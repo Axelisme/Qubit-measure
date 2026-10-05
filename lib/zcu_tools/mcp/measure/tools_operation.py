@@ -197,11 +197,9 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
         if "feedback" in reply:
             result["feedback"] = reply["feedback"]
         return result
-    if reply["reason"] not in ("timeout", "user_feedback"):
+    if reply["reason"] != "timeout":
         raise ValueError(f"unexpected operation await reason: {reply['reason']!r}")
     result["status"] = "running"
-    if "feedback" in reply:
-        result["feedback"] = reply["feedback"]
     progress = ctx.gui.read_internal("operation.progress", {}, operation_handle=op)
     if progress["active"]:
         bars = progress["bars"]

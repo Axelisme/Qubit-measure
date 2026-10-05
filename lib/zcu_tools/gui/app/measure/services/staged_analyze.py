@@ -139,8 +139,8 @@ class _StagedAnalyzeService:
 
         No exclusion (analyze never conflicts with hardware — ADR-0066), no
         progress, no cancel hook. begin() registers the token in _active_tokens
-        so the interactive accessor (cancel_interactive, active_interactive_token)
-        cannot see it (it is not in _interactive_tabs). Marks the tab analyzing
+        but not _interactive_tabs, so cancel_interactive cannot cancel it.
+        Marks the tab analyzing
         AFTER begin() succeeds (post-begin, stage2c_spec.md).
 
         Returns the operation token.

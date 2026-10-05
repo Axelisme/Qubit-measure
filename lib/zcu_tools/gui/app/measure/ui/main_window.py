@@ -33,7 +33,6 @@ from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 
 from .exp_tab_widget import ExpTabWidget, TabActions
-from .feedback_dock import FeedbackDockController
 from .main_dialog_registry import MainDialogRegistry
 from .main_window_activity import activity_marker_presentation
 from .main_window_events import MainWindowEventCoordinator
@@ -171,16 +170,6 @@ class MainWindow(QMainWindow):
 
         self._events.bind(self._ctrl.get_bus())
 
-        # Docked feedback panel (built after bus wiring; mounted under the
-        # target tab's figure only while the C3 gate holds).
-        self._feedback_dock = FeedbackDockController(
-            self._ctrl,
-            parent=self,
-            tab_by_id=lambda tab_id: self._tab_widgets.get(tab_id),
-            running_tab_id=self._ctrl.get_running_tab_id,
-            active_tab_id=self._ctrl.get_active_tab_id,
-        )
-
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
@@ -252,19 +241,6 @@ class MainWindow(QMainWindow):
         assert snapshot.interaction is not None  # render snapshot fills live fields
         if snapshot.interaction.has_run_result:
             tab_w.focus_result_panel()
-
-    # ------------------------------------------------------------------
-    # Docked feedback panel (ADR-0066)
-    # ------------------------------------------------------------------
-
-    def refresh_feedback_widget(self) -> None:
-        """Mount/unmount the docked feedback panel on op count + agent presence.
-
-        Called by both bus handlers (op count change) and
-        RemoteControlAdapter._on_client_count_changed() (agent presence change).
-        Both callers run on the Qt main thread — no thread guard needed.
-        """
-        self._feedback_dock.refresh()
 
     # ------------------------------------------------------------------
     # ViewProtocol implementation
@@ -714,9 +690,6 @@ class MainWindow(QMainWindow):
         if not self._ctrl.has_tab(widget.tab_id):
             return
         self._ctrl.set_active_tab(widget.tab_id)
-        # The active tab is the feedback panel's target when nothing is running;
-        # re-evaluate so a visible panel follows the user to the new tab.
-        self.refresh_feedback_widget()
 
     def _resolve_tab_widget(self, tab_id: str, action: str) -> ExpTabWidget | None:
         """Look up the widget; log + bail if tab_id is unknown to the controller."""
@@ -992,9 +965,8 @@ class MainWindow(QMainWindow):
         """Grab the WHOLE main window (client area + child widgets) as PNG bytes.
 
         ``self.grab()`` renders this QMainWindow and its child widgets, so it
-        captures the docked feedback panel and the left-edge handle that ride on
-        the client area and are invisible to the per-dialog grab. Same
-        main-thread Qt path as take_dialog_screenshot.
+        captures the client area using the same main-thread Qt path as
+        take_dialog_screenshot.
         """
         from zcu_tools.gui.widgets import widget_to_png_bytes
 

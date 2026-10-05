@@ -137,9 +137,6 @@ class RecordingHost:
     def refresh_predictor_panel(self) -> None:
         self._log.add("host", "refresh_predictor_panel")
 
-    def refresh_feedback_widget(self) -> None:
-        self._log.add("host", "refresh_feedback_widget")
-
     def handle_save_data_finished(self, payload: object) -> None:
         self._log.add("host", "handle_save_data_finished", payload)
 
@@ -191,16 +188,15 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
                 "refresh_tab_post_analyze_form",
                 "refresh_tab_writeback",
                 "refresh_tab_interaction",
-                "refresh_feedback_widget",
             ],
         ),
         (
             TabInteractionFact.PRIMARY_ANALYZE_STARTED,
-            ["refresh_tab_interaction", "refresh_feedback_widget"],
+            ["refresh_tab_interaction"],
         ),
         (
             TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED,
-            ["refresh_tab_interaction", "refresh_feedback_widget"],
+            ["refresh_tab_interaction"],
         ),
         (
             TabInteractionFact.PRIMARY_ANALYZE_FAILED,
@@ -208,7 +204,6 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
                 "refresh_tab_interaction",
                 "refresh_tab_figure",
                 "refresh_tab_post_figure",
-                "refresh_feedback_widget",
             ],
         ),
         (
@@ -217,7 +212,6 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
                 "refresh_tab_interaction",
                 "refresh_tab_figure",
                 "refresh_tab_post_figure",
-                "refresh_feedback_widget",
             ],
         ),
         (
@@ -226,16 +220,15 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
                 "refresh_tab_interaction",
                 "refresh_tab_figure",
                 "refresh_tab_post_figure",
-                "refresh_feedback_widget",
             ],
         ),
         (
             TabInteractionFact.POST_ANALYZE_STARTED,
-            ["refresh_tab_interaction", "refresh_feedback_widget"],
+            ["refresh_tab_interaction"],
         ),
         (
             TabInteractionFact.POST_ANALYZE_SUCCEEDED,
-            ["refresh_tab_interaction", "refresh_feedback_widget"],
+            ["refresh_tab_interaction"],
         ),
         (
             TabInteractionFact.POST_ANALYZE_FAILED,
@@ -243,7 +236,6 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
                 "refresh_tab_interaction",
                 "refresh_tab_figure",
                 "refresh_tab_post_figure",
-                "refresh_feedback_widget",
             ],
         ),
         (
@@ -252,20 +244,19 @@ def test_reaction_matrix_validator_rejects_missing_and_extra_keys() -> None:
                 "refresh_tab_interaction",
                 "refresh_tab_figure",
                 "refresh_tab_post_figure",
-                "refresh_feedback_widget",
             ],
         ),
         (
             TabInteractionFact.SAVE_STARTED,
-            ["refresh_tab_interaction", "refresh_feedback_widget"],
+            ["refresh_tab_interaction"],
         ),
         (
             TabInteractionFact.SAVE_SUCCEEDED,
-            ["refresh_tab_interaction", "refresh_feedback_widget"],
+            ["refresh_tab_interaction"],
         ),
         (
             TabInteractionFact.SAVE_FAILED,
-            ["refresh_tab_interaction", "refresh_feedback_widget"],
+            ["refresh_tab_interaction"],
         ),
         (
             TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
@@ -409,13 +400,11 @@ def test_run_finished_refreshes_without_focus_or_navigation() -> None:
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
         call("ctrl", "get_running_tab_id"),
         call("host", "refresh_run_lock", None),
-        call("host", "refresh_feedback_widget"),
         call("host", "has_tab_widget", "tab-1"),
         call("ctrl", "get_tab_snapshot", "tab-1"),
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
         call("ctrl", "get_running_tab_id"),
         call("host", "refresh_run_lock", None),
-        call("host", "refresh_feedback_widget"),
     ]
     assert all(entry.method != "focus_run_result_panel" for entry in log.calls)
 
@@ -429,7 +418,6 @@ def test_run_finished_event_preserves_each_selected_subtab(qapp) -> None:
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     ctrl.has_tab.return_value = True
     ctrl.get_tab_snapshot.return_value = _snapshot(has_run_result=True)
     window = MainWindow(ctrl)
@@ -465,7 +453,6 @@ def test_run_started_refreshes_invalidated_content_once() -> None:
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
         call("ctrl", "get_running_tab_id"),
         call("host", "refresh_run_lock", "running-tab"),
-        call("host", "refresh_feedback_widget"),
     ]
 
 
@@ -477,7 +464,6 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     ctrl.get_running_tab_id.return_value = "tab-a"
     ctrl.get_active_tab_id.return_value = None
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     ctrl.has_tab.return_value = True
 
     class _TabStub(QWidget):

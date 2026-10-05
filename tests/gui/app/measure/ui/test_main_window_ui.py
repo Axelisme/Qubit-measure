@@ -68,12 +68,10 @@ def _mock_ctrl() -> MagicMock:
 def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     """Set the minimal return values required by MainWindow.__init__ on a mock ctrl.
 
-    MainWindow calls active_operation_count() and has_agent_connected() during
-    bus-event handlers (FeedbackPanel docking, ADR-0066); tests
-    that emit bus events must stub both to deterministic values.
+    MainWindow uses active_operation_count() for shutdown confirmation.
+    Stub the count to keep tests independent of live operations.
     """
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     ctrl.get_session_env.return_value = SessionEnv(
         md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None
     )
@@ -1290,7 +1288,6 @@ def _editor_wiring_ctrl() -> MagicMock:
     cfg = make_cfg(_pulse_schema())
     ctrl.cfg_resources.lookup.side_effect = lambda _tab: cfg
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     return ctrl
 
 
@@ -1631,9 +1628,6 @@ def test_main_window_close_removes_event_bus_subscriptions(qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
     from zcu_tools.gui.session.events import (
         ContextSwitchedPayload,
-        DeviceChangedPayload,
-        DeviceSetupFinishedPayload,
-        DeviceSetupStartedPayload,
         PredictorChangedPayload,
         SocChangedPayload,
     )
@@ -1656,9 +1650,6 @@ def test_main_window_close_removes_event_bus_subscriptions(qapp):
         TabContentChangedPayload,
         PredictorChangedPayload,
         SocChangedPayload,
-        DeviceSetupStartedPayload,
-        DeviceSetupFinishedPayload,
-        DeviceChangedPayload,
     )
     for payload_type in payload_types:
         assert bus._subs.get(payload_type)
@@ -1763,11 +1754,6 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
     assert tab.get_current_figure_for_pane("analysis") is fig_a2
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p1
     assert tab._post_stack.count() == 2
-
-
-# ---------------------------------------------------------------------------
-# FeedbackPanel docking gate (ADR-0066): op-count AND agent-connected
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

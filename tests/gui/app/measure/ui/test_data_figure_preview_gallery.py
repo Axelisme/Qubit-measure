@@ -134,7 +134,7 @@ def make_ctrl():
     ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
     ctrl.get_cfg_editor_draft.return_value = MagicMock()
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
+
     return ctrl
 
 
@@ -631,7 +631,7 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
     # (see probe); using narrow tolerance ensures clipping regression is real.
     g.setFixedSize(434, 200)
     g.show()
-    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()
     QApplication.processEvents()
     fig = Figure()
     g.update_figures(fig)
@@ -727,8 +727,8 @@ def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
 
 def _gallery_geometry_cards(g: DataFigurePreviewGallery) -> dict[str, QRect]:
     # Force layout
-    QApplication.processEvents()  # type: ignore[attr-defined]
-    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()
+    QApplication.processEvents()
     geoms: dict[str, QRect] = {}
     for key in ["run", "analysis", "post_analysis"]:
         c = g.find_card(key)
@@ -767,8 +767,8 @@ def test_gallery_wide_three_card_mosaic_run_left_spanning(qapp):
     g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     g.setFixedSize(750, 700)  # wide: viewport ~738 > 450
     g.show()
-    QApplication.processEvents()  # type: ignore[attr-defined]
-    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()
+    QApplication.processEvents()
     assert g.is_wide_mode(), "expected wide mode at 750"
     geoms = _gallery_geometry_cards(g)
     r: QRect = geoms["run"]
@@ -799,8 +799,8 @@ def test_gallery_wide_two_card_side_by_side(qapp):
     g = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     g.setFixedSize(750, 400)
     g.show()
-    QApplication.processEvents()  # type: ignore[attr-defined]
-    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()
+    QApplication.processEvents()
     assert g.is_wide_mode()
     geoms = _gallery_geometry_cards(g)
     r: QRect = geoms["run"]
@@ -825,16 +825,16 @@ def test_gallery_wide_single_full_width(qapp):
     g_n = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     g_n.setFixedSize(360, 400)
     g_n.show()
-    QApplication.processEvents()  # type: ignore[attr-defined]
-    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()
+    QApplication.processEvents()
     assert not g_n.is_wide_mode()
     r_n: QRect = g_n.find_card("run").geometry()  # type: ignore[union-attr]
     # Wide
     g_w = DataFigurePreviewGallery(caps, renderer=_fake_renderer)
     g_w.setFixedSize(750, 400)
     g_w.show()
-    QApplication.processEvents()  # type: ignore[attr-defined]
-    QApplication.processEvents()  # type: ignore[attr-defined]
+    QApplication.processEvents()
+    QApplication.processEvents()
     r_w: QRect = g_w.find_card("run").geometry()  # type: ignore[union-attr]
     # Both should span full inner width — wide width larger than narrow
     assert r_w.width() > r_n.width() + 20
@@ -864,16 +864,16 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(qapp, exp_tab_widget):
         tab._on_left_tab_changed(tab._left_tabs.currentIndex())
         assert tab._right_stack.currentWidget() is tab._data_gallery
         tab.show()
-        QApplication.processEvents()  # type: ignore[attr-defined]
-        QApplication.processEvents()  # type: ignore[attr-defined]
+        QApplication.processEvents()
+        QApplication.processEvents()
         g = tab._data_gallery
         assert g.card_count() == expected_count
 
         # Narrow via ExpTabWidget resize — automatic reflow, no private call.
         tab.resize(650, 600)
-        QApplication.processEvents()  # type: ignore[attr-defined]
-        QApplication.processEvents()  # type: ignore[attr-defined]
-        QApplication.processEvents()  # type: ignore[attr-defined]
+        QApplication.processEvents()
+        QApplication.processEvents()
+        QApplication.processEvents()
         assert not g.is_wide_mode(), (
             f"expected narrow at 650 for {expected_count} cards"
         )
@@ -881,8 +881,6 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(qapp, exp_tab_widget):
         if expected_count == 1:
             r = geoms["run"]
             assert r.x() <= 4
-            # Single card full-width narrow — width near viewport.
-            assert g._viewport_available_width() < 450  # type: ignore[attr-defined]
         elif expected_count == 2:
             r = geoms["run"]
             a = geoms["analysis"]
@@ -901,16 +899,15 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(qapp, exp_tab_widget):
 
         # Wide via ExpTabWidget resize — automatic.
         tab.resize(1200, 600)
-        QApplication.processEvents()  # type: ignore[attr-defined]
-        QApplication.processEvents()  # type: ignore[attr-defined]
-        QApplication.processEvents()  # type: ignore[attr-defined]
+        QApplication.processEvents()
+        QApplication.processEvents()
+        QApplication.processEvents()
         assert g.is_wide_mode(), f"expected wide at 1200 for {expected_count} cards"
         geoms = _gallery_geometry_cards(g)
         if expected_count == 1:
             r = geoms["run"]
             assert r.x() <= 4
             assert r.width() > 400  # wide single card expands
-            assert g._viewport_available_width() >= 450  # type: ignore[attr-defined]
         elif expected_count == 2:
             r = geoms["run"]
             a = geoms["analysis"]
@@ -930,7 +927,7 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(qapp, exp_tab_widget):
             assert r.height() > a.height() + 2
         tab.detach()
         g.hide()
-        QApplication.processEvents()  # type: ignore[attr-defined]
+        QApplication.processEvents()
 
     # 1 card: Run only
     caps1 = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]

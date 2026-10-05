@@ -79,7 +79,6 @@ def _mock_ctrl() -> MagicMock:
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.app.measure.specs import make_pulse_spec
     from zcu_tools.gui.cfg import CfgSchema, make_default_value
@@ -619,7 +618,6 @@ def test_save_all_preserves_data_pane_editor_state(exp_tab_factory, qapp):
     configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     ctrl.has_tab.return_value = True
     ctrl.save_data = MagicMock(return_value="/tmp/data.h5")
     ctrl.save_image = MagicMock(return_value="/tmp/a.png")
@@ -867,7 +865,6 @@ def test_remote_save_completion_refreshes_state_owned_status(exp_tab_factory, qa
     configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     ctrl.has_tab.return_value = True
     window = MainWindow(ctrl)
     snap = _snapshot("tab-1", has_run=True, data_path="/gui.h5")

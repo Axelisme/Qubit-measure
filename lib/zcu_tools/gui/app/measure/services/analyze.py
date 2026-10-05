@@ -260,19 +260,6 @@ class AnalyzeService(_StagedAnalyzeService):
         """Whether this tab owns an in-flight plugin session."""
         return tab_id in self._interactive_tabs
 
-    def active_interactive_tab(self) -> str | None:
-        """A tab with an in-flight interactive analyze, or None — the foreground
-        op for ``Controller.cancel_active_operation`` to settle. Arbitrary if more
-        than one (measure-gui drives one interactive picker at a time)."""
-        return next(iter(self._interactive_tabs), None)
-
-    def active_interactive_token(self) -> int | None:
-        """The handle token of the active interactive analyze, or None."""
-        tab = self.active_interactive_tab()
-        if tab is None:
-            return None
-        return self._active_tokens.get(tab)
-
     def cancel_interactive(self, tab_id: str) -> bool:
         """Cancel an in-flight INTERACTIVE analyze: settle its handle as cancelled
         and clear ``is_analyzing`` so the tab can close.

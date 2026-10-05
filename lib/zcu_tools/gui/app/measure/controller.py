@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
@@ -90,18 +89,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class _ActiveOperation:
-    token: int | None
-    kind: Literal["run", "analyze", "device"]
-    owner_id: str | None = None
-
-    def tag(self) -> str:
-        if self.owner_id is None:
-            return self.kind
-        return f"{self.kind}:{self.owner_id}"
 
 
 # A View has two distinct down-channels from the Controller (ADR-0068):
@@ -212,15 +199,6 @@ class RenderView(Protocol):
         Called from the main thread (notify.open handler). The dialog mints no
         token — it receives one so reply/dismiss/timeout route back correctly.
         timeout is the display timeout in seconds (QTimer in the dialog).
-        """
-        ...
-
-    def refresh_feedback_widget(self) -> None:
-        """Re-evaluate and mount/unmount the docked feedback panel.
-
-        Called by RemoteControlAdapter._on_client_count_changed() on the Qt
-        main thread when a control client connects or disconnects, so the
-        panel tracks both op-count changes and agent-presence changes.
         """
         ...
 
@@ -358,11 +336,6 @@ class Controller(SessionControllerMixin):
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
         self._shutdown_driver: QtShutdownDriver | None = None
-        # Injected by RemoteControlAdapter on start()/stop() so the View can
-        # gate widgets on whether an MCP control client is connected (ADR-0066).
-        # None means no control socket is running → treat as no client connected.
-        self._agent_connected_query: Callable[[], bool] | None = None
-
         bus.subscribe(RunFinishedPayload, self._on_run_finished)
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
         bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
@@ -694,102 +667,6 @@ class Controller(SessionControllerMixin):
     def cancel_analyze(self, tab_id: str) -> bool:
         return self._run_analyze_control.cancel_analyze(tab_id)
 
-    def _active_operation(self) -> _ActiveOperation | None:
-        """Return the single foreground in-flight operation.
-
-        Applies the same taxonomy as cancel_active_operation / send_feedback:
-        run > interactive analyze > device (measure-gui drives one foreground
-        op at a time). Returns (None, None) when no operation is active.
-
-        token is sourced from the respective service's active-token accessor;
-        it may itself be None if the service is active but the token was not
-        captured (edge case during startup races) — callers must tolerate
-        token=None paired with a non-None tag.
-        """
-        running = self._state.running_tab_id
-        if running is not None:
-            return _ActiveOperation(self._run_svc.active_token, "run")
-        tab = self._analyze_svc.active_interactive_tab()
-        if tab is not None:
-            return _ActiveOperation(
-                self._analyze_svc.active_interactive_token(), "analyze", tab
-            )
-        ops = self.get_active_device_operations()
-        if ops:
-            name = ops[0].device_name
-            return _ActiveOperation(
-                self._dev_svc.active_operation_token(name), "device", name
-            )
-        return None
-
-    def cancel_active_operation(self) -> str | None:
-        """Cancel the single in-flight operation the docked feedback panel
-        represents; returns a short tag of what was cancelled (or None for a
-        no-op). The ONLY place that maps "the active op" to the right cancel —
-        op-taxonomy lives here, not in the View. Priority run > interactive
-        analyze > device (measure-gui drives one foreground op at a time)."""
-        running = self._state.running_tab_id
-        if running is not None:
-            self.cancel_run()
-            return "run"
-        tab = self._analyze_svc.active_interactive_tab()
-        if tab is not None:
-            self.cancel_analyze(tab)
-            return f"analyze:{tab}"
-        ops = self.get_active_device_operations()
-        if ops:
-            name = ops[0].device_name
-            self._dev_svc.cancel_device_operation(name)
-            return f"device:{name}"
-        return None
-
-    def can_cancel_active_operation(self) -> bool:
-        """True when the active foreground operation has a cancel hook.
-
-        Used by FeedbackPanel to gate the 'Send & Stop' button: ops
-        without a cancel hook (connect / FIT-analyze / device connect-
-        disconnect) should not show Stop (ADR-0066).
-        Returns False when no operation is active.
-        """
-        operation = self._active_operation()
-        if operation is None or operation.token is None:
-            return False
-        return self._operation_handles.has_cancel_hook(operation.token)
-
-    def send_feedback(self, message: str, *, stop: bool = False) -> str | None:
-        """User->agent feedback from the GUI (ADR-0066).
-
-        Routes the message to the active operation's OperationChannel using
-        the taxonomy from _active_operation() (run > interactive > device):
-        - ``stop=False``: ``handles.message(token, text)`` — pure nudge, op
-          continues running; agent receives user_feedback (non-terminal).
-        - ``stop=True``: UI teardown first (unmount view for interactive), then
-          ``handles.stop(token, reason=text)`` — enqueues Stop BEFORE triggering
-          the cancel hook (ADR-0066 ordering invariant preserved).
-
-        Returns the taxonomy tag of what was cancelled (stop=True only), or None.
-        """
-        operation = self._active_operation()
-        if operation is None:
-            return None
-
-        # Interactive analyze requires View teardown before the hook fires;
-        # run and device have no UI unmount step.
-        if stop and operation.kind == "analyze":
-            tab = operation.owner_id
-            assert tab is not None
-            host = self._render_host
-            if host is not None:
-                host.unmount_interactive_analysis(tab)
-
-        if stop:
-            if operation.token is not None:
-                self._operation_handles.stop(operation.token, reason=message)
-            return operation.tag()
-        if operation.token is not None:
-            self._operation_handles.message(operation.token, message)
-        return None
-
     # ------------------------------------------------------------------
     # Shutdown coordination (cancel-all + wait, ADR-0066)
     # ------------------------------------------------------------------
@@ -820,25 +697,6 @@ class Controller(SessionControllerMixin):
         Counts all live operations (run / device / connect AND analyze /
         interactive) — Handles owns the lifecycle (ADR-0066)."""
         return self._operation_handles.live_count()
-
-    def set_agent_connected_query(self, query: Callable[[], bool] | None) -> None:
-        """Inject or clear the has-live-control-client predicate.
-
-        Called by RemoteControlAdapter.start() / stop() so the View can gate
-        the feedback widget on agent presence (ADR-0066). None means the
-        control socket is not running; the predicate then returns False.
-        """
-        self._agent_connected_query = query
-
-    def has_agent_connected(self) -> bool:
-        """Return True if at least one MCP control client is connected.
-
-        The View calls this inside refresh_feedback_widget() to gate display
-        (ADR-0066: show only when op live AND agent connected). Always
-        returns False when no RemoteControlAdapter has been started.
-        """
-        q = self._agent_connected_query
-        return q() if q is not None else False
 
     def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
         """Cancel every live operation, wait (with a timeout) for them to stop,

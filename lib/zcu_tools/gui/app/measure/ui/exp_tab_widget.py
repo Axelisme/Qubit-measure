@@ -589,24 +589,6 @@ class ExpTabWidget(QWidget):
         if not self._has_post:
             raise RuntimeError(f"tab {self.tab_id!r} does not support post-analysis")
 
-    # ------------------------------------------------------------------
-    # Docked feedback panel host (ADR-0066)
-    # ------------------------------------------------------------------
-
-    def mount_feedback_panel(self, panel: QWidget) -> None:
-        """Dock the feedback panel directly below the figure (idempotent)."""
-        if self._plot_layout.indexOf(panel) != -1:
-            return
-        self._plot_layout.insertWidget(1, panel)
-        panel.show()
-
-    def unmount_feedback_panel(self, panel: QWidget) -> None:
-        """Remove the feedback panel from the plot column (idempotent)."""
-        if self._plot_layout.indexOf(panel) == -1:
-            return
-        self._plot_layout.removeWidget(panel)
-        panel.setParent(None)  # type: ignore[arg-type]
-
     def resizeEvent(self, a0) -> None:
         super().resizeEvent(a0)
         self._fix_splitter_on_resize()

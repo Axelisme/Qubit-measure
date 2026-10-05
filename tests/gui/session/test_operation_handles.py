@@ -5,9 +5,9 @@ cancel_all + live_count, independent of exclusion. A handle-only op (analyze /
 interactive) uses exactly this with no OperationGate involvement.
 
 ADR-0066: cross-thread interaction uses per-op OperationChannel (ordered FIFO).
-Tests cover the three return reasons (completed / user_feedback / timeout),
-the non-terminal guarantee (feedback/timeout leave handle unsettled),
-and the folding rules (Stop+Settled, Stop-then-Message fold into reason,
+Tests cover the two return reasons (completed / timeout),
+the non-terminal guarantee (timeout leaves the handle unsettled),
+and the folding rules (Stop+Settled, Stop reason retained across timeout,
 idempotent settle, interactive direct-settle cancel_hook ordering).
 """
 
@@ -82,11 +82,6 @@ def test_event_origin_rejects_unknown_operation() -> None:
 def test_await_result_completed_requires_outcome() -> None:
     with pytest.raises(ValueError, match="must have outcome"):
         AwaitResult(reason="completed")
-
-
-def test_await_result_user_feedback_requires_feedback() -> None:
-    with pytest.raises(ValueError, match="must have feedback"):
-        AwaitResult(reason="user_feedback")
 
 
 def test_await_result_timeout_ok() -> None:
@@ -185,100 +180,8 @@ def test_await_outcome_handle_still_awitable_after_timeout() -> None:
 
 
 # ---------------------------------------------------------------------------
-# await_outcome — user_feedback path (ADR-0066 Message event)
+# await_outcome — terminal and timeout paths
 # ---------------------------------------------------------------------------
-
-
-def test_await_outcome_wakes_on_message() -> None:
-    """handles.message(token, text) is delivered as user_feedback (non-terminal)."""
-    handles = OperationHandles()
-    token = handles.create()
-
-    results: list[AwaitResult] = []
-    dt: list[float] = []
-
-    def waiter() -> None:
-        t0 = time.monotonic()
-        r = handles.await_outcome(token, timeout=10.0)
-        assert r is not None
-        results.append(r)
-        dt.append(time.monotonic() - t0)
-
-    wt = threading.Thread(target=waiter)
-    wt.start()
-    time.sleep(0.05)  # let the thread enter Queue.get
-    handles.message(token, "stop and recalibrate")
-    wt.join(timeout=4.0)
-
-    assert results
-    r = results[0]
-    assert r.reason == "user_feedback"
-    assert r.feedback == "stop and recalibrate"
-    # operation is NOT settled — still pending
-    assert handles.poll(token) is None
-    # woke promptly (Queue.get, no 2s poll)
-    assert dt[0] < 2.0
-
-
-def test_await_outcome_handle_still_awitable_after_feedback() -> None:
-    """user_feedback is non-terminal — re-await on the same token still works."""
-    handles = OperationHandles()
-    token = handles.create()
-
-    # Deliver message
-    handles.message(token, "adjust gain")
-    r1 = handles.await_outcome(token, timeout=5.0)
-    assert r1 is not None
-    assert r1.reason == "user_feedback"
-    assert "adjust gain" in (r1.feedback or "")
-
-    # Handle still pending
-    assert handles.poll(token) is None
-
-    # Settle and re-await — must work
-    handles.settle(token, OperationOutcome("finished"))
-    r2 = handles.await_outcome(token, timeout=2.0)
-    assert r2 is not None
-    assert r2.reason == "completed"
-
-
-def test_await_outcome_message_returns_immediately_if_queued_before_await() -> None:
-    """Message enqueued before await_outcome is called surfaces on entry."""
-    handles = OperationHandles()
-    token = handles.create()
-
-    handles.message(token, "recalibrate now")
-    t0 = time.monotonic()
-    r = handles.await_outcome(token, timeout=10.0)
-    elapsed = time.monotonic() - t0
-
-    assert r is not None
-    assert r.reason == "user_feedback"
-    assert "recalibrate now" in (r.feedback or "")
-    assert elapsed < 0.5
-
-
-def test_await_outcome_operation_wins_before_message() -> None:
-    """When the operation settles before a message arrives, reason='completed'."""
-    handles = OperationHandles()
-    token = handles.create()
-
-    results: list[AwaitResult] = []
-
-    def waiter() -> None:
-        r = handles.await_outcome(token, timeout=10.0)
-        if r is not None:
-            results.append(r)
-
-    wt = threading.Thread(target=waiter)
-    wt.start()
-    time.sleep(0.05)
-    # Settle before sending a message
-    handles.settle(token, OperationOutcome("finished"))
-    wt.join(timeout=4.0)
-
-    assert results
-    assert results[0].reason == "completed"
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +323,7 @@ def test_live_count_tracks_pending_operations() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_channel_send_and_stop_folded_into_reason() -> None:
+def test_channel_stop_folded_into_reason() -> None:
     """Stop(reason) enqueued before Settled(cancelled) — reason folds into feedback."""
     ch = OperationChannel()
     # Simulate: stop enqueued first, then worker settles cancelled.
@@ -431,18 +334,6 @@ def test_channel_send_and_stop_folded_into_reason() -> None:
     assert r.reason == "completed"
     assert r.outcome == OperationOutcome("cancelled")
     assert r.feedback == "stop - wrong resonator"
-
-
-def test_channel_pure_message_nudge_is_nonterminal() -> None:
-    """Message without a preceding Stop returns user_feedback (non-terminal)."""
-    ch = OperationChannel()
-    ch.message("recalibrate gain")
-
-    r = ch.consume(timeout=1.0)
-    assert r.reason == "user_feedback"
-    assert r.feedback == "recalibrate gain"
-    # Channel is not settled.
-    assert ch.settled_outcome() is None
 
 
 def test_channel_stop_then_settled_folds_reason_across_consume_calls() -> None:
@@ -513,21 +404,6 @@ def test_channel_cancel_hook_triggers_direct_settle() -> None:
     assert r.feedback == reason_text
 
 
-def test_channel_message_during_cancel_folds_into_reason() -> None:
-    """Message arriving after Stop (cancel in progress) folds into stop reason."""
-    ch = OperationChannel()
-    ch.stop("first stop")
-    ch.message("also this info")
-    ch.settle(OperationOutcome("cancelled"))
-
-    r = ch.consume(timeout=1.0)
-    assert r.reason == "completed"
-    assert r.outcome is not None
-    assert r.outcome.status == "cancelled"
-    assert "first stop" in (r.feedback or "")
-    assert "also this info" in (r.feedback or "")
-
-
 def test_channel_settled_no_stop_has_no_feedback() -> None:
     """A cancelled outcome without any Stop event has no feedback."""
     ch = OperationChannel()
@@ -550,26 +426,6 @@ def test_channel_finished_outcome_no_feedback_even_with_stop() -> None:
     assert r.outcome.status == "finished"
     # feedback is not populated for non-cancelled outcomes.
     assert r.feedback is None
-
-
-def test_channel_blank_message_ignored() -> None:
-    """Blank/whitespace-only messages are silently ignored."""
-    ch = OperationChannel()
-    ch.message("   ")
-    # No event in queue; consume should timeout.
-    r = ch.consume(timeout=0.05)
-    assert r.reason == "timeout"
-
-
-def test_handles_message_method_delivers_to_live_channel() -> None:
-    """handles.message(token, text) routes to the live channel."""
-    handles = OperationHandles()
-    token = handles.create()
-    handles.message(token, "test nudge")
-    r = handles.await_outcome(token, timeout=1.0)
-    assert r is not None
-    assert r.reason == "user_feedback"
-    assert r.feedback == "test nudge"
 
 
 def test_handles_stop_with_reason_folds_into_cancelled() -> None:
@@ -693,22 +549,3 @@ def test_has_cancel_hook_is_pure_read_does_not_trigger_hook() -> None:
     result = handles.has_cancel_hook(token)
     assert result is True
     assert fired == []  # hook must NOT have been called
-
-
-def test_pure_nudge_between_awaits_is_delivered_not_dropped() -> None:
-    """A pure nudge enqueued while the op is settling (or between awaits) is
-    delivered as user_feedback on the next consume, not silently folded away
-    (ADR-0066 in-order drain). The subsequent settle then completes."""
-    handles = OperationHandles()
-    token = handles.create()
-    handles.message(token, "also check the readout freq")
-    handles.settle(token, OperationOutcome("finished"))
-
-    # First consume surfaces the queued nudge (non-terminal) ...
-    r1 = handles.await_outcome(token, timeout=0.5)
-    assert r1 is not None and r1.reason == "user_feedback"
-    assert r1.feedback == "also check the readout freq"
-    # ... and the next consume returns the terminal outcome.
-    r2 = handles.await_outcome(token, timeout=0.5)
-    assert r2 is not None and r2.reason == "completed"
-    assert r2.outcome is not None and r2.outcome.status == "finished"

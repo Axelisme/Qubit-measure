@@ -20,9 +20,6 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
-    DeviceChangedPayload,
-    DeviceSetupFinishedPayload,
-    DeviceSetupStartedPayload,
     PredictorChangedPayload,
     SocChangedPayload,
 )
@@ -67,7 +64,6 @@ class MainWindowEventHost(Protocol):
     def refresh_run_lock(self, running_tab_id: str | None) -> None: ...
     def refresh_context_panel(self) -> None: ...
     def refresh_predictor_panel(self) -> None: ...
-    def refresh_feedback_widget(self) -> None: ...
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None: ...
 
@@ -79,7 +75,6 @@ class _TabReaction(Enum):
     FIGURE = auto()
     POST_FIGURE = auto()
     INTERACTION = auto()
-    FEEDBACK = auto()
     CLEAR_PLOT = auto()
     SAVE_PATHS = auto()
 
@@ -90,66 +85,39 @@ _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
         _TabReaction.POST_ANALYZE_FORM,
         _TabReaction.WRITEBACK,
         _TabReaction.INTERACTION,
-        _TabReaction.FEEDBACK,
     ),
-    TabInteractionFact.PRIMARY_ANALYZE_STARTED: (
-        _TabReaction.INTERACTION,
-        _TabReaction.FEEDBACK,
-    ),
-    TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED: (
-        _TabReaction.INTERACTION,
-        _TabReaction.FEEDBACK,
-    ),
+    TabInteractionFact.PRIMARY_ANALYZE_STARTED: (_TabReaction.INTERACTION,),
+    TabInteractionFact.PRIMARY_ANALYZE_SUCCEEDED: (_TabReaction.INTERACTION,),
     TabInteractionFact.PRIMARY_ANALYZE_FAILED: (
         _TabReaction.INTERACTION,
         _TabReaction.FIGURE,
         _TabReaction.POST_FIGURE,
-        _TabReaction.FEEDBACK,
     ),
     TabInteractionFact.PRIMARY_ANALYZE_CANCELLED: (
         _TabReaction.INTERACTION,
         _TabReaction.FIGURE,
         _TabReaction.POST_FIGURE,
-        _TabReaction.FEEDBACK,
     ),
     TabInteractionFact.PRIMARY_ANALYZE_START_REJECTED: (
         _TabReaction.INTERACTION,
         _TabReaction.FIGURE,
         _TabReaction.POST_FIGURE,
-        _TabReaction.FEEDBACK,
     ),
-    TabInteractionFact.POST_ANALYZE_STARTED: (
-        _TabReaction.INTERACTION,
-        _TabReaction.FEEDBACK,
-    ),
-    TabInteractionFact.POST_ANALYZE_SUCCEEDED: (
-        _TabReaction.INTERACTION,
-        _TabReaction.FEEDBACK,
-    ),
+    TabInteractionFact.POST_ANALYZE_STARTED: (_TabReaction.INTERACTION,),
+    TabInteractionFact.POST_ANALYZE_SUCCEEDED: (_TabReaction.INTERACTION,),
     TabInteractionFact.POST_ANALYZE_FAILED: (
         _TabReaction.INTERACTION,
         _TabReaction.FIGURE,
         _TabReaction.POST_FIGURE,
-        _TabReaction.FEEDBACK,
     ),
     TabInteractionFact.POST_ANALYZE_START_REJECTED: (
         _TabReaction.INTERACTION,
         _TabReaction.FIGURE,
         _TabReaction.POST_FIGURE,
-        _TabReaction.FEEDBACK,
     ),
-    TabInteractionFact.SAVE_STARTED: (
-        _TabReaction.INTERACTION,
-        _TabReaction.FEEDBACK,
-    ),
-    TabInteractionFact.SAVE_SUCCEEDED: (
-        _TabReaction.INTERACTION,
-        _TabReaction.FEEDBACK,
-    ),
-    TabInteractionFact.SAVE_FAILED: (
-        _TabReaction.INTERACTION,
-        _TabReaction.FEEDBACK,
-    ),
+    TabInteractionFact.SAVE_STARTED: (_TabReaction.INTERACTION,),
+    TabInteractionFact.SAVE_SUCCEEDED: (_TabReaction.INTERACTION,),
+    TabInteractionFact.SAVE_FAILED: (_TabReaction.INTERACTION,),
     TabInteractionFact.ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.POST_ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.SAVE_PATHS_CHANGED: (),
@@ -254,13 +222,6 @@ class MainWindowEventCoordinator:
         )
         self._subs.subscribe(bus, PredictorChangedPayload, self._on_predictor_changed)
         self._subs.subscribe(bus, SocChangedPayload, self._on_soc_changed)
-        self._subs.subscribe(
-            bus, DeviceSetupStartedPayload, self._on_device_setup_started
-        )
-        self._subs.subscribe(
-            bus, DeviceSetupFinishedPayload, self._on_device_setup_finished
-        )
-        self._subs.subscribe(bus, DeviceChangedPayload, self._on_device_changed)
         self._subs.subscribe(bus, SaveDataFinishedPayload, self._on_save_data_finished)
 
     def close(self) -> None:
@@ -283,13 +244,11 @@ class MainWindowEventCoordinator:
             ),
         )
         self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
-        self._host.refresh_feedback_widget()
 
     def _on_run_finished(self, payload: RunFinishedPayload) -> None:
         """Refresh terminal state without changing the user's selected pane."""
         self._react_to_tab(payload.tab_id, (_TabReaction.INTERACTION,))
         self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
-        self._host.refresh_feedback_widget()
 
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
@@ -336,7 +295,6 @@ class MainWindowEventCoordinator:
             _TabReaction.INTERACTION: lambda: self._host.refresh_tab_interaction(
                 tab_id, snapshot
             ),
-            _TabReaction.FEEDBACK: self._host.refresh_feedback_widget,
             _TabReaction.CLEAR_PLOT: lambda: self._host.clear_tab_plot(tab_id),
             _TabReaction.SAVE_PATHS: lambda: self._host.refresh_tab_save_paths(
                 tab_id, snapshot
@@ -352,19 +310,6 @@ class MainWindowEventCoordinator:
     def _on_soc_changed(self, payload: SocChangedPayload) -> None:
         del payload
         self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
-        self._host.refresh_feedback_widget()
-
-    def _on_device_setup_started(self, payload: DeviceSetupStartedPayload) -> None:
-        del payload
-        self._host.refresh_feedback_widget()
-
-    def _on_device_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
-        del payload
-        self._host.refresh_feedback_widget()
-
-    def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
-        del payload
-        self._host.refresh_feedback_widget()
 
     def _on_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         self._host.handle_save_data_finished(payload)

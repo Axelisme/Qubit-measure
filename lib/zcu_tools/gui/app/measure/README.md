@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-05，TemplateCatalog 與 multi-source catalog loader
+**Last updated:** 2026-10-05，operation cancellation 與 feedback UI removal
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -587,13 +587,10 @@ controlled fields.
 
 - Run, device setup, and SoC connect use hardware exclusion.
 - Analyze and post-analyze use async handles but no hardware exclusion.
-- `OperationChannel` is the ordered cross-thread channel for terminal state,
-  user messages, and Send & Stop.
+- `OperationChannel` is the ordered cross-thread channel for terminal state
+  and Stop requests with optional cancellation reasons.
 - `NotifyChannel` mirrors the same pattern for the `notify.open` / `notify.await`
   RPC prompt. `notify.await` bounds the consumer wait so MCP transport stays alive.
-- `FeedbackDockController` owns the docked feedback panel, target-tab
-  resolution, and op-count plus agent-presence gate; `MainWindow` keeps the
-  public render-view refresh façade.
 - Run reserves the existing tab busy state before cleanup and registration.
   Active-operation reads project domain-admitted handles. A startup reservation
   has no domain handle until submission succeeds; failed submission releases busy

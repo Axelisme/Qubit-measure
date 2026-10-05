@@ -42,7 +42,6 @@ def make_ctrl():
     ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
     ctrl.get_cfg_editor_draft.return_value = MagicMock()
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     return ctrl
 
 
@@ -140,7 +139,7 @@ def make_snapshot(
         ),
         capabilities=AdapterCapabilities(
             analysis=analysis, post_analysis=post, load_data=load
-        ),  # type: ignore[call-arg]
+        ),
         run=run_snap,
         analysis=analysis_snap,
         post_analysis=post_snap,

@@ -7,7 +7,6 @@ a wire result (ADR-0066):
     feedback?} (NOT a raise; feedback present only when a Stop reason was latched).
   - completed/failed → structured failed/error, not a failed tool call.
   - timeout → structured timeout/running signal.
-  - user_feedback → {reason:'user_feedback', feedback:<str>} (non-terminal).
   - completed/finished → {reason:'completed', status:'finished'}.
 """
 
@@ -205,23 +204,8 @@ def test_timeout_returns_running_signal():
 
 
 # ---------------------------------------------------------------------------
-# user_feedback path (ADR-0066)
+# terminal result rereads
 # ---------------------------------------------------------------------------
-
-
-def test_user_feedback_returns_feedback_payload():
-    ctrl = _ctrl(AwaitResult(reason="user_feedback", feedback="recalibrate"))
-    out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
-    assert out["reason"] == "user_feedback"
-    assert "recalibrate" in str(out["feedback"])
-
-
-def test_user_feedback_multiple_messages_forwarded():
-    ctrl = _ctrl(AwaitResult(reason="user_feedback", feedback="line 1\nline 2"))
-    out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
-    assert out["reason"] == "user_feedback"
-    assert "line 1" in str(out["feedback"])
-    assert "line 2" in str(out["feedback"])
 
 
 # ---------------------------------------------------------------------------
