@@ -253,6 +253,42 @@ def test_interrupt_after_progress_preserves_best_so_far(tmp_path):
     assert np.isnan(result.entry_results[64, 1])
 
 
+@pytest.mark.parametrize("notebook", [False, True])
+def test_final_progress_interrupt_preserves_best_so_far(tmp_path, notebook: bool):
+    args = _search_args(tmp_path)
+    closed = []
+
+    class InterruptingProgress(TQDMProgressBar):
+        def set_description(self, text: str) -> None:
+            if text == "Done! ":
+                raise KeyboardInterrupt
+            super().set_description(text)
+
+        def close(self):
+            closed.append(True)
+            super().close()
+
+    with (
+        use_pbar_factory(InterruptingProgress),
+        pytest.warns(RuntimeWarning, match="best-so-far"),
+    ):
+        try:
+            if notebook:
+                params, figure = search_in_database(*args, plot=False)
+                assert figure is None
+            else:
+                result = search_database(
+                    *args[:4], ParamBounds(EJ=args[4], EC=args[5], EL=args[6])
+                )
+                params = result.params
+                assert result.best_index == 0
+                np.testing.assert_allclose(result.predicted_freqs, args[1])
+        except KeyboardInterrupt:
+            pytest.fail("final progress interruption discarded the best-so-far result")
+    assert params == (3.0, 0.8, 0.5)
+    assert closed
+
+
 def test_empty_transitions_have_no_valid_candidate(tmp_path):
     args = _search_args(tmp_path)
     with pytest.raises(RuntimeError, match="No valid candidate"):
