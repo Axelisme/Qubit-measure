@@ -370,6 +370,85 @@ def test_recursive_dict_views_preserve_models_constraints_and_sources(
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
+def test_collision_extra_edit_abort_preserves_both_components(
+    tmp_path: Path, registry_state_guard: None, owner: str
+) -> None:
+    class Colliding(ComponentSchema):
+        model_config = ConfigDict(extra="allow")
+
+    original_config = Colliding.model_config.copy()
+    try:
+        with registered_model("notebook/collision", Colliding) as kind:
+            entry, results, database = create_entry(tmp_path)
+            entry.setup.add_component("N1", kind=kind, model_config={"marker": "first"})
+            entry.setup.add_component(
+                "N2", kind=kind, model_config={"marker": "second"}
+            )
+            view = entry.setup if owner == "setup" else entry.new_point("working")
+            source = (
+                results / "entry/setup.yaml"
+                if owner == "setup"
+                else results / "entry/points/working/point.yaml"
+            )
+            before = source.read_bytes()
+
+            def abort_edit() -> None:
+                with view.edit() as draft:
+                    draft.set("N1.model_config.marker", "changed")
+                    raise RuntimeError("abort requested")
+
+            with pytest.raises(RuntimeError, match="abort requested"):
+                abort_edit()
+            assert field_view(view.N1.model_config).marker == "first"
+            assert field_view(view.N2.model_config).marker == "second"
+            assert source.read_bytes() == before
+            reopened = ResultEntry.open(
+                "entry", result_root=results, database_root=database
+            )
+            loaded = (
+                reopened.setup if owner == "setup" else reopened.use_point("working")
+            )
+            assert field_view(loaded.N1.model_config).marker == "first"
+            assert field_view(loaded.N2.model_config).marker == "second"
+    finally:
+        # Restore third-party class state even when the original bug mutates it.
+        Colliding.model_config = original_config
+
+
+@pytest.mark.parametrize("owner", ["setup", "point"])
+def test_model_mapping_replacement_accepts_values_and_leaf_sources(
+    tmp_path: Path, registry_state_guard: None, owner: str
+) -> None:
+    class Channel(BaseModel):
+        index: int = Field(strict=True, ge=0)
+
+    class Routed(ComponentSchema):
+        routes: dict[str, Channel]
+
+    with registered_model("notebook/container", Routed) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, routes={"drive": {"index": 2}})
+        view = entry.setup if owner == "setup" else entry.new_point("working")
+        with view.edit() as draft:
+            draft.set("N1.routes", {"drive": {"index": 6}})
+        assert field_view(field_view(view.N1.routes).drive).index == 6
+        accepted = view.meta("N1.routes.drive.index")
+        assert accepted is not None and accepted.source == "manual"
+        with view.edit() as draft:
+            with pytest.raises(ValidationError):
+                draft.set("N1.routes", {"drive": {"index": -1}})
+            assert field_view(field_view(draft.N1.routes).drive).index == 6
+        assert view.meta("N1.routes.drive.index") == accepted
+
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
+        assert field_view(field_view(loaded.N1.routes).drive).index == 6
+        assert loaded.meta("N1.routes.drive.index") == accepted
+
+
+@pytest.mark.parametrize("owner", ["setup", "point"])
 def test_child_writes_validate_the_complete_parent_and_preserve_rejected_sources(
     tmp_path: Path,
     owner: str,
