@@ -130,10 +130,9 @@ class RemoteControlServiceBase:
             if observation_policies.keys() != method_registry.keys():
                 raise ValueError("observation policies must match registered methods")
             for method, policy in observation_policies.items():
-                if method_registry[method].off_main_thread and (
-                    policy.guard_deps or policy.reveals or policy.refresh_after_write
-                ):
-                    raise ValueError("resource observations require the owner thread")
+                policy.validate_owner_thread(
+                    off_main_thread=method_registry[method].off_main_thread
+                )
         self._resource_versions = resource_versions
         self._observation_policies = dict(observation_policies or {})
         self.ctrl = controller

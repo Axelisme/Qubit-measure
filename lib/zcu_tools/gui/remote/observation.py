@@ -31,6 +31,21 @@ class ResourceObservationPolicy:
     created_resource: str | None = None
     created_identity: str | None = None
 
+    def validate_owner_thread(self, *, off_main_thread: bool) -> None:
+        """Reject an off-main handler that declares owner-thread observations.
+
+        off_main_thread is True when dispatch runs the handler on its IO worker,
+        rather than via OwnerScheduler. Raise ValueError for guard, reveal or
+        write tracking in that case; owner handlers and empty policies are valid.
+        Call during registry binding and service construction before dispatch.
+        """
+        if off_main_thread and (
+            self.guard_deps or self.reveals or self.refresh_after_write
+        ):
+            raise ValueError(
+                "guard, reveal and write tracking require the owner thread"
+            )
+
     def __post_init__(self) -> None:
         if (self.reveals_without or self.reveals_when_nonempty) and not self.reveals:
             raise ValueError("conditional reveals require revealed resources")

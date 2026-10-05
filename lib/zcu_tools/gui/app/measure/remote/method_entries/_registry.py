@@ -103,6 +103,7 @@ def build_dispatch_registry(
     specs = build_method_specs(entries)
     handlers: dict[str, Handler] = {}
     for entry in entries:
+        entry.agent.validate_owner_thread(off_main_thread=entry.spec.off_main_thread)
         handlers[entry.method] = _resolve_handler_ref(entry.handler_ref)
     return build_method_registry(handlers, specs)
 
