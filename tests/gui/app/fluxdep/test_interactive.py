@@ -12,6 +12,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     InteractiveChangedPayload,
     SpectrumChangedPayload,
 )
+from zcu_tools.gui.app.fluxdep.interactive import LinePickContext
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
@@ -166,6 +167,40 @@ def test_inspect_tracks_kind_switch_and_terminal_facts(twotone_controller):
         assert facts[-1].phase == "closed"
         assert facts[-1].context_id == active.context_id
         assert twotone_controller.state.spectrums["two"].points_completed
+    finally:
+        subscription.unsubscribe()
+
+
+def test_closed_callback_context_is_not_overwritten(controller: Controller):
+    controller.set_alignment("sample", -1.0, 1.0)
+    owner = controller.interactive
+    old = owner.begin_line_pick("sample")
+    reentered: list[LinePickContext] = []
+    facts: list[InteractiveChangedPayload] = []
+
+    def on_fact(fact: InteractiveChangedPayload) -> None:
+        facts.append(fact)
+        if fact.phase == "closed" and not reentered:
+            reentered.append(owner.begin_line_pick("sample"))
+
+    subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
+    try:
+        with pytest.raises(FailedPreconditionError, match="retirement"):
+            owner.begin_onetone_pick("sample")
+        active = owner.inspect()
+        assert active is not None and active.context is reentered[0]
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            old.plugin.actions.swap.execute(old.session, None)
+        current = reentered[0]
+        current.plugin.actions.swap.execute(current.session, None)
+        assert [fact.phase for fact in facts] == ["closed", "opened", "updated"]
+        assert facts[-1].context_id == active.context_id
+        owner.cancel()
+        assert owner.inspect() is None
+        assert facts[-1].phase == "closed"
+        assert facts[-1].context_id == active.context_id
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            current.plugin.actions.swap.execute(current.session, None)
     finally:
         subscription.unsubscribe()
 
