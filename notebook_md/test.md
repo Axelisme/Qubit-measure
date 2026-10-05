@@ -11,7 +11,7 @@ from zcu_tools.resources.context import ModuleLibrary, MetaDict, ContextManager
 from zcu_tools.datafile import create_datafolder
 import zcu_tools.program.v2.base as zp2b
 from zcu_tools.utils.debug import debug_scope
-from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.experiment.utils import make_sweep
 ```
 
 ```python

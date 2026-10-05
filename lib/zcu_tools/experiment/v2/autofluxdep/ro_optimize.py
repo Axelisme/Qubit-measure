@@ -15,7 +15,12 @@ from typing_extensions import (
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import (
+    make_comment,
+    make_sweep,
+    parse_comment,
+    setup_devices,
+)
 from zcu_tools.experiment.v2.runtime import (
     MeasurementTask,
     ResultUpdateEvent,
@@ -23,7 +28,6 @@ from zcu_tools.experiment.v2.runtime import (
 )
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
-from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.plotting.plots import HeatmapPlot, Plots
 from zcu_tools.program.v2 import (
     Branch,

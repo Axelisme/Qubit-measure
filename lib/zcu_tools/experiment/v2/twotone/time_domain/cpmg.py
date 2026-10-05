@@ -23,10 +23,9 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_sweep, setup_devices
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
-from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,

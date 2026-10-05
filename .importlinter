@@ -131,13 +131,6 @@ ignore_imports =
     # Not debt until D80 moves them to zcu_lab: GUI adapters living under experiment/ (see C1).
     zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**
     zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
-    # Debt: make_sweep is not notebook-specific; it moves into the experiment framework (backlog).
-    zcu_tools.experiment.v2.autofluxdep.lenrabi -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.autofluxdep.ro_optimize -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.autofluxdep.t1 -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.autofluxdep.t2echo -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.autofluxdep.t2ramsey -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.twotone.time_domain.cpmg -> zcu_tools.notebook.utils
 
 [importlinter:contract:top-level-acyclic]
 name = C9: top-level packages form no import cycle
@@ -149,13 +142,6 @@ ignore_imports =
     # Not debt until D80 moves them to zcu_lab (see C1, C8).
     zcu_tools.experiment.v2_gui.** -> zcu_tools.gui.**
     zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
-    # Debt, see C8.
-    zcu_tools.experiment.v2.autofluxdep.lenrabi -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.autofluxdep.ro_optimize -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.autofluxdep.t1 -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.autofluxdep.t2echo -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.autofluxdep.t2ramsey -> zcu_tools.notebook.utils
-    zcu_tools.experiment.v2.twotone.time_domain.cpmg -> zcu_tools.notebook.utils
     # Debt, see C10.
     zcu_tools.resources.context.library -> zcu_tools.program.v2
 

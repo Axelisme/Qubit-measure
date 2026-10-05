@@ -48,7 +48,8 @@ from zcu_tools.resources.sample_table import (
     SampleTable,
     validate_sample_table_v2,
 )
-from zcu_tools.notebook.utils import dump_device_info, gc_collect, make_sweep, savefig
+from zcu_tools.experiment.utils import make_sweep
+from zcu_tools.notebook.utils import dump_device_info, gc_collect, savefig
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.datafile import create_datafolder
 from zcu_tools.experiment.cfg_assembler import CfgEnv, make_cfg

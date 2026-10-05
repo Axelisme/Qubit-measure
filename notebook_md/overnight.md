@@ -31,7 +31,8 @@ from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.context import ContextManager
 from zcu_tools.datafile import create_datafolder
-from zcu_tools.notebook.utils import make_sweep, reconnect_devices, dump_device_info
+from zcu_tools.experiment.utils import make_sweep
+from zcu_tools.notebook.utils import reconnect_devices, dump_device_info
 ```
 
 ```python

@@ -15,14 +15,18 @@ from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load_labber_data, save_labber_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
+from zcu_tools.experiment.utils import (
+    make_comment,
+    make_sweep,
+    parse_comment,
+    setup_devices,
+)
 from zcu_tools.experiment.v2.runtime import (
     MeasurementTask,
     ResultUpdateEvent,
     ScheduleStep,
 )
 from zcu_tools.experiment.v2.utils import snr_checker, sweep2array
-from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.plotting.plots import LinePlot, Plots
 from zcu_tools.program.v2 import (
     Delay,
