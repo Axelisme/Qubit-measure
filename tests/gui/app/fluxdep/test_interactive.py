@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -171,10 +172,20 @@ def test_inspect_tracks_kind_switch_and_terminal_facts(twotone_controller):
         subscription.unsubscribe()
 
 
-def test_closed_callback_context_is_not_overwritten(controller: Controller):
+@pytest.mark.parametrize("kind", ["line", "onetone", "twotone", "selection"])
+def test_closed_callback_context_is_not_overwritten(
+    controller: Controller, kind: Literal["line", "onetone", "twotone", "selection"]
+):
+    if kind == "twotone":
+        controller.state.spectrums["sample"].spec_type = "TwoTone"
     controller.set_alignment("sample", -1.0, 1.0)
+    controller.set_points("sample", np.array([-0.5, 0.5]), np.array([4.2, 4.3]))
     owner = controller.interactive
-    old = owner.begin_line_pick("sample")
+    old = (
+        owner.begin_line_pick("sample")
+        if kind == "selection"
+        else owner.begin_cross_selection()
+    )
     reentered: list[LinePickContext] = []
     facts: list[InteractiveChangedPayload] = []
 
@@ -183,14 +194,20 @@ def test_closed_callback_context_is_not_overwritten(controller: Controller):
         if fact.phase == "closed" and not reentered:
             reentered.append(owner.begin_line_pick("sample"))
 
+    begin: Callable[[], object] = {
+        "line": lambda: owner.begin_line_pick("sample"),
+        "onetone": lambda: owner.begin_onetone_pick("sample"),
+        "twotone": lambda: owner.begin_twotone_pick("sample"),
+        "selection": owner.begin_cross_selection,
+    }[kind]
     subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
     try:
         with pytest.raises(FailedPreconditionError, match="retirement"):
-            owner.begin_onetone_pick("sample")
+            begin()
         active = owner.inspect()
         assert active is not None and active.context is reentered[0]
         with pytest.raises(FailedPreconditionError, match="closed"):
-            old.plugin.actions.swap.execute(old.session, None)
+            old.session.ensure_input_open()
         current = reentered[0]
         current.plugin.actions.swap.execute(current.session, None)
         assert [fact.phase for fact in facts] == ["closed", "opened", "updated"]
@@ -201,6 +218,31 @@ def test_closed_callback_context_is_not_overwritten(controller: Controller):
         assert facts[-1].context_id == active.context_id
         with pytest.raises(FailedPreconditionError, match="closed"):
             current.plugin.actions.swap.execute(current.session, None)
+    finally:
+        subscription.unsubscribe()
+
+
+def test_dispose_rejects_begin_from_closed_callback(controller: Controller):
+    owner = controller.interactive
+    old = owner.begin_line_pick("sample")
+    facts: list[InteractiveChangedPayload] = []
+
+    def on_fact(fact: InteractiveChangedPayload) -> None:
+        facts.append(fact)
+        if fact.phase == "closed":
+            with pytest.raises(FailedPreconditionError, match="disposed"):
+                owner.begin_line_pick("sample")
+            owner.dispose()
+
+    subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
+    try:
+        owner.dispose()
+        assert owner.inspect() is None
+        assert [fact.phase for fact in facts] == ["closed"]
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            old.plugin.actions.swap.execute(old.session, None)
+        owner.dispose()
+        assert len(facts) == 1
     finally:
         subscription.unsubscribe()
 

@@ -273,6 +273,12 @@ class FluxDepInteractiveOwner:
             return None
         return ActiveInteractiveContext(self._context_id, context)
 
+    def _cancel_for_begin(self) -> None:
+        """Retire input, but preserve a callback's replacement or disposal."""
+        self.cancel()
+        if self._disposed or self._context is not None:
+            raise FailedPreconditionError("owner changed during context retirement")
+
     def _install_context(self, context: InteractiveContext) -> None:
         self._context = context
         self._context_id = self._next_context_id
@@ -335,7 +341,9 @@ class FluxDepInteractiveOwner:
 
         InvalidInputError rejects unknown names. FailedPreconditionError rejects
         inactive names or a disposed owner. Seed inherits meaningful alignment;
-        OneTone fixes magnitude_only to True. RuntimeError rejects off-owner use.
+        OneTone fixes magnitude_only to True. Reentrant retirement that changes
+        the context or disposes the owner raises FailedPreconditionError and keeps
+        the callback's result. RuntimeError rejects off-owner use.
         """
         self._require_owner()
         if self._disposed:
@@ -347,7 +355,7 @@ class FluxDepInteractiveOwner:
         current = self.current_line_pick()
         if current is not None:
             return current
-        self.cancel()
+        self._cancel_for_begin()
         entry = self._state.spectrums[name]
         inputs = FluxPickInputs(
             entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
@@ -414,7 +422,9 @@ class FluxDepInteractiveOwner:
 
         Unknown name raises InvalidInputError. Inactive/unaligned/wrong-type or
         disposed owner raises FailedPreconditionError. Switching picker kind
-        closes old input before replacement. Off-owner use raises RuntimeError.
+        closes old input before replacement. Reentrant retirement that changes
+        the context or disposes the owner raises FailedPreconditionError and keeps
+        the callback's result. Off-owner use raises RuntimeError.
         """
         self._require_owner()
         if self._disposed:
@@ -437,7 +447,7 @@ class FluxDepInteractiveOwner:
         current = self.current_onetone_pick()
         if current is not None:
             return current
-        self.cancel()
+        self._cancel_for_begin()
         inputs = OneToneInputs(
             FluxPickInputs(
                 entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
@@ -499,7 +509,9 @@ class FluxDepInteractiveOwner:
 
         Unknown name raises InvalidInputError. Inactive/unaligned/wrong-type or
         disposed owner raises FailedPreconditionError. Kind switch closes old
-        input. Off-owner use raises RuntimeError. Invalid raw data raises ValueError.
+        input. Reentrant retirement that changes the context or disposes the
+        owner raises FailedPreconditionError and keeps the callback's result.
+        Off-owner use raises RuntimeError. Invalid raw data raises ValueError.
         """
         self._require_owner()
         if self._disposed:
@@ -522,7 +534,7 @@ class FluxDepInteractiveOwner:
         current = self.current_twotone_pick()
         if current is not None:
             return current
-        self.cancel()
+        self._cancel_for_begin()
         inputs = TwoToneInputs(
             FluxPickInputs(
                 entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
@@ -590,7 +602,9 @@ class FluxDepInteractiveOwner:
         from the usable spectra's raw axes and points. Only published distance is
         inherited. Cancel the previous picker on successful replacement.
         FailedPreconditionError rejects disposed owner or no usable cloud;
-        invalid numeric input raises ValueError. Off-owner use raises RuntimeError.
+        invalid numeric input raises ValueError. Reentrant retirement that changes
+        the context or disposes the owner raises FailedPreconditionError and keeps
+        the callback's result. Off-owner use raises RuntimeError.
         """
         self._require_owner()
         if self._disposed:
@@ -602,7 +616,7 @@ class FluxDepInteractiveOwner:
         plugin = CrossSelectionPlugin(
             inputs, min_distance=self._state.selection.min_distance
         )
-        self.cancel()
+        self._cancel_for_begin()
         context = CrossSelectionContext(
             plugin=plugin,
             session=plugin.open(self._owner),
