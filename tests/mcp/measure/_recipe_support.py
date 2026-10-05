@@ -190,7 +190,16 @@ class LookbackGui:
             }
             return {
                 "has_draft": True,
-                "items": [{"id": "md-1", "proposed": 0.24}],
+                "items": [
+                    {
+                        "id": "md-1",
+                        "kind": "metadict",
+                        "target_name": "trigger_offset",
+                        "selected": False,
+                        "proposed": 0.24,
+                        "current": 0.1,
+                    }
+                ],
                 "destination_context": {"active_label": "sample"},
             }
         raise AssertionError(method)

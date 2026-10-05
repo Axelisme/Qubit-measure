@@ -12,7 +12,7 @@ from ._recipe_support import PNG, LookbackGui, recipe_client
 from ._support import full_execution_reply, make_client
 
 
-@pytest.mark.parametrize("outcome", ["finished", "missing", "failed"])
+@pytest.mark.parametrize("outcome", ["awaiting_answer", "missing", "failed"])
 def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome):
     gui = LookbackGui()
 
@@ -38,14 +38,22 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
         )
         assert summary["run_id"] is None
         assert summary["steps"]["run"]["status"] == (
-            "not_started" if outcome == "missing" else outcome
+            "not_started"
+            if outcome == "missing"
+            else "finished"
+            if outcome == "awaiting_answer"
+            else outcome
         )
         assert summary["previews"] == {
             "run": [],
-            "primary": [full["analysis"]["figure"]] if outcome == "finished" else [],
+            "primary": [full["analysis"]["figure"]]
+            if outcome == "awaiting_answer"
+            else [],
             "post": [],
         }
-        if outcome == "finished":
+        if outcome == "awaiting_answer":
+            assert summary["question_items"] == ("trigger_offset",)
+            assert not summary["writeback"]["receipts"]
             assert initial.images
             assert waited.images
             assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
@@ -80,7 +88,7 @@ def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_pa
 
     with recipe_client(tmp_path, respond) as client:
         completed = client.call("lookback", {"frequency_mhz": 6020.0})
-        assert completed.data["status"] == "finished", completed.data
+        assert completed.data["status"] == "awaiting_answer", completed.data
         key = completed.data["execution"]
         summary = client.call("status", {"execution": key})
         full = client.call("status", {"execution": key, "detail": "full"})
@@ -140,7 +148,7 @@ def test_pulse_readout_candidate_summary_keeps_nested_values_and_captured_full(
 
     with recipe_client(tmp_path, respond) as client:
         completed = client.call("lookback", {"frequency_mhz": 6020.0})
-        assert completed.data["status"] == "finished", completed.data
+        assert completed.data["status"] == "awaiting_answer", completed.data
         sent = list(client.transport.sent)
         summary = client.call("status", {"execution": completed.data["execution"]})
         full = client.call(
@@ -208,7 +216,7 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
 
     with recipe_client(tmp_path, respond) as client:
         completed = client.call("lookback", {"frequency_mhz": 6020.0})
-        assert completed.data["status"] == "finished", completed.data
+        assert completed.data["status"] == "awaiting_answer", completed.data
         key = completed.data["execution"]
         summary = client.call("status", {"execution": key})
         full = client.call("status", {"execution": key, "detail": "full"})
@@ -331,7 +339,7 @@ def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
             assert len(client.transport.sent) == before
             release.set()
             completed = client.call("wait", {"execution": execution, "timeout": 2})
-            assert completed.data["status"] == "finished", completed.data
+            assert completed.data["status"] == "awaiting_answer", completed.data
             confirmed = client.call("status", {"execution": execution})
             assert confirmed["steps"]["run"] == {
                 "status": "finished",
@@ -366,9 +374,12 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         return response
 
     with recipe_client(tmp_path, respond) as client:
-        completed = client.call("lookback", {"frequency_mhz": 6020.0, "rounds": 7})
+        question = client.call("lookback", {"frequency_mhz": 6020.0, "rounds": 7})
+        assert question.data["status"] == "awaiting_answer", question.data
+        execution = question.data["execution"]
+        client.call("answer", {"recipe": execution, "decision": "skipped"})
+        completed = client.call("wait", {"execution": execution, "timeout": 2})
         assert completed.data["status"] == "finished", completed.data
-        execution = completed.data["execution"]
         before = len(client.transport.sent)
         summary = client.call("status", {"execution": execution})
         full = client.call("status", {"execution": execution, "detail": "full"})
@@ -414,7 +425,10 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         assert summary["writeback"]["destination"] == {
             "context": {"active_label": "sample"}
         }
-        assert summary["missing"] == summary["invalid"] == []
+        assert not summary["missing"]
+        assert not summary["invalid"]
+        assert summary["question_items"] is None
+        assert not summary["writeback"]["receipts"]
         assert summary["error"] is None
         assert len(client.transport.sent) == before
 
@@ -484,7 +498,7 @@ def test_run_capture_keeps_calibrated_raw_input_after_live_cfg_changes(tmp_path)
 
     with recipe_client(tmp_path, respond) as client:
         completed = client.call("lookback", {})
-        assert completed.data["status"] == "finished", completed.data
+        assert completed.data["status"] == "awaiting_answer", completed.data
         before = len(client.transport.sent)
         full = client.call(
             "status", {"execution": completed.data["execution"], "detail": "full"}
@@ -523,7 +537,7 @@ def test_full_query_keeps_the_publication_used_before_run(tmp_path):
 
     with recipe_client(tmp_path, respond) as client:
         completed = client.call("lookback", {"frequency_mhz": 6020.0, "rounds": 7})
-        assert completed.data["status"] == "finished", completed.data
+        assert completed.data["status"] == "awaiting_answer", completed.data
         execution = completed.data["execution"]
         before = len(client.transport.sent)
         full = client.call("status", {"execution": execution, "detail": "full"})
