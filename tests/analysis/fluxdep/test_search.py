@@ -259,10 +259,10 @@ def test_final_progress_interrupt_preserves_best_so_far(tmp_path, notebook: bool
     closed = []
 
     class InterruptingProgress(TQDMProgressBar):
-        def set_description(self, text: str) -> None:
-            if text == "Done! ":
+        def set_description(self, description: str) -> None:
+            if description == "Done! ":
                 raise KeyboardInterrupt
-            super().set_description(text)
+            super().set_description(description)
 
         def close(self):
             closed.append(True)

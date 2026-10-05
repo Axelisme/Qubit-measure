@@ -243,9 +243,14 @@ def _scan_candidates(
     idx_bar = make_pbar(total=N, desc="Searching...")
     searched = 0
     interrupted = False
+    # Retain scan/progress interrupts, but let a predicate's interrupt propagate.
+    checking_cancellation = False
     try:
         for oi in order:
-            _check_cancellation(cancel_requested)
+            if cancel_requested is not None:
+                checking_cancellation = True
+                _check_cancellation(cancel_requested)
+                checking_cancellation = False
             oi = int(oi)
             lb = lbs[oi]
             if not np.isfinite(lb) or lb > best_dist:
@@ -253,30 +258,31 @@ def _scan_candidates(
             p0, p1, p2 = f_params[oi]
             a_min = max(EJb[0] / p0, ECb[0] / p1, ELb[0] / p2)
             a_max = min(EJb[1] / p0, ECb[1] / p1, ELb[1] / p2)
-            # Only numerical/progress interruption retains Notebook partial results.
-            # A predicate failure must propagate, including KeyboardInterrupt.
-            try:
-                d, a = search_one_entry(
-                    sf_energies_c[oi],
-                    tr_pairs_reduced,
-                    tr_coeffs,
-                    tr_offsets,
-                    freqs_c,
-                    a_min,
-                    a_max,
-                )
-                results[oi] = d, a
-                searched += 1
-                if searched % 64 == 0:
-                    idx_bar.update(64)
-                if d < best_dist:
-                    best_dist, best_scale, best_idx = d, a, oi
-                    best_params = f_params[oi] * a
-            except KeyboardInterrupt:
-                interrupted = True
-                break
-            _check_cancellation(cancel_requested)
+            d, a = search_one_entry(
+                sf_energies_c[oi],
+                tr_pairs_reduced,
+                tr_coeffs,
+                tr_offsets,
+                freqs_c,
+                a_min,
+                a_max,
+            )
+            results[oi] = d, a
+            searched += 1
+            if searched % 64 == 0:
+                idx_bar.update(64)
+            if d < best_dist:
+                best_dist, best_scale, best_idx = d, a, oi
+                best_params = f_params[oi] * a
+            if cancel_requested is not None:
+                checking_cancellation = True
+                _check_cancellation(cancel_requested)
+                checking_cancellation = False
         idx_bar.set_description("Done! ")
+    except KeyboardInterrupt:
+        if checking_cancellation:
+            raise
+        interrupted = True
     finally:
         idx_bar.close()
 
