@@ -1,13 +1,10 @@
-"""Tests for FindPointsWidget + toggle_near_mask (headless)."""
+"""Tests for the FindPointsWidget frontend (headless)."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import (
-    FindPointsWidget,
-    toggle_near_mask,
-)
+from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 
 
 def _spectrum(n_dev=40, n_freq=30):
@@ -18,16 +15,6 @@ def _spectrum(n_dev=40, n_freq=30):
         np.complex128
     )
     return sig, devs, freqs
-
-
-def test_toggle_near_mask_select_then_erase():
-    _sig, devs, freqs = _spectrum()
-    mask = np.zeros((len(devs), len(freqs)), dtype=bool)
-    toggle_near_mask(devs, freqs, mask, x=0.0, y=4.5, width=0.2, select=True)
-    assert mask.any()  # some region selected near (0, 4.5)
-    before = mask.sum()
-    toggle_near_mask(devs, freqs, mask, x=0.0, y=4.5, width=0.2, select=False)
-    assert mask.sum() < before  # erase removed the region
 
 
 @pytest.fixture
