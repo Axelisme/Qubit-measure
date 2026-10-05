@@ -356,6 +356,27 @@ def test_channel_stop_then_settled_folds_reason_across_consume_calls() -> None:
     assert r2.feedback == "abort reason"
 
 
+def test_channel_multiple_stop_reasons_survive_timeout_and_terminal_reread() -> None:
+    """Stop reasons retain arrival order across timeout and terminal reads."""
+    channel = OperationChannel()
+    channel.stop("first")
+    assert channel.consume(timeout=0).reason == "timeout"
+
+    channel.stop("second")
+    channel.settle(OperationOutcome("cancelled"))
+
+    result = channel.consume(timeout=0)
+    assert result.reason == "completed"
+    assert result.outcome is not None
+    assert result.outcome.status == "cancelled"
+    assert result.feedback == "first\nsecond"
+
+    reread = channel.consume(timeout=0)
+    assert reread.reason == "completed"
+    assert reread.outcome == result.outcome
+    assert reread.feedback == "first\nsecond"
+
+
 def test_channel_terminal_idempotent_reconsume() -> None:
     """Already-settled channel: re-consuming always returns completed immediately."""
     ch = OperationChannel()
