@@ -391,6 +391,69 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
         qapp.processEvents()
 
 
+@pytest.mark.parametrize("notification", ["search", "progress"])
+def test_startup_notification_close_waits_for_search_terminal(
+    qapp, search_case, notification
+):
+    from qtpy import QtWidgets
+    from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
+    from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+
+    ctrl, bg, _owner, progress, result, _captured = search_case
+    runner = BackgroundRunner()
+    window = MainWindow(ctrl, search_runner=runner)
+    window.show()
+    close_results = []
+
+    def close_during_startup(*_args):
+        if ctrl.search.active_token is not None and not close_results:
+            # No worker exists yet, so the runner can report drained during start.
+            assert bg.work is None
+            close_results.append(window.close())
+
+    if notification == "search":
+        dispose = ctrl.bus.subscribe(
+            SearchChangedPayload, close_during_startup
+        ).unsubscribe
+    else:
+        dispose = progress.attach_by_owner("fluxdep-search", close_during_startup)
+    try:
+        analyze = next(
+            button
+            for button in window.findChildren(QtWidgets.QPushButton)
+            if button.text().startswith("Analyze")
+        )
+        analyze.click()
+        panel = window.findChild(AnalyzePanelWidget)
+        assert panel is not None
+        token = ctrl.search.start()
+        assert close_results == [False]
+        assert window.isVisible()
+        assert window.findChild(AnalyzePanelWidget) is panel
+        assert ctrl.search.active_token == token
+        with pytest.raises(RuntimeError, match="closing"):
+            ctrl.search.start()
+        bg.deliver(result)
+        assert ctrl.search.active_token is None
+        assert ctrl.search.outcome(token).status == "cancelled"
+        assert ctrl.state.fit.params is None
+        assert any(
+            label.text() == "Search cancelled."
+            for label in panel.findChildren(QtWidgets.QLabel)
+        )
+        assert window.close()
+        assert not window.isVisible()
+    finally:
+        dispose()
+        if ctrl.search.active_token is not None:
+            bg.deliver(result)
+        runner.quiesce()
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()
+
+
 def test_close_refuses_disposal_until_search_drains(qapp, search_case):
     from qtpy import QtWidgets
     from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
