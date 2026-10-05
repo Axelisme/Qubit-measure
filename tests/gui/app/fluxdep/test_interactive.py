@@ -247,6 +247,47 @@ def test_dispose_rejects_begin_from_closed_callback(controller: Controller):
         subscription.unsubscribe()
 
 
+def test_begin_cannot_cross_disposal_in_closed_callback(controller: Controller):
+    controller.set_alignment("sample", -1.0, 1.0)
+    owner = controller.interactive
+    old = owner.begin_line_pick("sample")
+
+    def on_fact(fact: InteractiveChangedPayload) -> None:
+        if fact.phase == "closed":
+            owner.dispose()
+
+    subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
+    try:
+        with pytest.raises(FailedPreconditionError, match="retirement"):
+            owner.begin_onetone_pick("sample")
+        assert owner.inspect() is None
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            old.session.ensure_input_open()
+    finally:
+        subscription.unsubscribe()
+
+
+def test_begin_rejects_source_removal_in_closed_callback(controller: Controller):
+    controller.set_alignment("sample", -1.0, 1.0)
+    owner = controller.interactive
+    old = owner.begin_line_pick("sample")
+
+    def on_fact(fact: InteractiveChangedPayload) -> None:
+        if fact.phase == "closed":
+            controller.remove_spectrum("sample")
+
+    subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
+    try:
+        with pytest.raises(FailedPreconditionError, match="retirement"):
+            owner.begin_onetone_pick("sample")
+        assert owner.inspect() is None
+        assert controller.list_spectrums() == []
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            old.session.ensure_input_open()
+    finally:
+        subscription.unsubscribe()
+
+
 def test_begin_reuses_session_and_finish_publishes_alignment(controller: Controller):
     owner = controller.interactive
     ctx = owner.begin_line_pick("sample")

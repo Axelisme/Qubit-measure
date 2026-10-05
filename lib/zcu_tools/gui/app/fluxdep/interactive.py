@@ -736,12 +736,18 @@ class FluxDepInteractiveOwner:
         self._emit_interactive(active, "closed")
 
     def dispose(self) -> None:
-        """Idempotently cancel and release subscriptions; reject future begin."""
+        """Reject admission before retiring input, then release subscriptions.
+
+        Idempotent owner-loop call. Synchronous closed callbacks cannot begin new
+        input. Callback errors propagate after source subscriptions are released.
+        """
         self._require_owner()
         if self._disposed:
             return
-        self.cancel()
         self._disposed = True
-        for unsubscribe in self._subscriptions:
-            unsubscribe()
-        self._subscriptions = ()
+        try:
+            self.cancel()
+        finally:
+            for unsubscribe in self._subscriptions:
+                unsubscribe()
+            self._subscriptions = ()
