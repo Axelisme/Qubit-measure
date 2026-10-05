@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import replace
 from typing import Literal
 
@@ -10,11 +11,13 @@ import numpy as np
 import pytest
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
+    ActiveSpectrumChangedPayload,
     InteractiveChangedPayload,
     SpectrumChangedPayload,
 )
 from zcu_tools.gui.app.fluxdep.interactive import LinePickContext
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
+from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
 
@@ -219,6 +222,58 @@ def test_closed_callback_context_is_not_overwritten(
         with pytest.raises(FailedPreconditionError, match="closed"):
             current.plugin.actions.swap.execute(current.session, None)
     finally:
+        subscription.unsubscribe()
+
+
+def test_begin_preserves_reentry_from_current_query_retirement(controller: Controller):
+    second = deepcopy(controller.state.spectrums["sample"])
+    second.name = "second"
+    controller.state.put_spectrum(second)
+    controller.set_alignment("second", -1.0, 1.0)
+    owner = controller.interactive
+    old = owner.begin_line_pick("sample")
+    reentered: list[LinePickContext] = []
+    errors: list[FailedPreconditionError] = []
+    facts: list[InteractiveChangedPayload] = []
+
+    def on_fact(fact: InteractiveChangedPayload) -> None:
+        facts.append(fact)
+        if fact.phase == "closed" and not reentered:
+            reentered.append(owner.begin_line_pick("second"))
+
+    def on_active(event: ActiveSpectrumChangedPayload, _meta: EventMeta) -> None:
+        if event.name == "second":
+            try:
+                owner.begin_onetone_pick("second")
+            except FailedPreconditionError as exc:
+                errors.append(exc)
+
+    subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
+    metadata = controller.bus.subscribe_with_meta(ActiveSpectrumChangedPayload, on_active)
+    try:
+        controller.set_active_spectrum("second")
+        assert len(errors) == 1
+        assert len(reentered) == 1
+        active = owner.inspect()
+        assert active is not None and active.context is reentered[0]
+        assert [fact.phase for fact in facts] == ["closed", "opened"]
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            old.session.ensure_input_open()
+        current = reentered[0]
+        current.plugin.actions.swap.execute(current.session, None)
+        current.session.undo()
+        assert [fact.phase for fact in facts] == [
+            "closed", "opened", "updated", "updated"
+        ]
+        assert {fact.context_id for fact in facts[1:]} == {active.context_id}
+        owner.cancel()
+        assert owner.inspect() is None
+        assert facts[-1].phase == "closed"
+        assert facts[-1].context_id == active.context_id
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            current.session.ensure_input_open()
+    finally:
+        metadata.unsubscribe()
         subscription.unsubscribe()
 
 
