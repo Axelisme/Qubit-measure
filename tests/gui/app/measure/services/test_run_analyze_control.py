@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
 )
-from zcu_tools.gui.app.measure.interactive import PluginDefinition
 from zcu_tools.gui.app.measure.services.analyze import ActiveInteractive
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.run_analyze_control import (
@@ -23,6 +22,7 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontendEnv,
 )
 from zcu_tools.gui.cfg.resource import CfgId, CfgRef, CfgRevision, CfgStaleError
+from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.plotting.plots import Plots
 

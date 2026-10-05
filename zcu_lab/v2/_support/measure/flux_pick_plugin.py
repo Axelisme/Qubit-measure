@@ -19,13 +19,13 @@ from zcu_tools.analysis.fluxdep.line_state import (
 )
 from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
-from zcu_tools.gui.app.measure.interactive import (
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.interactive import (
     Action,
     Command,
     PluginDefinition,
     Session,
 )
-from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.plots import Plots

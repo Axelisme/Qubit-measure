@@ -29,10 +29,20 @@ def _project_state(state: object) -> object:
 
 @dataclass(frozen=True, slots=True)
 class Action(Generic[S, P]):
+    """A typed state transition shared by GUI and remote command callers.
+
+    calculate receives a detached latest state and the domain payload P, and
+    returns its full replacement. Validation errors propagate without commit.
+    """
+
     calculate: Callable[[S, P], S]
 
     def execute(self, session: Session[S], params: P) -> S:
-        """The GUI and command handler call this same validation/commit path."""
+        """Apply params to the latest session state and return a detached result.
+
+        Propagate calculate failures without publication. Session owner-loop and
+        input gates apply; subscriber failures are isolated by the session.
+        """
         return session.commit(lambda state: self.calculate(state, params))
 
 
@@ -43,6 +53,12 @@ class Command(Generic[S]):
     The GUI invokes the typed Action directly. Remote validates the request with
     gui.remote.param_spec.validate_params before calling the bridge. Both call
     the same Action; the domain policy never depends on a wire codec.
+
+    name is a nonempty unique plugin-local id, excluding reserved 'done'.
+    params declares wire parameter names, types and validation constraints.
+    execute receives the session and already-validated named parameters, invokes
+    the typed action, and returns its domain result. Names must be unique and
+    execute callable; invalid declarations raise ValueError or TypeError.
     """
 
     name: str
@@ -65,6 +81,17 @@ class Command(Generic[S]):
 
 @dataclass(frozen=True, slots=True)
 class PluginDefinition(Generic[S, R]):
+    """Captured-input interactive definition, with independent sessions.
+
+    plugin_id is a nonempty stable domain identifier. seed is the deepcopy-able
+    initial state S. commands is a tuple of uniquely named command declarations.
+    can_finish validates committed state, raising to keep input open on failure.
+    build_result returns the terminal result R after input closes; failure leaves
+    it closed. project_state converts S to a read-only presentation projection;
+    the default projects dataclasses to field mappings and returns other values.
+    Invalid names/callbacks raise ValueError or TypeError at construction.
+    """
+
     plugin_id: str
     seed: S
     commands: tuple[Command[S], ...]
@@ -98,6 +125,12 @@ class PluginDefinition(Generic[S, R]):
         on_done: Callable[[object], None],
         on_error: Callable[[Exception], None],
     ) -> None:
+        """Submit compute to the bound runner with owner-loop completion callbacks.
+
+        compute returns the value supplied to on_done; on_error receives compute
+        failures. Raise FailedPreconditionError before submission if unbound.
+        Execution, cancellation and callback isolation belong to the runner.
+        """
         if self._background is None:
             raise FailedPreconditionError(
                 "interactive background runner is unavailable"
