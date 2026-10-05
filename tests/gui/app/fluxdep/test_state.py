@@ -103,6 +103,43 @@ def test_remove_spectrum_drops_key_bumps_set():
     assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 2  # add + remove
 
 
+@pytest.mark.parametrize("name", ["foo", "譜:*", "a:b"])
+def test_remove_spectrum_preserves_prefix_sibling(name: str):
+    st = FluxDepState()
+    sibling = _make_entry(name + "bar")
+    st.put_spectrum(_make_entry(name))
+    st.put_spectrum(sibling)
+    st.put_spectrum(sibling)
+    st.set_active(sibling.name)
+
+    st.remove_spectrum(name)
+
+    assert st.spectrums == {sibling.name: sibling}
+    assert st.active_spectrum == sibling.name
+    assert st.version.get(spectrum_version_key(name)) == 0
+    assert st.version.get(spectrum_version_key(sibling.name)) == 2
+    assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 3
+
+
+def test_same_name_recreation_never_reuses_a_spectrum_version():
+    st = FluxDepState()
+    entry = _make_entry("a")
+    key = spectrum_version_key(entry.name)
+    st.put_spectrum(entry)
+    assert st.version.get(key) == 1
+
+    st.remove_spectrum(entry.name)
+    assert st.version.get(key) == 0
+    st.put_spectrum(_make_entry(entry.name))
+    assert st.version.get(key) == 2
+
+    st.remove_spectrum(entry.name)
+    assert st.version.get(key) == 0
+    st.put_spectrum(_make_entry(entry.name))
+    assert st.version.get(key) == 3
+    assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 5
+
+
 def test_remove_active_spectrum_clears_active():
     st = FluxDepState()
     st.put_spectrum(_make_entry("a"))
