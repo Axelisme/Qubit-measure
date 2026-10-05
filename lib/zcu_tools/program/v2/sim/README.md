@@ -163,6 +163,8 @@ Each soc keeps its own copied parameters and source binding.
   `LoadValue` count register), and picks the `ComputedPulse` candidate from its
   `LoadValue` index register, padding a shorter candidate with idle time to the
   longest candidate's length as the hardware does.
+- `frame.py` — gives drives at several carriers their phase-coherent phases in
+  the reference rotating frame.
 - `dmem.py` — collects `LoadValue` / `LoadWord` tables and reads a table's value
   at a sweep point.
 - `errors.py` — `UnsupportedModuleError`, the fast-fail for any module the
@@ -216,10 +218,13 @@ Each soc keeps its own copied parameters and source binding.
 
 - **D1 — no `SimParams` => white-noise fallback.** `make_mock_soc()` without a
   sim uses the white-noise stub; the sim path is fully opt-in.
-- **Single rotating frame.** The whole timeline lives in one frame whose carrier
-  is the qubit control pulses' frequency. Idle segments carry the frame detuning
-  (not 0), which is what makes Ramsey fringes appear. Qubit pulses that disagree
-  in frequency at a point have no single frame -> fast-fail.
+- **Reference rotating frame.** Idle segments evolve in the frame of the first
+  qubit control pulse's frequency and carry its detuning (not 0), which is what
+  makes Ramsey fringes appear. Each drive uses its own carrier. When pulses at
+  one point play at different frequencies, `frame.py` gives each drive its
+  phase-coherent phase, with time measured from the start of the shot. Hardware
+  DDS phase follows absolute tProc time, so the model matches hardware only when
+  every carrier offset times the shot period is a whole number of cycles.
 - **Waveform envelopes.** Const, gauss/drag, cosine, flat_top, and `ArbWaveform`
   pulses all lower through the same scalar envelope path. `ArbWaveform` assets are
   represented as `abs(I+jQ)` because the current TLS Bloch/readout model has one
@@ -261,9 +266,8 @@ Each soc keeps its own copied parameters and source binding.
 - **Repeat and ComputedPulse supported.** A `Repeat` unrolls its body back to
   back, and a `ComputedPulse` plays the candidate its index register selects; the
   frame detuning includes pulses inside both. This covers AllXY, ZigZag and the
-  ZigZag gain scan. A readout or `Branch` inside a `Repeat` fast-fails. The
-  ZigZag frequency scan fast-fails by design: its X90 pulse stays at `q_f` while
-  the repeated pulse's frequency is swept, so no single rotating frame exists.
+  ZigZag gain and frequency scans. A readout or `Branch` inside a `Repeat`
+  fast-fails.
 - **Register dmem support is consumer-specific.** The simulator can recover
   uncompressed `LoadValue` tables when a semantic consumer interprets the
   register as a scalar: a `DelayAuto` delay, a `Repeat` count, or a
@@ -359,7 +363,9 @@ Each soc keeps its own copied parameters and source binding.
 - `tests/program/v2/sim/test_bloch.py`, `test_bloch_limits.py` — Bloch core +
   analytic limits (Rabi, Ramsey, echo refocus at the decoupled-detuning layer).
 - `test_params.py`, `test_readout.py`, `test_lowering.py`,
-  `test_control_flow.py` — per-layer unit tests.
+  `test_control_flow.py`, `test_frame.py` — per-layer unit tests.
+  `test_frame.py` checks a two-carrier sequence against a finely sliced
+  qubit-frame reference.
 - `test_engine.py` — engine assembly + acquire dispatch (feature *shape*: D1
   regression, peak/dip, oscillation, decay, fringes, round hook, decimated trace),
   the singleshot per-shot blobs (get_raw clusters on the |g>/|e> centres, pi/2 puts
@@ -378,5 +384,5 @@ Each soc keeps its own copied parameters and source binding.
   centres / preparation populations / a real discrimination fidelity that improves
   with snr). The echo recovery runs at `reps=2000` to average the shot noise.
 - `test_gate_sequences.py` — AllXY reports an injected 10 % gain error, the
-  ZigZag gain scan recovers the pi gain, and the ZigZag frequency scan fails with
-  `UnsupportedModuleError` on the stop signal.
+  ZigZag gain scan recovers the pi gain, and the ZigZag frequency scan recovers
+  the qubit frequency.
