@@ -62,7 +62,8 @@ def save_raw_data(
     Rejection by request.before_start propagates without changing the receipt.
 
     Once admitted, cancellation does not interrupt the save. Native failures and
-    transport/close errors propagate after observe captures failed/unknown facts.
+    delivery/close errors propagate after observe captures failed/unknown facts.
+    Handler timeouts and response encoding failures retain unknown outcomes.
     Reserved paths do not become confirmed until the true finished outcome. No
     retry, reconnect, rollback, or worker creation occurs.
     """
@@ -114,6 +115,8 @@ def save_raw_data(
             reason = error.reason if isinstance(error, GuiRpcError) else None
             unknown = reason in (
                 "gui_transport_timeout",
+                "gui_handler_timeout",
+                "response_encoding_failed",
                 "connection_lost",
                 "message_too_large",
             ) or (reason == "session_closed" and receipt.status == "saving")

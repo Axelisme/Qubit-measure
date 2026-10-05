@@ -308,8 +308,20 @@ def test_raw_save_failure_retains_reserved_path_and_prior_confirmed_save(
     [
         ("start", "timeout", None, "gui_handler_timeout", "unknown"),
         ("await", "timeout", None, "gui_handler_timeout", "unknown"),
-        ("start", "internal", "response_encoding_failed", "response_encoding_failed", "unknown"),
-        ("await", "internal", "response_encoding_failed", "response_encoding_failed", "unknown"),
+        (
+            "start",
+            "internal",
+            "response_encoding_failed",
+            "response_encoding_failed",
+            "unknown",
+        ),
+        (
+            "await",
+            "internal",
+            "response_encoding_failed",
+            "response_encoding_failed",
+            "unknown",
+        ),
         ("start", "invalid_params", "invalid_params", "invalid_params", "failed"),
     ],
 )
@@ -344,7 +356,9 @@ def test_raw_save_wire_failure_keeps_unknown_or_explicit_rejection(
             "/reserved/second.h5" if phase == "await" else "/actual/raw.h5"
         )
         assert (capture.save_op is not None) is (phase == "await")
-        assert sum(method == "tab.save_data" for method, _ in client.transport.sent) == 2
+        assert (
+            sum(method == "tab.save_data" for method, _ in client.transport.sent) == 2
+        )
 
 
 def test_uncertain_second_raw_save_retains_only_confirmed_prefix(tmp_path):
