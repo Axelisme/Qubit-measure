@@ -196,23 +196,19 @@ def _scan_candidates(
     )
     EJb, ECb, ELb = bounds.EJ, bounds.EC, bounds.EL
     # Initialize variables
-    N = f_params.shape[0]
-    best_idx = 0
-    best_scale = 1.0
-    best_dist = np.inf
+    best_idx, best_scale, best_dist = 0, 1.0, np.inf
     best_params = np.full(3, np.nan)
     # results[i] = (mean distance, scale) per entry. The exact path fills only the
     # entries it actually searches (the prune skips provably-worse ones); the rest
     # keep their lower bound (a valid distance floor) for the diagnostic scatter.
-    results = np.full((N, 2), np.nan)  # (N, 2)
+    results = np.full((f_params.shape[0], 2), np.nan)
 
     # Ensure contiguous float64 for njit signature.
     sf_energies_c = np.ascontiguousarray(sf_energies, dtype=np.float64)
     f_params_c = np.ascontiguousarray(f_params, dtype=np.float64)
     freqs_c = np.ascontiguousarray(freqs, dtype=np.float64)
 
-    n_workers = n_jobs if n_jobs > 0 else (os.cpu_count() or 1)
-    set_num_threads(n_workers)
+    set_num_threads(n_jobs if n_jobs > 0 else (os.cpu_count() or 1))
 
     # Exact search with a lower-bound prune. The objective per entry is
     # F(a) = mean_i min_j |A_i - |a*B_ij + C_ij||; ``entry_lower_bound`` gives a
@@ -240,17 +236,16 @@ def _scan_candidates(
     _check_cancellation(cancel_requested)
     results[:, 0] = lbs  # unsearched entries keep their LB for the scatter
     order = np.argsort(lbs)
-    idx_bar = make_pbar(total=N, desc="Searching...")
+    idx_bar = make_pbar(total=f_params.shape[0], desc="Searching...")
     searched = 0
     interrupted = False
     # Retain scan/progress interrupts, but let a predicate's interrupt propagate.
     checking_cancellation = False
     try:
         for oi in order:
-            if cancel_requested is not None:
-                checking_cancellation = True
-                _check_cancellation(cancel_requested)
-                checking_cancellation = False
+            checking_cancellation = cancel_requested is not None
+            _check_cancellation(cancel_requested)
+            checking_cancellation = False
             oi = int(oi)
             lb = lbs[oi]
             if not np.isfinite(lb) or lb > best_dist:
@@ -274,10 +269,9 @@ def _scan_candidates(
             if d < best_dist:
                 best_dist, best_scale, best_idx = d, a, oi
                 best_params = f_params[oi] * a
-            if cancel_requested is not None:
-                checking_cancellation = True
-                _check_cancellation(cancel_requested)
-                checking_cancellation = False
+            checking_cancellation = cancel_requested is not None
+            _check_cancellation(cancel_requested)
+            checking_cancellation = False
         idx_bar.set_description("Done! ")
     except KeyboardInterrupt:
         if checking_cancellation:
