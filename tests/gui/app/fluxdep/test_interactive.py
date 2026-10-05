@@ -199,7 +199,9 @@ def test_invalid_onetone_finish_keeps_context_editable(onetone_controller):
     context.session.commit(
         lambda state: OneTonePickState(threshold=state.threshold, peak_indices=(size,))
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="peak_indices must be within the captured device axis"
+    ):
         owner.finish_onetone_pick()
     assert owner.current_onetone_pick() is context
     assert not onetone_controller.state.spectrums["one"].points_selected
