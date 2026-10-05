@@ -305,7 +305,7 @@ def h_context_ml_get(
     }
 
 
-def h_context_ml_list_templates(
+def h_context_ml_list_roles(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Project template metadata through the unchanged context.ml_list_roles RPC."""
@@ -314,7 +314,7 @@ def h_context_ml_list_templates(
     return {"roles": list(catalog.list_meta())}
 
 
-def h_context_ml_create_from_template(
+def h_context_ml_create_from_role(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     """Create a ModuleLibrary entry from the template ID in wire role_id.
@@ -327,7 +327,7 @@ def h_context_ml_create_from_template(
     # The item kind is a property of the template, not an independent agent input —
     # derive it from role_id so the agent cannot pass a mismatching pair. An
     # unknown role_id fails fast as invalid_params; a missing catalog (no project)
-    # surfaces as precondition_failed (mirror h_context_ml_list_templates).
+    # surfaces as precondition_failed (mirror h_context_ml_list_roles).
     try:
         item_kind = adapter.ctrl.get_template_catalog().get(template_id).item_kind
     except KeyError as exc:
