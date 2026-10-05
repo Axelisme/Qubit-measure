@@ -355,6 +355,45 @@ def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
             release.set()
 
 
+def test_unconfirmed_analysis_start_reports_its_phase_without_new_reads(
+    tmp_path, monkeypatch
+):
+    gui = LookbackGui()
+    pending = Event()
+    release = Event()
+
+    def respond(method, params):
+        if method == "tab.analyze":
+            pending.set()
+            assert release.wait(2)
+        return gui(method, params)
+
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    with recipe_client(tmp_path, respond) as client:
+        try:
+            initial = client.call("lookback", {"frequency_mhz": 6020.0})
+            assert pending.wait(1)
+            execution = initial.data["execution"]
+            before = len(client.transport.sent)
+            summary = client.call("status", {"execution": execution})
+            full = client.call("status", {"execution": execution, "detail": "full"})
+            assert summary["phase"] == full["phase"] == "analysis"
+            assert summary["steps"]["analysis"]["primary"]["status"] == "unknown"
+            assert full["analysis_starts"]["primary"]["status"] == "unknown"
+            assert summary["steps"]["raw_save"]["status"] == "saved"
+            assert summary["question_items"] is None
+            assert len(client.transport.sent) == before
+            release.set()
+            question = client.call("wait", {"execution": execution, "timeout": 2})
+            assert question.data["status"] == "awaiting_answer", question.data
+            assert question.data["steps"]["analysis"]["primary"]["status"] == "finished"
+            assert [method for method, _ in client.transport.sent].count(
+                "tab.analyze"
+            ) == 1
+        finally:
+            release.set()
+
+
 def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
     gui = LookbackGui()
 

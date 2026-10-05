@@ -203,6 +203,7 @@ class RecipeExecution:
         with self._condition:
             progress = self._progress
             session = self._session
+            analysis: ExecutionSnapshot | None = None
             if session is not None:
                 progress = replace(
                     progress,
@@ -240,21 +241,41 @@ class RecipeExecution:
                 analysis = session.analysis_snapshot()
                 if analysis is not None:
                     progress = self._retain_analysis(progress, analysis.stage, analysis)
-            if isinstance(self._active, AnalyzeOperation):
-                capture = self._active.snapshot()
-                if capture is not None and progress.status not in TERMINAL_STATUSES:
-                    progress = replace(
-                        progress,
-                        status="interactive"
-                        if capture.status == "interactive"
-                        else "running",
-                        op=capture.op,
-                        phase="writeback_read"
-                        if capture.phase == "writeback_read"
-                        else "preview"
-                        if capture.phase == "figure_read"
-                        else "analysis",
+            capture = (
+                self._active.snapshot()
+                if isinstance(self._active, AnalyzeOperation)
+                else analysis
+            )
+            if (
+                capture is not None
+                and progress.status not in TERMINAL_STATUSES
+                and (
+                    isinstance(self._active, AnalyzeOperation)
+                    or (
+                        self._active is None
+                        and progress.phase == "preparing"
+                        and (
+                            capture.error is not None
+                            or capture.start.status == "unknown"
+                        )
                     )
+                )
+            ):
+                phase = (
+                    capture.error.phase if capture.error is not None else capture.phase
+                )
+                progress = replace(
+                    progress,
+                    status="interactive"
+                    if capture.status == "interactive"
+                    else "running",
+                    op=capture.op,
+                    phase="writeback_read"
+                    if phase == "writeback_read"
+                    else "preview"
+                    if phase == "figure_read"
+                    else "analysis",
+                )
             return deepcopy(progress)
 
     def wait(self, timeout: float) -> ToolReply:
