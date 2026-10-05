@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-06，records ledger 與跨條目 clone
+**Last updated:** 2026-10-06，SaveLayout 路徑政策
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -43,6 +43,16 @@ ComponentSchema 只要求字串 kind。原 model 決定必填欄位、型別、e
 每次讀取與追加都持同一 resolved path 的 sidecar lock，不使用 cache。新事件只寫 1.0；較新 1.x 行可讀，原行與未知欄位保持不變。帶 record 的 append 先發布新 JSON 附檔，再追加事件，不修改 caller model 或既有附檔。讀取不跳過損壞行。失敗可以留下孤兒附檔或不完整尾行，不提供 crash recovery。
 
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與來源。Point commit 失敗時 accepted 可以保留，值與來源仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
+
+## 輸出位置
+
+`ResultEntry.result_path` 與 `database_path` 是唯讀的條目目錄，不是上層 roots。`SaveLayout` 接收這兩個 exact paths、opaque run_id、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。它不建立目錄或檔案，也不接線現行保存流程。
+
+`ArtifactKey` 用 section、artifact name 與 member kind 定位輸出。Figure 與 analysis 另需 member_name，保留同 artifact 的多成員身分。名稱不承載物理語意，安全路徑段規則共用 entry owner。輸出檔名先編碼 percent，再編碼 underscore，避免 token 與分隔符混淆。Symlink 不能讓目的地離開 entry root。
+
+Data 回傳 run 的 data.h5 與當地日期樹內的 Labber 新檔名。Figure 回傳 run PNG 與 point 或全域 figures 副本。Analysis 回傳單一 run JSON。`Output` 提供 writer format 與絕對 exact path。Labber suffix 重用 datafile helper，只避讓既有檔案，不原子保留。其他 paths 固定，上層保存流程擁有 replacement 與失敗隔離。
+
+`new_run_id` 將帶 timezone 的時間轉為 UTC 時間戳，加上六個小寫 UUID4 hex 字元。預設取 UTC 現在，不從名稱解析時間，也不保證跨程序唯一性。
 
 ## 保存與版本
 

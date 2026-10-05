@@ -5,7 +5,7 @@ import os
 import shutil
 from copy import deepcopy
 from datetime import datetime, timezone
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from uuid import uuid4
 
 from ruamel.yaml import YAML
@@ -13,6 +13,7 @@ from ruamel.yaml import YAML
 from zcu_tools.resources.document_store import DocumentStore
 
 from . import _point_origin
+from ._path_segments import validate_path_segment
 from .errors import RenameRecoveryError
 from .ledger import RecordsLedger
 from .ledger_models import ImportPayload, LedgerEvent, Origin, validate_origin
@@ -27,16 +28,7 @@ from .views import SetupView
 
 
 def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -> Path:
-    if (
-        not name
-        or name in {".", ".."}
-        or "/" in name
-        or "\\" in name
-        or "\x00" in name
-        or Path(name).is_absolute()
-        or PureWindowsPath(name).anchor
-    ):
-        raise ValueError(f"{name!r}: expected a single path component")
+    validate_path_segment(name, field="name")
     root_path = Path(root)
     path = root_path / name
     if new_destination and (path.exists() or path.is_symlink()):
@@ -115,6 +107,16 @@ class ResultEntry:
     @property
     def entry_id(self) -> str:
         return self._setup_store.snapshot().general.entry_id
+
+    @property
+    def result_path(self) -> Path:
+        """Return this entry's exact Result directory, not the parent root."""
+        return self._result_path
+
+    @property
+    def database_path(self) -> Path:
+        """Return this entry's exact Database directory, not the parent root."""
+        return self._database_path
 
     @property
     def ledger(self) -> RecordsLedger:
