@@ -7,7 +7,6 @@ from pathlib import Path
 from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
-from . import _point_origin
 from .provenance import Provenance
 from .roles import RoleSpec, RoleView, resolve_names
 from .schema import ComponentSchema, PointDocument, PointGeneral
@@ -51,7 +50,6 @@ class PointView:
         self._source = source
         self._ledger = ledger
         self._entry_id = entry_id
-        _point_origin.register(self, source)
 
     @property
     def general(self) -> GeneralView:

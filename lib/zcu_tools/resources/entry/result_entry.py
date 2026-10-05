@@ -14,6 +14,8 @@ from zcu_tools.resources.document_store import DocumentStore
 
 from . import _point_origin
 from .errors import RenameRecoveryError
+from .ledger import RecordsLedger
+from .ledger_models import ImportPayload, LedgerEvent, Origin, validate_origin
 from .points import PointView
 from .schema import (
     PARAMETER_FORMAT,
@@ -114,6 +116,15 @@ class ResultEntry:
     def entry_id(self) -> str:
         return self._setup_store.snapshot().general.entry_id
 
+    @property
+    def ledger(self) -> RecordsLedger:
+        """Bind this entry's records directory and UUID without caching events.
+
+        Reads and appends use RecordsLedger's lock, schema and failure contracts.
+        Missing records directories raise; accessing this property writes no files.
+        """
+        return RecordsLedger(self._result_path / "records", entry_id=self.entry_id)
+
     def list_points(self) -> list[str]:
         """Return sorted labels of directories containing both point files.
 
@@ -130,25 +141,36 @@ class ResultEntry:
         )
 
     def new_point(
-        self, label: str, *, clone_from: str | PointView | None = None
+        self,
+        label: str,
+        *,
+        clone_from: str | PointView | None = None,
+        origin: Origin = "notebook",
+        call_id: str | None = None,
     ) -> PointView:
         """Create an independent complete point and return its validated view.
 
         label is a safe single path segment; existing destinations are rejected.
         Without clone_from, copy the latest setup components and provenance.
-        Otherwise copy only the same-entry source point and module_cfg, renew its
-        creation time and mark sources with that direct clone origin. References
-        resolve only inside the new point. Neither path changes its source.
-        Creation failure removes only the new destination. No cross-point
-        transaction, active point selection or data/image copy is provided.
+        clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
+        PointView using the same resolved result/database roots. Reload published
+        point and module_cfg, renew creation time and mark the direct clone origin.
+        Cross-entry nonmanual sources become local import events with copied JSON
+        attachments; same-entry source IDs remain unchanged. origin/call_id name
+        the import operation: MCP needs a nonempty ID, other origins require None.
+        No source files, data or images change. Failure removes only the new point;
+        completed imports may remain orphaned. No cross-file transaction is provided.
         """
+        validate_origin(origin, call_id)
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )
         destination.mkdir()
         try:
             if clone_from is not None:
-                self._clone_point(destination, clone_from)
+                self._clone_point(
+                    destination, clone_from, origin=origin, call_id=call_id
+                )
             else:
                 self._seed_point(destination)
             return self.use_point(label)
@@ -186,13 +208,45 @@ class ResultEntry:
                 {"format": "zcu.module-library", "format_version": "1.0"}, stream
             )
 
-    def _clone_point(self, destination: Path, clone_from: str | PointView) -> None:
-        source = (
-            _point_origin.clone_source(clone_from, self._result_path)
-            if isinstance(clone_from, PointView)
-            else _entry_path(self._result_path / "points", clone_from)
-        )
-        store = self._point_store(source / "point.yaml")
+    def _clone_source(self, clone_from: str | PointView) -> tuple["ResultEntry", Path]:
+        result_root = self._result_path.parent
+        database_root = self._database_path.parent
+        expected_id = None
+        if isinstance(clone_from, PointView):
+            identity = _point_origin.clone_source(
+                clone_from, result_root=result_root, database_root=database_root
+            )
+            source = identity.source.parent
+            name = source.parent.parent.name
+            expected_id = identity.entry_id
+        else:
+            segments = clone_from.split("/")
+            if len(segments) == 1:
+                return self, _entry_path(self._result_path / "points", clone_from)
+            if len(segments) != 2:
+                raise ValueError("clone_from must be label or <entry>/<point>")
+            name, label = segments
+            source = _entry_path(_entry_path(result_root, name) / "points", label)
+        if source.parent.parent.resolve() == self._result_path.resolve():
+            entry = self
+        else:
+            entry = ResultEntry.open(
+                name, result_root=result_root, database_root=database_root
+            )
+        if expected_id is not None and entry.entry_id != expected_id:
+            raise ValueError("PointView source entry_id has changed")
+        return entry, source
+
+    def _clone_point(
+        self,
+        destination: Path,
+        clone_from: str | PointView,
+        *,
+        origin: Origin,
+        call_id: str | None,
+    ) -> None:
+        source_entry, source = self._clone_source(clone_from)
+        store = source_entry._point_store(source / "point.yaml")
         with store.locked():
             store.refresh()
             components = store.snapshot().components
@@ -200,15 +254,68 @@ class ResultEntry:
                 shutil.copyfile(source / filename, destination / filename)
         cloned_store = self._point_store(destination / "point.yaml")
         with cloned_store.edit() as draft:
+            imports: dict[str, str] = {}
+            if source_entry is not self:
+                imports = self._import_sources(
+                    store.snapshot(), source_entry, origin=origin, call_id=call_id
+                )
             draft.components = components
             draft.general.created_at = (
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             )
             for metadata in draft.provenance.values():
+                event_id = metadata.get("source")
+                if isinstance(event_id, str) and event_id in imports:
+                    metadata["source"] = imports[event_id]
                 metadata["cloned_from"] = {
-                    "entry_id": self.entry_id,
+                    "entry_id": source_entry.entry_id,
                     "point": source.name,
                 }
+
+    def _import_sources(
+        self,
+        document: PointDocument,
+        source_entry: "ResultEntry",
+        *,
+        origin: Origin,
+        call_id: str | None,
+    ) -> dict[str, str]:
+        imports: dict[str, str] = {}
+        source_ledger = source_entry.ledger
+        destination_ledger = self.ledger
+        for metadata in document.provenance.values():
+            event_id = metadata.get("source")
+            if event_id == "manual":
+                continue
+            if not isinstance(event_id, str):
+                raise ValueError(
+                    "point provenance.source must be a local event ID or manual"
+                )
+            if event_id in imports:
+                continue
+            try:
+                evidence = source_ledger.get(event_id)
+            except KeyError as exc:
+                raise ValueError(
+                    f"source ledger event {event_id!r} does not exist"
+                ) from exc
+            imported = LedgerEvent(
+                id=str(uuid4()),
+                kind="import",
+                at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                entry_id=self.entry_id,
+                origin=origin,
+                call_id=call_id,
+                payload=ImportPayload(
+                    source_entry_id=source_entry.entry_id,
+                    source_event_id=event_id,
+                    source_event_json=evidence.event_json,
+                    source_record=evidence.event.record,
+                ),
+            )
+            destination_ledger.append(imported, record=evidence.record)
+            imports[event_id] = imported.id
+        return imports
 
     def use_point(self, label: str) -> PointView:
         """Load one complete point and return an independently bound view.
@@ -225,12 +332,22 @@ class ResultEntry:
         module = directory / "module_cfg.yaml"
         if not module.is_file():
             raise FileNotFoundError(module)
-        return PointView(
+        view = PointView(
             self._point_store(source),
             source,
             ledger=self._result_path / "records/ledger.jsonl",
             entry_id=self.entry_id,
         )
+        _point_origin.register(
+            view,
+            _point_origin.PointOrigin(
+                source=source,
+                entry_id=self.entry_id,
+                result_root=self._result_path.parent.resolve(),
+                database_root=self._database_path.parent.resolve(),
+            ),
+        )
+        return view
 
     def _point_store(self, source: Path) -> DocumentStore[PointDocument]:
         class EntryPointDocument(PointDocument):

@@ -76,17 +76,6 @@ def notebook_kind(registry_state_guard: None) -> Generator[str]:
 
 
 @pytest.fixture
-def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
-    return tmp_path / "results", tmp_path / "Database"
-
-
-@pytest.fixture
-def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
-    results, database = entry_roots
-    return ResultEntry.create("entry", result_root=results, database_root=database)
-
-
-@pytest.fixture
 def working_point(entry: ResultEntry) -> PointView:
     entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = entry.new_point("a")
@@ -689,26 +678,6 @@ def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
     assert {name: (source / name).read_bytes() for name in before} == before
     assert working_point.Q1.duration == 12.0
     assert entry.new_point("b", clone_from="a").Q1.duration == 12.0
-
-
-@pytest.mark.parametrize("source_mode", ["label", "view"])
-def test_cross_entry_clone_is_rejected_and_removes_new_destination(
-    entry: ResultEntry, entry_roots: tuple[Path, Path], source_mode: str
-) -> None:
-    results, database = entry_roots
-    other = ResultEntry.create("other", result_root=results, database_root=database)
-    foreign_point = other.new_point("source")
-    foreign_source = results / "other/points/source/point.yaml"
-    before = foreign_source.read_bytes()
-    source_arg = "other/source" if source_mode == "label" else foreign_point
-    message = (
-        "single path component" if source_mode == "label" else "Cross-entry cloning"
-    )
-    with pytest.raises(ValueError, match=message):
-        entry.new_point("rejected", clone_from=source_arg)
-    assert entry.list_points() == []
-    assert not (results / "entry/points/rejected").exists()
-    assert foreign_source.read_bytes() == before
 
 
 def test_independent_handles_merge_different_leaves_in_one_point(

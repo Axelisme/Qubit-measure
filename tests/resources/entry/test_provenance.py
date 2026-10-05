@@ -7,14 +7,18 @@ from contextlib import ExitStack
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from ruamel.yaml import YAML
-from zcu_tools.format_version import FormatError, VersionError, YamlMap
+from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
+    AcceptedPayload,
+    AcceptedWrite,
     ComponentSchema,
+    LedgerEvent,
     PointView,
     Provenance,
     ResultEntry,
@@ -22,6 +26,8 @@ from zcu_tools.resources.entry import (
     component_registry,
 )
 from zcu_tools.resources.entry.views import FieldView
+
+_EVENT_ID = "b13fea4c-1678-4b5c-b7a2-edb975c20611"
 
 
 class Timing(BaseModel):
@@ -90,7 +96,7 @@ def test_legal_extension_keys_preserve_seed_clone_reload_and_sources(
     )
     extensions["fit notes"] = payload
     field = f"{owner}.ext.fit notes._arbitrary-key.radius"
-    expected = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
+    expected = Provenance(_EVENT_ID, "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
     with original.edit() as draft:
         draft.set(field, 12.0, provenance=expected)
     payload["_arbitrary-key"] = {"radius": 99.0}
@@ -155,17 +161,19 @@ def test_manual_write_records_source_and_value_together(
 def ledger(container: tuple[ResultEntry, SetupView | PointView, Path]) -> Path:
     entry, view, source = container
     root = source.parents[2] if isinstance(view, PointView) else source.parent
-    path = root / "records/ledger.jsonl"
-    event = {
-        "format": "zcu.ledger",
-        "format_version": "1.0",
-        "id": "evt-1",
-        "entry_id": entry.entry_id,
-        "type": "accepted",
-        "at": "2026-10-04T00:00:00Z",
-    }
-    path.write_text(json.dumps(event) + "\n")
-    return path
+    event = LedgerEvent(
+        id=_EVENT_ID,
+        kind="accepted",
+        at="2026-10-04T00:00:00Z",
+        entry_id=entry.entry_id,
+        origin="notebook",
+        payload=AcceptedPayload(
+            writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
+            analysis_summary={},
+        ),
+    )
+    entry.ledger.append(event)
+    return root / "records/ledger.jsonl"
 
 
 @pytest.mark.parametrize(
@@ -189,7 +197,7 @@ def test_explicit_source_and_stderr_round_trip_in_the_values_document(
     _entry, view, source = container
     before = ledger.read_bytes()
     metadata = Provenance(
-        "evt-1", "duration/decay", "run-1", "2026-10-04T00:00:00Z", stderr
+        _EVENT_ID, "duration/decay", "run-1", "2026-10-04T00:00:00Z", stderr
     )
     with view.edit() as draft:
         draft.set(path, value, provenance=metadata)
@@ -217,7 +225,7 @@ def test_newer_minor_ledger_event_can_be_referenced_without_rewriting_it(
     event["future_analysis"] = {"confidence": None, "steps": [{"new": True}]}
     ledger.write_text(json.dumps(event) + "\n")
     before = ledger.read_bytes()
-    metadata = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2)
+    metadata = Provenance(_EVENT_ID, "fit", "run-1", "2026-10-04T00:00:00Z", 0.2)
     with view.edit() as draft:
         draft.set("Q1.rate", 5300.0, provenance=metadata)
     assert view.Q1.rate == 5300.0
@@ -282,10 +290,12 @@ def test_invalid_local_source_keeps_the_draft_value_and_source_unchanged(
     if failure == "missing":
         ledger.unlink()
     elif failure == "absent_event":
-        ledger.write_text(ledger.read_text().replace("evt-1", "evt-other"))
+        event = json.loads(ledger.read_text())
+        event["id"] = str(uuid4())
+        ledger.write_text(json.dumps(event) + "\n")
     elif failure == "foreign":
         event = json.loads(ledger.read_text())
-        event["entry_id"] = "another-entry"
+        event["entry_id"] = str(uuid4())
         ledger.write_text(json.dumps(event) + "\n")
     else:
         ledger.write_text("{invalid-json\n")
@@ -295,7 +305,7 @@ def test_invalid_local_source_keeps_the_draft_value_and_source_unchanged(
                 "Q1.rate",
                 5300.0,
                 provenance=Provenance(
-                    "evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
+                    _EVENT_ID, "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
                 ),
             )
         assert draft.Q1.rate == 5000.0
@@ -321,7 +331,7 @@ def test_failed_value_transaction_discards_its_formal_source(
                 "Q1.rate",
                 5300.0,
                 provenance=Provenance(
-                    "evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
+                    _EVENT_ID, "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
                 ),
             )
             if failure == "body":
@@ -342,7 +352,7 @@ def test_notebook_nested_value_and_stderr_round_trip_without_scaling(
 ) -> None:
     _entry, view, source = container
     view.add_component("N1", kind=notebook_kind, timing={"width": 2.0})
-    metadata = Provenance("evt-1", "timing/fit", None, "2026-10-04T00:00:00Z", 0.18)
+    metadata = Provenance(_EVENT_ID, "timing/fit", None, "2026-10-04T00:00:00Z", 0.18)
     with view.edit() as draft:
         draft.set("N1.timing.width", 3.0, provenance=metadata)
     timing = view.N1.timing
@@ -357,13 +367,13 @@ def test_notebook_nested_value_and_stderr_round_trip_without_scaling(
 
 
 @pytest.mark.parametrize(
-    ("field", "raw_value", "error_type"),
+    ("field", "raw_value"),
     [
-        ("format", "zcu.point", FormatError),
-        ("format", None, FormatError),
-        ("format_version", None, FormatError),
-        ("format_version", "invalid", FormatError),
-        ("format_version", "2.0", VersionError),
+        ("format", "zcu.point"),
+        ("format", None),
+        ("format_version", None),
+        ("format_version", "invalid"),
+        ("format_version", "2.0"),
     ],
 )
 def test_invalid_ledger_header_keeps_the_value_source_and_files_unchanged(
@@ -371,7 +381,6 @@ def test_invalid_ledger_header_keeps_the_value_source_and_files_unchanged(
     ledger: Path,
     field: str,
     raw_value: str | None,
-    error_type: type[FormatError],
 ) -> None:
     _entry, view, source = container
     event = json.loads(ledger.read_text())
@@ -384,17 +393,16 @@ def test_invalid_ledger_header_keeps_the_value_source_and_files_unchanged(
     before = source.read_bytes()
     previous = view.meta("Q1.rate")
     with view.edit() as draft:
-        with pytest.raises(error_type) as error:
+        with pytest.raises(ValueError, match="ledger") as error:
             draft.set(
                 "Q1.rate",
                 5300.0,
                 provenance=Provenance(
-                    "evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
+                    _EVENT_ID, "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
                 ),
             )
-        assert error.value.source == ledger
-        assert error.value.field == field
-        assert error.value.actual == raw_value
+        assert str(ledger) in str(error.value)
+        assert field in str(error.value)
         assert draft.Q1.rate == 5000.0
     assert view.Q1.rate == 5000.0
     assert view.meta("Q1.rate") == previous
@@ -451,7 +459,9 @@ def test_conflict_keeps_the_winning_value_and_source_together(
         draft.set(
             "Q1.rate",
             5300.0,
-            provenance=Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2),
+            provenance=Provenance(
+                _EVENT_ID, "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
+            ),
         )
         draft.Q1.duration = 12.0
         other.Q1.rate = 5400.0
@@ -474,7 +484,7 @@ def test_clone_sources_are_independent_and_reacceptance_clears_the_origin(
 ) -> None:
     entry, _view, _source = container
     original = entry.new_point("original")
-    expected = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
+    expected = Provenance(_EVENT_ID, "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
     with original.edit() as draft:
         draft.set("Q1.duration", 12.0, provenance=expected)
     clone = entry.new_point("clone", clone_from=original)
@@ -501,7 +511,7 @@ def test_setup_seed_preserves_formal_source_without_following_later_edits(
     container: tuple[ResultEntry, SetupView | PointView, Path], ledger: Path
 ) -> None:
     entry, setup, _source = container
-    expected = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
+    expected = Provenance(_EVENT_ID, "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
     with setup.edit() as draft:
         draft.set("Q1.duration", 12.0, provenance=expected)
     point = entry.new_point("seed")
@@ -531,11 +541,144 @@ def test_failed_atomic_replace_preserves_value_source_and_file(
         draft.set(
             "Q1.rate",
             5300.0,
-            provenance=Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2),
+            provenance=Provenance(
+                _EVENT_ID, "fit", "run-1", "2026-10-04T00:00:00Z", 0.2
+            ),
         )
     assert view.Q1.rate == 5000.0
     assert view.meta("Q1.rate") == previous
     assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("container", ["point"], indirect=True)
+def test_accepted_without_run_commits_local_source_and_reopens(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    tmp_path: Path,
+) -> None:
+    entry, point, _source = container
+    assert isinstance(point, PointView)
+    accepted = entry.ledger.get(_EVENT_ID).event
+    assert isinstance(accepted.payload, AcceptedPayload)
+    assert accepted.payload.run_id is None
+    assert accepted.payload.source is None
+    assert tuple(event.kind for event in entry.ledger.events()) == ("accepted",)
+    before = ledger.read_bytes()
+    provenance = Provenance(accepted.id, "accepted", None, accepted.at, None)
+    with point.edit() as draft:
+        draft.set("Q1.rate", 5300.0, provenance=provenance)
+    assert point.Q1.rate == 5300.0
+    assert_metadata(point.meta("Q1.rate"), provenance)
+    reopened = ResultEntry.open(
+        "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
+    )
+    restored = reopened.use_point("a")
+    assert restored.Q1.rate == 5300.0
+    assert_metadata(restored.meta("Q1.rate"), provenance)
+    assert reopened.ledger.get(accepted.id).event == accepted
+    assert ledger.read_bytes() == before
+
+
+@pytest.mark.parametrize("container", ["point"], indirect=True)
+@pytest.mark.parametrize("failure", ["replace", "conflict"])
+def test_failed_point_commit_leaves_accepted_event_but_no_rejected_source(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+    tmp_path: Path,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry, point, source = container
+    accepted = entry.ledger.get(_EVENT_ID).event
+    before = source.read_bytes()
+    original_meta = point.meta("Q1.rate")
+    ledger_before = ledger.read_bytes()
+    expected_error = OSError if failure == "replace" else ConflictError
+    with ExitStack() as transaction:
+        draft = transaction.enter_context(point.edit())
+        draft.set(
+            "Q1.rate",
+            5300.0,
+            provenance=Provenance(accepted.id, "accepted", None, accepted.at, None),
+        )
+        if failure == "replace":
+
+            def reject_replace(_source: str | Path, _destination: str | Path) -> None:
+                raise OSError("point replace rejected")
+
+            monkeypatch.setattr(os, "replace", reject_replace)
+        else:
+            other = ResultEntry.open(
+                "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
+            ).use_point("a")
+            other.Q1.rate = 5400.0
+            before = source.read_bytes()
+        with pytest.raises(expected_error):
+            transaction.close()
+    assert source.read_bytes() == before
+    assert point.Q1.rate == 5000.0
+    assert point.meta("Q1.rate") == original_meta
+    point.refresh()
+    assert point.Q1.rate == (5000.0 if failure == "replace" else 5400.0)
+    committed_meta = point.meta("Q1.rate")
+    assert committed_meta is not None
+    assert committed_meta.source == "manual"
+    assert entry.ledger.get(accepted.id).event == accepted
+    assert ledger.read_bytes() == ledger_before
+
+
+def test_unknown_local_source_is_translated_with_original_cause(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+) -> None:
+    _entry, point, source = container
+    unknown = str(uuid4())
+    before = source.read_bytes()
+    with point.edit() as draft, pytest.raises(ValueError, match=unknown) as caught:
+        draft.set(
+            "Q1.rate",
+            5300.0,
+            provenance=Provenance(
+                unknown, "accepted", None, "2026-10-06T02:00:00Z", None
+            ),
+        )
+    assert str(ledger) in str(caught.value)
+    assert isinstance(caught.value.__cause__, KeyError)
+    assert source.read_bytes() == before
+    assert point.Q1.rate == 5000.0
+
+
+def test_source_with_missing_record_reports_file_and_keeps_values_unpublished(
+    container: tuple[ResultEntry, SetupView | PointView, Path],
+    ledger: Path,
+) -> None:
+    entry, point, source = container
+    event = LedgerEvent(
+        id=str(uuid4()),
+        kind="accepted",
+        at="2026-10-06T02:00:00Z",
+        entry_id=entry.entry_id,
+        origin="notebook",
+        payload=AcceptedPayload(
+            writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
+            analysis_summary={},
+        ),
+    )
+    entry.ledger.append(event, record={"fit": 1})
+    missing = ledger.parent / f"{event.id}.json"
+    missing.unlink()
+    before = source.read_bytes()
+    ledger_before = ledger.read_bytes()
+    with point.edit() as draft, pytest.raises(FileNotFoundError) as caught:
+        draft.set(
+            "Q1.rate",
+            5300.0,
+            provenance=Provenance(event.id, "accepted", None, event.at, None),
+        )
+    assert str(missing) in str(caught.value)
+    assert point.Q1.rate == 5000.0
+    assert source.read_bytes() == before
+    assert ledger.read_bytes() == ledger_before
 
 
 def test_newer_minor_retains_unknown_source_fields_when_accepting_a_value(

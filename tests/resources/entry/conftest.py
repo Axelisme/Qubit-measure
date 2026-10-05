@@ -1,10 +1,23 @@
 """Registry bootstrap and pollution guards at the entry seam."""
 
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
+from zcu_tools.resources.entry import ResultEntry
 
 from .fakes import register_fakes, registry_state, restore_registry
+
+
+@pytest.fixture
+def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
+    return tmp_path / "results", tmp_path / "Database"
+
+
+@pytest.fixture
+def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
+    results, database = entry_roots
+    return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
 @pytest.fixture(scope="module", autouse=True)
