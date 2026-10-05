@@ -182,6 +182,42 @@ def test_primary_and_post_done_return_recipe_continuation_then_question(tmp_path
         assert gui.writes == []
 
 
+@pytest.mark.parametrize(
+    ("failed_stage", "post_is_error"), [("primary", False), ("post", True)]
+)
+def test_delivery_error_is_scoped_to_the_current_interactive_stage(
+    tmp_path, failed_stage, post_is_error
+):
+    gui = WritebackGui(interactive=True)
+
+    def respond(method, params):
+        reply = gui(method, params)
+        if method == "tab.interact" and gui.current_stage == failed_stage:
+            reply["figure"] = {"png_b64": "invalid-png"}
+        return reply
+
+    client = make_client(tmp_path, respond, recipes=(SAMPLE,))
+    with closing(client.context.session):
+        primary = client.call("sample", {"post": True})
+        key = primary.data["execution"]
+        assert primary.data["status"] == "interactive"
+        assert primary.is_error is (failed_stage == "primary")
+        # GUI-local done does not replace Primary interaction through an MCP call.
+        gui.done["primary"].set()
+        assert gui.awaited["post"].wait(2)
+        post = client.call("wait", {"execution": key, "timeout": 5})
+        assert post.data["status"] == "interactive"
+        assert post.data["analysis"]["stage"] == "post"
+        assert post.is_error is post_is_error
+        full = client.call("status", {"execution": key, "detail": "full"})
+        pane = "analysis" if failed_stage == "primary" else "post_analysis"
+        assert "delivery_error" in full[pane]["interaction"]
+        gui.done["post"].set()
+        question = client.call("wait", {"execution": key, "timeout": 5})
+        assert question.data["status"] == "awaiting_answer" and not question.is_error
+        client.call("answer", {"recipe": key, "decision": "skipped"})
+
+
 def test_interactive_delivery_error_is_preserved_without_failing_native_operation(
     tmp_path,
 ):
