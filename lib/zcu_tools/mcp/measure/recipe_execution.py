@@ -283,7 +283,8 @@ class RecipeExecution:
 
         timeout is finite and nonnegative; zero only reads local capture.
         Timeout does not cancel or stop background execution. Return native
-        captured data and previews; only failed execution marks is_error.
+        captured data and previews; failed execution or the current interactive
+        handoff's delivery error marks is_error. Historical errors do not.
         """
         if not isfinite(timeout) or timeout < 0:
             raise ValueError("timeout must be finite and nonnegative")
@@ -308,18 +309,20 @@ class RecipeExecution:
                 run = self._session.run_snapshot()
                 if run is not None:
                     images = run.preview_images
+            current_analysis = (
+                progress.post_analysis
+                if progress.analysis_stage == "post"
+                else progress.analysis
+            )
             return ToolReply(
                 {**asdict(progress), "elapsed_s": time.monotonic() - began},
                 images,
                 is_error=progress.status == "failed"
                 or (
                     progress.status == "interactive"
-                    and any(
-                        capture is not None
-                        and capture.interaction is not None
-                        and "delivery_error" in capture.interaction
-                        for capture in (progress.analysis, progress.post_analysis)
-                    )
+                    and current_analysis is not None
+                    and current_analysis.interaction is not None
+                    and "delivery_error" in current_analysis.interaction
                 ),
             )
 
