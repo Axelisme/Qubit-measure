@@ -28,9 +28,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.analysis.fluxdep import (
+    BrushPoint,
+    apply_mask_stroke,
     cast2real_and_norm,
     spectrum2d_findpoint,
-    toggle_near_mask,
 )
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
@@ -253,14 +254,13 @@ class FindPointsWidget(InteractiveMplWidget):
     def on_press(self, event: MouseEvent) -> None:
         if event.xdata is None or event.ydata is None:
             return
-        toggle_near_mask(
+        apply_mask_stroke(
             self._dev_values,
             self._freqs,
             self._mask,
-            float(event.xdata),
-            float(event.ydata),
+            (BrushPoint(float(event.xdata), float(event.ydata)),),
             self._width_val(),
-            self._operation_select(),
+            select=self._operation_select(),
         )
         self._refresh_mask_overlay()
         self.update_points()

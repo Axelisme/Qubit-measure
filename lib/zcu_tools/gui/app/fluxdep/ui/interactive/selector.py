@@ -32,9 +32,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.analysis.fluxdep import (
+    BrushPoint,
     cast2real_and_norm,
     downsample_points,
-    points_in_normalized_brush,
+    points_in_normalized_stroke,
 )
 from zcu_tools.analysis.fluxdep.models import SpectrumResult
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -280,11 +281,10 @@ class SelectorWidget(InteractiveMplWidget):
         if event.xdata is None or event.ydata is None:
             return
         x, y, width = float(event.xdata), float(event.ydata), self._width_val()
-        toggle = points_in_normalized_brush(
+        toggle = points_in_normalized_stroke(
             self._s_fluxs,
             self._s_freqs,
-            x=x,
-            y=y,
+            stroke=(BrushPoint(x, y),),
             width=width,
             x_bound=self._flux_bound,
             y_bound=self._freq_bound,
