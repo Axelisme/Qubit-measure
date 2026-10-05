@@ -5,7 +5,8 @@ from pathlib import Path
 import numpy as np
 from zcu_tools.datafile import load_labber_data
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.twotone.zigzag_sweep import (
+
+from zcu_lab.v2.twotone.zigzag_sweep.core import (
     ZigZagScanCfg,
     ZigZagScanExp,
     ZigZagScanResult,
