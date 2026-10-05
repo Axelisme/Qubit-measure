@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.datafile import save_labber_data
 from zcu_tools.gui.app.fluxdep.services.load import (
     LoadService,
     transpose_spectrum_data,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, spectrum_version_key
+from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
 
 
 def test_load_spectrum_populates_state(spectrum_hdf5):
@@ -71,10 +73,36 @@ def test_load_spectrum_inherits_alignment(spectrum_hdf5):
 def test_load_spectrum_inherit_from_unknown_raises(spectrum_hdf5):
     filepath, *_ = spectrum_hdf5
     st = FluxDepState()
-    with pytest.raises(KeyError):
+    with pytest.raises(InvalidInputError) as caught:
         LoadService(st).load_spectrum(
             filepath, spec_type="OneTone", inherit_from="nope"
         )
+    assert caught.value.reason_code == "unknown_spectrum"
+    assert st.spectrums == {}
+    assert st.version.snapshot() == {}
+
+
+def test_non_2d_native_load_is_nominal_invalid_input(tmp_path):
+    path = save_labber_data(
+        str(tmp_path / "trace"),
+        z=("Signal", "a.u.", np.ones(3, dtype=np.complex128)),
+        axes=[("Device", "native", np.arange(3))],
+    )
+    st = FluxDepState()
+    with pytest.raises(InvalidInputError) as caught:
+        LoadService(st).load_spectrum(path, "OneTone")
+    assert caught.value.reason_code == "spectrum_not_2d"
+    assert st.spectrums == {}
+    assert st.version.snapshot() == {}
+
+
+def test_native_load_io_failure_remains_unexpected(tmp_path):
+    st = FluxDepState()
+    with pytest.raises(FileNotFoundError) as caught:
+        LoadService(st).load_spectrum(str(tmp_path / "missing.hdf5"), "OneTone")
+    assert not isinstance(caught.value, ExpectedError)
+    assert st.spectrums == {}
+    assert st.version.snapshot() == {}
 
 
 # --- transpose -------------------------------------------------------------
@@ -93,7 +121,7 @@ def test_transpose_spectrum_data_swaps_axes_and_signal():
 def test_load_transpose_recovers_canonical_axes(transposed_spectrum_hdf5):
     """A legacy x=freq/y=flux file loaded with transpose_axes=True must come back
     with dev_values=flux and freqs in GHz."""
-    filepath, flux, freqs_ghz, signals = transposed_spectrum_hdf5
+    filepath, flux, freqs_ghz, _signals = transposed_spectrum_hdf5
     st = FluxDepState()
     name = LoadService(st).load_spectrum(
         filepath, spec_type="OneTone", transpose_axes=True
@@ -107,7 +135,7 @@ def test_load_transpose_recovers_canonical_axes(transposed_spectrum_hdf5):
 def test_load_without_transpose_keeps_legacy_axes_wrong(transposed_spectrum_hdf5):
     """Sanity: loading the legacy file WITHOUT transpose mis-reads the axes
     (freqs ≈ 0 after the Hz→GHz scaling of what is really the flux axis)."""
-    filepath, flux, freqs_ghz, _signals = transposed_spectrum_hdf5
+    filepath, _flux, _freqs_ghz, _signals = transposed_spectrum_hdf5
     st = FluxDepState()
     name = LoadService(st).load_spectrum(filepath, spec_type="OneTone")
     entry = st.spectrums[name]

@@ -13,6 +13,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     SpectrumEntry,
 )
+from zcu_tools.gui.expected_error import InvalidInputError
 
 
 def _empty_points() -> PointsData:
@@ -45,6 +46,14 @@ def test_store_list_get_remove():
     assert store.get_spectrum("a").name == "a"
     store.remove_spectrum("a")
     assert store.list_spectrums() == ["b"]
+
+
+def test_store_unknown_lookup_uses_nominal_state_contract():
+    st = FluxDepState()
+    with pytest.raises(InvalidInputError) as caught:
+        SpectrumStore(st).get_spectrum("missing")
+    assert caught.value.reason_code == "unknown_spectrum"
+    assert st.version.snapshot() == {}
 
 
 def test_store_set_active():

@@ -63,7 +63,10 @@ class AlignmentService:
         )
 
     def reset_alignment(self, name: str) -> None:
-        """Reopen named spectrum's alignment, keeping points/completion; KeyError if absent."""
+        """Reopen alignment on the owner, preserving native points/completion.
+
+        Unknown names raise InvalidInputError (unknown_spectrum) without mutation.
+        """
         self._state.reset_alignment(name)
 
 
@@ -74,7 +77,11 @@ class PointsService:
         self._state = state
 
     def reset_points(self, name: str) -> None:
-        """Clear named spectrum's points/completion; KeyError if absent, ValueError if unaligned."""
+        """Clear points/completion on the owner, preserving alignment and seed.
+
+        InvalidInputError (unknown_spectrum) or FailedPreconditionError
+        (spectrum_not_aligned) leaves State and versions unchanged.
+        """
         self._state.reset_points(name)
 
     def set_points(

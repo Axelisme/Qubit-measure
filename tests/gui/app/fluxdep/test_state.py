@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import PointsData
@@ -15,6 +17,12 @@ from zcu_tools.gui.app.fluxdep.state import (
     SpecType,
     VersionTable,
     spectrum_version_key,
+)
+from zcu_tools.gui.expected_error import (
+    ExpectedError,
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+    InvalidInputError,
 )
 from zcu_tools.gui.project import ProjectInfo
 
@@ -148,10 +156,64 @@ def test_remove_active_spectrum_clears_active():
     assert st.active_spectrum is None
 
 
-def test_set_active_unknown_raises():
+def test_unknown_named_commands_leave_state_unchanged():
     st = FluxDepState()
-    with pytest.raises(KeyError):
-        st.set_active("nope")
+    st.put_spectrum(_make_entry("譜:*"))
+    st.set_active("譜:*")
+    before = st.version.snapshot()
+    entry = st.spectrums["譜:*"]
+    for command in (
+        lambda: st.get_spectrum("nope"),
+        lambda: st.remove_spectrum("nope"),
+        lambda: st.set_active("nope"),
+        lambda: st.reset_alignment("nope"),
+        lambda: st.reset_points("nope"),
+    ):
+        with pytest.raises(InvalidInputError) as caught:
+            command()
+        assert caught.value.category is ExpectedErrorCategory.INVALID_INPUT
+        assert caught.value.reason_code == "unknown_spectrum"
+        assert st.spectrums == {"譜:*": entry}
+        assert st.active_spectrum == "譜:*"
+        assert st.version.snapshot() == before
+
+
+@pytest.mark.parametrize("name", ["譜:*", "a:b", "plain"])
+def test_get_spectrum_returns_live_literal_entry(name: str):
+    st = FluxDepState()
+    entry = _make_entry(name)
+    st.put_spectrum(entry)
+    before = st.version.snapshot()
+    assert st.get_spectrum(name) is entry
+    assert st.version.snapshot() == before
+
+
+def test_get_spectrum_rejects_foreign_thread_without_mutation():
+    st = FluxDepState()
+    entry = _make_entry("a")
+    st.put_spectrum(entry)
+    before = st.version.snapshot()
+    with (
+        ThreadPoolExecutor(max_workers=1) as pool,
+        pytest.raises(RuntimeError, match="owner|thread") as caught,
+    ):
+        pool.submit(st.get_spectrum, "a").result()
+    assert not isinstance(caught.value, ExpectedError)
+    assert st.get_spectrum("a") is entry
+    assert st.version.snapshot() == before
+
+
+def test_reset_points_unaligned_is_correctable_without_mutation():
+    st = FluxDepState()
+    entry = _make_entry("a")
+    st.put_spectrum(entry)
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
+        st.reset_points("a")
+    assert caught.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert caught.value.reason_code == "spectrum_not_aligned"
+    assert st.spectrums["a"] is entry
+    assert st.version.snapshot() == before
 
 
 def test_set_alignment_marks_aligned_and_bumps():

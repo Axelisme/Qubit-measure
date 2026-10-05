@@ -33,6 +33,7 @@ from zcu_tools.analysis.fluxdep.search import (
     search_database,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.resources.qubit_params import (
     FluxDepFit,
@@ -103,7 +104,8 @@ class FitService:
         Concatenates every spectrum's selected points (insertion order), then
         applies the cross-spectrum selection mask. With no mask set, every point
         is included (the selector defaults to all-selected). Fast-fails if a
-        stored mask disagrees with the current cloud size.
+        stored mask disagrees with the current cloud size, raising
+        FailedPreconditionError (selection_stale) without mutation.
         """
         flux_parts: list[NDArray[np.float64]] = []
         freq_parts: list[NDArray[np.float64]] = []
@@ -120,9 +122,10 @@ class FitService:
         if mask is None:
             return fluxs, freqs
         if mask.shape[0] != fluxs.shape[0]:
-            raise ValueError(
+            raise FailedPreconditionError(
                 f"selection mask length {mask.shape[0]} != joint point cloud "
-                f"size {fluxs.shape[0]} (re-run the cross-spectrum filter)"
+                f"size {fluxs.shape[0]} (re-run the cross-spectrum filter)",
+                reason_code="selection_stale",
             )
         return fluxs[mask], freqs[mask]
 
@@ -134,14 +137,22 @@ class FitService:
         Rejects foreign threads, missing database path, empty selected cloud
         and a selection mask inconsistent with the cloud. Kernel validation of
         bounds, transitions and database contents happens during compute_search.
+        FailedPreconditionError reasons are no_database_path, no_selected_points
+        or selection_stale. Foreign threads raise RuntimeError.
         """
         self._state.assert_owner_thread()
         fit = self._state.fit
         if not fit.database_path:
-            raise ValueError("no database path set (call set_params first)")
+            raise FailedPreconditionError(
+                "no database path set (call set_params first)",
+                reason_code="no_database_path",
+            )
         fluxs, freqs = self.selected_pointcloud()
         if fluxs.size == 0:
-            raise ValueError("no selected points to fit (select points first)")
+            raise FailedPreconditionError(
+                "no selected points to fit (select points first)",
+                reason_code="no_selected_points",
+            )
         return SearchInput(
             database_path=fit.database_path,
             fluxs=fluxs.copy(),
@@ -209,15 +220,22 @@ class FitService:
         from the first aligned spectrum (the notebook stores a single
         flux_half/int/period; in a multi-spectrum session every spectrum is
         aligned to the same flux coordinate, so the first aligned one is
-        representative). Fast-fails if no spectrum is aligned.
+        representative). Before file I/O, FailedPreconditionError reports
+        no_fit_result or no_aligned_spectrum. Native I/O failures propagate.
         """
         fit = self._state.fit
         if fit.params is None:
-            raise ValueError("no fit result to export (run search first)")
+            raise FailedPreconditionError(
+                "no fit result to export (run search first)",
+                reason_code="no_fit_result",
+            )
 
         aligned = next((e for e in self._state.spectrums.values() if e.aligned), None)
         if aligned is None:
-            raise ValueError("no aligned spectrum (align one before exporting)")
+            raise FailedPreconditionError(
+                "no aligned spectrum (align one before exporting)",
+                reason_code="no_aligned_spectrum",
+            )
 
         project = self._state.project
         path = (

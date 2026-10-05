@@ -28,6 +28,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     SpectrumEntry,
 )
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import ProjectInfo
 
 # --- fixtures --------------------------------------------------------------
@@ -132,10 +133,11 @@ def test_selected_pointcloud_stale_mask_raises():
     # selection set, then a point added → mask length now disagrees
     st.set_selection(np.array([True, False, True, False]))
     st.put_spectrum(_aligned_entry_with_points("s2", [0.4], [5.2]))
-    with pytest.raises(
-        ValueError, match="selection mask length 4 != joint point cloud"
-    ):
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
         FitService(st).selected_pointcloud()
+    assert caught.value.reason_code == "selection_stale"
+    assert st.version.snapshot() == before
 
 
 # --- compute_search / record_result ----------------------------------------
@@ -221,8 +223,11 @@ def test_record_result_writes_state(tiny_database):
 
 def test_capture_search_fast_fails_without_database():
     st = _state_with_points()
-    with pytest.raises(ValueError, match="database"):
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
         FitService(st).capture_search()
+    assert caught.value.reason_code == "no_database_path"
+    assert st.version.snapshot() == before
 
 
 def test_capture_search_fast_fails_without_points(tiny_database):
@@ -232,8 +237,11 @@ def test_capture_search_fast_fails_without_points(tiny_database):
     assert st.spectrums["noise"].points_completed
     svc = FitService(st)
     svc.set_params(db_path, *_WIDE, TransitionDict({}), 0.0, 0.0)
-    with pytest.raises(ValueError, match="selected points"):
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
         svc.capture_search()
+    assert caught.value.reason_code == "no_selected_points"
+    assert st.version.snapshot() == before
 
 
 # --- export_params ---------------------------------------------------------
@@ -259,17 +267,27 @@ def test_export_params_writes_json(tmp_path):
     assert fluxdep_fit.timestamp is not None
 
 
-def test_export_params_fast_fails_without_result():
+def test_export_params_fast_fails_without_result(tmp_path):
     st = _state_with_points()
-    with pytest.raises(ValueError, match="no fit result"):
-        FitService(st).export_params("/tmp/x.json")
+    path = tmp_path / "params.json"
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
+        FitService(st).export_params(str(path))
+    assert caught.value.reason_code == "no_fit_result"
+    assert not path.exists()
+    assert st.version.snapshot() == before
 
 
-def test_export_params_fast_fails_without_aligned():
-    st = FluxDepState()  # no aligned spectrum
+def test_export_params_fast_fails_without_aligned(tmp_path):
+    st = FluxDepState()
     st.set_fit_result((5.0, 1.2, 0.4))
-    with pytest.raises(ValueError, match="aligned"):
-        FitService(st).export_params("/tmp/x.json")
+    path = tmp_path / "params.json"
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
+        FitService(st).export_params(str(path))
+    assert caught.value.reason_code == "no_aligned_spectrum"
+    assert not path.exists()
+    assert st.version.snapshot() == before
 
 
 def test_default_params_path():

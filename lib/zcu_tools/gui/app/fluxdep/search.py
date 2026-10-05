@@ -19,6 +19,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     spectrum_version_key,
 )
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.operation_handles import (
     AwaitResult,
     OperationHandles,
@@ -145,14 +146,21 @@ class FluxDepSearchOwner:
         """Capture inputs/dependencies and submit one search; return its token.
 
         Raises on foreign thread, closing, busy, missing executor/progress or
-        invalid inputs before opening a handle. Submit failure re-raises after
+        invalid inputs before opening a handle. Busy/closing are
+        FailedPreconditionError (search_busy/search_closing); capture errors
+        propagate as documented by FitService.capture_search. Missing runtime
+        and foreign-thread misuse remain RuntimeError. Submit failure re-raises after
         cleanup and records a failed activity for the opened handle.
         """
         self._assert_owner()
         if self._closing:
-            raise RuntimeError("search owner is closing")
+            raise FailedPreconditionError(
+                "search owner is closing", reason_code="search_closing"
+            )
         if self._busy:
-            raise RuntimeError("search is already pending")
+            raise FailedPreconditionError(
+                "search is already pending", reason_code="search_busy"
+            )
         runner = self._runner
         if runner is None:
             raise RuntimeError("search background executor is unavailable")
@@ -206,24 +214,40 @@ class FluxDepSearchOwner:
     def cancel(self, token: int) -> None:
         """Request cooperative stop on the owner; terminal cancel is a no-op.
 
-        Unknown/evicted tokens raise KeyError. A request is not a terminal result.
+        Unknown/evicted tokens raise InvalidInputError (unknown_operation).
+        Foreign threads raise RuntimeError. A request is not a terminal result.
         """
         self._assert_owner()
-        if self._handles.known_outcome(token) is None:
+        if self.outcome(token) is None:
             self._handles.cancel(token)
 
     def outcome(self, token: int) -> OperationOutcome | None:
-        """Thread-safe terminal query; None means pending; unknown raises KeyError."""
-        return self._handles.known_outcome(token)
+        """Thread-safe terminal query for a retained token; None means pending.
+
+        Unknown/evicted tokens raise InvalidInputError (unknown_operation).
+        """
+        try:
+            return self._handles.known_outcome(token)
+        except KeyError as exc:
+            raise InvalidInputError(
+                f"unknown search operation {token}", reason_code="unknown_operation"
+            ) from exc
 
     def await_outcome(self, token: int, timeout: float) -> AwaitResult:
         """Wait off-owner for one known token. Timeout does not cancel.
 
-        Owner calls raise RuntimeError; unknown/evicted tokens raise KeyError.
+        Owner calls raise RuntimeError; unknown/evicted tokens raise
+        InvalidInputError (unknown_operation), preserving the lookup cause.
+        timeout is seconds, with the shared handle wait semantics.
         """
         if self._owner.is_owner_thread():
             raise RuntimeError("cannot await search on the owner thread")
-        return self._handles.await_known_outcome(token, timeout)
+        try:
+            return self._handles.await_known_outcome(token, timeout)
+        except KeyError as exc:
+            raise InvalidInputError(
+                f"unknown search operation {token}", reason_code="unknown_operation"
+            ) from exc
 
     def begin_close(self) -> None:
         """Permanently refuse new starts and request pending cancellation, on owner.

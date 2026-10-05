@@ -27,6 +27,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     SpectrumEntry,
     SpecType,
 )
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.simulate import value2flux
 
 logger = logging.getLogger(__name__)
@@ -76,12 +77,18 @@ class LoadService:
         time — for legacy files that store x=frequency / y=flux (the transpose of
         the expected x=flux / y=frequency).
 
-        Returns the spectrum name (basename of ``filepath``).
+        Returns the spectrum name (basename of ``filepath``). InvalidInputError
+        reports unknown_spectrum for absent inheritance or spectrum_not_2d
+        for a missing frequency axis, before State publication. Native I/O and
+        parsing failures propagate without caller-correctable classification.
         """
         ld = load_labber_data(filepath)
         dev_values = np.asarray(ld.axes[0].values)
         if len(ld.axes) < 2:
-            raise ValueError(f"{filepath!r} has no frequency axis (not a 2D spectrum)")
+            raise InvalidInputError(
+                f"{filepath!r} has no frequency axis (not a 2D spectrum)",
+                reason_code="spectrum_not_2d",
+            )
         freqs = np.asarray(ld.axes[1].values)
         # native load_labber_data returns z as (Ny, Nx) = (N_freq, N_dev); the
         # downstream pipeline (format_rawdata, SpectrumData) expects device-major
@@ -130,9 +137,7 @@ class LoadService:
         """Seed alignment from an existing spectrum, or the identity default."""
         if inherit_from is None:
             return 0.0, 0.0, 1.0
-        src = self._state.spectrums.get(inherit_from)
-        if src is None:
-            raise KeyError(f"inherit_from spectrum {inherit_from!r} not loaded")
+        src = self._state.get_spectrum(inherit_from)
         return src.flux_half, src.flux_int, src.flux_period
 
     def load_processed_spectrums(self, filepath: str) -> list[str]:

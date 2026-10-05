@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Spectrum retirement and app-owned presentation
+**Last updated:** 2026-10-06. Nominal error producers and app-owned presentation
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -229,6 +229,14 @@ Hide 或 detach 不取消，重新 activate 讀 owner snapshot。
 
 `Controller.search_database` 保留 headless owner-inline capture／compute／record 便利入口，
 不取 operation token。Remote 尚無 mutation RPC；後續 RPC 使用同一 search owner。
+
+### Caller-correctable errors
+
+State、SearchOwner 與 load／fit／export owners 使用 shared `InvalidInputError` 與
+`FailedPreconditionError` 分類 caller 可修正的失敗。State 的 `get_spectrum` 是 owner-thread
+literal-name lookup，回傳 live entry；未知名稱不修改來源或版本。Remote 只投影 nominal category
+與 reason，不從 ordinary exception ancestry 或訊息猜分類。Missing runtime、thread misuse、
+provider I/O 與 worker failure 保留各自的 unexpected failure／operation outcome 語意。
 
 ### v2 結果存放 + 視覺化
 - `FitState`（State 上的 singleton，version key `fit`）：db 路徑/EJb/ECb/ELb/transitions/r_f/sample_f

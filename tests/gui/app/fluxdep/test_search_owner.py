@@ -17,6 +17,11 @@ from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload, SearchChangedPayload
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.event_bus import EventOrigin
+from zcu_tools.gui.expected_error import (
+    ExpectedError,
+    FailedPreconditionError,
+    InvalidInputError,
+)
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.ports import ProgressEvent
@@ -225,8 +230,9 @@ def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing)
 def test_submit_failure_cleanup_and_known_token_queries(search_case):
     ctrl, bg, _owner, progress, _result, _captured = search_case
     bg.fail_submit = True
-    with pytest.raises(RuntimeError, match="submit failed"):
+    with pytest.raises(RuntimeError, match="submit failed") as caught:
         ctrl.search.start()
+    assert not isinstance(caught.value, ExpectedError)
     activity = ctrl.search.current
     assert activity is not None and activity.status == "failed"
     assert ctrl.search.outcome(activity.token).status == "failed"
@@ -235,8 +241,10 @@ def test_submit_failure_cleanup_and_known_token_queries(search_case):
     bg.fail_submit = False
     assert ctrl.search.start() != activity.token
     for query in (ctrl.search.outcome, ctrl.search.cancel):
-        with pytest.raises(KeyError):
+        with pytest.raises(InvalidInputError) as caught:
             query(999999)
+        assert caught.value.reason_code == "unknown_operation"
+        assert isinstance(caught.value.__cause__, KeyError)
     with pytest.raises(RuntimeError, match="owner"):
         ctrl.search.await_outcome(activity.token, 0)
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -246,8 +254,10 @@ def test_submit_failure_cleanup_and_known_token_queries(search_case):
             .reason
             == "timeout"
         )
-        with pytest.raises(KeyError):
+        with pytest.raises(InvalidInputError) as caught:
             pool.submit(ctrl.search.await_outcome, 999999, 0).result()
+        assert caught.value.reason_code == "unknown_operation"
+        assert isinstance(caught.value.__cause__, KeyError)
     assert ctrl.search.active_token is not None
 
 
@@ -274,8 +284,9 @@ def test_origin_capture_and_last_success_survives_failure(search_case):
 
 def test_missing_background_rejects_before_handle(cross_controller):
     assert cross_controller.search.current is None
-    with pytest.raises(RuntimeError, match="background|executor"):
+    with pytest.raises(RuntimeError, match="background|executor") as caught:
         cross_controller.search.start()
+    assert not isinstance(caught.value, ExpectedError)
     assert cross_controller.search.current is None
 
 
@@ -287,9 +298,35 @@ def test_capture_and_owner_queries_reject_foreign_threads(search_case):
             ctrl.search.start,
             lambda: ctrl.search.current,
         ):
-            with pytest.raises(RuntimeError, match="owner|thread"):
+            with pytest.raises(RuntimeError, match="owner|thread") as caught:
                 pool.submit(query).result()
+            assert not isinstance(caught.value, ExpectedError)
     assert ctrl.search.current is None
+
+
+@pytest.mark.parametrize("closing", [False, True])
+def test_search_admission_is_nominal_and_preserves_pending_handle(search_case, closing):
+    ctrl, bg, _owner, _progress, _result, _captured = search_case
+    token = ctrl.search.start()
+    before = ctrl.state.version.snapshot()
+    if closing:
+        ctrl.search.begin_close()
+    with pytest.raises(FailedPreconditionError) as caught:
+        ctrl.search.start()
+    assert caught.value.reason_code == ("search_closing" if closing else "search_busy")
+    assert ctrl.search.active_token == token
+    assert ctrl.search.outcome(token) is None
+    assert ctrl.state.version.snapshot() == before
+    bg.fail(SearchCancelled("requested"))
+
+
+def test_await_on_owner_is_unexpected(search_case):
+    ctrl, bg, _owner, _progress, _result, _captured = search_case
+    token = ctrl.search.start()
+    with pytest.raises(RuntimeError, match="owner") as caught:
+        ctrl.search.await_outcome(token, 0)
+    assert not isinstance(caught.value, ExpectedError)
+    bg.fail(SearchCancelled("requested"))
 
 
 def test_progress_notifications_cannot_reenter_start(search_case):

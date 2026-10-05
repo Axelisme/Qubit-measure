@@ -22,6 +22,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
 from zcu_tools.analysis.spectrum import SpectrumData
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.project import ProjectInfo
 
@@ -212,14 +213,31 @@ class FluxDepState:
             self.version.bump(SPECTRUM_SET_VERSION_KEY)
         logger.debug("put_spectrum: name=%r new=%s", entry.name, is_new)
 
+    def get_spectrum(self, name: str) -> SpectrumEntry:
+        """Return the live entry for an opaque literal name, on the owner thread.
+
+        The returned entry is not copied. Unknown names raise InvalidInputError
+        with reason unknown_spectrum; foreign threads raise RuntimeError.
+        Neither failure changes State or versions.
+        """
+        self._assert_owner()
+        try:
+            return self.spectrums[name]
+        except KeyError as exc:
+            raise InvalidInputError(
+                f"no spectrum named {name!r}", reason_code="unknown_spectrum"
+            ) from exc
+
     def remove_spectrum(self, name: str) -> None:
         """Remove ``name`` and retire only its exact spectrum version key.
 
-        Unknown names raise KeyError without mutation. The removed key reads
-        as 0; reloading the same name continues above its previous live version.
+        Unknown names raise InvalidInputError (unknown_spectrum) without mutation.
+        The removed key reads as 0; reloading the same name continues above its
+        previous live version.
         The collection version advances, and an active removed name is cleared.
         """
         self._assert_owner()
+        self.get_spectrum(name)
         del self.spectrums[name]
         self.version.retire(spectrum_version_key(name))
         self.version.bump(SPECTRUM_SET_VERSION_KEY)
@@ -228,9 +246,14 @@ class FluxDepState:
         logger.debug("remove_spectrum: name=%r", name)
 
     def set_active(self, name: str | None) -> None:
+        """Select an existing literal name, or clear selection with None.
+
+        Owner-thread command. Unknown names raise InvalidInputError
+        (unknown_spectrum) without changing active selection or versions.
+        """
         self._assert_owner()
-        if name is not None and name not in self.spectrums:
-            raise KeyError(f"no spectrum named {name!r}")
+        if name is not None:
+            self.get_spectrum(name)
         self.active_spectrum = name
 
     def set_alignment(
@@ -296,14 +319,18 @@ class FluxDepState:
     def reset_points(self, name: str) -> None:
         """Clear points and completion on an aligned spectrum; bump once.
 
-        Keep alignment and its seed. Unknown name raises KeyError; an unaligned
-        spectrum raises ValueError. Both failures leave data/version unchanged.
+        Keep alignment and its seed. Unknown name raises InvalidInputError
+        (unknown_spectrum); unaligned raises FailedPreconditionError
+        (spectrum_not_aligned). Both leave data/version unchanged.
         Must run on the owner thread.
         """
         self._assert_owner()
-        entry = self.spectrums[name]
+        entry = self.get_spectrum(name)
         if not entry.aligned:
-            raise ValueError("spectrum must be aligned before resetting points")
+            raise FailedPreconditionError(
+                "spectrum must be aligned before resetting points",
+                reason_code="spectrum_not_aligned",
+            )
         self.spectrums[name] = replace(
             entry,
             points=PointsData(
@@ -318,11 +345,11 @@ class FluxDepState:
     def reset_alignment(self, name: str) -> None:
         """Reopen alignment, preserving native points, completion and last mapping.
 
-        Set aligned=False and bump once. Unknown name raises KeyError without
-        mutation. Must run on the owner thread.
+        Set aligned=False and bump once. Unknown name raises InvalidInputError
+        (unknown_spectrum) without mutation. Must run on the owner thread.
         """
         self._assert_owner()
-        self.spectrums[name] = replace(self.spectrums[name], aligned=False)
+        self.spectrums[name] = replace(self.get_spectrum(name), aligned=False)
         self.version.bump(spectrum_version_key(name))
 
     def set_selection(

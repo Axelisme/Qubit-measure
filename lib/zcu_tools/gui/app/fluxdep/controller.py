@@ -164,7 +164,8 @@ class Controller(BaseController[FluxDepState, EventBus]):
     def reset_alignment(self, name: str) -> None:
         """Reopen alignment, keeping points/completion; emit one change on success.
 
-        Owner-thread command. Unknown name raises KeyError without publication.
+        Owner-thread command. Unknown name raises InvalidInputError
+        (unknown_spectrum) without publication.
         """
         self._alignment.reset_alignment(name)
         self._emit(SpectrumChangedPayload(name=name))
@@ -172,8 +173,9 @@ class Controller(BaseController[FluxDepState, EventBus]):
     def reset_points(self, name: str) -> None:
         """Clear points/completion and reopen picking; emit one change on success.
 
-        Owner-thread command. Unknown name raises KeyError; unaligned spectrum
-        raises ValueError. Failures do not publish.
+        Owner-thread command. Unknown name raises InvalidInputError
+        (unknown_spectrum); unaligned raises FailedPreconditionError
+        (spectrum_not_aligned). Failures do not publish.
         """
         self._points.reset_points(name)
         self._emit(SpectrumChangedPayload(name=name))
