@@ -83,11 +83,11 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.setuptools]
-package-dir = { "" = "lib", "recipes" = "recipes", "zcu_lab" = "zcu_lab" }
+package-dir = { "" = "lib", "zcu_lab" = "zcu_lab" }
 
 [tool.setuptools.packages.find]
 where = ["lib", "."]
-include = ["zcu_tools", "zcu_tools.*", "zcu_lab", "zcu_lab.*", "recipes"]
+include = ["zcu_tools", "zcu_tools.*", "zcu_lab", "zcu_lab.*"]
 namespaces = true
 
 [tool.ruff.lint]
@@ -152,10 +152,9 @@ max-args = 6
 "tests/**" = ["PLR0913", "ARG001", "ARG002", "FBT001", "FBT002", "B011"]
 
 [tool.pyright]
-include = ["lib", "zcu_lab", "tests", "scripts", "tools", "recipes"]
+include = ["lib", "zcu_lab", "tests", "scripts", "tools"]
 executionEnvironments = [
   { root = "zcu_lab", extraPaths = ["lib", "."] },
-  { root = "recipes", extraPaths = ["lib", "."] },
   { root = "lib", extraPaths = ["lib", "."] },
   { root = "tests", extraPaths = ["lib", "tools", "."] },
   { root = "scripts", extraPaths = ["lib", "."] },
