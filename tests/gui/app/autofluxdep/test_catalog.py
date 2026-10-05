@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 import pytest
+from qtpy.QtWidgets import QApplication, QInputDialog, QPushButton, QWidget
 from zcu_tools.gui.app.autofluxdep.app import build_core
 from zcu_tools.gui.app.autofluxdep.catalog import ExperimentCatalog
 from zcu_tools.gui.app.autofluxdep.controller import Controller
 from zcu_tools.gui.app.autofluxdep.nodes.builder import Builder
 from zcu_tools.gui.app.autofluxdep.nodes.io import Patch
+from zcu_tools.gui.app.autofluxdep.ui.node_list import NodeListPane
 
 from tests.gui.app.autofluxdep._helpers import ProduceFn, make_builder
 
@@ -43,6 +45,70 @@ def test_injected_catalog_controls_add_without_reordering(
 
     assert tuple(node.type_name for node in ctrl.state.nodes) == ("first", "second")
     assert ctrl.experiment_catalog.builders()[1] is ctrl.state.nodes[0].builder
+
+
+def test_fake_catalog_restores_workflow_order(
+    injected_controller: Controller,
+) -> None:
+    ctrl = injected_controller
+    ctrl.add_node_by_type("first")
+    ctrl.add_node_by_type("second")
+    saved = ctrl.capture_persisted_state()
+
+    restored = build_core(ctrl.experiment_catalog)
+    try:
+        report = restored.restore_persisted_state(saved)
+
+        assert report.rejected_nodes == ()
+        assert tuple(node.type_name for node in restored.state.nodes) == (
+            "first",
+            "second",
+        )
+        assert restored.state.nodes[0].builder is ctrl.experiment_catalog.builders()[1]
+        assert restored.state.nodes[1].builder is ctrl.experiment_catalog.builders()[0]
+    finally:
+        restored.quiesce_background()
+
+
+def test_fake_catalog_populates_add_menu_and_placement(
+    injected_controller: Controller,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    offered: list[tuple[str, ...]] = []
+
+    def choose_item(
+        _parent: QWidget,
+        _title: str,
+        _label: str,
+        items: Sequence[str],
+        _current: int,
+        _editable: bool,
+    ) -> tuple[str, bool]:
+        offered.append(tuple(items))
+        return "first", True
+
+    monkeypatch.setattr(QInputDialog, "getItem", choose_item)
+    pane = NodeListPane(injected_controller)
+    try:
+        pane.show()
+        qapp.processEvents()
+        add_button = next(
+            button for button in pane.findChildren(QPushButton) if button.text() == "+"
+        )
+        add_button.click()
+
+        assert offered == [("second", "first")]
+        assert tuple(node.type_name for node in injected_controller.state.nodes) == (
+            "first",
+        )
+        assert (
+            injected_controller.state.nodes[0].builder
+            is injected_controller.experiment_catalog.builders()[1]
+        )
+    finally:
+        pane.teardown()
+        pane.close()
 
 
 def test_injected_catalog_unknown_name_raises(injected_controller: Controller) -> None:
