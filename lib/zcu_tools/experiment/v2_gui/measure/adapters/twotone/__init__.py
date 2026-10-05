@@ -1,3 +1,4 @@
+from .allxy import AllXYAdapter
 from .ckp import CKPAdapter
 from .flux_dep import FluxDepAdapter
 from .freq import FreqAdapter
@@ -39,4 +40,5 @@ __all__ = [
     "ZigZagAdapter",
     "ZigZagScanGainAdapter",
     "ZigZagScanFreqAdapter",
+    "AllXYAdapter",
 ]

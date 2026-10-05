@@ -33,6 +33,7 @@ from .adapters.singleshot import (
     SsT1ToneSweepFreqAdapter,
     SsT1ToneSweepGainAdapter,
 )
+from .adapters.twotone.allxy import AllXYAdapter
 from .adapters.twotone.ckp import CKPAdapter
 from .adapters.twotone.flux_dep import FluxDepAdapter
 from .adapters.twotone.freq import FreqAdapter
@@ -102,6 +103,7 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "twotone/zigzag": ZigZagAdapter,
     "twotone/zigzag_scan/gain": ZigZagScanGainAdapter,
     "twotone/zigzag_scan/freq": ZigZagScanFreqAdapter,
+    "twotone/allxy": AllXYAdapter,
     "singleshot/ge": GEAdapter,
     "singleshot/check": CheckAdapter,
     "singleshot/reset_check": SsResetCheckAdapter,
