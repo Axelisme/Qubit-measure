@@ -37,24 +37,21 @@ frequency, so that ``omega`` / ``delta`` / ``t`` / ``t1`` / ``t2`` handed to
   - ``SimParams.T1`` / ``T2`` are already in µs and are threaded onto every
     segment unchanged.
 
-Single rotating frame (Ramsey / echo correctness)
--------------------------------------------------
-The whole timeline lives in *one* rotating frame whose carrier is the qubit
-control pulses' frequency ``f_ref`` (the top-level :class:`Pulse` modules — reset
-prep pulses and the readout do not define the qubit frame).  In that frame every
-segment, drive *and* idle, precesses about z at the same frame detuning
-``delta = 2*pi*(f_qubit_MHz - f_ref_MHz)``:
+Reference rotating frame (Ramsey / echo correctness)
+----------------------------------------------------
+Idle segments evolve in one reference frame whose carrier ``f_ref`` is the
+first qubit control pulse's frequency (top-level :class:`Pulse` modules; reset
+prep pulses and the readout do not define the qubit frame).  Idle / free
+segments precess at ``delta = 2*pi*(f_qubit_MHz - f_ref_MHz)``, NOT 0: a zero
+idle detuning would freeze the Bloch vector between pulses and kill Ramsey
+fringes.  A Ramsey experiment that detunes the control pulses gets idle
+precession at the detuning, producing fringes at the detuning frequency.
 
-  - drive segments already carry ``2*pi*(f_qubit - pulse.freq)``; since a qubit
-    pulse's ``pulse.freq`` *is* ``f_ref``, that equals the frame detuning.
-  - idle / free-evolution segments (delays, pre/post idle) must carry the *same*
-    frame detuning, NOT 0.  A zero idle detuning would freeze the Bloch vector
-    between pulses and kill Ramsey fringes.
-
-When the qubit is driven on resonance (``f_ref == f_qubit``) the frame detuning
-is 0 and idle segments are static.  A Ramsey experiment that detunes the control pulses
-(``f_ref = f_qubit + detuning``) gets idle precession at the detuning, producing
-fringes at the detuning frequency.
+Each drive segment uses its own carrier, ``2*pi*(f_qubit - pulse.freq)``.  When
+pulses play at several carriers (a zig-zag frequency scan plays X90 at ``q_f``
+and repeats a swept pulse), :func:`frame.align_drive_phases` gives each drive
+its phase-coherent phase, with time measured from the start of the shot.  With
+one carrier the timeline is unchanged.
 
 Drive amplitude (the gain -> Rabi-rate chain)
 ---------------------------------------------
@@ -113,6 +110,7 @@ from .bloch import Segment
 from .control_flow import iter_evolution_modules, select_branch, unroll
 from .dmem import DmemTable, collect_dmem_values, dmem_table_value
 from .errors import UnsupportedModuleError
+from .frame import align_drive_phases
 from .params import SimParams
 from .waveforms import arb_waveform_abs_at, cosine_shape, gauss_shape
 
@@ -344,7 +342,7 @@ def _pulse_segments(
 ) -> list[Segment]:
     """Lower one Pulse cfg to drive segments (with pre/post idle) at one point.
 
-    ``frame_detuning`` is the single-frame idle precession rate (rad/µs) shared by
+    ``frame_detuning`` is the reference-frame idle precession rate (rad/µs) shared by
     this pulse's pre/post idle and every other free segment in the timeline; see
     the module docstring.  The drive segments themselves use this pulse's own
     detuning, which equals ``frame_detuning`` whenever the pulse sits at the frame
@@ -399,7 +397,7 @@ def _idle_segment(
 ) -> Segment:
     """A free-evolution (Omega = 0) segment of duration ``t`` µs.
 
-    ``frame_detuning`` (rad/µs) is the single-frame precession rate
+    ``frame_detuning`` (rad/µs) is the reference-frame precession rate
     ``2*pi*(f_qubit - f_ref)``: the Bloch vector keeps precessing about z during
     the idle, which is what makes Ramsey fringes appear.  It is 0 when the qubit
     is driven on resonance (then the idle is static, as in T1).
@@ -533,7 +531,7 @@ def _delay_segment(
     the per-point delay lives in a dmem table loaded by a ``LoadValue`` earlier
     in the module list, indexed by the ``*_idx`` sweep axis.  The cycle count is
     recovered from ``dmem_tables`` and converted to µs via ``cycles2us``.
-    ``idle_detuning`` is the single-frame idle precession rate (already including
+    ``idle_detuning`` is the reference-frame idle precession rate (already including
     the global ``detune_offset``) applied to the emitted free segment.
     """
 
@@ -881,10 +879,10 @@ def _frame_detuning(
     point: dict[str, int],
     dmem_tables: dict[str, DmemTable],
 ) -> float:
-    """Compute the single rotating-frame idle precession rate (rad/µs) at a point.
+    """Compute the reference-frame idle precession rate (rad/µs) at a point.
 
-    The frame carrier ``f_ref`` is the frequency of the top-level qubit control
-    pulses (``Pulse`` modules in the timeline); reset prep pulses live inside
+    The frame carrier ``f_ref`` is the frequency of the first qubit control
+    pulse (``Pulse`` modules in the timeline); reset prep pulses live inside
     ``Reset`` modules and the readout is an ``AbsReadout``, so neither defines the
     qubit frame.  Returns ``2*pi*(f_qubit - f_ref)``.
 
@@ -892,30 +890,16 @@ def _frame_detuning(
     point (e.g. the g/e prep ``Branch("ge", [], Pulse(pi))``), inside a
     ``Repeat``, or be the candidate a ``ComputedPulse`` selects; the timeline is
     flattened via ``iter_evolution_modules`` first so such a pulse still defines
-    the frame, otherwise ``f_ref`` would be taken from the wrong (or no) pulse.
-
-    Fast-fail (per CLAUDE.md): if the qubit pulses disagree in frequency at this
-    point there is no single well-defined rotating frame, so raise rather than
-    silently picking one.  When there is no qubit pulse at all (e.g. a pure
-    onetone readout sweep, which has no Bloch evolution) the frame detuning is
-    unused, so 0 is returned.
+    the frame.  Pulses at other carriers are phase-aligned to this frame by
+    :func:`frame.align_drive_phases`.  When there is no qubit pulse at all (e.g.
+    a pure onetone readout sweep) the frame detuning is unused, so 0 is returned.
     """
 
-    freqs = {
-        round(_resolve_scalar(module.cfg.freq, loop_counts, point), 9)
-        for module in iter_evolution_modules(modules, point, dmem_tables)
-        if isinstance(module, (Pulse, TableLengthPulse)) and module.cfg is not None
-    }
-    if not freqs:
-        return 0.0
-    if len(freqs) > 1:
-        raise UnsupportedModuleError(
-            "qubit control pulses have differing frequencies "
-            f"{sorted(freqs)} MHz at this sweep point; a single rotating frame "
-            "(required to lower idle precession) is undefined"
-        )
-    (f_ref_mhz,) = freqs
-    return 2.0 * math.pi * (f_qubit_mhz - f_ref_mhz)
+    for module in iter_evolution_modules(modules, point, dmem_tables):
+        if isinstance(module, (Pulse, TableLengthPulse)) and module.cfg is not None:
+            f_ref_mhz = _resolve_scalar(module.cfg.freq, loop_counts, point)
+            return 2.0 * math.pi * (f_qubit_mhz - f_ref_mhz)
+    return 0.0
 
 
 def lower_point(
@@ -1024,7 +1008,9 @@ def lower_point(
     if readout is None:
         raise UnsupportedModuleError("no readout module found in the timeline")
 
-    return LoweredPoint(segments=segments, readout=readout)
+    return LoweredPoint(
+        segments=align_drive_phases(segments, idle_detuning), readout=readout
+    )
 
 
 def inter_shot_relax_segment(

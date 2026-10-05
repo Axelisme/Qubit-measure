@@ -1,9 +1,10 @@
 """Gate-sequence experiments recover injected pulse errors on the simulator.
 
 AllXY selects its gates with ``ComputedPulse`` and the zig-zag scan repeats a
-pulse with a register-driven ``Repeat``; both run end to end through the real
-experiment classes on a sim mock soc.  With ``pi_gain_len = 0.4`` a 0.5 µs const
-pulse needs gain 0.8 for a pi rotation and 0.4 for a pi/2 rotation.
+pulse at a swept gain or frequency with a register-driven ``Repeat``; all run
+end to end through the real experiment classes on a sim mock soc.  With
+``pi_gain_len = 0.4`` a 0.5 µs const pulse needs gain 0.8 for a pi rotation and
+0.4 for a pi/2 rotation.
 """
 
 from __future__ import annotations
@@ -11,7 +12,6 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-import numpy as np
 import pytest
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -35,7 +35,6 @@ from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.sim.lowering import UnsupportedModuleError
 
 from ._engine_support import (
     RESET_RELAX_DELAY,
@@ -66,11 +65,11 @@ def _readout() -> DirectReadoutCfg:
 
 
 @contextmanager
-def _context(stop: StopSignal | None = None) -> Generator[RunContext]:
+def _context() -> Generator[RunContext]:
     soc, soccfg = make_mock_soc(sim=SIM)
     plots = Plots(NonPresentingHost())
     try:
-        yield RunContext(soc, soccfg, plots, {}, stop or StopSignal())
+        yield RunContext(soc, soccfg, plots, {}, StopSignal())
     finally:
         plots.finish(present=False)
 
@@ -132,19 +131,19 @@ def test_zigzag_gain_scan_recovers_pi_gain() -> None:
     assert analysis.min_value == pytest.approx(_PI_GAIN, abs=0.011)
 
 
-def test_zigzag_freq_scan_fails_without_a_single_frame() -> None:
-    # The X90 pulse stays at q_f while the repeated pulse's frequency is swept,
-    # so no single rotating frame describes the sequence.
+def test_zigzag_freq_scan_recovers_qubit_frequency() -> None:
+    # The X90 pulse stays at q_f while the repeated pulse's frequency is swept.
     f_qubit = qubit_frequency_mhz()
     cfg = _zigzag_scan_cfg(
         ZigZagScanSweepCfg(
-            freq=SweepCfg(start=f_qubit - 2.0, stop=f_qubit + 2.0, expts=5, step=1.0)
+            freq=SweepCfg(start=f_qubit - 2.0, stop=f_qubit + 2.0, expts=41, step=0.1)
         )
     )
-    stop = StopSignal()
-    with _context(stop) as context:
-        result = ZigZagScanExp().run(cfg, context=context)
+    exp = ZigZagScanExp()
+    with _context() as context:
+        result = exp.run(cfg, context=context)
+        analysis = exp.analyze(
+            RunRecord(cfg, result), ZigZagScanAnalyzeOptions(), plots=context.plots
+        )
 
-    assert np.isnan(result.signals).all()
-    assert stop.error is not None
-    assert isinstance(stop.error.exception, UnsupportedModuleError)
+    assert analysis.min_value == pytest.approx(f_qubit, abs=0.11)
