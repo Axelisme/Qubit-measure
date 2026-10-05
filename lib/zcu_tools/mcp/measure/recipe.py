@@ -563,22 +563,49 @@ class RecipeSession:
         self._tab: str | None = None
         self._run: RunOperation | None = None
         self._analysis: AnalyzeOperation | None = None
+        self._latest_operation: RunOperation | AnalyzeOperation | None = None
         self._written: list[WritebackReceipt] = []
 
     def _observe_run(self, operation: RunOperation) -> None:
         with self._condition:
             self._run = operation
+            self._latest_operation = operation
             self._condition.notify_all()
 
     def _observe_analysis(self, operation: AnalyzeOperation) -> None:
         with self._condition:
             self._analysis = operation
+            self._latest_operation = operation
             self._condition.notify_all()
 
     def _observe_writeback(self, receipt: WritebackReceipt) -> None:
         with self._condition:
             self._written.append(deepcopy(receipt))
             self._condition.notify_all()
+
+    def pending_operation(self) -> RunOperation | AnalyzeOperation | None:
+        """Read the latest unfinished Run/analysis handle, even before its yield.
+
+        Include an admitted start awaiting its receipt and interactive handoff.
+        Return None before admission, after completion, or for a suppressed start.
+        This performs no GUI request or completion. The driver uses the same
+        opaque handle for cancel/finish_early during synchronous author calls.
+        """
+        with self._condition:
+            operation = self._latest_operation
+        if isinstance(operation, RunOperation):
+            capture = operation.snapshot()
+            if (
+                capture is not None
+                and capture.start_status in ("unknown", "running")
+                and capture.outcome is None
+            ):
+                return operation
+        elif isinstance(operation, AnalyzeOperation):
+            capture = operation.snapshot()
+            if capture is not None and capture.status in ("running", "interactive"):
+                return operation
+        return None
 
     def writeback_receipts(self) -> tuple[WritebackReceipt, ...]:
         """Read detached actual writes in call order, including failed prefixes.

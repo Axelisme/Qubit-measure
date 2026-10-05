@@ -346,14 +346,18 @@ class RecipeExecution:
         return self._control_reply(result)
 
     def finish_early(self) -> ToolReply:
-        """Request cooperative stop of an active Run; reject every other yield.
+        """Request cooperative stop of an admitted Run, including a late receipt.
 
-        A native failed outcome still throws. Cancel overrides this intent.
+        Reject other yields, unsubmitted starts and terminal executions. A native
+        failed outcome still throws. Cancel overrides this intent.
         The recipe receives finished_early after a successful native stop.
         """
         with self._condition:
             active = self._active
-            if not isinstance(active, RunOperation) or active.snapshot() is None:
+            if active is None and self._session is not None:
+                active = self._session.pending_operation()
+            capture = active.snapshot() if isinstance(active, RunOperation) else None
+            if capture is None or capture.outcome is not None:
                 raise GuiRpcError(
                     "finish_early requires an active Run", reason="not_running"
                 )
@@ -432,6 +436,8 @@ class RecipeExecution:
             return consumed
 
     def _cancel_active(self, active: RecipeOperation | None) -> GuiCancel | ToolReply:
+        if active is None and self._session is not None:
+            active = self._session.pending_operation()
         try:
             if isinstance(active, AnalyzeOperation):
                 reply = active.cancel()
@@ -508,7 +514,9 @@ class RecipeExecution:
                 else "awaiting_answer"
             )
             self._progress = replace(self._progress, phase=phase, status="running")
-            pending = self._pending_cancel
+            stop_requested = (
+                self._pending_cancel or self._progress.finish_early_requested
+            )
             self._condition.notify_all()
         if isinstance(operation, WritebackQuestion):
             question = operation.snapshot()
@@ -536,7 +544,7 @@ class RecipeExecution:
                 )
                 self._answer = None
                 return delivery
-        if pending:
+        if stop_requested:
             self._cancel_active(operation)
         if isinstance(operation, RunOperation):
             capture = operation.snapshot()
@@ -548,9 +556,14 @@ class RecipeExecution:
             with self._condition:
                 if self._progress.finish_early_requested and not self._pending_cancel:
                     status = "finished_early"
+                elif status == "cancelled":
+                    self._consume_cancel()
             return run, status
         try:
-            return operation.complete_in_current_worker()
+            delivery = operation.complete_in_current_worker()
+            if delivery[1] == "cancelled":
+                self._consume_cancel()
+            return delivery
         finally:
             # Keep each stage and its confirmed previews even when completion fails.
             capture = operation.snapshot()
@@ -579,13 +592,12 @@ class RecipeExecution:
             with self._condition:
                 self._active = None
                 self._last_status = delivery[1]
-                self._pending_cancel = False
                 self._progress = replace(
                     self._progress,
                     status="running",
                     phase="preparing",
                     op=None,
-                    cancel_requested=False,
+                    cancel_requested=self._pending_cancel,
                     finish_early_requested=False,
                     question_items=None,
                     question_preview=None,

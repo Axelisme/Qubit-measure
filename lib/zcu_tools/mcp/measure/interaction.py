@@ -21,16 +21,32 @@ def handoff_interaction(
     *,
     before_send: Callable[[], None] | None = None,
 ) -> None:
-    """Read an initial handoff without hiding its accepted analysis receipt."""
+    """Capture the original interactive analysis without hiding its receipt.
+
+    ctx supplies the fixed GUI binding; execution owns the admitted analysis.
+    before_send optionally checks caller lifetime just before native dispatch.
+    Cancelled executions reject this read at that boundary. Query, PNG and path
+    failures become delivery_error on the same owner, not a failed native outcome.
+    Non-interactive executions need no handoff and perform no GUI request.
+    """
     snapshot = execution.snapshot()
     if snapshot.status != "interactive":
         return
+
+    def admit() -> None:
+        if before_send is not None:
+            before_send()
+        if execution.snapshot().cancel_requested:
+            raise GuiRpcError(
+                "Analysis handoff was cancelled", reason="recipe_cancelled"
+            )
+
     try:
         interact(
             ctx,
             {"tab_id": snapshot.tab},
             expected_op=snapshot.op,
-            before_send=before_send,
+            before_send=admit,
         )
     except (GuiRpcError, ValueError, OSError) as exc:
         execution.observe_interaction(
