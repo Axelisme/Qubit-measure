@@ -153,6 +153,27 @@ def test_preview_presents_current_stroke_and_undo_inverse_geometry(selector):
     np.testing.assert_array_equal(inverse.added_points, [[0.5, 4.5], [0.5, 4.5]])
 
 
+def test_undo_after_opposite_strokes_uses_reverted_gesture(selector):
+    widget, context, jobs = selector
+    context.plugin.stroke.execute(
+        context.session, BrushStroke((BrushPoint(0.5, 4.5),), 0.02, "erase")
+    )
+    reverted = (BrushPoint(0.51, 4.5),)
+    context.plugin.stroke.execute(
+        context.session, BrushStroke(reverted, 0.04, "select")
+    )
+    assert context.session.snapshot().selected.all()
+    control(widget, QtWidgets.QPushButton, "Undo").click()
+    wait_for_debounce()
+    jobs[-1].on_done(jobs[-1].compute())
+    inverse = widget.preview_view()
+    assert inverse is not None
+    assert inverse.stroke_vertices == reverted
+    assert inverse.stroke_width == 0.04
+    np.testing.assert_array_equal(inverse.removed_points, [[0.5, 4.5], [0.5, 4.5]])
+    assert inverse.added_points.shape == (0, 2)
+
+
 def test_latest_success_discards_old_error_and_old_success(selector):
     widget, context, jobs = selector
     wait_for_debounce()
