@@ -589,8 +589,11 @@ class RecipeExecution:
                 logger.exception("Recipe operation failed; delivering to generator")
                 self._check_open()
                 with self._condition:
+                    # Finish belongs to this Run; pending cancel still needs delivery.
                     self._progress = replace(
-                        self._progress, phase=self.snapshot().phase
+                        self._progress,
+                        phase=self.snapshot().phase,
+                        finish_early_requested=False,
                     )
                     self._active = None
                     self._condition.notify_all()
