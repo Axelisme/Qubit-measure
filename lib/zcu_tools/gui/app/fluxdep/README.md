@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02. Explicit search figures and presentation lifetime
+**Last updated:** 2026-10-05. Shared line picking and app-owned session lifetime
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -65,6 +65,11 @@ view 只暴露查詢，不暴露 mutation。
   state/bus/project_root 儲存 + `state`/`bus` property + `get_project_root` + `_emit`
   helper；per-command façade body 仍各 app（領域動詞 + app payload），main 不繼承。
   **無 measure 概念**（run/analyze/writeback/context/device/tab）。
+- **`interactive.py`** — Qt-free `FluxDepInteractiveOwner` 持有 active spectrum 的
+  live 定線 context。GUI controls 與 commands 共用 `gui.interactive` 的 Actions／Session；
+  LinePicker 只持有 disposable preview。Finish 經 Controller 的 AlignmentService 發布；
+  active switch、reload、remove 或 external spectrum change 關閉舊輸入。Widget detach
+  不終止 session，window close 才 dispose owner 並 quiesce 背景 runner。
 - **`event_bus.py`** — fluxdep 的 payload 型別，掛在共用 `BaseEventBus`
   （`gui/event_bus`，payload-type-key 訂閱）上；bus 機制共用、payload 定義 per-app。
 - **`ui/`** — `MainWindow`（左 spectrum 列表 + 右階段驅動編輯區）、互動 widget
@@ -122,6 +127,8 @@ ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一�
 `on_done` 帶 captured generation，主執行緒檢查不是最新就丟棄（非中途 kill）。`get_result`
 同步算最終（finish 終點）。**generation/debounce 留在 panel、不進 runner**——這個「最新者勝」
 取消範式與 measure 的 stop_event 協作取消不同，刻意不合併（runner 對取消無感）。
+- **LinePicker** 使用共用 plugin 的 single-flight auto alignment；owner-loop completion
+  對最新 snapshot 提交，已終止 session 的晚到結果不發布。它不使用 panel generation 範式。
 - **FindPoints** `spectrum2d_findpoint`（大譜 ~180-480ms/次）：worker 化。
 - **Selector** `downsample_points`（O(N²)，5000 點 ~1.3s）：worker 化。
 - **線程非進程**：實測 numpy/scipy 釋放 GIL，背景線程不卡主執行緒；避開進程的
