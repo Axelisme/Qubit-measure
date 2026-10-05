@@ -501,14 +501,16 @@ class MainWindow(QMainWindow):
     # --- close path --------------------------------------------------------
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
-        """Refuse close while app search has not drained its worker/delivery.
+        """Refuse close until search startup and worker/delivery have settled.
 
         begin_close permanently blocks admission and requests cancellation.
         Keep subscriptions, figures and Qt owners alive on drain refusal.
-        A later close attempt can finish once the runner actually drains.
+        A later close attempt can finish once the runner and search owner drain.
         """
         self._ctrl.search.begin_close()
-        if self._search_runner is not None and not self._search_runner.quiesce():
+        search_drained = self._search_runner is None or self._search_runner.quiesce()
+        # Startup notifications can reenter close before any worker is submitted.
+        if not search_drained or self._ctrl.search.active_token is not None:
             if a0 is not None:
                 a0.ignore()
             return
