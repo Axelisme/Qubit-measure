@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -16,6 +17,24 @@ from zcu_tools.analysis.fluxdep.models import TransitionDict, energy2linearform
 from zcu_tools.progress_bar import make_pbar
 
 from .search_models import compile_transitions
+
+
+class SearchCancelled(RuntimeError):
+    """A supplied cancellation predicate stopped search without a partial result."""
+
+
+@dataclass(frozen=True)
+class SearchExecution:
+    """Caller-owned worker policy shared by GUI and Notebook search callers.
+
+    n_jobs: Numba thread count; <=0 selects available CPUs, default is 1.
+    cancel_requested: Optional quick, worker-safe predicate. True at a search
+    checkpoint raises SearchCancelled without returning partial results.
+    Predicate exceptions propagate; None disables cooperative cancellation.
+    """
+
+    n_jobs: int = 1
+    cancel_requested: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -101,8 +120,16 @@ class _PreparedSearch:
     interpolated: NDArray[np.float64]
 
 
+def _check_cancellation(cancel_requested: Callable[[], bool] | None) -> None:
+    if cancel_requested is not None and cancel_requested():
+        raise SearchCancelled("database search cancelled")
+
+
 def _prepare_search(
-    fluxs: NDArray[np.float64], datapath: str, transitions: TransitionDict
+    fluxs: NDArray[np.float64],
+    datapath: str,
+    transitions: TransitionDict,
+    cancel_requested: Callable[[], bool] | None,
 ) -> _PreparedSearch:
     """Load and interpolate only levels referenced by compiled transitions."""
     from .search_njit import _apply_interp, _interp_weights
@@ -110,6 +137,7 @@ def _prepare_search(
     # Load the database (file-cached: the GUI re-runs the search against the same
     # database on every parameter tweak, so the ~290 MB read is amortised).
     f_fluxs, f_params, f_energies = load_database(datapath)
+    _check_cancellation(cancel_requested)
     M = f_energies.shape[2]
 
     # Pre-compile transitions once so the hot loop calls only nogil njit code.
@@ -135,6 +163,7 @@ def _prepare_search(
     idxs, ws = _interp_weights(fluxs_c, f_fluxs)
     energies_used = np.ascontiguousarray(f_energies[:, :, used_levels])
     sf_energies = _apply_interp(energies_used, idxs, ws)
+    _check_cancellation(cancel_requested)
 
     return _PreparedSearch(
         fluxs,
@@ -154,6 +183,7 @@ def _scan_candidates(
     freqs: NDArray[np.float64],
     bounds: ParamBounds,
     n_jobs: int,
+    cancel_requested: Callable[[], bool] | None,
 ) -> tuple[int, float, float, NDArray[np.float64], NDArray[np.float64], bool]:
     """Scan feasible entries while keeping the progress and interruption behavior."""
     from .search_njit import _lower_bound_kernel, search_one_entry
@@ -207,6 +237,7 @@ def _scan_candidates(
         ELb[0],
         ELb[1],
     )
+    _check_cancellation(cancel_requested)
     results[:, 0] = lbs  # unsearched entries keep their LB for the scatter
     order = np.argsort(lbs)
     idx_bar = make_pbar(total=N, desc="Searching...")
@@ -214,6 +245,7 @@ def _scan_candidates(
     interrupted = False
     try:
         for oi in order:
+            _check_cancellation(cancel_requested)
             oi = int(oi)
             lb = lbs[oi]
             if not np.isfinite(lb) or lb > best_dist:
@@ -221,27 +253,30 @@ def _scan_candidates(
             p0, p1, p2 = f_params[oi]
             a_min = max(EJb[0] / p0, ECb[0] / p1, ELb[0] / p2)
             a_max = min(EJb[1] / p0, ECb[1] / p1, ELb[1] / p2)
-            d, a = search_one_entry(
-                sf_energies_c[oi],
-                tr_pairs_reduced,
-                tr_coeffs,
-                tr_offsets,
-                freqs_c,
-                a_min,
-                a_max,
-            )
-            results[oi] = d, a
-            searched += 1
-            if searched % 64 == 0:
-                idx_bar.update(64)
-            if d < best_dist:
-                best_dist = d
-                best_scale = a
-                best_idx = oi
-                best_params = f_params[oi] * a
+            # Only numerical/progress interruption retains Notebook partial results.
+            # A predicate failure must propagate, including KeyboardInterrupt.
+            try:
+                d, a = search_one_entry(
+                    sf_energies_c[oi],
+                    tr_pairs_reduced,
+                    tr_coeffs,
+                    tr_offsets,
+                    freqs_c,
+                    a_min,
+                    a_max,
+                )
+                results[oi] = d, a
+                searched += 1
+                if searched % 64 == 0:
+                    idx_bar.update(64)
+                if d < best_dist:
+                    best_dist, best_scale, best_idx = d, a, oi
+                    best_params = f_params[oi] * a
+            except KeyboardInterrupt:
+                interrupted = True
+                break
+            _check_cancellation(cancel_requested)
         idx_bar.set_description("Done! ")
-    except KeyboardInterrupt:
-        interrupted = True
     finally:
         idx_bar.close()
 
@@ -263,18 +298,37 @@ def search_database(
     transitions: TransitionDict,
     bounds: ParamBounds,
     *,
-    n_jobs: int = 1,
+    execution: SearchExecution | None = None,
 ) -> DatabaseSearchResult:
-    """Search exact scale candidates in increasing lower-bound order."""
+    """Search a fluxonium HDF5 database for exact scale candidates.
+
+    fluxs and freqs are paired one-dimensional flux/GHz arrays. transitions
+    describes allowed level pairs; bounds supplies EJ/EC/EL intervals in GHz.
+    execution supplies the Numba thread count and optional stop predicate.
+    None uses one Numba thread without cooperative cancellation.
+    Return the best candidate and numeric diagnostics; infeasible bounds raise
+    RuntimeError. File, transition, and numerical failures propagate.
+
+    execution.cancel_requested is a quick worker-safe predicate owned by the caller.
+    True at a checkpoint raises SearchCancelled, never a partial result.
+    Predicate exceptions propagate. Checks surround preparation, lower-bound
+    scanning, exact-entry work and diagnostic reconstruction; an in-flight
+    HDF5/Numba call must return first, so cancellation has no fixed latency.
+    None disables cooperative cancellation. KeyboardInterrupt during exact
+    scanning still returns the best-so-far result with a RuntimeWarning.
+    """
     from .search_njit import _apply_interp
 
-    prepared = _prepare_search(fluxs, datapath, transitions)
+    execution = SearchExecution() if execution is None else execution
+    cancel_requested = execution.cancel_requested
+    _check_cancellation(cancel_requested)
+    prepared = _prepare_search(fluxs, datapath, transitions, cancel_requested)
     fluxs = prepared.fluxs
     f_params, f_energies = prepared.params, prepared.energies
     idxs, ws = prepared.idxs, prepared.ws
 
     best_idx, best_scale, best_dist, best_params, results, interrupted = (
-        _scan_candidates(prepared, freqs, bounds, n_jobs)
+        _scan_candidates(prepared, freqs, bounds, execution.n_jobs, cancel_requested)
     )
 
     if not np.isfinite(best_dist):
@@ -299,6 +353,7 @@ def search_database(
         p_freqs = _find_close_points(freqs, best_full, best_scale, transitions)
     else:
         p_freqs = np.empty(0, dtype=np.float64)
+    _check_cancellation(cancel_requested)
     return DatabaseSearchResult(
         params=(float(best_params[0]), float(best_params[1]), float(best_params[2])),
         best_distance=float(best_dist),

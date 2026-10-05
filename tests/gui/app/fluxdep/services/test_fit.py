@@ -15,8 +15,10 @@ import h5py
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
-from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, SearchCancelled
 from zcu_tools.analysis.spectrum import SpectrumData
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
     default_params_path,
@@ -165,6 +167,33 @@ def test_compute_search_does_not_touch_state(tiny_database):
     assert len(result.params) == 3
     assert st.fit.params is None  # still no result on State
     assert st.version.get(FIT_VERSION_KEY) == fit_version_before
+
+
+@pytest.mark.parametrize("synchronous", [False, True])
+def test_controller_cancelled_search_keeps_published_fit(tiny_database, synchronous):
+    st = _state_with_points()
+    ctrl = Controller(st)
+    ctrl.set_fit_params(
+        tiny_database[0],
+        *_WIDE,
+        TransitionDict({"transitions": [(0, 1), (0, 2)]}),
+        0.0,
+        0.0,
+    )
+    st.set_fit_result((3.0, 1.0, 0.5))
+    version = st.version.get(FIT_VERSION_KEY)
+    changes: list[FitChangedPayload] = []
+    subscription = ctrl.bus.subscribe(FitChangedPayload, changes.append)
+    search = ctrl.search_database if synchronous else ctrl.compute_search
+    try:
+        with pytest.raises(SearchCancelled):
+            search(cancel_requested=lambda: True)
+        assert st.fit.params == (3.0, 1.0, 0.5)
+        assert st.version.get(FIT_VERSION_KEY) == version
+        assert changes == []
+    finally:
+        subscription.unsubscribe()
+        ctrl.interactive.dispose()
 
 
 def test_record_result_writes_state(tiny_database):

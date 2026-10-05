@@ -27,6 +27,7 @@ from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
     ParamBounds,
+    SearchExecution,
     search_database,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
@@ -112,6 +113,7 @@ class FitService:
         self,
         *,
         pbar_factory: PbarFactory | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> DatabaseSearchResult:
         """Run the database search and return its result — WITHOUT touching State.
 
@@ -125,6 +127,10 @@ class FitService:
         to the caller after recording the result. ``pbar_factory`` installs a
         custom progress-bar factory for the duration; without one, tqdm is used.
         Fast-fails when no database path is set or the selected cloud is empty.
+        cancel_requested is a quick worker-safe predicate, forwarded to the
+        kernel. True at a checkpoint raises SearchCancelled without a result
+        or State write. None disables cancellation; other failures propagate.
+        In-flight HDF5/Numba work may delay observation of the request.
         """
         fit = self._state.fit
         if not fit.database_path:
@@ -147,6 +153,7 @@ class FitService:
                 database_path,
                 transitions,
                 ParamBounds(EJ=EJb, EC=ECb, EL=ELb),
+                execution=SearchExecution(cancel_requested=cancel_requested),
             )
 
         if pbar_factory is not None:

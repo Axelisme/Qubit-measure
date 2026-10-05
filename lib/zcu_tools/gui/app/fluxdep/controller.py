@@ -13,6 +13,7 @@ device / tab) — only the fluxdep pipeline actions.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -203,15 +204,22 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self,
         *,
         pbar_factory: PbarFactory | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> DatabaseSearchResult:
         """Run the search WITHOUT touching State (safe on a worker thread).
 
         Pair with ``record_search_result`` on the main thread. The GUI worker
         calls this off-main, then marshals the result to the main thread to
         record it; the synchronous convenience ``search_database`` does both in
-        sequence on the calling thread.
+        sequence on the calling thread. pbar_factory optionally supplies worker
+        progress; cancel_requested is a quick worker-safe predicate. True at a
+        kernel checkpoint raises SearchCancelled without a result or State
+        write. None disables cancellation. Other failures propagate, and an
+        in-flight HDF5/Numba call may delay the next cancellation checkpoint.
         """
-        return self._fit.compute_search(pbar_factory=pbar_factory)
+        return self._fit.compute_search(
+            pbar_factory=pbar_factory, cancel_requested=cancel_requested
+        )
 
     def record_search_result(self, result: DatabaseSearchResult) -> None:
         """Write a computed search result onto State (MAIN THREAD only)."""
@@ -222,15 +230,22 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self,
         *,
         pbar_factory: PbarFactory | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> DatabaseSearchResult:
         """Synchronous convenience: compute the search then record it.
 
         Runs the blocking search inline on the calling thread, which must be the
         main thread because of the State write. No remote method triggers it; the
         GUI worker uses the split ``compute_search`` / ``record_search_result`` to
-        keep the search off-main.
+        keep the search off-main. pbar_factory optionally supplies progress;
+        cancel_requested is a quick worker-safe predicate. True at a kernel
+        checkpoint raises SearchCancelled and does not publish a fit result or
+        fact. None disables cancellation. Other failures propagate. In-flight
+        HDF5/Numba work may delay cancellation observation.
         """
-        result = self._fit.compute_search(pbar_factory=pbar_factory)
+        result = self._fit.compute_search(
+            pbar_factory=pbar_factory, cancel_requested=cancel_requested
+        )
         self.record_search_result(result)
         return result
 

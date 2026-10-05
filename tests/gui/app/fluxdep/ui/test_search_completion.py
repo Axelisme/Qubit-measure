@@ -13,7 +13,11 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QPushButton,
 )
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
+from zcu_tools.analysis.fluxdep.search import (
+    DatabaseSearchResult,
+    ParamBounds,
+    SearchExecution,
+)
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
@@ -66,7 +70,8 @@ def completed_search(qapp, search_input, monkeypatch, failure):
     make_figure = analyze_panel.make_search_diagnostic_figure
     present_figure = analyze_panel.QtPlotHost.present
 
-    def search(*args):
+    def search(*args, execution: SearchExecution | None = None):
+        del args, execution
         calls.append("search")
         assert QThread.currentThread() != qapp.thread()
         if failure == "search":
@@ -172,7 +177,8 @@ def test_replacing_and_releasing_diagnostics_keeps_retained_figures(
         first.savefig(after, format="png")
         assert before.getvalue() == after.getvalue()
 
-        def fail_search(*args):
+        def fail_search(*args, execution: SearchExecution | None = None):
+            del args, execution
             raise RuntimeError("numeric search failed")
 
         monkeypatch.setattr(fit, "search_database", fail_search)
