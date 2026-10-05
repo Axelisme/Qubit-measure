@@ -261,9 +261,8 @@ class ZigZagScanFreqAdapter(_ZigZagScanBase):
             "Zig-zag frequency scan: runs the zig-zag repetition sequence at "
             "each drive frequency of the repeated pulse, and picks the "
             "frequency where the signal stays flattest across repetitions. "
-            "Runs on real hardware only: the simulator rejects it because the "
-            "X90 pulse stays at q_f while the repeated pulse's frequency moves, "
-            "and it models a single rotating frame."
+            "Runs on real hardware. The simulator measures drive phase from "
+            "the start of each shot, while hardware uses absolute time."
         ),
         expects_md=(
             "Reads 'q_f' to seed the frequency sweep as q_f ± 2 MHz "
