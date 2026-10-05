@@ -16,6 +16,7 @@ from zcu_tools.analysis.fluxdep import (
 from zcu_tools.gui.app.fluxdep.interactive import LinePickContext
 from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.plotting.fluxdep.pick import configure_flux_pick_axes
 
 __all__ = ["LinePickerWidget", "find_best_mirror_position", "fold_initial_lines"]
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class LinePickerWidget(InteractiveMplWidget):
             flux_int=state.flux_int,
             force_magnitude=state.magnitude_only,
         )
+        configure_flux_pick_axes(self.figure)
         self._conjugate = QtWidgets.QCheckBox("Conjugate Line")
         self._conjugate.toggled.connect(
             lambda enabled: self._execute(
