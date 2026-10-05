@@ -12,7 +12,6 @@ from matplotlib.colors import Normalize
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from pydantic import Field
-
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.device import DeviceInfo
@@ -33,9 +32,7 @@ from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
     setup_devices,
 )
-from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
-from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
@@ -50,6 +47,8 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
+
+from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
 
 
 @dataclass(frozen=True)

@@ -12,16 +12,9 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from matplotlib.figure import Figure
-
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_lab.v2.jpa.auto_optimize.core import AutoOptimizeExp
-from zcu_lab.v2.jpa.auto_optimize.core import JPAOptCfg
-from zcu_lab.v2.jpa.auto_optimize.core import JPAOptimizeResult
-from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder
-from zcu_lab.v2._support.measure.schema_builder import MeasureCfgDefinition
-from zcu_lab.v2._support.measure.seeds import custom
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
@@ -36,9 +29,21 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.jpa_shared import lower_jpa_flux_dev
-from zcu_lab.v2._support.measure.jpa_shared import lower_jpa_rf_dev
-from zcu_lab.v2._support.measure.jpa_shared import lower_jpa_rf_power_dev
+from zcu_lab.v2._support.measure.jpa_shared import (
+    lower_jpa_flux_dev,
+    lower_jpa_rf_dev,
+    lower_jpa_rf_power_dev,
+)
+from zcu_lab.v2._support.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_lab.v2._support.measure.seeds import custom
+from zcu_lab.v2.jpa.auto_optimize.core import (
+    AutoOptimizeExp,
+    JPAOptCfg,
+    JPAOptimizeResult,
+)
 from zcu_lab.v2.jpa.flux.gui import jpa_flux_sweep_seed
 from zcu_lab.v2.jpa.freq.gui import jpa_freq_sweep_seed
 from zcu_lab.v2.jpa.power.gui import jpa_power_sweep_seed

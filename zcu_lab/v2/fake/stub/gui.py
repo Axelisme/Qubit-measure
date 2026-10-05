@@ -1,20 +1,39 @@
 """stub experiment GUI attachment."""
 
 from __future__ import annotations
+
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
+
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder
-from zcu_lab.v2._support.measure.schema_builder import MeasureCfgDefinition
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalyzeRequest, AnalyzeResultBase, MetaDictWriteback, ParamMeta, RunRequest, SessionEnv, WritebackRequest
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AnalyzeRequest,
+    AnalyzeResultBase,
+    MetaDictWriteback,
+    ParamMeta,
+    RunRequest,
+    SessionEnv,
+    WritebackRequest,
+)
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import SweepSpec, SweepValue
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
-from zcu_lab.v2.fake.stub.core import FakeAnalyzeOptions, FakeExp, FakeExpCfg, FakeRunResult
+
+from zcu_lab.v2._support.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_lab.v2.fake.stub.core import (
+    FakeAnalyzeOptions,
+    FakeExp,
+    FakeExpCfg,
+    FakeRunResult,
+)
 
 
 @dataclass

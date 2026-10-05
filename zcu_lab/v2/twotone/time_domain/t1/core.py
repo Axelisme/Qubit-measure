@@ -6,10 +6,9 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
+import zcu_tools.analysis.fitting as ft
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-
-import zcu_tools.analysis.fitting as ft
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
@@ -29,10 +28,9 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
-from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
-from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,

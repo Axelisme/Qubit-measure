@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from matplotlib.figure import Figure
-
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.gui.app.measure.adapter import AnalyzeResultBase
 

@@ -9,7 +9,6 @@ from matplotlib import rcParams
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
-
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -23,8 +22,7 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
-from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ComputedPulse,
@@ -161,6 +159,22 @@ class AllXYAnalyzeOptions:
     fit_ge: bool = False
 
 
+@dataclass(frozen=True)
+class AllXYAnalysis:
+    """Fitted gate errors.
+
+    ``power_param`` and ``detune_param`` are the fitted model parameters
+    (relative amplitude error and detuning error in the Reed thesis model).
+    ``power_err`` and ``detune_err`` are their mean state deviations over the
+    21 gate pairs, the fractions shown in the fit figure title.
+    """
+
+    power_param: float
+    detune_param: float
+    power_err: float
+    detune_err: float
+
+
 class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
     Options: ClassVar[type[AllXYAnalyzeOptions]] = AllXYAnalyzeOptions
 
@@ -242,7 +256,7 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         options: AllXYAnalyzeOptions,
         *,
         plots: Plots,
-    ) -> None:
+    ) -> AllXYAnalysis:
         result = source.result
         fit_ge = options.fit_ge
 
@@ -354,3 +368,10 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         ax.set_title(f"power dep: {power_err:.1%}, detune dep: {detune_err:.1%}")
 
         fig.tight_layout()
+
+        return AllXYAnalysis(
+            power_param=float(ep),
+            detune_param=float(ed),
+            power_err=float(power_err),
+            detune_err=float(detune_err),
+        )

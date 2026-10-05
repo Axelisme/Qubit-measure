@@ -1,9 +1,11 @@
 """stub experiment core."""
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
+
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.experiment.cfg_model import ExpCfgModel

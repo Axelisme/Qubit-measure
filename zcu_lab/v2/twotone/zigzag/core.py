@@ -6,7 +6,6 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
-
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -18,8 +17,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
-from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.program.v2 import (
     LoadValue,
     ProgramV2Cfg,

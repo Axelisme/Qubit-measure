@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_tools.gui.app.measure.adapter import ModuleWriteback, SessionEnv
+
+from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 
 if TYPE_CHECKING:
     from zcu_lab.v2._support.measure.writeback_helpers import _HasModules

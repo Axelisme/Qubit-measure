@@ -304,7 +304,7 @@ class TestDelaySegments:
 
 
 class TestIdleFrameDetuning:
-    """Idle segments precess at the single-frame detuning set by the qubit pulses.
+    """Idle segments precess at the reference-frame detuning set by the qubit pulses.
 
     The frame carrier is the top-level qubit Pulse frequency; an idle/Delay
     segment must carry ``delta = 2*pi*(f_qubit - f_ref)`` so Ramsey fringes can
@@ -369,17 +369,6 @@ class TestIdleFrameDetuning:
             # The second pi/2's phase advances linearly with the delay index.
             drives = [s for s in lp.segments if s.omega > 0.0]
             assert drives[-1].phase == pytest.approx(math.radians(expected_phase_deg))
-
-    def test_ambiguous_frame_fast_fails(self) -> None:
-        # Two qubit pulses at different frequencies have no single rotating frame.
-        modules = [
-            _const_pulse(freq=4000.0, length=0.2),
-            Delay("wait", 0.5),
-            _const_pulse(freq=4005.0, length=0.2),
-            _readout(),
-        ]
-        with pytest.raises(UnsupportedModuleError, match="single rotating frame"):
-            lower_point(modules, None, _SIM, _F_QUBIT_GHZ, {}, _identity_cycles2us)
 
 
 class TestResetSegments:

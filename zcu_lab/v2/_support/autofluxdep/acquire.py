@@ -22,7 +22,6 @@ from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
-
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
@@ -178,8 +177,6 @@ def schedule_completed(outcome: ScheduleOutcome, exp_name: str) -> bool:
         reason = outcome.reason or f"{exp_name} Schedule acquire {outcome.status}"
         raise RuntimeError(reason) from outcome.exception
     raise RuntimeError(f"unsupported {exp_name} Schedule outcome: {outcome.status!r}")
-
-
 
 
 def signal2real_flip(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

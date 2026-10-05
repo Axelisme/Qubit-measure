@@ -16,7 +16,6 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.stats import qmc
 from skopt import Optimizer
-
 from zcu_tools.program.v2 import SweepCfg
 
 # Suppress skopt warnings about duplicate points
@@ -152,9 +151,7 @@ class JPAOptimizer:
         )
 
         # Initialize Phase 1 state
-        flux_grid = np.linspace(
-            flux_sweep.start, flux_sweep.stop, num_flux_points
-        )
+        flux_grid = np.linspace(flux_sweep.start, flux_sweep.stop, num_flux_points)
         flux_interval = (
             abs(flux_sweep.stop - flux_sweep.start) / (num_flux_points - 1)
             if num_flux_points > 1

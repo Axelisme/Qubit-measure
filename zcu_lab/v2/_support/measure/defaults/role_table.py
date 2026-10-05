@@ -41,11 +41,15 @@ from zcu_tools.program.v2.modules import AbsResetCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
 from zcu_lab.v2._support.measure.ctx_helpers import md_has_key
-from zcu_lab.v2._support.measure.defaults.helpers import make_trig_offset
-from zcu_lab.v2._support.measure.defaults.helpers import patch_pulse_fields
-from zcu_lab.v2._support.measure.defaults.helpers import patch_ro_cfg_fields
-from zcu_lab.v2._support.measure.defaults.module_defaults import select_named_module_value
-from zcu_lab.v2._support.measure.defaults.module_defaults import select_named_waveform_value
+from zcu_lab.v2._support.measure.defaults.helpers import (
+    make_trig_offset,
+    patch_pulse_fields,
+    patch_ro_cfg_fields,
+)
+from zcu_lab.v2._support.measure.defaults.module_defaults import (
+    select_named_module_value,
+    select_named_waveform_value,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv

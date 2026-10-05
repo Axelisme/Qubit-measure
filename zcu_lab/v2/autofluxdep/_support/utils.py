@@ -3,7 +3,6 @@ from typing import TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
-
 from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.resources.context import ModuleLibrary
 

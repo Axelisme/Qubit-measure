@@ -10,7 +10,6 @@ from matplotlib.backend_bases import MouseEvent
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from typing_extensions import TypeVar
-
 from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickAnalysis,
@@ -20,13 +19,12 @@ from zcu_tools.analysis.fluxdep.line_state import (
     fold_initial_lines,
 )
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
-from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg
-from zcu_lab.v2.onetone.flux_dep.core import FluxDepResult
-from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg
-from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.plots import PlotHost, Plots
+
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepResult
+from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxResult
 
 
 @dataclass(frozen=True)

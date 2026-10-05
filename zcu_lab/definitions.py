@@ -2,12 +2,11 @@
 
 from typing import Any
 
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
-from zcu_lab.roles import register_all_roles
-
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
 
+from zcu_lab.roles import register_all_roles
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
@@ -19,19 +18,22 @@ from zcu_lab.v2.lookback.gui import LookbackAdapter
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
+from zcu_lab.v2.singleshot.ac_stark.gui import SsAcStarkAdapter
+from zcu_lab.v2.singleshot.amp_rabi.gui import SsAmpRabiAdapter
 from zcu_lab.v2.singleshot.check.gui import CheckAdapter
 from zcu_lab.v2.singleshot.ge.gui import GEAdapter
+from zcu_lab.v2.singleshot.len_rabi.gui import SsLenRabiAdapter
 from zcu_lab.v2.singleshot.mist.freq.gui import MistFreqAdapter
 from zcu_lab.v2.singleshot.mist.power.gui import MistPowerAdapter
 from zcu_lab.v2.singleshot.mist.power_freq.gui import MistPowerFreqAdapter
-from zcu_lab.v2.singleshot.ac_stark.gui import SsAcStarkAdapter
-from zcu_lab.v2.singleshot.amp_rabi.gui import SsAmpRabiAdapter
-from zcu_lab.v2.singleshot.len_rabi.gui import SsLenRabiAdapter
 from zcu_lab.v2.singleshot.reset_check.gui import SsResetCheckAdapter
 from zcu_lab.v2.singleshot.t1.t1.gui import SsT1Adapter
 from zcu_lab.v2.singleshot.t1.t1_with_tone.gui import SsT1ToneAdapter
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import SsT1ToneSweepFreqAdapter
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import SsT1ToneSweepGainAdapter
+from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
+    SsT1ToneSweepFreqAdapter,
+    SsT1ToneSweepGainAdapter,
+)
+from zcu_lab.v2.twotone.allxy.gui import AllXYAdapter
 from zcu_lab.v2.twotone.ckp.gui import CKPAdapter
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
 from zcu_lab.v2.twotone.freq.gui import FreqAdapter
@@ -41,10 +43,10 @@ from zcu_lab.v2.twotone.rabi.len_rabi.gui import LenRabiAdapter
 from zcu_lab.v2.twotone.reset.bath.freq.gui import BathFreqGainAdapter
 from zcu_lab.v2.twotone.reset.bath.length.gui import BathLengthAdapter
 from zcu_lab.v2.twotone.reset.bath.phase.gui import BathPhaseAdapter
-from zcu_lab.v2.twotone.reset.rabi_check.gui import RabiCheckAdapter
 from zcu_lab.v2.twotone.reset.dual_tone.freq.gui import DualToneFreqAdapter
 from zcu_lab.v2.twotone.reset.dual_tone.length.gui import DualToneLengthAdapter
 from zcu_lab.v2.twotone.reset.dual_tone.power.gui import DualTonePowerAdapter
+from zcu_lab.v2.twotone.reset.rabi_check.gui import RabiCheckAdapter
 from zcu_lab.v2.twotone.reset.single_tone.freq.gui import SingleToneFreqAdapter
 from zcu_lab.v2.twotone.reset.single_tone.length.gui import SingleToneLengthAdapter
 from zcu_lab.v2.twotone.ro_optimize.auto_optimize.gui import RoOptAutoAdapter
@@ -55,6 +57,11 @@ from zcu_lab.v2.twotone.ro_optimize.power.gui import RoOptPowerAdapter
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoAdapter
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAdapter
+from zcu_lab.v2.twotone.zigzag.gui import ZigZagAdapter
+from zcu_lab.v2.twotone.zigzag_sweep.gui import (
+    ZigZagScanFreqAdapter,
+    ZigZagScanGainAdapter,
+)
 
 ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "lookback": LookbackAdapter,
@@ -85,6 +92,10 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "twotone/t1": T1Adapter,
     "twotone/t2ramsey": T2RamseyAdapter,
     "twotone/t2echo": T2EchoAdapter,
+    "twotone/zigzag": ZigZagAdapter,
+    "twotone/zigzag_scan/gain": ZigZagScanGainAdapter,
+    "twotone/zigzag_scan/freq": ZigZagScanFreqAdapter,
+    "twotone/allxy": AllXYAdapter,
     "singleshot/ge": GEAdapter,
     "singleshot/check": CheckAdapter,
     "singleshot/reset_check": SsResetCheckAdapter,

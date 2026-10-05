@@ -5,15 +5,18 @@ from dataclasses import dataclass, field
 from typing import TypeAlias
 
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
-from zcu_lab.v2.singleshot.ge.core import GE_Cfg
-from zcu_lab.v2.singleshot.ge.core import GE_Exp
-from zcu_lab.v2.singleshot.ge.core import GE_Result
-from zcu_lab.v2.singleshot.ge.core import GEAnalysis
-from zcu_lab.v2.singleshot.ge.core import GEAnalyzeOptions
-from zcu_lab.v2.singleshot.ge.core import GEPostAnalysis
-from zcu_lab.v2.singleshot.ge.core import GEPostAnalyzeOptions
 from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
 from zcu_tools.plotting.plots import PlotHost, Plots
+
+from zcu_lab.v2.singleshot.ge.core import (
+    GE_Cfg,
+    GE_Exp,
+    GE_Result,
+    GEAnalysis,
+    GEAnalyzeOptions,
+    GEPostAnalysis,
+    GEPostAnalyzeOptions,
+)
 
 GEPrimaryRecord: TypeAlias = AnalysisRecord[
     GE_Cfg, GE_Result, GEAnalyzeOptions, GEAnalysis

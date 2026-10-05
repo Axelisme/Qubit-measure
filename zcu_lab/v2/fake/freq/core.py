@@ -1,10 +1,12 @@
 """freq experiment core."""
 
 from __future__ import annotations
+
 import time
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal, TypeAlias, cast
+from typing import Literal, TypeAlias
+
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.resonance.hanger import HangerModel
@@ -15,19 +17,21 @@ from zcu_tools.experiment.base import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_lab.v2.onetone.freq.core import FreqAnalysis
-from zcu_lab.v2.onetone.freq.core import FreqAnalyzeOptions
-from zcu_lab.v2.onetone.freq.core import FreqCfg
-from zcu_lab.v2.onetone.freq.core import FreqExp
-from zcu_lab.v2.onetone.freq.core import FreqResult
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
-from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ProgramV2Cfg, ReadoutCfg
 from zcu_tools.program.v2.sweep import SweepCfg
 
+from zcu_lab.v2.onetone.freq.core import (
+    FreqAnalysis,
+    FreqAnalyzeOptions,
+    FreqCfg,
+    FreqExp,
+    FreqResult,
+)
 
-class FakeFreqSweepCfg(ProgramV2Cfg):  # type: ignore[misc]
+
+class FakeFreqSweepCfg(ProgramV2Cfg):
     freq: SweepCfg
 
 
@@ -100,7 +104,7 @@ class FakeFreqExp(PersistableExperiment[FreqResult, FakeFreqCfg]):
             assert isinstance(p, HangerSimParams)
             Qc = complex(p.Qc_abs * np.exp(-1j * p.phi))
             return HangerModel.calc_signals(
-                freqs, p.freq, p.Ql, cast(float, Qc), p.phi, a0, p.edelay
+                freqs, p.freq, p.Ql, Qc, p.phi, a0, p.edelay
             )
         assert isinstance(p, TransmissionSimParams)
         return TransmissionModel.calc_signals(freqs, p.freq, p.Ql, a0, p.edelay)

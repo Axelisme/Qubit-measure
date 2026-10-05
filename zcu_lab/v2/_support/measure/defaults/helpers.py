@@ -17,9 +17,11 @@ from zcu_tools.gui.cfg import (
 )
 
 from zcu_lab.v2._support.measure.ctx_helpers import md_has_key
-from zcu_lab.v2._support.measure.defaults.module_defaults import NamedModuleValue
-from zcu_lab.v2._support.measure.defaults.module_defaults import select_named_module_value
-from zcu_lab.v2._support.measure.defaults.module_defaults import select_named_waveform_value
+from zcu_lab.v2._support.measure.defaults.module_defaults import (
+    NamedModuleValue,
+    select_named_module_value,
+    select_named_waveform_value,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv

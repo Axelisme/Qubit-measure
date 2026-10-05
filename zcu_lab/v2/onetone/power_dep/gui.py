@@ -5,13 +5,6 @@ from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_lab.v2.onetone.power_dep.core import PowerDepCfg
-from zcu_lab.v2.onetone.power_dep.core import PowerDepExp
-from zcu_lab.v2.onetone.power_dep.core import PowerDepResult
-from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder
-from zcu_lab.v2._support.measure.schema_builder import MeasureCfgDefinition
-from zcu_lab.v2._support.measure.schema_builder import ModuleInit
-from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -21,6 +14,14 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import SweepValue
+
+from zcu_lab.v2._support.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+    ModuleInit,
+)
+from zcu_lab.v2._support.measure.seeds import res_freq_range
+from zcu_lab.v2.onetone.power_dep.core import PowerDepCfg, PowerDepExp, PowerDepResult
 
 OneTonePowerDepRunResult: TypeAlias = RunRecord[PowerDepCfg, PowerDepResult]
 

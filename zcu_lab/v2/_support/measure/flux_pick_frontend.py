@@ -19,7 +19,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QVBoxLayout,
     QWidget,
 )
-
 from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import FluxPickState
 from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session

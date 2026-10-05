@@ -10,17 +10,16 @@ from numpy.typing import NDArray
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
 )
-
 from zcu_tools.analysis.fitting import fit_qubit_freq
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load_labber_data, save_labber_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
-from zcu_tools.experiment.v2.runtime.task import MeasurementTask
 from zcu_tools.experiment.v2.runtime.result_tree import ResultUpdateEvent
 from zcu_tools.experiment.v2.runtime.schedule import ScheduleStep
-from zcu_tools.experiment.v2.utils.snr import snr_checker
+from zcu_tools.experiment.v2.runtime.task import MeasurementTask
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import HeatmapLinePlot, LinePlot, Plots
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,

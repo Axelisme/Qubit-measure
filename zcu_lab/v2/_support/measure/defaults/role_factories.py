@@ -25,10 +25,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from zcu_lab.v2._support.measure.defaults.role_table import ROLE_TABLE
-from zcu_lab.v2._support.measure.defaults.role_table import RoleDef
-from zcu_lab.v2._support.measure.defaults.role_table import role_blank
-from zcu_lab.v2._support.measure.defaults.role_table import role_ref
+from zcu_lab.v2._support.measure.defaults.role_table import (
+    ROLE_TABLE,
+    RoleDef,
+    role_blank,
+    role_ref,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv

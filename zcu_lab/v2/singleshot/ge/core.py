@@ -9,7 +9,6 @@ from typing import ClassVar, Literal, cast
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
@@ -24,8 +23,7 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
-from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
@@ -39,9 +37,11 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 
-from zcu_lab.v2._support.singleshot.util import classify_result
-from zcu_lab.v2._support.singleshot.util import plot_with_classified
-from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
+from zcu_lab.v2._support.singleshot.util import (
+    classify_result,
+    plot_with_classified,
+    raw_shots_to_signal,
+)
 
 # ------------------------------------------------------------
 # Helper Functions
@@ -112,7 +112,7 @@ def optimize_ge_radius(
     sigma: float,
     consider_other: bool = True,
 ) -> float:
-    from scipy.optimize import minimize_scalar
+    from scipy.optimize import OptimizeResult, minimize_scalar
 
     # Validate geometry even before the optimizer evaluates its first candidate.
     classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, 0.0)
@@ -157,6 +157,8 @@ def optimize_ge_radius(
         return condition if np.isfinite(condition) else 1e12
 
     result = minimize_scalar(loss_fn, bounds=(0.0, ge_dist), method="bounded")
+    if not isinstance(result, OptimizeResult):
+        raise TypeError("classification-radius optimizer must return OptimizeResult")
     if not result.success or not np.isfinite(result.x):
         raise RuntimeError("classification-radius optimization failed")
     # The optimum can be the upper bound; bounded minimization excludes endpoints.

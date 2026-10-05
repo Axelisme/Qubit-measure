@@ -1,8 +1,9 @@
-from zcu_lab.v2.mist.power_dep.drive_freq.core import DriveFreqCfg
-from zcu_lab.v2.mist.power_dep.drive_freq.core import DriveFreqExp
-from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepAnalyzeOptions
-from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg
-from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepExp
+from zcu_lab.v2.mist.power_dep.drive_freq.core import DriveFreqCfg, DriveFreqExp
+from zcu_lab.v2.mist.power_dep.single_trace.core import (
+    PowerDepAnalyzeOptions,
+    PowerDepCfg,
+    PowerDepExp,
+)
 
 __all__ = [
     # drive freq

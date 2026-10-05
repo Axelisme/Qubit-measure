@@ -28,10 +28,9 @@ from typing import Any
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-
-from zcu_lab.v2._support.autofluxdep.result import Sweep1DResult
-from zcu_lab.v2._support.autofluxdep.result import Sweep2DResult
 from zcu_tools.plotting.plots import Plots
+
+from zcu_lab.v2._support.autofluxdep.result import Sweep1DResult, Sweep2DResult
 
 
 class Decay1DPlotter:
