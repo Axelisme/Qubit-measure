@@ -83,14 +83,16 @@ def test_allxy_analysis_reports_fitted_errors(fit_ge: bool) -> None:
             ),
             plots=plots,
         )
-        assert answer.power_param == pytest.approx(0.05, abs=0.005)
+        assert answer.amplitude_error == pytest.approx(0.05 / (np.pi / 2), abs=0.003)
         assert answer.detune_param == pytest.approx(0.0, abs=0.005)
         assert answer.power_err > 0.0
+        assert answer.residual_rms < 0.01
         assert set(answer.to_summary_dict()) == {
-            "power_param",
+            "amplitude_error",
             "detune_param",
             "power_err",
             "detune_err",
+            "residual_rms",
         }
         assert tuple(plots) == ("fit",)
     finally:
