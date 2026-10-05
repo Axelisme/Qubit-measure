@@ -45,8 +45,9 @@ def apply_mask_stroke(
     A zero radius is valid only for a stationary stroke. Out-of-bounds vertices
     are allowed; only supplied grid positions can be changed. ValueError rejects
     invalid shapes, nonfinite data, zero spans, an empty stroke, or invalid width
-    before modifying mask. Squared width, axis spans, normalized coordinates
-    and segment distances must also remain finite. A complete stroke may use at
+    before modifying mask. Squared width, axis spans, normalized coordinates,
+    squared circle distances (including their sum) and segment distances must
+    also remain finite. A complete stroke may use at
     most 10,000 samples including segment endpoints; validate the full sampling
     budget before painting. Axes and stroke are not modified.
     """
@@ -55,7 +56,9 @@ def apply_mask_stroke(
     if mask.shape != (dev_values.size, freqs.size):
         raise ValueError("mask shape must match (len(dev_values), len(freqs))")
     samples = _stroke_samples(stroke, width, x_span, y_span)
-    _validate_normalized_coordinates(dev_values, freqs, samples, x_span, y_span)
+    _validate_normalized_coordinates(
+        dev_values, freqs, samples, x_span, y_span, grid=True
+    )
 
     for point in samples:
         toggle_near_mask(dev_values, freqs, mask, point.x, point.y, width, select)
@@ -82,8 +85,8 @@ def points_in_normalized_stroke(
     remain valid; bounds define scaling, not clipping. An empty point cloud returns
     a zero-length bool array for a valid request. ValueError rejects invalid shapes,
     nonfinite data/bounds/vertices, zero or nonfinite spans, empty stroke or
-    invalid width. Squared width, normalized coordinates and segment distances
-    must also be finite. A complete stroke may use at most 10,000 samples including
+    invalid width. Squared width, normalized coordinates, squared circle distances
+    (including their sum) and segment distances must also be finite. A complete stroke may use at most 10,000 samples including
     segment endpoints; validate its complete budget before evaluating membership.
     """
     if xs.shape != ys.shape:
@@ -95,7 +98,7 @@ def points_in_normalized_stroke(
     x_span = _bound_span(x_bound, "x_bound")
     y_span = _bound_span(y_bound, "y_bound")
     samples = _stroke_samples(stroke, width, x_span, y_span)
-    _validate_normalized_coordinates(xs, ys, samples, x_span, y_span)
+    _validate_normalized_coordinates(xs, ys, samples, x_span, y_span, grid=False)
 
     membership = np.zeros(xs.shape, dtype=np.bool_)
     for point in samples:
@@ -184,15 +187,23 @@ def _validate_normalized_coordinates(
     samples: Sequence[BrushPoint],
     x_span: float,
     y_span: float,
+    *,
+    grid: bool,
 ) -> None:
-    """Check all circle-coordinate arithmetic before evaluating any brush."""
+    """Reject nonfinite circle arithmetic for a Cartesian grid or paired points."""
     # Overflow is translated into a request error, never a partially painted mask.
     with np.errstate(over="ignore", invalid="ignore"):
         for point in samples:
             if not isfinite(point.x) or not isfinite(point.y):
                 raise ValueError("stroke sample coordinates must be finite")
-            if (
-                not np.isfinite((xs - point.x) / x_span).all()
-                or not np.isfinite((ys - point.y) / y_span).all()
-            ):
-                raise ValueError("normalized stroke coordinates must be finite")
+            x_squared = ((xs - point.x) / x_span) ** 2
+            y_squared = ((ys - point.y) / y_span) ** 2
+            if not np.isfinite(x_squared).all() or not np.isfinite(y_squared).all():
+                raise ValueError("normalized squared stroke coordinates must be finite")
+            if grid:
+                # The farthest Cartesian pair bounds every sum without a 2D allocation.
+                finite_distances = np.isfinite(x_squared.max() + y_squared.max())
+            else:
+                finite_distances = np.isfinite(x_squared + y_squared).all()
+            if not finite_distances:
+                raise ValueError("normalized squared stroke distances must be finite")
