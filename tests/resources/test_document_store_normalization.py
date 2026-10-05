@@ -1,5 +1,6 @@
 from contextlib import ExitStack
 from enum import StrEnum
+from itertools import count
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,42 @@ class ModernDocument(BaseModel):
     format_version: str
     values: ModernValues
     description: str
+
+
+@pytest.mark.parametrize("version", ["1.0", "1.2"])
+def test_collision_extra_model_keeps_absent_defaults_on_unrelated_commit(
+    tmp_path: Path, version: str
+) -> None:
+    sequence = count()
+
+    class Details(BaseModel):
+        value: int
+        token: str = Field(default_factory=lambda: f"token-{next(sequence)}")
+
+    class ExtensibleDocument(BaseModel):
+        model_config = ConfigDict(extra="allow")
+        __pydantic_extra__: dict[str, Details] = Field(init=False)
+        format: str
+        format_version: str
+        description: str
+
+    path = tmp_path / "collision.yaml"
+    path.write_text(
+        f"format: synthetic\nformat_version: '{version}'\n"
+        "description: initial\nmodel_config:\n  value: 7\n",
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+    store = DocumentStore(path, ExtensibleDocument, format="synthetic")
+    assert path.read_bytes() == before
+    with store.edit() as draft:
+        draft.description = "accepted"
+    stored = YAML(typ="safe").load(path)
+    assert stored["model_config"] == {"value": 7}
+    assert stored["description"] == "accepted"
+    assert stored["format_version"] == version
+    reopened = DocumentStore(path, ExtensibleDocument, format="synthetic")
+    assert reopened.snapshot().description == "accepted"
 
 
 @pytest.mark.parametrize("shape", ["scalar", "collision", "relocated"])

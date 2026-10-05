@@ -410,6 +410,53 @@ def test_plain_string_target_resolves_and_round_trips_without_markers(
         component_registry.unregister("fake/drive/linked")
 
 
+@pytest.mark.parametrize("path", ["model_dump", "links.model_dump"])
+def test_via_reads_collision_extra_target_and_follows_reload(
+    tmp_path: Path, registry_state_guard: None, path: str
+) -> None:
+    class Links(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+    class Linked(ComponentSchema):
+        model_config = ConfigDict(extra="allow")
+        links: Links
+
+    component_registry.register("fake/drive/colliding", Linked)
+    try:
+        point = make_point(tmp_path)
+        point.add_component(
+            "Q3",
+            kind="fake/drive/colliding",
+            model_dump="R1",
+            links={"model_dump": "R1"},
+        )
+        requirements = {
+            "driver": RoleSpec("fake/drive/*"),
+            "sense": RoleSpec("fake/sensor", via=f"driver.{path}"),
+        }
+        assert point.resolve(requirements, focus="Q3").components == {
+            "driver": "Q3",
+            "sense": "R1",
+        }
+        with point.edit() as draft:
+            draft.set(f"Q3.{path}", "R2")
+        loaded = ResultEntry.open(
+            "roles",
+            result_root=tmp_path / "results",
+            database_root=tmp_path / "database",
+        ).use_point("working")
+        assert loaded.resolve(requirements, focus="Q3").components == {
+            "driver": "Q3",
+            "sense": "R2",
+        }
+        with loaded.edit() as draft:
+            draft.set(f"Q3.{path}", "missing")
+        with pytest.raises(RoleResolutionError):
+            loaded.resolve(requirements, focus="Q3")
+    finally:
+        component_registry.unregister("fake/drive/colliding")
+
+
 @pytest.mark.parametrize("reference", [None, "Q2", "missing"])
 def test_missing_or_wrong_kind_reference_reports_required_role(
     tmp_path: Path, reference: str | None

@@ -81,10 +81,18 @@ def _manual_source() -> YamlMap:
     }
 
 
+def _model_field_value(node: BaseModel, name: str) -> object:
+    """Read logical data, never a class attribute shadowed by an extra key."""
+    if name in type(node).model_fields:
+        return getattr(node, name)
+    return (node.model_extra or {}).get(name)
+
+
 def _field_value(node: object, path: str) -> object:
+    """Read a dotted logical model/mapping path; missing or null returns None."""
     for part in path.split("."):
         if isinstance(node, BaseModel):
-            node = getattr(node, part, None)
+            node = _model_field_value(node, part)
         elif isinstance(node, dict):
             node = node.get(part)
         else:
@@ -207,7 +215,7 @@ def _read_field(node: _FieldNode, name: str, path: str) -> object:
     if isinstance(node, BaseModel):
         if name not in type(node).model_fields and name not in (node.model_extra or {}):
             raise AttributeError(f"{path}.{name}: field is not set")
-        value: object = getattr(node, name)
+        value = _model_field_value(node, name)
         if name not in node.model_fields_set and value is None:
             raise AttributeError(f"{path}.{name}: field is not set")
         return value
@@ -224,10 +232,15 @@ def _field_container(value: object, path: str) -> _FieldNode:
 def _write_field(node: _FieldNode, name: str, value: object) -> None:
     copied = deepcopy(value)
     if isinstance(node, BaseModel):
-        if (
-            name not in type(node).model_fields
-            and node.model_config.get("extra") != "allow"
-        ):
+        if name in type(node).model_fields:
+            setattr(node, name, copied)
+        elif type(node).model_config.get("extra") == "allow":
+            extras = node.model_extra
+            if extras is None:
+                raise ValueError(f"{name!r}: model has no extra field storage")
+            extras[name] = copied
+            node.model_fields_set.add(name)
+        else:
             # The original model applies forbid/ignore, not a registry precheck.
             type(node).model_validate(
                 {
@@ -235,8 +248,6 @@ def _write_field(node: _FieldNode, name: str, value: object) -> None:
                     name: copied,
                 }
             )
-            return
-        setattr(node, name, copied)
     else:
         node[name] = copied
 
