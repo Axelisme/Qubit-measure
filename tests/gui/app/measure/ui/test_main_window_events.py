@@ -499,14 +499,14 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     assert window._tabs.tabText(0) == "● A"
     assert window._tabs.tabText(1) == "B"
     assert tab_bar.tabTextColor(0).name() == "#286ac7"
-    assert tab_bar.tabToolTip(0) == "Run in progress"
+    assert tab_bar.tabToolTip(0) == "A — Run in progress"
 
     ctrl.get_running_tab_id.return_value = None
     window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
 
     assert window._tabs.tabText(0) == "A"
     assert window._tabs.tabText(1) == "B"
-    assert tab_bar.tabToolTip(0) == ""
+    assert tab_bar.tabToolTip(0) == "A"
 
 
 def test_context_event_refreshes_paths_and_interaction_without_writeback() -> None:

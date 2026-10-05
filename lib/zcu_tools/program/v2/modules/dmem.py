@@ -74,6 +74,11 @@ class LoadValue(Module):
 
         self._plan_compression()
 
+    @property
+    def is_compressed(self) -> bool:
+        """Whether several values share one dmem word."""
+        return self._is_compressed
+
     def init(self, prog: ModularProgramV2) -> None:
         if self._is_empty:
             logger.debug(
