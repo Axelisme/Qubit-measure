@@ -209,7 +209,7 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 `MeasureCfgBuilder` / `MeasureCfgDefinition`、`ModuleInit` role shape與materialization modes、typed Seed
 resolution/path errors、module override/lock transactionality與definition isolation。
 `tests/gui/app/measure/adapter/test_adapter_definition.py` 驗證 empty/rich md/ml contexts 下的
-adapter definition 可重複 instantiate；registry 數量與 static spec 宣告直接審閱。
+adapter definition 可重複 instantiate；registry 數量與 static spec 宣告直接審閱。通用 BaseAdapter 的 capability、canonical load 與 post defaults 由 `tests/gui/app/measure/adapter/` 的 `test_base_validation.py`、`test_base_load.py`、`test_post_analysis_default.py` 擁有。
 
 Singleshot adapter 案例依 cfg、analysis 等穩定行為找 owner，不以歷史 Phase 切檔。
 例如 GE、downstream、LenRabi/T1、AC-Stark/MIST/T1-tone-sweep 描述的是領域責任，
@@ -412,7 +412,7 @@ Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2`
 ### measure-gui canonical result load 測試
 
 load-result feature 的 targeted tests 分散在對應 ownership：
-`tests/experiment/v2_gui/measure/adapters/test_base_load.py` 鎖 adapter default load contract；
+`tests/gui/app/measure/adapter/test_base_load.py` 鎖 adapter default load contract；
 `tests/gui/app/measure/services/test_load.py` 鎖 state invalidation / version bump；
 `tests/gui/app/measure/ui/test_main_window_ui.py` 鎖 `Load Data...` button gate 與 file dialog；
 `tests/gui/app/measure/remote/` 鎖 `tab.load_data` dispatch、tool generation 與 MCP guard deps。

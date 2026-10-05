@@ -1,11 +1,11 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-05，multi-source catalog loader
+**Last updated:** 2026-10-05，framework BaseAdapter 與 multi-source catalog loader
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
 view 與 GUI-side remote handler。實驗領域知識住在 `experiment/v2_gui/measure/` adapter；
-framework 只看 `ExpAdapterProtocol`。
+framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/base.py`。它透過 `AdapterCfgDefinition.instantiate(ctx)` 產生 fresh cfg，不依賴具體 builder 或 Seed。
 
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
 lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
@@ -772,7 +772,7 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   所有 application 入口的保證；補齊目標見
   [GUI capability draft](../../../../../docs/adr/draft/gui-adapter-capability-guards.md)。
   `BaseAdapter` 的 import-time 條件 hook 驗證與 concrete adapter 義務見
-  [experiment adapter README](../../../experiment/v2_gui/measure/adapters/README.md)；
+  [framework BaseAdapter](adapter/base.py)；
   capability 判斷不用 method presence 推測。
 - Adapter `cfg_definition()` is context-free authoring; only fresh
   `make_default_cfg(ctx)` materializes deferred defaults and validates the schema.

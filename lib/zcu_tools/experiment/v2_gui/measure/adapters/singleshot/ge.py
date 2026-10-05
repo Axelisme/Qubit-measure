@@ -22,7 +22,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
 from zcu_tools.experiment.v2_gui.measure.adapters._support.analyze_results import (
     fit_quality_summary,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -40,6 +39,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
 if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots

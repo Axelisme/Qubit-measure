@@ -23,7 +23,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
 from zcu_tools.experiment.v2_gui.measure.adapters._support.analyze_results import (
     fit_quality_summary,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
@@ -37,6 +36,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
     require_soc_handles,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,

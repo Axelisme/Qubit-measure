@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.measure.adapters.fake.stub import FakeAdapter
 from zcu_tools.experiment.v2_gui.measure.registry import ADAPTERS
 from zcu_tools.gui.app.measure.adapter import AdapterGuide
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
 
 def test_registered_adapters_define_local_guide_text() -> None:

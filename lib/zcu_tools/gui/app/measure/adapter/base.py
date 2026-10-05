@@ -11,6 +11,7 @@ from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    AdapterCfgDefinition,
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
@@ -36,9 +37,6 @@ from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 from zcu_tools.gui.cfg import CfgSchema
 
 if TYPE_CHECKING:
-    from zcu_tools.experiment.v2_gui.measure.adapters._support.schema_builder import (
-        MeasureCfgDefinition,
-    )
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
         InteractiveFrontend,
         InteractiveFrontendEnv,
@@ -273,7 +271,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     @classmethod
     @abstractmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
+    def cfg_definition(cls) -> AdapterCfgDefinition:
         """Return the context-free cfg shape and deferred fresh-value recipes."""
 
     @classmethod

@@ -23,7 +23,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgDefinition,
     custom,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
@@ -35,6 +34,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
 
 from ._shared import (

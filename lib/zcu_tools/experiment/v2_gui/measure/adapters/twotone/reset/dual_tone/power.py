@@ -19,7 +19,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     md,
     reset_module_writeback_items,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
@@ -31,6 +30,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import (
     SweepValue,
 )

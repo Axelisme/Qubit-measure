@@ -16,11 +16,11 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 

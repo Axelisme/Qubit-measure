@@ -10,7 +10,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -20,6 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WaveformWriteback,
     require_soc_handles,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.adapter.protocol import NoAnalyzeParams
 from zcu_tools.gui.cfg import (
@@ -899,7 +899,7 @@ def test_base_adapter_build_exp_cfg_uses_explicit_snapshot():
     req = MagicMock()
     sentinel = object()
     with patch(
-        "zcu_tools.experiment.v2_gui.measure.adapters.base.assemble_experiment_cfg",
+        "zcu_tools.gui.app.measure.adapter.base.assemble_experiment_cfg",
         return_value=sentinel,
     ) as make_cfg:
         out = _Adapter().build_exp_cfg({"reps": 1}, req)

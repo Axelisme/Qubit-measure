@@ -21,7 +21,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     custom,
     res_freq_range,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -29,6 +28,7 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
     SessionEnv,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
 from ._shared import lower_jpa_flux_dev
 from .flux import jpa_flux_sweep_seed

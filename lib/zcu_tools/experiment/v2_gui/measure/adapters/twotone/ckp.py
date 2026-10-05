@@ -20,7 +20,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     md_has_key,
     res_freq_range,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
@@ -32,6 +31,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 

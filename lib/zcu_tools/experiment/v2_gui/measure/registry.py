@@ -2,9 +2,9 @@
 
 from typing import Any
 
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
 
-from .adapters.base import BaseAdapter
 from .adapters.fake.freq import FakeFreqAdapter
 from .adapters.jpa import (
     JpaAutoOptimizeAdapter,

@@ -23,7 +23,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
 from zcu_tools.experiment.v2_gui.measure.adapters._support.analyze_results import (
     fit_quality_summary,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.experiment.v2_gui.measure.adapters.twotone.time_domain._detune_shared import (
     detune_ratio_of,
     resolve_detune,
@@ -40,6 +39,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
 
 logger = logging.getLogger(__name__)

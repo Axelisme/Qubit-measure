@@ -31,7 +31,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support.flux_pick_plugin impo
     FluxPickPlugin,
     render_flux_pick,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -43,6 +42,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 
 if TYPE_CHECKING:

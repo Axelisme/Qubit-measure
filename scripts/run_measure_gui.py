@@ -91,7 +91,6 @@ def _build_measure_catalogs():
         preserved_modules=(
             "zcu_tools.experiment.v2.runtime",
             "zcu_tools.experiment.v2.utils",
-            "zcu_tools.experiment.v2_gui.measure.adapters.base",
             "zcu_tools.experiment.v2_gui.measure.adapters._support",
         ),
         catalog_module="zcu_tools.experiment.v2_gui.measure.registry",

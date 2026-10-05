@@ -18,7 +18,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
@@ -29,6 +28,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,

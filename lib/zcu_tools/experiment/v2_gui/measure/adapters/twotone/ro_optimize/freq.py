@@ -20,7 +20,6 @@ from zcu_tools.experiment.v2_gui.measure.adapters._support import (
     res_freq_range,
     scaled_md,
 )
-from zcu_tools.experiment.v2_gui.measure.adapters.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
@@ -32,6 +31,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
 
 RoOptFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]

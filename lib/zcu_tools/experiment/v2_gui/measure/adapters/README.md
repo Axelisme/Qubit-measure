@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-04, fit quality summaries
+**Last updated:** 2026-10-05, framework BaseAdapter owner
 
 # measure experiment adapters
 
@@ -13,7 +13,7 @@ primary/post 兩組 proposal 放入不同 opaque draft，adapter 不接觸 Write
 
 T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned fit_quality。共用 mechanics 只投影數值與具體 summary 路徑，不重算品質。GUI 與 MCP 讀同一份結果，低 r2 不增加 accept 門檻。GE 保留 joint／ground／excited 身分，post 不產生新 fit。
 
-- `base.py` 擁有所有 adapter 共用的 framework implementation，不含特定實驗 policy。
+- `gui.app.measure.adapter.base.BaseAdapter` 擁有共用的 framework implementation，不含特定實驗 policy。此 package 只提供 concrete adapters 與 domain support。
 - `lookback.py`、`onetone/`、`twotone/`、`singleshot/`、`jpa/`、`fake/` 是 concrete experiment
   definitions；同一實驗專用的 helper 就近放在該檔案或同群組的 `_shared.py`。
   `jpa/` 的六個 adapter（`freq` / `flux` / `power` / `auto_optimize` /
@@ -26,7 +26,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
 - `_support/` 是 private package，只放至少被兩個 concrete adapters 共用的 mechanics；它
   不擁有 registry order，也不 import concrete adapter。
 - `../registry.py` 明確列出可重載的 adapter catalog；`../role_registry.py` 擁有 startup-only role composition。
-- Reload experiments 會重建 concrete adapters 及 family helpers，但保留 `base.py` 與 `_support/`。
+- Reload experiments 會重建 concrete adapters 及 family helpers，但保留 framework `BaseAdapter` 與 `_support/`。
   修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
 
 已遷移adapter的`run(req, raw_cfg, *, context)`使用Guard凍結的resolved cfg，RunService 提供單次 RunContext，adapter 與核心共用其 devices、plots 和取消訊號。

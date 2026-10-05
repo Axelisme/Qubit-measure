@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2_gui.measure` — measure-gui adapters
 
-**Last updated:** 2026-10-05，source loader 移至 GUI framework
+**Last updated:** 2026-10-05，BaseAdapter 與 source loader 位於 GUI framework
 
 `experiment/v2_gui/measure/` 是 measure-gui 的**實驗領域層**：把 `experiment/v2/` 的每個 `*Exp`
 包成一個 GUI adapter，供框架層 `gui/app/measure/` 驅動。依賴方向 `experiment/v2_gui/measure/` →
@@ -15,17 +15,17 @@ experiment/v2_gui/measure/
 ├── registry.py          — register_all（明確的、可重載 adapter catalog）
 ├── role_registry.py     — register_all_roles（startup-only role catalog）
 └── adapters/
-    ├── base.py          — BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]（共用實作）
     ├── _support/        — private cross-adapter mechanics：MeasureCfgBuilder / typed Seed recipes / role defaults
     ├── lookback / onetone / twotone / jpa / fake
     └── twotone/reset/   — reset 校準實驗群（single_tone / dual_tone / bath / check）
 ```
 
+共用 `BaseAdapter` 位於 `gui/app/measure/adapter/base.py`。它的 authoring hook 回傳 `AdapterCfgDefinition`，並呼叫 instantiate 產生 fresh cfg。靜態 spec 留在 authoring contract，framework 不依賴 builder 或 Seed。
 通用 source loader 位於 `gui/app/measure/catalog_loader.py`，由 launcher 宣告來源與重載範圍。
 它支援明確的多個 source package，回傳尚未發布的 Registry。框架契約見
 [Experiment reload](../../../gui/app/measure/README.md#experiment-reload)。目前組合根重載
 `experiment.v2`、concrete adapters 與 adapter registry，包含 package exports；保留
-`v2.runtime`、`v2.utils`、adapter `base`／`_support`、role factories 與 framework identity。
+`v2.runtime`、`v2.utils`、adapter `_support`、role factories 與 framework identity。`BaseAdapter` 位於重載範圍之外，保持固定 identity。
 新增 adapter 仍須加入 `registry.py`，不是自動掃描 class 註冊。
 
 Loader 在 GUI 關閉全部 tabs、排除進行中操作後才清除 owned import cache，從已檢查的 source
