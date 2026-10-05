@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep import (
@@ -208,6 +210,63 @@ def test_numeric_or_sampling_limit_fails_before_any_mask_mutation(
             x_bound=(0, 1),
             y_bound=(0, 1),
         )
+
+
+@pytest.mark.parametrize("overflow_policy", ["raise", "warn"])
+@pytest.mark.parametrize("select", [True, False])
+@pytest.mark.parametrize("end", [BrushPoint(1e155, 0), BrushPoint(1.2e154, 1.2e154)])
+def test_circle_arithmetic_overflow_rejected_before_mask_mutation(
+    end: BrushPoint,
+    select: bool,
+    overflow_policy: Literal["raise", "warn"],
+) -> None:
+    xs = np.array([0.0, 1.0])
+    mask = np.array([[True, False], [False, True]])
+    before = mask.copy()
+    with np.errstate(over=overflow_policy):
+        with pytest.raises(ValueError, match="finite"):
+            apply_mask_stroke(
+                xs, xs, mask, [BrushPoint(0, 0), end], 1e154, select=select
+            )
+    np.testing.assert_array_equal(mask, before)
+
+
+@pytest.mark.parametrize("overflow_policy", ["raise", "warn"])
+@pytest.mark.parametrize("end", [BrushPoint(1e155, 0), BrushPoint(1.2e154, 1.2e154)])
+def test_point_circle_arithmetic_overflow_is_request_error(
+    end: BrushPoint,
+    overflow_policy: Literal["raise", "warn"],
+) -> None:
+    xs = np.array([0.0, 1.0])
+    ys = xs.copy()
+    before_xs, before_ys = xs.copy(), ys.copy()
+    with np.errstate(over=overflow_policy):
+        with pytest.raises(ValueError, match="finite"):
+            points_in_normalized_stroke(
+                xs,
+                ys,
+                stroke=[BrushPoint(0, 0), end],
+                width=1e154,
+                x_bound=(0, 1),
+                y_bound=(0, 1),
+            )
+    np.testing.assert_array_equal(xs, before_xs)
+    np.testing.assert_array_equal(ys, before_ys)
+
+
+def test_finite_paired_distances_do_not_use_cartesian_grid_envelope() -> None:
+    xs = np.array([1.2e154, 0.0])
+    ys = np.array([0.0, 1.2e154])
+    with np.errstate(over="raise"):
+        result = points_in_normalized_stroke(
+            xs,
+            ys,
+            stroke=[BrushPoint(0, 0)],
+            width=1,
+            x_bound=(0, 1),
+            y_bound=(0, 1),
+        )
+    np.testing.assert_array_equal(result, [False, False])
 
 
 def test_empty_point_cloud_returns_empty_membership_for_valid_request() -> None:
