@@ -75,7 +75,7 @@ def _context() -> Generator[RunContext]:
         plots.finish(present=False)
 
 
-def _allxy_power_param(gain_scale: float) -> float:
+def _allxy_amplitude_error(gain_scale: float) -> float:
     cfg = AllXYCfg(
         reps=100,
         rounds=1,
@@ -92,15 +92,15 @@ def _allxy_power_param(gain_scale: float) -> float:
         analysis = exp.analyze(
             RunRecord(cfg, result), AllXYAnalyzeOptions(), plots=context.plots
         )
-    return analysis.power_param
+    return analysis.amplitude_error
 
 
 def test_allxy_reports_injected_gain_error() -> None:
-    calibrated = _allxy_power_param(1.0)
-    over_driven = _allxy_power_param(1.1)
+    calibrated = _allxy_amplitude_error(1.0)
+    over_driven = _allxy_amplitude_error(1.1)
 
-    assert abs(calibrated) < 0.05
-    assert over_driven > 0.1
+    assert abs(calibrated) < 0.03
+    assert over_driven - calibrated == pytest.approx(0.1, abs=0.02)
 
 
 def _zigzag_scan_cfg(sweep: ZigZagScanSweepCfg) -> ZigZagScanCfg:

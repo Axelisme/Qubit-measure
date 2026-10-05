@@ -163,16 +163,24 @@ class AllXYAnalyzeOptions:
 class AllXYAnalysis:
     """Fitted gate errors.
 
-    ``power_param`` and ``detune_param`` are the fitted model parameters
-    (relative amplitude error and detuning error in the Reed thesis model).
-    ``power_err`` and ``detune_err`` are their mean state deviations over the
-    21 gate pairs, the fractions shown in the fit figure title.
+    ``amplitude_error`` is the relative drive amplitude error: +0.02 means the
+    pulses rotate 2% too far. ``detune_param`` is the dimensionless detuning
+    parameter of the Reed thesis model.
+
+    ``power_err``, ``detune_err`` and ``residual_rms`` are in Bloch-z units,
+    where ground is +1 and excited is -1. ``power_err`` and ``detune_err`` are
+    the mean absolute deviation each fitted error alone causes over the 21
+    pairs; they are not gate infidelities. ``residual_rms`` is the RMS
+    distance between the data and the fitted model. A residual comparable to
+    the fitted deviations means the low-order model does not describe the
+    data, for example because T1/T2 decay during the sequence matters.
     """
 
-    power_param: float
+    amplitude_error: float
     detune_param: float
     power_err: float
     detune_err: float
+    residual_rms: float
 
 
 class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
@@ -312,6 +320,11 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         predict_signals = [
             calc_sim_signal(seq, center, contrast, ep, ed) for seq in sequence
         ]
+        # The model's ep is the pi/2 rotation-angle error, (pi/2) * amplitude error.
+        amplitude_error = ep / (np.pi / 2)
+        residual_rms = np.sqrt(
+            np.mean((real_signals - np.asarray(predict_signals)) ** 2)
+        ) / (0.5 * np.abs(contrast))
 
         # ------------------------------------------------------------------
         # calculate the error
@@ -365,13 +378,17 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
         ax.legend()
         ax.grid(True)
 
-        ax.set_title(f"power dep: {power_err:.1%}, detune dep: {detune_err:.1%}")
+        ax.set_title(
+            f"amp err: {amplitude_error:+.2%}, power dep: {power_err:.1%}, "
+            f"detune dep: {detune_err:.1%}, residual: {residual_rms:.1%}"
+        )
 
         fig.tight_layout()
 
         return AllXYAnalysis(
-            power_param=float(ep),
+            amplitude_error=float(amplitude_error),
             detune_param=float(ed),
             power_err=float(power_err),
             detune_err=float(detune_err),
+            residual_rms=float(residual_rms),
         )
