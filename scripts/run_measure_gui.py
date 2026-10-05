@@ -60,9 +60,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def _build_measure_catalogs():
     """Build measure-gui's experiment catalogs after runtime pre-Qt setup."""
-    from zcu_tools.experiment.v2_gui.measure.catalog_loader import make_catalog_loader
     from zcu_tools.experiment.v2_gui.measure.registry import register_all
     from zcu_tools.experiment.v2_gui.measure.role_registry import register_all_roles
+    from zcu_tools.gui.app.measure.catalog_loader import (
+        SourceExperimentCatalogLoader,
+        SourcePackage,
+    )
 
     # Composition root: wire the experiment-adapter layer (experiment.v2_gui)
     # into the GUI framework. The behavior receives a factory, so these imports
@@ -75,7 +78,25 @@ def _build_measure_catalogs():
 
     role_catalog = RoleCatalog()
     register_all_roles(role_catalog)
-    return registry, role_catalog, make_catalog_loader()
+    loader = SourceExperimentCatalogLoader(
+        sources=(
+            SourcePackage("zcu_tools", PROJECT_ROOT / "lib" / "zcu_tools"),
+            SourcePackage("zcu_lab", PROJECT_ROOT / "zcu_lab"),
+        ),
+        reload_modules=(
+            "zcu_tools.experiment.v2",
+            "zcu_tools.experiment.v2_gui.measure.adapters",
+            "zcu_tools.experiment.v2_gui.measure.registry",
+        ),
+        preserved_modules=(
+            "zcu_tools.experiment.v2.runtime",
+            "zcu_tools.experiment.v2.utils",
+            "zcu_tools.experiment.v2_gui.measure.adapters.base",
+            "zcu_tools.experiment.v2_gui.measure.adapters._support",
+        ),
+        catalog_module="zcu_tools.experiment.v2_gui.measure.registry",
+    )
+    return registry, role_catalog, loader
 
 
 def main(argv: list[str] | None = None) -> int:

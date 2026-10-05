@@ -12,10 +12,11 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from zcu_tools.experiment.v2_gui.measure.catalog_loader import (
-    SourceExperimentCatalogLoader,
-)
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError
+from zcu_tools.gui.app.measure.catalog_loader import (
+    SourceExperimentCatalogLoader,
+    SourcePackage,
+)
 from zcu_tools.gui.app.measure.registry import Registry
 
 
@@ -84,8 +85,7 @@ def source_catalog(
     original = importlib.import_module("reload_fixture.domain")
     importlib.import_module("reload_fixture.catalog")
     loader = SourceExperimentCatalogLoader(
-        package_root=root,
-        namespace="reload_fixture",
+        sources=(SourcePackage("reload_fixture", root),),
         reload_modules=(
             "reload_fixture.domain",
             "reload_fixture.adapters",
@@ -349,3 +349,237 @@ def test_source_mutation_during_load_is_not_reported_as_success(
     )
     with pytest.raises(CatalogReloadError, match="changed after preflight"):
         source_catalog.reload()
+
+
+@dataclass
+class DualCatalogFixture:
+    """User catalog plus the fixed framework it consumes.
+
+    user owns the reloadable package and loader; framework is its fixed source
+    directory; fixed_module is the original imported framework core identity.
+    """
+
+    user: CatalogFixture
+    framework: Path
+    fixed_module: ModuleType
+
+
+@pytest.fixture
+def dual_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[DualCatalogFixture]:
+    framework = tmp_path / "loader_framework"
+    framework.mkdir()
+    (framework / "__init__.py").write_text("", encoding="utf-8")
+    (framework / "core.py").write_text(
+        textwrap.dedent("""
+            from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, AdapterCapabilities
+            class Base(ExpAdapterProtocol):
+                capabilities = AdapterCapabilities()
+        """),
+        encoding="utf-8",
+    )
+    root = tmp_path / "loader_user"
+    root.mkdir()
+    files = {
+        "__init__.py": "",
+        "domain/__init__.py": "from . import fixed\nfrom .experiment import Experiment\n",
+        "domain/fixed.py": "TOKEN = object()\n",
+        "domain/experiment.py": """
+            from . import fixed
+            class Experiment:
+                def label(self):
+                    return "v1"
+                def token(self):
+                    return fixed.TOKEN
+        """,
+        "catalog.py": """
+            from loader_framework.core import Base
+            from loader_user.domain import Experiment
+            from zcu_tools.gui.app.measure.adapter import AdapterGuide
+            class Adapter(Base):
+                @classmethod
+                def guide(cls):
+                    return AdapterGuide(Experiment().label(), "", "", "", "")
+            def register_all(registry):
+                registry.register("demo", Adapter)
+        """,
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(content), encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        original = importlib.import_module("loader_user.domain")
+        fixed_module = importlib.import_module("loader_framework.core")
+        importlib.import_module("loader_user.catalog")
+        loader = SourceExperimentCatalogLoader(
+            sources=(
+                SourcePackage("loader_framework", framework),
+                SourcePackage("loader_user", root),
+            ),
+            reload_modules=("loader_user.domain", "loader_user.catalog"),
+            preserved_modules=("loader_user.domain.fixed",),
+            catalog_module="loader_user.catalog",
+        )
+        yield DualCatalogFixture(
+            CatalogFixture(root, loader, original), framework, fixed_module
+        )
+    finally:
+        for name in tuple(sys.modules):
+            if name in ("loader_framework", "loader_user") or name.startswith(
+                ("loader_framework.", "loader_user.")
+            ):
+                del sys.modules[name]
+        importlib.invalidate_caches()
+
+
+def test_user_catalog_reloads_without_replacing_framework_identity(
+    dual_catalog: DualCatalogFixture,
+) -> None:
+    user = dual_catalog.user
+    fixed = user.original.fixed
+    user.write(
+        "domain/experiment.py",
+        """
+        from . import fixed
+        class Experiment:
+            def label(self):
+                return "v2"
+            def token(self):
+                return fixed.TOKEN
+        """,
+    )
+    registry = user.reload()
+    assert registry.create("demo").guide().behavior == "v2"
+    assert isinstance(registry.create("demo"), dual_catalog.fixed_module.Base)
+    assert importlib.import_module("loader_framework.core") is dual_catalog.fixed_module
+    domain = importlib.import_module("loader_user.domain")
+    assert domain is not user.original
+    assert domain.fixed is fixed
+    assert domain.Experiment().token() is fixed.TOKEN
+
+
+@pytest.mark.parametrize("package", ["framework", "user"])
+@pytest.mark.parametrize("remove", [False, True])
+def test_fixed_source_in_either_package_requires_restart(
+    dual_catalog: DualCatalogFixture, package: str, remove: bool
+) -> None:
+    path = (
+        dual_catalog.framework / "core.py"
+        if package == "framework"
+        else dual_catalog.user.root / "domain" / "fixed.py"
+    )
+    if remove:
+        path.unlink()
+    else:
+        path.write_text("CHANGED = True\n", encoding="utf-8")
+    with pytest.raises(CatalogReloadError, match="Fixed source") as failure:
+        dual_catalog.user.loader.prepare()
+    assert failure.value.restart_required
+    assert importlib.import_module("loader_framework.core") is dual_catalog.fixed_module
+    assert importlib.import_module("loader_user.domain") is dual_catalog.user.original
+
+
+@pytest.mark.parametrize("package", ["framework", "user"])
+@pytest.mark.parametrize("already_imported", [False, True])
+def test_new_fixed_dependency_in_either_package_requires_restart(
+    dual_catalog: DualCatalogFixture, package: str, already_imported: bool
+) -> None:
+    root = dual_catalog.framework if package == "framework" else dual_catalog.user.root
+    namespace = "loader_framework" if package == "framework" else "loader_user"
+    (root / "new_fixed.py").write_text("VALUE = 1\n", encoding="utf-8")
+    assert dual_catalog.user.reload().list_names() == ["demo"]
+    if already_imported:
+        importlib.import_module(namespace + ".new_fixed")
+    else:
+        dual_catalog.user.write(
+            "catalog.py",
+            f"""
+            from {namespace} import new_fixed
+            def register_all(registry):
+                pass
+            """,
+        )
+    with pytest.raises(CatalogReloadError, match="New fixed dependency") as failure:
+        dual_catalog.user.reload()
+    assert failure.value.restart_required
+
+
+@pytest.mark.parametrize(
+    "namespace", ["loader_framework.core", "loader_user.domain.fixed"]
+)
+def test_fixed_module_corruption_in_either_package_requires_restart(
+    dual_catalog: DualCatalogFixture, namespace: str
+) -> None:
+    dual_catalog.user.write(
+        "catalog.py",
+        f"""
+        import sys
+        sys.modules[{namespace!r}] = None
+        def register_all(registry):
+            pass
+        """,
+    )
+    with pytest.raises(CatalogReloadError, match="fixed module") as failure:
+        dual_catalog.user.reload()
+    assert failure.value.restart_required
+
+
+@pytest.mark.parametrize(
+    ("namespaces", "reload_modules", "preserved_modules", "catalog_module", "message"),
+    [
+        ((), ("demo.catalog",), (), "demo.catalog", "Source packages"),
+        (("demo",), (), (), "demo.catalog", "nonempty reload"),
+        (("demo", "demo"), ("demo.catalog",), (), "demo.catalog", "overlap"),
+        (("demo", "demo.child"), ("demo.catalog",), (), "demo.catalog", "overlap"),
+        (("demo.child", "demo"), ("demo.catalog",), (), "demo.catalog", "overlap"),
+        (("",), ("demo.catalog",), (), "demo.catalog", "dotted"),
+        (("demo..child",), ("demo.catalog",), (), "demo.catalog", "dotted"),
+        (("class",), ("class.catalog",), (), "class.catalog", "dotted"),
+        (("demo",), ("foreign.catalog",), (), "demo.catalog", "declared source"),
+        (("demo",), ("demo_extra.catalog",), (), "demo.catalog", "declared source"),
+        (("demo",), ("demo..catalog",), (), "demo.catalog", "declared source"),
+        (
+            ("demo",),
+            ("demo.catalog",),
+            ("foreign.fixed",),
+            "demo.catalog",
+            "declared source",
+        ),
+        (("demo",), ("demo.domain",), (), "demo.catalog", "reload scope"),
+        (("demo",), ("demo",), ("demo.catalog",), "demo.catalog", "reload scope"),
+        (("demo",), ("demo",), (), "foreign.catalog", "declared source"),
+    ],
+)
+def test_invalid_source_and_scope_declarations_fail_at_construction(
+    tmp_path: Path,
+    namespaces: tuple[str, ...],
+    reload_modules: tuple[str, ...],
+    preserved_modules: tuple[str, ...],
+    catalog_module: str,
+    message: str,
+) -> None:
+    sources = []
+    for index, namespace in enumerate(namespaces):
+        root = tmp_path / str(index)
+        root.mkdir()
+        sources.append(SourcePackage(namespace, root))
+    with pytest.raises(ValueError, match=message):
+        SourceExperimentCatalogLoader(
+            sources=tuple(sources),
+            reload_modules=reload_modules,
+            preserved_modules=preserved_modules,
+            catalog_module=catalog_module,
+        )
+
+
+def test_missing_source_root_fails_at_construction(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="existing directory"):
+        SourceExperimentCatalogLoader(
+            sources=(SourcePackage("demo", tmp_path / "missing"),),
+            reload_modules=("demo.catalog",),
+            preserved_modules=(),
+            catalog_module="demo.catalog",
+        )

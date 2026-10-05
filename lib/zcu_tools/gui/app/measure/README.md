@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-03, operation-bound Run and Post consumption
+**Last updated:** 2026-10-05，multi-source catalog loader
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -291,6 +291,14 @@ Key ownership rules:
 `ExperimentCatalogLoader` 載入新 registry，透過 Workspace 的正常 close/apply seam
 重建全部 tabs。Controller 只轉接，工具列與 MainWindow 負責整批 destructive confirmation
 和 failure/recovery presentation。Role catalog、hardware context 與 framework 不重建。
+
+`catalog_loader.py` 提供通用 `SourceExperimentCatalogLoader`。組合根用 `SourcePackage`
+宣告 framework 與使用者 source 目錄，並指定 reload、preserved 與 catalog module。
+Loader 不猜 namespace 或套件位置。Preserved prefix 優先於 reload prefix，其餘 source 也固定。
+固定 source 的內容變更或刪除要求重啟。新增尚未 import 的固定檔案不阻擋重載，但重載中
+import 新的固定 dependency 要求重啟。Loader 在所有來源保留固定 module identity，且每個
+prepare plan 只能使用一次。它在重載失敗時清除部分 owned modules，不回滾任意 import side effect。
+
 依賴重載是 best-effort，不全面保證 deferred/dynamic import 的一致性，也不禁止函式內 import；
 確切限制見 `experiment/v2_gui/measure/README.md`。此取捨不放寬資料丟棄確認或 lifecycle 保護。
 
