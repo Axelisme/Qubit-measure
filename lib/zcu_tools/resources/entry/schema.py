@@ -3,47 +3,24 @@
 import keyword
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal, Self, override
 from uuid import UUID
 
 from pydantic import (
-    AfterValidator,
     BaseModel,
-    BeforeValidator,
     ConfigDict,
     Field,
     TypeAdapter,
-    ValidationError,
     ValidationInfo,
     field_validator,
 )
-from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
-from zcu_tools.resources.document_store import FieldPath
 
 PARAMETER_FORMAT = "zcu.parameter-container"
 PARAMETER_VERSION = FormatVersion(1, 0)
-
-
-@dataclass(frozen=True)
-class UnitSpec:
-    """Schema annotation for a working unit; never validates or converts values."""
-
-    unit: str
-
-
-@dataclass(frozen=True)
-class Ref:
-    """Annotate a string field that names a component in the same document."""
-
-
-@dataclass(frozen=True)
-class ModuleSlot:
-    """Annotate a mapping of slot names to module_cfg path strings."""
 
 
 def is_forward_minor(document: Mapping[str, YamlValue], *, source: Path) -> bool:
@@ -88,42 +65,6 @@ def validate_component_name(name: str, *, source: Path | None = None) -> None:
         )
 
 
-def _validate_extension_keys(value: YamlMap) -> YamlMap:
-    errors: list[InitErrorDetails] = []
-
-    def collect_errors(node: YamlValue, path: tuple[str | int, ...]) -> None:
-        if isinstance(node, dict):
-            for key, child in node.items():
-                key_path = (*path, key)
-                if not key or "." in key:
-                    errors.append(
-                        InitErrorDetails(
-                            type=PydanticCustomError(
-                                "extension_key",
-                                "Extension key at {path} must be non-empty and contain no '.'",
-                                {"path": repr(key_path)},
-                            ),
-                            loc=key_path,
-                            input=key,
-                        )
-                    )
-                collect_errors(child, key_path)
-        elif isinstance(node, list):
-            for index, child in enumerate(node):
-                collect_errors(child, (*path, index))
-
-    collect_errors(value, ())
-    if errors:
-        raise ValidationError.from_exception_data("ext", errors)
-    return value
-
-
-_JSON_EXTENSIONS = TypeAdapter[YamlMap](
-    Annotated[YamlMap, AfterValidator(_validate_extension_keys)],
-    config=ConfigDict(strict=True, allow_inf_nan=False),
-)
-
-
 class SetupGeneral(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -131,12 +72,8 @@ class SetupGeneral(BaseModel):
     created_at: str
     description: str | None = None
     flux_unit: Literal["A", "V"] | None = None
-    flux_value: Annotated[
-        float | None, UnitSpec("A/V"), Field(strict=True, allow_inf_nan=False)
-    ] = None
-    ext: Annotated[YamlMap, BeforeValidator(_JSON_EXTENSIONS.validate_python)] = Field(
-        default_factory=dict
-    )
+    flux_value: Annotated[float | None, Field(strict=True, allow_inf_nan=False)] = None
+    ext: YamlMap = Field(default_factory=dict)
 
     @field_validator("entry_id")
     @classmethod
@@ -157,8 +94,8 @@ class PointGeneral(BaseModel):
 
     created_at is an ISO-8601 timestamp with a UTC offset; Z and +00:00 are valid.
     description is optional human-readable text; None means no description.
-    ext is a JSON mapping, empty by default, with no unit conversion.
-    Mapping keys at every depth must be non-empty strings without dots.
+    ext is a YAML mapping, empty by default, with no unit conversion.
+    Empty keys or keys containing dots cannot be addressed by set/meta.
     Global flux_value uses flux_unit (A or V); both are optional.
     Unknown metadata fields and invalid timestamps raise Pydantic ValidationError.
     """
@@ -168,12 +105,8 @@ class PointGeneral(BaseModel):
     created_at: str
     description: str | None = None
     flux_unit: Literal["A", "V"] | None = None
-    flux_value: Annotated[
-        float | None, UnitSpec("A/V"), Field(strict=True, allow_inf_nan=False)
-    ] = None
-    ext: Annotated[YamlMap, BeforeValidator(_JSON_EXTENSIONS.validate_python)] = Field(
-        default_factory=dict
-    )
+    flux_value: Annotated[float | None, Field(strict=True, allow_inf_nan=False)] = None
+    ext: YamlMap = Field(default_factory=dict)
 
     @field_validator("created_at")
     @classmethod
@@ -182,74 +115,14 @@ class PointGeneral(BaseModel):
 
 
 class ComponentSchema(BaseModel):
-    """Original notebook model for complete setup and point components.
+    """Base for registered components, requiring only a string kind.
 
-    Required fields, defaults, factories and field validators use Pydantic
-    semantics. Field conversions must be idempotent under exact value equality.
-    Entry reports canonical drift as ValidationError before commits or snapshot
-    publication. Ext accepts JSON values with non-empty, dot-free mapping keys
-    at every depth, including mappings inside lists.
-    Registration does not trial sample inputs. All model-level validators and
-    custom model_post_init are rejected, including inherited and direct or
-    nullable nested models. Cross-field checks are unsupported in this batch.
+    Definitions own extra policy, validators, hooks and optional containers.
+    Loading uses model_validate and saving uses model_dump. Mapping keys with
+    dots or an empty name cannot be addressed by set/meta dotted paths.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     kind: str
-    ext: YamlMap = Field(default_factory=dict)
-
-    @field_validator("ext", mode="before")
-    @classmethod
-    def validate_extension(cls, value: object) -> YamlMap:
-        # Keep the container boundary when a user model redeclares the field.
-        return _JSON_EXTENSIONS.validate_python(value)
-
-
-def canonical_errors(
-    fields: YamlMap,
-    validated: BaseModel,
-    path: FieldPath,
-    *,
-    source: Path,
-) -> list[InitErrorDetails]:
-    """Compare supplied known fields in working units, not the original user input."""
-    canonical = TypeAdapter(YamlMap).validate_python(
-        validated.model_dump(exclude_unset=True)
-    )
-    errors: list[InitErrorDetails] = []
-    for name in type(validated).model_fields:
-        if name not in fields and name not in canonical:
-            continue
-        before = fields.get(name, "(missing)")
-        after = canonical.get(name, "(missing)")
-        nested = getattr(validated, name)
-        if isinstance(before, dict) and isinstance(nested, BaseModel):
-            errors.extend(
-                canonical_errors(
-                    before,
-                    nested,
-                    (*path, name),
-                    source=source,
-                )
-            )
-        elif (name in fields) != (name in canonical) or before != after:
-            errors.append(
-                InitErrorDetails(
-                    type=PydanticCustomError(
-                        "canonical_value",
-                        "{source}: field validation changed canonical value from {before} to {after}",
-                        {
-                            "source": str(source),
-                            "before": repr(before),
-                            "after": repr(after),
-                        },
-                    ),
-                    loc=(*path, name),
-                    input=before,
-                )
-            )
-    return errors
 
 
 class _ParameterDocument(BaseModel):
@@ -282,7 +155,7 @@ class _ParameterDocument(BaseModel):
 
         if isinstance(obj, Mapping):
             document = TypeAdapter(YamlMap).validate_python(obj)
-            forward_minor = is_forward_minor(document, source=cls._source)
+            is_forward_minor(document, source=cls._source)
             components = TypeAdapter(dict[str, YamlMap]).validate_python(
                 document.get("components", {})
             )
@@ -291,8 +164,6 @@ class _ParameterDocument(BaseModel):
                 kind = fields.get("kind")
                 if isinstance(kind, str):
                     component_registry.get(kind, source=cls._source, component=name)
-                    if not forward_minor:
-                        component_registry.check_fields(kind, fields, path=name)
         return super().model_validate(
             obj,
             strict=strict,
@@ -325,22 +196,16 @@ class _ParameterDocument(BaseModel):
         for name, fields in components.items():
             validate_component_name(name, source=cls._source)
             kind = fields.get("kind")
-            if isinstance(kind, str) and not forward_minor:
-                component_registry.check_fields(kind, fields, path=name)
             model = (
                 component_registry.get(kind, source=cls._source, component=name)
                 if isinstance(kind, str)
                 else ComponentSchema
             )
-            # Field validators may mutate mapping inputs in place. Keep the
-            # pre-validation working values for the canonical comparison.
+            # Validators may mutate mapping inputs; keep the caller isolated.
             adapter = TypeAdapter[dict[str, ComponentSchema]](dict[str, model])
             result[name] = adapter.validate_python(
-                {name: deepcopy(fields)}, extra="ignore" if forward_minor else None
+                {name: deepcopy(fields)}, extra="allow" if forward_minor else None
             )[name]
-            errors = canonical_errors(fields, result[name], (name,), source=cls._source)
-            if errors:
-                raise ValidationError.from_exception_data(model.__name__, errors)
         return result
 
 
@@ -354,14 +219,13 @@ class PointDocument(_ParameterDocument):
     """One complete, independent point document in working units.
 
     format and format_version are the parameter-container header, initially 1.0.
-    The store validates header compatibility and converts known physical leaves
-    between SI on disk and working units in snapshots. general is point-local.
+    The store validates header compatibility. Values remain in working units;
+    general is point-local.
     components maps public names to original registered ComponentSchema models,
-    including kind; required fields, field validators and same-document
-    references must be valid. No value or source falls back to setup.
+    including kind; each original model owns validation. No value or source falls back to setup.
     provenance maps logical component-field paths to YAML source metadata.
-    Unknown fields are rejected at the current minor version; a forward minor
-    keeps unknown YAML fields outside the typed view.
+    Component models choose extra policy. Forward-minor unknown fields remain
+    on disk; only extra=allow models expose them in the typed view.
     """
 
     _source: ClassVar[Path] = Path("point.yaml")

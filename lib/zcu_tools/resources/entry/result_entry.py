@@ -15,7 +15,6 @@ from zcu_tools.resources.document_store import DocumentStore
 from . import _point_origin
 from .errors import RenameRecoveryError
 from .points import PointView
-from .registry import component_registry
 from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -94,9 +93,6 @@ class ResultEntry:
         )
 
     def _validate_setup(self, document: SetupDocument) -> None:
-        component_registry.validate_references(
-            document.components, source=self._result_path / "setup.yaml"
-        )
         if self._entry_id is None:
             self._entry_id = document.general.entry_id
         elif document.general.entry_id != self._entry_id:
@@ -220,8 +216,8 @@ class ResultEntry:
         label follows new_point's single-segment path rules. Both point.yaml and
         module_cfg.yaml must exist; the latter is not parsed here. Invalid labels
         raise ValueError and missing files raise FileNotFoundError. Original
-        models validate required fields, field validators, canonical values and
-        same-document references. The view binds one Store and never reads setup.
+        models apply their required fields, defaults and validators. References
+        are resolved only on request. The view binds one Store and never reads setup.
         No files are committed, other snapshots changed or active point selected.
         """
         directory = _entry_path(self._result_path / "points", label)
@@ -245,9 +241,6 @@ class ResultEntry:
             EntryPointDocument,
             format=PARAMETER_FORMAT,
             supported_version=PARAMETER_VERSION,
-            validate=lambda document: component_registry.validate_references(
-                document.components, source=source
-            ),
         )
 
     @classmethod

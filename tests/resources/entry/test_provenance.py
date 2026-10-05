@@ -7,7 +7,6 @@ from contextlib import ExitStack
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -16,23 +15,22 @@ from zcu_tools.format_version import FormatError, VersionError, YamlMap
 from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
     ComponentSchema,
-    MissingReferenceError,
     PointView,
     Provenance,
     ResultEntry,
     SetupView,
-    UnitSpec,
-    UnknownFieldError,
     component_registry,
 )
+from zcu_tools.resources.entry.views import FieldView
 
 
 class Timing(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    width: Annotated[float, UnitSpec("µs")]
+    width: float
 
 
 class NotebookComponent(ComponentSchema):
+    model_config = ConfigDict(extra="forbid")
     timing: Timing
 
 
@@ -44,6 +42,12 @@ def notebook_kind(registry_state_guard: None) -> Generator[str]:
         yield kind
     finally:
         component_registry.unregister(kind)
+
+
+def field_view(value: object) -> FieldView:
+    """Require an editable container returned by a public view."""
+    assert isinstance(value, FieldView)
+    return value
 
 
 def assert_metadata(actual: Provenance | None, expected: Provenance) -> None:
@@ -67,122 +71,6 @@ def container(
 
 
 @pytest.mark.parametrize("owner", ["Q1", "general"])
-@pytest.mark.parametrize(
-    ("payload", "key_path"),
-    [
-        ({"": 1.0}, ("",)),
-        ({"a.b": 1.0}, ("a.b",)),
-        ({"nested": {"a.b": 1.0}}, ("nested", "a.b")),
-        ({"series": [{"": 1.0}]}, ("series", 0, "")),
-    ],
-)
-def test_extension_key_syntax_rejection_preserves_draft_and_source(
-    container: tuple[ResultEntry, SetupView | PointView, Path],
-    ledger: Path,
-    owner: str,
-    payload: YamlMap,
-    key_path: tuple[str | int, ...],
-) -> None:
-    _entry, view, source = container
-    field = f"{owner}.ext.accepted.rate"
-    expected = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.2)
-    with view.edit() as draft:
-        draft.set(f"{owner}.ext.accepted", {"rate": 12.0})
-        draft.set(field, 12.0, provenance=expected)
-    before = source.read_bytes()
-    with view.edit() as draft:
-        with pytest.raises(ValidationError) as error:
-            draft.set(f"{owner}.ext", payload)
-        assert any(
-            detail["loc"][-len(key_path) :] == key_path
-            for detail in error.value.errors()
-        )
-        extensions = draft.general.ext if owner == "general" else draft.Q1.ext
-        assert extensions.accepted == {"rate": 12.0}
-    extensions = view.general.ext if owner == "general" else view.Q1.ext
-    assert extensions.accepted == {"rate": 12.0}
-    assert_metadata(view.meta(field), expected)
-    assert source.read_bytes() == before
-
-
-@pytest.mark.parametrize("key", ["", "a.b"])
-@pytest.mark.parametrize("owner", ["Q1", "general"])
-def test_extension_key_syntax_rejection_preserves_item_write(
-    container: tuple[ResultEntry, SetupView | PointView, Path], key: str, owner: str
-) -> None:
-    _entry, view, source = container
-    before = source.read_bytes()
-    previous = view.meta("Q1.rate")
-    extensions = view.general.ext if owner == "general" else view.Q1.ext
-    with pytest.raises(ValidationError):
-        extensions[key] = 12.0
-    with view.edit() as draft:
-        extensions = draft.general.ext if owner == "general" else draft.Q1.ext
-        with pytest.raises(ValidationError):
-            extensions.batch = [{key: 12.0}]
-        with pytest.raises(AttributeError):
-            _ = extensions.batch
-    with pytest.raises(KeyError):
-        _ = extensions[key]
-    assert view.meta("Q1.rate") == previous
-    assert source.read_bytes() == before
-
-
-@pytest.mark.parametrize("key", ["", "a.b"])
-def test_extension_key_syntax_rejects_add_without_publishing(
-    container: tuple[ResultEntry, SetupView | PointView, Path], key: str
-) -> None:
-    _entry, view, source = container
-    before = source.read_bytes()
-    with pytest.raises(ValidationError):
-        view.add_component("Q2", kind="fake/drive/a", ext={"batch": [{key: 12.0}]})
-    with pytest.raises(AttributeError):
-        _ = view.Q2
-    assert view.Q1.rate == 5000.0
-    assert source.read_bytes() == before
-
-
-@pytest.mark.parametrize("owner", ["Q1", "general"])
-@pytest.mark.parametrize("key", ["", "a.b"])
-def test_extension_key_syntax_rejects_open_and_refresh_without_publishing(
-    container: tuple[ResultEntry, SetupView | PointView, Path],
-    tmp_path: Path,
-    owner: str,
-    key: str,
-) -> None:
-    _entry, view, source = container
-    previous = view.meta("Q1.rate")
-    yaml = YAML(typ="safe")
-    document = yaml.load(source.read_text())
-    target = (
-        document["general"] if owner == "general" else document["components"][owner]
-    )
-    target["ext"] = {"batch": [{key: 12.0}]}
-    with source.open("w") as stream:
-        yaml.dump(document, stream)
-    before = source.read_bytes()
-    with pytest.raises(ValidationError) as error:
-        view.refresh()
-    assert any(
-        detail["loc"][-3:] == ("batch", 0, key) for detail in error.value.errors()
-    )
-    assert view.Q1.rate == 5000.0
-    assert view.meta("Q1.rate") == previous
-    if isinstance(view, PointView):
-        reopened = ResultEntry.open(
-            "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
-        )
-        with pytest.raises(ValidationError):
-            reopened.use_point("a")
-    else:
-        with pytest.raises(ValidationError):
-            ResultEntry.open(
-                "entry", result_root=tmp_path / "results", database_root=tmp_path / "db"
-            )
-    assert source.read_bytes() == before
-
-
-@pytest.mark.parametrize("owner", ["Q1", "general"])
 def test_legal_extension_keys_preserve_seed_clone_reload_and_sources(
     container: tuple[ResultEntry, SetupView | PointView, Path],
     ledger: Path,
@@ -191,17 +79,24 @@ def test_legal_extension_keys_preserve_seed_clone_reload_and_sources(
 ) -> None:
     entry, _view, _source = container
     payload: YamlMap = {"_arbitrary-key": {"flags": [True, None], "radius": 12.0}}
-    entry.setup.Q1.ext["fit notes"] = payload
+    field_view(entry.setup.Q1.ext)["fit notes"] = payload
     original = entry.new_point("original")
-    assert original.Q1.ext["fit notes"] == payload
-    extensions = original.general.ext if owner == "general" else original.Q1.ext
+    notes = field_view(field_view(original.Q1.ext)["fit notes"])
+    data = field_view(notes["_arbitrary-key"])
+    assert data.flags == [True, None]
+    assert data.radius == 12.0
+    extensions = field_view(
+        original.general.ext if owner == "general" else original.Q1.ext
+    )
     extensions["fit notes"] = payload
     field = f"{owner}.ext.fit notes._arbitrary-key.radius"
     expected = Provenance("evt-1", "fit", "run-1", "2026-10-04T00:00:00Z", 0.18)
     with original.edit() as draft:
         draft.set(field, 12.0, provenance=expected)
     payload["_arbitrary-key"] = {"radius": 99.0}
-    assert extensions["fit notes"] != payload
+    accepted_notes = field_view(extensions["fit notes"])
+    accepted_data = field_view(accepted_notes["_arbitrary-key"])
+    assert accepted_data.radius == 12.0
     clone = entry.new_point("clone", clone_from=original)
     metadata = clone.meta(field)
     assert metadata is not None
@@ -355,7 +250,7 @@ def test_manual_sources_cover_created_values_and_written_container_leaves(
         with view.edit() as draft:
             draft.set("Q1.wiring", {"ch": 3, "delay": 1.2})
     elif write == "nested_ext":
-        view.Q1.ext.batch = {"rate": 12.0}
+        field_view(view.Q1.ext).batch = {"rate": 12.0}
     elif write == "description":
         view.description = "accepted point"
     elif write == "general_ext":
@@ -409,7 +304,7 @@ def test_invalid_local_source_keeps_the_draft_value_and_source_unchanged(
     assert source.read_bytes() == before
 
 
-@pytest.mark.parametrize("failure", ["body", "schema", "reference"])
+@pytest.mark.parametrize("failure", ["body", "schema"])
 def test_failed_value_transaction_discards_its_formal_source(
     container: tuple[ResultEntry, SetupView | PointView, Path],
     ledger: Path,
@@ -418,13 +313,7 @@ def test_failed_value_transaction_discards_its_formal_source(
     _entry, view, source = container
     before = source.read_bytes()
     previous = view.meta("Q1.rate")
-    error = (
-        RuntimeError
-        if failure == "body"
-        else ValidationError
-        if failure == "schema"
-        else MissingReferenceError
-    )
+    error = RuntimeError if failure == "body" else ValidationError
 
     def fail_transaction() -> None:
         with view.edit() as draft:
@@ -437,10 +326,7 @@ def test_failed_value_transaction_discards_its_formal_source(
             )
             if failure == "body":
                 raise RuntimeError("abort")
-            if failure == "schema":
-                draft.Q1.duration = "not-a-number"
-            else:
-                draft.Q1.sense = "missing"
+            draft.Q1.duration = "not-a-number"
 
     with pytest.raises(error):
         fail_transaction()
@@ -449,7 +335,7 @@ def test_failed_value_transaction_discards_its_formal_source(
     assert source.read_bytes() == before
 
 
-def test_notebook_nested_stderr_uses_the_registered_leaf_unit(
+def test_notebook_nested_value_and_stderr_round_trip_without_scaling(
     container: tuple[ResultEntry, SetupView | PointView, Path],
     ledger: Path,
     notebook_kind: str,
@@ -459,7 +345,9 @@ def test_notebook_nested_stderr_uses_the_registered_leaf_unit(
     metadata = Provenance("evt-1", "timing/fit", None, "2026-10-04T00:00:00Z", 0.18)
     with view.edit() as draft:
         draft.set("N1.timing.width", 3.0, provenance=metadata)
-    assert view.N1.timing == {"width": 3.0}
+    timing = view.N1.timing
+    assert isinstance(timing, FieldView)
+    assert timing.width == 3.0
     assert_metadata(view.meta("N1.timing.width"), metadata)
     stored = YAML(typ="safe").load(source.read_text())
     assert stored["components"]["N1"]["timing"]["width"] == pytest.approx(3.0)
@@ -540,7 +428,7 @@ def test_flat_error_fields_are_rejected_without_changing_value_or_source(
 ) -> None:
     _entry, view, source = container
     before = source.read_bytes()
-    with pytest.raises(UnknownFieldError), view.edit() as draft:
+    with pytest.raises(ValidationError), view.edit() as draft:
         draft.set(f"Q1.{field}", 0.18)
     assert view.Q1.rate == 5000.0
     assert source.read_bytes() == before

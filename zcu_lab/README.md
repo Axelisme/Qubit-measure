@@ -1,10 +1,12 @@
 # zcu_lab
 
-**Last updated:** 2026-10-05，TemplateCatalog 命名與框架依賴方向
+**Last updated:** 2026-10-06，元件定義與顯式 bootstrap
 
 `zcu_lab` 擁有具體實驗與其前端附件。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。組合根取得定義，再顯式注入框架。
 
-`definitions.register_all` 接受 caller 的 measure Registry，startup 可用 `templates` 傳入 TemplateCatalog。import 不執行註冊。此入口明列 `v2` leaf 的 GUI declarations，並把範本交給 `templates.py` 的 startup-only composition。
+`definitions.register_all` 接受 caller 的 measure Registry。Startup 可用 `templates` 傳入 TemplateCatalog，並用 `components` 傳入框架共用的 ComponentRegistry。Reload 省略這兩個參數，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
+
+`components.py` 擁有具體元件 model、wiring、module 槽與內建角色。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI 與 MCP 組合根明確 bootstrap；notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
 
 `autofluxdep_catalog.build_catalog` 明列 Autofluxdep 的 measurement Builders。組合根將 catalog 注入 app，不在 import 時建立全域 registry。
 

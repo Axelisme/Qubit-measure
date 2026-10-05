@@ -3,6 +3,8 @@
 Copy incoming values before assignment: notebook models can validate assignment.
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
@@ -20,7 +22,6 @@ from .provenance import Provenance, validate_source
 from .registry import component_registry
 from .schema import (
     ComponentSchema,
-    ModuleSlot,
     PointDocument,
     PointGeneral,
     SetupDocument,
@@ -28,7 +29,7 @@ from .schema import (
     validate_component_name,
 )
 
-type _FieldNode = BaseModel | YamlMap
+type _FieldNode = BaseModel | dict[str, object]
 
 
 def _retain_component_defaults(model: BaseModel) -> None:
@@ -56,12 +57,11 @@ def add_component_to_draft(
     """Add one original registered model to an independent document draft.
 
     Internal entry helper, not a package export. Inputs are working-unit YAML
-    fields. The document commit owns canonical and reference validation.
+    fields. The original model owns validation; the store owns commit.
     Invalid names, fields, values or duplicates leave the draft unchanged.
     """
     validate_component_name(name, source=source)
     model = component_registry.get(kind, source=source, component=name)
-    component_registry.check_fields(kind, fields, path=name)
     if name in draft.components:
         raise ValueError(f"Component {name!r} already exists")
     component = model.model_validate({"kind": kind, **fields})
@@ -83,8 +83,8 @@ def _manual_source() -> YamlMap:
 
 def _field_value(node: object, path: str) -> object:
     for part in path.split("."):
-        if isinstance(node, BaseModel) and part in type(node).model_fields:
-            node = getattr(node, part)
+        if isinstance(node, BaseModel):
+            node = getattr(node, part, None)
         elif isinstance(node, dict):
             node = node.get(part)
         else:
@@ -98,7 +98,9 @@ def _sources_after_write(
     """Prepare sources for an accepted field and its written leaves without mutation."""
     result = deepcopy(sources)
     if isinstance(value, BaseModel):
-        value = value.model_dump(exclude_unset=True, warnings=False)
+        value = value.model_dump(
+            exclude_unset=True, serialize_as_any=True, warnings=False
+        )
     tree = TypeAdapter[YamlValue](YamlValue).validate_python(value)
 
     def include(field: str, node: YamlValue) -> None:
@@ -138,12 +140,12 @@ def stage_component(
     with a fresh manual source, clearing cloned_from on the path and descendants
     even for an unchanged value.
     A body exception or validation failure leaves the draft and sources intact.
-    Reference and canonical checks belong to the document commit. No I/O occurs here.
+    The owning store commits the complete document. No I/O occurs here.
     """
     candidate = draft.components[name].model_copy(deep=True)
     yield candidate
     accepted = type(candidate).model_validate(
-        candidate.model_dump(exclude_unset=True, warnings=False)
+        candidate.model_dump(exclude_unset=True, serialize_as_any=True, warnings=False)
     )
     sources = _sources_after_write(
         draft.provenance,
@@ -201,6 +203,44 @@ def stage_general(
         draft.general = point_general
 
 
+def _read_field(node: _FieldNode, name: str, path: str) -> object:
+    if isinstance(node, BaseModel):
+        if name not in type(node).model_fields and name not in (node.model_extra or {}):
+            raise AttributeError(f"{path}.{name}: field is not set")
+        value: object = getattr(node, name)
+        if name not in node.model_fields_set and value is None:
+            raise AttributeError(f"{path}.{name}: field is not set")
+        return value
+    return node[name]
+
+
+def _field_container(value: object, path: str) -> _FieldNode:
+    # Preserve models inside mappings rather than projecting them to YAML.
+    if isinstance(value, (BaseModel, dict)):
+        return value
+    raise AttributeError(f"{path}: not a field container")
+
+
+def _write_field(node: _FieldNode, name: str, value: object) -> None:
+    copied = deepcopy(value)
+    if isinstance(node, BaseModel):
+        if (
+            name not in type(node).model_fields
+            and node.model_config.get("extra") != "allow"
+        ):
+            # The original model applies forbid/ignore, not a registry precheck.
+            type(node).model_validate(
+                {
+                    **node.model_dump(exclude_unset=True, serialize_as_any=True),
+                    name: copied,
+                }
+            )
+            return
+        setattr(node, name, copied)
+    else:
+        node[name] = copied
+
+
 class FieldView:
     _model: Callable[[], _FieldNode]
     _edit: Callable[[str], AbstractContextManager[_FieldNode]]
@@ -212,49 +252,64 @@ class FieldView:
         edit: Callable[[str], AbstractContextManager[_FieldNode]],
         path: str,
     ) -> None:
-        """Bind a field container to its snapshot and validated edit callbacks.
+        """Bind a container to memory reads and atomic candidate edits.
 
-        model returns the readable container. edit(field_name) stages one write
-        and raises on rejection without changing that snapshot. path is the
-        logical container path, such as Q1.wiring, used in errors.
+        model returns the latest container without I/O. edit(relative_path)
+        yields an independent candidate and validates the complete owning model
+        on normal exit. Rejection leaves values and sources unchanged. path is
+        the full logical container path used in errors.
         """
         self._model = model
         self._edit = edit
         self._path = path
 
-    def __getattr__(self, name: str) -> YamlValue:
+    def __getattr__(self, name: str) -> YamlValue | FieldView:
+        """Read one field/key; missing fields raise AttributeError, without I/O."""
         try:
             return self[name]
         except KeyError as cause:
             raise AttributeError(f"{self._path}.{name}: field is not set") from cause
 
-    def __getitem__(self, name: str) -> YamlValue:
-        model = self._model()
-        if isinstance(model, BaseModel):
-            component_registry.check_fields(type(model), {name: None}, path=self._path)
-            value = getattr(model, name)
-            if name not in model.model_fields_set and value is None:
-                raise AttributeError(f"{self._path}.{name}: field is not set")
-            if isinstance(value, BaseModel):
-                value = value.model_dump(exclude_unset=True)
-            return TypeAdapter(YamlValue).validate_python(value)
-        return model[name]
+    def __getitem__(self, name: str) -> YamlValue | FieldView:
+        """Read one literal key, returning a live child view for dict/model values.
+
+        Scalars and lists are independent YAML values. Missing mapping keys raise
+        KeyError; unset null-default model fields raise AttributeError. Empty or
+        dotted keys cannot be addressed by set/meta.
+        """
+        value = _read_field(self._model(), name, self._path)
+        if isinstance(value, (BaseModel, dict)):
+            return FieldView(
+                lambda: _field_container(
+                    _read_field(self._model(), name, self._path), f"{self._path}.{name}"
+                ),
+                lambda field: self._edit_child(name, field),
+                f"{self._path}.{name}",
+            )
+        serialized = TypeAdapter(object).dump_python(value, serialize_as_any=True)
+        return deepcopy(TypeAdapter(YamlValue).validate_python(serialized))
+
+    @contextmanager
+    def _edit_child(self, name: str, field: str) -> Generator[_FieldNode]:
+        with self._edit(f"{name}.{field}") as parent:
+            child = _field_container(
+                _read_field(parent, name, self._path), f"{self._path}.{name}"
+            )
+            if isinstance(parent, BaseModel):
+                parent.model_fields_set.add(name)
+            yield child
 
     def __setattr__(self, name: str, value: object) -> None:
+        """Write one field/key through the complete owning model's validation."""
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
             self[name] = value
 
     def __setitem__(self, name: str, value: object) -> None:
+        """Copy into an atomic candidate; validation/body failures reject the write."""
         with self._edit(name) as draft:
-            if isinstance(draft, BaseModel):
-                component_registry.check_fields(
-                    type(draft), {name: value}, path=self._path
-                )
-                setattr(draft, name, deepcopy(value))
-            else:
-                draft[name] = TypeAdapter(YamlValue).validate_python(value, strict=True)
+            _write_field(draft, name, value)
 
 
 class GeneralView(FieldView):
@@ -270,12 +325,16 @@ class GeneralView(FieldView):
         self._general_model = model
 
         @contextmanager
-        def edit_extension(name: str) -> Generator[YamlMap]:
+        def edit_extension(name: str) -> Generator[_FieldNode]:
             with edit(f"ext.{name}") as draft:
-                yield draft.ext
+                yield _field_container(draft.ext, "general.ext")
                 draft.model_fields_set.add("ext")
 
-        self._extension = FieldView(lambda: model().ext, edit_extension, "general.ext")
+        self._extension = FieldView(
+            lambda: _field_container(model().ext, "general.ext"),
+            edit_extension,
+            "general.ext",
+        )
 
     @property
     def ext(self) -> FieldView:
@@ -292,8 +351,7 @@ class GeneralView(FieldView):
 
 class ComponentView:
     _model: Callable[[], ComponentSchema]
-    _edit: Callable[[str], AbstractContextManager[ComponentSchema]]
-    _path: str
+    _fields: FieldView
 
     def __init__(
         self,
@@ -301,82 +359,32 @@ class ComponentView:
         edit: Callable[[str], AbstractContextManager[ComponentSchema]],
         path: str,
     ) -> None:
-        """Bind a component snapshot to an atomic, validated field edit.
+        """Bind a component to memory reads and complete-model field edits.
 
-        model supplies the readable model. edit(relative_field_path) yields
-        a detached candidate, validates it on normal exit, then accepts the write
-        into its owning document. Rejection leaves the pre-write draft intact.
-        path is the component name used in logical paths, for example Q1.
-        Nested wiring/ext writes pass their relative dotted paths to edit.
-        The callback owner controls persistence and transaction boundaries.
+        model supplies the latest snapshot. edit(relative_path) yields a detached
+        candidate, validates it on normal exit, and accepts its value and source.
+        path is the component name. Dict/model reads return live child views
+        using the same callback; scalar/list reads are independent YAML values.
+        No read performs I/O.
         """
         self._model = model
-        self._edit = edit
-        self._path = path
-
-    @property
-    def ext(self) -> FieldView:
-        return FieldView(lambda: self._model().ext, self._edit_ext, f"{self._path}.ext")
-
-    @contextmanager
-    def _edit_ext(self, field: str) -> Generator[YamlMap]:
-        with self._edit(f"ext.{field}") as draft:
-            yield draft.ext
-            draft.model_fields_set.add("ext")
-
-    @property
-    def wiring(self) -> FieldView:
-        return self._container_view("wiring")
-
-    def _container_view(self, name: str) -> FieldView:
-        return FieldView(
-            lambda: self._field_container(self._model(), name),
-            lambda field: self._edit_container(name, field),
-            f"{self._path}.{name}",
-        )
-
-    def _field_container(self, model: ComponentSchema, name: str) -> _FieldNode:
-        value: object = getattr(model, name)
-        return (
-            value
-            if isinstance(value, BaseModel)
-            else TypeAdapter(YamlMap).validate_python(value)
-        )
-
-    @contextmanager
-    def _edit_container(self, name: str, field: str) -> Generator[_FieldNode]:
-        with self._edit(f"{name}.{field}") as draft:
-            container = self._field_container(draft, name)
-            yield container
-            setattr(draft, name, container)
-            draft.model_fields_set.add(name)
+        self._fields = FieldView(model, edit, path)
 
     @property
     def kind(self) -> str:
+        """Return the component's declared kind."""
         return self._model().kind
 
     def __getattr__(self, name: str) -> YamlValue | FieldView:
-        model = self._model()
-        component_registry.check_fields(model.kind, {name: None}, path=self._path)
-        field = type(model).model_fields[name]
-        if any(isinstance(marker, ModuleSlot) for marker in field.metadata):
-            return self._container_view(name)
-        value = getattr(model, name)
-        if name not in model.model_fields_set and value is None:
-            raise AttributeError(f"{self._path}.{name}: field is not set")
-        if isinstance(value, BaseModel):
-            value = value.model_dump(exclude_unset=True)
-        return TypeAdapter(YamlValue).validate_python(value)
+        """Read a field; missing/unset fields raise AttributeError."""
+        return self._fields.__getattr__(name)
 
     def __setattr__(self, name: str, value: object) -> None:
+        """Validate and accept a field and source, or leave both unchanged."""
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
-            with self._edit(name) as draft:
-                component_registry.check_fields(
-                    draft.kind, {name: value}, path=self._path
-                )
-                setattr(draft, name, deepcopy(value))
+            self._fields[name] = value
 
 
 class EditView:
@@ -405,8 +413,9 @@ class EditView:
         its five fixed fields and clears clone origin; non-manual event ids must
         belong to this entry's ledger. Written containers accept their leaves
         together. Invalid paths, schema values or source references raise before
-        acceptance. The enclosing view.edit() checks document references and
-        canonical values, then owns commit, conflict and publication.
+        acceptance. The enclosing view.edit() validates the complete document
+        and owns commit, conflict and publication. Empty or dotted mapping keys
+        cannot be addressed through this dotted syntax.
         """
         metadata: YamlMap | None = None
         if provenance is not None:
@@ -429,10 +438,7 @@ class EditView:
             for index, name in enumerate(parts[1:-1], start=1):
                 parent_path = ".".join(parts[:index])
                 if isinstance(node, BaseModel):
-                    component_registry.check_fields(
-                        type(node), {name: None}, path=parent_path
-                    )
-                    child = getattr(node, name)
+                    child = _read_field(node, name, parent_path)
                     node.model_fields_set.add(name)
                 else:
                     child = node[name]

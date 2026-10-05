@@ -22,9 +22,11 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 ### 資料表示與完整性
 
-參數容器的 YAML、快照與視圖使用同一個工作單位數字，來源表的 stderr 也不換算。UnitSpec 只作欄位標註。這條規則不改 Experiment Data File 的單位契約；datafile 的格式責任仍由 datafile 擁有。
+參數容器的 YAML、快照與視圖使用同一個工作單位數字，來源表的 stderr 也不換算。元件 model 擁有型別、extra 策略與驗證。這條規則不改 Experiment Data File 的單位契約；datafile 的格式責任仍由 datafile 擁有。
 
-參數容器框架只消費已註冊的 model 與角色宣告。具體 kinds、欄位與內建角色暫存於 `resources.entry.builtin_kinds`，由 lib 外的組合根呼叫 `register_all(registry)` 顯式注入，不在 import 時註冊。Registry、角色解析與 lib 其他模組不 import 此模組。`.importlinter` contract `entry-definitions-composition-only` 固定這個依賴方向。這讓使用者可以替換定義，不把具體名稱散入框架；不相容舊檔沿用 model 原生驗證報錯，不增加自動修復。
+參數容器框架只消費已註冊的 model 與角色宣告。具體 kinds、欄位與內建角色由 `zcu_lab.components` 擁有。Lib 外的組合根顯式傳入共用 ComponentRegistry，在 startup 註冊，不在 import 或 reload 時註冊。`.importlinter` 的 `entry-definitions-composition-only` 與 `framework-no-user` 禁止框架反向 import 定義。使用者 model 可用 validator 處理舊欄位；框架不猜兼容規則。
+
+DocumentStore 分開保存 raw YAML 節點、驗證後的 normalized tree 與 public typed snapshot。讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。這讓 model 的讀檔轉換在下一次 commit 寫回，同時保留未改節點與 forward-minor 的剩餘未知欄位。Forbid／ignore 的 typed snapshot 隱藏未來欄位，allow model 保留它們。Entry 只為明確接受的值記錄來源，不把格式轉換記為 manual acceptance。
 
 Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Data Variable 是結果語意，state／phase 等離散座標仍是 axis。單一 Result 的 canonical one-shot grouped file 使用共同 grid、一份 shared metadata 與明確 variable-to-channel mapping；必需 variables 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
 

@@ -5,7 +5,9 @@ from typing import Any
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
+from zcu_tools.resources.entry.registry import ComponentRegistry
 
+from zcu_lab.components import register_all as register_components
 from zcu_lab.templates import register_all_templates
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
@@ -119,14 +121,20 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
 
 
 def register_all(
-    registry: Registry, *, templates: TemplateCatalog | None = None
+    registry: Registry,
+    *,
+    templates: TemplateCatalog | None = None,
+    components: ComponentRegistry | None = None,
 ) -> None:
     """Register adapters into the caller-owned registry.
 
     Pass a caller-owned TemplateCatalog as ``templates`` only at startup to
-    register module/waveform templates. Omit it on reload to keep template identities.
-    Duplicate entries raise the corresponding catalog registration error.
+    register module/waveform templates. Pass the shared ComponentRegistry as
+    components at startup to register component models and roles. Omit both on
+    reload to preserve identities. Duplicate entries raise registration errors.
     """
+    if components is not None:
+        register_components(components)
     if templates is not None:
         register_all_templates(templates)
     for name, cls in ADAPTERS.items():
