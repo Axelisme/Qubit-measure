@@ -175,7 +175,11 @@ class CoherenceGui(LookbackGui):
         for edit in params["edits"]:
             if edit["path"][0] == "modules" and len(edit["path"]) == 2:
                 name = edit["value"]["__ref"]
-                if name is not None and name not in self.library:
+                custom_pulse = (
+                    edit["path"][1] in ("pi_pulse", "pi2_pulse")
+                    and name == "<Custom:Pulse>"
+                )
+                if name is not None and name not in self.library and not custom_pulse:
                     modules[edit["path"][1]].update(
                         valid=False, error="unknown library"
                     )
@@ -437,7 +441,7 @@ def test_t2_rejects_nonfinite_or_boolean_detune_before_preparing(
 def test_coherence_explicit_reference_must_be_a_library_entry(
     tmp_path, recipe, parameter
 ):
-    gui = CoherenceGui(pi_ref="pi", adapter=recipe)
+    gui = CoherenceGui(pi_ref="pi", pi2_ref="pi2", adapter=recipe)
     with recipe_client(tmp_path, gui) as client:
         data = client.call(recipe, {parameter: "<Custom:Pulse>"}).data
         assert data["status"] == "failed", data

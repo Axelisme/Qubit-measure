@@ -177,7 +177,10 @@ class GeGui(LookbackGui):
         for edit in params["edits"]:
             if edit["path"][0] == "modules" and len(edit["path"]) == 2:
                 name = edit["value"]["__ref"]
-                if name is not None and name not in self.library:
+                custom_pulse = (
+                    edit["path"][1] == "probe_pulse" and name == "<Custom:Pulse>"
+                )
+                if name is not None and name not in self.library and not custom_pulse:
                     modules[edit["path"][1]].update(
                         valid=False, error="unknown library"
                     )
@@ -692,6 +695,14 @@ def test_ge_optional_refs_are_explicit_and_omission_resets_them(ge_client, reuse
 def test_ge_does_not_replace_missing_explicit_library_refs(ge_client, parameter):
     gui, client = ge_client
     data = client.call("singleshot_ge", {"pi_ref": "pi", parameter: "missing"}).data
+    assert data["status"] == "failed", data
+    assert data["error"]["reason"] == "invalid_cfg"
+    assert not gui.ran
+
+
+def test_ge_rejects_valid_custom_pi_outside_calibrated_library(ge_client):
+    gui, client = ge_client
+    data = client.call("singleshot_ge", {"pi_ref": "<Custom:Pulse>"}).data
     assert data["status"] == "failed", data
     assert data["error"]["reason"] == "invalid_cfg"
     assert not gui.ran
