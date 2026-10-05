@@ -25,7 +25,7 @@ def _make_dmem_prog(temp_regs=("r10", "r11")):
 
 def test_small_values_not_compressed():
     lv = LoadValue("x", [1, 2, 3], idx_reg="i", val_reg="v")
-    assert lv._is_compressed is False
+    assert lv.is_compressed is False
     assert lv._packed_values == [1, 2, 3]
     assert lv.allow_rerun() is True
 
@@ -33,7 +33,7 @@ def test_small_values_not_compressed():
 def test_large_small_range_gets_compressed():
     values = [i % 4 for i in range(64)]  # 2 bits, 64 values
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
-    assert lv._is_compressed is True
+    assert lv.is_compressed is True
     assert lv._bits_per_value == 2
     assert lv._values_per_word == 16
     assert len(lv._packed_values) == 64 // 16
@@ -58,7 +58,7 @@ def test_int32_max_value_accepted():
 def test_auto_compress_off_keeps_values():
     values = [i % 4 for i in range(64)]
     lv = LoadValue("x", values, idx_reg="i", val_reg="v", auto_compress=False)
-    assert lv._is_compressed is False
+    assert lv.is_compressed is False
     assert lv._packed_values == values
 
 
@@ -127,7 +127,7 @@ def test_load_value_run_uncompressed_returns_t():
 def test_load_value_run_compressed_uses_asr_word_shift():
     values = [i % 4 for i in range(64)]
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
-    assert lv._is_compressed is True
+    assert lv.is_compressed is True
     prog = _make_dmem_prog()
     lv.init(prog)
     lv.run(prog)
@@ -204,14 +204,14 @@ def test_large_value_max_17bits_not_compressed():
     # max value = 65536 (17-bit) → bits rounds to 32 → values_per_word = 1 < 2 → no compression
     values = [65536] * _COMPRESS_MIN_VALUES
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
-    assert lv._is_compressed is False
+    assert lv.is_compressed is False
 
 
 def test_large_value_max_16bits_gets_compressed():
     # max value = 65535 (16-bit) → bits = 16 → values_per_word = 2 → compressed
     values = [65535] * _COMPRESS_MIN_VALUES
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
-    assert lv._is_compressed is True
+    assert lv.is_compressed is True
     assert lv._bits_per_value == 16
     assert lv._values_per_word == 2
     # Packed words that set bit 31 are stored as negative int32 (two's complement).
@@ -224,7 +224,7 @@ def test_packed_words_fit_in_int32():
 
     values = [255] * _COMPRESS_MIN_VALUES  # 8-bit, vpw=4 → slot 3 at bit 24
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
-    assert lv._is_compressed is True
+    assert lv.is_compressed is True
     # Must not raise OverflowError
     arr = np.array(lv._packed_values, dtype=np.int32)
     assert arr.dtype == np.int32
