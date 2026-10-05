@@ -52,6 +52,7 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
         stop=None if gain_range is None else gain_range[1],
         expts=gain_points,
     )
+    tab.set("modules.readout.pulse_cfg.gain", None)
     tab.set("reps", reps)
     tab.set("rounds", rounds)
     run, status = yield tab.run()

@@ -568,8 +568,9 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
             "value": 0.21,
             "source": "gui_default",
         }
-        assert waited.data["actual"]["parameters"]["gain"] == (
-            summary["actual"]["parameters"]["gain"]
+        assert (
+            waited.data["actual"]["parameters"]["gain"]
+            == summary["actual"]["parameters"]["gain"]
         )
         assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
             {"path": "/actual/raw.h5", "status": "saved"}

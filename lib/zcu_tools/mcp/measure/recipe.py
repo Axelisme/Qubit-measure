@@ -330,7 +330,13 @@ class AnalyzeOperation:
 
     Yield once to receive (RecipeAnalysis, completed) or (None, cancelled).
     Interactive handoff does not finish the yield; GUI done resumes observation.
-    Failure or superseded source is thrown back at the yield expression.
+    Completed delivery captures the native result, persistently saves each named
+    stage image at the GUI's canonical destination, creates a session-only PNG
+    preview, and captures writeback candidates once without writing them.
+    No named images means no image saves or preview, but still captures writeback.
+    Failure, including image-save failure, or superseded source is thrown back at
+    the yield expression. snapshot retains any result and confirmed saved prefix;
+    session previews are not persistent images and are removed on session close.
     Construction is framework-only: execution is the registered completion owner,
     or None for one suppressed start. Authors use RecipeRun.analyze.
     """
@@ -364,10 +370,11 @@ class AnalyzeOperation:
         """Complete on the recipe's worker without starting or joining another one.
 
         A suppressed or cancelled analysis delivers (None, cancelled). Finished
-        analysis delivers (RecipeAnalysis, completed). Failed native operations,
-        superseded sources and continuation failures raise GuiRpcError for the
-        driver to throw at the yield. Snapshot/image reads retain confirmed prefix
-        facts. Raise ValueError if completion already started or has no receipt.
+        analysis delivers (RecipeAnalysis, completed) after this handle's result,
+        persistent-image, session-preview and writeback capture. Failed native
+        operations, superseded sources and continuation failures raise GuiRpcError
+        for the driver to throw at the yield. Snapshot/image reads retain confirmed
+        prefix facts. Raise ValueError if completion already started or has no receipt.
         """
         if self._execution is None:
             return None, "cancelled"
@@ -1468,6 +1475,14 @@ class RecipeRun:
         Post uses this Run's completed Primary source. Pending between-yield cancel
         suppresses this one start and is consumed once. Rejection fails immediately;
         the yielded handle delivers cancellation or throws completion failures.
+
+        Before completed yield delivery, capture the native result, persistently
+        save every named stage image at the GUI's canonical destination, create
+        a session-only PNG preview, and capture writeback candidates once without
+        writing them. No named images skips saves/preview, not writeback capture.
+        Image-save or later capture failure raises GuiRpcError at yield and leaves
+        the confirmed saved prefix in the handle snapshot. Session previews are
+        separate from persistent images and are removed on session close.
         """
         from zcu_tools.mcp.measure.recipe_inputs import copy_recipe_parameters
 
