@@ -17,6 +17,8 @@ from zcu_tools.analysis.fluxdep.twotone import (
     analyze_twotone_pick,
 )
 from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import SpectrumChangedPayload
+from zcu_tools.gui.app.fluxdep.state import spectrum_version_key
 from zcu_tools.gui.app.fluxdep.twotone import TwoTonePickPlugin
 from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -238,7 +240,9 @@ def test_outside_release_finishes_once_and_tool_is_captured_on_press(presented) 
     assert context is not None
     context.plugin.set_tool.execute(context.session, TwoToneTool(0.02, "erase"))
     widget.canvas.draw()
-    press = mouse(widget, "button_press_event", 0.0, 4.8)
+    # Center on a device row so the captured radius reaches actual mask cells.
+    press_x = float(context.plugin.inputs.spectrum.dev_values[12])
+    press = mouse(widget, "button_press_event", press_x, 4.8)
     widget.canvas.callbacks.process(press.name, press)
     context.plugin.execute_command(
         context.session, "set_tool", {"width": 0.004, "mode": "select"}
@@ -368,13 +372,33 @@ def test_finish_pending_preview_publishes_committed_selection(presented) -> None
     assert context is not None
     wait_for_requests(queue, 1)
     pending = queue.requests[0]
+    stale_preview = pending.compute()
+    assert stale_preview.result.dev_values.size > 0
     context.plugin.clear.execute(context.session, None)
     assert widget.preview_view() is None
-    widget.finished.connect(ctrl.interactive.finish_twotone_pick)
-    button(widget, "Finish").click()
-    assert ctrl.state.spectrums["two"].points_selected
-    assert ctrl.state.spectrums["two"].points["dev_values"].size == 0
-    pending.on_done(pending.compute())
-    assert widget.preview_view() is None
-    with pytest.raises(FailedPreconditionError):
-        context.plugin.clear.execute(context.session, None)
+    version_key = spectrum_version_key("two")
+    version_before = ctrl.state.version.get(version_key)
+    changes: list[str] = []
+    subscription = ctrl.bus.subscribe(
+        SpectrumChangedPayload, lambda event: changes.append(event.name)
+    )
+    try:
+        widget.finished.connect(ctrl.interactive.finish_twotone_pick)
+        button(widget, "Finish").click()
+        entry = ctrl.state.spectrums["two"]
+        assert not entry.points_selected
+        assert entry.points["dev_values"].size == 0
+        assert entry.points["freqs"].size == 0
+        assert entry.points["fluxs"].size == 0
+        assert ctrl.state.version.get(version_key) == version_before + 1
+        assert changes == ["two"]
+        assert ctrl.interactive.current_twotone_pick() is None
+        pending.on_done(stale_preview)
+        assert widget.preview_view() is None
+        assert ctrl.state.version.get(version_key) == version_before + 1
+        assert changes == ["two"]
+        assert ctrl.state.spectrums["two"].points["dev_values"].size == 0
+        with pytest.raises(FailedPreconditionError):
+            context.plugin.clear.execute(context.session, None)
+    finally:
+        subscription.unsubscribe()

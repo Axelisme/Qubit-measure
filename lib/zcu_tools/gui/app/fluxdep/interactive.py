@@ -20,7 +20,11 @@ from zcu_tools.analysis.fluxdep.onetone import (
     OneTonePickResult,
     OneTonePickState,
 )
-from zcu_tools.analysis.fluxdep.twotone import TwoTonePickResult, TwoTonePickState
+from zcu_tools.analysis.fluxdep.twotone import (
+    TwoToneInputs,
+    TwoTonePickResult,
+    TwoTonePickState,
+)
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -308,7 +312,38 @@ class FluxDepInteractiveOwner:
         disposed owner raises FailedPreconditionError. Kind switch closes old
         input. Off-owner use raises RuntimeError. Invalid raw data raises ValueError.
         """
-        raise NotImplementedError
+        self._require_owner()
+        if self._disposed:
+            raise FailedPreconditionError("interactive owner is disposed")
+        if name not in self._state.spectrums:
+            raise InvalidInputError(f"unknown spectrum {name!r}")
+        if name != self._state.active_spectrum:
+            raise FailedPreconditionError(
+                "two-tone picking requires the active spectrum"
+            )
+        entry = self._state.spectrums[name]
+        if entry.spec_type != "TwoTone":
+            raise FailedPreconditionError(
+                "two-tone picking requires a TwoTone spectrum"
+            )
+        if not entry.aligned:
+            raise FailedPreconditionError(
+                "two-tone picking requires an aligned spectrum"
+            )
+        current = self.current_twotone_pick()
+        if current is not None:
+            return current
+        self.cancel()
+        inputs = TwoToneInputs(
+            FluxPickInputs(
+                entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
+            )
+        )
+        plugin = TwoTonePickPlugin(inputs)
+        self._context = TwoTonePickContext(
+            name, plugin, plugin.open(self._owner), entry.flux_half, entry.flux_int
+        )
+        return self._context
 
     def current_twotone_pick(self) -> TwoTonePickContext | None:
         """Return valid open TwoTone context, otherwise None, on the owner loop.
@@ -316,7 +351,24 @@ class FluxDepInteractiveOwner:
         Invalid active/spectrum identity closes the old input, as for OneTone.
         This query does not create a Session or compute a preview.
         """
-        raise NotImplementedError
+        self._require_owner()
+        if self._context is not None and (
+            self._context.spectrum_name != self._state.active_spectrum
+            or self._context.spectrum_name not in self._state.spectrums
+        ):
+            self.cancel()
+        if not isinstance(self._context, TwoTonePickContext):
+            return None
+        entry = self._state.spectrums[self._context.spectrum_name]
+        if entry.spec_type != "TwoTone" or not entry.aligned:
+            self.cancel()
+            return None
+        try:
+            self._context.session.ensure_input_open()
+        except FailedPreconditionError:
+            self.cancel()
+            return None
+        return self._context
 
     def finish_twotone_pick(self) -> TwoTonePickResult:
         """Compute latest committed points, close input and publish through PointsService.
@@ -325,7 +377,15 @@ class FluxDepInteractiveOwner:
         context editable. Clear context before publication; publication failure
         remains terminal. Never use a widget's pending or cached preview.
         """
-        raise NotImplementedError
+        self._require_owner()
+        context = self.current_twotone_pick()
+        if context is None:
+            raise FailedPreconditionError("no active two-tone picker")
+        context.plugin.can_finish(context.session.snapshot())
+        self._context = None
+        result = context.plugin.finish(context.session)
+        self._publish_points(context.spectrum_name, result.dev_values, result.freqs)
+        return result
 
     def cancel(self) -> None:
         """Close current input without publication; safe with no active context."""

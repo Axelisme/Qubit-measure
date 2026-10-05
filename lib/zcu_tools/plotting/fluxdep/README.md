@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-06 — shared OneTone state projection
+**Last updated:** 2026-10-06 — shared OneTone and TwoTone state projection
 
 `make_search_diagnostic_figure(result)` accepts the completed `DatabaseSearchResult`
 from [`analysis.fluxdep.search`](../../analysis/fluxdep/README.md) and returns a
@@ -23,6 +23,13 @@ indices onto device/GHz and normalized-amplitude panels. The Qt OneTone view and
 `make_onetone_pick_figure` share its layout and reusable artists. The builder
 returns a separate Agg Figure; projecting onto a supplied GUI Figure does not
 change its canvas. Neither path commits threshold or selection state.
+
+`twotone.TwoTonePickPlot` renders a numerical `TwoTonePickView` onto a supplied
+Figure in native device/GHz axes. Current points, optional mask and positional
+added/removed changes share the Qt/native renderer. Stroke endpoint outlines use
+normalized radius scaled by each axis span. `make_twotone_pick_figure` computes
+the projection and returns a separate Agg Figure, with optional previous-snapshot
+feedback for Undo. Neither renderer commits state or owns a Qt canvas.
 
 This package does not own Qt canvas attachment, backend selection, interactive
 `TwoLinePicker` gestures, or analysis state. Importing the root `plotting` package

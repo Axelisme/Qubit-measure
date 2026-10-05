@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Shared line/OneTone picking and app-owned session lifetime
+**Last updated:** 2026-10-06. Shared line/OneTone/TwoTone picking and app-owned session lifetime
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -66,8 +66,10 @@ view 只暴露查詢，不暴露 mutation。
   helper；per-command façade body 仍各 app（領域動詞 + app payload），main 不繼承。
   **無 measure 概念**（run/analyze/writeback/context/device/tab）。
 - **`interactive.py`** — Qt-free `FluxDepInteractiveOwner` 持有 active spectrum 的
-  單一 live 定線／OneTone context。GUI controls 與 commands 共用 `gui.interactive` 的 Actions／Session；
+  單一 live 定線／OneTone／TwoTone context。GUI controls 與 commands 共用 `gui.interactive` 的 Actions／Session；
   LinePicker 只持有 disposable preview，OneTone threshold 與 indices 一起 commit／undo。
+  TwoTone Session 保存 mask、detector 與 tools；工具設定保留單層 Undo，完整 stroke 一次 commit。
+  Background projection 只提供 derived view；Finish 重新計算 committed snapshot，不等待 preview。
   Finish 經 Controller 的 AlignmentService／PointsService 發布；後者擁有排序與 flux calibration。
   Picker kind switch、active switch、reload、remove 或 external spectrum change 關閉舊輸入。
   Widget detach 不終止 session，window close 才 dispose owner 並 quiesce 背景 runner。
@@ -95,7 +97,8 @@ LoadService 用底層 `load_data`(datafile) + `format_rawdata`(analysis.spectrum
 
 ### State 邊界（main-thread 不變式）
 所有 State 寫入只在 Qt 主執行緒（沿用 measure 的不變式）。worker（互動 widget 的
-背景計算）不直接寫 State，只 emit Qt signal → 主執行緒 slot 寫。
+背景計算）不直接寫 State，只經 owner-loop delivery 提供計算結果。
+TwoTone preview completion 只更新 presentation，不提交 Session 或 spectrum points。
 
 ### 兩種繪圖機制：互動 widget 自建 canvas / v2 診斷圖使用 explicit host
 **互動 widget（定線/選點/結果預覽）自持 canvas**：widget 自持 `Figure` +

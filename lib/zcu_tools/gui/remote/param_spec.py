@@ -22,6 +22,7 @@ Validation semantics intentionally mirror the legacy ``wire._require_*`` /
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -54,12 +55,59 @@ class NumberPairs:
     values: tuple[tuple[float, float], ...]
 
     def __post_init__(self) -> None:
-        raise NotImplementedError
+        object.__setattr__(self, "values", _owned_number_pairs(self.values))
 
     @classmethod
     def from_wire(cls, value: object) -> NumberPairs:
         """Decode JSON list or retain validated carrier; INVALID_PARAMS rejects others."""
-        raise NotImplementedError
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, list) or not value:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "number pairs must be a nonempty JSON list"
+            )
+        pairs: list[tuple[float, float]] = []
+        for pair in value:
+            if not isinstance(pair, list) or len(pair) != 2:
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS,
+                    "each number pair must be a two-number JSON list",
+                )
+            pairs.append((_pair_number(pair[0]), _pair_number(pair[1])))
+        return cls(tuple(pairs))
+
+
+def _pair_number(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "number pairs require numeric values"
+        )
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "number pairs require finite values"
+        ) from exc
+    if not math.isfinite(number):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "number pairs require finite values"
+        )
+    return number
+
+
+def _owned_number_pairs(value: object) -> tuple[tuple[float, float], ...]:
+    if not isinstance(value, tuple) or not value:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "number pairs must be a nonempty tuple"
+        )
+    pairs: list[tuple[float, float]] = []
+    for pair in value:
+        if not isinstance(pair, tuple) or len(pair) != 2:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "each number pair must have two values"
+            )
+        pairs.append((_pair_number(pair[0]), _pair_number(pair[1])))
+    return tuple(pairs)
 
 
 def _validate_string_enum(values: tuple[object, ...]) -> None:
