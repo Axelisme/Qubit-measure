@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from io import BufferedWriter, TextIOWrapper
 from pathlib import Path
+from typing import IO, Literal
 from uuid import uuid4
 
 import pytest
@@ -445,3 +447,193 @@ def test_future_minor_preserves_raw_event_and_unknown_payload_without_rewrite(
     with pytest.raises(ValueError, match="version"):
         entry.ledger.append(found.event)
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("version", ["1.0", "1.1"])
+def test_payload_kind_controls_future_field_projection(
+    entry_records: tuple[ResultEntry, Path], version: str
+) -> None:
+    entry, records = entry_records
+    event = LedgerEvent(
+        id=str(uuid4()),
+        kind="saved",
+        at=_AT,
+        entry_id=entry.entry_id,
+        origin="notebook",
+        payload=SavedPayload(run_id="r", outputs=()),
+    )
+    entry.ledger.append(event)
+    path = records / "ledger.jsonl"
+    data = json.loads(path.read_text())
+    data["format_version"] = version
+    data["payload"].update(
+        tab="Spectroscopy", experiment="future-spec", cfg_summary={}, roles={}
+    )
+    raw = json.dumps(data)
+    path.write_text(raw + "\n", encoding="utf-8")
+    before = path.read_bytes()
+    if version == "1.0":
+        with pytest.raises(ValueError, match="extra"):
+            entry.ledger.events()
+    else:
+        found = entry.ledger.get(event.id)
+        assert isinstance(found.event.payload, SavedPayload)
+        assert found.event.payload == event.payload
+        assert found.event_json == raw
+        assert entry.ledger.events() == (found.event,)
+    assert path.read_bytes() == before
+
+    data["payload"]["run_id"] = 123
+    path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+    invalid = path.read_bytes()
+    with pytest.raises(ValueError, match="run_id"):
+        entry.ledger.events()
+    assert path.read_bytes() == invalid
+
+
+def test_invalid_utf8_ledger_reports_exact_line_without_rewrite(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    entry, records = entry_records
+    event = _accepted(entry.entry_id)
+    entry.ledger.append(event)
+    path = records / "ledger.jsonl"
+    corrupt = path.read_bytes() + b"\xff\n"
+    path.write_bytes(corrupt)
+    for operation in (
+        lambda: entry.ledger.events(),
+        lambda: entry.ledger.get(event.id),
+        lambda: entry.ledger.append(_accepted(entry.entry_id)),
+    ):
+        with pytest.raises(ValueError, match="utf-8") as caught:
+            operation()
+        assert f"{path}:2:" in str(caught.value)
+        assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+        assert path.read_bytes() == corrupt
+
+
+def test_invalid_utf8_record_reports_physical_path_without_rewrite(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    entry, records = entry_records
+    event = _accepted(entry.entry_id)
+    entry.ledger.append(event, record={"sample": 1})
+    path = records / f"{event.id}.json"
+    path.write_bytes(b"\xff")
+    ledger_bytes = (records / "ledger.jsonl").read_bytes()
+    assert len(entry.ledger.events()) == 1
+    with pytest.raises(ValueError, match="utf-8") as caught:
+        entry.ledger.get(event.id)
+    assert str(path) in str(caught.value)
+    assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+    assert path.read_bytes() == b"\xff"
+    assert (records / "ledger.jsonl").read_bytes() == ledger_bytes
+
+
+def test_record_rename_failure_cleans_only_unpublished_temp(
+    entry_records: tuple[ResultEntry, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry, records = entry_records
+    entry.ledger.append(_accepted(entry.entry_id))
+    path = records / "ledger.jsonl"
+    before = path.read_bytes()
+    event = _accepted(entry.entry_id)
+    original_replace = Path.replace
+
+    def fail_record_rename(source: Path, target: Path) -> Path:
+        if source.parent == records and source.suffix == ".tmp":
+            raise OSError("injected record rename")
+        return original_replace(source, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail_record_rename)
+        with pytest.raises(OSError, match="injected record rename"):
+            entry.ledger.append(event, record={"sample": 1})
+    assert not tuple(records.glob("*.tmp"))
+    assert not (records / f"{event.id}.json").exists()
+    assert path.read_bytes() == before
+    with pytest.raises(KeyError):
+        entry.ledger.get(event.id)
+
+
+class _FailingLedgerStream(TextIOWrapper):
+    """Write/flush collaborator that persists evidence before reporting failure."""
+
+    def __init__(self, buffer: BufferedWriter, fail_at: Literal["write", "flush"]):
+        self._fail_at: Literal["write", "flush"] | None = fail_at
+        super().__init__(buffer, encoding="utf-8", newline="")
+
+    def write(self, text: str) -> int:
+        if self._fail_at == "write":
+            super().write(text[:10])
+            raise OSError("injected ledger write")
+        return super().write(text)
+
+    def flush(self) -> None:
+        super().flush()
+        if self._fail_at == "flush":
+            raise OSError("injected ledger flush")
+
+    def close(self) -> None:
+        # Context cleanup must not hide the injected write/flush failure.
+        self._fail_at = None
+        super().close()
+
+
+@pytest.mark.parametrize("fail_at", ["open", "write", "flush"])
+def test_append_io_failure_retains_published_record_and_historical_bytes(
+    entry_records: tuple[ResultEntry, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    fail_at: Literal["open", "write", "flush"],
+) -> None:
+    entry, records = entry_records
+    entry.ledger.append(_accepted(entry.entry_id))
+    path = records / "ledger.jsonl"
+    before = path.read_bytes()
+    event = _accepted(entry.entry_id)
+    record: JsonObject = {"sample": [1, "µ"]}
+    original_open = Path.open
+
+    def failing_open(
+        source: Path,
+        mode: str = "r",
+        *,
+        encoding: str | None = None,
+        newline: str | None = None,
+    ) -> IO[str] | IO[bytes]:
+        if source == path and mode == "a":
+            if fail_at == "open":
+                raise OSError("injected ledger open")
+            return _FailingLedgerStream(original_open(source, "ab"), fail_at)
+        return original_open(source, mode, encoding=encoding, newline=newline)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", failing_open)
+        with pytest.raises(OSError, match=f"injected ledger {fail_at}"):
+            entry.ledger.append(event, record=record)
+
+    attachment = records / f"{event.id}.json"
+    assert json.loads(attachment.read_text()) == record
+    assert not tuple(records.glob("*.tmp"))
+    after = path.read_bytes()
+    assert after.startswith(before)
+    if fail_at == "open":
+        assert after == before
+        with pytest.raises(KeyError):
+            entry.ledger.get(event.id)
+    elif fail_at == "write":
+        assert len(after) > len(before)
+        for operation in (
+            lambda: entry.ledger.events(),
+            lambda: entry.ledger.get(event.id),
+            lambda: entry.ledger.append(_accepted(entry.entry_id)),
+        ):
+            with pytest.raises(ValueError, match="incomplete tail"):
+                operation()
+            assert path.read_bytes() == after
+    else:
+        found = entry.ledger.get(event.id)
+        assert found.record == record
+        assert found.event.record == f"records/{event.id}.json"
+    assert attachment.exists()

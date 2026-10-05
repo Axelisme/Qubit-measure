@@ -214,7 +214,11 @@ class ResultEntry:
         expected_id = None
         if isinstance(clone_from, PointView):
             identity = _point_origin.clone_source(
-                clone_from, result_root=result_root, database_root=database_root
+                clone_from,
+                result_root=result_root,
+                database_root=database_root,
+                entry_path=self._result_path,
+                entry_id=self.entry_id,
             )
             source = identity.source.parent
             name = source.parent.parent.name

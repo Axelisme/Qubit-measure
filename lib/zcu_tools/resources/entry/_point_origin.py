@@ -26,23 +26,39 @@ class PointOrigin:
 
 
 # Weak keys keep identity only for the lifetime of the corresponding view.
-_sources: WeakKeyDictionary[PointView, PointOrigin] = WeakKeyDictionary()
+_sources: WeakKeyDictionary[PointView, PointOrigin | Path] = WeakKeyDictionary()
 
 
-def register(view: PointView, origin: PointOrigin) -> None:
-    """Record ResultEntry's source identity, without exposing a snapshot API."""
+def register(view: PointView, origin: PointOrigin | Path) -> None:
+    """Associate view with its point.yaml Path or full ResultEntry PointOrigin.
+
+    Construction records only the path, permitting same-entry clone. ResultEntry
+    replaces that path with full identity to permit foreign clone. No I/O runs.
+    """
     _sources[view] = origin
 
 
 def clone_source(
-    view: PointView, *, result_root: Path, database_root: Path
+    view: PointView,
+    *,
+    result_root: Path,
+    database_root: Path,
+    entry_path: Path,
+    entry_id: str,
 ) -> PointOrigin:
-    """Return the original identity if both resolved roots match.
+    """Return a verified source identity for clone into entry_path/entry_id.
 
-    Manually constructed views lack this identity and raise ValueError, as do
-    views bound to another pair of roots. The caller reloads the published point.
+    A constructor-only path can clone within that same resolved entry. Foreign
+    views require ResultEntry identity and both roots must match. The caller
+    reloads the published point instead of using the view snapshot.
     """
     origin = _sources.get(view)
+    if isinstance(origin, Path):
+        if origin.resolve().parents[2] != entry_path.resolve():
+            raise ValueError("PointView has no ResultEntry source identity")
+        return PointOrigin(
+            origin, entry_id, result_root.resolve(), database_root.resolve()
+        )
     if origin is None:
         raise ValueError("PointView has no ResultEntry source identity")
     if (

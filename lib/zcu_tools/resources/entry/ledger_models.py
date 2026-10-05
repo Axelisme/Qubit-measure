@@ -13,6 +13,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictStr,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -233,6 +234,31 @@ class LedgerEvent(_LedgerModel):
         | AcceptedPayload
         | ImportPayload
     )
+
+    @field_validator("payload", mode="before")
+    @classmethod
+    def validate_payload(cls, value: object, info: ValidationInfo) -> object:
+        """Validate a raw mapping or payload model against the envelope kind.
+
+        info supplies Pydantic's previously validated kind/format_version fields.
+        Known-field/type errors and 1.0 extras raise ValueError; future 1.x keys
+        are ignored by the selected typed model, not used to select a branch.
+        """
+        models: dict[str, type[BaseModel]] = {
+            "acquired": AcquiredPayload,
+            "saved": SavedPayload,
+            "analyzed": AnalyzedPayload,
+            "accepted": AcceptedPayload,
+            "import": ImportPayload,
+        }
+        kind = info.data.get("kind")
+        if kind not in models:
+            # Invalid/missing kind is reported by its own required field.
+            return value
+        future = info.data.get("format_version", "1.0") != "1.0"
+        return models[kind].model_validate(
+            value, extra="ignore" if future else "forbid"
+        )
 
     @field_validator("format_version")
     @classmethod

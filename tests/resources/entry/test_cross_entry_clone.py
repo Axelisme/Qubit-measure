@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from ruamel.yaml import YAML
+from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import (
     AcceptedPayload,
     AcceptedWrite,
@@ -16,6 +17,12 @@ from zcu_tools.resources.entry import (
     PointView,
     Provenance,
     ResultEntry,
+    SavedPayload,
+)
+from zcu_tools.resources.entry.schema import (
+    PARAMETER_FORMAT,
+    PARAMETER_VERSION,
+    PointDocument,
 )
 
 
@@ -284,3 +291,89 @@ def test_cross_entry_clone_rejects_invalid_origin_call_id_before_publication(
         )
     assert not (results / "entry/points/failed").exists()
     assert entry.ledger.events() == ()
+
+
+def test_future_minor_import_preserves_payload_branch_collision_evidence(
+    entry: ResultEntry,
+    entry_roots: tuple[Path, Path],
+    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+) -> None:
+    foreign, view, _event = foreign_recorded_point
+    results, _database = entry_roots
+    event = LedgerEvent(
+        id=str(uuid4()),
+        kind="saved",
+        at="2026-10-06T02:00:00Z",
+        entry_id=foreign.entry_id,
+        origin="notebook",
+        payload=SavedPayload(run_id="r", outputs=()),
+    )
+    foreign.ledger.append(event, record={"sample": 1})
+    with view.edit() as draft:
+        draft.set(
+            "Q1.rate",
+            5300.0,
+            provenance=Provenance(event.id, "fit", None, event.at, None),
+        )
+    path = results / "other/records/ledger.jsonl"
+    lines = path.read_text().splitlines()
+    data = json.loads(lines[-1])
+    data["format_version"] = "1.1"
+    data["payload"].update(
+        run_id="future-run",
+        tab="Spectroscopy",
+        experiment="future-spec",
+        cfg_summary={},
+        roles={},
+    )
+    raw = json.dumps(data)
+    path.write_text("\n".join([*lines[:-1], raw]) + "\n", encoding="utf-8")
+    before = path.read_bytes()
+    source_record = foreign.ledger.get(event.id).record
+    cloned = entry.new_point("future-copy", clone_from=view)
+    metadata = cloned.meta("Q1.rate")
+    assert metadata is not None
+    imported = entry.ledger.get(metadata.source)
+    assert isinstance(imported.event.payload, ImportPayload)
+    assert imported.event.payload.source_event_json == raw
+    assert imported.record == source_record
+    assert cloned.Q1.rate == 5300.0
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("same_entry", [True, False])
+def test_manual_view_clone_requires_full_identity_only_for_foreign_entry(
+    entry: ResultEntry,
+    entry_roots: tuple[Path, Path],
+    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    same_entry: bool,
+) -> None:
+    foreign, _view, event = foreign_recorded_point
+    results, _database = entry_roots
+    source = results / "other/points/source/point.yaml"
+    store = DocumentStore(
+        source,
+        PointDocument,
+        format=PARAMETER_FORMAT,
+        supported_version=PARAMETER_VERSION,
+    )
+    manual = PointView(
+        store,
+        source,
+        ledger=results / "other/records/ledger.jsonl",
+        entry_id=foreign.entry_id,
+    )
+    destination = foreign if same_entry else entry
+    if not same_entry:
+        with pytest.raises(ValueError, match="identity"):
+            destination.new_point("manual-view-copy", clone_from=manual)
+        assert not (results / "entry/points/manual-view-copy").exists()
+        assert entry.ledger.events() == ()
+    else:
+        cloned = destination.new_point("manual-view-copy", clone_from=manual)
+        assert cloned.Q1.rate == 5300.0
+        assert len(foreign.ledger.events()) == 1
+        metadata = cloned.meta("Q1.rate")
+        assert metadata is not None
+        assert metadata.source == event.id
+        assert metadata.cloned_from == {"entry_id": foreign.entry_id, "point": "source"}

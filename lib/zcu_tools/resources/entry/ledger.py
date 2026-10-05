@@ -143,8 +143,8 @@ class RecordsLedger:
                     record = None
                     if item.event.record is not None:
                         path = self._records / f"{event_id}.json"
-                        content = path.read_text(encoding="utf-8")
                         try:
+                            content = path.read_text(encoding="utf-8")
                             record = _JSON_OBJECT.validate_json(content)
                         except ValueError as exc:
                             raise ValueError(f"{path}: invalid record: {exc}") from exc
@@ -153,7 +153,7 @@ class RecordsLedger:
 
     def _read(self) -> tuple[LedgerEntry, ...]:
         try:
-            stream = self._path.open(encoding="utf-8", newline="")
+            stream = self._path.open("rb")
         except FileNotFoundError:
             # Only an absent ledger in an existing directory means no events.
             self._records.stat()
@@ -163,8 +163,9 @@ class RecordsLedger:
         entries: list[LedgerEntry] = []
         ids: set[str] = set()
         with stream:
-            for number, line in enumerate(stream, start=1):
+            for number, encoded_line in enumerate(stream, start=1):
                 try:
+                    line = encoded_line.decode("utf-8")
                     if not line.endswith("\n"):
                         raise ValueError("incomplete tail: expected LF")
                     raw = line[:-1]
