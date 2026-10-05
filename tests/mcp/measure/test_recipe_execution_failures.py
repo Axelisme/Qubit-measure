@@ -130,6 +130,75 @@ def test_pre_run_cfg_failure_retains_prepared_or_requested_locator(tmp_path, reu
 
 
 @pytest.mark.parametrize("control", ["cancel", "finish_early"])
+def test_failed_run_control_intent_is_scoped_for_the_next_run(tmp_path, control: str):
+    caught: list[str | None] = []
+    delivered: list[str] = []
+
+    def sample(session: RecipeSession) -> RecipeGenerator:
+        tab = session.open_tab("lookback")
+        try:
+            _, _ = yield tab.run()
+        except GuiRpcError as error:
+            caught.append(error.reason)
+        _, status = yield tab.run()
+        delivered.append(status)
+
+    gui = ControlledRunGui()
+    starts = 0
+    stopped: list[object] = []
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        nonlocal starts
+        if method == "tab.run_start":
+            starts += 1
+            gui.ran = False
+            gui(method, params)
+            return {"operation_id": 70 + starts}
+        if method == "operation.cancel":
+            stopped.append(params["operation_id"])
+            gui.outcome = "failed"
+            gui.settled.set()
+            return {"status": "cancelling"}
+        if method == "operation.await" and params["operation_id"] == 72:
+            return {"reason": "completed", "status": "finished"}
+        if method == "tab.snapshot" and starts == 2:
+            return {
+                "tabs": [
+                    {
+                        "tab_id": "t",
+                        "adapter_name": "lookback",
+                        "result_state": {
+                            "available": True,
+                            "revision": 2,
+                            "source_operation_id": 72,
+                        },
+                    }
+                ]
+            }
+        return gui(method, params)
+
+    with (
+        recipe_client(tmp_path, respond) as client,
+        registry(client.context, definition(sample)) as executions,
+    ):
+        execution = executions.start(client.context, "sample", {})
+        assert gui.awaited.wait(2)
+        if control == "cancel":
+            execution.cancel()
+        else:
+            execution.finish_early()
+        reply = execution.wait(5)
+        assert caught == ["run_failed"]
+        assert stopped == [71]
+        assert delivered == (["cancelled"] if control == "cancel" else ["completed"])
+        assert starts == (1 if control == "cancel" else 2)
+        assert reply.data["status"] == ("cancelled" if control == "cancel" else "finished")
+        assert reply.data["run_outcome"]["status"] == (
+            "failed" if control == "cancel" else "finished"
+        )
+
+
+@pytest.mark.parametrize("control", ["cancel", "finish_early"])
 def test_stop_intent_does_not_relabel_failed_native_run(tmp_path, control):
     caught: list[str | None] = []
 
