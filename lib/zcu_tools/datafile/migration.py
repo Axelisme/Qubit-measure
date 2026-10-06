@@ -15,6 +15,7 @@ from .models import LabberPayload
 from .native import load_run_data, validate_experiment_payload
 from .native_metadata import read_json, text_attr, write_json
 from .native_models import ExperimentPayload, VariableSchema
+from .native_nodes import known_node
 
 
 def migrate_native_run_v1(source: Path, destination: Path) -> Path:
@@ -27,7 +28,8 @@ def migrate_native_run_v1(source: Path, destination: Path) -> Path:
     Validate the complete new file before atomic, no-overwrite publication.
     Same resolved paths raise ValueError; an existing destination raises
     FileExistsError. Wrong source format/major retains FormatError subtype;
-    malformed known content raises source/location ValueError. I/O errors
+    malformed known content or shared cfg/context datasets raise a located
+    ValueError: removing context.params cannot also preserve cfg in that object. I/O errors
     propagate. No in-place rewrite, runtime fallback or power-loss guarantee.
     """
     if source.resolve() == destination.resolve():
@@ -45,6 +47,17 @@ def migrate_native_run_v1(source: Path, destination: Path) -> Path:
                 supported_version=FormatVersion(1, 0),
                 source=source,
             )
+            cfg_node = known_node(file, "cfg")
+            context_node = known_node(file, "context")
+            if (
+                cfg_node is not None
+                and context_node is not None
+                and cfg_node.id == context_node.id
+            ):
+                raise ValueError(
+                    "/context: shared dataset with /cfg; cannot preserve cfg "
+                    "while removing context.params"
+                )
             context = read_json(file, "context")
             if not isinstance(context.get("params"), dict):
                 raise ValueError("/context/params: expected required JSON object")

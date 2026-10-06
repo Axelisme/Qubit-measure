@@ -94,6 +94,38 @@ def test_migration_preserves_source_known_data_and_unknown_references(
         assert signal.dims[0][0].id == file["data/readout/frequency"].id
 
 
+@pytest.mark.parametrize("link_kind", ["hard", "soft"])
+def test_shared_cfg_context_conflict_never_publishes_changed_cfg(
+    tmp_path: Path, link_kind: str
+) -> None:
+    source, destination = tmp_path / "shared.h5", tmp_path / "new.h5"
+    write_v1(source)
+    with h5.File(source, "r+") as file:
+        context = json.loads(hdf_json_text(file, "context"))
+        context["params"] = {}
+        hdf_dataset(file, "context")[()] = json.dumps(context)
+        cfg_attrs = dict(hdf_dataset(file, "cfg").attrs)
+        del file["cfg"]
+        if link_kind == "hard":
+            file["cfg"] = hdf_dataset(file, "context")
+        else:
+            file["cfg"] = h5.SoftLink("/context")
+        hdf_dataset(file, "context").attrs.update(cfg_attrs)
+        # The unchanged known layout is valid, including cfg's complete JSON.
+        file.attrs["format_version"] = "2.0"
+    assert load_run_data(source).cfg.values == context
+    with h5.File(source, "r+") as file:
+        file.attrs["format_version"] = "1.0"
+    before = source.read_bytes()
+
+    with pytest.raises(ValueError, match=r"/context.*shared.*?/cfg") as caught:
+        migrate_native_run_v1(source, destination)
+
+    assert str(source) in str(caught.value)
+    assert source.read_bytes() == before
+    assert set(tmp_path.iterdir()) == {source}
+
+
 @pytest.mark.parametrize("version", ["2.0", "3.0", "0.9", "1.bad"])
 def test_migration_rejects_wrong_major_or_invalid_version_without_publication(
     tmp_path: Path, version: str
