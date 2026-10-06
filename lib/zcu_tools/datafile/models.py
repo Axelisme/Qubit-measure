@@ -294,13 +294,21 @@ class LabberData:
         return self.payload.get_num_entries()
 
     def save(self, path: str) -> str:
+        """Save this dataset at the Labber-normalized path and return that path.
+
+        path is normalized to .hdf5. List-valued signals use trace layout;
+        array-valued signals use uniform layout. Existing files raise
+        FileExistsError, invalid shapes raise ValueError and I/O errors
+        propagate, possibly leaving a partial new file.
+        """
         if isinstance(self.data.values, list):
             from .labber import _save_labber_trace_data
 
             return _save_labber_trace_data(path, self)
-        from .labber import _save_labber_data
+        from .labber import write_labber_data_file
+        from .paths import format_ext
 
-        return _save_labber_data(path, self)
+        return write_labber_data_file(format_ext(path), self)
 
     @classmethod
     def load(cls, path: str) -> LabberData:

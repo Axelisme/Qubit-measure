@@ -1,4 +1,4 @@
-from .comment import make_comment, parse_comment
+from .comment import make_comment, make_labber_cfg_snapshot, parse_comment
 from .device import (
     get_labeled_device_cfg,
     set_flux_in_dev_cfg,
@@ -23,5 +23,6 @@ __all__ = [
     "make_sweep",
     # comment
     "make_comment",
+    "make_labber_cfg_snapshot",
     "parse_comment",
 ]

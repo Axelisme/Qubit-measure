@@ -17,19 +17,25 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from zcu_tools.datafile import (
     AxisSchema,
     DataVariable,
+    ExperimentPayload,
     GroupedLabberData,
     LabberMetadata,
     LabberPayload,
     VariableSchema,
+    cast_labber_values,
+    format_ext,
     load_grouped_labber_data,
     save_grouped_labber_data,
+    validate_labber_payload,
+    write_labber,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
@@ -326,35 +332,17 @@ class VariableSpec:
         context labels ValueError for invalid labels, units, arrays or generated
         indices. Return loaded arrays for this mapping\'s variable identity.
         """
-        if len(payload.axes) != len(self.axes):
-            raise ValueError(
-                f"{context} has {len(payload.axes)} axes; expected {len(self.axes)}"
-            )
+        validate_labber_payload(payload, schema=self.native_schema(), context=context)
 
         loaded_axes: list[np.ndarray] = []
         for index, (loaded_axis, expected_axis) in enumerate(
             zip(payload.axes, self.axes, strict=True)
         ):
-            if loaded_axis.name != expected_axis.label:
-                raise ValueError(
-                    f"{context} axis {index} label is {loaded_axis.name!r}; "
-                    f"expected {expected_axis.label!r}"
-                )
-            if loaded_axis.unit != expected_axis.unit:
-                raise ValueError(
-                    f"{context} axis {index} unit is {loaded_axis.unit!r}; "
-                    f"expected {expected_axis.unit!r}"
-                )
-
             axis_values = _cast_memory_values(
                 np.asarray(loaded_axis.values) / expected_axis.scale,
                 expected_axis.dtype,
                 context=f"{context} axis {index}",
             )
-            if axis_values.ndim != 1:
-                raise ValueError(
-                    f"{context} axis {index} is {axis_values.ndim}D; expected 1D"
-                )
             if expected_axis.generated == "arange":
                 expected_values = np.arange(
                     axis_values.shape[0], dtype=axis_values.dtype
@@ -363,23 +351,11 @@ class VariableSpec:
                     raise ValueError(f"{context} axis {index} must equal arange(N)")
             loaded_axes.append(axis_values)
 
-        if payload.data.name != self.z.label:
-            raise ValueError(
-                f"{context} z channel label is {payload.data.name!r}; "
-                f"expected {self.z.label!r}"
-            )
-        if payload.data.unit != self.z.unit:
-            raise ValueError(
-                f"{context} z channel unit is {payload.data.unit!r}; "
-                f"expected {self.z.unit!r}"
-            )
-
         z_values = _cast_memory_values(
             np.asarray(payload.z) / self.z.scale,
             self.z.dtype,
             context=f"{context} z channel",
         )
-        self._validate_shape(z_values, loaded_axes, context)
         return LoadedVariableData(
             variable=self.data_variable,
             axes=tuple(loaded_axes),
@@ -522,15 +498,33 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         comment: str | None = None,
         tag: str | None = None,
     ) -> None:
+        """Map this explicit record to one common-grid Labber export.
+
+        source.cfg must be present. destination follows the existing Labber
+        extension normalization. comment is optional user text; tag overrides
+        this declaration's tag. Invalid cfg JSON or data raises ValueError;
+        existing files raise FileExistsError and I/O errors propagate. No native
+        file is written and no directory/name reservation is performed.
+        """
         if source.cfg is None:
             raise ValueError("Cannot save a RunRecord without cfg")
-        from zcu_tools.experiment.utils import make_comment
+        from zcu_tools.experiment.utils import make_labber_cfg_snapshot
 
-        self.save_grouped_result(
-            str(destination),
-            source.result,
-            comment=make_comment(source.cfg, comment),
-            tag=tag,
+        payload = ExperimentPayload(
+            variables={
+                DataVariable(variable): signal
+                for variable, signal in self.payloads_from_result(source.result).items()
+            },
+            metadata=LabberMetadata(tags=tag or self.tag),
+            representation="grouped",
+        )
+        write_labber(
+            Path(format_ext(str(destination))),
+            payload,
+            cfg=make_labber_cfg_snapshot(
+                source.cfg, schema_version=self.cfg_schema_version
+            ),
+            comment=comment,
         )
 
     def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
@@ -606,22 +600,13 @@ def _validate_cfg_schema_version(version: str) -> None:
         raise ValueError(f"cfg_schema_version must be major.minor, got {version!r}")
 
 
-def _cast_memory_values(values: Any, dtype: type, *, context: str) -> np.ndarray:
+def _cast_memory_values(values: ArrayLike, dtype: type, *, context: str) -> np.ndarray:
     target_dtype = np.dtype(dtype)
-    array = np.asarray(values)
-    if target_dtype.kind != "c" and np.iscomplexobj(array):
-        if np.any(np.imag(array) != 0.0):
-            raise ValueError(
-                f"{context} contains non-zero imaginary component; "
-                f"cannot load as {target_dtype}"
-            )
-        array = np.real(array)
-
     if target_dtype.kind in {"i", "u"}:
-        real_array = np.asarray(array, dtype=np.float64)
+        # Integer coordinates use the typed mapping's existing rounding contract.
+        real_array = cast_labber_values(values, np.dtype(np.float64), context=context)
         rounded = np.round(real_array)
         if not np.allclose(real_array, rounded):
             raise ValueError(f"{context} values must be integers")
         return rounded.astype(target_dtype)
-
-    return np.asarray(array, dtype=target_dtype)
+    return cast_labber_values(values, target_dtype, context=context)

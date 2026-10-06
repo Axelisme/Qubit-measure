@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-06，Native persistence
+**Last updated:** 2026-10-06，Labber codec/schema ownership
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 從 `program.v2` 匯入 `ModuleCfgFactory`，`utils/sweep.py` 使用 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
@@ -17,7 +17,7 @@
 - `cfg_model.py` 的 `ExpCfgModel` 繼承 package-root `zcu_tools.cfg_model.ConfigBase`，提供可選的 `dev` 欄位。`ConfigBase` 提供欄位驗證、`with_updates` 和 `to_dict`；`ExpCfgModel.validate_or_warn` 嘗試驗證載入的 cfg，失敗則發出警告並回傳 `None`。
 - `cfg_assembler.py` 的 `assemble_experiment_cfg` 使用 caller 傳入的 module library 與 device snapshot，套用 overrides、組裝 device／module／單一 sweep 資料，再驗證成目標實驗 cfg。`make_cfg(raw_cfg, CfgModel, env)` 每次從 `CfgEnv.device_manager` 讀取當次資訊。`CfgEnv` 集中 md／ml／manager 引用，不解析 md expression，也不擁有資源關閉責任。這是量測 cfg 的組裝，不是 GUI 的編輯模型。
 - `config.py` 目前提供繪圖尺寸 `figsize`；它不是 cfg model，也不執行 cfg 組裝。
-- `utils/` 提供實驗側的 comment JSON 編解碼、device 設定／啟用與單一 sweep 格式整理。其中 device helper 接收顯式具名 driver mapping 與 StopSignal，先驗證整批名稱，再逐一 setup。只有 helper 呼叫 driver.setup 時才取 signal.event，低層 device 不依賴 experiment。Sweep helper 使用 program/v2 的 `SweepCfg`。`experiment.utils.make_sweep` 是 core 與 Notebook 共用的 sweep 建構入口；Notebook 不擁有此框架能力。它與 [v2/utils](v2/README.md#v2-工具與實驗輔助) 的硬體量化、SNR 和 tracker 工具分開。
+- `utils/` 提供 cfg 到 datafile comment codec 的 mapping、device 設定／啟用與單一 sweep 格式整理。Comment envelope 的 JSON 編解碼與 Labber reader 的 labels／units／shape／numeric container 驗證由 datafile 擁有；experiment 保留 typed cfg validation、memory units 與 generated coordinate 語意。其中 device helper 接收顯式具名 driver mapping 與 StopSignal，先驗證整批名稱，再逐一 setup。只有 helper 呼叫 driver.setup 時才取 signal.event，低層 device 不依賴 experiment。Sweep helper 使用 program/v2 的 `SweepCfg`。`experiment.utils.make_sweep` 是 core 與 Notebook 共用的 sweep 建構入口；Notebook 不擁有此框架能力。它與 [v2/utils](v2/README.md#v2-工具與實驗輔助) 的硬體量化、SNR 和 tracker 工具分開。
 
 ## 子模組入口
 

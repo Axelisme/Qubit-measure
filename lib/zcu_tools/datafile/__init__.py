@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from .comment import LabberComment, decode_labber_comment, encode_labber_comment
 from .grouped import load_grouped_labber_data, save_grouped_labber_data
 from .labber import (
     load_labber_data,
     save_labber_data,
     save_labber_trace_data,
 )
+from .labber_schema import cast_labber_values, validate_labber_payload
+from .labber_writer import write_labber
 from .models import (
     Axis,
     DataVariable,
@@ -48,6 +51,9 @@ from .streaming import (
 )
 
 __all__ = [
+    "LabberComment",
+    "encode_labber_comment",
+    "decode_labber_comment",
     "AxisSchema",
     "VariableSchema",
     "ExperimentPayload",
@@ -61,6 +67,9 @@ __all__ = [
     "NativeExtensions",
     "StoredRun",
     "JsonObject",
+    "validate_labber_payload",
+    "cast_labber_values",
+    "write_labber",
     "save_run_data",
     "load_run_data",
     "validate_experiment_payload",

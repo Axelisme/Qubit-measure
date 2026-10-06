@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-06，Native experiment data
+**Last updated:** 2026-10-06，Independent Labber writer
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -18,6 +18,16 @@ facade。caller 優先從 package root import model 與 function。
   保留同 major minor 的未知 JSON／HDF5 內容與不改形 rewrite 的 references。
   Typed experiment tuple 不是 lossless rewrite envelope，也沒有 legacy fallback。
 
+- `write_labber` 從同一 `ExperimentPayload` 輸出 single 或 canonical
+  common-grid grouped Labber，包括單成員 grouped。它只寫 caller 的 exact path，
+  不加副檔名、不覆寫、不呼叫 native writer。兩個格式的失敗隔離由 caller 編排，
+  batch-level 保存流程不在 datafile。Labber axes 必須可表示成 real coordinates。
+- `encode_labber_comment`／`decode_labber_comment` 與 `LabberComment`
+  擁有 cfg/comment/timestamp envelope。不屬於 envelope 的手寫文字原樣保留；
+  可辨識 envelope 的欄位型別錯誤直接報錯，不猜歷史 cfg 或量測時間。
+- `validate_labber_payload`／`cast_labber_values` 擁有 Labber reader 的
+  label、unit、shape 與 numeric real/complex container 契約。
+  Experiment 只宣告 schema、換 memory units，並驗證 generated coordinate 語意。
 - `Axis`、`LabberPayload`、`LabberMetadata`、`LabberData` 描述單一
   inner-first axes 的 Labber dataset。
 - `DataVariable`、`GroupedLabberData` 描述 grouped experiment dataset：單一

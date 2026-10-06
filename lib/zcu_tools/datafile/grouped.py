@@ -55,7 +55,20 @@ def save_grouped_labber_data(
     path. Invalid variables/grid raise ValueError before creating the file;
     invalid payload/metadata types raise TypeError. Existing paths raise FileExistsError.
     """
-    grouped = GroupedLabberData(variables, metadata=metadata)
+    return write_grouped_labber_data_file(
+        format_ext(path), GroupedLabberData(variables, metadata=metadata)
+    )
+
+
+def write_grouped_labber_data_file(path: str, grouped: GroupedLabberData) -> str:
+    """Write common-grid grouped channels at the exact path and return it.
+
+    grouped carries ordered stable variable identities and shared metadata.
+    Payloads must share axes, shape and timestamps. Invalid grids/labels raise
+    ValueError before creating the destination. Existing paths raise
+    FileExistsError and I/O errors propagate. No path normalization is applied.
+    A failed I/O operation may leave a partial new file.
+    """
     _validate_v2_payloads(grouped.variables)
 
     raw_metadata = grouped.metadata
@@ -71,7 +84,6 @@ def save_grouped_labber_data(
         user=raw_metadata.user,
         creation_time=creation_time,
     )
-    path = format_ext(path)
     log_name = os.path.splitext(os.path.basename(path))[0]
     variable_items = list(grouped.variables.items())
     variable_names = [str(variable) for variable, _payload in variable_items]
