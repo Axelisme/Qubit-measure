@@ -243,6 +243,95 @@ def test_known_invalid_local_soft_link_fails_with_location(
     assert "/cfg" in str(caught.value)
 
 
+@pytest.mark.parametrize("name", ["cfg", "context"])
+@pytest.mark.parametrize("unicode_value", [False, True])
+@pytest.mark.parametrize("fits", [False, True])
+def test_fixed_json_exact_byte_capacity_edit(
+    tmp_path: Path,
+    name: str,
+    unicode_value: bool,
+    fits: bool,
+) -> None:
+    source = tmp_path / "source.h5"
+    initial = "甲" if unicode_value else "a"
+    changed = "乙" if unicode_value else "b"
+    metadata = replace(
+        native_metadata(),
+        snapshot=replace(native_metadata().snapshot, description=initial),
+    )
+    cfg = replace(native_cfg(), values={"a": initial if unicode_value else 1, "b": 2})
+    save_run_data(source, native_payload(), metadata, cfg=cfg)
+    with h5.File(source, "r+") as file:
+        values = json.loads(hdf_json_text(file, name))
+        if name == "context":
+            values["future"] = {"kept": "未知"}
+        raw = json.dumps(values, ensure_ascii=False, separators=(",", ":"))
+        if name == "cfg" and not unicode_value:
+            assert raw == '{"a":1,"b":2}'
+        attrs = dict(hdf_dataset(file, name).attrs)
+        del file[name]
+        dataset = file.create_dataset(
+            name,
+            data=raw.encode("utf-8"),
+            dtype=h5.string_dtype("utf-8", length=len(raw.encode("utf-8"))),
+        )
+        dataset.attrs.update(attrs)
+        file["json_alias"] = dataset
+        file.create_dataset("json_ref", data=dataset.ref, dtype=h5.ref_dtype)
+    stored = load_run_data(source, preserve_unknown=True)
+    source.unlink()
+    cfg, metadata = stored.cfg, stored.metadata
+    if name == "cfg":
+        value = changed if unicode_value else 3
+        if not fits:
+            value = changed + "x" if unicode_value else 33
+        cfg = replace(cfg, values={**cfg.values, "a": value})
+    else:
+        value = changed if fits else changed + "x"
+        metadata = replace(
+            metadata, snapshot=replace(metadata.snapshot, description=value)
+        )
+    destination = tmp_path / "destination.h5"
+    destination.write_bytes(b"existing destination")
+    if not fits:
+        before = set(tmp_path.iterdir())
+        with pytest.raises(ValueError, match="capacity") as caught:
+            save_run_data(
+                destination,
+                stored.payload,
+                metadata,
+                cfg=cfg,
+                extensions=stored.extensions,
+                replace=True,
+            )
+        assert str(destination) in str(caught.value)
+        assert "/" + name in str(caught.value)
+        assert destination.read_bytes() == b"existing destination"
+        assert set(tmp_path.iterdir()) == before
+        return
+    save_run_data(
+        destination,
+        stored.payload,
+        metadata,
+        cfg=cfg,
+        extensions=stored.extensions,
+        replace=True,
+    )
+    actual = load_run_data(destination)
+    assert actual.cfg == cfg
+    assert actual.metadata == metadata
+    with h5.File(destination, "r") as file:
+        dataset = hdf_dataset(file, name)
+        text = hdf_json_text(file, name)
+        assert len(text.encode("utf-8")) == len(raw.encode("utf-8"))
+        assert dataset.id == hdf_dataset(file, "json_alias").id
+        assert dataset.id == file[hdf_dataset(file, "json_ref")[()]].id
+        if name == "cfg":
+            assert actual.cfg.values["b"] == 2
+        else:
+            assert json.loads(text)["future"] == {"kept": "未知"}
+
+
 def _write_future_native(source: Path) -> None:
     """Create synthetic forward-minor HDF5 extensions for the rewrite contract."""
     save_run_data(source, native_payload(), native_metadata(), cfg=native_cfg())
