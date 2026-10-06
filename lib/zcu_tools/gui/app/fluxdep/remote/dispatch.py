@@ -1,7 +1,8 @@
 """Method dispatcher for the fluxdep RemoteControlAdapter.
 
 Every handler is a pure synchronous function ``(adapter, params) -> dict`` that
-runs on the Qt main thread. The adapter layer is responsible for marshalling —
+runs on the State owner except operation.await, which only waits on a
+thread-safe SearchOwner handle off-owner. Shared dispatch owns marshalling;
 handlers must not touch threading or Qt directly. Handlers reach the fluxdep
 command façade via ``adapter.ctrl`` (a ``Controller``).
 
@@ -42,6 +43,11 @@ from .dto import (
     FitUpdatedReply,
     NameReply,
     NamesReply,
+    OperationAwaitReply,
+    OperationCancelledReply,
+    OperationOutcomeReply,
+    OperationStartedReply,
+    OperationStatusReply,
     ParamsExportedReply,
     PointcloudReply,
     ProjectSetupReply,
@@ -355,6 +361,79 @@ def _h_fit_set_params(
     return {"fit": _h_fit_result(adapter, {})}
 
 
+def _h_fit_search(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> OperationStartedReply:
+    del params
+    return {"token": adapter.ctrl.search.start()}
+
+
+def _h_operation_status(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> OperationStatusReply:
+    token = params["token"]
+    search = adapter.ctrl.search
+    if token is None:
+        activity = search.current
+        return {
+            "activity": (
+                {
+                    "token": activity.token,
+                    "status": activity.status,
+                    "error": activity.error,
+                }
+                if activity is not None
+                else None
+            )
+        }
+    assert isinstance(token, int)  # ParamSpec rejects booleans/non-integers.
+    outcome = search.outcome(token)
+    return {
+        "activity": {
+            "token": token,
+            "status": outcome.status if outcome is not None else "pending",
+            "error": outcome.error if outcome is not None else None,
+        }
+    }
+
+
+def _h_operation_cancel(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> OperationCancelledReply:
+    token = params["token"]
+    assert isinstance(token, int)
+    adapter.ctrl.search.cancel(token)
+    return {"token": token, "cancel_requested": True}
+
+
+def _h_operation_await(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> OperationAwaitReply:
+    # This is the only off-owner handler. Do not read State, current activity,
+    # versions or observations; SearchOwner owns the thread-safe wait.
+    token = params["token"]
+    assert isinstance(token, int)
+    timeout = _finite_number(params["timeout"], "timeout")
+    if not 0.0 <= timeout <= 30.0:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "'timeout' must be between 0 and 30 seconds"
+        )
+    result = adapter.ctrl.search.await_outcome(token, timeout)
+    outcome: OperationOutcomeReply | None = None
+    if result.outcome is not None:
+        # The native wait returns only terminal outcomes; the shared outcome
+        # type also represents pending for other users, so narrow that union.
+        status = result.outcome.status
+        assert status != "pending"
+        outcome = {"status": status, "error": result.outcome.error}
+    return {
+        "token": token,
+        "reason": result.reason,
+        "outcome": outcome,
+        "feedback": result.feedback,
+    }
+
+
 def _h_export_spectrums(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> SpectrumsExportedReply:
@@ -417,6 +496,10 @@ _HANDLERS: dict[str, Handler] = {
     "selection.pointcloud": _h_selection_pointcloud,
     "fit.result": _h_fit_result,
     "fit.set_params": _h_fit_set_params,
+    "fit.search": _h_fit_search,
+    "operation.status": _h_operation_status,
+    "operation.cancel": _h_operation_cancel,
+    "operation.await": _h_operation_await,
     "export.spectrums": _h_export_spectrums,
     "fit.export_params": _h_fit_export_params,
     "resources.versions": h_resources_versions,

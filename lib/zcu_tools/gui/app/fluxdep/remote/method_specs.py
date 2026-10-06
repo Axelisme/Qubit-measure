@@ -131,6 +131,37 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             ParamSpec("sample_f", JsonType.NUMBER, required=False),
         ),
     ),
+    "fit.search": MethodSpec(
+        5.0,
+        "Start the app's single-flight database search after reading project, "
+        "fit, selection, collection and every spectrum snapshot. Returns the "
+        "app token; after completion explicitly reread fit.result.",
+    ),
+    "operation.status": MethodSpec(
+        5.0,
+        "Read a retained search token's pending or terminal activity. Null or "
+        "omitted token reads the latest GUI/agent activity, or null before "
+        "any search. Unknown tokens are rejected; no observations are updated.",
+        params=(ParamSpec("token", JsonType.INTEGER, required=False),),
+    ),
+    "operation.cancel": MethodSpec(
+        5.0,
+        "Request cooperative cancellation of a known search token. The receipt "
+        "is not a terminal outcome; terminal tokens are a legal no-op.",
+        params=(ParamSpec("token", JsonType.INTEGER),),
+    ),
+    "operation.await": MethodSpec(
+        35.0,
+        "Wait off-owner for a known search token, returning completed, timeout "
+        "or user_feedback with native outcome/feedback. timeout is finite "
+        "seconds from 0 to 30 (default 10). Timeout does not cancel; this read "
+        "does not refresh fit or other observations.",
+        params=(
+            ParamSpec("token", JsonType.INTEGER),
+            ParamSpec("timeout", JsonType.NUMBER, required=False, default=10.0),
+        ),
+        off_main_thread=True,
+    ),
     "export.spectrums": MethodSpec(
         30.0,
         "Export the native spectrum collection after reading project.info, "
@@ -194,6 +225,12 @@ OBSERVATION_POLICIES: dict[str, ResourceObservationPolicy] = {
     "fit.set_params": ResourceObservationPolicy(
         guard_deps=("fit",), refresh_after_write=True
     ),
+    "fit.search": ResourceObservationPolicy(
+        guard_deps=("project", "fit", "selection", "spectrums:__set__", "spectrum:*")
+    ),
+    "operation.status": ResourceObservationPolicy(),
+    "operation.cancel": ResourceObservationPolicy(),
+    "operation.await": ResourceObservationPolicy(),
     "export.spectrums": ResourceObservationPolicy(
         guard_deps=("project", "spectrums:__set__", "spectrum:*")
     ),

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Fit replacement and native export RPC
+**Last updated:** 2026-10-06. Search and operation RPC
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -45,7 +45,7 @@ scipy fit**（fit_spectrum 留在 notebook，未移植）。
 view；RemoteControlAdapter 是 agent 的命令與觀測入口。它與 GUI 共用
 Controller owners，資源的 per-connection observation 與 guard 由 shared remote 執行。
 目前支援完整 project／spectrum／selection／fit 查詢、project／spectrum 編輯與載入、
-fit inputs replacement 及原生 spectrum／params 匯出。Search 與 interactive RPC 正在 task 中實作。
+fit inputs replacement、原生 spectrum／params 匯出及 app-owned search／operation。Interactive RPC 正在 task 中實作。
 
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、
   `spectrums: dict[str, SpectrumEntry]`、`active_spectrum`、`selection`(SelectionState)、
@@ -204,7 +204,10 @@ Fit replacement 經 Controller 清掉舊結果，不啟動搜尋。Nested JSON p
 bounds 與 transition 的領域語意留在 search kernel。Spectrum export 預設 create-only，明示 overwrite 才替換。
 Params export 沿原生 merge，保留獨立 sections，取第一張 aligned spectrum 的 calibration，包含零點譜。
 Export 不改 State 或建立 observation；原生失敗保留成功前綴，不 cleanup／rollback。
-六個原有 read projections 保持原值；search／interactive methods 尚在實作。
+Search 使用同一 app owner token，status 可找 GUI 或 agent 的最新 activity。Await 在 IO thread
+等待，不碰 State／seen；timeout 不取消，cancel receipt 不代表 cancelled outcome。
+Async terminal 不刷新 fit observation，成功後須明示讀 fit.result。Unknown／evicted token 明示拒絕。
+六個原有 read projections 保持原值；interactive methods 尚在實作。
 
 MCP entrypoint 使用共用 `McpBridge`，工具從 method specs 生成。完整控制工具的 workflow
 與圖像驗收尚未完成。MCP 不訂閱業務 event-push，不維護第二份 seen map。
@@ -228,7 +231,7 @@ Hide 或 detach 不取消，重新 activate 讀 owner snapshot。
 診斷圖失敗不改數值 outcome。
 
 `Controller.search_database` 保留 headless owner-inline capture／compute／record 便利入口，
-不取 operation token。Remote search 尚在實作，使用同一 search owner，不另建 operation registry。
+不取 operation token。Remote search 使用同一 search owner，不另建 operation registry。
 
 ### Caller-correctable errors
 
@@ -272,7 +275,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   要看實際檔案。GUI 的「Transpose axes」toggle（`services/load.py` 的 `transpose_spectrum_data`）
   讓 user 從 preview 判斷後交換。
 - **Remote pipeline 尚未完成**：目前 agent 可觀測、編輯與載入 project／spectrum，替換 fit inputs 與
-  匯出 spectrum／params。Search 與互動命令仍待實作。完整 MCP workflow 與圖像驗收由 fluxdep-mcp-control task 推進。
+  匯出 spectrum／params，並啟動、觀察及取消搜尋。互動命令仍待實作。完整 MCP workflow 與圖像驗收由 fluxdep-mcp-control task 推進。
 
 ## Entry Points
 
