@@ -71,11 +71,12 @@ class RecordingDevices:
 
 
 class RecordingPlots:
-    """Use native detached Figures and record line snapshots."""
+    """Record detached line and image snapshots from native Figures."""
 
     def __init__(self) -> None:
         self.figures: dict[str, Figure] = {}
         self.snapshots: list[tuple[NDArray[np.float64], ...]] = []
+        self.image_snapshots: list[tuple[NDArray[np.float64], ...]] = []
         self.error: Exception | None = None
 
     def axes(self, name: str) -> Axes:
@@ -91,6 +92,13 @@ class RecordingPlots:
                 np.asarray(line.get_ydata(), dtype=np.float64).copy()
                 for axes in figure.axes
                 for line in axes.lines
+            )
+        )
+        self.image_snapshots.append(
+            tuple(
+                np.asarray(image.get_array(), dtype=np.float64).copy()
+                for axes in figure.axes
+                for image in axes.images
             )
         )
 

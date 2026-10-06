@@ -1,5 +1,6 @@
 """Engine effect boundary: failure source, Completed pairing, files, and live."""
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Never
@@ -430,6 +431,73 @@ def test_live_projects_without_overwriting_other_rows_or_changing_shape(
 
     rig.start(step)
     assert rig.engine.execute("run").lifecycle == "done"
+
+
+@pytest.mark.parametrize("display", ["line", "image", "row"])
+def test_live_finalization_projects_latest_values(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, display: str
+) -> None:
+    now = 1000.0
+    at_return: list[NDArray[np.float64]] = []
+
+    def wall_time() -> float:
+        return now
+
+    monkeypatch.setattr(time, "time", wall_time)
+
+    def project(values: NDArray[np.complex128]) -> NDArray[np.float64]:
+        nonlocal now
+        # A costly projection followed immediately by another buffer update.
+        now += 1.0
+        return values.real
+
+    def acquire(run: Run[Cfg]) -> int:
+        shape = (2, 2) if display == "image" else (2,)
+        axes = tuple(np.array([0.0, 1.0]) for _ in shape)
+        buffer = run.buffer(shape, axes=axes)
+        buffer.set(np.full(shape, 1.0 + 0j, dtype=np.complex128))
+        buffer.set(np.full(shape, 7.0 + 0j, dtype=np.complex128))
+        return 1
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if state.index:
+            return Done()
+        axes = env.axes("live")
+        if display == "line":
+            (line,) = axes.plot([], [])
+            live = Live1D(line, project)
+        else:
+            image = axes.imshow(np.full((2, 2), 9.0))
+            live = (
+                Live2D(image, project)
+                if display == "image"
+                else Live2DRow(image, 1, project)
+            )
+        yield from env.run(acquire, Cfg(), save=save_integer, live=live)
+        values = (
+            axes.lines[0].get_ydata()
+            if display == "line"
+            else axes.images[0].get_array()
+        )
+        at_return.append(np.asarray(values, dtype=np.float64).copy())
+        state.index = 1
+        return Next(1, state)
+
+    rig.start(step)
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "done"
+    assert status.committed_seq == 1
+    if display == "line":
+        expected = np.array([7.0, 7.0])
+    elif display == "image":
+        expected = np.array([[7.0, 7.0], [7.0, 7.0]])
+    else:
+        expected = np.array([[9.0, 9.0], [7.0, 7.0]])
+    np.testing.assert_array_equal(at_return[0], expected)
+    snapshots = rig.plots.snapshots if display == "line" else rig.plots.image_snapshots
+    np.testing.assert_array_equal(snapshots[-1][0], expected)
 
 
 def test_workflow_can_abort_after_a_recoverable_failed_effect(rig: Rig) -> None:
