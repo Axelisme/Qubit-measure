@@ -725,11 +725,13 @@ def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retryin
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
 
 
-def test_build_and_acquire_first_round_stop_returns_nan_partial():
+def test_build_and_acquire_first_round_stop_returns_nan_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
     with Schedule(_cfg(rounds=2), signals_buffer, stop=StopSignal()) as sched:
-        StopBeforeDataProgram.external_stop = sched.stop
+        monkeypatch.setattr(StopBeforeDataProgram, "external_stop", sched.stop)
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=StopBeforeDataProgram)
             .add(FakeModule("readout"))
@@ -741,7 +743,8 @@ def test_build_and_acquire_first_round_stop_returns_nan_partial():
 
     np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
-    StopBeforeDataProgram.external_stop = None
+    assert sched.outcome.exception is None
+    assert sched.stop.error is None
 
 
 def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
@@ -792,6 +795,7 @@ def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
 
 def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
     stop = StopSignal()
+    cause = RuntimeError("failure with stop")
     attempts: list[int] = []
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
@@ -815,7 +819,7 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
             raw = np.array([float(len(attempts))])
             round_hook(1, raw, cancel_flag)
             stop.set()
-            raise RuntimeError("failure with stop")
+            raise cause
 
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
             raise NotImplementedError
@@ -830,6 +834,7 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
             .add(FakeModule("readout"))
             .build_and_acquire(raw2signal_fn=_identity_array, retry=3)
         )
+        assert sched.outcome.exception is cause
         assert sched.outcome.status == "stopped"
         assert sched.outcome.reason == "stop requested"
         assert stop.error is None
@@ -841,6 +846,7 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
 
 def test_build_program_failure_does_not_retry_when_stop_requested():
     stop = StopSignal()
+    cause = RuntimeError("build failure with stop")
     attempts: list[int] = []
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
@@ -859,7 +865,7 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
         ) -> None:
             attempts.append(1)
             stop.set()
-            raise RuntimeError("build failure with stop")
+            raise cause
 
         def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
             raise NotImplementedError
@@ -877,6 +883,7 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
             .add(FakeModule("readout"))
             .build_and_acquire(raw2signal_fn=_identity_array, retry=3)
         )
+        assert sched.outcome.exception is cause
         assert sched.outcome.status == "stopped"
         assert sched.outcome.reason == "stop requested"
         assert stop.error is None
