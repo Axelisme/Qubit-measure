@@ -80,8 +80,9 @@ def write_json(node: h5.Group, name: str, value: JsonObject) -> h5.Dataset:
     """Write full JSON values while retaining an existing scalar's identity.
 
     Unchanged JSON retains raw text, including compact number/Unicode spelling.
-    Changed fixed UTF-8 strings must fit their encoded byte capacity, otherwise
-    raise a located ValueError before assignment. New datasets use vlen UTF-8.
+    Changed fixed UTF-8 strings use compact JSON and must fit their encoded byte
+    capacity, otherwise raise a located ValueError before assignment. New datasets
+    use vlen UTF-8.
     """
     text = json.dumps(value, ensure_ascii=False, allow_nan=False)
     dataset = known_node(node, name)
@@ -92,15 +93,16 @@ def write_json(node: h5.Group, name: str, value: JsonObject) -> h5.Dataset:
         if _same_json_value(old, value):
             return dataset
         dtype = h5.check_string_dtype(dataset.dtype)
-        if (
-            dtype is not None
-            and dtype.length is not None
-            and len(text.encode("utf-8")) > dtype.length
-        ):
-            raise ValueError(
-                f"{str(node.name).rstrip('/')}/{name}: JSON exceeds fixed UTF-8 "
-                f"byte capacity {dtype.length}"
+        if dtype is not None and dtype.length is not None:
+            # Fixed storage must not reject a fitting edit for optional whitespace.
+            text = json.dumps(
+                value, ensure_ascii=False, allow_nan=False, separators=(",", ":")
             )
+            if len(text.encode("utf-8")) > dtype.length:
+                raise ValueError(
+                    f"{str(node.name).rstrip('/')}/{name}: JSON exceeds fixed UTF-8 "
+                    f"byte capacity {dtype.length}"
+                )
         dataset[()] = text
         return dataset
     return node.create_dataset(name, data=text, dtype=h5.string_dtype("utf-8"))

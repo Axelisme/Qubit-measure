@@ -243,18 +243,9 @@ def test_known_invalid_local_soft_link_fails_with_location(
     assert "/cfg" in str(caught.value)
 
 
-@pytest.mark.parametrize("name", ["cfg", "context"])
-@pytest.mark.parametrize("unicode_value", [False, True])
-@pytest.mark.parametrize("fits", [False, True])
-def test_fixed_json_exact_byte_capacity_edit(
-    tmp_path: Path,
-    name: str,
-    unicode_value: bool,
-    fits: bool,
-) -> None:
-    source = tmp_path / "source.h5"
+def _write_exact_fixed_json(source: Path, name: str, unicode_value: bool) -> str:
+    """Build a fixed scalar exactly sized to compact JSON, with alias/reference."""
     initial = "甲" if unicode_value else "a"
-    changed = "乙" if unicode_value else "b"
     metadata = replace(
         native_metadata(),
         snapshot=replace(native_metadata().snapshot, description=initial),
@@ -278,6 +269,21 @@ def test_fixed_json_exact_byte_capacity_edit(
         dataset.attrs.update(attrs)
         file["json_alias"] = dataset
         file.create_dataset("json_ref", data=dataset.ref, dtype=h5.ref_dtype)
+    return raw
+
+
+@pytest.mark.parametrize("name", ["cfg", "context"])
+@pytest.mark.parametrize("unicode_value", [False, True])
+@pytest.mark.parametrize("fits", [False, True])
+def test_fixed_json_exact_byte_capacity_edit(
+    tmp_path: Path,
+    name: str,
+    unicode_value: bool,
+    fits: bool,
+) -> None:
+    source = tmp_path / "source.h5"
+    raw = _write_exact_fixed_json(source, name, unicode_value)
+    changed = "乙" if unicode_value else "b"
     stored = load_run_data(source, preserve_unknown=True)
     source.unlink()
     cfg, metadata = stored.cfg, stored.metadata
