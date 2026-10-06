@@ -115,8 +115,10 @@ class Run[Cfg]:
     def outcome(self) -> ScheduleOutcome:
         """Return a detached first non-completed Schedule outcome.
 
-        exception is the original cause, not a deepcopy. Later completed
-        schedules never erase failed, interrupted, or stopped outcomes.
+        exception is the original cause, not a deepcopy. A stopped outcome
+        may still carry a captured acquire/build failure, without changing the
+        native cancellation status or signal error. Later completed schedules
+        never erase failed, interrupted, or stopped outcomes.
         """
         return ScheduleOutcome(
             self._outcome.status, self._outcome.reason, self._outcome.exception

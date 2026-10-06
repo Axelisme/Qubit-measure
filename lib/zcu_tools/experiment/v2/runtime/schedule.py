@@ -13,7 +13,7 @@ from collections.abc import (
     Sized,
 )
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Generic, Literal, Protocol, Self, TypeAlias, cast, overload
 
 import numpy as np
@@ -119,7 +119,17 @@ class _AcquireCancelFlag:
 
 @dataclass(frozen=True)
 class ScheduleOutcome:
-    """Completion state for a Schedule run."""
+    """Immutable completion state and original cause for a Schedule run.
+
+    status is completed, stopped, interrupted, or failed. reason is None for
+    completion, otherwise a human-readable explanation of that status.
+    exception is the original captured cause, or None when none was observed.
+    A stopped outcome may retain an acquire/build Exception caught after stop
+    was requested; its status/reason and StopSignal.error remain cancellation,
+    and no retry follows. The first such cause is retained even if the schedule
+    was already marked stopped. Pure cancellation has no exception. interrupted
+    retains KeyboardInterrupt; failed retains the exhausted failure cause.
+    """
 
     status: RunStatus = "completed"
     reason: str | None = None
@@ -338,9 +348,16 @@ class Schedule(Generic[T_Cfg, T_Env]):
                 "Schedule operations must run inside 'with Schedule(...)'"
             )
 
-    def _mark_stopped(self, reason: str) -> None:
+    def _mark_stopped(self, reason: str, *, exception: Exception | None = None) -> None:
         self._stop.set()
-        self._set_outcome("stopped", reason=reason)
+        self._set_outcome("stopped", reason=reason, exception=exception)
+        if (
+            exception is not None
+            and self._outcome.status == "stopped"
+            and self._outcome.exception is None
+        ):
+            # Enrich a prior stop without replacing its status or an earlier cause.
+            self._outcome = replace(self._outcome, exception=exception)
 
     def _mark_interrupted(self, exc: BaseException) -> None:
         reason = _exception_reason(exc)
@@ -374,9 +391,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._outcome = ScheduleOutcome()
         self._stop.clear_stop()
 
-    def _check_stop_requested(self) -> bool:
+    def _check_stop_requested(self, *, exception: Exception | None = None) -> bool:
         if self.is_stop():
-            self._mark_stopped("stop requested")
+            self._mark_stopped("stop requested", exception=exception)
             return True
         return False
 
@@ -960,7 +977,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                 self._schedule._mark_interrupted(exc)
                 return slot.view
             except Exception as exc:
-                if self._schedule._check_stop_requested():
+                if self._schedule._check_stop_requested(exception=exc):
                     return slot.view
                 if attempt == retry:
                     self._schedule._mark_failed(exc)
@@ -1030,7 +1047,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                     self._schedule._mark_interrupted(exc)
                     break
                 except Exception as exc:
-                    if self._schedule._check_stop_requested():
+                    if self._schedule._check_stop_requested(exception=exc):
                         break
                     if attempt == retry:
                         self._schedule._mark_failed(exc)

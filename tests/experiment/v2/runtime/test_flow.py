@@ -792,6 +792,7 @@ def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
 
 def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
     stop = StopSignal()
+    cause = RuntimeError("failure with stop")
     attempts: list[int] = []
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
@@ -815,7 +816,7 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
             raw = np.array([float(len(attempts))])
             round_hook(1, raw, cancel_flag)
             stop.set()
-            raise RuntimeError("failure with stop")
+            raise cause
 
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
             raise NotImplementedError
@@ -830,6 +831,7 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
             .add(FakeModule("readout"))
             .build_and_acquire(raw2signal_fn=_identity_array, retry=3)
         )
+        assert sched.outcome.exception is cause
         assert sched.outcome.status == "stopped"
         assert sched.outcome.reason == "stop requested"
         assert stop.error is None
@@ -841,6 +843,7 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
 
 def test_build_program_failure_does_not_retry_when_stop_requested():
     stop = StopSignal()
+    cause = RuntimeError("build failure with stop")
     attempts: list[int] = []
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
@@ -859,7 +862,7 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
         ) -> None:
             attempts.append(1)
             stop.set()
-            raise RuntimeError("build failure with stop")
+            raise cause
 
         def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
             raise NotImplementedError
@@ -877,6 +880,7 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
             .add(FakeModule("readout"))
             .build_and_acquire(raw2signal_fn=_identity_array, retry=3)
         )
+        assert sched.outcome.exception is cause
         assert sched.outcome.status == "stopped"
         assert sched.outcome.reason == "stop requested"
         assert stop.error is None

@@ -408,25 +408,30 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         if outcome.status == "failed":
             if error is None:
                 raise RuntimeError("Failed Schedule has no original signal error")
-            _, call_seq = self._current_iteration()
-            self._artifacts.append(
-                ExperimentFailed(
-                    call_seq,
-                    self._run_no,
-                    experiment,
-                    error.reason,
-                    describe_error(
-                        error.exception if error.exception is not None else error
-                    ),
-                )
+            reason = error.reason
+            cause = error.exception if error.exception is not None else error
+        elif outcome.status == "stopped" and outcome.exception is not None:
+            # Native stop/retry policy is unchanged; an observed cause still wins.
+            cause = outcome.exception
+            reason = str(cause) or type(cause).__name__
+        else:
+            if outcome.status == "stopped" or run.cancel_signal.is_set():
+                with self._lock:
+                    if self._lifecycle not in ("pausing", "stopping"):
+                        self._host_stop()
+                self._check_cancel()
+            return None
+        _, call_seq = self._current_iteration()
+        self._artifacts.append(
+            ExperimentFailed(
+                call_seq,
+                self._run_no,
+                experiment,
+                reason,
+                describe_error(cause),
             )
-            return Failed(error.reason)
-        if outcome.status == "stopped" or run.cancel_signal.is_set():
-            with self._lock:
-                if self._lifecycle not in ("pausing", "stopping"):
-                    self._host_stop()
-            self._check_cancel()
-        return None
+        )
+        return Failed(reason)
 
     def set_device(self, name: str, value: float) -> None:
         """Apply an absolute setpoint through the device port and current signal."""

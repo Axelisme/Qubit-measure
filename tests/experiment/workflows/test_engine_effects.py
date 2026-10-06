@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Never
 
 import numpy as np
 import pytest
@@ -26,6 +27,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
 )
 from zcu_tools.program.v2 import ProgramV2Cfg
+from zcu_tools.program.v2.modules import SoftDelay
 
 from ._engine_fakes import Cfg, Plan, Rig, State, Tunables
 
@@ -484,15 +486,99 @@ def test_real_schedule_failure_is_delivered_before_pending_control(
     assert "step_discarded" not in rig.kinds()
 
 
-def test_program_error_beats_control(rig: Rig) -> None:
-    cause = OSError("program acquire failed with control")
+@pytest.mark.parametrize("control", ["pause", "stop"])
+@pytest.mark.parametrize("source", ["acquire", "build"])
+@pytest.mark.parametrize("native_stop", [False, True])
+def test_program_error_beats_control(
+    rig: Rig, control: str, source: str, native_stop: bool
+) -> None:
+    message = f"program {source} failed with control"
+    cause = OSError(message)
+    attempts: list[str] = []
+
+    def fail(schedule_stop: Callable[[], None]) -> Never:
+        attempts.append(source)
+        if control == "pause":
+            rig.engine.pause("run")
+        else:
+            rig.engine.stop("run")
+        if native_stop:
+            schedule_stop()
+        raise cause
 
     class FailingProgram:
         cfg_model = ProgramV2Cfg(rounds=1)
 
+        def __init__(
+            self,
+            *_args: object,
+            schedule_stop: Callable[[], None],
+            **_kwargs: object,
+        ) -> None:
+            self.schedule_stop = schedule_stop
+            if source == "build":
+                fail(schedule_stop)
+
         def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
-            rig.engine.pause("run")
-            raise cause
+            fail(self.schedule_stop)
+
+        def acquire_decimated(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("unexpected decimated acquire")
+
+    def acquire(run: Run[Cfg]) -> int:
+        buffer = run.buffer((1,), axes=(np.array([0.0]),))
+        with run.schedule(buffer) as schedule:
+            builder = schedule.prog_builder(
+                "soc",
+                "soccfg",
+                cfg=ProgramV2Cfg(),
+                program_cls=FailingProgram,
+                schedule_stop=schedule.set_stop,
+            )
+            if source == "build":
+                builder.add(SoftDelay("wait", 0.0)).build_and_acquire(
+                    raw2signal_fn=lambda raw: raw, retry=3
+                )
+            else:
+                builder.run_program(
+                    FailingProgram(schedule_stop=schedule.set_stop),
+                    raw2signal_fn=lambda raw: raw,
+                    retry=3,
+                )
+        return 99
+
+    observed = start_effect(rig, acquire)
+    status = rig.engine.execute("run")
+    assert status.lifecycle == ("paused" if control == "pause" else "stopped")
+    assert len(observed) == 1
+    assert isinstance(observed[0], Failed)
+    assert message in observed[0].reason
+    assert attempts == [source]
+    assert status.committed_seq == 1
+    failed = next(
+        event for event in rig.events() if event["kind"] == "experiment_failed"
+    )
+    assert isinstance(failed["error"], dict)
+    assert failed["error"]["type"] == "builtins.OSError"
+    assert failed["error"]["message"] == message
+    assert "raise cause" in str(failed["error"]["traceback"])
+    assert "step_discarded" not in rig.kinds()
+    assert not tuple(rig.paths.data_root.rglob("*.h5"))
+
+
+@pytest.mark.parametrize("control", ["pause", "stop"])
+def test_program_cancellation_without_error_never_returns_failed(
+    rig: Rig, control: str
+) -> None:
+    class CancelledProgram:
+        cfg_model = ProgramV2Cfg(rounds=1)
+
+        def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
+            if control == "pause":
+                rig.engine.pause("run")
+            else:
+                rig.engine.stop("run")
+            return np.array([1.0], dtype=np.complex128)
 
         def acquire_decimated(self, *_args: object, **_kwargs: object) -> object:
             raise AssertionError("unexpected decimated acquire")
@@ -501,25 +587,17 @@ def test_program_error_beats_control(rig: Rig) -> None:
         buffer = run.buffer((1,), axes=(np.array([0.0]),))
         with run.schedule(buffer) as schedule:
             schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg()).run_program(
-                FailingProgram(), raw2signal_fn=lambda raw: raw, retry=3
+                CancelledProgram(), raw2signal_fn=lambda raw: raw
             )
         return 99
 
     observed = start_effect(rig, acquire)
     status = rig.engine.execute("run")
-    assert status.lifecycle == "paused"
-    assert len(observed) == 1
-    assert isinstance(observed[0], Failed)
-    assert "program acquire failed with control" in observed[0].reason
-    assert status.committed_seq == 1
-    failed = next(
-        event for event in rig.events() if event["kind"] == "experiment_failed"
-    )
-    assert isinstance(failed["error"], dict)
-    assert failed["error"]["type"] == "builtins.OSError"
-    assert failed["error"]["message"] == "program acquire failed with control"
-    assert "raise cause" in str(failed["error"]["traceback"])
-    assert "step_discarded" not in rig.kinds()
+    assert status.lifecycle == ("paused" if control == "pause" else "stopped")
+    assert not observed
+    assert status.committed_seq == 0
+    assert "step_discarded" in rig.kinds()
+    assert "experiment_failed" not in rig.kinds()
     assert not tuple(rig.paths.data_root.rglob("*.h5"))
 
 
