@@ -68,11 +68,6 @@ def test_waveform_build_dispatch_drag_arb_and_flat_top():
     assert isinstance(flat_top.raise_waveform, GaussWaveform)
 
 
-def test_waveform_adapter_dispatches_by_style():
-    cfg = WaveformCfgFactory.from_raw({"style": "gauss", "length": 1.0, "sigma": 0.2})
-    assert isinstance(cfg, GaussWaveformCfg)
-
-
 def test_waveform_adapter_rejects_unknown_style():
     with pytest.raises(ValidationError, match="union_tag_invalid"):
         WaveformCfgFactory.from_raw({"style": "no_such_style", "length": 1.0})

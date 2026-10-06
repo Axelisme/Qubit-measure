@@ -24,6 +24,11 @@ from zcu_tools.cfg_model import (
 from ._support import AssetInfo, Resolver
 
 
+def test_waveform_adapter_dispatches_by_style():
+    cfg = WaveformCfgFactory.from_raw({"style": "gauss", "length": 1.0, "sigma": 0.2})
+    assert isinstance(cfg, GaussWaveformCfg)
+
+
 def test_inline_flat_top_materializes_isolated_ramp_without_dependencies():
     raw: CfgInputMap = {
         "style": "flat_top",
