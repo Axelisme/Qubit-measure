@@ -23,6 +23,7 @@ from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
     default_params_path,
 )
+from zcu_tools.gui.app.fluxdep.services.store import SelectionService
 from zcu_tools.gui.app.fluxdep.state import (
     FIT_VERSION_KEY,
     FluxDepState,
@@ -147,6 +148,48 @@ def test_selected_pointcloud_stale_mask_raises():
 # breakpoint search scales each entry's params; narrow bounds can reject every
 # scale, which is a real "infeasible" error, not what these tests probe).
 _WIDE = ((0.1, 50.0), (0.01, 10.0), (0.01, 10.0))
+
+
+@pytest.mark.parametrize("capture_search", [False, True])
+def test_removed_last_spectrum_leaves_stale_selection(tiny_database, capture_search):
+    st = _state_with_points()
+    mask = np.array([True, False, True, False])
+    SelectionService(st).set_selection(mask)
+    svc = FitService(st)
+    svc.set_params(tiny_database[0], *_WIDE, TransitionDict({}), 0.0, 0.0)
+    st.remove_spectrum("s1")
+    before = st.version.snapshot()
+
+    with pytest.raises(FailedPreconditionError) as caught:
+        if capture_search:
+            svc.capture_search()
+        else:
+            svc.selected_pointcloud()
+
+    assert caught.value.category == "failed_precondition"
+    assert caught.value.reason_code == "selection_stale"
+    assert st.version.snapshot() == before
+    assert st.spectrums == {}
+    np.testing.assert_array_equal(st.selection.selected, mask)
+
+
+@pytest.mark.parametrize("publish_empty_selection", [False, True])
+def test_empty_collection_without_stale_selection(tiny_database, publish_empty_selection):
+    st = FluxDepState()
+    if publish_empty_selection:
+        SelectionService(st).set_selection(np.empty(0, dtype=np.bool_))
+    svc = FitService(st)
+    svc.set_params(tiny_database[0], *_WIDE, TransitionDict({}), 0.0, 0.0)
+    before = st.version.snapshot()
+
+    fluxs, freqs = svc.selected_pointcloud()
+    assert fluxs.shape == freqs.shape == (0,)
+    assert fluxs.dtype == freqs.dtype == np.dtype(np.float64)
+    with pytest.raises(FailedPreconditionError) as caught:
+        svc.capture_search()
+    assert caught.value.category == "failed_precondition"
+    assert caught.value.reason_code == "no_selected_points"
+    assert st.version.snapshot() == before
 
 
 def test_compute_search_does_not_touch_state(tiny_database):
