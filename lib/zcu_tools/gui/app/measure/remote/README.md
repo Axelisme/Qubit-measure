@@ -1,11 +1,11 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-04, shared string enums and native flux coordinates
+**Last updated:** 2026-10-06, shared resource observation ownership
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
-local NDJSON RPC surface over the live `Controller`, marshals State-owned work onto
-the injected owner scheduler, serializes selected events, and enforces measure-gui policy
-such as resource-version guards and editor lifecycle tracking.
+local NDJSON RPC surface over the live `Controller`, injects measure's resource
+observation declarations and owner version provider into shared remote dispatch,
+serializes selected events, and owns measure-specific editor lifecycle tracking.
 
 The agent-facing MCP bridge lives in `zcu_tools.mcp.measure`. This package does
 not declare MCP tools and does not own stdio transport.
@@ -13,8 +13,8 @@ not declare MCP tools and does not own stdio transport.
 ## Layout
 
 - `service.py`：`RemoteControlAdapter`, a measure-gui subclass of shared
-  `RemoteControlServiceBase`; owns client context, guard hooks, diagnostics, and
-  editor cleanup.
+  `RemoteControlServiceBase`; injects observation policies and versions, and owns
+  client editor context, writeback key aliases, diagnostics and editor cleanup.
 - `dispatch.py`：runtime method registry projection; keeps the public
   `METHOD_REGISTRY` import path stable.
 - `handlers/`：grouped wire method handlers bound to controller, control facets,
@@ -218,10 +218,14 @@ reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
 
 ## Resource-Version Guard
 
-The GUI maintains a monotonic resource version table for context, SoC, devices,
-tabs, results, save paths, and editor sessions. Each remote connection starts with
-an empty seen map. The adapter compares it with current versions on the State
-owner thread before calling the controller. Missing observations, including
+Measure State maintains a monotonic resource version table for context, SoC,
+devices, tabs, results, save paths, and editor sessions. Shared `gui.remote`
+maintains each connection's initially empty seen map and compares it with the
+injected current versions on the State owner thread before calling the controller.
+`ResourceObservationPolicy` declares guard, full-read and write tracking; measure's
+`AgentMethodPolicy` adds agent exposure and operation metadata. Shared dispatch
+rejects off-main observations at construction. Measure keeps only the writeback
+pane alias mapping and app-specific lifetime hooks. Missing observations, including
 version zero, are stale. Wire methods do not accept `expected_versions`.
 
 Run uses the explicit cfg ref and observed device snapshots, not live md/ml.

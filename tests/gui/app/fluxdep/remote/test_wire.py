@@ -3,10 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.fluxdep.remote.wire_version import (
-    GUI_VERSION,
-    WIRE_VERSION,
-)
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
     ErrorEnvelope,
@@ -18,11 +14,6 @@ from zcu_tools.gui.remote.wire import (
     require_int,
     require_str,
 )
-
-
-def test_versions_start_at_one():
-    assert WIRE_VERSION == 2
-    assert GUI_VERSION == 4
 
 
 def test_parse_request_ok():

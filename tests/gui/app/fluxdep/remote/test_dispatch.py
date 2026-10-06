@@ -1,13 +1,11 @@
 """Tests for the fluxdep remote dispatch handlers + method-spec validation.
 
-The remote surface is READ-ONLY: the agent observes a GUI the user drives. So
-every handler here is a pure query — there is no load / align / point-pick /
-select / fit / export RPC. The tests therefore build the state directly through
-the ``Controller`` (the GUI's own command API, exercised by the GUI/controller
-tests) and assert that the read handlers report it correctly.
+These characterization cases build state through the Controller and check the
+six original read projections. Guarded writes are covered by the real route
+harness in test_project.py, not this direct-handler stub.
 
 Qt-free: the handlers only touch ``adapter.ctrl`` (a real ``Controller``), so a
-tiny stub adapter exercises the whole RPC handler surface without a QApplication
+tiny stub adapter exercises read projections without a QApplication
 or the socket server.
 """
 
@@ -18,11 +16,7 @@ import os
 import numpy as np
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.fluxdep.controller import Controller
-from zcu_tools.gui.app.fluxdep.remote.dispatch import (
-    _HANDLERS,
-    METHOD_REGISTRY,
-)
-from zcu_tools.gui.app.fluxdep.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.fluxdep.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.remote.param_spec import validate_params
@@ -44,28 +38,6 @@ def _call(adapter: _StubAdapter, method: str, raw_params: dict) -> dict:
     spec = METHOD_REGISTRY[method]
     params = validate_params(spec.params, raw_params) if spec.params else raw_params
     return dict(spec.handler(adapter, params))  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------------------
-# Registry coherence
-# ---------------------------------------------------------------------------
-
-
-def test_registry_specs_and_handlers_match():
-    assert set(_HANDLERS) == set(METHOD_SPECS)
-    assert set(METHOD_REGISTRY) == set(METHOD_SPECS)
-
-
-def test_registry_is_read_only():
-    # Guard against re-introducing a mutating RPC: only these read methods exist.
-    assert set(METHOD_SPECS) == {
-        "project.info",
-        "spectrum.list",
-        "selection.pointcloud",
-        "fit.result",
-        "resources.versions",
-        "state.check",
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +90,7 @@ def test_spectrum_list_reports_loaded_spectra(spectrum_hdf5):
     assert entry["name"] == name
     assert entry["spec_type"] == "OneTone"
     assert entry["aligned"] is False
-    assert entry["points_selected"] is False
+    assert entry["points_completed"] is False
 
     # after alignment + points the flags flip — the agent can watch the user's
     # progress through the pipeline stages
@@ -126,12 +98,72 @@ def test_spectrum_list_reports_loaded_spectra(spectrum_hdf5):
     adapter.ctrl.set_points(name, np.asarray(dev_values[:3]), np.asarray(freqs_ghz[:3]))
     entry = _call(adapter, "spectrum.list", {})["spectrums"][0]
     assert entry["aligned"] is True
-    assert entry["points_selected"] is True
+    assert entry["points_completed"] is True
+    assert entry["point_count"] == 3
+    adapter.ctrl.set_points(name, np.empty(0), np.empty(0))
+    entry = _call(adapter, "spectrum.list", {})["spectrums"][0]
+    assert entry["aligned"] is True
+    assert entry["points_completed"] is True
+    assert entry["point_count"] == 0
+    adapter.ctrl.reset_points(name)
+    entry = _call(adapter, "spectrum.list", {})["spectrums"][0]
+    assert entry["points_completed"] is False and entry["point_count"] == 0
 
 
 # ---------------------------------------------------------------------------
 # selection.pointcloud
 # ---------------------------------------------------------------------------
+
+
+def test_spectrum_list_wire_distinguishes_empty_completion_and_availability(
+    spectrum_hdf5,
+):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+
+    from zcu_tools.gui.app.fluxdep.remote.service import (
+        ControlOptions,
+        RemoteControlAdapter,
+    )
+    from zcu_tools.gui.remote.rpc_endpoint import ClientLink
+    from zcu_tools.gui.remote.wire import Request
+    from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
+        ManualOwnerScheduler,
+    )
+
+    filepath, *_ = spectrum_hdf5
+    ctrl = Controller(FluxDepState())
+    name = ctrl.load_spectrum(filepath, "OneTone")
+    ctrl.set_alignment(name, 0.0, 1.0)
+    ctrl.set_points(name, np.empty(0), np.empty(0))
+    scheduler = ManualOwnerScheduler()
+    adapter = RemoteControlAdapter(
+        ctrl, ControlOptions(port=0), owner_scheduler=scheduler
+    )
+    link = ClientLink("test", token_required=False)
+    adapter.on_client_open(link)
+    scheduler.pump_all()
+    try:
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            future = worker.submit(
+                adapter.route, link, Request("list-empty", "spectrum.list", {})
+            )
+            assert scheduler.pump_once(block=True, timeout=1.0)
+            future.result(timeout=2.0)
+        reply = json.loads(link.outbound.get(timeout=1.0))
+        assert reply["id"] == "list-empty" and reply["ok"]
+        assert reply["result"]["spectrums"] == [
+            {
+                "name": name,
+                "spec_type": "OneTone",
+                "aligned": True,
+                "points_completed": True,
+                "point_count": 0,
+            }
+        ]
+    finally:
+        adapter.stop()
+        ctrl.interactive.dispose()
 
 
 def test_selection_pointcloud_assembles_selected_points(spectrum_hdf5):

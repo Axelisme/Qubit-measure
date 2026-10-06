@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-02. Explicit search figures and presentation lifetime
+**Last updated:** 2026-10-06. Published fit inputs in GUI controls
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -41,19 +41,23 @@ scipy fit**（fit_spectrum 留在 notebook，未移植）。
 
 ## Architecture Overview
 
-分層 `app → Controller(façade) → services → State`。MainWindow 是唯一的 driving
-view（給人）；RemoteControlAdapter 是 **read-only observing view**（給 agent 讀
-狀態，不驅動分析）。仿 measure ADR-0068 的 view-split 機制，但 fluxdep 的 remote
-view 只暴露查詢，不暴露 mutation。
+分層 `app → Controller(façade) → services → State`。MainWindow 是人使用的 driving
+view；RemoteControlAdapter 是 agent 的命令與觀測入口。它與 GUI 共用
+Controller owners，資源的 per-connection observation 與 guard 由 shared remote 執行。
+目前支援完整 project／spectrum／selection／fit 查詢、project／spectrum 編輯與載入、
+fit inputs replacement、原生 spectrum／params 匯出、app-owned search／operation，
+以及四種 shared Session 的互動命令與原生 PNG。
 
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、
   `spectrums: dict[str, SpectrumEntry]`、`active_spectrum`、`selection`(SelectionState)、
-  `version`(VersionTable)。`VersionTable` 原樣搬自 measure（純樂觀鎖機制）。
+  `version`(shared VersionTable)。Spectrum leaf 移除使用精確 retire，刪除期間版本為 0，
+  同名重建續增，不重用舊 observation；不影響同字首的其他譜。Collection／global keys
+  保持 State lifetime 的計數。
   **`ProjectInfo`/`default_*` 共用** `gui/project.py`（Qt-free，與 dispersive 同源）；
   `ProjectDialog` 共用 `gui/widgets/project_dialog.py`（`db_label="Database path"`），並可從
   project root 掃描到的 `result/**/params.json` result scope 下拉選取既有 chip/qubit。
   `SpectrumEntry` 持 raw(SpectrumData)/points(PointsData)/per-spectrum flux 對齊/
-  aligned/points_selected/alignment_seeded。raw/points 直接複用
+  aligned/points_completed/alignment_seeded。raw/points 直接複用
   `analysis.spectrum` 與 `analysis.fluxdep.models` 的 **TypedDict**（欄位用 `[...]` 存取，非 dataclass）。
 - **`services/`** — 薄包裝純運算，mutate State：`load`(LoadService)、
   `alignment`(Alignment/Points)、`store`(SpectrumStore/Selection)、`export`。
@@ -65,6 +69,16 @@ view 只暴露查詢，不暴露 mutation。
   state/bus/project_root 儲存 + `state`/`bus` property + `get_project_root` + `_emit`
   helper；per-command façade body 仍各 app（領域動詞 + app payload），main 不繼承。
   **無 measure 概念**（run/analyze/writeback/context/device/tab）。
+- **`interactive.py`** — Qt-free `FluxDepInteractiveOwner` 持有 active spectrum 的
+  單一 live 定線／OneTone／TwoTone／跨譜篩選 context。GUI controls 與 commands 共用 `gui.interactive` 的 Actions／Session；
+  LinePicker 只持有 disposable preview，OneTone threshold 與 indices 一起 commit／undo。
+  TwoTone Session 保存 mask、detector 與 tools；工具設定保留單層 Undo，完整 stroke 一次 commit。
+  Background projection 只提供 derived view；Finish 重新計算 committed snapshot，不等待 preview。
+  Finish 經 Controller 的 AlignmentService／PointsService 發布；後者擁有排序與 flux calibration。
+  Picker kind switch、active switch、reload、remove 或 external spectrum change 關閉舊輸入。
+  跨譜 context capture 全部來源版本，包含零點譜；任何來源變更或外部 selection publication 都關閉舊輸入。
+  Apply 同步計算最新 snapshot、經 Controller 發布一次 selection，保留 input 與 Undo，不是 picking Finish。
+  Widget detach 不終止 session，window close 才 dispose owner 並 quiesce 背景 runner。
 - **`event_bus.py`** — fluxdep 的 payload 型別，掛在共用 `BaseEventBus`
   （`gui/event_bus`，payload-type-key 訂閱）上；bus 機制共用、payload 定義 per-app。
 - **`ui/`** — `MainWindow`（左 spectrum 列表 + 右階段驅動編輯區）、互動 widget
@@ -76,7 +90,7 @@ view 只暴露查詢，不暴露 mutation。
   一份供 find_points/result_preview。MainWindow 擁有的 EventBus subscriptions 在 window close
   釋放，避免分析 view 被 bus callback 保活。
 - **`remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
-  （`gui/remote/control_service`，零 policy 覆寫），讓 agent **只讀**觀測（無任何 mutation RPC）。MCP
+  （`gui/remote/control_service`），注入 app observation policies 與 resource versions。MCP
   entrypoint 位於 `zcu_tools/mcp/fluxdep/server.py`；`McpBridge` 在
   `zcu_tools/mcp/core/bridge`。
 
@@ -89,7 +103,8 @@ LoadService 用底層 `load_data`(datafile) + `format_rawdata`(analysis.spectrum
 
 ### State 邊界（main-thread 不變式）
 所有 State 寫入只在 Qt 主執行緒（沿用 measure 的不變式）。worker（互動 widget 的
-背景計算）不直接寫 State，只 emit Qt signal → 主執行緒 slot 寫。
+背景計算）不直接寫 State，只經 owner-loop delivery 提供計算結果。
+TwoTone preview completion 只更新 presentation，不提交 Session 或 spectrum points。
 
 ### 兩種繪圖機制：互動 widget 自建 canvas / v2 診斷圖使用 explicit host
 **互動 widget（定線/選點/結果預覽）自持 canvas**：widget 自持 `Figure` +
@@ -106,15 +121,18 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   host、shutdown callback 與 mathtext 支援，不切換全域 Matplotlib backend。
 - `FluxDepGuiBehavior.spec` 宣告 app slug 與 default control port。`app.py` 只做
   controller/window/adapter wiring；程序入口位於 `scripts/run_fluxdep_gui.py`。
-- **FitPanel R4**：DB 搜尋經 Qt runtime adapter `session/adapters/qt_background.py` 的 `BackgroundRunner`（per-panel）提交，
-  worker 經 `compute_search(pbar_factory=...)` 安裝進度通知。主執行緒的成功 callback 先記錄結果，
-  再透過該 panel 的 explicit host 呈現診斷圖。
+- DB 搜尋由 app-owned `FluxDepSearchOwner` 提交到專用 `BackgroundRunner`。
+  Worker 只計算 detached snapshot。Owner 提交有效數值後，panel 才呈現診斷圖。
 
 ### 編輯區階段驅動
 MainWindow 編輯區依 active 譜的 pipeline 階段 swap widget：未定線→LinePicker；
-已定線未選點→OneTone/FindPoints(by spec_type)；已選點→ResultPreview(唯讀結果圖)。
+已定線未完成選點→OneTone/FindPoints(by spec_type)；已完成→ResultPreview(唯讀結果圖)。
+空 Finish 也完成選點，清單顯示完成，ResultPreview 顯示零點。
+`points_completed` 表示階段完成；`point_count` 表示可用點數。Analyze／Selector 只使用非空資料。
 widget 的 `finished` → Controller 寫回 → 階段前進 → 重 swap。
-ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一階段重做。
+ResultPreview 的 Re-select points 透過 Controller 清空 points／completion 並重開 selector。
+Re-pick lines 重開 alignment，保留 native points／completion；接受新定線時一次重算 raw 與 point fluxs。
+Processed restore 包含零點的完成結果，不新增持久化欄位。
 
 ### 背景計算 + 即時中斷（generation 戳記）
 慢計算經共用 `BackgroundRunner.submit`（per-panel，`enter=None`）off-main，避免拖動卡 UI。
@@ -122,6 +140,8 @@ ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一�
 `on_done` 帶 captured generation，主執行緒檢查不是最新就丟棄（非中途 kill）。`get_result`
 同步算最終（finish 終點）。**generation/debounce 留在 panel、不進 runner**——這個「最新者勝」
 取消範式與 measure 的 stop_event 協作取消不同，刻意不合併（runner 對取消無感）。
+- **LinePicker** 使用共用 plugin 的 single-flight auto alignment；owner-loop completion
+  對最新 snapshot 提交，已終止 session 的晚到結果不發布。它不使用 panel generation 範式。
 - **FindPoints** `spectrum2d_findpoint`（大譜 ~180-480ms/次）：worker 化。
 - **Selector** `downsample_points`（O(N²)，5000 點 ~1.3s）：worker 化。
 - **線程非進程**：實測 numpy/scipy 釋放 GIL，背景線程不卡主執行緒；避開進程的
@@ -140,57 +160,96 @@ ResultPreview 內含 Re-pick lines / Re-select points 按鈕，可回退任一�
 `inherit_from` 既有譜的對齊當初值（`alignment_seeded` 標記），LinePicker 才會 seed；
 fresh load 用 picker 預設。OneTone 譜的 LinePicker 鎖 magnitude-only（相位無資訊）。
 
+### Interactive context facts 與 GUI 跟隨
+Owner 的 inspect 回傳 live context reference 與 owner-lifetime identity，不建立 Session，也不消耗 Undo。
+同一有效 begin 重用 identity；退休後的新 context 使用新 identity。Identity 不代表 edit revision，
+同一 Session 的 GUI／command Actions 仍依 owner-loop 順序提交。
+
+Owner 發布 opened／updated／closed domain facts，Session commit／undo 與定線 alignment info 都更新同一 context。
+MainWindow 依 EventMeta origin 與目前 identity 顯示 agent 開啟／修改的 picker 或 Filter。
+GUI 依 context kind 掛載，不能用已完成的 pipeline 階段代替目前 context。
+Closed 只清除旧 view，不開新 Session。純讀取與 user-origin edits 不強制切換畫面。
+AnalyzePanel 的 public show_tab 管理 Filter／Search／Show，外部不存取 Qt 私有 stack 或 tab。
+Agent-origin search pending 顯示 lazy Search 面板；terminal 更新結果，不搶回使用者已切換的畫面。
+
 ### 跨譜篩選：繼承 min_distance 不繼承 select
-Selector 每次開**全選重置**（不繼承 brush 選擇，否則移除的點難加回），但**繼承**
-穩定的 downsample threshold(`SelectionState.min_distance`)。
+App owner 建立新的跨譜 context 時全選，僅繼承已發布的 `SelectionState.min_distance`。
+Analyze singleton 每次啟用 Filter 都重新 attach 有效 context；離開 Filter 取消 context，切走 Analyze 則只 detach view。
+Selector controls／完整 stroke 透過共用 Actions 修改 Session。Preview 使用 80ms debounce 與 generation guard；
+Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 delivery。
 
 ### 配色
 互動圖背景一律 `gray_r`（白底、高值=黑），紅點落在高值共振線上對比最強
 （vs viridis 高值=黃，紅點不明顯）。對齊 notebook plotly 版的 Greys。
 
-### Remote RPC + MCP（**read-only** observing view，共用 gui/remote transport）
-GUI 側：`RemoteControlAdapter` 是第二個 driving-shaped view，但只讀。它 **subclass 共用
-`RemoteControlServiceBase`**（`gui/remote/control_service`），後者擁有 router scaffolding
-（`route` 骨架 + events.* handlers + `_dispatch_on_owner` bare marshal + EventBus
-subscribe/serialize/broadcast，底層的 socket/framing/handshake 再委給
-`NdjsonRpcEndpoint`）。fluxdep 是 read-only → **零 policy 覆寫**（連 `_get_bus` 都用 base
-預設 `ctrl.bus`、event serializers 以 payload `type` 為 key），本檔 `service.py` 只剩
-domain 注入（method registry / serializers / 版本 / `server_name="FluxDepRemoteServer"`）。
-method 註冊用共用 `MethodSpec`/`build_method_registry`（`gui/remote/method_spec`）。
-MCP 側：`zcu_tools/mcp/fluxdep/server.py` 是 thin entrypoint over 共用 `McpBridge`
-（`zcu_tools/mcp/core/bridge`：MCP-server-side transport，socket state 是 instance attr）—
-config（`fluxdep_` tool 前綴）+ bridge + 3 個生命週期工具。**MCP 層 events dropped**：
-MCP bridge 不訂任何 event-push（無 `on_event` hook）；RPC 層的 `RemoteControlAdapter`
-則訂閱 7 種 EventBus payload 並透過 `broadcast` 推送給已訂閱的 RPC 客戶端。
-- **只讀不變式**：`method_specs`/`dispatch` 只有 6 個純查詢 method
-  （`project.info`/`spectrum.list`/`selection.pointcloud`/`fit.result`/
-  `resources.versions`/`state.check`），**無任何 mutation**。所有分析（load/align/
-  pick/select/fit/export）是 user 在 GUI 裡做；agent 只觀測。原因：選點與軸向判斷需
-  人眼看 preview，agent 沒有。`test_dispatch.test_registry_is_read_only` 守這條線。
-- **`project.info` / `resources.versions` 用共用 handler**：`dispatch.py` 直接註冊 `gui/remote/readonly_handlers.py` 的 `h_project_info` / `h_resources_versions`（dispersive 用同一份，兩 app 永遠同步）；`_h_state_check` 仍 app-local（用 `gui/project.py` 的 `is_real_project` 判 placeholder）。
-- **MCP 工具集**：讀工具自 method_specs 生成（`fluxdep_project_info`/`spectrum_list`/
-  `selection_pointcloud`/`fit_result`/`state_check`；`resources.versions` 不曝露）+ 3 個
-  生命週期手寫工具（`fluxdep_launch`/`connect`/`disconnect`）。**無 `fluxdep_stop`**——
-  agent 不關 user 的 GUI。
-- 因 method 全無參數，`method_specs` 的 `params` 為空。
-- **省略**（measure-only policy，fluxdep 不需）：version guard / async operation handle /
-  diagnostic fan-out / CfgEditor session / render-view——這些都留在 measure 端的
-  RemoteControlAdapter + mcp_server，不在共用 transport 裡。
+### Remote RPC 與 MCP
 
-### v2 database search：State 邊界 + 兩條執行路徑
-search（`analysis.fluxdep.search.search_database`，njit prange 跑數萬筆、釋放 GIL）是 v2 唯一的長阻塞作業。
-拆成**純計算 vs State 寫入**兩半，守住 main-thread State 不變式：
-- `FitService.compute_search`：純函式，先 snapshot State 的輸入（db 路徑/bounds/transitions/
-  選中點雲），再跑 search，不寫 State、不繪圖。直接回傳 kernel 的 `DatabaseSearchResult`，含 params 與數值診斷陣列，可在 worker 跑。
-- `FitService.record_result`：唯一寫 State 處（`set_fit_result`），只在主執行緒呼。
-- **GUI 路徑（唯一觸發路徑）**：`AnalyzePanelWidget` 經 `BackgroundRunner` 跑 `Controller.compute_search`（off-main，
-  GIL 釋放不卡 UI）。完成後，主執行緒先透過 `record_search_result` 寫 State、發出 fit fact，再畫圖。
-  數值成功不依賴診斷圖成功。**不可中斷**（單一確定性掃描，只 disable Search 鈕 + 進度條，無 Cancel）。
-  - search 是 user 在 GUI 裡按的，**沒有 RPC 觸發路徑**（remote view 只讀）。`Controller.
-    search_database` 是主執行緒上 compute + record 的便利入口，GUI worker 不用它；沒有 `fit.search` handler。compute/record
-    分拆仍是守 main-thread State 不變式的關鍵。
-- **進度注入**：`analysis.fluxdep.search` 走 `make_pbar`。GUI worker 用
-  `use_pbar_factory` 裝 `GuiProgressBar`（emit Qt signal 到主執行緒進度條，節流 50ms）。
+`RemoteControlAdapter` 注入 app 的 methods、event serializers、resource versions 與 observation policies。
+`RemoteControlServiceBase` 擁有 route、owner marshal、每條連線的 seen map 與 guard。
+`NdjsonRpcEndpoint` 擁有 socket、framing、authentication 與回覆交付。App 不複製這些機制。
+
+完整 `project.info`、`spectrum.list`、`fit.result` 分別揭露 project、集合及 fit。
+`selection.pointcloud`、`state.check` 與 `resources.versions` 不建立完整 observation。
+`project.setup` 必須先讀 project，使用 Controller 與原生 ProjectInfo paths。成功 self-write
+只推進同連線已讀且相符的版本，其他連線與 GUI 修改後仍須明示重讀。
+Spectrum snapshot 回完整 calibration／published points 與 raw axes extents，不輸出 complex signal matrix。
+合法的 absent name 回 absence 並建立 version 0 observation。Leaf guard 不展開 name 內的 literal star。
+Remove、reset 與 active selection 共用原生 Controller owners；同名重建會使舊 observation stale。
+Selection snapshot 回完整 published mask 與 normalized min_distance，不讀 live Session。
+Raw load 與 processed restore 必須先完整讀 project、集合與全部 live spectra，包含零點譜。
+All-source guard 也保留已觀察的 retired leaf，必須讀 absence 才能重新載入。
+載入沿原生 basename replacement、inheritance／transpose 與 processed completion。
+成功只推進既有且相符的 observation，新譜的 receipt 不取代完整 snapshot。
+Processed publication 失敗保留已發布前綴，不 rollback，也不刷新 observation。
+Fit replacement 經 Controller 清掉舊結果，不啟動搜尋。Nested JSON parser 只處理 type／shape／finite，
+bounds 與 transition 的領域語意留在 search kernel。Spectrum export 預設 create-only，明示 overwrite 才替換。
+Params export 沿原生 merge，保留獨立 sections，取第一張 aligned spectrum 的 calibration，包含零點譜。
+Export 不改 State 或建立 observation；原生失敗保留成功前綴，不 cleanup／rollback。
+Search 使用同一 app owner token，status 可找 GUI 或 agent 的最新 activity。Await 在 IO thread
+等待，不碰 State／seen；timeout 不取消，cancel receipt 不代表 cancelled outcome。
+Async terminal 不刷新 fit observation，成功後須明示讀 fit.result。Unknown／evicted token 明示拒絕。
+六個原有 read projections 保持原值。
+
+Interactive open 必須先讀來源，picker name 必須已為 active。Read 只 inspect，不開輸入、
+不切畫面，也不建立 published-resource observation。Command 帶 owner-lifetime context_id，
+先核對身份與 target，再呼叫同一 plugin Actions／Session Undo／app publication。
+每次回覆使用同一 committed snapshot 投影數值與獨立 Agg PNG。TwoTone 的 mask-cell count
+與 detected-point count 分開；selection 保留完整 input mask 與 downsample 後的 kept count。
+Finish／cancel 的 receipt 保留退休 identity，即使同步 GUI callback 已開下一份 context。
+Apply 不關閉有效 joint input。Publication 或 rendering 失敗不宣稱 rollback。
+PNG 使用 shared renderer，不採用 Qt canvas，也不保存為產物。
+
+MCP entrypoint 使用共用 `McpBridge`，工具從 method specs 生成。完整控制工具的 workflow
+與圖像驗收尚未完成。MCP 不訂閱業務 event-push，不維護第二份 seen map。
+RPC clients 可自行訂閱 EventBus facts。Agent 不關閉使用者的 GUI。
+
+### Database search 的 app ownership
+`FitService.capture_search` 在 State owner capture detached `SearchInput`。
+`compute_search(inputs)` 只算數值，不讀 live State、不繪圖。
+`record_result` 在 owner 寫入 fit，Controller 發布 `FitChanged`。
+
+`Controller.search` 的 `FluxDepSearchOwner` 集中 single-flight、版本依賴與 terminal policy。
+依賴包含 project、fit、selection、spectrum 集合與全部來源，包含零點譜。
+來源改變時，成功 delivery 回 failed，不覆蓋新的 fit。Active spectrum 切換不影響 joint search。
+Cancel 只提出請求，kernel 的 `SearchCancelled` 才代表運算取消。
+普通失敗保持 failed，最後 checkpoint 後的有效成功可以 finished。
+
+App composition 注入專用 `BackgroundRunner` 與 `ProgressService`，沒有 hardware gate。
+AnalyzePanel 從同一 owner 與 progress facet 顯示 Search／Cancel／結果。
+Hide 或 detach 不取消，重新 activate 讀 owner snapshot。
+關窗先拒絕新 search 並提出 cancel，search runner 未 drain 就拒絕關窗，保留 Qt owners 與圖。
+診斷圖失敗不改數值 outcome。
+
+`Controller.search_database` 保留 headless owner-inline capture／compute／record 便利入口，
+不取 operation token。Remote search 使用同一 search owner，不另建 operation registry。
+
+### Caller-correctable errors
+
+State、SearchOwner 與 load／fit／export owners 使用 shared `InvalidInputError` 與
+`FailedPreconditionError` 分類 caller 可修正的失敗。State 的 `get_spectrum` 是 owner-thread
+literal-name lookup，回傳 live entry；未知名稱不修改來源或版本。Remote 只投影 nominal category
+與 reason，不從 ordinary exception ancestry 或訊息猜分類。Missing runtime、thread misuse、
+provider I/O 與 worker failure 保留各自的 unexpected failure／operation outcome 語意。
 
 ### v2 結果存放 + 視覺化
 - `FitState`（State 上的 singleton，version key `fit`）：db 路徑/EJb/ECb/ELb/transitions/r_f/sample_f
@@ -206,6 +265,8 @@ search（`analysis.fluxdep.search.search_database`，njit prange 跑數萬筆、
   - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（預設按 `viz.derive_auto_limits` = notebook
     `auto_derive_limits`）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
   AnalyzePanel 是 **MainWindow 持有的單例**（建一次留 stack，切走只隱藏不銷毀），所有 tab 狀態保留。
+  Panel 訂閱已發布的 fit 變更，新 inputs 同步到 Search 與 Show；僅結果改變時保留本地 display edits。
+  Visualization 的 fallback 使用已發布的 fit transitions，不使用未提交的 Search 表單。
 - Search 診斷图 builder 建立原生 Agg Figure，不登記 pyplot manager。Panel 替換或關閉時 release presentation，不以全域 `plt.close("all")` 管理其他 caller 的圖。
 - `transitions` 沿用 `analysis.fluxdep.models.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar
   與任意 `transitions{n}`/`mirror{n}` 動態 list 群）——這正是 extra_items 的設計用途，**不改 pydantic/
@@ -225,13 +286,12 @@ search（`analysis.fluxdep.search.search_database`，njit prange 跑數萬筆、
   `[Frequency, Flux]`（freq 掃在外層）→ 軸反。**不是固定特性**（TwoTone 通常正、OneTone 常反），
   要看實際檔案。GUI 的「Transpose axes」toggle（`services/load.py` 的 `transpose_spectrum_data`）
   讓 user 從 preview 判斷後交換。
-- **分析全在 GUI（agent 只讀）**：load/定線/選點/篩選/fit/export 都是 user 互動；選點與軸向
-  判斷需人眼看 preview。agent 沒有 mutation RPC，只能讀狀態回報，**不可代為操作**。被要求「跑
-  分析」時要誠實說明只能 launch GUI + 讀狀態。
+- **MCP workflow 尚未驗收**：GUI RPC 已提供 pipeline commands、互動回覆、匯出及搜尋操作。
+  MCP tools workflow、原生圖像辨識與真實資料 e2e 由 fluxdep-mcp-control task 的後續票驗證。
 
 ## Entry Points
 
-- `scripts/run_fluxdep_gui.py` — 啟動（`--control-port` 開 read-only RPC 給 agent/MCP）。
+- `scripts/run_fluxdep_gui.py` — 啟動（`--control-port` 開 RPC 給 agent/MCP）。
 - `.mcp.json` 註冊 `fluxdep-gui` MCP server；skill `run-fluxdep-gui`
   (`.claude/skills/`，三副本同步 .agent/.codex；`sync_skills.sh` 只同步 SKILL.md) 只含
-  SKILL.md。GUI 不提供操作 RPC；socket 層驗證限於 launch + read-only state。
+  SKILL.md。既有 skill 尚描述 read-only workflow；完整控制 workflow 與 skill 更新留在 MCP tools task。

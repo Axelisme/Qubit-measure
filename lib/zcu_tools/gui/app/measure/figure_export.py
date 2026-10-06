@@ -1,14 +1,7 @@
-"""Fixed-size figure rendering for save, Data Preview, and agent screenshots.
+"""Measure save and Data Preview geometry for live GUI-owned Figures.
 
-All paths render the *same* live matplotlib Figure that is embedded in a tab's
-Qt canvas. That canvas resizes with the GUI window, which mutates the figure's
-``size_inches`` — so a naive ``fig.savefig(path)`` (save) or ``canvas.grab()``
-(screenshot) produces an image whose dimensions track the current window shape.
-
-To make rendering window-independent, all paths funnel through here: the live
-figure's size is temporarily pinned to a fixed value, rendered, then restored
-(try/finally). All calls must run on the Qt main thread (the live figure is
-GUI-owned); the existing save/screenshot entry points already do.
+Calls run on the Figure's owner thread. Size is temporarily pinned and restored
+after rendering; agent screenshots use the shared gui.plotting renderer.
 """
 
 from __future__ import annotations
@@ -29,13 +22,6 @@ SAVE_DPI: int = 150
 # layout are WYSIWYG, but rasterizes at 640x480 to keep gallery refresh lightweight.
 DATA_PREVIEW_FIGSIZE: tuple[float, float] = SAVE_FIGSIZE
 DATA_PREVIEW_DPI: float = 160.0 / 3.0
-
-# Fixed export geometry for AGENT SCREENSHOTS (tab.get_figure). The agent
-# only needs to eyeball the plot, so this is deliberately small to keep the
-# base64 PNG token-light (~640x480). Distinct from the save path, which must keep
-# full quality. Tune here if the screenshot is too small/large to read.
-SCREENSHOT_FIGSIZE: tuple[float, float] = (6.4, 4.8)  # inches -> 640x480 at dpi=100
-SCREENSHOT_DPI: int = 100
 
 
 def _render_with_fixed_size(
@@ -81,16 +67,4 @@ def render_figure_preview_png(fig: Figure) -> bytes:
         DATA_PREVIEW_DPI,
         format="png",
     )
-    return buf.getvalue()
-
-
-def render_figure_png(fig: Figure) -> bytes:
-    """Render ``fig`` to PNG bytes at the small screenshot size/dpi.
-
-    Used for agent figure screenshots (tab.get_figure). Replaces
-    ``canvas.grab()`` so the result has a fixed, window-independent geometry; it
-    is intentionally smaller/lower-dpi than a saved image to stay token-light.
-    """
-    buf = io.BytesIO()
-    _render_with_fixed_size(fig, buf, SCREENSHOT_FIGSIZE, SCREENSHOT_DPI, format="png")
     return buf.getvalue()

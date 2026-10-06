@@ -214,6 +214,14 @@ ignore_imports =
     # Debt: logging setup is not part of the remote contract (backlog).
     zcu_tools.mcp.measure.server -> zcu_tools.gui.logging_setup
 
+# ADR-0067: shared interactive contracts sit below application policy.
+[importlinter:contract:interactive-below-apps]
+name = C17: application policies depend on shared interactive contracts, never the reverse
+type = layers
+layers =
+    zcu_tools.gui.app
+    zcu_tools.gui.interactive
+
 # D72: concrete definitions are supplied by the external composition root.
 [importlinter:contract:framework-no-user]
 name = C16: the framework does not import the user experiment package

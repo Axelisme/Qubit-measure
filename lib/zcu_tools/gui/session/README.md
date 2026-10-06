@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-05, operation cancellation channel
+**Last updated:** 2026-10-06, operation cancellation channel and analysis-only runner facets
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -72,6 +72,15 @@ session/
 ```
 
 `Use Simulate Env` 是明確的環境組裝入口，不是 `SOC_CHANGED` 的副作用。它只在啟用時斷開真實 devices，允許之後混用。任一斷線失敗就停止並回報部分成果，不自動重連、歸零或 RF off。低層 SoC connect 不建立 FakeDevice；重複啟用保留有效 mock 的資源與數值。
+
+## Analysis-only operations
+
+Fluxdep search 重用 OperationRunner、OperationHandles 與 ProgressService。
+Runner 的 gate／progress injection 可為 None。begin 在建立 handle 前拒絕缺少的必要 facet。
+純分析不用注入硬體 gate。OperationSpec 的 optional on_opened hook 在 progress notification
+與 submit 前交出 token，讓 domain owner 保留 admission 與 startup-failure activity。
+Hook、registration、factory 或 submit 失敗時，runner 清理並重拋。
+既有 measure／autofluxdep clients 保留各自的硬體 policy。
 
 ## Operation markers
 

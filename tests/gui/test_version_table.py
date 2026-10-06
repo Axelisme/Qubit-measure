@@ -1,8 +1,8 @@
-"""Unit tests for zcu_tools.gui.app.measure.state.VersionTable."""
+"""Public lifecycle tests for the shared GUI VersionTable."""
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.measure.state import VersionTable
+from zcu_tools.gui.version_table import VersionTable
 
 
 def test_unbumped_key_reads_zero():
@@ -52,6 +52,47 @@ def test_drop_prefix_forgets_matching_keys_only():
     # A different tab and global resources are untouched.
     assert vt.get("tab:xyz") == 1
     assert vt.get("context") == 1
+
+
+def test_retire_removes_only_the_literal_key_and_preserves_recreation_counter():
+    vt = VersionTable()
+    vt.bump("spectrum:a")
+    vt.bump("spectrum:a")
+    vt.bump("spectrum:ab")
+    vt.retire("spectrum:a")
+
+    assert vt.get("spectrum:a") == 0
+    assert vt.snapshot() == {"spectrum:ab": 1}
+    assert vt.bump("spectrum:a") == 3
+    assert vt.get("spectrum:ab") == 1
+
+
+def test_repeated_and_unknown_retire_do_not_reset_or_create_resources():
+    vt = VersionTable()
+    vt.retire("unknown")
+    assert vt.snapshot() == {}
+    assert vt.bump("unknown") == 1
+    vt.retire("unknown")
+    vt.retire("unknown")
+    assert vt.get("unknown") == 0
+    assert vt.snapshot() == {}
+    assert vt.bump("unknown") == 2
+    vt.retire("unknown")
+    assert vt.bump("unknown") == 3
+
+
+def test_drop_prefix_forgets_retired_counters_but_not_other_retirements():
+    vt = VersionTable()
+    vt.bump("tab:a")
+    vt.bump("tab:a")
+    vt.bump("tab:b")
+    vt.retire("tab:a")
+    vt.retire("tab:b")
+    vt.drop_prefix("tab:a")
+
+    assert vt.snapshot() == {}
+    assert vt.bump("tab:a") == 1
+    assert vt.bump("tab:b") == 2
 
 
 def test_bump_after_drop_starts_from_zero_again():

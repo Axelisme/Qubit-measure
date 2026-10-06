@@ -13,7 +13,11 @@ from scipy.optimize import least_squares
 from tqdm.auto import tqdm
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict, energy2linearform
-from zcu_tools.analysis.fluxdep.search import ParamBounds, search_database
+from zcu_tools.analysis.fluxdep.search import (
+    ParamBounds,
+    SearchExecution,
+    search_database,
+)
 from zcu_tools.analysis.fluxdep.search_models import count_max_evals
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
@@ -67,7 +71,7 @@ def search_in_database(
         datapath,
         transitions,
         ParamBounds(EJ=EJb, EC=ECb, EL=ELb),
-        n_jobs=n_jobs,
+        execution=SearchExecution(n_jobs=n_jobs),
     )
     fig: Figure | None = None
     if plot:

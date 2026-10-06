@@ -36,8 +36,12 @@ from .selection import (
     points_in_normalized_brush,
     toggle_near_mask,
 )
+from .stroke import BrushPoint, apply_mask_stroke, points_in_normalized_stroke
 
 __all__ = [
+    "BrushPoint",
+    "apply_mask_stroke",
+    "points_in_normalized_stroke",
     "FluxPickInputs",
     "FluxPickState",
     "TwoLinePicker",
