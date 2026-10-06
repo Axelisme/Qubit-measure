@@ -26,6 +26,7 @@ from zcu_tools.experiment.workflows import (
     TunableChange,
     WorkflowEnv,
 )
+from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.program.v2.modules import SoftDelay
 
@@ -567,8 +568,10 @@ def test_program_error_beats_control(
 
 
 @pytest.mark.parametrize("control", ["pause", "stop"])
-def test_program_cancellation_without_error_never_returns_failed(
-    rig: Rig, control: str
+@pytest.mark.parametrize("first_round_stop", [False, True])
+@pytest.mark.parametrize("acquire_mode", ["integrated", "decimated"])
+def test_program_cancel_protocol_never_returns_failed(
+    rig: Rig, control: str, first_round_stop: bool, acquire_mode: str
 ) -> None:
     class CancelledProgram:
         cfg_model = ProgramV2Cfg(rounds=1)
@@ -578,17 +581,25 @@ def test_program_cancellation_without_error_never_returns_failed(
                 rig.engine.pause("run")
             else:
                 rig.engine.stop("run")
+            if first_round_stop:
+                raise StoppedPartialAcquireError(
+                    "acquire stopped before the first round completed"
+                )
             return np.array([1.0], dtype=np.complex128)
 
         def acquire_decimated(self, *_args: object, **_kwargs: object) -> object:
-            raise AssertionError("unexpected decimated acquire")
+            return self.acquire()
 
     def acquire(run: Run[Cfg]) -> int:
         buffer = run.buffer((1,), axes=(np.array([0.0]),))
         with run.schedule(buffer) as schedule:
-            schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg()).run_program(
-                CancelledProgram(), raw2signal_fn=lambda raw: raw
-            )
+            builder = schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg())
+            if acquire_mode == "integrated":
+                builder.run_program(CancelledProgram(), raw2signal_fn=lambda raw: raw)
+            else:
+                builder.run_program_decimated(
+                    CancelledProgram(), raw2signal_fn=lambda raw: raw
+                )
         return 99
 
     observed = start_effect(rig, acquire)
