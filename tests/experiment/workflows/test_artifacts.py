@@ -97,6 +97,7 @@ def test_start_documents_are_detached_and_use_identity_not_slug(
     assert initial["format_version"] == 1
     assert initial["lifecycle"] == "running"
     assert initial["ended_at"] is None
+    assert initial["journal"] == str(artifacts.journal_path)
     assert initial["initial_tunables"] == {"reps": 2}
     assert initial["plan"] == {"targets": [1, 2]}
     lines = artifacts.journal_path.read_text(encoding="utf-8").splitlines()
@@ -495,7 +496,15 @@ def test_second_root_creation_failure_keeps_first_root(
 
 
 @pytest.mark.parametrize(
-    "reference", ["../outside", "/outside", "iter/../outside", "iter\\outside"]
+    "reference",
+    [
+        "../outside",
+        "/outside",
+        "iter/../outside",
+        "iter\\outside",
+        "C:/outside",
+        "C:outside",
+    ],
 )
 def test_journal_rejects_external_path_references(
     artifacts: RunArtifacts, reference: str

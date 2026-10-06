@@ -8,7 +8,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from re import fullmatch
 from threading import RLock
 from typing import Literal
@@ -39,7 +39,8 @@ class RunManifest:
     """Run entry document, not a checkpoint or point-record store.
 
     identity/workflow/plan/initial_tunables/requires/roots retain startup
-    provenance. roots are absolute. started_at is the original UTC start;
+    provenance. roots and journal are absolute paths; journal locates JSONL.
+    started_at is the original UTC start;
     updated_at is the last lifecycle change, ended_at is None until terminal.
     lifecycle uses the Engine lifecycle enum; reason is diagnostic or None.
     format and format_version identify this document's schema.
@@ -51,6 +52,7 @@ class RunManifest:
     initial_tunables: JsonValue
     requires: tuple[Capability, ...]
     roots: RunPaths
+    journal: Path
     started_at: datetime
     updated_at: datetime
     ended_at: datetime | None
@@ -86,7 +88,13 @@ def _check_utc(value: datetime) -> None:
 
 def _relative_path(value: str) -> None:
     path = PurePosixPath(value)
-    if not value or path.is_absolute() or ".." in path.parts or "\\" in value:
+    if (
+        not value
+        or path.is_absolute()
+        or PureWindowsPath(value).drive
+        or ".." in path.parts
+        or "\\" in value
+    ):
         raise ValueError("Artifact references must be relative paths without '..'")
 
 
@@ -136,6 +144,7 @@ class RunArtifacts:
             initial_tunables=metadata.tunables,
             requires=metadata.requires,
             roots=roots,
+            journal=self.journal_path,
             started_at=metadata.started_at,
             updated_at=metadata.started_at,
             ended_at=None,
