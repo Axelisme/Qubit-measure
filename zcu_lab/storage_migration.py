@@ -15,7 +15,7 @@ from zcu_tools.resources.storage_migration import KeyRule, MigrationMapping, Mod
 # Reviewed decisions: D120-D129, D133-D134. Changes to any rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
-_KIND_REVISIONS = {"qubit/fluxonium": "1.2", "qubit/transmon": "1.3"}
+_KIND_REVISIONS = {"qubit/fluxonium": "1.4", "qubit/transmon": "1.5"}
 
 _VALUE_PATHS = (
     ("r_f", "R1.freq"),

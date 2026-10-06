@@ -21,7 +21,7 @@ from .models import (
     LabberPayload,
 )
 from .native import load_run_data, save_run_data, validate_experiment_payload
-from .native_metadata import json_values_equal
+from .native_metadata import json_values_equal, validate_cfg_snapshot
 from .native_models import (
     AxisSchema,
     CfgSnapshot,
@@ -77,6 +77,7 @@ __all__ = [
     "load_run_data",
     "load_legacy_labber_payload",
     "validate_experiment_payload",
+    "validate_cfg_snapshot",
     "Axis",
     "LabberPayload",
     "LabberMetadata",

@@ -114,21 +114,35 @@ def write_json(node: h5.Group, name: str, value: JsonObject) -> h5.Dataset:
     return node.create_dataset(name, data=text, dtype=h5.string_dtype("utf-8"))
 
 
+def validate_cfg_snapshot(cfg: CfgSnapshot) -> None:
+    """Check historical cfg format without I/O, normalization or input mutation.
+
+    cfg.values must be a finite JSON object, cfg.cfg_type a nonempty declaration
+    name, and cfg.schema_version an ASCII major.minor string. Unknown JSON keys
+    are valid. Return None; invalid format raises ValueError located at /cfg.
+    This checks storage format, not concrete model fields or supported majors.
+    """
+    try:
+        _JSON.validate_json(json.dumps(cfg.values, allow_nan=False), strict=True)
+    except (ValidationError, ValueError) as error:
+        raise ValueError(f"/cfg: {error}") from error
+    if re.fullmatch(r"[0-9]+\.[0-9]+", cfg.schema_version) is None:
+        raise ValueError("/cfg: cfg_schema_version must be major.minor")
+    if not cfg.cfg_type:
+        raise ValueError("/cfg: cfg_type must not be empty")
+
+
 def validate_metadata(metadata: RunMetadata, cfg: CfgSnapshot) -> None:
     """Validate historical metadata, UTC times and cfg JSON before creating a file."""
+    validate_cfg_snapshot(cfg)
     # JSON validation rechecks dataclass fields rather than trusting instance types.
     try:
         checked = _METADATA.validate_json(
             json.dumps(_METADATA.dump_python(metadata, mode="json"), allow_nan=False),
             strict=True,
         )
-        _JSON.validate_json(json.dumps(cfg.values, allow_nan=False), strict=True)
     except (ValidationError, ValueError) as error:
-        raise ValueError(f"/context or /cfg: {error}") from error
-    if re.fullmatch(r"[0-9]+\.[0-9]+", cfg.schema_version) is None:
-        raise ValueError("/cfg: cfg_schema_version must be major.minor")
-    if not cfg.cfg_type:
-        raise ValueError("/cfg: cfg_type must not be empty")
+        raise ValueError(f"/context: {error}") from error
     if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}", checked.run_id) is None:
         raise ValueError(
             "/: run_id must be a UTC timestamp plus six-character identity"

@@ -1,11 +1,12 @@
 """Fixed native declarations for offline migration, never a runtime registry."""
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
-from zcu_tools.datafile import CfgSnapshot, VariableSchema
+from zcu_tools.datafile import CfgSnapshot, VariableSchema, validate_cfg_snapshot
 from zcu_tools.experiment import (
     AxesSpec,
     ExpCfgModel,
@@ -106,8 +107,9 @@ class MigrationExperiment:
     into native RunMetadata; it may differ from source_tag only by an explicit
     migration declaration. schemas is the generic
     disk-unit variable declaration. validate_cfg checks a historical CfgSnapshot
-    against this pair's cfg_type, major version and concrete model, returns None
-    without changing raw values, and raises ValueError for unconvertible cfg.
+    for storage format, this pair's cfg_type, major version and concrete model.
+    It returns None without changing raw values and raises ValueError for
+    unconvertible cfg.
     validate_native reads an exact native Path
     with the corresponding typed load_run, returns None and propagates failures.
     These bindings perform no acquisition, registration or live-context capture.
@@ -130,6 +132,7 @@ def _declaration(
         raise ValueError("Missing native experiment declaration")
 
     def validate_cfg(snapshot: CfgSnapshot) -> None:
+        validate_cfg_snapshot(snapshot)
         if snapshot.cfg_type != spec.cfg_type.__name__:
             raise ValueError(f"cfg_type must be {spec.cfg_type.__name__}")
         if int(snapshot.schema_version.split(".")[0]) != int(
@@ -138,7 +141,7 @@ def _declaration(
             raise ValueError(
                 f"cfg_schema_version major must match {spec.cfg_schema_version}"
             )
-        spec.cfg_type.model_validate(snapshot.values, extra="ignore")
+        spec.cfg_type.model_validate(deepcopy(snapshot.values), extra="ignore")
 
     def validate(path: Path) -> None:
         load_run(path, spec=spec)

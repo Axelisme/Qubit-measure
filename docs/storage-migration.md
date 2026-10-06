@@ -48,7 +48,7 @@ Dry-run 只讀來源，將 report 印到 stdout。它會以具體 cfg model 檢�
 | `snapshot` | 當時的 entry_name、point、description、roles 與 params。Point 可明確為 null。不要拿新容器的當前值冒充歷史快照。 |
 | `provenance` | `SoftwareProvenance`，缺少證據的欄位只填型別允許的 null，不假造 commit、主機或 SoC。 |
 
-Evidence 必須與來源 hash、檔內 tag 及 cfg 相符。巢狀 JSON 中的 true／1、false／0 不視為相同證據。矛盾不會被補充文件覆蓋。已知 pair 的 cfg 缺必要欄位或版本不符時，工具在分配 run_id 與規劃 native 前列 pending，保留來源。缺 cfg 或 cfg_type 的文件仍保留完整 raw，但該 run pending。缺少必填時間或 snapshot 的 evidence 文件會直接拒絕；缺證據時可先不提供該筆 evidence，保留來源待查。
+Evidence 必須與來源 hash、檔內 tag 及 cfg 相符。巢狀 JSON 中的 true／1、false／0 不視為相同證據。矛盾不會被補充文件覆蓋。已知 pair 的 cfg 缺必要欄位、版本不是完整 `major.minor` 或 major 不符時，工具在分配 run_id 與規劃 native 前列 pending，保留來源。同 major 的合法 minor 可以轉換。驗證使用隔離副本，不把可推導的欄位回填歷史 cfg。尚未 planned 的 pending evidence 可補正版本後明確 resume，不需手改 manifest。缺 cfg 或 cfg_type 的文件仍保留完整 raw，但該 run pending。缺少必填時間或 snapshot 的 evidence 文件會直接拒絕；缺證據時可先不提供該筆 evidence，保留來源待查。
 
 FreqGainCfg 的來源仍使用歷史 tag `twotone/ge/ro_optimize/freq`。離線 declaration 將新 native tag 寫為 `twotone/ge/ro_optimize/freq_gain`，typed reader 用新 spec 讀取。FreqCfg 的 tag 不變，原 Labber 與完整 evidence 也不改。正常 loader 沒有舊 tag alias。
 

@@ -2,6 +2,7 @@
 
 import json
 import os
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from zcu_tools.datafile import (
     load_run_data,
     save_labber_data,
     save_run_data,
+    validate_cfg_snapshot,
     validate_experiment_payload,
 )
 
@@ -30,6 +32,57 @@ from tests._native_support import (
     native_metadata,
     native_payload,
 )
+
+
+@pytest.mark.parametrize("version", ["1.bad", "1", "1.0.1", "", "1.0\n", "１.０"])
+def test_cfg_snapshot_and_writer_reject_the_same_malformed_version(
+    tmp_path: Path,
+    version: str,
+) -> None:
+    cfg = replace(native_cfg(), schema_version=version)
+    before = deepcopy(cfg)
+    with pytest.raises(ValueError, match=r"/cfg.*major.minor"):
+        validate_cfg_snapshot(cfg)
+    destination = tmp_path / "invalid.h5"
+    with pytest.raises(ValueError, match=r"/cfg.*major.minor"):
+        save_run_data(destination, native_payload(), native_metadata(), cfg=cfg)
+    assert cfg == before
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("defect", ["empty-type", "non-finite"])
+def test_cfg_snapshot_and_writer_reject_invalid_cfg_format(
+    tmp_path: Path,
+    defect: str,
+) -> None:
+    cfg = (
+        replace(native_cfg(), cfg_type="")
+        if defect == "empty-type"
+        else replace(native_cfg(), values={"nested": [float("nan")]})
+    )
+    with pytest.raises(ValueError, match="/cfg"):
+        validate_cfg_snapshot(cfg)
+    with pytest.raises(ValueError, match="/cfg"):
+        save_run_data(
+            tmp_path / "invalid.h5", native_payload(), native_metadata(), cfg=cfg
+        )
+    assert not (tmp_path / "invalid.h5").exists()
+
+
+def test_cfg_snapshot_validation_preserves_unknown_nested_values(
+    tmp_path: Path,
+) -> None:
+    cfg = replace(
+        native_cfg(),
+        schema_version="1.7",
+        values={"future": [{"keep": True}], "unknown": None},
+    )
+    before = deepcopy(cfg)
+    validate_cfg_snapshot(cfg)
+    assert cfg == before
+    destination = tmp_path / "known.h5"
+    save_run_data(destination, native_payload(), native_metadata(), cfg=cfg)
+    assert load_run_data(destination).cfg == before
 
 
 def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(

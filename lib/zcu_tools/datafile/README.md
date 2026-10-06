@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-06，Independent Labber writer
+**Last updated:** 2026-10-06，Cfg snapshot validation
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -10,6 +10,9 @@ facade。caller 優先從 package root import model 與 function。
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
   不同 variables 可以使用不同網格。`VariableSchema` 與
   `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
+- `validate_cfg_snapshot` 擁有 cfg 的 JSON、非空 cfg_type 與完整 major.minor 格式規則。
+  Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
+  Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。
 - `RunMetadata`、`RunSnapshot`、`CfgSnapshot` 是 caller 傳入的歷史資料，writer
   不擷取 live context。Native saving 使用 caller 的 exact path，先寫同目錄 temp，
   關檔後發布；`replace=True` 原子替換，失敗清理 temp 並保留原 destination。
