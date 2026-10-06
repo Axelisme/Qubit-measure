@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock
-
 import pytest
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
@@ -16,27 +14,6 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _ml():
-    return MagicMock()
-
-
-def _pulse_dict(**kw):
-    d = {
-        "type": "readout/pulse",
-        "pulse_cfg": {
-            "type": "pulse",
-            "waveform": {"style": "const", "length": 0.5},
-            "ch": 3,
-            "nqz": 1,
-            "freq": 7000.0,
-            "gain": 0.8,
-        },
-        "ro_cfg": {"type": "readout/direct", "ro_ch": 0, "ro_length": 2.0},
-    }
-    d.update(kw)
-    return d
 
 
 def _make_pulse_cfg(ch=0, freq=5000.0):
@@ -60,39 +37,6 @@ def _make_pulse_ro_cfg(ch=3, ro_ch=None):
             ro_ch=ro_ch if ro_ch is not None else ch, ro_freq=7000.0
         ),
     )
-
-
-# ---------------------------------------------------------------------------
-# PulseReadoutCfg – validation / auto-derivation / set_param
-# ---------------------------------------------------------------------------
-
-
-class TestPulseReadoutCfg:
-    def test_explicit_ro_ch_not_overwritten(self):
-        d = _pulse_dict()
-        d["ro_cfg"]["ro_ch"] = 9  # type: ignore[index]
-        cfg = PulseReadoutCfg.model_validate(d)
-        assert cfg.ro_cfg.ro_ch == 9
-
-    def test_explicit_ro_freq_not_overwritten(self):
-        d = _pulse_dict()
-        d["ro_cfg"]["ro_ch"] = 3  # type: ignore[index]
-        d["ro_cfg"]["ro_freq"] = 9999.0  # type: ignore[index]
-        cfg = PulseReadoutCfg.model_validate(d)
-        assert cfg.ro_cfg.ro_freq == 9999.0
-
-    def test_pulse_cfg_as_string_uses_ml_context(self):
-        ml = _ml()
-        ml.get_module.return_value = _make_pulse_cfg(ch=0, freq=5000.0)
-        d = {
-            "type": "readout/pulse",
-            "pulse_cfg": "library_pulse",
-            "ro_cfg": {"ro_ch": 0, "ro_length": 1.0, "ro_freq": 5000.0},
-        }
-        cfg = PulseReadoutCfg.model_validate(d, context={"ml": ml})
-        ml.get_module.assert_called_once_with("library_pulse")
-        assert isinstance(cfg, PulseReadoutCfg)
-        assert isinstance(cfg.pulse_cfg, PulseCfg)
 
 
 # ---------------------------------------------------------------------------

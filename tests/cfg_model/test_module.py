@@ -1,17 +1,23 @@
 """Core module validation and runtime knob contracts."""
 
+from copy import deepcopy
+
 import pytest
 from pydantic import TypeAdapter, ValidationError
 from zcu_tools.cfg_model import (
     CfgInputMap,
     CfgInputValue,
+    CfgValidationContext,
     ConstWaveformCfg,
     DirectReadoutCfg,
     ModuleCfgFactory,
     PulseCfg,
     PulseReadoutCfg,
+    PulseSpec,
     ReadoutCfg,
 )
+
+from ._support import Resolver
 
 _READOUT_ADAPTER: TypeAdapter[ReadoutCfg] = TypeAdapter(ReadoutCfg)
 
@@ -157,6 +163,59 @@ class TestDirectReadoutCfg:
 
 
 class TestPulseReadoutCfg:
+    def test_explicit_ro_ch_not_overwritten(self):
+        d = _pulse_dict(ro_cfg={"type": "readout/direct", "ro_ch": 9, "ro_length": 2.0})
+        cfg = PulseReadoutCfg.model_validate(d)
+        assert cfg.ro_cfg.ro_ch == 9
+
+    def test_explicit_ro_freq_not_overwritten(self):
+        d = _pulse_dict(
+            ro_cfg={
+                "type": "readout/direct",
+                "ro_ch": 3,
+                "ro_length": 2.0,
+                "ro_freq": 9999.0,
+            }
+        )
+        cfg = PulseReadoutCfg.model_validate(d)
+        assert cfg.ro_cfg.ro_freq == 9999.0
+
+    def test_pulse_cfg_as_string_uses_typed_context(self):
+        resolver = Resolver()
+        pulse = PulseSpec(
+            ch=0,
+            nqz=1,
+            freq=5000.0,
+            gain=0.8,
+            waveform=ConstWaveformCfg(length=0.5),
+        )
+        resolver.modules["library_pulse"] = pulse
+        d: CfgInputMap = {
+            "type": "readout/pulse",
+            "pulse_cfg": "library_pulse",
+            "ro_cfg": {"ro_ch": 0, "ro_length": 1.0, "ro_freq": 5000.0},
+        }
+        input_before = deepcopy(d)
+        spec_before = pulse.model_dump()
+
+        cfg = ModuleCfgFactory.from_raw(
+            d, context=CfgValidationContext(modules=resolver)
+        )
+
+        assert isinstance(cfg, PulseReadoutCfg)
+        assert isinstance(cfg.pulse_cfg, PulseCfg)
+        assert cfg.pulse_cfg.ch == 0
+        assert cfg.pulse_cfg.freq == 5000.0
+        assert cfg.pulse_cfg.gain == 0.8
+        assert cfg.pulse_cfg.waveform.length == 0.5
+        assert cfg.ro_cfg.ro_ch == 0
+        assert cfg.ro_cfg.ro_length == 1.0
+        assert cfg.ro_cfg.ro_freq == 5000.0
+        cfg.pulse_cfg.set_param("gain", 0.2)
+        cfg.set_param("ro_freq", 6000.0)
+        assert d == input_before
+        assert pulse.model_dump() == spec_before
+
     def test_validate_basic(self):
         cfg = PulseReadoutCfg.model_validate(_pulse_dict())
         assert isinstance(cfg, PulseReadoutCfg)
