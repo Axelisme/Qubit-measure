@@ -151,7 +151,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         self._executing = True
 
     def execute(self) -> RunStatus:
-        """Run the reserved segment and return only after producer shutdown."""
+        """Run the segment; capture detached status before releasing reservation."""
         try:
             with use_pbar_factory(self._ports.progress):
                 self._produce()
@@ -164,10 +164,12 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 self._fail(cause)
         finally:
             with self._lock:
-                self._signal = None
-                self._executing = False
-        with self._lock:
-            return self.status()
+                try:
+                    status = self.status()
+                finally:
+                    self._signal = None
+                    self._executing = False
+        return status
 
     def _produce(self) -> None:
         try:

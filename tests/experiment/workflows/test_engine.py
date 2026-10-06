@@ -24,6 +24,7 @@ from zcu_tools.experiment.workflows import (
     RunIdentity,
     RunMismatch,
     RunPaths,
+    RunStatus,
     Step,
     TunableChange,
     WorkflowEnv,
@@ -39,7 +40,11 @@ def rig(tmp_path: Path) -> Rig:
 
 
 class ReadCallbackBar(RecordingBar):
-    """Read real progress and invoke an armed host callback exactly once."""
+    """Read real progress with an optional one-shot ``on_read`` host callback.
+
+    None leaves reads unchanged. The getter clears the callback before calling
+    it, so control methods may take nested progress snapshots safely.
+    """
 
     on_read: Callable[[], None] | None = None
 
@@ -74,6 +79,31 @@ def points(
     yield from env.wait_until(START)
     state.index += 1
     return Next(tun.value, state)
+
+
+def start_replacement(rig: Rig) -> RunStatus:
+    """Start offline points on the same Engine with fresh paths and run ID new."""
+
+    def replacement(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        return points(env, plan, tun, state)
+
+    declared = workflow(
+        "replacement",
+        plan=Plan,
+        tunables=Tunables,
+        state=State,
+        record=int,
+        init=rig.init,
+    )(replacement)
+    return rig.engine.start(
+        declared,
+        plan=Plan(count=1),
+        tunables=Tunables(),
+        paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
+        identity=RunIdentity("new", DeviceSnapshot(()), "offline"),
+    )
 
 
 def test_start_is_deferred_and_commits_precede_done(rig: Rig) -> None:
@@ -333,6 +363,111 @@ def test_final_capture_rejects_resume_until_paused_segment_returns(
     capture_bar.set_progress(2)
     assert (paused.lifecycle, paused.call_seq, paused.revision) == ("paused", 1, 0)
     assert paused.progress[0].completed == 1
+
+
+def test_final_capture_rejects_replacement_until_terminal_segment_returns(
+    rig: Rig, capture_bar: ReadCallbackBar
+) -> None:
+    attempts: list[str] = []
+
+    def reject_takeover() -> None:
+        attempts.append("start")
+        with pytest.raises(InvalidRunState):
+            start_replacement(rig)
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        bar = env.pbar("work", 2)
+        bar.set_progress(1)
+        yield from env.wait_until(START)
+        capture_bar.on_read = reject_takeover
+        return Done()
+
+    rig.start(step)
+    old = rig.engine.execute("run")
+    assert attempts == ["start"]
+    assert (old.run_id, old.lifecycle, old.call_seq, old.committed_seq) == (
+        "run",
+        "done",
+        1,
+        0,
+    )
+    assert old.progress[0].completed == 1
+    assert capture_bar.closed
+    assert start_replacement(rig).lifecycle == "running"
+    new = rig.engine.execute("new")
+    assert (new.run_id, new.lifecycle, new.committed_seq) == ("new", "done", 1)
+    assert (old.run_id, old.lifecycle, old.call_seq, old.committed_seq) == (
+        "run",
+        "done",
+        1,
+        0,
+    )
+    assert old.progress[0].completed == 1
+
+
+@pytest.mark.parametrize(
+    ("ending", "lifecycle", "reason"),
+    [
+        ("pause", "paused", None),
+        ("done", "done", None),
+        ("failure", "failed", "RuntimeError: producer failed"),
+    ],
+)
+def test_final_capture_failure_releases_reservation_and_preserves_producer_cause(
+    rig: Rig,
+    capture_bar: ReadCallbackBar,
+    ending: str,
+    lifecycle: str,
+    reason: str | None,
+) -> None:
+    def fail_capture() -> None:
+        raise LookupError("capture failed")
+
+    def pause(_signal: object) -> None:
+        rig.engine.pause("run")
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        env.pbar("work", 2).set_progress(1)
+        try:
+            if ending == "failure":
+                raise RuntimeError("producer failed")
+            yield from env.wait_until(START + timedelta(seconds=20))
+            return Done()
+        finally:
+            capture_bar.on_read = fail_capture
+
+    if ending == "pause":
+        rig.clock.on_wait = pause
+    rig.start(step)
+    with pytest.raises(LookupError, match="capture failed"):
+        rig.engine.execute("run")
+    status = rig.engine.status()
+    assert status is not None
+    assert (status.lifecycle, status.call_seq, status.committed_seq, status.reason) == (
+        lifecycle,
+        1,
+        0,
+        reason,
+    )
+    assert status.progress[0].completed == 1
+    assert rig.engine.records("run") == ()
+    if ending == "failure":
+        event = next(e for e in rig.events() if e["kind"] == "step_failed")
+        error = event["error"]
+        assert isinstance(error, dict) and error["message"] == "producer failed"
+    if ending == "pause":
+        assert (
+            rig.engine.resume("run", devices=DeviceSnapshot(())).lifecycle == "running"
+        )
+        rig.engine.stop("run")
+        assert rig.engine.execute("run").lifecycle == "stopped"
+    else:
+        assert start_replacement(rig).lifecycle == "running"
+        assert rig.engine.execute("new").committed_seq == 1
 
 
 @pytest.mark.parametrize("control", ["pause", "stop"])
