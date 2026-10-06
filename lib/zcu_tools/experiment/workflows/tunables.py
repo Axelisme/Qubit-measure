@@ -91,7 +91,9 @@ class TunableValues[T: BaseModel]:
         """Validate and journal one nonempty leaf-replacement batch, then publish.
 
         paths use model field names and dot components, not aliases or array
-        indices. Lists/tuples are replaced as a whole. Unknown paths, model-layer
+        indices. Lists/tuples are replaced as a whole. JSON arrays are valid
+        inputs for declared tuple fields, including strict models; the model's
+        strict scalar policy still applies. Unknown paths, model-layer
         replacements, overlap, duplicates, and empty batches raise ValueError.
         Updating through an absent optional model also raises ValueError.
         None is a value, not deletion; model validation decides if it is legal.
@@ -114,8 +116,11 @@ class TunableValues[T: BaseModel]:
             for change in changes:
                 validate_tunable_path(self._model_type, change.path)
                 _replace_leaf(candidate, change)
-            model = self._model_type.model_validate(
-                candidate, by_name=True, by_alias=False
+            # Reject nonfinite values before JSON encoding can replace them with null.
+            _check_finite(candidate, (), self._model_type.__name__)
+            # JSON arrays remain valid inputs for model-declared strict tuples.
+            model = self._model_type.model_validate_json(
+                _json_adapter.dump_json(candidate), by_name=True, by_alias=False
             )
             after = _model_json(model)
             applied = tuple(

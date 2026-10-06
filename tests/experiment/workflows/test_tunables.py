@@ -273,6 +273,53 @@ def test_strict_tuple_model_allows_other_scalar_update(
     ]
 
 
+def test_strict_tuple_model_accepts_detached_json_array_replacement(
+    journal: list[TunablesChanged],
+) -> None:
+    values = TunableValues(StrictTunables, StrictTunables(), RLock(), journal.append)
+    requested: list[JsonValue] = [3.0, 4.0]
+    snapshot = values.update(
+        (TunableChange("points", requested),),
+        expected_revision=0,
+        actor=Actor("user", "owner"),
+    )
+    captured = values.capture()
+    requested.append(99.0)
+    captured.model.points = (100.0,)
+    assert values.capture().model == StrictTunables(points=(3.0, 4.0))
+    assert snapshot.revision == 1
+    assert snapshot.values == {
+        "reps": 2,
+        "gate": {"lower": 2.0, "upper": 5.0},
+        "points": [3.0, 4.0],
+        "note": None,
+    }
+    assert len(journal) == 1
+    event = journal[0]
+    assert (event.revision_before, event.revision_after) == (0, 1)
+    assert [(change.path, change.old, change.new) for change in event.changes] == [
+        ("points", [1.0, 2.0], [3.0, 4.0]),
+    ]
+
+
+def test_strict_tuple_model_rejects_scalar_coercion_without_publication(
+    journal: list[TunablesChanged],
+) -> None:
+    values = TunableValues(StrictTunables, StrictTunables(), RLock(), journal.append)
+    with pytest.raises(ValidationError) as caught:
+        values.update(
+            (TunableChange("reps", "3"),),
+            expected_revision=0,
+            actor=Actor("user", "owner"),
+        )
+    assert [(error["loc"], error["type"]) for error in caught.value.errors()] == [
+        (("reps",), "int_type"),
+    ]
+    assert values.capture().revision == 0
+    assert values.capture().model == StrictTunables()
+    assert journal == []
+
+
 def test_tuple_replacement_and_snapshots_do_not_alias_request_or_model(
     values: TunableValues[Tunables], journal: list[TunablesChanged]
 ) -> None:
