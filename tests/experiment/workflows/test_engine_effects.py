@@ -25,6 +25,7 @@ from zcu_tools.experiment.workflows import (
     TunableChange,
     WorkflowEnv,
 )
+from zcu_tools.program.v2 import ProgramV2Cfg
 
 from ._engine_fakes import Cfg, Plan, Rig, State, Tunables
 
@@ -481,6 +482,45 @@ def test_real_schedule_failure_is_delivered_before_pending_control(
     assert status.committed_seq == 1
     assert "experiment_failed" in rig.kinds()
     assert "step_discarded" not in rig.kinds()
+
+
+def test_program_error_beats_control(rig: Rig) -> None:
+    cause = OSError("program acquire failed with control")
+
+    class FailingProgram:
+        cfg_model = ProgramV2Cfg(rounds=1)
+
+        def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
+            rig.engine.pause("run")
+            raise cause
+
+        def acquire_decimated(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("unexpected decimated acquire")
+
+    def acquire(run: Run[Cfg]) -> int:
+        buffer = run.buffer((1,), axes=(np.array([0.0]),))
+        with run.schedule(buffer) as schedule:
+            schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg()).run_program(
+                FailingProgram(), raw2signal_fn=lambda raw: raw, retry=3
+            )
+        return 99
+
+    observed = start_effect(rig, acquire)
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "paused"
+    assert len(observed) == 1
+    assert isinstance(observed[0], Failed)
+    assert "program acquire failed with control" in observed[0].reason
+    assert status.committed_seq == 1
+    failed = next(
+        event for event in rig.events() if event["kind"] == "experiment_failed"
+    )
+    assert isinstance(failed["error"], dict)
+    assert failed["error"]["type"] == "builtins.OSError"
+    assert failed["error"]["message"] == "program acquire failed with control"
+    assert "raise cause" in str(failed["error"]["traceback"])
+    assert "step_discarded" not in rig.kinds()
+    assert not tuple(rig.paths.data_root.rglob("*.h5"))
 
 
 def test_pause_during_successful_saver_retains_final_without_delivering_completed(
