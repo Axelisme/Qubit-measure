@@ -67,6 +67,9 @@ class MigrationMapping:
     roles maps role names to component names.
     data_schemas maps (experiment tag, cfg_type) pairs to disk-unit schemas;
     both strings are exact historical identities, with no tag-only fallback.
+    native_tags maps declared historical pairs to canonical native experiment tags;
+    absent pairs keep their historical tag. It never changes source evidence,
+    Labber tags or callback lookup identities, and is not a runtime alias.
     module_rules declares deferred flat module names in reference priority order.
     The composition root registers the seeds' kinds with entry before use.
     """
@@ -77,6 +80,7 @@ class MigrationMapping:
     roles: Mapping[str, str]
     data_schemas: Mapping[tuple[str, str], tuple[VariableSchema, ...]]
     module_rules: tuple[ModuleRule, ...] = ()
+    native_tags: Mapping[tuple[str, str], str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, kw_only=True)

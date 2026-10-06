@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter
 
-from zcu_tools.datafile import JsonObject
+from zcu_tools.datafile import JsonObject, json_values_equal
 from zcu_tools.resources.entry import (
     ResultEntry,
 )
@@ -30,11 +30,16 @@ _JSON = TypeAdapter(JsonObject)
 
 
 def validate_mapping(mapping: MigrationMapping) -> None:
-    """Require a major.minor mapping revision, unique keys and explicit action targets.
+    """Require a revision, unique keys, explicit targets and declared native-tag renames.
 
     Raise MigrationInputError for invalid declarations. No registration or I/O occurs."""
     if re.fullmatch(r"[0-9]+\.[0-9]+", mapping.mapping_version) is None:
         raise MigrationInputError("mapping_version: expected major.minor")
+    for identity, native_tag in mapping.native_tags.items():
+        if identity not in mapping.data_schemas or not native_tag:
+            raise MigrationInputError(
+                f"native_tags: undeclared pair or empty target for {identity!r}"
+            )
     seen: set[str] = set()
     for rule in mapping.rules:
         if not rule.old_key or rule.old_key in seen:
@@ -61,6 +66,14 @@ def validate_mapping(mapping: MigrationMapping) -> None:
         names.add(module.old_name)
 
 
+def _protect_result_root(root: Path, *paths: Path) -> None:
+    for path in paths:
+        if path.is_relative_to(root) or root.is_relative_to(path):
+            raise MigrationInputError(
+                f"{path}: write/deletion overlaps old result root {root}"
+            )
+
+
 def _locations(
     request: MigrationRequest,
 ) -> tuple[MigrationSource, MigrationDestination]:
@@ -85,6 +98,14 @@ def _locations(
         result_path=contained_path(results_root / request.name, results_root),
         database_path=contained_path(database_root / request.name, database_root),
     )
+    _protect_result_root(
+        result_root,
+        destination.result_path,
+        destination.database_path,
+        source.database_path,
+    )
+    if request.report_path is not None:
+        _protect_result_root(result_root, request.report_path.resolve())
     for path in (source.result_path, source.database_path):
         if not path.is_dir():
             raise MigrationInputError(f"{path}: source directory does not exist")
@@ -123,7 +144,9 @@ def _resume_session(
     if not path.is_file():
         raise MigrationInputError(f"{path}: resume requires this tool's manifest")
     manifest = read_manifest(path)
-    _validate_report_location(manifest.report_path, source, destination)
+    _validate_report_location(
+        manifest.report_path, source, destination, request.result_root.resolve()
+    )
     manifest = _recover_first_report(manifest)
     expected = _identity(request, manifest.identity.entry_id)
     if (
@@ -161,7 +184,9 @@ def _validate_report_location(
     report_path: Path,
     source: MigrationSource,
     destination: MigrationDestination,
+    result_root: Path,
 ) -> None:
+    _protect_result_root(result_root, report_path.resolve())
     default = destination.result_path / "records" / "migration-report.json"
     if not report_path.is_absolute() or report_path.resolve() != report_path:
         raise MigrationInputError(
@@ -262,7 +287,7 @@ def _recover_first_report(manifest: MigrationManifest) -> MigrationManifest:
         existing = _JSON.validate_json(
             manifest.report_path.read_text(encoding="utf-8"), strict=True
         )
-        if existing != report_json(manifest.report):
+        if not json_values_equal(existing, report_json(manifest.report)):
             raise MigrationInputError(
                 f"{manifest.report_path}: unowned report collision"
             )

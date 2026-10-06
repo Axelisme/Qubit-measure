@@ -59,18 +59,23 @@ def write_meta(request: MigrationRequest, label: str, values: JsonObject) -> Pat
     return source
 
 
-def write_run(request: MigrationRequest) -> tuple[MigrationRequest, Path]:
+def write_run(
+    request: MigrationRequest, *, cfg_values: JsonObject | None = None
+) -> tuple[MigrationRequest, Path]:
     """Write one canonical synthetic Labber run plus its acquisition evidence.
 
     request uses fixture chip/qubit roots. Return a replaced request carrying the
-    full evidence document and the Labber Path. Use SyntheticCfg/synthetic_scan
+    full evidence document and the Labber Path. cfg_values supplies exact comment
+    and evidence values, or None for the valid default. Use SyntheticCfg/synthetic_scan
     with a stopped historical snapshot. Create parents and replace fixture
     evidence JSON; writer/I/O errors propagate.
     """
     source = request.database_root / "chip" / "qubit" / "2025" / "10" / "scan.hdf5"
     source.parent.mkdir(parents=True, exist_ok=True)
     cfg = CfgSnapshot(
-        values={"frequency": 12.5}, cfg_type="SyntheticCfg", schema_version="1.0"
+        values={"frequency": 12.5} if cfg_values is None else cfg_values,
+        cfg_type="SyntheticCfg",
+        schema_version="1.0",
     )
     payload = ExperimentPayload(
         variables={
@@ -119,6 +124,34 @@ def write_run(request: MigrationRequest) -> tuple[MigrationRequest, Path]:
     evidence_path = request.result_root.parent / "evidence.json"
     evidence_path.write_text(json.dumps(document), encoding="utf-8")
     return replace(request, run_evidence=load_run_evidence(evidence_path)), source
+
+
+class SyntheticCfg(BaseModel):
+    """Test acquisition cfg requiring one frequency; unknown raw keys stay untouched."""
+
+    frequency: float
+
+
+class AlternateCfg(BaseModel):
+    """Alternate schema-identity fixture cfg requiring one other value."""
+
+    other: float
+
+
+def validate_cfg(tag: str, snapshot: CfgSnapshot) -> None:
+    """Check the synthetic acquisition pair with its concrete public cfg owner.
+
+    Return None without mutation; ValueError reports unknown identity, version or
+    missing required values. Used by converter contracts, not shipped lab mapping.
+    """
+    if tag != "synthetic_scan" or snapshot.schema_version != "1.0":
+        raise ValueError("Unknown synthetic cfg identity/version")
+    if snapshot.cfg_type == "SyntheticCfg":
+        SyntheticCfg.model_validate(snapshot.values)
+    elif snapshot.cfg_type == "AlternateCfg":
+        AlternateCfg.model_validate(snapshot.values)
+    else:
+        raise ValueError("Unknown synthetic cfg_type")
 
 
 def noop_validation(path: Path, tag: str, cfg_type: str) -> None:

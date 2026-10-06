@@ -15,7 +15,7 @@ from zcu_tools.resources.storage_migration import KeyRule, MigrationMapping, Mod
 # Reviewed decisions: D120-D129, D133-D134. Changes to any rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
-_KIND_REVISIONS = {"qubit/fluxonium": "1.0", "qubit/transmon": "1.1"}
+_KIND_REVISIONS = {"qubit/fluxonium": "1.2", "qubit/transmon": "1.3"}
 
 _VALUE_PATHS = (
     ("r_f", "R1.freq"),
@@ -132,12 +132,15 @@ def build_mapping(
     *,
     qubit_kind: Literal["qubit/fluxonium", "qubit/transmon"],
     data_schemas: Mapping[tuple[str, str], tuple[VariableSchema, ...]],
+    native_tags: Mapping[tuple[str, str], str],
 ) -> MigrationMapping:
     """Return this lab's explicit R1/Q1/J1 conversion profile without any I/O.
 
     qubit_kind is the caller's declared historical kind, never inferred from
     chip/qubit names. data_schemas is supplied by the composition root's fixed
-    native declarations. Seeds carry no guessed channels, flux units or pulse
+    native declarations. native_tags explicitly renames selected historical
+    pairs for native metadata only; omitted pairs keep the historical tag.
+    Seeds carry no guessed channels, flux units or pulse
     values. Keep complete readout_cal ext containers for dotted value writes.
     No entry registration or module cfg conversion occurs here. Unsupported
     kinds raise ValueError. Missing unit evidence is pending in the converter.
@@ -206,6 +209,7 @@ def build_mapping(
         roles={"qubit": "Q1", "resonator": "R1"},
         rules=rules,
         data_schemas=data_schemas,
+        native_tags=native_tags,
         module_rules=tuple(
             ModuleRule(
                 old_name=name,

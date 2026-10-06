@@ -9,6 +9,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from zcu_tools.datafile import CfgSnapshot
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.storage_migration import (
     MigrationInputError,
@@ -24,7 +25,9 @@ from zcu_lab.storage_migration import build_mapping
 
 # Fixed declarations, keyed by both proven identities. This is not registration
 # or discovery; data schemas and readers come from the same declaration objects.
-_DECLARATIONS = {(item.tag, item.cfg_type): item for item in MIGRATION_EXPERIMENTS}
+_DECLARATIONS = {
+    (item.source_tag, item.cfg_type): item for item in MIGRATION_EXPERIMENTS
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -44,6 +47,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--report", type=Path)
     parser.add_argument("--run-evidence", type=Path)
     return parser
+
+
+def _validate_cfg(tag: str, snapshot: CfgSnapshot) -> None:
+    declaration = _DECLARATIONS[tag, snapshot.cfg_type]
+    declaration.validate_cfg(snapshot)
 
 
 def _validate_native(path: Path, tag: str, cfg_type: str) -> None:
@@ -82,6 +90,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             data_schemas={
                 identity: item.schemas for identity, item in _DECLARATIONS.items()
             },
+            native_tags={
+                identity: item.native_tag
+                for identity, item in _DECLARATIONS.items()
+                if item.source_tag != item.native_tag
+            },
         )
         request = MigrationRequest(
             result_root=args.result_root,
@@ -99,7 +112,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             else None,
         )
         report = migrate_storage(
-            request, mapping=mapping, validate_native=_validate_native
+            request,
+            mapping=mapping,
+            validate_cfg=_validate_cfg,
+            validate_native=_validate_native,
         )
         print(
             json.dumps(

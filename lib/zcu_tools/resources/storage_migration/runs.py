@@ -7,10 +7,12 @@ from pathlib import Path
 from uuid import UUID
 
 from zcu_tools.datafile import (
+    CfgSnapshot,
     ExperimentPayload,
     RunMetadata,
     RunSnapshot,
     decode_labber_comment,
+    json_values_equal,
     load_legacy_labber_payload,
     load_run_data,
     save_run_data,
@@ -32,7 +34,7 @@ from .models import (
     MigrationRunEvidenceDocument,
     RunAssignment,
 )
-from .paths import contained_path
+from .paths import contained_path, source_removed
 from .preservation import preserve_result_files
 from .state import MigrationSession, clear_pending, record_pending
 
@@ -56,12 +58,15 @@ def _check_evidence(evidence: LegacyRunEvidence, entry: ResultEntry | None) -> N
 
 
 def _run_metadata(
-    legacy: LegacyRunEvidence, assignment: RunAssignment, entry_id: UUID
+    legacy: LegacyRunEvidence,
+    assignment: RunAssignment,
+    entry_id: UUID,
+    native_tag: str,
 ) -> RunMetadata:
     snapshot = legacy.snapshot
     return RunMetadata(
         run_id=assignment.run_id,
-        experiment=legacy.experiment,
+        experiment=native_tag,
         started_at=legacy.started_at,
         finished_at=legacy.finished_at,
         completion=legacy.completion,
@@ -103,7 +108,9 @@ def _load_payload(
             f"experiment: evidence {legacy.experiment!r} disagrees with file tags {sorted(tags)!r}"
         )
     comment = decode_labber_comment(payload.metadata.comment)
-    if comment.cfg is not None and comment.cfg != legacy.cfg.values:
+    if comment.cfg is not None and not json_values_equal(
+        comment.cfg, legacy.cfg.values
+    ):
         raise ValueError("cfg: evidence disagrees with file comment.cfg")
     return payload
 
@@ -159,18 +166,11 @@ def _convert_run(
     session: MigrationSession,
     entry: ResultEntry | None,
     mapping: MigrationMapping,
-    source: Path,
-    legacy: LegacyRunEvidence | None,
+    legacy: LegacyRunEvidence,
+    validate_cfg: Callable[[str, CfgSnapshot], None],
     validate_native: Callable[[Path, str, str], None],
 ) -> None:
-    if legacy is None:
-        record_pending(
-            session,
-            source,
-            "run evidence",
-            "Missing explicit historical snapshot/acquisition/completion evidence; Labber source retained",
-        )
-        return
+    source = session.manifest.report.source.database_path / legacy.source
     cfg = legacy.cfg
     if cfg is None:
         record_pending(
@@ -185,6 +185,7 @@ def _convert_run(
     if native is None or native.phase == "planned":
         try:
             payload = _load_payload(source, legacy, session, entry, mapping)
+            validate_cfg(legacy.experiment, cfg)
         except MigrationInputError:
             raise
         except ValueError as exc:
@@ -224,7 +225,12 @@ def _convert_run(
             ),
         )
     )
-    metadata = _run_metadata(legacy, assignment, session.manifest.identity.entry_id)
+    metadata = _run_metadata(
+        legacy,
+        assignment,
+        session.manifest.identity.entry_id,
+        mapping.native_tags.get((legacy.experiment, cfg.cfg_type), legacy.experiment),
+    )
 
     def build(path: Path) -> None:
         if payload is None:
@@ -256,17 +262,21 @@ def convert_data(
     entry: ResultEntry | None,
     mapping: MigrationMapping,
     evidence_document: MigrationRunEvidenceDocument | None,
+    validate_cfg: Callable[[str, CfgSnapshot], None],
     validate_native: Callable[[Path, str, str], None],
 ) -> None:
     """Convert evidence-backed Labber sources, then copy/verify/remove only validated originals.
 
     session owns fixed run identities and publication recovery. entry resolves
-    historical ledger references; mapping supplies explicit disk schemas.
+    historical ledger references; mapping supplies disk schemas and optional
+    canonical native-tag renames without changing historical callback identities.
     evidence_document is the selected complete historical evidence or None.
+    validate_cfg purely checks the historical cfg before assignment/planning;
+    ValueError is located pending, while other callback failures propagate.
     validate_native synchronously validates each published native before its source
     can be removed. Missing/conflicting metadata is pending; execution, callback,
     identity/hash and I/O failures propagate and retain owned recovery state.
-    dry_run neither writes nor invokes the callback."""
+    dry_run invokes only the pure cfg check and never writes or validates native."""
     preserve_result_files(session)
     source_root = session.manifest.report.source.database_path
     evidence = (
@@ -277,7 +287,9 @@ def convert_data(
     paths = {
         contained_path(path, source_root)
         for path in source_root.rglob("*")
-        if path.is_file() and path.suffix.lower() in (".hdf5", ".h5")
+        if not source_removed(path, session.manifest)
+        and path.is_file()
+        and path.suffix.lower() in (".hdf5", ".h5")
     }
     paths.update(
         state.source
@@ -285,13 +297,15 @@ def convert_data(
         if state.operation in ("native", "move_labber")
     )
     for source in sorted(paths):
-        _convert_run(
-            session,
-            entry,
-            mapping,
-            source,
-            evidence.get(source.relative_to(source_root)),
-            validate_native,
-        )
+        legacy = evidence.get(source.relative_to(source_root))
+        if legacy is None:
+            record_pending(
+                session,
+                source,
+                "run evidence",
+                "Missing explicit historical snapshot/acquisition/completion evidence; Labber source retained",
+            )
+            continue
+        _convert_run(session, entry, mapping, legacy, validate_cfg, validate_native)
     session.manifest = replace(session.manifest, data_complete=True)
     session.checkpoint()

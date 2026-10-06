@@ -9,11 +9,11 @@ from pathlib import Path
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
-from zcu_tools.datafile import JsonObject
+from zcu_tools.datafile import JsonObject, json_values_equal
 
 from .errors import MigrationInputError
 from .models import LegacyRunEvidence, MigrationRequest, MigrationRunEvidenceDocument
-from .paths import contained_path
+from .paths import source_identity, source_removed
 from .state import MigrationSession
 
 _JSON = TypeAdapter(JsonObject)
@@ -175,6 +175,17 @@ def has_legacy_expression(value: JsonValue) -> bool:
     return False
 
 
+def _typed_projection(document: MigrationRunEvidenceDocument) -> JsonObject:
+    envelope = _EvidenceEnvelope(
+        format=document.format,
+        format_version=document.format_version,
+        entries=document.entries,
+    )
+    return _JSON.validate_python(
+        _ENVELOPE.dump_python(envelope, mode="json"), strict=True
+    )
+
+
 def select_run_evidence(
     request: MigrationRequest,
     session: MigrationSession,
@@ -198,10 +209,7 @@ def select_run_evidence(
     checked = parse_run_evidence(
         json.dumps(incoming.raw, allow_nan=False), source=session.path
     )
-    if checked.entries != incoming.entries or (
-        checked.format,
-        checked.format_version,
-    ) != (incoming.format, incoming.format_version):
+    if not json_values_equal(_typed_projection(checked), _typed_projection(incoming)):
         raise MigrationInputError(
             "run_evidence: typed projection disagrees with raw document"
         )
@@ -225,13 +233,13 @@ def select_run_evidence(
             )
             planned = any(
                 item.source
-                == (
-                    session.manifest.report.source.database_path / entry.source
-                ).resolve()
+                == (session.manifest.report.source.database_path / entry.source)
                 for item in session.manifest.files
             )
             if old_index is not None:
-                if planned and old_entries[old_index] != new_entries[index]:
+                if planned and not json_values_equal(
+                    old_entries[old_index], new_entries[index]
+                ):
                     raise MigrationInputError(
                         f"{entry.source}: evidence for a planned source cannot change"
                     )
@@ -250,7 +258,9 @@ def select_run_evidence(
         )
     source_root = session.manifest.report.source.database_path
     for entry in checked.entries:
-        source = contained_path(source_root / entry.source, source_root)
+        source = source_identity(source_root / entry.source, session.manifest)
+        if source_removed(source, session.manifest):
+            continue
         if not source.is_file() and not any(
             state.source == source
             and state.operation == "move_labber"

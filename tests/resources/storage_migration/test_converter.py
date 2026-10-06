@@ -26,11 +26,49 @@ from zcu_tools.resources.storage_migration import (
 from tests.resources.storage_migration.fakes import (
     manifest_path,
     noop_validation,
+    validate_cfg,
     write_meta,
     write_run,
 )
 
 pytestmark = pytest.mark.usefixtures("registry_guard")
+
+
+@pytest.mark.parametrize("flag, replacement", [(True, 1), (False, 0)])
+def test_first_report_boolean_number_collision_is_not_owned(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    flag: bool,
+    replacement: int,
+) -> None:
+    migrate_storage(
+        request_data,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    state_path = manifest_path(request_data)
+    manifest = json.loads(state_path.read_text())
+    manifest["report_published"] = False
+    manifest["report"]["future_nested"] = {"flags": [flag]}
+    state_path.write_text(json.dumps(manifest))
+    existing = json.loads(json.dumps(manifest["report"]))
+    existing["future_nested"]["flags"][0] = replacement
+    report_path = Path(manifest["report_path"])
+    report_path.write_text(json.dumps(existing))
+    before = report_path.read_bytes()
+    with pytest.raises(MigrationInputError, match="unowned report collision"):
+        migrate_storage(
+            replace(request_data, resume=True),
+            mapping=mapping,
+            validate_cfg=validate_cfg,
+            validate_native=noop_validation,
+        )
+    assert report_path.read_bytes() == before
+    assert (
+        json.loads(state_path.read_text())["report"]["future_nested"]["flags"][0]
+        is flag
+    )
 
 
 @pytest.mark.parametrize("which", ["result", "database"])
@@ -44,7 +82,12 @@ def test_existing_destination_is_never_merged(
     marker = target / "caller.txt"
     marker.write_text("unchanged")
     with pytest.raises(FileExistsError):
-        migrate_storage(request_data, mapping=mapping, validate_native=noop_validation)
+        migrate_storage(
+            request_data,
+            mapping=mapping,
+            validate_cfg=validate_cfg,
+            validate_native=noop_validation,
+        )
     assert marker.read_text() == "unchanged"
     other = (
         request_data.database_root if which == "result" else request_data.results_root
@@ -64,6 +107,7 @@ def test_resume_refuses_arbitrary_entry(
         migrate_storage(
             replace(request_data, resume=True),
             mapping=mapping,
+            validate_cfg=validate_cfg,
             validate_native=noop_validation,
         )
 
@@ -87,6 +131,7 @@ def test_two_complete_points_keep_working_units_and_sources(
     report = migrate_storage(
         replace(request_data, part="parameters"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     entry = ResultEntry.open(
@@ -120,12 +165,14 @@ def test_parts_accumulate_with_same_identity(
     initial = migrate_storage(
         replace(request_data, part=first),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     second = "data" if first == "parameters" else "parameters"
     result = migrate_storage(
         replace(request_data, part=second, resume=True),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     assert result.entry_id == initial.entry_id
@@ -144,6 +191,7 @@ def test_data_resume_keeps_valid_user_edit(
     migrate_storage(
         replace(request_data, part="parameters"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     entry = ResultEntry.open(
@@ -155,6 +203,7 @@ def test_data_resume_keeps_valid_user_edit(
     migrate_storage(
         replace(request_data, part="data", resume=True),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     assert entry.use_point("context").C1.frequency == 19.0
@@ -167,6 +216,7 @@ def test_invalid_current_point_is_not_restored(
     migrate_storage(
         replace(request_data, part="parameters"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     point = (
@@ -181,6 +231,7 @@ def test_invalid_current_point_is_not_restored(
         migrate_storage(
             replace(request_data, part="data", resume=True),
             mapping=mapping,
+            validate_cfg=validate_cfg,
             validate_native=noop_validation,
         )
     assert point.read_text() == "invalid: true"
@@ -193,6 +244,7 @@ def test_resume_rejects_changed_identity(
     migrate_storage(
         replace(request_data, part="parameters"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     request = replace(request_data, resume=True)
@@ -207,7 +259,12 @@ def test_resume_rejects_changed_identity(
             request, report_path=request.result_root.parent / "another-report.json"
         )
     with pytest.raises(MigrationInputError):
-        migrate_storage(request, mapping=mapping, validate_native=noop_validation)
+        migrate_storage(
+            request,
+            mapping=mapping,
+            validate_cfg=validate_cfg,
+            validate_native=noop_validation,
+        )
 
 
 def test_native_is_readable_and_validated_before_source_removal(
@@ -232,7 +289,9 @@ def test_native_is_readable_and_validated_before_source_removal(
         )
         observed.append(path)
 
-    report = migrate_storage(request, mapping=mapping, validate_native=validate)
+    report = migrate_storage(
+        request, mapping=mapping, validate_cfg=validate_cfg, validate_native=validate
+    )
     assert len(observed) == 1
     assert len(report.converted_files) == len(report.moved_labber_files) == 1
     assert not source.exists()
@@ -259,7 +318,9 @@ def test_validation_failure_retains_source_and_reuses_run_identity(
         raise RuntimeError("typed spec rejected")
 
     with pytest.raises(RuntimeError, match="typed spec rejected"):
-        migrate_storage(request, mapping=mapping, validate_native=fail)
+        migrate_storage(
+            request, mapping=mapping, validate_cfg=validate_cfg, validate_native=fail
+        )
     assert source.is_file()
     before = json.loads(manifest_path(request).read_text())
     assert before["files"][0]["phase"] == "published"
@@ -273,6 +334,7 @@ def test_validation_failure_retains_source_and_reuses_run_identity(
     report = migrate_storage(
         replace(request, resume=True, run_evidence=None),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=succeed,
     )
     after = json.loads(manifest_path(request).read_text())
@@ -291,7 +353,9 @@ def test_validated_native_hash_conflict_retains_labber_source(
         raise RuntimeError("pause")
 
     with pytest.raises(RuntimeError):
-        migrate_storage(request, mapping=mapping, validate_native=fail)
+        migrate_storage(
+            request, mapping=mapping, validate_cfg=validate_cfg, validate_native=fail
+        )
     manifest = json.loads(manifest_path(request).read_text())
     manifest["files"][0]["native_validated"] = True
     native = Path(manifest["files"][0]["destination"])
@@ -301,6 +365,7 @@ def test_validated_native_hash_conflict_retains_labber_source(
         migrate_storage(
             replace(request, resume=True),
             mapping=mapping,
+            validate_cfg=validate_cfg,
             validate_native=noop_validation,
         )
     assert source.is_file()
@@ -314,6 +379,7 @@ def test_missing_evidence_is_pending_and_can_be_supplied_on_resume(
     initial = migrate_storage(
         replace(request, run_evidence=None, part="data"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     assert source.is_file()
@@ -322,6 +388,7 @@ def test_missing_evidence_is_pending_and_can_be_supplied_on_resume(
     report = migrate_storage(
         replace(request, resume=True, part="data"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     assert report.entry_id == initial.entry_id
@@ -339,7 +406,10 @@ def test_dry_run_never_publishes_or_calls_validator(
         pytest.fail(f"dry-run called validator: {path} {tag}")
 
     result = migrate_storage(
-        replace(request, dry_run=True), mapping=mapping, validate_native=forbidden
+        replace(request, dry_run=True),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=forbidden,
     )
     assert result.key_mappings
     assert source.is_file()
@@ -354,7 +424,12 @@ def test_move_resumes_each_publication_window(
     request_data: MigrationRequest, mapping: MigrationMapping, phase: str
 ) -> None:
     request, source = write_run(request_data)
-    report = migrate_storage(request, mapping=mapping, validate_native=noop_validation)
+    report = migrate_storage(
+        request,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
     moved = report.moved_labber_files[0]
     state_path = manifest_path(request)
     manifest = json.loads(state_path.read_text())
@@ -374,7 +449,10 @@ def test_move_resumes_each_publication_window(
     manifest["report"]["moved_labber_files"] = []
     state_path.write_text(json.dumps(manifest))
     result = migrate_storage(
-        replace(request, resume=True), mapping=mapping, validate_native=noop_validation
+        replace(request, resume=True),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
     )
     assert len(result.moved_labber_files) == 1
     assert result.moved_labber_files[0].destination_hash == moved.destination_hash
@@ -388,6 +466,7 @@ def test_report_rebuild_retains_future_fields(
     migrate_storage(
         replace(request_data, part="parameters"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     state_path = manifest_path(request_data)
@@ -403,6 +482,7 @@ def test_report_rebuild_retains_future_fields(
     migrate_storage(
         replace(request_data, part="data", resume=True),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     after = json.loads(state_path.read_text())
@@ -431,6 +511,7 @@ def test_preserved_archives_keep_paths_bytes_and_sources(
     report = migrate_storage(
         replace(request_data, part="data"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     assert len(report.preserved_files) == 4
@@ -468,6 +549,7 @@ def test_owned_copy_hash_conflict_is_not_repaired(
     report = migrate_storage(
         replace(request_data, part="parameters"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     destination = report.preserved_files[0].destination
@@ -476,6 +558,7 @@ def test_owned_copy_hash_conflict_is_not_repaired(
         migrate_storage(
             replace(request_data, resume=True, part="data"),
             mapping=mapping,
+            validate_cfg=validate_cfg,
             validate_native=noop_validation,
         )
     assert destination.read_bytes() == b"caller edit"
@@ -491,6 +574,7 @@ def test_existing_independent_report_is_never_overwritten(
         migrate_storage(
             replace(request_data, report_path=path),
             mapping=mapping,
+            validate_cfg=validate_cfg,
             validate_native=noop_validation,
         )
     assert path.read_bytes() == b"caller file"
@@ -506,6 +590,7 @@ def test_first_report_publication_window_requires_same_report(
     migrate_storage(
         replace(request_data, part="parameters"),
         mapping=mapping,
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     state_path = manifest_path(request_data)
@@ -517,6 +602,7 @@ def test_first_report_publication_window_requires_same_report(
         result = migrate_storage(
             replace(request_data, part="data", resume=True),
             mapping=mapping,
+            validate_cfg=validate_cfg,
             validate_native=noop_validation,
         )
         assert result.part == "all"
@@ -526,6 +612,7 @@ def test_first_report_publication_window_requires_same_report(
             migrate_storage(
                 replace(request_data, part="data", resume=True),
                 mapping=mapping,
+                validate_cfg=validate_cfg,
                 validate_native=noop_validation,
             )
         assert report_path.read_text() == '{"unrelated": true}'
@@ -538,7 +625,12 @@ def test_native_resume_before_labber_move_keeps_assignment(
     phase: str,
 ) -> None:
     request, source = write_run(request_data)
-    report = migrate_storage(request, mapping=mapping, validate_native=noop_validation)
+    report = migrate_storage(
+        request,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
     state_path = manifest_path(request)
     manifest = json.loads(state_path.read_text())
     assignment = manifest["runs"]
@@ -564,7 +656,10 @@ def test_native_resume_before_labber_move_keeps_assignment(
         noop_validation(path, tag, cfg_type)
 
     result = migrate_storage(
-        replace(request, resume=True), mapping=mapping, validate_native=validate
+        replace(request, resume=True),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=validate,
     )
     assert json.loads(state_path.read_text())["runs"] == assignment
     assert len(result.converted_files) == len(result.moved_labber_files) == 1
@@ -575,7 +670,12 @@ def test_prepared_final_window_does_not_require_temp(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
     request, source = write_run(request_data)
-    report = migrate_storage(request, mapping=mapping, validate_native=noop_validation)
+    report = migrate_storage(
+        request,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
     state_path = manifest_path(request)
     manifest = json.loads(state_path.read_text())
     state = next(
@@ -586,7 +686,10 @@ def test_prepared_final_window_does_not_require_temp(
     manifest["report"]["moved_labber_files"] = []
     state_path.write_text(json.dumps(manifest))
     result = migrate_storage(
-        replace(request, resume=True), mapping=mapping, validate_native=noop_validation
+        replace(request, resume=True),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
     )
     assert len(result.moved_labber_files) == 1
     assert not source.exists()
@@ -602,7 +705,9 @@ def test_callback_cannot_change_native_and_authorize_source_deletion(
         path.write_bytes(b"modified by callback")
 
     with pytest.raises(MigrationInputError, match="hash"):
-        migrate_storage(request, mapping=mapping, validate_native=change)
+        migrate_storage(
+            request, mapping=mapping, validate_cfg=validate_cfg, validate_native=change
+        )
     assert source.is_file()
 
 
@@ -616,7 +721,9 @@ def test_planned_evidence_is_immutable_including_future_fields(
         raise RuntimeError("pause validation")
 
     with pytest.raises(RuntimeError, match="pause"):
-        migrate_storage(request, mapping=mapping, validate_native=fail)
+        migrate_storage(
+            request, mapping=mapping, validate_cfg=validate_cfg, validate_native=fail
+        )
     assert request.run_evidence is not None
     raw = json.loads(json.dumps(request.run_evidence.raw))
     raw["entries"][0]["future_detail"] = "changed evidence"
@@ -628,6 +735,7 @@ def test_planned_evidence_is_immutable_including_future_fields(
                 request, resume=True, run_evidence=load_run_evidence(evidence_path)
             ),
             mapping=mapping,
+            validate_cfg=validate_cfg,
             validate_native=noop_validation,
         )
     assert source.is_file()
@@ -649,6 +757,7 @@ def test_parameter_requires_explicit_unit_evidence(
     report = migrate_storage(
         replace(request_data, part="parameters"),
         mapping=replace(mapping, rules=(rule,)),
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     point = ResultEntry.open(
@@ -683,6 +792,7 @@ def test_wrapped_channel_creates_a_complete_optional_container(
                 ),
             ),
         ),
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     point = ResultEntry.open(
@@ -707,9 +817,13 @@ def test_module_candidates_keep_destinations_and_declared_reference_priority(
     meta = write_meta(request_data, "context", {"old_frequency": 12.5})
     library = meta.parent / "module_cfg.yaml"
     library.write_text(
-        "second_choice: {type: synthetic, value: 2}\n"
-        "first_choice: {type: synthetic, value: 1}\n"
-        "unknown_module: {type: unknown}\n",
+        "waveforms: {pulse: {style: const, length: 1}}\n"
+        "modules:\n"
+        "  second_choice: {type: synthetic, value: 2}\n"
+        "  third_choice: {type: synthetic, value: 3}\n"
+        "  first_choice: {type: synthetic, value: 1}\n"
+        "  unknown_module: {type: unknown}\n"
+        "future_root: {keep: true}\n",
         encoding="utf-8",
     )
     rules = tuple(
@@ -719,11 +833,12 @@ def test_module_candidates_keep_destinations_and_declared_reference_priority(
             reference_path="C1.module.chosen",
             reason="Explicit candidate",
         )
-        for name in ("first_choice", "second_choice")
+        for name in ("first_choice", "second_choice", "third_choice")
     )
     report = migrate_storage(
         replace(request_data, part="parameters"),
         mapping=replace(mapping, module_rules=rules),
+        validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
     point = ResultEntry.open(
@@ -742,8 +857,19 @@ def test_module_candidates_keep_destinations_and_declared_reference_priority(
     assert destinations == {
         "first_choice": "C1.pulses.first_choice",
         "second_choice": "C1.pulses.second_choice",
+        "third_choice": "C1.pulses.third_choice",
         "unknown_module": None,
     }
-    assert all(
-        "由 4a 轉換" in item.reason for item in report.pending if item.source == library
-    )
+    pending = {
+        item.location: item.reason for item in report.pending if item.source == library
+    }
+    assert set(pending) == {
+        "modules.first_choice",
+        "modules.second_choice",
+        "modules.third_choice",
+        "modules.unknown_module",
+        "waveforms.pulse",
+        "future_root",
+    }
+    assert all("由 4a 轉換" in reason for reason in pending.values())
+    assert "Unknown" in pending["modules.unknown_module"]

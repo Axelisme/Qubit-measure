@@ -8,7 +8,7 @@
 
 `components.py` 擁有具體元件 model、wiring、module 槽與內建角色。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI 與 MCP 組合根明確 bootstrap；notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
 
-`storage_migration.build_mapping` 擁有舊 key、flat module 候選與 R1/Q1/J1 profile。Kind 由 caller 明確指定，數字維持工作單位，缺 flux 單位只 pending。`migration_experiments` 明列 core 的 native declarations，以 tag 與 cfg_type 配對 generic schema 與 typed reader；不建構實驗 instance、不註冊或做動態 discovery。常駐 CLI 在 `tools/migrate_storage.py`，正常 runtime 不使用 legacy fallback。
+`storage_migration.build_mapping` 擁有舊 key、waveforms/modules envelope 裡的 module 候選與 R1/Q1/J1 profile。Kind 由 caller 明確指定，數字維持工作單位，缺 flux 單位只 pending。`migration_experiments` 明列 core 的 native declarations，以歷史 source_tag 與 cfg_type 配對 generic schema、concrete cfg validation 與 typed reader，另明示 canonical native_tag；不建構實驗 instance、不註冊或做動態 discovery。常駐 CLI 在 `tools/migrate_storage.py`，正常 runtime 不使用 legacy fallback。
 
 `autofluxdep_catalog.build_catalog` 明列 Autofluxdep 的 measurement Builders。組合根將 catalog 注入 app，不在 import 時建立全域 registry。
 

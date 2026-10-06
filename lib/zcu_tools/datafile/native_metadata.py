@@ -61,19 +61,25 @@ def read_json(node: h5.Group, name: str) -> JsonObject:
     return json_object(text, location)
 
 
-def _same_json_value(old: JsonValue, new: JsonValue) -> bool:
-    # JSON numbers compare by value, but true must not compare equal to 1.
-    if isinstance(old, bool) or isinstance(new, bool):
-        return type(old) is type(new) and old == new
-    if isinstance(old, dict) and isinstance(new, dict):
-        return old.keys() == new.keys() and all(
-            _same_json_value(value, new[key]) for key, value in old.items()
+def json_values_equal(left: JsonValue, right: JsonValue) -> bool:
+    """Compare validated JSON recursively, distinguishing boolean from number.
+
+    Numbers compare by numeric value (1 equals 1.0). Object key order does not
+    matter, but key sets and list order do. Compare every key, including unknown
+    fields; no projection, mutation, parsing or filesystem access is performed.
+    Inputs must already be valid finite JSON values.
+    """
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(
+            json_values_equal(value, right[key]) for key, value in left.items()
         )
-    if isinstance(old, list) and isinstance(new, list):
-        return len(old) == len(new) and all(
-            _same_json_value(a, b) for a, b in zip(old, new, strict=True)
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            json_values_equal(a, b) for a, b in zip(left, right, strict=True)
         )
-    return old == new
+    return left == right
 
 
 def write_json(node: h5.Group, name: str, value: JsonObject) -> h5.Dataset:
@@ -90,7 +96,7 @@ def write_json(node: h5.Group, name: str, value: JsonObject) -> h5.Dataset:
         old = read_json(node, name)
         if not isinstance(dataset, h5.Dataset):
             raise ValueError(f"{node.name}/{name}: expected scalar JSON dataset")
-        if _same_json_value(old, value):
+        if json_values_equal(old, value):
             return dataset
         dtype = h5.check_string_dtype(dataset.dtype)
         if dtype is not None and dtype.length is not None:

@@ -21,6 +21,7 @@ from .models import (
     LabberPayload,
 )
 from .native import load_run_data, save_run_data, validate_experiment_payload
+from .native_metadata import json_values_equal
 from .native_models import (
     AxisSchema,
     CfgSnapshot,
@@ -68,6 +69,7 @@ __all__ = [
     "NativeExtensions",
     "StoredRun",
     "JsonObject",
+    "json_values_equal",
     "validate_labber_payload",
     "cast_labber_values",
     "write_labber",

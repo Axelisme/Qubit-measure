@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
-from zcu_tools.datafile import VariableSchema
+from zcu_tools.datafile import CfgSnapshot, VariableSchema
 from zcu_tools.experiment import (
     AxesSpec,
     ExpCfgModel,
@@ -101,30 +101,55 @@ CfgT = TypeVar("CfgT", bound=ExpCfgModel)
 class MigrationExperiment:
     """Bind a concrete typed reader to its generic schema without erasing its cfg.
 
-    tag and cfg_type are the exact persisted experiment/cfg identities; neither
-    determines the other. schemas is the generic
-    disk-unit variable declaration. validate_native reads an exact native Path
+    source_tag and cfg_type are the exact historical experiment/cfg identities;
+    neither determines the other. native_tag is the canonical spec tag written
+    into native RunMetadata; it may differ from source_tag only by an explicit
+    migration declaration. schemas is the generic
+    disk-unit variable declaration. validate_cfg checks a historical CfgSnapshot
+    against this pair's cfg_type, major version and concrete model, returns None
+    without changing raw values, and raises ValueError for unconvertible cfg.
+    validate_native reads an exact native Path
     with the corresponding typed load_run, returns None and propagates failures.
     These bindings perform no acquisition, registration or live-context capture.
     """
 
-    tag: str
+    source_tag: str
+    native_tag: str
     cfg_type: str
     schemas: tuple[VariableSchema, ...]
+    validate_cfg: Callable[[CfgSnapshot], None]
     validate_native: Callable[[Path], None]
 
 
 def _declaration(
     spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT] | None,
+    *,
+    source_tag: str | None = None,
 ) -> MigrationExperiment:
     if spec is None:
         raise ValueError("Missing native experiment declaration")
+
+    def validate_cfg(snapshot: CfgSnapshot) -> None:
+        if snapshot.cfg_type != spec.cfg_type.__name__:
+            raise ValueError(f"cfg_type must be {spec.cfg_type.__name__}")
+        if int(snapshot.schema_version.split(".")[0]) != int(
+            spec.cfg_schema_version.split(".")[0]
+        ):
+            raise ValueError(
+                f"cfg_schema_version major must match {spec.cfg_schema_version}"
+            )
+        spec.cfg_type.model_validate(snapshot.values, extra="ignore")
 
     def validate(path: Path) -> None:
         load_run(path, spec=spec)
 
     return MigrationExperiment(
-        spec.tag, spec.cfg_type.__name__, native_schemas(spec), validate
+        source_tag=spec.tag if source_tag is None else source_tag,
+        native_tag=spec.tag,
+        cfg_type=spec.cfg_type.__name__,
+        schemas=native_schemas(spec),
+        validate_cfg=validate_cfg,
+        validate_native=validate,
     )
 
 
@@ -188,7 +213,10 @@ MIGRATION_EXPERIMENTS = (
     _declaration(twotone_reset_single_tone_length.LengthExp.AXES_SPEC),
     _declaration(twotone_ro_optimize_auto_optimize.AutoOptExp.AXES_SPEC),
     _declaration(twotone_ro_optimize_freq.FreqExp.AXES_SPEC),
-    _declaration(twotone_ro_optimize_freq_gain.FreqGainExp.AXES_SPEC),
+    _declaration(
+        twotone_ro_optimize_freq_gain.FreqGainExp.AXES_SPEC,
+        source_tag="twotone/ge/ro_optimize/freq",
+    ),
     _declaration(twotone_ro_optimize_length.LengthExp.AXES_SPEC),
     _declaration(twotone_ro_optimize_power.PowerExp.AXES_SPEC),
     _declaration(twotone_time_domain_cpmg.CPMG_Exp.AXES_SPEC),

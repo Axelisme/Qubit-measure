@@ -8,7 +8,7 @@ from .models import (
     MigrationFileState,
     MigrationManifest,
 )
-from .paths import contained_path, validate_segment
+from .paths import contained_path, source_identity, source_removed, validate_segment
 from .state import MigrationSession, file_hash
 
 
@@ -16,14 +16,8 @@ def _validate_file_paths(
     state: MigrationFileState, manifest: MigrationManifest
 ) -> None:
     source, destination = manifest.report.source, manifest.report.destination
-    if not state.source.is_absolute() or state.source.resolve() != state.source:
+    if source_identity(state.source, manifest) != state.source:
         raise MigrationInputError("manifest: invalid source path")
-    source_root = (
-        source.result_path
-        if state.source.is_relative_to(source.result_path)
-        else source.database_path
-    )
-    contained_path(state.source, source_root)
     destination_root = (
         destination.result_path
         if state.destination.is_relative_to(destination.result_path)
@@ -100,6 +94,8 @@ def _validate_baselines(manifest: MigrationManifest) -> None:
             for root in (source.result_path, source.database_path)
         ):
             raise MigrationInputError("manifest: invalid baseline source")
+        if source_removed(source_path, manifest):
+            continue
         if source_path.exists():
             if file_hash(source_path) != expected:
                 raise MigrationInputError(f"{source_path}: source hash changed")
@@ -123,8 +119,8 @@ def _validate_assignments(manifest: MigrationManifest) -> None:
         ids.add(run.run_id)
         if (
             not run.source.is_absolute()
-            or contained_path(run.source, manifest.report.source.database_path)
-            != run.source
+            or not run.source.is_relative_to(manifest.report.source.database_path)
+            or source_identity(run.source, manifest) != run.source
         ):
             raise MigrationInputError("manifest: invalid run source")
         if (

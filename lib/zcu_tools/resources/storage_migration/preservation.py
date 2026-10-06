@@ -3,7 +3,7 @@
 from dataclasses import replace
 from pathlib import Path
 
-from .paths import contained_path
+from .paths import contained_path, source_removed
 from .state import (
     MigrationSession,
     record_pending,
@@ -73,6 +73,8 @@ def report_unrecognized_files(session: MigrationSession) -> None:
     known.update(str(item.source) for item in session.manifest.report.pending)
     for root in (source.result_path, source.database_path):
         for candidate in sorted(root.rglob("*")):
+            if source_removed(candidate, session.manifest):
+                continue
             if candidate.is_file():
                 path = contained_path(candidate, root)
                 if str(path) not in known:

@@ -188,9 +188,19 @@ def _defer_modules(
         return
     source = contained_path(source, session.manifest.report.source.result_path)
     session.baseline(source)
-    modules = _YAML_MAP.validate_python(
+    envelope = _YAML_MAP.validate_python(
         YAML(typ="safe").load(source.read_text(encoding="utf-8")), strict=True
     )
+    if "modules" not in envelope or "waveforms" not in envelope:
+        raise MigrationInputError(f"{source}: expected waveforms/modules envelope")
+    modules = _YAML_MAP.validate_python(envelope["modules"], strict=True)
+    waveforms = _YAML_MAP.validate_python(envelope["waveforms"], strict=True)
+    for name in waveforms:
+        record_pending(
+            session, source, f"waveforms.{name}", "Legacy waveform; 由 4a 轉換"
+        )
+    for name in envelope.keys() - {"modules", "waveforms"}:
+        record_pending(session, source, name, "Unknown legacy library root; 由 4a 轉換")
     references: dict[str, str] = {}
     for rule in mapping.module_rules:
         if rule.old_name in modules and rule.reference_path is not None:
@@ -212,7 +222,7 @@ def _defer_modules(
             reason += (
                 f"; {rule.reference_path} references {references[rule.reference_path]}"
             )
-        record_pending(session, source, name, reason)
+        record_pending(session, source, f"modules.{name}", reason)
         report = session.manifest.report
         items = tuple(
             item
