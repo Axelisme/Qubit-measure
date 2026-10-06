@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Project RPC and shared resource observations
+**Last updated:** 2026-10-06. Native load RPC and all-source guards
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -44,8 +44,8 @@ scipy fit**（fit_spectrum 留在 notebook，未移植）。
 分層 `app → Controller(façade) → services → State`。MainWindow 是人使用的 driving
 view；RemoteControlAdapter 是 agent 的命令與觀測入口。它與 GUI 共用
 Controller owners，資源的 per-connection observation 與 guard 由 shared remote 執行。
-目前支援完整 project／spectrum／selection 查詢及 project／spectrum 編輯命令。
-載入、search、export 與 interactive RPC 正在 task 中實作。
+目前支援完整 project／spectrum／selection 查詢及 project／spectrum 編輯與載入命令。
+Search、export 與 interactive RPC 正在 task 中實作。
 
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、
   `spectrums: dict[str, SpectrumEntry]`、`active_spectrum`、`selection`(SelectionState)、
@@ -195,7 +195,12 @@ Spectrum snapshot 回完整 calibration／published points 與 raw axes extents�
 合法的 absent name 回 absence 並建立 version 0 observation。Leaf guard 不展開 name 內的 literal star。
 Remove、reset 與 active selection 共用原生 Controller owners；同名重建會使舊 observation stale。
 Selection snapshot 回完整 published mask 與 normalized min_distance，不讀 live Session。
-六個原有 read projections 保持原值；其餘 pipeline methods 尚在實作。
+Raw load 與 processed restore 必須先完整讀 project、集合與全部 live spectra，包含零點譜。
+All-source guard 也保留已觀察的 retired leaf，必須讀 absence 才能重新載入。
+載入沿原生 basename replacement、inheritance／transpose 與 processed completion。
+成功只推進既有且相符的 observation，新譜的 receipt 不取代完整 snapshot。
+Processed publication 失敗保留已發布前綴，不 rollback，也不刷新 observation。
+六個原有 read projections 保持原值；search／export／interactive methods 尚在實作。
 
 MCP entrypoint 使用共用 `McpBridge`，工具從 method specs 生成。完整控制工具的 workflow
 與圖像驗收尚未完成。MCP 不訂閱業務 event-push，不維護第二份 seen map。
@@ -262,7 +267,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   `[Frequency, Flux]`（freq 掃在外層）→ 軸反。**不是固定特性**（TwoTone 通常正、OneTone 常反），
   要看實際檔案。GUI 的「Transpose axes」toggle（`services/load.py` 的 `transpose_spectrum_data`）
   讓 user 從 preview 判斷後交換。
-- **Remote pipeline 尚未完成**：目前 agent 可觀測與編輯 project／spectrum，載入、search、export
+- **Remote pipeline 尚未完成**：目前 agent 可觀測、編輯與載入 project／spectrum，search、export
   與互動命令仍待實作。完整 MCP workflow 與圖像驗收由 fluxdep-mcp-control task 推進。
 
 ## Entry Points

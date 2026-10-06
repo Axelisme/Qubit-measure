@@ -53,6 +53,27 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Absent names return {name, exists: false}; no raw complex matrix is sent.",
         params=(ParamSpec("name", JsonType.STRING),),
     ),
+    "spectrum.load": MethodSpec(
+        30.0,
+        "Load native raw data after reading project.info, spectrum.list and "
+        "every current spectrum snapshot. The basename replaces an existing "
+        "entry. New spectra still need a full snapshot before editing.",
+        params=(
+            ParamSpec("filepath", JsonType.STRING),
+            ParamSpec("spec_type", JsonType.STRING, enum=("OneTone", "TwoTone")),
+            ParamSpec("inherit_from", JsonType.STRING, required=False),
+            ParamSpec(
+                "transpose_axes", JsonType.BOOLEAN, required=False, default=False
+            ),
+        ),
+    ),
+    "spectrum.load_processed": MethodSpec(
+        30.0,
+        "Restore processed spectra after reading project.info, spectrum.list "
+        "and every current spectrum snapshot. Includes empty completed spectra; "
+        "publication is incremental, not rolled back on failure.",
+        params=(ParamSpec("filepath", JsonType.STRING),),
+    ),
     "spectrum.remove": MethodSpec(
         5.0,
         "Remove a literal spectrum after reading its snapshot and spectrum.list.",
@@ -113,6 +134,14 @@ OBSERVATION_POLICIES: dict[str, ResourceObservationPolicy] = {
     ),
     "spectrum.list": ResourceObservationPolicy(reveals=("spectrums:__set__",)),
     "spectrum.snapshot": ResourceObservationPolicy(reveals=("spectrum:{name}",)),
+    "spectrum.load": ResourceObservationPolicy(
+        guard_deps=("project", "spectrums:__set__", "spectrum:*"),
+        refresh_after_write=True,
+    ),
+    "spectrum.load_processed": ResourceObservationPolicy(
+        guard_deps=("project", "spectrums:__set__", "spectrum:*"),
+        refresh_after_write=True,
+    ),
     "spectrum.remove": ResourceObservationPolicy(
         guard_deps=("spectrums:__set__", "spectrum:{name}"), refresh_after_write=True
     ),

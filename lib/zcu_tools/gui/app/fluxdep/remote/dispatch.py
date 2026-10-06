@@ -37,6 +37,7 @@ from .dto import (
     FitParametersReply,
     FitResultReply,
     NameReply,
+    NamesReply,
     PointcloudReply,
     ProjectSetupReply,
     SelectionSnapshotReply,
@@ -146,6 +147,31 @@ def _h_spectrum_snapshot(
             "freqs": entry.points["freqs"].tolist(),
         },
     }
+
+
+def _h_spectrum_load(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> NameReply:
+    filepath = params["filepath"]
+    spec_type = params["spec_type"]
+    inherit_from = params["inherit_from"]
+    transpose_axes = params["transpose_axes"]
+    # ParamSpec validated types, enum and optional defaults.
+    assert isinstance(filepath, str)
+    assert isinstance(spec_type, str)
+    assert spec_type == "OneTone" or spec_type == "TwoTone"
+    assert inherit_from is None or isinstance(inherit_from, str)
+    assert isinstance(transpose_axes, bool)
+    name = adapter.ctrl.load_spectrum(filepath, spec_type, inherit_from, transpose_axes)
+    return {"name": name}
+
+
+def _h_spectrum_load_processed(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> NamesReply:
+    filepath = params["filepath"]
+    assert isinstance(filepath, str)  # ParamSpec validated the nonempty path.
+    return {"names": adapter.ctrl.load_processed_spectrums(filepath)}
 
 
 def _h_spectrum_remove(
@@ -265,6 +291,8 @@ _HANDLERS: dict[str, Handler] = {
     "project.setup": _h_project_setup,
     "spectrum.list": _h_spectrum_list,
     "spectrum.snapshot": _h_spectrum_snapshot,
+    "spectrum.load": _h_spectrum_load,
+    "spectrum.load_processed": _h_spectrum_load_processed,
     "spectrum.remove": _h_spectrum_remove,
     "spectrum.set_active": _h_spectrum_set_active,
     "spectrum.reset_alignment": _h_spectrum_reset_alignment,
