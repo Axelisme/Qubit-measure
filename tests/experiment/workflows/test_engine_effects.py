@@ -587,7 +587,9 @@ def test_program_cancel_protocol_never_returns_failed(
                 )
             return np.array([1.0], dtype=np.complex128)
 
-        def acquire_decimated(self, *_args: object, **_kwargs: object) -> object:
+        def acquire_decimated(
+            self, *_args: object, **_kwargs: object
+        ) -> NDArray[np.complex128]:
             return self.acquire()
 
     def acquire(run: Run[Cfg]) -> int:

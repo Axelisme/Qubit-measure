@@ -725,11 +725,13 @@ def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retryin
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
 
 
-def test_build_and_acquire_first_round_stop_returns_nan_partial():
+def test_build_and_acquire_first_round_stop_returns_nan_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
     with Schedule(_cfg(rounds=2), signals_buffer, stop=StopSignal()) as sched:
-        StopBeforeDataProgram.external_stop = sched.stop
+        monkeypatch.setattr(StopBeforeDataProgram, "external_stop", sched.stop)
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=StopBeforeDataProgram)
             .add(FakeModule("readout"))
@@ -741,7 +743,8 @@ def test_build_and_acquire_first_round_stop_returns_nan_partial():
 
     np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
-    StopBeforeDataProgram.external_stop = None
+    assert sched.outcome.exception is None
+    assert sched.stop.error is None
 
 
 def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():

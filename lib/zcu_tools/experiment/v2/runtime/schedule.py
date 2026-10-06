@@ -22,7 +22,7 @@ from typing_extensions import TypeVar
 
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime._path import get_path, set_target, writable_view
-from zcu_tools.program.acquisition import CancelFlagProtocol
+from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Module,
@@ -127,8 +127,9 @@ class ScheduleOutcome:
     A stopped outcome may retain an acquire/build Exception caught after stop
     was requested; its status/reason and StopSignal.error remain cancellation,
     and no retry follows. The first such cause is retained even if the schedule
-    was already marked stopped. Pure cancellation has no exception. interrupted
-    retains KeyboardInterrupt; failed retains the exhausted failure cause.
+    was already marked stopped. Pure cancellation, including the producer's
+    first-round stopped-partial signal, has no exception. interrupted retains
+    KeyboardInterrupt; failed retains the exhausted failure cause.
     """
 
     status: RunStatus = "completed"
@@ -1047,7 +1048,9 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                     self._schedule._mark_interrupted(exc)
                     break
                 except Exception as exc:
-                    if self._schedule._check_stop_requested(exception=exc):
+                    # The producer reports first-round cancellation with an exception.
+                    cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
+                    if self._schedule._check_stop_requested(exception=cause):
                         break
                     if attempt == retry:
                         self._schedule._mark_failed(exc)
