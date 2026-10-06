@@ -15,6 +15,7 @@ from typing import Any
 
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.lifecycle import build_lifecycle_tools
+from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
 from zcu_tools.mcp.core.stdio_server import (
     StdioLoopHooks,
     ToolTable,
@@ -60,7 +61,7 @@ def build_readonly_server(
     ``repo_root`` anchors the GUI launch script; pass ``Path(__file__).parents[4]``
     from the caller (``lib/zcu_tools/mcp/<app>/server.py`` -> repo root).
     ``gui_name`` is the human GUI name embedded in the lifecycle-tool prose (e.g.
-    ``fluxdep-gui``). Events are dropped (READ-ONLY: no ``on_event`` hook), so the
+    ``autofluxdep-gui``). Events are dropped (READ-ONLY: no ``on_event`` hook), so the
     GUI's event stream never reaches the agent.
     """
     bridge = McpBridge(config)
@@ -69,15 +70,7 @@ def build_readonly_server(
         method: str, params: dict[str, Any], timeout_seconds: float = 30.0
     ) -> dict[str, Any]:
         """Issue one RPC against the GUI; raises on error or timeout."""
-        resp = bridge.send_rpc_raw(method, params, timeout_seconds)
-        if not resp.get("ok", False):
-            err = resp.get("error", {})
-            msg = f"GUI Error ({err.get('code')}): {err.get('message')}"
-            reason = err.get("reason")
-            if reason:
-                msg += f" (reason: {reason})"
-            raise RuntimeError(msg)
-        return dict(resp.get("result", {}))
+        return call_gui(bridge, GuiRpcCall(method, params, timeout_seconds)).data
 
     overrides, override_names = build_lifecycle_tools(
         config, bridge, repo_root, gui_name

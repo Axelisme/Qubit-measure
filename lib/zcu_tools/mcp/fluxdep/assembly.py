@@ -12,6 +12,7 @@ from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.lifecycle import build_lifecycle_tools
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
 from zcu_tools.mcp.core.stdio_server import (
     StdioLoopHooks,
     ToolTable,
@@ -79,14 +80,7 @@ def build_fluxdep_server(
     def send_gui_rpc(
         method: str, params: dict[str, object], timeout_seconds: float = 30.0
     ) -> dict[str, object]:
-        response = bridge.send_rpc_raw(method, params, timeout_seconds)
-        if not response["ok"]:
-            error = response["error"]
-            message = f"GUI Error ({error['code']}): {error['message']}"
-            if error.get("reason"):
-                message += f" (reason: {error['reason']})"
-            raise RuntimeError(message)
-        return dict(response["result"])
+        return call_gui(bridge, GuiRpcCall(method, params, timeout_seconds)).data
 
     generated = generate_tools(
         config, METHOD_SPECS, frozenset({"resources.versions"}), send_gui_rpc
