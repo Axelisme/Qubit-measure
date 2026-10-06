@@ -245,6 +245,25 @@ def test_native_metadata_failure_does_not_block_labber_writer(tmp_path: Path) ->
     )
 
 
+def test_single_scalar_is_rejected_before_creating_destination(tmp_path: Path) -> None:
+    destination = tmp_path / "scalar.export"
+    payload = ExperimentPayload(
+        variables={
+            DataVariable("readout"): LabberPayload(
+                ("signal", "V", np.array(1.0)), axes=[]
+            )
+        },
+        metadata=LabberMetadata(),
+        representation="single",
+    )
+    with pytest.raises(ValueError) as error:
+        write_labber(destination, payload, cfg=_cfg())
+    assert str(destination) in str(error.value)
+    assert "readout" in str(error.value)
+    assert "axis" in str(error.value)
+    assert not destination.exists()
+
+
 def test_export_rejects_complex_coordinates_instead_of_discarding_them(
     tmp_path: Path,
 ) -> None:
