@@ -228,16 +228,53 @@ def test_launch_reports_early_exit_without_connecting(
     launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock],
     tmp_path: Path,
     stderr: bytes | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bridge, proc, _, connect = launch_bridge
     proc.poll.return_value = 7
-    proc.stderr = BytesIO(stderr) if stderr is not None else None
+    monkeypatch.setattr(
+        "zcu_tools.mcp.core.bridge.tempfile.TemporaryFile",
+        lambda: BytesIO(stderr or b""),
+    )
     with pytest.raises(RuntimeError, match="returncode=7") as error:
         bridge.launch(tmp_path, 18765)
     if stderr is not None:
         assert "startup details" in str(error.value)
     assert not bridge.launched_gui
     connect.assert_not_called()
+
+
+def test_launched_child_can_fill_stderr_after_parent_returns(tmp_path: Path) -> None:
+    """A real child must not stall when startup warnings exceed pipe capacity."""
+    config = _config(tmp_path)
+    script = tmp_path / "scripts" / config.run_script_name
+    script.parent.mkdir()
+    script.write_text(
+        "import socket, sys, time\n"
+        "from pathlib import Path\n"
+        "port = int(sys.argv[sys.argv.index('--control-port') + 1])\n"
+        "with socket.socket() as server:\n"
+        "    server.bind(('127.0.0.1', port))\n"
+        "    server.listen()\n"
+        "    deadline = time.monotonic() + 10\n"
+        "    while not Path('release').exists():\n"
+        "        if time.monotonic() > deadline: raise TimeoutError('release')\n"
+        "        time.sleep(0.01)\n"
+        "    sys.stderr.write('warning\\n' * 262144)\n"
+        "    sys.stderr.flush()\n"
+        "    Path('completed').touch()\n",
+        encoding="utf8",
+    )
+    bridge = McpBridge(config)
+    try:
+        bridge.launch(tmp_path, _find_free_port(), auto_connect=False)
+        pid = int(config.pid_file.read_text())
+        (tmp_path / "release").touch()
+        assert bridge.wait_for_gui_exit(pid, timeout=5)
+        assert (tmp_path / "completed").exists()
+    finally:
+        if bridge.launched_gui:
+            bridge.stop()
 
 
 def test_launch_timeout_retains_process_without_claiming_connection(

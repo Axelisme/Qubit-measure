@@ -43,6 +43,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -56,6 +57,13 @@ from zcu_tools.gui.remote.framing import MAX_LINE_BYTES, encode_line
 from zcu_tools.mcp.core.stdio_server import McpServerConfig
 
 logger = logging.getLogger(__name__)
+
+
+class _LaunchStderr(Protocol):
+    """Seekable byte stream; accepts Windows/POSIX tempfile wrappers alike."""
+
+    def seek(self, offset: int, whence: int = 0) -> int: ...
+    def read(self) -> bytes: ...
 
 
 @dataclass(frozen=True)
@@ -638,25 +646,29 @@ class McpBridge:
         if extra_args:
             cmd += list(extra_args)
 
-        if os.name == "nt":
-            self._proc = subprocess.Popen(
-                cmd,
-                cwd=str(repo_root),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
-            )
-        else:
-            self._proc = subprocess.Popen(
-                cmd,
-                cwd=str(repo_root),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
-            )
-        self._write_pid_file(self._proc.pid)
-
-        ready = self._wait_for_launch(self._proc, port)
+        # An unread PIPE eventually blocks the GUI's stderr logger (and its
+        # main thread). A file preserves startup diagnostics without requiring
+        # a lifetime drain thread. The child retains its own file handle after
+        # this parent-side context closes, including after readiness timeout.
+        with tempfile.TemporaryFile() as launch_stderr:
+            if os.name == "nt":
+                self._proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(repo_root),
+                    stdout=subprocess.DEVNULL,
+                    stderr=launch_stderr,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
+                )
+            else:
+                self._proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(repo_root),
+                    stdout=subprocess.DEVNULL,
+                    stderr=launch_stderr,
+                    start_new_session=True,
+                )
+            self._write_pid_file(self._proc.pid)
+            ready = self._wait_for_launch(self._proc, port, launch_stderr)
         pid = self._proc.pid
         if not ready:
             return (
@@ -674,15 +686,17 @@ class McpBridge:
             )
         return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
 
-    def _wait_for_launch(self, proc: subprocess.Popen[bytes], port: int) -> bool:
+    def _wait_for_launch(
+        self, proc: subprocess.Popen[bytes], port: int, launch_stderr: _LaunchStderr
+    ) -> bool:
         """Wait for readiness, reporting an early process exit with its stderr."""
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
             rc = proc.poll()
             if rc is not None:
-                stderr = b""
-                if proc.stderr is not None:
-                    stderr = proc.stderr.read() or b""
+                size = launch_stderr.seek(0, os.SEEK_END)
+                launch_stderr.seek(max(0, size - 8192))
+                stderr = launch_stderr.read()
                 tail = stderr.decode("utf-8", "replace").strip().splitlines()[-5:]
                 self._proc = None
                 raise RuntimeError(

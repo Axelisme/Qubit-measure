@@ -362,7 +362,8 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
 
         ss = np.random.SeedSequence(run_cfg.seed)
         entropys = np.array(
-            [child.entropy for child in ss.spawn(run_cfg.n_seeds)], dtype=np.int64
+            [int(child.generate_state(1)[0]) for child in ss.spawn(run_cfg.n_seeds)],
+            dtype=np.int64,
         )
 
         prog_cache: dict[int, Any] = {}
