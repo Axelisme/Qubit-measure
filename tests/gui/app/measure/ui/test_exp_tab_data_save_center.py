@@ -5,9 +5,8 @@ Validates S1-S3 acceptance via production ExpTabWidget / MainWindow seams.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,6 +17,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QTabWidget,
     QTextEdit,
 )
 from zcu_tools.gui.app.measure.adapter import (
@@ -34,27 +34,25 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_save_image
-from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.state import State, TabInteractionState
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
+from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import cfg_resources, configure_cfg_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.app.measure.ui._artifact_snapshots import (
+    make_tab_snapshot,
+    with_artifacts,
+)
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 _DATA = ArtifactKey(ArtifactKind.DATA)
 _FIT = ArtifactKey(ArtifactKind.ANALYSIS, "fit")
 _POST_FIT = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
-
-
-@dataclass
-class _DummyParams:
-    x: int = 1
 
 
 def _require_qapp() -> QApplication:
@@ -79,7 +77,6 @@ def _mock_ctrl() -> MagicMock:
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.app.measure.specs import make_pulse_spec
     from zcu_tools.gui.cfg import CfgSchema, make_default_value
@@ -91,131 +88,6 @@ def _mock_ctrl() -> MagicMock:
     ctrl.open_seeded_cfg_editor.return_value = ("editor-tab", ())
     ctrl.get_cfg_editor_draft.return_value = draft
     return ctrl
-
-
-def _snapshot(
-    tab_id: str,
-    *,
-    has_run: bool = False,
-    has_analysis: bool = False,
-    has_post: bool = False,
-    analysis_mode=AnalysisMode.FIT,
-    post_cap: bool = False,
-    load_cap: bool = False,
-    has_active_context: bool = True,
-    has_context: bool = True,
-    is_running: bool = False,
-    is_analyzing: bool = False,
-    is_saving: bool = False,
-    data_path: str | None = None,
-    analysis_path: str | None = None,
-    post_path: str | None = None,
-    analysis_has_figure: bool | None = None,
-    post_has_figure: bool | None = None,
-    data_status: SaveStatus | None = None,
-    analysis_status: SaveStatus | None = None,
-    post_status: SaveStatus | None = None,
-) -> TabSnapshot:
-    from zcu_tools.gui.app.measure.services.ports import (
-        AnalysisPaneSnapshot,
-        PathResourceSnapshot,
-        PostAnalysisPaneSnapshot,
-        RunPaneSnapshot,
-        SavePaneSnapshot,
-        TabPathsSnapshot,
-    )
-
-    caps = AdapterCapabilities(
-        analysis=analysis_mode, post_analysis=post_cap, load_data=load_cap
-    )
-    run_result = object() if has_run else None
-    ana_result = object() if has_analysis else None
-    post_result = object() if has_post else None
-    if analysis_has_figure is None:
-        fig = Figure() if has_analysis else None
-    elif analysis_has_figure:
-        fig = Figure()
-    else:
-        fig = None
-    if post_has_figure is None:
-        post_fig = Figure() if has_post else None
-    elif post_has_figure:
-        post_fig = Figure()
-    else:
-        post_fig = None
-
-    data_ps = PathResourceSnapshot(
-        override=data_path, path=data_path or ("/tmp/data.h5" if has_run else None)
-    )
-    ana_ps = PathResourceSnapshot(
-        override=analysis_path,
-        path=analysis_path or ("/tmp/a.png" if has_analysis else None),
-    )
-    post_ps = PathResourceSnapshot(
-        override=post_path, path=post_path or ("/tmp/p.png" if has_post else None)
-    )
-
-    analysis_plots = None
-    if fig is not None:
-        analysis_plots = Plots(NonPresentingHost())
-        analysis_plots.adopt("fit", fig)
-        analysis_plots.finish()
-    post_plots = None
-    if post_fig is not None:
-        post_plots = Plots(NonPresentingHost())
-        post_plots.adopt("fit", post_fig)
-        post_plots.finish()
-
-    snapshot = TabSnapshot(
-        adapter_name="fake",
-        cfg_schema=MagicMock(),
-        tab_id=tab_id,
-        interaction=TabInteractionState(
-            global_run_active=False,
-            is_running=is_running,
-            is_analyzing=is_analyzing,
-            is_saving_data=is_saving,
-            has_context=has_context,
-            has_active_context=has_active_context,
-            has_soc=True,
-            has_run_result=has_run,
-            has_analyze_result=has_analysis,
-            has_figure=bool(fig is not None),
-            has_post_analyze_result=has_post,
-        ),
-        capabilities=caps,
-        run=RunPaneSnapshot(result=run_result, source_path=None),
-        analysis=AnalysisPaneSnapshot(
-            params=_DummyParams() if has_analysis else None,
-            result=ana_result,
-            figures=analysis_plots,
-            writeback_items=(),
-            image_paths={"fit": ana_ps} if fig is not None else {},
-        ),
-        post_analysis=PostAnalysisPaneSnapshot(
-            params=_DummyParams() if has_post else None,
-            result=post_result,
-            figures=post_plots,
-            writeback_items=(),
-            image_paths={"fit": post_ps} if post_fig is not None else {},
-        ),
-        save=SavePaneSnapshot(data_path=data_ps),
-        paths=TabPathsSnapshot(
-            data=data_ps,
-            analysis_images={"fit": ana_ps} if fig is not None else {},
-            post_analysis_images={"fit": post_ps} if post_fig is not None else {},
-        ),
-    )
-    statuses = {
-        kind: status
-        for kind, status in (
-            (ArtifactKind.DATA, data_status),
-            (ArtifactKind.ANALYSIS, analysis_status),
-            (ArtifactKind.POST_ANALYSIS, post_status),
-        )
-        if status is not None
-    }
-    return with_artifacts(snapshot, statuses)
 
 
 @pytest.fixture
@@ -248,7 +120,7 @@ def test_data_subtab_contains_save_center_and_order(exp_tab_factory):
     caps = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
     )
-    snap = _snapshot(
+    snap = make_tab_snapshot(
         "tab-1",
         has_run=True,
         has_analysis=True,
@@ -301,7 +173,7 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
         _, axes = plots.subplots(name)
         axes.plot([0, 1], ys)
     plots.finish()
-    base = _snapshot("tab-1", has_run=True, has_analysis=True)
+    base = make_tab_snapshot("tab-1", has_run=True, has_analysis=True)
     assert base.analysis is not None and base.paths is not None
     fit_path = base.paths.analysis_images["fit"]
     diagnostic_path = replace(fit_path, path="/tmp/diagnostic.png")
@@ -385,7 +257,7 @@ def test_measurement_always_post_conditional(exp_tab_factory):
         analysis=AnalysisMode.NONE, post_analysis=False, load_data=False
     )
     tab_none = exp_tab_factory("tab-1", ctrl, caps_none)
-    snap_none = _snapshot(
+    snap_none = make_tab_snapshot(
         "tab-1",
         has_run=False,
         analysis_mode=AnalysisMode.NONE,
@@ -399,7 +271,7 @@ def test_measurement_always_post_conditional(exp_tab_factory):
         analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
     )
     tab_a = exp_tab_factory("tab-2", ctrl, caps_a)
-    snap_a = _snapshot(
+    snap_a = make_tab_snapshot(
         "tab-2",
         has_run=True,
         has_analysis=False,
@@ -413,7 +285,7 @@ def test_measurement_always_post_conditional(exp_tab_factory):
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=False
     )
     tab_both = exp_tab_factory("tab-3", ctrl, caps_both)
-    snap_both = _snapshot(
+    snap_both = make_tab_snapshot(
         "tab-3",
         has_run=True,
         has_analysis=True,
@@ -439,7 +311,7 @@ def test_artifact_rows_have_status_path_browse_save_and_comment(exp_tab_factory)
     caps = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
     )
-    snap = _snapshot(
+    snap = make_tab_snapshot(
         "tab-1",
         has_run=True,
         has_analysis=True,
@@ -472,7 +344,7 @@ def test_artifact_rows_have_status_path_browse_save_and_comment(exp_tab_factory)
         analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
     )
     tab2 = exp_tab_factory("tab-2", ctrl, caps_no_load)
-    snap2 = _snapshot(
+    snap2 = make_tab_snapshot(
         "tab-2",
         has_run=True,
         analysis_mode=AnalysisMode.FIT,
@@ -499,7 +371,7 @@ def test_data_actions_appear_before_measurement_data_card(
     caps = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
     )
-    snap = _snapshot(
+    snap = make_tab_snapshot(
         "tab-1",
         analysis_mode=AnalysisMode.FIT,
         post_cap=False,
@@ -541,7 +413,7 @@ def test_status_no_result_and_not_saved(exp_tab_factory):
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=False
     )
     tab = exp_tab_factory("tab-1", ctrl, caps)
-    snap_none = _snapshot(
+    snap_none = make_tab_snapshot(
         "tab-1",
         has_run=False,
         has_analysis=False,
@@ -556,7 +428,7 @@ def test_status_no_result_and_not_saved(exp_tab_factory):
     assert center.status_text(_DATA) == "— NO RESULT"
     assert not center.is_save_enabled(_DATA)
     assert center.is_path_enabled(_DATA)
-    snap_run = _snapshot(
+    snap_run = make_tab_snapshot(
         "tab-1",
         has_run=True,
         has_analysis=False,
@@ -569,7 +441,7 @@ def test_status_no_result_and_not_saved(exp_tab_factory):
     assert center.status_text(_DATA) == "○ NOT SAVED"
     assert center.is_save_enabled(_DATA)
     assert not center.has_artifact(_FIT)
-    snap_ana = _snapshot(
+    snap_ana = make_tab_snapshot(
         "tab-1",
         has_run=True,
         has_analysis=True,
@@ -592,7 +464,7 @@ def test_status_text_renders_shared_snapshot(exp_tab_factory):
         _mock_ctrl(),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
-    tab.attach(_snapshot("tab-1", has_run=True), MagicMock())
+    tab.attach(make_tab_snapshot("tab-1", has_run=True), MagicMock())
     center = tab._save_center
     assert center.status_text(_DATA) == "○ NOT SAVED"
     for status, label in (
@@ -601,7 +473,7 @@ def test_status_text_renders_shared_snapshot(exp_tab_factory):
         (SaveStatus.NO_RESULT, "— NO RESULT"),
     ):
         tab.update_interaction_state(
-            _snapshot(
+            make_tab_snapshot(
                 "tab-1", has_run=status is not SaveStatus.NO_RESULT, data_status=status
             )
         )
@@ -610,26 +482,21 @@ def test_status_text_renders_shared_snapshot(exp_tab_factory):
     _require_qapp().processEvents()
 
 
-def test_save_all_preserves_data_pane_editor_state(exp_tab_factory, qapp):
-    from qtpy.QtCore import Qt
-    from qtpy.QtTest import QTest
+def test_save_all_preserves_data_pane_editor_state(qapp):
+    from qtpy.QtCore import QEvent, QPointF, Qt
+    from qtpy.QtGui import QMouseEvent
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
+    ctrl = _mock_ctrl()
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     ctrl.has_tab.return_value = True
     ctrl.save_data = MagicMock(return_value="/tmp/data.h5")
     ctrl.save_image = MagicMock(return_value="/tmp/a.png")
     ctrl.save_post_image = MagicMock(return_value="/tmp/p.png")
     window = MainWindow(ctrl)
 
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
-    )
-    snap = _snapshot(
+    snap = make_tab_snapshot(
         "tab-1",
         has_run=True,
         has_analysis=True,
@@ -639,18 +506,28 @@ def test_save_all_preserves_data_pane_editor_state(exp_tab_factory, qapp):
         load_cap=True,
         has_active_context=True,
     )
-    tab_ctrl = _mock_ctrl()
-    tab = exp_tab_factory("tab-1", tab_ctrl, caps)
-    tab.attach(snap, window._tab_actions)
     ctrl.get_tab_snapshot.return_value = snap
-    window._tab_widgets["tab-1"] = tab
-    tab.update_interaction_state(snap)
-
-    tab._left_tabs.setCurrentWidget(tab._save_panel)
-    tab.show()
+    window.add_tab_widget("tab-1", "fake")
+    tab = window.findChild(ExpTabWidget)
+    assert tab is not None
+    center = tab.findChild(ArtifactSaveCenter)
+    assert center is not None
+    left_tabs = next(
+        widget
+        for widget in tab.findChildren(QTabWidget)
+        if any(widget.tabText(i) == "Data" for i in range(widget.count()))
+    )
+    data_index = next(
+        i for i in range(left_tabs.count()) if left_tabs.tabText(i) == "Data"
+    )
+    left_tabs.setCurrentIndex(data_index)
+    window.show()
     qapp.processEvents()
-    center = tab._save_center
-    data_edit = center._path_edits[_DATA]
+    data_edit = next(
+        edit
+        for edit in center.findChildren(QLineEdit)
+        if edit.text() == center.get_data_path()
+    )
     data_edit.setFocus()
     qapp.processEvents()
     assert qapp.focusWidget() is data_edit
@@ -672,12 +549,24 @@ def test_save_all_preserves_data_pane_editor_state(exp_tab_factory, qapp):
         data_edit.selectedText(),
     ) == before
 
-    selected_pane = tab._left_tabs.currentWidget()
-    data_edit_identity = center._path_edits[_DATA]
-    cast(Any, QTest).mouseClick(
-        cast(QPushButton, center.save_all_button), Qt.MouseButton.LeftButton
-    )
+    selected_pane = left_tabs.currentWidget()
+    button = center.save_all_button
+    position = button.rect().center()
+    for event_type, buttons in (
+        (QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
+        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+    ):
+        event = QMouseEvent(
+            event_type,
+            QPointF(position),
+            QPointF(button.mapToGlobal(position)),
+            Qt.MouseButton.LeftButton,
+            buttons,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(button, event)
     qapp.processEvents()
+    ctrl.save_artifacts.assert_called_once()
 
     # This fake controller does not publish terminal State snapshots; dispatch
     # alone must not mark any artifact as saved.
@@ -688,9 +577,9 @@ def test_save_all_preserves_data_pane_editor_state(exp_tab_factory, qapp):
     )
     qapp.processEvents()
 
-    assert tab._left_tabs.currentWidget() is selected_pane
-    assert tab._save_center is center
-    assert center._path_edits[_DATA] is data_edit_identity
+    assert left_tabs.currentWidget() is selected_pane
+    assert tab.findChild(ArtifactSaveCenter) is center
+    assert data_edit in center.findChildren(QLineEdit)
     assert (
         data_edit.hasFocus(),
         data_edit.cursorPosition(),
@@ -710,7 +599,7 @@ def test_changed_path_refresh_preserves_reverse_data_editor_state(
     caps = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
     )
-    snap = _snapshot(
+    snap = make_tab_snapshot(
         "tab-1",
         has_run=True,
         analysis_mode=AnalysisMode.FIT,
@@ -750,7 +639,7 @@ def test_save_all_disabled_when_no_result(exp_tab_factory):
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
     )
     tab = exp_tab_factory("tab-1", ctrl, caps)
-    snap_none = _snapshot(
+    snap_none = make_tab_snapshot(
         "tab-1",
         has_run=False,
         has_analysis=False,
@@ -761,7 +650,7 @@ def test_save_all_disabled_when_no_result(exp_tab_factory):
     )
     tab.attach(snap_none, MagicMock())
     assert tab._save_center.is_save_all_enabled() is False
-    snap_some = _snapshot(
+    snap_some = make_tab_snapshot(
         "tab-1",
         has_run=True,
         has_analysis=False,
@@ -774,7 +663,7 @@ def test_save_all_disabled_when_no_result(exp_tab_factory):
     tab.update_interaction_state(snap_some)
     assert tab._save_center.is_save_all_enabled() is True
 
-    saved = _snapshot(
+    saved = make_tab_snapshot(
         "tab-1",
         has_run=True,
         has_analysis=True,
@@ -787,7 +676,7 @@ def test_save_all_disabled_when_no_result(exp_tab_factory):
     assert tab._save_center.is_save_all_enabled() is False
     assert tab._save_center.is_save_enabled(_DATA)
     assert tab._save_center.is_save_enabled(_FIT)
-    changed = _snapshot(
+    changed = make_tab_snapshot(
         "tab-1",
         has_run=True,
         has_analysis=True,
@@ -808,7 +697,7 @@ def test_load_data_gates(exp_tab_factory):
         analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
     )
     tab = exp_tab_factory("tab-1", ctrl, caps_load)
-    snap_idle = _snapshot(
+    snap_idle = make_tab_snapshot(
         "tab-1",
         has_run=False,
         analysis_mode=AnalysisMode.FIT,
@@ -819,7 +708,7 @@ def test_load_data_gates(exp_tab_factory):
     )
     tab.attach(snap_idle, MagicMock())
     assert tab._save_center.is_load_enabled() is True
-    snap_no_ctx = _snapshot(
+    snap_no_ctx = make_tab_snapshot(
         "tab-1",
         has_run=False,
         analysis_mode=AnalysisMode.FIT,
@@ -830,7 +719,7 @@ def test_load_data_gates(exp_tab_factory):
     )
     tab.update_interaction_state(snap_no_ctx)
     assert tab._save_center.is_load_enabled() is False
-    snap_busy = _snapshot(
+    snap_busy = make_tab_snapshot(
         "tab-1",
         has_run=False,
         analysis_mode=AnalysisMode.FIT,
@@ -845,7 +734,7 @@ def test_load_data_gates(exp_tab_factory):
         analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
     )
     tab2 = exp_tab_factory("tab-2", ctrl, caps_no)
-    snap2 = _snapshot(
+    snap2 = make_tab_snapshot(
         "tab-2",
         has_run=True,
         analysis_mode=AnalysisMode.FIT,
@@ -860,25 +749,24 @@ def test_load_data_gates(exp_tab_factory):
     _require_qapp().processEvents()
 
 
-def test_remote_save_completion_refreshes_state_owned_status(exp_tab_factory, qapp):
+def test_remote_save_completion_refreshes_state_owned_status(qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
+    ctrl = _mock_ctrl()
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     ctrl.has_tab.return_value = True
     window = MainWindow(ctrl)
-    snap = _snapshot("tab-1", has_run=True, data_path="/gui.h5")
-    assert snap.capabilities is not None
-    tab = exp_tab_factory("tab-1", _mock_ctrl(), snap.capabilities)
-    tab.attach(snap, MagicMock())
-    window._tab_widgets["tab-1"] = tab
-    center = tab._save_center
+    snap = make_tab_snapshot("tab-1", has_run=True, data_path="/gui.h5")
+    ctrl.get_tab_snapshot.return_value = snap
+    window.add_tab_widget("tab-1", "fake")
+    tab = window.findChild(ExpTabWidget)
+    assert tab is not None
+    center = tab.findChild(ArtifactSaveCenter)
+    assert center is not None
     assert center.status_text(_DATA) == "○ NOT SAVED"
 
-    ctrl.get_tab_snapshot.return_value = _snapshot(
+    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
         "tab-1", has_run=True, data_path="/gui.h5", data_status=SaveStatus.SAVED
     )
     window.handle_save_data_finished(
@@ -903,7 +791,7 @@ def test_comment_edit_updates_shared_draft_without_touching_paths(
         analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
     )
     tab = exp_tab_factory("tab-1", ctrl, caps)
-    snap = _snapshot("tab-1", has_run=True)
+    snap = make_tab_snapshot("tab-1", has_run=True)
     save = snap.save
     assert save is not None
     ctrl.get_tab_snapshot.return_value = snap
@@ -1157,7 +1045,7 @@ def test_analysis_save_requires_figure(exp_tab_factory):
         analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
     )
     # Result present but figure absent -> NOT saveable; data not present to isolate
-    snap_no_fig = _snapshot(
+    snap_no_fig = make_tab_snapshot(
         "tab-1",
         has_run=False,
         has_analysis=True,
@@ -1173,7 +1061,7 @@ def test_analysis_save_requires_figure(exp_tab_factory):
     assert not center.has_artifact(_FIT)
     assert not center.is_save_all_enabled()
     # With figure, enabled
-    snap_with_fig = _snapshot(
+    snap_with_fig = make_tab_snapshot(
         "tab-1",
         has_run=False,
         has_analysis=True,
@@ -1186,7 +1074,7 @@ def test_analysis_save_requires_figure(exp_tab_factory):
     assert center.is_save_enabled(_FIT)
     assert center.is_save_all_enabled()
     # When data also present, Save All remains enabled even if analysis figure missing, but analysis save stays disabled
-    snap_mixed = _snapshot(
+    snap_mixed = make_tab_snapshot(
         "tab-1",
         has_run=True,
         has_analysis=True,
@@ -1209,7 +1097,7 @@ def test_tab_close_query_reads_only_data_artifact(exp_tab_factory):
         _mock_ctrl(),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
-    tab.attach(_snapshot("tab-1", has_run=False), MagicMock())
+    tab.attach(make_tab_snapshot("tab-1", has_run=False), MagicMock())
     assert tab.has_unsaved_data() is False
 
     for status, expected in (
@@ -1218,7 +1106,7 @@ def test_tab_close_query_reads_only_data_artifact(exp_tab_factory):
         (SaveStatus.SAVED, False),
     ):
         tab.update_interaction_state(
-            _snapshot(
+            make_tab_snapshot(
                 "tab-1",
                 has_run=True,
                 has_analysis=True,

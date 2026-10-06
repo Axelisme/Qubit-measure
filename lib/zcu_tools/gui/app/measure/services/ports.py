@@ -212,7 +212,7 @@ class ContextWritePort(Protocol):
     """The single authority for ml/md content writes (ADR-0067).
 
     Sources holding an un-lowered ``CfgSchema`` (editor commit, writeback apply,
-    inspect save, create_from_role) write through this port; ContextService
+    inspect save, create_from_template) write through this port; ContextService
     lowers (app-local ``schema_to_raw_dict`` with the live md, so callers cannot
     forget md)
     + registers, and on success bumps the ``context`` version + emits
@@ -326,7 +326,7 @@ class TabResultWritePort(Protocol):
     satisfies it structurally (no inheritance change)."""
 
     def clear_tab_results(self, tab_id: str) -> RetiredPaneResources: ...
-    def set_tab_running(self, tab_id: str, running: bool) -> None: ...
+    def set_tab_running(self, tab_id: str, *, running: bool) -> None: ...
     def update_tab_result(
         self, tab_id: str, result: object, *, source_operation_id: int | None = None
     ) -> RetiredPaneResources: ...
@@ -339,7 +339,7 @@ class TabAnalyzeWritePort(Protocol):
     only implementer. Result replacement methods return detached resources for
     post-commit draft cleanup."""
 
-    def set_tab_analyzing(self, tab_id: str, analyzing: bool) -> None: ...
+    def set_tab_analyzing(self, tab_id: str, *, analyzing: bool) -> None: ...
     def update_tab_analyze(
         self,
         tab_id: str,

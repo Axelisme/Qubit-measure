@@ -16,7 +16,7 @@ data needed to analyze that run as a whole.
 _Avoid_: output blob, save payload
 
 **Complete Experiment Result**:
-An experiment result whose required dataset roles are all present. Normal
+An experiment result whose required data variables are all present. Normal
 analysis and loading operate on complete experiment results.
 _Avoid_: partial result, best-effort result
 
@@ -32,7 +32,7 @@ _Avoid_: HDF5 blob, data file
 
 **Experiment Data File**:
 The canonical persisted file for one experiment result. If the experiment result
-has multiple dataset roles, they belong in the same experiment data file.
+has multiple data variables, they belong in the same experiment data file.
 _Avoid_: sidecar file, companion file, workaround file
 
 **Legacy Measurement Artifact**:
@@ -41,18 +41,17 @@ language. Legacy artifacts may be migrated, but they are not a normal loading
 format.
 _Avoid_: supported old format, compatibility path
 
-**Dataset Role**:
-The semantic role of a member dataset inside a grouped experiment dataset, as
-defined by that experiment result. Each dataset role may have its own measurement
-shape; shared experiment result identity, not shared shape, is what makes the
-members a group.
+**Data Variable**:
+A named measured variable within an experiment result, corresponding to a member
+of xarray's `data_vars`. Each data variable may have its own axes and shape;
+shared experiment result identity, not shared shape, makes the variables a group.
 _Avoid_: file suffix, member name
 
 **Grouped Experiment Dataset**:
 A set of Labber datasets that together represent one experiment result. The
 group, not any individual member, is the canonical persisted measurement result;
 all member datasets are peers under the same experiment result identity and each
-member has a dataset role.
+member represents a data variable.
 _Avoid_: grouped persistence, multi-file workaround, sidecar artifact
 
 **Flux-Dependence Analysis**:
@@ -103,6 +102,11 @@ _Avoid_: lease, operation handle
 操作啟動時取得、在終局釋放的動態互斥佔用。
 它與操作追蹤用的 handle 不同，也不代替請求前置條件檢查。
 _Avoid_: permit, operation handle
+
+**ModuleLibrary Template**:
+A named starting shape and defaults for creating a new module or waveform entry.
+Choosing a template creates an independent entry that can then be edited.
+_Avoid_: experiment role, module role catalog
 
 **SessionEnv**:
 GUI session 目前生效的實驗 context 與 live 連線資源。

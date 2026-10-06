@@ -1,10 +1,18 @@
 # v2 experiment authoring
 
-**Last updated:** 2026-10-05，實驗定義搬遷
+**Last updated:** 2026-10-05，使用者實驗測試規則
 
 `zcu_lab/v2/` 擁有使用 program/v2 的具體實驗。每個實驗的 `core.py` 保存 cfg、Result、run 與分析政策。共同實驗介面、Result 保存映射與 cfg 組裝見[框架 README](../../lib/zcu_tools/experiment/README.md)。本頁保留實驗家族、具體 workflow 與撰寫慣例。
 
 一般實驗以 [runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 的 `SignalBuffer`、`Schedule` 與 `ProgramBuilder` 編排 host loop 與 program acquire。`autofluxdep`、`overnight` 的 executor 使用同一 runtime 的 `ResultTree` 與 `MultiMeasurementExecutor`；runtime 的 buffer、stop、retry 和 lifecycle 機制見其文件。
+
+## 使用者實驗的測試
+
+`zcu_lab` 使用通用、參數化契約測試逐一走過 registry，確認實驗可載入、spec 宣告有效、adapter 符合框架契約。新增或移除 registry entry 就更新測試選集，不另維護一份具體實驗清單。這讓使用者修改實驗時，不必同步修改綁定其實作的測試。
+
+不為個別實驗新增 cfg、fit 數值或 acquisition 細節的測試。需要測試的邏輯，先抽成具有公開介面的共用工具，依責任放在 `zcu_lab/v2/_support/` 或 framework，再測工具的 seam 與對外契約。既有的使用者指定 AllXY、ZigZag 與 ZigZagScan round-trip 案例保留，不據此新增其他實驗的特例。
+
+案例歸屬、fixture 與搬遷規則見 [tests README](../../tests/README.md)。
 
 ---
 
@@ -132,11 +140,11 @@ Singleshot T1／T1WithTone／T1WithToneSweep 使用 explicit RunContext，unifor
 
 ### 版本實驗的資料形狀
 
-`PersistableExperiment`、`AxesSpec`、inner-first 軸序及 grouped roles 的共同映射見[父層 README](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。以下保留 v2 實驗的具體資料形狀。
+`PersistableExperiment`、`AxesSpec`、inner-first 軸序及 grouped variables 的共同映射見[父層 README](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。以下保留 v2 實驗的具體資料形狀。
 
-- **grouped experiment roles**：`CPMG_Exp` 使用 roles `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 roles `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 roles `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` role unit 為 `A` 不是 canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。這些 runtime `load()` 都只接受 complete grouped HDF5；legacy `.npz` 或 sidecar 不是 runtime 可載入格式；repo 不再提供轉換腳本。
+- **grouped experiment variables**：`CPMG_Exp` 使用 variables `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 variables `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 variables `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` variable unit 為 `A` 不是 canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。這些 runtime `load()` 都只接受 complete grouped HDF5；legacy `.npz` 或 sidecar 不是 runtime 可載入格式；repo 不再提供轉換腳本。
 - **legacy single-file**：舊 Labber HDF5 的 `Frequency` `MHz/Hz`、`Yoko` flux 軸或 `ADC unit` signal channel 不符合當前 `AXES_SPEC`，不由 runtime/GUI 隱式轉換。`onetone/flux_dep` 的 canonical axes 是 `(freqs, values)`，對應 Result-native `signals.shape == (Nflux, Nfreq)`。
-- **single-role 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡及phase offset的Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料；MIST `power` / `freq` / `pre_freq` 把 `g/e` population components 視為 `population_states=[0, 1]` axis，canonical shape 為 `(Nsweep, 2)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 2)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 2)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 2)`，只存 Result 的 g/e components，`other` 由 analysis 推導。這類 homogeneous Result 存成單一 `.hdf5`，離散狀態不是 Dataset Role，也不再拆成多個 sidecar artifact；legacy artifact 不由 runtime 載入；舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向也不在 runtime 重排。
+- **single-variable 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡及phase offset的Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料；MIST `power` / `freq` / `pre_freq` 把 `g/e` population components 視為 `population_states=[0, 1]` axis，canonical shape 為 `(Nsweep, 2)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 2)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 2)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 2)`，只存 Result 的 g/e components，`other` 由 analysis 推導。這類 homogeneous Result 存成單一 `.hdf5`，離散狀態不是 Data Variable，也不再拆成多個 sidecar artifact；legacy artifact 不由 runtime 載入；舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向也不在 runtime 重排。
 
 Singleshot MIST 的 Freq／Power／PreFreq／FreqPower 使用 explicit RunContext，回傳純 Result。所有 classification 校準值屬於 typed cfg。同步 analyze 接 RunRecord、對應 AnalyzeOptions 與 Plots，允許 cfg=None，只發布 fit 圖。Power 支援 photon 軸與 log scale；FreqPower 不宣告未實作的軸選項。單 sweep 即時圖使用 measurement，二維掃描的 Ground／Excited／Other 熱圖各自具名；canonical population shapes 不變。
 

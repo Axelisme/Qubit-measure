@@ -87,12 +87,6 @@ def h_operation_await(
         ) from exc
     if result.reason == "timeout":
         return {"reason": "timeout"}
-    if result.reason == "user_feedback":
-        # Non-terminal: operation still running; feedback delivered to the agent.
-        return {
-            "reason": "user_feedback",
-            "feedback": result.feedback,
-        }
     outcome = result.outcome
     if outcome is None:
         raise RuntimeError("completed operation is missing its outcome")
@@ -100,7 +94,7 @@ def h_operation_await(
         # Structured cancellation: return status + optional Stop reason so the
         # agent gets the full picture in one reply (ADR-0066).
         # The feedback field is only present when a Stop reason was latched
-        # (i.e. "Send & Stop" was used); a plain cancel has no feedback.
+        # (i.e. stop(reason) was used); a plain cancel has no feedback.
         payload: dict[str, object] = {"reason": "completed", "status": "cancelled"}
         if result.feedback:
             payload["feedback"] = result.feedback

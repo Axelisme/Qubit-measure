@@ -308,32 +308,32 @@ def h_context_ml_get(
 def h_context_ml_list_roles(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """List the experiment-role templates available for create_from_role."""
+    """Project template metadata through the unchanged context.ml_list_roles RPC."""
     del params
-    catalog = adapter.ctrl.get_role_catalog()
+    catalog = adapter.ctrl.get_template_catalog()
     return {"roles": list(catalog.list_meta())}
 
 
 def h_context_ml_create_from_role(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Create a blank ml module/waveform from a named role and register it.
+    """Create a ModuleLibrary entry from the template ID in wire role_id.
 
     One-shot: seeds md-linked defaults (lowered against the live md), writes ml.
     Edit afterwards via editor.new(from_name=...).
     """
-    role_id = str(params["role_id"])
+    template_id = str(params["role_id"])
     name = str(params["name"])
-    # The item kind is a property of the role, not an independent agent input —
+    # The item kind is a property of the template, not an independent agent input —
     # derive it from role_id so the agent cannot pass a mismatching pair. An
     # unknown role_id fails fast as invalid_params; a missing catalog (no project)
     # surfaces as precondition_failed (mirror h_context_ml_list_roles).
     try:
-        item_kind = adapter.ctrl.get_role_catalog().get(role_id).item_kind
+        item_kind = adapter.ctrl.get_template_catalog().get(template_id).item_kind
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:
-        adapter.ctrl.create_from_role(item_kind, role_id, name)
+        adapter.ctrl.create_from_template(item_kind, template_id, name)
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {"created": name}

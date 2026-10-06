@@ -1,4 +1,4 @@
-"""Autofluxdep Result role/schema Labber IO tests."""
+"""Autofluxdep Result variable/schema Labber IO tests."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from zcu_tools.datafile import (
     Axis,
     LabberPayload,
     StreamingGroupedLabberWriter,
-    StreamingLabberRoleSpec,
+    StreamingLabberVariableSpec,
     load_labber_data,
     open_streaming_grouped_labber_data,
 )
@@ -29,20 +29,20 @@ from zcu_tools.gui.app.autofluxdep.services.labber_browser_export import (
     export_qubit_freq_labber_browser_sidecar,
 )
 from zcu_tools.gui.app.autofluxdep.services.result_io import (
-    ROLE_BEST_FREQ,
-    ROLE_FIT_CURVE,
-    ROLE_FIT_FREQ,
-    ROLE_FIT_VALUE,
-    ROLE_PREDICT_FREQ,
-    ROLE_SIGNAL,
-    ROLE_SNR,
+    VARIABLE_BEST_FREQ,
+    VARIABLE_FIT_CURVE,
+    VARIABLE_FIT_FREQ,
+    VARIABLE_FIT_VALUE,
+    VARIABLE_PREDICT_FREQ,
+    VARIABLE_SIGNAL,
+    VARIABLE_SNR,
     load_node_result,
     read_result_row,
     result_declaration,
     result_progress_summary,
-    result_role_specs,
-    result_row_role_names,
     result_row_summary,
+    result_row_variable_names,
+    result_variable_specs,
     write_result_row,
 )
 
@@ -145,7 +145,7 @@ def test_external_tagged_result_uses_same_archive_contract(tmp_path):
     assert isinstance(result, FrequencySweepResult)
 
     path = str(tmp_path / "foreign")
-    specs = result_role_specs("foreign", "user_measurement", result)
+    specs = result_variable_specs("foreign", "user_measurement", result)
     with open_streaming_grouped_labber_data(path, specs) as writer:
         write_result_row(writer, "foreign", "user_measurement", result, 1)
         writer.flush()
@@ -189,7 +189,7 @@ def test_unsupported_class_kind_fast_fails(declaration):
 
 def test_tagged_instance_without_arrays_fast_fails():
     with pytest.raises(TypeError, match="Result|Protocol|field"):
-        result_role_specs("missing", "custom", _FrequencyDeclaration())
+        result_variable_specs("missing", "custom", _FrequencyDeclaration())
 
 
 @pytest.mark.parametrize(
@@ -200,7 +200,7 @@ def test_result_io_rejects_inconsistent_signal_shape(result_factory):
     result = result_factory()
     result.signal = result.signal[:1]
     with pytest.raises(ValueError, match="shape"):
-        result_role_specs("bad", "custom", result)
+        result_variable_specs("bad", "custom", result)
 
 
 @pytest.mark.parametrize(
@@ -211,7 +211,7 @@ def test_result_io_rejects_non_float64_signal(result_factory):
     result = result_factory()
     result.signal = result.signal.astype(np.float32)
     with pytest.raises(TypeError, match="float64|dtype"):
-        result_role_specs("bad", "custom", result)
+        result_variable_specs("bad", "custom", result)
 
 
 @pytest.mark.parametrize("idx", [-1, 2])
@@ -221,7 +221,7 @@ def test_result_row_rejects_out_of_range_index(idx):
         result_row_summary(result, idx)
 
 
-def test_qubit_freq_result_role_specs_and_row_roundtrip(tmp_path):
+def test_qubit_freq_result_variable_specs_and_row_roundtrip(tmp_path):
     result = QubitFreqResult.allocate(
         np.array([0.0, 0.5], dtype=float),
         np.array([-5.0, 0.0, 5.0], dtype=float),
@@ -232,8 +232,8 @@ def test_qubit_freq_result_role_specs_and_row_roundtrip(tmp_path):
     result.predict_freq[1] = 5000.0
     result.snr[1] = 42.0
 
-    specs = result_role_specs("qf", "qubit_freq", result, flux_unit="A")
-    assert [str(spec.role) for spec in specs] == [
+    specs = result_variable_specs("qf", "qubit_freq", result, flux_unit="A")
+    assert [str(spec.variable) for spec in specs] == [
         "signal",
         "fit_curve",
         "fit_freq",
@@ -245,14 +245,16 @@ def test_qubit_freq_result_role_specs_and_row_roundtrip(tmp_path):
 
     path = str(tmp_path / "qf")
     with open_streaming_grouped_labber_data(path, specs) as writer:
-        roles = write_result_row(writer, "qf", "qubit_freq", result, 1)
+        variables = write_result_row(writer, "qf", "qubit_freq", result, 1)
         writer.flush()
 
-    assert ROLE_SIGNAL in {type(ROLE_SIGNAL)(role) for role in roles}
+    assert VARIABLE_SIGNAL in {
+        type(VARIABLE_SIGNAL)(variable) for variable in variables
+    }
     row = read_result_row(path, "qubit_freq", 1)
-    np.testing.assert_allclose(row[ROLE_SIGNAL], [1.0, 2.0, 3.0])
-    assert row[ROLE_FIT_FREQ] == 5001.0
-    assert row[ROLE_PREDICT_FREQ] == 5000.0
+    np.testing.assert_allclose(row[VARIABLE_SIGNAL], [1.0, 2.0, 3.0])
+    assert row[VARIABLE_FIT_FREQ] == 5001.0
+    assert row[VARIABLE_PREDICT_FREQ] == 5000.0
 
     loaded = load_node_result(path, "qubit_freq")
     assert isinstance(loaded, FrequencySweepResult)
@@ -276,15 +278,15 @@ def test_sweep1d_result_row_roundtrip(tmp_path):
     result.snr[0] = 5.0
 
     path = str(tmp_path / "sweep1d")
-    specs = result_role_specs("t1", "t1", result)
+    specs = result_variable_specs("t1", "t1", result)
     with open_streaming_grouped_labber_data(path, specs) as writer:
-        roles = write_result_row(writer, "t1", "t1", result, 0)
+        variables = write_result_row(writer, "t1", "t1", result, 0)
         writer.flush()
 
-    assert "fit_value" in roles
+    assert "fit_value" in variables
     row = read_result_row(path, "t1", 0)
-    np.testing.assert_allclose(row[ROLE_SIGNAL], [0.1, 0.2])
-    assert row[ROLE_FIT_VALUE] == 12.0
+    np.testing.assert_allclose(row[VARIABLE_SIGNAL], [0.1, 0.2])
+    assert row[VARIABLE_FIT_VALUE] == 12.0
     loaded = load_node_result(path, "t1")
     assert isinstance(loaded, SweepResult1D)
     assert loaded.x_label == "delay time (us)"
@@ -303,15 +305,15 @@ def test_sweep2d_result_row_roundtrip(tmp_path):
     result.best_gain[1] = 0.2
 
     path = str(tmp_path / "sweep2d")
-    specs = result_role_specs("ro", "ro_optimize", result)
+    specs = result_variable_specs("ro", "ro_optimize", result)
     with open_streaming_grouped_labber_data(path, specs) as writer:
-        roles = write_result_row(writer, "ro", "ro_optimize", result, 1)
+        variables = write_result_row(writer, "ro", "ro_optimize", result, 1)
         writer.flush()
 
-    assert set(roles) == {"signal", "best_freq", "best_gain"}
+    assert set(variables) == {"signal", "best_freq", "best_gain"}
     row = read_result_row(path, "ro_optimize", 1)
-    np.testing.assert_allclose(row[ROLE_SIGNAL], result.signal[1])
-    assert row[ROLE_BEST_FREQ] == 6001.0
+    np.testing.assert_allclose(row[VARIABLE_SIGNAL], result.signal[1])
+    assert row[VARIABLE_BEST_FREQ] == 6001.0
     loaded = load_node_result(path, "ro_optimize")
     assert isinstance(loaded, SweepResult2D)
     np.testing.assert_allclose(loaded.gain, result.gain)
@@ -334,11 +336,11 @@ def test_result_declaration_contract_converges_all_public_paths(
     declaration = result_declaration(result)
     row_idx = 1
 
-    specs = result_role_specs("node", node_type, result)
-    declared_roles = {str(role) for role in declaration.roles}
+    specs = result_variable_specs("node", node_type, result)
+    declared_variables = {str(variable) for variable in declaration.variables}
 
-    assert {str(spec.role) for spec in specs} == declared_roles
-    assert set(result_row_role_names(result, row_idx)) == declared_roles
+    assert {str(spec.variable) for spec in specs} == declared_variables
+    assert set(result_row_variable_names(result, row_idx)) == declared_variables
     assert set(result_row_summary(result, row_idx)) == set(
         declaration.summary_scalar_attrs
     )
@@ -351,23 +353,23 @@ def test_result_declaration_contract_converges_all_public_paths(
 
     path = str(tmp_path / f"{node_type}_contract")
     with open_streaming_grouped_labber_data(path, specs) as writer:
-        roles = write_result_row(writer, "node", node_type, result, row_idx)
+        variables = write_result_row(writer, "node", node_type, result, row_idx)
         writer.flush()
 
-    assert set(roles) == declared_roles
+    assert set(variables) == declared_variables
     loaded = load_node_result(path, node_type)
     assert isinstance(loaded, expected_type)
     assert result_declaration(loaded).kind == declaration.kind
-    assert {str(role) for role in read_result_row(path, node_type, row_idx)} == (
-        declared_roles
-    )
+    assert {
+        str(variable) for variable in read_result_row(path, node_type, row_idx)
+    } == (declared_variables)
 
 
-def test_result_role_specs_unknown_result_fast_fails():
+def test_result_variable_specs_unknown_result_fast_fails():
     with pytest.raises(TypeError, match="unsupported autofluxdep Result"):
-        result_role_specs("bad", "bad", object())
+        result_variable_specs("bad", "bad", object())
     with pytest.raises(TypeError, match="unsupported autofluxdep Result"):
-        result_row_role_names(object(), 0)
+        result_row_variable_names(object(), 0)
     writer = cast(StreamingGroupedLabberWriter, object())
     with pytest.raises(TypeError, match="unsupported autofluxdep Result"):
         write_result_row(writer, "bad", "bad", object(), 0)
@@ -396,42 +398,42 @@ def test_result_progress_summary_counts_raw_rows_separately_from_fits():
     assert progress["fit_summary"]["last_fit_freq"] == pytest.approx(5000.0)
 
 
-def _save_streaming_payloads(path: str, roles: dict[str, LabberPayload]) -> str:
+def _save_streaming_payloads(path: str, variables: dict[str, LabberPayload]) -> str:
     specs = [
-        StreamingLabberRoleSpec(
-            role,
+        StreamingLabberVariableSpec(
+            variable,
             payload.data.name,
             payload.data.unit,
             payload.axes,
             np.asarray(payload.z).shape,
         )
-        for role, payload in roles.items()
+        for variable, payload in variables.items()
     ]
     with open_streaming_grouped_labber_data(path, specs):
         pass
     return path + ".hdf5"
 
 
-def test_load_node_result_rejects_mismatched_role_shape(tmp_path):
+def test_load_node_result_rejects_mismatched_variable_shape(tmp_path):
     flux = Axis("Flux device value", "", np.array([0.0, 1.0], dtype=float))
     detune = Axis("Detune", "MHz", np.array([-1.0, 0.0, 1.0], dtype=float))
     short_detune = Axis("Detune", "MHz", np.array([-1.0, 0.0], dtype=float))
     path = _save_streaming_payloads(
         str(tmp_path / "bad_shape"),
         {
-            ROLE_SIGNAL: LabberPayload(
+            VARIABLE_SIGNAL: LabberPayload(
                 Axis("Signal", "a.u.", np.zeros((2, 3))), [detune, flux]
             ),
-            ROLE_FIT_CURVE: LabberPayload(
+            VARIABLE_FIT_CURVE: LabberPayload(
                 Axis("Fit curve", "a.u.", np.zeros((2, 2))), [short_detune, flux]
             ),
-            ROLE_FIT_FREQ: LabberPayload(
+            VARIABLE_FIT_FREQ: LabberPayload(
                 Axis("Fit frequency", "MHz", np.zeros(2)), [flux]
             ),
-            ROLE_PREDICT_FREQ: LabberPayload(
+            VARIABLE_PREDICT_FREQ: LabberPayload(
                 Axis("Predicted frequency", "MHz", np.zeros(2)), [flux]
             ),
-            ROLE_SNR: LabberPayload(Axis("SNR", "a.u.", np.zeros(2)), [flux]),
+            VARIABLE_SNR: LabberPayload(Axis("SNR", "a.u.", np.zeros(2)), [flux]),
         },
     )
 
@@ -439,26 +441,26 @@ def test_load_node_result_rejects_mismatched_role_shape(tmp_path):
         load_node_result(path, "qubit_freq")
 
 
-def test_load_node_result_rejects_mismatched_role_axis(tmp_path):
+def test_load_node_result_rejects_mismatched_variable_axis(tmp_path):
     flux = Axis("Flux device value", "", np.array([0.0, 1.0], dtype=float))
     shifted_flux = Axis("Flux device value", "", np.array([0.0, 2.0], dtype=float))
     detune = Axis("Detune", "MHz", np.array([-1.0, 0.0, 1.0], dtype=float))
     path = _save_streaming_payloads(
         str(tmp_path / "bad_axis"),
         {
-            ROLE_SIGNAL: LabberPayload(
+            VARIABLE_SIGNAL: LabberPayload(
                 Axis("Signal", "a.u.", np.zeros((2, 3))), [detune, flux]
             ),
-            ROLE_FIT_CURVE: LabberPayload(
+            VARIABLE_FIT_CURVE: LabberPayload(
                 Axis("Fit curve", "a.u.", np.zeros((2, 3))), [detune, flux]
             ),
-            ROLE_FIT_FREQ: LabberPayload(
+            VARIABLE_FIT_FREQ: LabberPayload(
                 Axis("Fit frequency", "MHz", np.zeros(2)), [shifted_flux]
             ),
-            ROLE_PREDICT_FREQ: LabberPayload(
+            VARIABLE_PREDICT_FREQ: LabberPayload(
                 Axis("Predicted frequency", "MHz", np.zeros(2)), [flux]
             ),
-            ROLE_SNR: LabberPayload(Axis("SNR", "a.u.", np.zeros(2)), [flux]),
+            VARIABLE_SNR: LabberPayload(Axis("SNR", "a.u.", np.zeros(2)), [flux]),
         },
     )
 

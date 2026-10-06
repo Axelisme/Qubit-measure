@@ -8,7 +8,7 @@ operation token (= ``operation_id``) and exposes the three async verbs over it:
 waiter still returns.
 
 Cross-thread interaction uses a per-operation ``OperationChannel`` (ADR-0066):
-a single ordered FIFO carrying typed events (Settled / Message / Stop).
+a single ordered FIFO carrying typed events (Settled / Stop).
 This replaces the ADR-0023 FeedbackInbox + poll-loop await-combine: signal
 ordering is guaranteed by the single queue (ordered within this channel), and
 ``Queue.get(timeout)`` wakes immediately on enqueue (no 2s poll delay).
@@ -54,7 +54,7 @@ _DONE_EVENT_LIMIT = 32
 OperationStatus = Literal["pending", "finished", "failed", "cancelled"]
 
 # Reason tag for AwaitResult: what caused await_outcome to return.
-AwaitReason = Literal["completed", "user_feedback", "timeout"]
+AwaitReason = Literal["completed", "timeout"]
 
 
 @dataclass(frozen=True)
@@ -75,15 +75,12 @@ class OperationOutcome:
 class AwaitResult:
     """The result of one ``await_outcome`` call (ADR-0066).
 
-    ``reason`` distinguishes the three return paths:
-    - ``'completed'``: the operation settled (terminal). ``outcome`` is set; a
-      cancelled outcome may also carry ``feedback`` (a user "Send & Stop" message
-      folded into the cancellation, so the agent gets one {cancelled, feedback}).
-    - ``'user_feedback'``: a feedback string arrived before the op settled (non-
-      terminal). ``feedback`` is set; the operation is still running and the handle
-      can be awaited again.
-    - ``'timeout'``: the bounded wait elapsed without the op settling or feedback
-      arriving (non-terminal). The operation is still running.
+    ``reason`` distinguishes two return paths:
+    - ``'completed'``: the operation settled. ``outcome`` is set; a cancelled
+      outcome may carry ``feedback``, the accumulated Stop reason.
+    - ``'timeout'``: the bounded wait elapsed without settling. The operation
+      remains running, ``outcome`` and ``feedback`` are None.
+    A completed result without an outcome raises ValueError.
     """
 
     reason: AwaitReason
@@ -93,10 +90,6 @@ class AwaitResult:
     def __post_init__(self) -> None:
         if self.reason == "completed" and self.outcome is None:
             raise ValueError("AwaitResult with reason='completed' must have outcome")
-        if self.reason == "user_feedback" and not self.feedback:
-            raise ValueError(
-                "AwaitResult with reason='user_feedback' must have feedback"
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -117,20 +110,13 @@ class Settled:
 
 
 @dataclass(frozen=True)
-class Message:
-    """A user nudge: op continues running; agent receives user_feedback."""
-
-    text: str
-
-
-@dataclass(frozen=True)
 class Stop:
     """A cancel request with an optional reason string."""
 
     reason: str | None
 
 
-ChannelEvent = Settled | Message | Stop
+ChannelEvent = Settled | Stop
 
 
 def _join_reasons(a: str | None, b: str | None) -> str | None:
@@ -149,7 +135,6 @@ class OperationChannel:
 
     Producer interface (non-blocking, any thread):
     - ``settle(outcome)`` — set-once terminal; idempotent.
-    - ``message(text)`` — nudge; ignored when text is blank.
     - ``stop(reason)`` — enqueue Stop FIRST, then invoke cancel_hook.
       Order is critical: the Settled event from the hook lands after Stop,
       so the consumer folds reason correctly (see ADR-0066 ordering).
@@ -173,7 +158,7 @@ class OperationChannel:
         """True when a cancel hook is registered (this op is cancellable).
 
         Pure read — never triggers the hook; used by
-        OperationHandles.has_cancel_hook() to gate the 'Send & Stop' button
+        OperationHandles.has_cancel_hook() for operation cancellation checks
         without any op-kind knowledge in this layer (ADR-0066).
         """
         return self._cancel_hook is not None
@@ -193,12 +178,6 @@ class OperationChannel:
                 return  # idempotent: already settled
             self._settled = outcome
         self._q.put(Settled(outcome))
-
-    def message(self, text: str) -> None:
-        """Enqueue a nudge; blank text is ignored (same rule as old FeedbackInbox)."""
-        if not text.strip():
-            return
-        self._q.put(Message(text))
 
     def stop(self, reason: str | None) -> None:
         """Request cancellation: enqueue Stop BEFORE invoking cancel_hook.
@@ -232,21 +211,16 @@ class OperationChannel:
         - ``Settled`` → completed (feedback only when status=='cancelled' and a
           Stop reason was latched).
         - ``Stop(reason)`` → latch reason into _pending_stop_reason, keep going.
-        - ``Message(text)`` → if a cancel is in progress (_pending_stop_reason
-          set): fold into the reason, keep going; else return user_feedback
-          (non-terminal — a pure nudge, op continues, agent may re-await).
         - timeout → return timeout.
 
-        Already-drained events are processed non-blockingly first, so a nudge
-        queued *between* two awaits is delivered (not silently dropped), and a
-        terminally-settled channel returns idempotently without blocking.
+        Queued events are processed non-blockingly first so pending Stop
+        reasons are folded before the terminal fast-path. A terminal channel
+        can be consumed again without blocking.
         """
         deadline = time.monotonic() + timeout
 
         while True:
-            # 1) Drain immediately-available events in arrival order. A pending
-            #    nudge (enqueued between awaits) surfaces here rather than being
-            #    eaten by the terminal fast-path below.
+            # 1) Drain queued Stop reasons before the terminal fast-path.
             try:
                 event = self._q.get_nowait()
             except queue.Empty:
@@ -273,30 +247,20 @@ class OperationChannel:
             result = self._process_event(event)
             if result is not None:
                 return result
-            # else: latched a Stop / folded a Message — loop.
+            # else: latched a Stop — loop.
 
     def _process_event(self, event: ChannelEvent) -> AwaitResult | None:
-        """Fold one event. Returns an AwaitResult to return now, or None to keep
-        consuming (a latched Stop or a folded-in Message)."""
+        """Fold a terminal event or latch a Stop reason and keep consuming."""
         if isinstance(event, Settled):
             return self._make_completed(event.outcome)
-        if isinstance(event, Stop):
-            self._pending_stop_reason = _join_reasons(
-                self._pending_stop_reason, event.reason
-            )
-            return None
-        # Message: fold into the reason while a cancel is in progress, else a
-        # pure non-terminal nudge.
-        if self._pending_stop_reason is not None:
-            self._pending_stop_reason = _join_reasons(
-                self._pending_stop_reason, event.text
-            )
-            return None
-        return AwaitResult(reason="user_feedback", feedback=event.text)
+        self._pending_stop_reason = _join_reasons(
+            self._pending_stop_reason, event.reason
+        )
+        return None
 
     def _make_completed(self, outcome: OperationOutcome) -> AwaitResult:
         """Build a completed AwaitResult; attach pending_stop_reason only for
-        cancelled outcomes (a 'Send & Stop' surfaces as {cancelled, feedback})."""
+        cancelled outcomes (Stop surfaces as {cancelled, feedback})."""
         feedback: str | None = None
         if outcome.status == "cancelled" and self._pending_stop_reason is not None:
             feedback = self._pending_stop_reason
@@ -417,20 +381,11 @@ class OperationHandles:
             logger.info("operation cancel: token=%d", token)
             record.channel.stop(None)
 
-    def message(self, token: int, text: str) -> None:
-        """Deliver a nudge message to the operation's awaiter (non-terminal).
-
-        A no-op for an unknown/settled token — the message has nowhere to go.
-        """
-        record = self._live.get(token)
-        if record is not None:
-            record.channel.message(text)
-
     def stop(self, token: int, reason: str | None = None) -> None:
         """Request cancel with an optional reason string.
 
         The reason string surfaces in the AwaitResult.feedback of the
-        subsequent completed(cancelled) result (Send & Stop semantic).
+        subsequent completed(cancelled) result.
         A no-op for an unknown/settled token.
         """
         record = self._live.get(token)
@@ -447,16 +402,13 @@ class OperationHandles:
         return tokens
 
     def await_outcome(self, token: int, timeout: float) -> AwaitResult | None:
-        """Block until the token settles or a wakeup condition fires.
+        """Block until the token settles or the timeout in seconds elapses.
 
         Thread-safe; for off-main blocking handlers. Returns:
         - ``AwaitResult(reason='completed', outcome=<outcome>)`` when the
           operation settles (terminal). Never None on this path.
-        - ``AwaitResult(reason='user_feedback', feedback=<text>)`` when a user
-          feedback string arrives before the op settles (non-terminal). The
-          operation is still running; the caller may re-await the same token.
         - ``AwaitResult(reason='timeout', ...)`` when the bounded ``timeout``
-          elapses without completion or feedback (non-terminal).
+          elapses without completion (non-terminal).
         - ``None`` is never returned (kept as a contract break note; all callers
           must handle AwaitResult).
 
@@ -507,9 +459,8 @@ class OperationHandles:
         reading the active token and this call is still reachable). Returns
         False for unknown tokens — they have no hook by definition.
 
-        Used by Controller.can_cancel_active_operation() to gate the
-        'Send & Stop' button without any op-kind knowledge in this layer
-        (ADR-0066). Pure read — never triggers the hook.
+        Used by OperationControlFacet to check cancellation capability without
+        op-kind knowledge in this layer (ADR-0066). Never triggers the hook.
         """
         record = self._record(token)
         if record is None:

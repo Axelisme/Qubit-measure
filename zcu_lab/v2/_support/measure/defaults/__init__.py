@@ -2,7 +2,7 @@
 the shared value-tree primitives.
 
 Each role's default is one ``RoleDef`` literal in ``role_table.py``; the
-``ROLE_FACTORIES`` table consumed by fresh cfg materialization and ``RoleCatalog`` is
+``ROLE_FACTORIES`` table consumed by fresh cfg materialization and ``TemplateCatalog`` is
 generated from it. See ADR-0009 / ADR-0012.
 """
 

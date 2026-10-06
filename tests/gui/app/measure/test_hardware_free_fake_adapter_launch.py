@@ -24,22 +24,22 @@ def hw_fixture(qapp, tmp_path):
     from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.app.measure.app import _build_window
     from zcu_tools.gui.app.measure.registry import Registry
-    from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
     from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
     from zcu_tools.gui.session.services.io_manager import IOManager
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     from zcu_lab.definitions import register_all
-    from zcu_lab.roles import register_all_roles
+    from zcu_lab.templates import register_all_templates
 
     state = State(SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None))
     registry = Registry()
     register_all(registry)
-    role_catalog = RoleCatalog()
-    register_all_roles(role_catalog)
+    template_catalog = TemplateCatalog()
+    register_all_templates(template_catalog)
     io_manager = IOManager()
     ctrl, window = _build_window(
-        state, registry, role_catalog, io_manager, project_root=str(tmp_path)
+        state, registry, template_catalog, io_manager, project_root=str(tmp_path)
     )
     # Attach a no-op caretaker so MainWindow close does not assert (production
     # attaches it in MeasureGuiBehavior.before_show, which we do not run here).

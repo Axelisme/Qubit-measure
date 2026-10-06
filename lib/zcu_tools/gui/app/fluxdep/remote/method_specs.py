@@ -197,8 +197,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "operation.await": MethodSpec(
         35.0,
-        "Wait off-owner for a known search token, returning completed, timeout "
-        "or user_feedback with native outcome/feedback. timeout is finite "
+        "Wait off-owner for a known search token, returning completed or timeout "
+        "with native outcome and cancellation reasons. timeout is finite "
         "seconds from 0 to 30 (default 10). Timeout does not cancel; this read "
         "does not refresh fit or other observations.",
         params=(

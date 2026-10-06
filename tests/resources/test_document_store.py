@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from filelock import Timeout
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from ruamel.yaml import YAML
 from zcu_tools.format_version import FormatError, VersionError
 from zcu_tools.resources.document_store import (
@@ -13,6 +13,8 @@ from zcu_tools.resources.document_store import (
     DocumentStore,
     LockTimeoutError,
 )
+
+from tests.resources._document_store_fakes import StrictDocument
 
 
 class SyntheticDocument(BaseModel):
@@ -82,36 +84,6 @@ class NullableGeneralDocument(SyntheticDocument):
     general: OptionalGeneral | None = None
 
 
-class KnownValues(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    left: float = Field(ge=0)
-    right: float
-
-
-class StrictDocument(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    format: str
-    format_version: str
-    values: KnownValues
-
-
-class StrictSequenceDocument(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    format: str
-    format_version: str
-    values: list[KnownValues]
-
-
-@pytest.fixture
-def document_path(tmp_path: Path) -> Path:
-    path = tmp_path / "document.yaml"
-    path.write_text(
-        "format: synthetic\nformat_version: '1.0'\nvalues:\n  left: 1.0\n  right: 2.0\n",
-        encoding="utf-8",
-    )
-    return path
-
-
 def make_store(path: Path) -> DocumentStore[SyntheticDocument]:
     return DocumentStore(path, SyntheticDocument, format="synthetic")
 
@@ -142,10 +114,6 @@ def make_sequenced_groups_store(path: Path) -> DocumentStore[SequencedGroupsDocu
 
 def make_nullable_general_store(path: Path) -> DocumentStore[NullableGeneralDocument]:
     return DocumentStore(path, NullableGeneralDocument, format="synthetic")
-
-
-def make_strict_sequence_store(path: Path) -> DocumentStore[StrictSequenceDocument]:
-    return DocumentStore(path, StrictSequenceDocument, format="synthetic")
 
 
 def test_snapshot_is_an_independent_memory_only_typed_copy(document_path: Path) -> None:
@@ -345,37 +313,6 @@ def test_observer_failure_is_reported_separately_from_committed_state(
     assert any(
         record.levelname == "ERROR" and record.exc_info and record.exc_info[1] is error
         for record in caplog.records
-    )
-
-
-def test_newer_minor_keeps_unknown_nested_fields_outside_the_typed_snapshot(
-    document_path: Path,
-) -> None:
-    document_path.write_text(
-        "format: synthetic\nformat_version: '1.2'\nvalues:\n"
-        "  left: 1.0\n  right: 2.0\n  future: 7.000 # future nested\n"
-        "future_top: [next, version] # future top\n",
-        encoding="utf-8",
-    )
-    store = DocumentStore(document_path, StrictDocument, format="synthetic")
-    assert store.snapshot().model_dump() == {
-        "format": "synthetic",
-        "format_version": "1.2",
-        "values": {"left": 1.0, "right": 2.0},
-    }
-    with store.edit() as draft:
-        draft.values.left = 10.0
-
-    assert store.snapshot().values.left == 10.0
-    assert store.snapshot().format_version == "1.2"
-    text = document_path.read_text(encoding="utf-8")
-    assert "  future: 7.000 # future nested" in text
-    assert "future_top: [next, version] # future top" in text
-    assert (
-        DocumentStore(document_path, StrictDocument, format="synthetic")
-        .snapshot()
-        .values.left
-        == 10.0
     )
 
 
@@ -846,86 +783,6 @@ def test_boolean_numeric_changes_inside_a_sequence_are_not_discarded(
     on_disk = DocumentStore(document_path, SequenceDocument, format="synthetic")
     assert type(on_disk.snapshot().values[0]["enabled"]) is int
     assert on_disk.snapshot().values == [{"enabled": 1}]
-
-
-def test_known_sequence_edit_preserves_future_fields_comments_and_untouched_nodes(
-    document_path: Path,
-) -> None:
-    document_path.write_text(
-        "format: synthetic\nformat_version: '1.2'\nvalues: # sequence note\n"
-        "  - left: 1.000 # edited\n    right: 2.000 # unchanged\n"
-        "    future: 7.000 # future nested\n"
-        "  - left: 3.000 # untouched element\n    right: 4.000\n",
-        encoding="utf-8",
-    )
-    store = make_strict_sequence_store(document_path)
-    with store.edit() as draft:
-        draft.values[0].left = 10.0
-
-    assert store.snapshot().format_version == "1.2"
-    assert store.snapshot().values[0].left == 10.0
-    text = document_path.read_text(encoding="utf-8")
-    assert "# sequence note" in text
-    assert "# edited" in text
-    lines = [" ".join(line.split()) for line in text.splitlines()]
-    assert "right: 2.000 # unchanged" in lines
-    assert "future: 7.000 # future nested" in lines
-    assert any("left: 3.000 # untouched element" in line for line in lines)
-    reopened = make_strict_sequence_store(document_path)
-    assert reopened.snapshot() == store.snapshot()
-    persisted = YAML(typ="safe").load(text)
-    assert persisted["values"][0]["future"] == 7.0
-    assert persisted["format_version"] == "1.2"
-
-
-def test_appending_to_typed_sequence_keeps_existing_future_nodes(
-    document_path: Path,
-) -> None:
-    document_path.write_text(
-        "format: synthetic\nformat_version: '1.2'\nvalues:\n"
-        "  - left: 1.000 # original\n    right: 2.000\n"
-        "    future: 7.000 # future nested\n",
-        encoding="utf-8",
-    )
-    store = make_strict_sequence_store(document_path)
-    with store.edit() as draft:
-        draft.values.append(KnownValues(left=3.0, right=4.0))
-
-    text = document_path.read_text(encoding="utf-8")
-    assert "# original" in text
-    assert "# future nested" in text
-    persisted = YAML(typ="safe").load(text)
-    assert persisted["values"] == [
-        {"left": 1.0, "right": 2.0, "future": 7.0},
-        {"left": 3.0, "right": 4.0},
-    ]
-    assert store.snapshot().format_version == "1.2"
-
-
-def test_sequence_edits_conflict_as_a_whole_without_losing_future_nodes(
-    document_path: Path,
-) -> None:
-    document_path.write_text(
-        "format: synthetic\nformat_version: '1.2'\nvalues:\n"
-        "  - left: 1.000\n    right: 2.000\n    future: 7.000 # future\n",
-        encoding="utf-8",
-    )
-    first = make_strict_sequence_store(document_path)
-    second = make_strict_sequence_store(document_path)
-    with ExitStack() as stack:
-        draft = stack.enter_context(first.edit())
-        draft.values[0].left = 10.0
-        with second.edit() as other:
-            other.values[0].right = 20.0
-        committed = document_path.read_bytes()
-        with pytest.raises(ConflictError) as caught:
-            stack.close()
-
-    assert caught.value.path == ("values",)
-    assert document_path.read_bytes() == committed
-    assert "# future" in document_path.read_text(encoding="utf-8")
-    assert first.snapshot().values[0].left == 1.0
-    assert second.snapshot().values[0].right == 20.0
 
 
 def test_duplicate_subscriptions_can_be_independently_and_idempotently_removed(

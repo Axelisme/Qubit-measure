@@ -1,4 +1,4 @@
-"""Typed Result <-> streaming Labber role mapping for autofluxdep artifacts."""
+"""Typed Result <-> streaming Labber variable mapping for autofluxdep artifacts."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from numpy.typing import NDArray
 
 from zcu_tools.datafile import (
     Axis,
-    DatasetRole,
+    DataVariable,
     LabberPayload,
     StreamingGroupedLabberWriter,
-    StreamingLabberRoleSpec,
+    StreamingLabberVariableSpec,
     load_grouped_labber_data,
 )
 from zcu_tools.gui.app.autofluxdep.results import (
@@ -33,20 +33,22 @@ from zcu_tools.gui.app.autofluxdep.results import (
     require_workflow_result,
 )
 
-ROLE_SIGNAL = DatasetRole("signal")
-ROLE_FIT_CURVE = DatasetRole("fit_curve")
-ROLE_FIT_FREQ = DatasetRole("fit_freq")
-ROLE_PREDICT_FREQ = DatasetRole("predict_freq")
-ROLE_SNR = DatasetRole("snr")
-ROLE_FIT_VALUE = DatasetRole("fit_value")
-ROLE_BEST_FREQ = DatasetRole("best_freq")
-ROLE_BEST_GAIN = DatasetRole("best_gain")
+VARIABLE_SIGNAL = DataVariable("signal")
+VARIABLE_FIT_CURVE = DataVariable("fit_curve")
+VARIABLE_FIT_FREQ = DataVariable("fit_freq")
+VARIABLE_PREDICT_FREQ = DataVariable("predict_freq")
+VARIABLE_SNR = DataVariable("snr")
+VARIABLE_FIT_VALUE = DataVariable("fit_value")
+VARIABLE_BEST_FREQ = DataVariable("best_freq")
+VARIABLE_BEST_GAIN = DataVariable("best_gain")
 
-_SpecBuilder = Callable[[str, str, object, str], tuple[StreamingLabberRoleSpec, ...]]
-_RowValueBuilder = Callable[
-    [object, int], Mapping[DatasetRole, NDArray[np.float64] | float]
+_SpecBuilder = Callable[
+    [str, str, object, str], tuple[StreamingLabberVariableSpec, ...]
 ]
-_Loader = Callable[[Mapping[DatasetRole, LabberPayload]], WorkflowResult]
+_RowValueBuilder = Callable[
+    [object, int], Mapping[DataVariable, NDArray[np.float64] | float]
+]
+_Loader = Callable[[Mapping[DataVariable, LabberPayload]], WorkflowResult]
 
 
 @dataclass(frozen=True)
@@ -87,7 +89,7 @@ class _LoadedSweep2D:
 @dataclass(frozen=True)
 class _ResultDeclaration:
     kind: str
-    roles: frozenset[DatasetRole]
+    variables: frozenset[DataVariable]
     summary_scalar_attrs: tuple[str, ...]
     last_fit_fields: tuple[tuple[str, str], ...]
     spec_builder: _SpecBuilder
@@ -95,14 +97,21 @@ class _ResultDeclaration:
     loader: _Loader
 
 
-def result_role_specs(
+def result_variable_specs(
     node_name: str,
     node_type: str,
     result: object,
     *,
     flux_unit: str = "",
-) -> tuple[StreamingLabberRoleSpec, ...]:
-    """Build the stream schema for one placed node Result."""
+) -> tuple[StreamingLabberVariableSpec, ...]:
+    """Build variable schemas for one placed node\'s tagged workflow Result.
+
+    node_name/node_type identify the placed node in stored attrs. result must
+    satisfy its declared result_kind array contract. flux_unit labels its flux
+    axis, or is empty when unspecified. Return ordered full-shape schemas;
+    unknown declarations or invalid array fields/dtypes raise TypeError,
+    and inconsistent shapes raise ValueError.
+    """
     declaration = result_declaration(result)
     return declaration.spec_builder(node_name, node_type, result, flux_unit)
 
@@ -116,51 +125,58 @@ def write_result_row(
     *,
     timestamp: float | None = None,
 ) -> tuple[str, ...]:
-    """Write all persisted roles for one flux row."""
+    """Write all persisted variables for one flux row."""
     del node_name, node_type
     idx = int(flux_idx)
     values = _result_row_values(result, idx)
-    for role, row in values.items():
-        writer.write_outer_slice(role, idx, row, timestamp=timestamp)
-    return tuple(str(role) for role in values)
+    for variable, row in values.items():
+        writer.write_outer_slice(variable, idx, row, timestamp=timestamp)
+    return tuple(str(variable) for variable in values)
 
 
-def result_row_role_names(result: object, flux_idx: int) -> tuple[str, ...]:
-    """Return the role names a row write would touch, without mutating storage."""
-    return tuple(str(role) for role in _result_row_values(result, int(flux_idx)))
+def result_row_variable_names(result: object, flux_idx: int) -> tuple[str, ...]:
+    """Return variables written for flux_idx without mutating result or storage.
+
+    result must satisfy its tagged workflow Result array contract. flux_idx
+    selects a row; unknown declarations or invalid fields/dtypes raise TypeError,
+    inconsistent shapes raise ValueError, and an out-of-range row raises IndexError.
+    """
+    return tuple(
+        str(variable) for variable in _result_row_values(result, int(flux_idx))
+    )
 
 
 def load_node_result(path: str, node_type: str) -> WorkflowResult:
     """Load a node HDF5 path into a framework-owned sweep data record.
 
-    node_type is retained for caller context; role sets determine representation.
+    node_type is retained for caller context; variable sets determine representation.
     The returned record satisfies the same Protocol as the experiment's Result,
     including NaN rows. It does not allocate or construct an experiment class.
-    Raise ValueError for unknown roles, inconsistent axes or data shapes;
+    Raise ValueError for unknown variables, inconsistent axes or data shapes;
     propagate file/IO errors. No archive or input data is mutated.
     """
     del node_type
     grouped = load_grouped_labber_data(path)
-    roles = grouped.roles
-    declaration = _declaration_for_roles(frozenset(roles))
-    return declaration.loader(roles)
+    variables = grouped.variables
+    declaration = _declaration_for_variables(frozenset(variables))
+    return declaration.loader(variables)
 
 
 def read_result_row(
     path: str,
     node_type: str,
     flux_idx: int,
-) -> Mapping[DatasetRole, np.ndarray | float]:
+) -> Mapping[DataVariable, np.ndarray | float]:
     """Read one committed-or-nan Result row from a node HDF5 file."""
     result = load_node_result(path, node_type)
     values = _result_row_values(result, int(flux_idx))
-    row: dict[DatasetRole, np.ndarray | float] = {}
-    for role, value in values.items():
+    row: dict[DataVariable, np.ndarray | float] = {}
+    for variable, value in values.items():
         array = np.asarray(value)
         if array.ndim == 0:
-            row[role] = float(array)
+            row[variable] = float(array)
         else:
-            row[role] = array.copy()
+            row[variable] = array.copy()
     return row
 
 
@@ -302,7 +318,7 @@ def result_progress_summary(result: WorkflowResult) -> ResultProgressSummary:
 
 def _result_row_values(
     result: object, idx: int
-) -> Mapping[DatasetRole, NDArray[np.float64] | float]:
+) -> Mapping[DataVariable, NDArray[np.float64] | float]:
     checked = require_workflow_result(result)
     _require_row_index(checked, idx)
     declaration = result_declaration(checked)
@@ -316,12 +332,14 @@ def _require_row_index(result: WorkflowResult, idx: int) -> None:
         )
 
 
-def _declaration_for_roles(roles: frozenset[DatasetRole]) -> _ResultDeclaration:
+def _declaration_for_variables(
+    variables: frozenset[DataVariable],
+) -> _ResultDeclaration:
     for declaration in _RESULT_DECLARATIONS:
-        if roles == declaration.roles:
+        if variables == declaration.variables:
             return declaration
-    present = ", ".join(sorted(str(role) for role in roles))
-    raise ValueError(f"unsupported autofluxdep node result roles: {present}")
+    present = ", ".join(sorted(str(variable) for variable in variables))
+    raise ValueError(f"unsupported autofluxdep node result variables: {present}")
 
 
 def _require_frequency_sweep(result: object) -> FrequencySweepResult:
@@ -348,15 +366,15 @@ def _require_sweep2d(result: object) -> SweepResult2D:
     raise TypeError("result declaration requires sweep2d")
 
 
-def _qubit_freq_role_specs(
+def _qubit_freq_variable_specs(
     node_name: str, node_type: str, result: object, flux_unit: str
-) -> tuple[StreamingLabberRoleSpec, ...]:
+) -> tuple[StreamingLabberVariableSpec, ...]:
     qubit_freq = _require_frequency_sweep(result)
     flux_axis = Axis("Flux device value", flux_unit, qubit_freq.flux)
     detune_axis = Axis("Detune", "MHz", qubit_freq.detune)
     return (
         _spec(
-            ROLE_SIGNAL,
+            VARIABLE_SIGNAL,
             "Signal",
             "a.u.",
             (detune_axis, flux_axis),
@@ -366,7 +384,7 @@ def _qubit_freq_role_specs(
             "qubit_freq",
         ),
         _spec(
-            ROLE_FIT_CURVE,
+            VARIABLE_FIT_CURVE,
             "Fit curve",
             "a.u.",
             (detune_axis, flux_axis),
@@ -376,7 +394,7 @@ def _qubit_freq_role_specs(
             "qubit_freq",
         ),
         _spec(
-            ROLE_FIT_FREQ,
+            VARIABLE_FIT_FREQ,
             "Fit frequency",
             "MHz",
             (flux_axis,),
@@ -386,7 +404,7 @@ def _qubit_freq_role_specs(
             "qubit_freq",
         ),
         _spec(
-            ROLE_PREDICT_FREQ,
+            VARIABLE_PREDICT_FREQ,
             "Predicted frequency",
             "MHz",
             (flux_axis,),
@@ -396,7 +414,7 @@ def _qubit_freq_role_specs(
             "qubit_freq",
         ),
         _spec(
-            ROLE_SNR,
+            VARIABLE_SNR,
             "SNR",
             "a.u.",
             (flux_axis,),
@@ -408,15 +426,15 @@ def _qubit_freq_role_specs(
     )
 
 
-def _sweep1d_role_specs(
+def _sweep1d_variable_specs(
     node_name: str, node_type: str, result: object, flux_unit: str
-) -> tuple[StreamingLabberRoleSpec, ...]:
+) -> tuple[StreamingLabberVariableSpec, ...]:
     sweep = _require_sweep1d(result)
     flux_axis = Axis("Flux device value", flux_unit, sweep.flux)
     x_axis = Axis(sweep.x_label, "", sweep.x)
     return (
         _spec(
-            ROLE_SIGNAL,
+            VARIABLE_SIGNAL,
             "Signal",
             "a.u.",
             (x_axis, flux_axis),
@@ -426,7 +444,7 @@ def _sweep1d_role_specs(
             "sweep_1d",
         ),
         _spec(
-            ROLE_FIT_CURVE,
+            VARIABLE_FIT_CURVE,
             "Fit curve",
             "a.u.",
             (x_axis, flux_axis),
@@ -436,7 +454,7 @@ def _sweep1d_role_specs(
             "sweep_1d",
         ),
         _spec(
-            ROLE_FIT_VALUE,
+            VARIABLE_FIT_VALUE,
             "Fit value",
             "",
             (flux_axis,),
@@ -446,7 +464,7 @@ def _sweep1d_role_specs(
             "sweep_1d",
         ),
         _spec(
-            ROLE_SNR,
+            VARIABLE_SNR,
             "SNR",
             "a.u.",
             (flux_axis,),
@@ -458,16 +476,16 @@ def _sweep1d_role_specs(
     )
 
 
-def _sweep2d_role_specs(
+def _sweep2d_variable_specs(
     node_name: str, node_type: str, result: object, flux_unit: str
-) -> tuple[StreamingLabberRoleSpec, ...]:
+) -> tuple[StreamingLabberVariableSpec, ...]:
     sweep = _require_sweep2d(result)
     flux_axis = Axis("Flux device value", flux_unit, sweep.flux)
     freq_axis = Axis("Frequency", "MHz", sweep.freq)
     gain_axis = Axis("Gain", "a.u.", sweep.gain)
     return (
         _spec(
-            ROLE_SIGNAL,
+            VARIABLE_SIGNAL,
             "Signal",
             "a.u.",
             (gain_axis, freq_axis, flux_axis),
@@ -477,7 +495,7 @@ def _sweep2d_role_specs(
             "sweep_2d",
         ),
         _spec(
-            ROLE_BEST_FREQ,
+            VARIABLE_BEST_FREQ,
             "Best frequency",
             "MHz",
             (flux_axis,),
@@ -487,7 +505,7 @@ def _sweep2d_role_specs(
             "sweep_2d",
         ),
         _spec(
-            ROLE_BEST_GAIN,
+            VARIABLE_BEST_GAIN,
             "Best gain",
             "a.u.",
             (flux_axis,),
@@ -501,60 +519,60 @@ def _sweep2d_role_specs(
 
 def _qubit_freq_row_values(
     result: object, idx: int
-) -> Mapping[DatasetRole, NDArray[np.float64] | float]:
+) -> Mapping[DataVariable, NDArray[np.float64] | float]:
     qubit_freq = _require_frequency_sweep(result)
     return {
-        ROLE_SIGNAL: qubit_freq.signal[idx],
-        ROLE_FIT_CURVE: qubit_freq.fit_curve[idx],
-        ROLE_FIT_FREQ: float(qubit_freq.fit_freq[idx]),
-        ROLE_PREDICT_FREQ: float(qubit_freq.predict_freq[idx]),
-        ROLE_SNR: float(qubit_freq.snr[idx]),
+        VARIABLE_SIGNAL: qubit_freq.signal[idx],
+        VARIABLE_FIT_CURVE: qubit_freq.fit_curve[idx],
+        VARIABLE_FIT_FREQ: float(qubit_freq.fit_freq[idx]),
+        VARIABLE_PREDICT_FREQ: float(qubit_freq.predict_freq[idx]),
+        VARIABLE_SNR: float(qubit_freq.snr[idx]),
     }
 
 
 def _sweep1d_row_values(
     result: object, idx: int
-) -> Mapping[DatasetRole, NDArray[np.float64] | float]:
+) -> Mapping[DataVariable, NDArray[np.float64] | float]:
     sweep = _require_sweep1d(result)
     return {
-        ROLE_SIGNAL: sweep.signal[idx],
-        ROLE_FIT_CURVE: sweep.fit_curve[idx],
-        ROLE_FIT_VALUE: float(sweep.fit_value[idx]),
-        ROLE_SNR: float(sweep.snr[idx]),
+        VARIABLE_SIGNAL: sweep.signal[idx],
+        VARIABLE_FIT_CURVE: sweep.fit_curve[idx],
+        VARIABLE_FIT_VALUE: float(sweep.fit_value[idx]),
+        VARIABLE_SNR: float(sweep.snr[idx]),
     }
 
 
 def _sweep2d_row_values(
     result: object, idx: int
-) -> Mapping[DatasetRole, NDArray[np.float64] | float]:
+) -> Mapping[DataVariable, NDArray[np.float64] | float]:
     sweep = _require_sweep2d(result)
     return {
-        ROLE_SIGNAL: sweep.signal[idx],
-        ROLE_BEST_FREQ: float(sweep.best_freq[idx]),
-        ROLE_BEST_GAIN: float(sweep.best_gain[idx]),
+        VARIABLE_SIGNAL: sweep.signal[idx],
+        VARIABLE_BEST_FREQ: float(sweep.best_freq[idx]),
+        VARIABLE_BEST_GAIN: float(sweep.best_gain[idx]),
     }
 
 
 def _load_qubit_freq(
-    roles: Mapping[DatasetRole, LabberPayload],
+    variables: Mapping[DataVariable, LabberPayload],
 ) -> FrequencySweepResult:
-    signal = roles[ROLE_SIGNAL]
-    fit_curve = roles[ROLE_FIT_CURVE]
-    fit_freq = roles[ROLE_FIT_FREQ]
-    predict_freq = roles[ROLE_PREDICT_FREQ]
-    snr = roles[ROLE_SNR]
-    signal_z = _real_data(signal, ROLE_SIGNAL)
-    _require_ndim(ROLE_SIGNAL, signal_z, 2)
-    detune = _axis_values(signal, ROLE_SIGNAL, 0)
-    flux = _axis_values(signal, ROLE_SIGNAL, 1)
+    signal = variables[VARIABLE_SIGNAL]
+    fit_curve = variables[VARIABLE_FIT_CURVE]
+    fit_freq = variables[VARIABLE_FIT_FREQ]
+    predict_freq = variables[VARIABLE_PREDICT_FREQ]
+    snr = variables[VARIABLE_SNR]
+    signal_z = _real_data(signal, VARIABLE_SIGNAL)
+    _require_ndim(VARIABLE_SIGNAL, signal_z, 2)
+    detune = _axis_values(signal, VARIABLE_SIGNAL, 0)
+    flux = _axis_values(signal, VARIABLE_SIGNAL, 1)
     fit_curve_z = _matching_data(
-        fit_curve, ROLE_FIT_CURVE, signal_z.shape, (detune, flux)
+        fit_curve, VARIABLE_FIT_CURVE, signal_z.shape, (detune, flux)
     )
-    fit_freq_z = _matching_data(fit_freq, ROLE_FIT_FREQ, flux.shape, (flux,))
+    fit_freq_z = _matching_data(fit_freq, VARIABLE_FIT_FREQ, flux.shape, (flux,))
     predict_freq_z = _matching_data(
-        predict_freq, ROLE_PREDICT_FREQ, flux.shape, (flux,)
+        predict_freq, VARIABLE_PREDICT_FREQ, flux.shape, (flux,)
     )
-    snr_z = _matching_data(snr, ROLE_SNR, flux.shape, (flux,))
+    snr_z = _matching_data(snr, VARIABLE_SNR, flux.shape, (flux,))
     return _LoadedFrequencySweep(
         flux=flux,
         detune=detune,
@@ -566,18 +584,20 @@ def _load_qubit_freq(
     )
 
 
-def _load_sweep1d(roles: Mapping[DatasetRole, LabberPayload]) -> SweepResult1D:
-    signal = roles[ROLE_SIGNAL]
-    fit_curve = roles[ROLE_FIT_CURVE]
-    fit_value = roles[ROLE_FIT_VALUE]
-    snr = roles[ROLE_SNR]
-    signal_z = _real_data(signal, ROLE_SIGNAL)
-    _require_ndim(ROLE_SIGNAL, signal_z, 2)
-    x = _axis_values(signal, ROLE_SIGNAL, 0)
-    flux = _axis_values(signal, ROLE_SIGNAL, 1)
-    fit_curve_z = _matching_data(fit_curve, ROLE_FIT_CURVE, signal_z.shape, (x, flux))
-    fit_value_z = _matching_data(fit_value, ROLE_FIT_VALUE, flux.shape, (flux,))
-    snr_z = _matching_data(snr, ROLE_SNR, flux.shape, (flux,))
+def _load_sweep1d(variables: Mapping[DataVariable, LabberPayload]) -> SweepResult1D:
+    signal = variables[VARIABLE_SIGNAL]
+    fit_curve = variables[VARIABLE_FIT_CURVE]
+    fit_value = variables[VARIABLE_FIT_VALUE]
+    snr = variables[VARIABLE_SNR]
+    signal_z = _real_data(signal, VARIABLE_SIGNAL)
+    _require_ndim(VARIABLE_SIGNAL, signal_z, 2)
+    x = _axis_values(signal, VARIABLE_SIGNAL, 0)
+    flux = _axis_values(signal, VARIABLE_SIGNAL, 1)
+    fit_curve_z = _matching_data(
+        fit_curve, VARIABLE_FIT_CURVE, signal_z.shape, (x, flux)
+    )
+    fit_value_z = _matching_data(fit_value, VARIABLE_FIT_VALUE, flux.shape, (flux,))
+    snr_z = _matching_data(snr, VARIABLE_SNR, flux.shape, (flux,))
     return _LoadedSweep1D(
         flux=flux,
         x=x,
@@ -589,17 +609,17 @@ def _load_sweep1d(roles: Mapping[DatasetRole, LabberPayload]) -> SweepResult1D:
     )
 
 
-def _load_sweep2d(roles: Mapping[DatasetRole, LabberPayload]) -> SweepResult2D:
-    signal = roles[ROLE_SIGNAL]
-    best_freq = roles[ROLE_BEST_FREQ]
-    best_gain = roles[ROLE_BEST_GAIN]
-    signal_z = _real_data(signal, ROLE_SIGNAL)
-    _require_ndim(ROLE_SIGNAL, signal_z, 3)
-    gain = _axis_values(signal, ROLE_SIGNAL, 0)
-    freq = _axis_values(signal, ROLE_SIGNAL, 1)
-    flux = _axis_values(signal, ROLE_SIGNAL, 2)
-    best_freq_z = _matching_data(best_freq, ROLE_BEST_FREQ, flux.shape, (flux,))
-    best_gain_z = _matching_data(best_gain, ROLE_BEST_GAIN, flux.shape, (flux,))
+def _load_sweep2d(variables: Mapping[DataVariable, LabberPayload]) -> SweepResult2D:
+    signal = variables[VARIABLE_SIGNAL]
+    best_freq = variables[VARIABLE_BEST_FREQ]
+    best_gain = variables[VARIABLE_BEST_GAIN]
+    signal_z = _real_data(signal, VARIABLE_SIGNAL)
+    _require_ndim(VARIABLE_SIGNAL, signal_z, 3)
+    gain = _axis_values(signal, VARIABLE_SIGNAL, 0)
+    freq = _axis_values(signal, VARIABLE_SIGNAL, 1)
+    flux = _axis_values(signal, VARIABLE_SIGNAL, 2)
+    best_freq_z = _matching_data(best_freq, VARIABLE_BEST_FREQ, flux.shape, (flux,))
+    best_gain_z = _matching_data(best_gain, VARIABLE_BEST_GAIN, flux.shape, (flux,))
     return _LoadedSweep2D(
         flux=flux,
         freq=freq,
@@ -613,39 +633,41 @@ def _load_sweep2d(roles: Mapping[DatasetRole, LabberPayload]) -> SweepResult2D:
 _RESULT_DECLARATIONS: tuple[_ResultDeclaration, ...] = (
     _ResultDeclaration(
         kind="qubit_freq",
-        roles=frozenset(
+        variables=frozenset(
             {
-                ROLE_SIGNAL,
-                ROLE_FIT_CURVE,
-                ROLE_FIT_FREQ,
-                ROLE_PREDICT_FREQ,
-                ROLE_SNR,
+                VARIABLE_SIGNAL,
+                VARIABLE_FIT_CURVE,
+                VARIABLE_FIT_FREQ,
+                VARIABLE_PREDICT_FREQ,
+                VARIABLE_SNR,
             }
         ),
         summary_scalar_attrs=("fit_freq", "predict_freq", "snr"),
         last_fit_fields=(("last_fit_freq", "fit_freq"),),
-        spec_builder=_qubit_freq_role_specs,
+        spec_builder=_qubit_freq_variable_specs,
         row_values=_qubit_freq_row_values,
         loader=_load_qubit_freq,
     ),
     _ResultDeclaration(
         kind="sweep1d",
-        roles=frozenset({ROLE_SIGNAL, ROLE_FIT_CURVE, ROLE_FIT_VALUE, ROLE_SNR}),
+        variables=frozenset(
+            {VARIABLE_SIGNAL, VARIABLE_FIT_CURVE, VARIABLE_FIT_VALUE, VARIABLE_SNR}
+        ),
         summary_scalar_attrs=("fit_value", "snr"),
         last_fit_fields=(("last_fit_value", "fit_value"),),
-        spec_builder=_sweep1d_role_specs,
+        spec_builder=_sweep1d_variable_specs,
         row_values=_sweep1d_row_values,
         loader=_load_sweep1d,
     ),
     _ResultDeclaration(
         kind="sweep2d",
-        roles=frozenset({ROLE_SIGNAL, ROLE_BEST_FREQ, ROLE_BEST_GAIN}),
+        variables=frozenset({VARIABLE_SIGNAL, VARIABLE_BEST_FREQ, VARIABLE_BEST_GAIN}),
         summary_scalar_attrs=("best_freq", "best_gain"),
         last_fit_fields=(
             ("last_best_freq", "best_freq"),
             ("last_best_gain", "best_gain"),
         ),
-        spec_builder=_sweep2d_role_specs,
+        spec_builder=_sweep2d_variable_specs,
         row_values=_sweep2d_row_values,
         loader=_load_sweep2d,
     ),
@@ -672,7 +694,7 @@ def _finite_scalar_at(values: NDArray[np.float64], idx: int) -> float | None:
 
 
 def _spec(
-    role: DatasetRole,
+    variable: DataVariable,
     data_name: str,
     data_unit: str,
     axes: tuple[Axis, ...],
@@ -680,9 +702,9 @@ def _spec(
     node_name: str,
     node_type: str,
     result_kind: str,
-) -> StreamingLabberRoleSpec:
-    return StreamingLabberRoleSpec(
-        role,
+) -> StreamingLabberVariableSpec:
+    return StreamingLabberVariableSpec(
+        variable,
         data_name,
         data_unit,
         axes,
@@ -691,7 +713,7 @@ def _spec(
             "zcu_tools.autofluxdep.node_name": node_name,
             "zcu_tools.autofluxdep.node_type": node_type,
             "zcu_tools.autofluxdep.result_kind": result_kind,
-            "zcu_tools.autofluxdep.result_role": str(role),
+            "zcu_tools.autofluxdep.result_role": str(variable),
             "zcu_tools.autofluxdep.role_label": data_name,
             "zcu_tools.autofluxdep.role_unit": data_unit,
         },
@@ -702,7 +724,7 @@ def _real_axis(axis: Axis) -> NDArray[np.float64]:
     return np.asarray(axis.values, dtype=np.float64)
 
 
-def _real_data(payload: LabberPayload, role: DatasetRole) -> NDArray[np.float64]:
+def _real_data(payload: LabberPayload, variable: DataVariable) -> NDArray[np.float64]:
     values = np.asarray(payload.z.real, dtype=np.float64)
     expected_shape = tuple(
         int(np.asarray(axis.values, dtype=np.float64).reshape(-1).shape[0])
@@ -710,23 +732,27 @@ def _real_data(payload: LabberPayload, role: DatasetRole) -> NDArray[np.float64]
     )
     if values.shape != expected_shape:
         raise ValueError(
-            f"role {role!r} data shape {values.shape} does not match axes "
+            f"variable {variable!r} data shape {values.shape} does not match axes "
             f"{expected_shape}"
         )
     return values
 
 
-def _require_ndim(role: DatasetRole, values: NDArray[np.float64], ndim: int) -> None:
+def _require_ndim(
+    variable: DataVariable, values: NDArray[np.float64], ndim: int
+) -> None:
     if values.ndim != ndim:
-        raise ValueError(f"role {role!r} must be {ndim}D, got shape {values.shape}")
+        raise ValueError(
+            f"variable {variable!r} must be {ndim}D, got shape {values.shape}"
+        )
 
 
 def _axis_values(
-    payload: LabberPayload, role: DatasetRole, axis_index: int
+    payload: LabberPayload, variable: DataVariable, axis_index: int
 ) -> NDArray[np.float64]:
     if len(payload.axes) <= axis_index:
         raise ValueError(
-            f"role {role!r} is missing axis {axis_index}; "
+            f"variable {variable!r} is missing axis {axis_index}; "
             f"only {len(payload.axes)} axis/axes present"
         )
     return _real_axis(payload.axes[axis_index])
@@ -734,45 +760,45 @@ def _axis_values(
 
 def _matching_data(
     payload: LabberPayload,
-    role: DatasetRole,
+    variable: DataVariable,
     expected_shape: tuple[int, ...],
     expected_axes: tuple[NDArray[np.float64], ...],
 ) -> NDArray[np.float64]:
-    values = _real_data(payload, role)
+    values = _real_data(payload, variable)
     if values.shape != expected_shape:
         raise ValueError(
-            f"role {role!r} shape {values.shape} does not match expected "
+            f"variable {variable!r} shape {values.shape} does not match expected "
             f"{expected_shape}"
         )
     if len(payload.axes) != len(expected_axes):
         raise ValueError(
-            f"role {role!r} axis count {len(payload.axes)} does not match "
+            f"variable {variable!r} axis count {len(payload.axes)} does not match "
             f"expected {len(expected_axes)}"
         )
     for axis_index, expected in enumerate(expected_axes):
         actual = _real_axis(payload.axes[axis_index])
         if actual.shape != expected.shape or not np.array_equal(actual, expected):
             raise ValueError(
-                f"role {role!r} axis {axis_index} does not match the signal role"
+                f"variable {variable!r} axis {axis_index} does not match the signal variable"
             )
     return values
 
 
 __all__ = [
-    "ROLE_BEST_FREQ",
-    "ROLE_BEST_GAIN",
-    "ROLE_FIT_CURVE",
-    "ROLE_FIT_FREQ",
-    "ROLE_FIT_VALUE",
-    "ROLE_PREDICT_FREQ",
-    "ROLE_SIGNAL",
-    "ROLE_SNR",
+    "VARIABLE_BEST_FREQ",
+    "VARIABLE_BEST_GAIN",
+    "VARIABLE_FIT_CURVE",
+    "VARIABLE_FIT_FREQ",
+    "VARIABLE_FIT_VALUE",
+    "VARIABLE_PREDICT_FREQ",
+    "VARIABLE_SIGNAL",
+    "VARIABLE_SNR",
     "load_node_result",
     "read_result_row",
     "result_declaration",
     "result_progress_summary",
-    "result_row_role_names",
+    "result_row_variable_names",
     "result_row_summary",
-    "result_role_specs",
+    "result_variable_specs",
     "write_result_row",
 ]

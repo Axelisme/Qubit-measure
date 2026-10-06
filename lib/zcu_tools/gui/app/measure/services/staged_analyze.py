@@ -122,7 +122,7 @@ class _StagedAnalyzeService:
         """
         token = self._active_tokens[tab_id]
         with self._bus.origin(self._handles.event_origin(token)):
-            self._state.set_tab_analyzing(tab_id, True)
+            self._state.set_tab_analyzing(tab_id, analyzing=True)
             self._bus.emit(
                 TabInteractionChangedPayload(tab_id=tab_id, fact=self.STARTED_FACT)
             )
@@ -139,8 +139,8 @@ class _StagedAnalyzeService:
 
         No exclusion (analyze never conflicts with hardware — ADR-0066), no
         progress, no cancel hook. begin() registers the token in _active_tokens
-        so the interactive accessor (cancel_interactive, active_interactive_token)
-        cannot see it (it is not in _interactive_tabs). Marks the tab analyzing
+        but not _interactive_tabs, so cancel_interactive cannot cancel it.
+        Marks the tab analyzing
         AFTER begin() succeeds (post-begin, stage2c_spec.md).
 
         Returns the operation token.
@@ -171,7 +171,7 @@ class _StagedAnalyzeService:
                 _fail(exc, settle)
                 return
             self._active_tokens.pop(tab_id, None)
-            self._state.set_tab_analyzing(tab_id, False)
+            self._state.set_tab_analyzing(tab_id, analyzing=False)
             # settle before facts — State visible to awaiter on wake.
             settle(OperationOutcome("finished"))
             self._bus.emit(
@@ -188,7 +188,7 @@ class _StagedAnalyzeService:
                     "Unpublished analysis plot cleanup failed: tab_id=%r", tab_id
                 )
             self._active_tokens.pop(tab_id, None)
-            self._state.set_tab_analyzing(tab_id, False)
+            self._state.set_tab_analyzing(tab_id, analyzing=False)
             # settle before facts — State visible to awaiter on wake.
             settle(OperationOutcome("failed", str(error)))
             self._bus.emit(

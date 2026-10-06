@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.datafile import (
-    DatasetRole,
+    DataVariable,
     LabberPayload,
     load_grouped_labber_data,
     save_grouped_labber_data,
@@ -15,9 +15,9 @@ from zcu_tools.experiment import (
     MHZ_TO_HZ,
     GroupedAxesSpec,
     GroupedLoadData,
-    RoleAxisSpec,
-    RoleSpec,
-    RoleZSpec,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -50,11 +50,11 @@ def _validate_result(result: _GroupedResult) -> None:
 def _build_result(data: GroupedLoadData[_GroupedCfg]) -> _GroupedResult:
     params = np.column_stack(
         [
-            data.role("freq").z,
-            data.role("gain").z,
+            data.variable("freq").z,
+            data.variable("gain").z,
         ]
     ).astype(np.float64)
-    scores = data.role("score").z.astype(np.float64)
+    scores = data.variable("score").z.astype(np.float64)
     _validate_result(_GroupedResult(params=params, scores=scores))
     return _GroupedResult(
         params=params,
@@ -62,13 +62,15 @@ def _build_result(data: GroupedLoadData[_GroupedCfg]) -> _GroupedResult:
     )
 
 
-_ITERATION_AXIS = (RoleAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),)
+_ITERATION_AXIS = (
+    VariableAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
+)
 _GROUPED_SPEC = GroupedAxesSpec(
-    roles=(
-        RoleSpec(
-            role="freq",
+    variables=(
+        VariableSpec(
+            variable="freq",
             axes=_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="params",
                 label="Frequency",
                 unit="Hz",
@@ -78,10 +80,10 @@ _GROUPED_SPEC = GroupedAxesSpec(
                 index_axis=1,
             ),
         ),
-        RoleSpec(
-            role="gain",
+        VariableSpec(
+            variable="gain",
             axes=_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="params",
                 label="Gain",
                 unit="a.u.",
@@ -90,10 +92,10 @@ _GROUPED_SPEC = GroupedAxesSpec(
                 index_axis=1,
             ),
         ),
-        RoleSpec(
-            role="score",
+        VariableSpec(
+            variable="score",
             axes=_ITERATION_AXIS,
-            z=RoleZSpec(
+            z=VariableZSpec(
                 field_name="scores",
                 label="Score",
                 unit="a.u.",
@@ -165,18 +167,18 @@ def test_grouped_axes_spec_saves_and_loads_typed_result(tmp_path: Path) -> None:
     _GROUPED_SPEC.save(source, written, comment="note")
 
     grouped = load_grouped_labber_data(
-        str(written), required_roles=_GROUPED_SPEC.required_roles
+        str(written), required_variables=_GROUPED_SPEC.required_variables
     )
-    assert list(grouped.roles) == [
-        DatasetRole("freq"),
-        DatasetRole("gain"),
-        DatasetRole("score"),
+    assert list(grouped.variables) == [
+        DataVariable("freq"),
+        DataVariable("gain"),
+        DataVariable("score"),
     ]
     np.testing.assert_allclose(
-        grouped.roles[DatasetRole("freq")].z, params[:, 0] * MHZ_TO_HZ
+        grouped.variables[DataVariable("freq")].z, params[:, 0] * MHZ_TO_HZ
     )
-    np.testing.assert_allclose(grouped.roles[DatasetRole("gain")].z, params[:, 1])
-    np.testing.assert_allclose(grouped.roles[DatasetRole("score")].z, scores)
+    np.testing.assert_allclose(grouped.variables[DataVariable("gain")].z, params[:, 1])
+    np.testing.assert_allclose(grouped.variables[DataVariable("score")].z, scores)
 
     loaded = _GROUPED_SPEC.load(written)
     np.testing.assert_allclose(loaded.result.params, params)
@@ -265,25 +267,27 @@ def test_grouped_load_invalid_cfg_warns_and_retains_data(tmp_path: Path) -> None
     np.testing.assert_array_equal(loaded.result.scores, result.scores)
 
 
-def test_grouped_axes_spec_load_rejects_missing_required_role(tmp_path: Path) -> None:
+def test_grouped_axes_spec_load_rejects_missing_required_variable(
+    tmp_path: Path,
+) -> None:
     payload = LabberPayload(
         ("Score", "a.u.", np.ones(2, dtype=np.float64)),
         axes=[("Iteration", "a.u.", np.arange(2, dtype=np.int64))],
     )
     path = save_grouped_labber_data(str(tmp_path / "partial"), {"score": payload})
 
-    with pytest.raises(ValueError, match="missing required dataset role"):
+    with pytest.raises(ValueError, match="missing required data variable"):
         _GROUPED_SPEC.load(Path(path))
 
 
 def test_grouped_axes_spec_declaration_rejects_missing_result_field() -> None:
     with pytest.raises(ValueError, match="field_name"):
         GroupedAxesSpec(
-            roles=(
-                RoleSpec(
-                    role="bad",
+            variables=(
+                VariableSpec(
+                    variable="bad",
                     axes=_ITERATION_AXIS,
-                    z=RoleZSpec(
+                    z=VariableZSpec(
                         field_name="missing",
                         label="Missing",
                         unit="a.u.",

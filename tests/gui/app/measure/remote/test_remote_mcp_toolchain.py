@@ -561,7 +561,7 @@ def test_original_run_can_be_analyzed_and_saved_without_bypassing_seen_guards(
 
 
 @pytest.mark.parametrize("keep_partial", [True, False])
-def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
+def test_gui_cancel_run_survives_eventless_remote_wait(
     fx, monkeypatch: pytest.MonkeyPatch, keep_partial: bool
 ) -> None:
 
@@ -589,13 +589,12 @@ def test_gui_send_and_stop_feedback_survives_eventless_remote_wait(
         running = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert running["result_state"]["available"] is False
         assert running["result_state"]["source_operation_id"] is None
-        assert fx.ctrl.send_feedback("please stop", stop=True) == "run"
+        assert fx.ctrl.cancel_run()
         release.set()
         reply = call(sock, "operation.await", {"operation_id": run_id, "timeout": 2})
         assert reply["result"] == {
             "reason": "completed",
             "status": "cancelled",
-            "feedback": "please stop",
         }
         snapshot = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert snapshot["result_state"]["available"] is keep_partial
@@ -1531,7 +1530,7 @@ def test_tab_cfg_edit_blocked_while_owning_tab_runs(fx):
     expected = encode_ref(cfg.observe().ref)
     sock = open_client(fx.service.port)
     try:
-        fx.state.set_tab_running(tab_id, True)
+        fx.state.set_tab_running(tab_id, running=True)
         resp = call(
             sock,
             "tab.edit_cfg",

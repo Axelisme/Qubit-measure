@@ -8,9 +8,9 @@ import h5py
 import numpy as np
 import pytest
 from zcu_tools.datafile import (
-    DatasetRole,
+    DataVariable,
     LabberMetadata,
-    StreamingLabberRoleSpec,
+    StreamingLabberVariableSpec,
     load_grouped_labber_data,
     load_labber_data,
     open_streaming_grouped_labber_data,
@@ -22,7 +22,7 @@ def test_streaming_writer_commits_one_2d_row_and_leaves_nan_rows(tmp_path):
     path = str(tmp_path / "streamed")
     flux = np.array([0.0, 0.5, 1.0], dtype=float)
     detune = np.array([-1.0, 0.0, 1.0, 2.0], dtype=float)
-    spec = StreamingLabberRoleSpec(
+    spec = StreamingLabberVariableSpec(
         "signal",
         "Signal",
         "a.u.",
@@ -41,8 +41,8 @@ def test_streaming_writer_commits_one_2d_row_and_leaves_nan_rows(tmp_path):
     writer.close()
     writer.close()
 
-    loaded = load_grouped_labber_data(path, required_roles=("signal",))
-    payload = loaded.roles[DatasetRole("signal")]
+    loaded = load_grouped_labber_data(path, required_variables=("signal",))
+    payload = loaded.variables[DataVariable("signal")]
     np.testing.assert_allclose(payload.z[1].real, [1.0, 2.0, 3.0, 4.0])
     assert np.isnan(payload.z[0].real).all()
     assert np.isnan(payload.z[2].real).all()
@@ -65,7 +65,7 @@ def test_streaming_single_log_writer_commits_one_2d_row(tmp_path):
     path = str(tmp_path / "single_stream")
     flux = np.array([0.0, 0.5, 1.0], dtype=float)
     detune = np.array([-1.0, 0.0, 1.0, 2.0], dtype=float)
-    spec = StreamingLabberRoleSpec(
+    spec = StreamingLabberVariableSpec(
         "signal",
         "Signal",
         "a.u.",
@@ -98,7 +98,7 @@ def test_streaming_writer_commits_one_3d_outer_block(tmp_path):
     flux = np.array([0.0, 0.5], dtype=float)
     freq = np.array([10.0, 11.0, 12.0], dtype=float)
     gain = np.array([0.1, 0.2], dtype=float)
-    spec = StreamingLabberRoleSpec(
+    spec = StreamingLabberVariableSpec(
         "signal",
         "Signal",
         "a.u.",
@@ -115,8 +115,8 @@ def test_streaming_writer_commits_one_3d_outer_block(tmp_path):
         writer.write_outer_slice("signal", 0, row)
         writer.flush()
 
-    loaded = load_grouped_labber_data(path, required_roles=("signal",))
-    payload = loaded.roles[DatasetRole("signal")]
+    loaded = load_grouped_labber_data(path, required_variables=("signal",))
+    payload = loaded.variables[DataVariable("signal")]
     np.testing.assert_allclose(payload.z[0].real, row)
     assert np.isnan(payload.z[1].real).all()
 
@@ -124,7 +124,7 @@ def test_streaming_writer_commits_one_3d_outer_block(tmp_path):
 def test_streaming_writer_rejects_existing_formatted_path(tmp_path):
     path = tmp_path / "existing.hdf5"
     path.write_bytes(b"existing")
-    spec = StreamingLabberRoleSpec(
+    spec = StreamingLabberVariableSpec(
         "signal",
         "Signal",
         "a.u.",
@@ -141,7 +141,7 @@ def test_streaming_writer_rejects_existing_formatted_path(tmp_path):
 def test_streaming_single_log_writer_rejects_existing_formatted_path(tmp_path):
     path = tmp_path / "existing_single.hdf5"
     path.write_bytes(b"existing")
-    spec = StreamingLabberRoleSpec(
+    spec = StreamingLabberVariableSpec(
         "signal",
         "Signal",
         "a.u.",
@@ -158,7 +158,7 @@ def test_streaming_single_log_writer_rejects_existing_formatted_path(tmp_path):
 def test_streaming_grouped_close_marks_closed_when_underlying_close_fails(
     tmp_path, monkeypatch
 ):
-    spec = StreamingLabberRoleSpec(
+    spec = StreamingLabberVariableSpec(
         "signal",
         "Signal",
         "a.u.",
@@ -187,7 +187,7 @@ def test_streaming_grouped_close_marks_closed_when_underlying_close_fails(
 def test_streaming_single_log_close_marks_closed_when_underlying_close_fails(
     tmp_path, monkeypatch
 ):
-    spec = StreamingLabberRoleSpec(
+    spec = StreamingLabberVariableSpec(
         "signal",
         "Signal",
         "a.u.",
@@ -211,8 +211,8 @@ def test_streaming_single_log_close_marks_closed_when_underlying_close_fails(
         writer.close()
 
 
-def test_streaming_writer_validates_role_shape(tmp_path):
-    spec = StreamingLabberRoleSpec(
+def test_streaming_writer_validates_variable_shape(tmp_path):
+    spec = StreamingLabberVariableSpec(
         "fit_freq",
         "Fit frequency",
         "MHz",
@@ -226,7 +226,7 @@ def test_streaming_writer_validates_role_shape(tmp_path):
 
 
 def test_streaming_single_log_writer_validates_scalar_shape(tmp_path):
-    spec = StreamingLabberRoleSpec(
+    spec = StreamingLabberVariableSpec(
         "fit_freq",
         "Fit frequency",
         "MHz",

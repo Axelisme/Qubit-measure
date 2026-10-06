@@ -325,7 +325,7 @@ def test_interactive_start_hands_off_current_state_without_waiting(
         if method == "tab.analyze":
             return _start_reply({"gain": 2}, [], interactive=True)
         if method == "operation.await":
-            return {"reason": "user_feedback", "status": "running"}
+            return {"reason": "timeout", "status": "running"}
         assert method == "tab.interact"
         assert params == {"tab_id": "t"}
         return {**interaction, "operation_id": 71}
@@ -388,7 +388,7 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
             return (
                 {"reason": "completed", "status": "finished"}
                 if done.is_set()
-                else {"reason": "user_feedback", "status": "running"}
+                else {"reason": "timeout", "status": "running"}
             )
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"gain": 2})
@@ -442,7 +442,7 @@ def test_rejected_done_keeps_registered_interaction_editable(
         if method == "tab.analyze":
             return _start_reply({}, [], interactive=True)
         if method == "operation.await":
-            return {"reason": "user_feedback", "status": "running"}
+            return {"reason": "timeout", "status": "running"}
         if method == "tab.interact":
             if "payload" in params:
                 assert params["payload"] == {"command": "set", "value": 2}
@@ -513,7 +513,7 @@ def test_cancel_latches_intent_and_retains_original_terminal(
             return (
                 {"reason": "completed", "status": outcome, "error": "real failure"}
                 if terminal.is_set()
-                else {"reason": "user_feedback", "status": "running"}
+                else {"reason": "timeout", "status": "running"}
             )
         if method == "operation.cancel":
             assert params["operation_id"] == 71
@@ -1030,7 +1030,7 @@ def test_malformed_interactive_image_is_a_tool_error_not_a_success(
         if method == "tab.analyze":
             return _start_reply({}, [], interactive=True)
         if method == "operation.await":
-            return {"reason": "user_feedback", "status": "running"}
+            return {"reason": "timeout", "status": "running"}
         assert method == "tab.interact"
         return {
             "operation_id": 71,
@@ -1062,7 +1062,7 @@ def test_invalid_interactive_png_is_a_tool_error_without_retry(
         if method == "tab.analyze":
             return _start_reply({}, [], interactive=True)
         if method == "operation.await":
-            return {"reason": "user_feedback", "status": "running"}
+            return {"reason": "timeout", "status": "running"}
         assert method == "tab.interact"
         return {
             "operation_id": 71,

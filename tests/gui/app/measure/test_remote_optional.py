@@ -15,7 +15,7 @@ from zcu_tools.gui.app.measure.catalog import (
 )
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
+from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import DirectValue
 
@@ -31,10 +31,10 @@ def measure_gui(qapp: QApplication, tmp_path: Path) -> Iterator[Controller]:
         def load(self, plan: PreparedCatalogReload) -> Registry:
             raise RuntimeError("reload is not part of this composition test")
 
-    def registry_factory() -> tuple[Registry, RoleCatalog, ExperimentCatalogLoader]:
+    def registry_factory() -> tuple[Registry, TemplateCatalog, ExperimentCatalogLoader]:
         registry = Registry()
         registry.register("fake", FakeAdapter)
-        return registry, RoleCatalog(), UnusedLoader()
+        return registry, TemplateCatalog(), UnusedLoader()
 
     previous_hook = sys.excepthook
     ctrl: Controller | None = None

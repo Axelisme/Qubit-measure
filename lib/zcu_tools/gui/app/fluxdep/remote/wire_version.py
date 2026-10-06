@@ -20,8 +20,8 @@ from __future__ import annotations
 #   GUI_VERSION  — this GUI code's *revision*. Reported, never compared. Bump on
 #     any meaningful GUI change you want to be able to spot a reload of,
 #     INCLUDING pure-internal logic changes that don't touch the wire.
-WIRE_VERSION = 3  # guarded pipeline commands and interactive state/PNG receipts
+WIRE_VERSION = 4  # operation await follows the completed/timeout-only contract
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 5  # shared-owner pipeline control and search/interactive projections
+GUI_VERSION = 6  # operation await declarations match the shared cancellation channel

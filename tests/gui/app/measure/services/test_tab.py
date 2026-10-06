@@ -129,7 +129,7 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
                 cfg=MagicMock(),
             ),
         )
-    state.set_tab_running("running", True)
+    state.set_tab_running("running", running=True)
     writeback = MagicMock()
     writeback.preview_draft.return_value = []
     service = TabService(state, MagicMock(), writeback, cfg_resources(state))

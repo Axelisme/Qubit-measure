@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
@@ -48,7 +47,6 @@ from .events.tab import (
 )
 from .registry import Registry
 from .remote.dialogs import DialogName
-from .role_catalog import RoleCatalog
 from .services import (
     AppPersistedState,
     LoadTabResultOutcome,
@@ -61,6 +59,7 @@ from .services import (
 from .services.cfg_lowering import lower_module, lower_waveform
 from .services.ports import CfgEdit, CfgEditResult, ContextWrites
 from .state import State
+from .template_catalog import TemplateCatalog
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 
 if TYPE_CHECKING:
@@ -90,18 +89,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class _ActiveOperation:
-    token: int | None
-    kind: Literal["run", "analyze", "device"]
-    owner_id: str | None = None
-
-    def tag(self) -> str:
-        if self.owner_id is None:
-            return self.kind
-        return f"{self.kind}:{self.owner_id}"
 
 
 # A View has two distinct down-channels from the Controller (ADR-0068):
@@ -215,15 +202,6 @@ class RenderView(Protocol):
         """
         ...
 
-    def refresh_feedback_widget(self) -> None:
-        """Re-evaluate and mount/unmount the docked feedback panel.
-
-        Called by RemoteControlAdapter._on_client_count_changed() on the Qt
-        main thread when a control client connects or disconnects, so the
-        panel tracks both op-count changes and agent-presence changes.
-        """
-        ...
-
 
 class ViewProtocol(DiagnosticSink, RenderHost, RenderView, Protocol):
     """A full Qt View (``MainWindow``) implements all three channels."""
@@ -247,7 +225,7 @@ class Controller(SessionControllerMixin):
         io_manager: IOManager,
         view: ViewProtocol | None,
         bus: EventBus,
-        role_catalog: RoleCatalog | None = None,
+        template_catalog: TemplateCatalog | None = None,
         progress_transport: ProgressTransport | None = None,
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
@@ -270,10 +248,9 @@ class Controller(SessionControllerMixin):
         if view is not None:
             self.add_view(view)
         self._bus = bus
-        # Catalog of experiment-role templates (gui interface, populated by
-        # injected user composition at startup). Optional so tests can construct a bare
-        # Controller; create_from_role fails fast when absent.
-        self._role_catalog = role_catalog
+        # User composition injects templates at startup. Bare controllers omit
+        # them; create_from_template fails fast when the catalog is absent.
+        self._template_catalog = template_catalog
 
         # Construct and wire every domain service into an immutable bundle, then
         # alias them onto self for the façade's call sites.
@@ -359,11 +336,6 @@ class Controller(SessionControllerMixin):
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
         self._shutdown_driver: QtShutdownDriver | None = None
-        # Injected by RemoteControlAdapter on start()/stop() so the View can
-        # gate widgets on whether an MCP control client is connected (ADR-0066).
-        # None means no control socket is running → treat as no client connected.
-        self._agent_connected_query: Callable[[], bool] | None = None
-
         bus.subscribe(RunFinishedPayload, self._on_run_finished)
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
         bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
@@ -695,102 +667,6 @@ class Controller(SessionControllerMixin):
     def cancel_analyze(self, tab_id: str) -> bool:
         return self._run_analyze_control.cancel_analyze(tab_id)
 
-    def _active_operation(self) -> _ActiveOperation | None:
-        """Return the single foreground in-flight operation.
-
-        Applies the same taxonomy as cancel_active_operation / send_feedback:
-        run > interactive analyze > device (measure-gui drives one foreground
-        op at a time). Returns (None, None) when no operation is active.
-
-        token is sourced from the respective service's active-token accessor;
-        it may itself be None if the service is active but the token was not
-        captured (edge case during startup races) — callers must tolerate
-        token=None paired with a non-None tag.
-        """
-        running = self._state.running_tab_id
-        if running is not None:
-            return _ActiveOperation(self._run_svc.active_token, "run")
-        tab = self._analyze_svc.active_interactive_tab()
-        if tab is not None:
-            return _ActiveOperation(
-                self._analyze_svc.active_interactive_token(), "analyze", tab
-            )
-        ops = self.get_active_device_operations()
-        if ops:
-            name = ops[0].device_name
-            return _ActiveOperation(
-                self._dev_svc.active_operation_token(name), "device", name
-            )
-        return None
-
-    def cancel_active_operation(self) -> str | None:
-        """Cancel the single in-flight operation the docked feedback panel
-        represents; returns a short tag of what was cancelled (or None for a
-        no-op). The ONLY place that maps "the active op" to the right cancel —
-        op-taxonomy lives here, not in the View. Priority run > interactive
-        analyze > device (measure-gui drives one foreground op at a time)."""
-        running = self._state.running_tab_id
-        if running is not None:
-            self.cancel_run()
-            return "run"
-        tab = self._analyze_svc.active_interactive_tab()
-        if tab is not None:
-            self.cancel_analyze(tab)
-            return f"analyze:{tab}"
-        ops = self.get_active_device_operations()
-        if ops:
-            name = ops[0].device_name
-            self._dev_svc.cancel_device_operation(name)
-            return f"device:{name}"
-        return None
-
-    def can_cancel_active_operation(self) -> bool:
-        """True when the active foreground operation has a cancel hook.
-
-        Used by FeedbackPanel to gate the 'Send & Stop' button: ops
-        without a cancel hook (connect / FIT-analyze / device connect-
-        disconnect) should not show Stop (ADR-0066).
-        Returns False when no operation is active.
-        """
-        operation = self._active_operation()
-        if operation is None or operation.token is None:
-            return False
-        return self._operation_handles.has_cancel_hook(operation.token)
-
-    def send_feedback(self, message: str, *, stop: bool = False) -> str | None:
-        """User->agent feedback from the GUI (ADR-0066).
-
-        Routes the message to the active operation's OperationChannel using
-        the taxonomy from _active_operation() (run > interactive > device):
-        - ``stop=False``: ``handles.message(token, text)`` — pure nudge, op
-          continues running; agent receives user_feedback (non-terminal).
-        - ``stop=True``: UI teardown first (unmount view for interactive), then
-          ``handles.stop(token, reason=text)`` — enqueues Stop BEFORE triggering
-          the cancel hook (ADR-0066 ordering invariant preserved).
-
-        Returns the taxonomy tag of what was cancelled (stop=True only), or None.
-        """
-        operation = self._active_operation()
-        if operation is None:
-            return None
-
-        # Interactive analyze requires View teardown before the hook fires;
-        # run and device have no UI unmount step.
-        if stop and operation.kind == "analyze":
-            tab = operation.owner_id
-            assert tab is not None
-            host = self._render_host
-            if host is not None:
-                host.unmount_interactive_analysis(tab)
-
-        if stop:
-            if operation.token is not None:
-                self._operation_handles.stop(operation.token, reason=message)
-            return operation.tag()
-        if operation.token is not None:
-            self._operation_handles.message(operation.token, message)
-        return None
-
     # ------------------------------------------------------------------
     # Shutdown coordination (cancel-all + wait, ADR-0066)
     # ------------------------------------------------------------------
@@ -821,25 +697,6 @@ class Controller(SessionControllerMixin):
         Counts all live operations (run / device / connect AND analyze /
         interactive) — Handles owns the lifecycle (ADR-0066)."""
         return self._operation_handles.live_count()
-
-    def set_agent_connected_query(self, query: Callable[[], bool] | None) -> None:
-        """Inject or clear the has-live-control-client predicate.
-
-        Called by RemoteControlAdapter.start() / stop() so the View can gate
-        the feedback widget on agent presence (ADR-0066). None means the
-        control socket is not running; the predicate then returns False.
-        """
-        self._agent_connected_query = query
-
-    def has_agent_connected(self) -> bool:
-        """Return True if at least one MCP control client is connected.
-
-        The View calls this inside refresh_feedback_widget() to gate display
-        (ADR-0066: show only when op live AND agent connected). Always
-        returns False when no RemoteControlAdapter has been started.
-        """
-        q = self._agent_connected_query
-        return q() if q is not None else False
 
     def begin_shutdown(self, on_closed: Callable[[], None]) -> None:
         """Cancel every live operation, wait (with a timeout) for them to stop,
@@ -1056,36 +913,37 @@ class Controller(SessionControllerMixin):
         return self._arb_waveform_svc
 
     # ------------------------------------------------------------------
-    # Role templates — one-shot "create blank ml entry from a named role"
-    # (shared by inspect UI and ml.create_from_role RPC). Editing afterwards
-    # goes through the normal modify path (inspect / editor.new(from_name)).
+    # Templates: one-shot create for Inspect UI and context.ml_create_from_role.
     # ------------------------------------------------------------------
 
-    def get_role_catalog(self) -> RoleCatalog:
-        if self._role_catalog is None:
-            raise FailedPreconditionError("No role catalog is wired up.")
-        return self._role_catalog
+    def get_template_catalog(self) -> TemplateCatalog:
+        """Return the injected catalog; raise FailedPreconditionError if absent."""
+        if self._template_catalog is None:
+            raise FailedPreconditionError("No template catalog is wired up.")
+        return self._template_catalog
 
     def get_session_env(self) -> SessionEnv:
         return self._ctx_svc.get_session_env()
 
-    def create_from_role(self, item_kind: str, role_id: str, name: str) -> None:
-        """Seed a blank ml module/waveform from a named role and register it.
+    def create_from_template(self, item_kind: str, template_id: str, name: str) -> None:
+        """Create a new ModuleLibrary entry from the catalog template ID.
 
-        The role's eval-aware factory produces md-linked defaults; lowering
-        against the live md turns those into the md's current concrete values
-        (ModuleLibrary stores concrete numbers, never md references).
+        ``item_kind`` must match the template's module/waveform store. ``name``
+        must be nonempty and unused in that store. Raise KeyError for an unknown
+        ID and FailedPreconditionError for a missing catalog, empty/colliding
+        name or kind mismatch. Factory and schema-validation failures propagate.
+
+        The template's fresh value and shape are lowered against the live md by
+        ContextService, so ModuleLibrary stores concrete numbers, not md links.
+        No library write occurs before both factories succeed.
         """
         if not name:
             raise FailedPreconditionError("Entry name must not be empty.")
-        entry = self.get_role_catalog().get(role_id)
+        entry = self.get_template_catalog().get(template_id)
         if entry.item_kind != item_kind:
             raise FailedPreconditionError(
-                f"Role {role_id!r} is a {entry.item_kind}, not a {item_kind}."
+                f"Template {template_id!r} is a {entry.item_kind}, not a {item_kind}."
             )
-        # create = new entry; a name clash is an error (the user/agent meant to
-        # add, not silently overwrite an existing entry — register_module would
-        # overwrite). Editing an existing entry goes through the modify path.
         self._require_new_ml_name(item_kind, name)
 
         ctx = self.get_session_env()

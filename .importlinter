@@ -19,7 +19,7 @@ type = forbidden
 source_modules =
     zcu_tools
 forbidden_modules =
-    zcu_tools.resources.entry.builtin_kinds
+    zcu_lab.components
 
 [importlinter:contract:experiment-no-gui]
 name = C1: the experiment domain does not depend on the GUI

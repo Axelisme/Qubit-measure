@@ -13,20 +13,29 @@ Axes are declared **inner-first** to match ``labber_io``'s native convention
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from zcu_tools.datafile import (
-    DatasetRole,
+    AxisSchema,
+    DataVariable,
+    ExperimentPayload,
     GroupedLabberData,
     LabberMetadata,
     LabberPayload,
+    VariableSchema,
+    cast_labber_values,
+    format_ext,
     load_grouped_labber_data,
     save_grouped_labber_data,
+    validate_labber_payload,
+    write_labber,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
@@ -35,10 +44,10 @@ __all__ = [
     "Axis",
     "ZSpec",
     "AxesSpec",
-    "RoleAxisSpec",
-    "RoleZSpec",
-    "RoleSpec",
-    "LoadedRoleData",
+    "VariableAxisSpec",
+    "VariableZSpec",
+    "VariableSpec",
+    "LoadedVariableData",
     "GroupedLoadData",
     "GroupedAxesSpec",
     "IDENTITY",
@@ -68,25 +77,48 @@ class Axis:
 
 @dataclass(frozen=True)
 class ZSpec:
-    """The log (z) channel of an experiment Result."""
+    """Result channel: field_name selects the array; label/unit describe disk.
+
+    dtype is the reconstructed memory dtype. scale maps memory values to SI
+    disk values (disk = memory * scale), and must be finite and nonzero.
+    """
 
     field_name: str
     label: str
     unit: str
     dtype: type = np.complex128
+    scale: float = IDENTITY
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.scale) or self.scale == 0.0:
+            raise ValueError("ZSpec scale must be finite and non-zero")
 
 
 @dataclass(frozen=True)
 class AxesSpec(Generic[T_Result, T_Config]):
-    """The full per-experiment persistence declaration (see module docstring)."""
+    """Map a Result dataclass and cfg model to one stable variable identity.
+
+    axes are inner-first memory-field/label/unit/scale declarations; z selects
+    the signal field and its memory dtype/unit conversion. result_type rebuilds
+    Result; cfg_type validates cfg. tag is the persisted experiment identity.
+    data_variable is the explicit native group key, defaulting to data, never
+    inferred from a label. cfg_schema_version is declaration-owned major.minor,
+    defaulting to 1.0. Invalid Result fields fail at declaration time. Existing
+    save/load remain Labber; native save_run/load_run consume this same spec.
+    """
 
     axes: tuple[Axis, ...]  # inner-first
     z: ZSpec
     result_type: type[T_Result]
     cfg_type: type[T_Config]
     tag: str  # on-disk hierarchical tag, e.g. 'twotone/freq'
+    data_variable: DataVariable = DataVariable(
+        "data"
+    )  # stable single-variable identity
+    cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
 
     def __post_init__(self) -> None:
+        _validate_cfg_schema_version(self.cfg_schema_version)
         # Fast-Fail at declaration time: the spec must reference real Result fields.
         if not is_dataclass(self.result_type):
             raise TypeError(f"result_type {self.result_type!r} must be a dataclass")
@@ -101,8 +133,15 @@ class AxesSpec(Generic[T_Result, T_Config]):
 
 
 @dataclass(frozen=True)
-class RoleAxisSpec:
-    """One inner-first axis for a grouped Dataset Role."""
+class VariableAxisSpec:
+    """Declare one inner-first axis for a grouped Data Variable.
+
+    label/unit identify the persisted axis. field_name selects a 1D Result field;
+    generated="arange" instead derives indices from the corresponding z dimension.
+    Exactly one source is required. Nonzero scale multiplies memory values on save
+    and divides persisted values on load. dtype is the reconstructed memory dtype.
+    Invalid source selection or zero scale raises ValueError at construction.
+    """
 
     label: str
     unit: str
@@ -118,21 +157,29 @@ class RoleAxisSpec:
         unit: str,
         *,
         dtype: type = np.int64,
-    ) -> RoleAxisSpec:
+    ) -> VariableAxisSpec:
+        """Declare indices 0..N-1 with the given persisted label/unit and dtype."""
         return cls(label=label, unit=unit, dtype=dtype, generated="arange")
 
     def __post_init__(self) -> None:
         if (self.field_name is None) == (self.generated is None):
             raise ValueError(
-                "RoleAxisSpec requires exactly one of field_name or generated"
+                "VariableAxisSpec requires exactly one of field_name or generated"
             )
         if self.scale == 0.0:
-            raise ValueError("RoleAxisSpec scale must be non-zero")
+            raise ValueError("VariableAxisSpec scale must be non-zero")
 
 
 @dataclass(frozen=True)
-class RoleZSpec:
-    """The z/data channel for one grouped Dataset Role."""
+class VariableZSpec:
+    """Declare the measured channel for one grouped Data Variable.
+
+    field_name selects the Result array; label/unit identify its persisted channel.
+    Nonzero scale maps memory to disk units; dtype is the reconstructed memory
+    dtype. index=None uses the entire array; otherwise select index on index_axis
+    before saving. The remaining shape must match the reversed axis lengths.
+    Empty field_name or zero scale raises ValueError at construction.
+    """
 
     field_name: str
     label: str
@@ -144,65 +191,119 @@ class RoleZSpec:
 
     def __post_init__(self) -> None:
         if not self.field_name:
-            raise ValueError("RoleZSpec field_name must be non-empty")
+            raise ValueError("VariableZSpec field_name must be non-empty")
         if self.scale == 0.0:
-            raise ValueError("RoleZSpec scale must be non-zero")
+            raise ValueError("VariableZSpec scale must be non-zero")
 
 
 @dataclass(frozen=True)
-class LoadedRoleData:
-    """Validated, memory-unit arrays for one loaded Dataset Role."""
+class LoadedVariableData:
+    """Validated arrays for one loaded Data Variable.
 
-    role: DatasetRole
+    variable is its lowercase snake_case identity. axes are 1D arrays in
+    inner-first order and memory units. z is the measured memory-unit array,
+    shaped by the reversed axis lengths, with the VariableZSpec memory dtype.
+    """
+
+    variable: DataVariable
     axes: tuple[np.ndarray, ...]
     z: np.ndarray
 
 
 @dataclass(frozen=True)
 class GroupedLoadData(Generic[T_Config]):
-    """Validated grouped payload plus reconstructed cfg snapshot."""
+    """Validated grouped payload plus reconstructed cfg snapshot.
 
-    roles: Mapping[DatasetRole, LoadedRoleData]
+    variables maps each DataVariable identity to its memory-unit loaded arrays.
+    metadata contains shared file metadata. cfg_snapshot is the reconstructed
+    experiment config, or None when the saved comment cannot validate as that cfg.
+    """
+
+    variables: Mapping[DataVariable, LoadedVariableData]
     metadata: LabberMetadata
     cfg_snapshot: T_Config | None
 
-    def role(self, role: str | DatasetRole) -> LoadedRoleData:
-        dataset_role = DatasetRole(role)
+    def variable(self, variable: str | DataVariable) -> LoadedVariableData:
+        """Get loaded arrays by snake_case identity; invalid/missing names raise ValueError."""
+        data_variable = DataVariable(variable)
         try:
-            return self.roles[dataset_role]
+            return self.variables[data_variable]
         except KeyError:
-            raise ValueError(f"loaded grouped data is missing role {role!r}") from None
+            raise ValueError(
+                f"loaded grouped data is missing variable {variable!r}"
+            ) from None
 
 
 @dataclass(frozen=True)
-class RoleSpec:
-    """Mechanical Result-field mapping for one grouped Dataset Role."""
+class VariableSpec:
+    """Map one named Data Variable between Result fields and a Labber payload.
 
-    role: str | DatasetRole
-    axes: tuple[RoleAxisSpec, ...]
-    z: RoleZSpec
+    variable is its lowercase snake_case identity; invalid names raise ValueError
+    at construction. axes declares inner-first axes; z declares the measured
+    channel, memory dtype and unit conversion. Arrays use reversed-axis shape.
+    """
+
+    variable: str | DataVariable
+    axes: tuple[VariableAxisSpec, ...]
+    z: VariableZSpec
 
     def __post_init__(self) -> None:
-        DatasetRole(self.role)
+        DataVariable(self.variable)
 
     @property
-    def dataset_role(self) -> DatasetRole:
-        return DatasetRole(self.role)
+    def data_variable(self) -> DataVariable:
+        """Return the validated snake_case identity for this mapping."""
+        return DataVariable(self.variable)
 
     def validate_result_fields(
         self, result_fields: set[str], result_type_name: str
     ) -> None:
+        """Check declared fields against Result field names; missing fields raise ValueError.
+
+        result_type_name labels that error with the caller\'s Result type.
+        """
         declared = {self.z.field_name}
         declared.update(axis.field_name for axis in self.axes if axis.field_name)
         missing = declared - result_fields
         if missing:
             raise ValueError(
-                f"RoleSpec {self.dataset_role!r} field_name(s) "
+                f"VariableSpec {self.data_variable!r} field_name(s) "
                 f"{sorted(missing)} not on {result_type_name} "
                 f"(has {sorted(result_fields)})"
             )
 
+    def native_schema(self) -> VariableSchema:
+        """Return this mapping's SI disk labels, units and numeric dtypes.
+
+        NumPy scalar multiplication determines disk dtype after memory casting.
+        Generated arange axes keep their declared integer dtype without scaling.
+        This declaration does not inspect Result values or modify arrays.
+        """
+        return VariableSchema(
+            variable=self.data_variable,
+            axes=tuple(
+                AxisSchema(
+                    name=axis.label,
+                    unit=axis.unit,
+                    dtype=(
+                        np.dtype(axis.dtype)
+                        if axis.generated == "arange"
+                        else (np.empty(0, dtype=axis.dtype) * axis.scale).dtype
+                    ),
+                )
+                for axis in self.axes
+            ),
+            signal_name=self.z.label,
+            signal_unit=self.z.unit,
+            signal_dtype=(np.empty(0, dtype=self.z.dtype) * self.z.scale).dtype,
+        )
+
     def payload_from_result(self, result: object, *, context: str) -> LabberPayload:
+        """Map declared Result arrays into disk units; context labels validation errors.
+
+        Missing fields raise AttributeError. Invalid dtype, index or axis/array
+        shape raises ValueError. The returned payload retains inner-first axes.
+        """
         z_values = self._z_from_result(result, context=context)
         axes = [
             (
@@ -225,36 +326,23 @@ class RoleSpec:
 
     def loaded_from_payload(
         self, payload: LabberPayload, *, context: str
-    ) -> LoadedRoleData:
-        if len(payload.axes) != len(self.axes):
-            raise ValueError(
-                f"{context} has {len(payload.axes)} axes; expected {len(self.axes)}"
-            )
+    ) -> LoadedVariableData:
+        """Validate persisted labels/units/shape and restore memory units and dtypes.
+
+        context labels ValueError for invalid labels, units, arrays or generated
+        indices. Return loaded arrays for this mapping\'s variable identity.
+        """
+        validate_labber_payload(payload, schema=self.native_schema(), context=context)
 
         loaded_axes: list[np.ndarray] = []
         for index, (loaded_axis, expected_axis) in enumerate(
             zip(payload.axes, self.axes, strict=True)
         ):
-            if loaded_axis.name != expected_axis.label:
-                raise ValueError(
-                    f"{context} axis {index} label is {loaded_axis.name!r}; "
-                    f"expected {expected_axis.label!r}"
-                )
-            if loaded_axis.unit != expected_axis.unit:
-                raise ValueError(
-                    f"{context} axis {index} unit is {loaded_axis.unit!r}; "
-                    f"expected {expected_axis.unit!r}"
-                )
-
             axis_values = _cast_memory_values(
                 np.asarray(loaded_axis.values) / expected_axis.scale,
                 expected_axis.dtype,
                 context=f"{context} axis {index}",
             )
-            if axis_values.ndim != 1:
-                raise ValueError(
-                    f"{context} axis {index} is {axis_values.ndim}D; expected 1D"
-                )
             if expected_axis.generated == "arange":
                 expected_values = np.arange(
                     axis_values.shape[0], dtype=axis_values.dtype
@@ -263,25 +351,13 @@ class RoleSpec:
                     raise ValueError(f"{context} axis {index} must equal arange(N)")
             loaded_axes.append(axis_values)
 
-        if payload.data.name != self.z.label:
-            raise ValueError(
-                f"{context} z channel label is {payload.data.name!r}; "
-                f"expected {self.z.label!r}"
-            )
-        if payload.data.unit != self.z.unit:
-            raise ValueError(
-                f"{context} z channel unit is {payload.data.unit!r}; "
-                f"expected {self.z.unit!r}"
-            )
-
         z_values = _cast_memory_values(
             np.asarray(payload.z) / self.z.scale,
             self.z.dtype,
             context=f"{context} z channel",
         )
-        self._validate_shape(z_values, loaded_axes, context)
-        return LoadedRoleData(
-            role=self.dataset_role,
+        return LoadedVariableData(
+            variable=self.data_variable,
             axes=tuple(loaded_axes),
             z=z_values,
         )
@@ -306,7 +382,7 @@ class RoleSpec:
     def _axis_from_result(
         self,
         result: object,
-        axis: RoleAxisSpec,
+        axis: VariableAxisSpec,
         *,
         z_shape: tuple[int, ...],
         axis_index: int,
@@ -345,46 +421,59 @@ class RoleSpec:
 
 @dataclass(frozen=True)
 class GroupedAxesSpec(Generic[T_Result, T_Config]):
-    """Experiment-level grouped persistence contract (ADR-0063)."""
+    """Declare the grouped persistence mapping for one experiment (ADR-0063).
 
-    roles: tuple[RoleSpec, ...]
+    variables is a nonempty ordered tuple of unique VariableSpec declarations.
+    result_type is the Result dataclass; cfg_type validates saved cfg comments.
+    tag is the default file tag. result_builder rebuilds result_type from loaded
+    memory-unit arrays; result_validator, when supplied, checks results on save
+    and load. Invalid declarations raise ValueError; non-dataclass types or wrong
+    builder return types raise TypeError. cfg_schema_version is the declaration's
+    major.minor cfg version, defaulting to 1.0. Existing Labber save/load require
+    a common grid; native persistence permits different grids for each variable.
+    """
+
+    variables: tuple[VariableSpec, ...]
     result_type: type[T_Result]
     cfg_type: type[T_Config]
     tag: str
     result_builder: Callable[[GroupedLoadData[T_Config]], T_Result]
     result_validator: Callable[[T_Result], None] | None = None
+    cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
 
     def __post_init__(self) -> None:
-        if not self.roles:
-            raise ValueError("GroupedAxesSpec requires at least one role")
+        _validate_cfg_schema_version(self.cfg_schema_version)
+        if not self.variables:
+            raise ValueError("GroupedAxesSpec requires at least one variable")
         if not is_dataclass(self.result_type):
             raise TypeError(f"result_type {self.result_type!r} must be a dataclass")
         result_fields = {f.name for f in fields(self.result_type)}  # type: ignore[arg-type]
 
-        seen: set[DatasetRole] = set()
-        for role in self.roles:
-            dataset_role = role.dataset_role
-            if dataset_role in seen:
-                raise ValueError(f"duplicate grouped dataset role {dataset_role!r}")
-            seen.add(dataset_role)
-            role.validate_result_fields(result_fields, self.result_type.__name__)
+        seen: set[DataVariable] = set()
+        for variable in self.variables:
+            data_variable = variable.data_variable
+            if data_variable in seen:
+                raise ValueError(f"duplicate grouped data variable {data_variable!r}")
+            seen.add(data_variable)
+            variable.validate_result_fields(result_fields, self.result_type.__name__)
 
     @property
-    def required_roles(self) -> tuple[DatasetRole, ...]:
-        return tuple(role.dataset_role for role in self.roles)
+    def required_variables(self) -> tuple[DataVariable, ...]:
+        """Return required variable identities in declaration order."""
+        return tuple(variable.data_variable for variable in self.variables)
 
     def payloads_from_result(self, result: T_Result) -> dict[str, LabberPayload]:
         if self.result_validator is not None:
             self.result_validator(result)
         return {
-            str(role.dataset_role): role.payload_from_result(
+            str(variable.data_variable): variable.payload_from_result(
                 result,
                 context=(
-                    f"{self.result_type.__name__} grouped role "
-                    f"{str(role.dataset_role)!r}"
+                    f"{self.result_type.__name__} grouped variable "
+                    f"{str(variable.data_variable)!r}"
                 ),
             )
-            for role in self.roles
+            for variable in self.variables
         }
 
     def save_grouped_result(
@@ -409,21 +498,48 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         comment: str | None = None,
         tag: str | None = None,
     ) -> None:
+        """Map this explicit record to one common-grid Labber export.
+
+        source.cfg must be present. destination follows the existing Labber
+        extension normalization. comment is optional user text; tag overrides
+        this declaration's tag. Invalid cfg JSON or data raises ValueError;
+        existing files raise FileExistsError and I/O errors propagate. No native
+        file is written and no directory/name reservation is performed.
+        """
         if source.cfg is None:
             raise ValueError("Cannot save a RunRecord without cfg")
-        from zcu_tools.experiment.utils import make_comment
+        from zcu_tools.experiment.utils import make_labber_cfg_snapshot
 
-        self.save_grouped_result(
-            str(destination),
-            source.result,
-            comment=make_comment(source.cfg, comment),
-            tag=tag,
+        payload = ExperimentPayload(
+            variables={
+                DataVariable(variable): signal
+                for variable, signal in self.payloads_from_result(source.result).items()
+            },
+            metadata=LabberMetadata(tags=tag or self.tag),
+            representation="grouped",
+        )
+        write_labber(
+            Path(format_ext(str(destination))),
+            payload,
+            cfg=make_labber_cfg_snapshot(
+                source.cfg, schema_version=self.cfg_schema_version
+            ),
+            comment=comment,
         )
 
     def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
+        """Read canonical grouped Labber at an exact local path into a record.
+
+        Required variables, axes, units or shape mismatches raise ValueError;
+        I/O errors propagate. Missing cfg or non-envelope comment text returns
+        cfg=None with valid Result data. Recognized envelopes with invalid
+        cfg/comment/timestamp field types raise ValueError. A valid envelope
+        whose cfg object fails cfg_type validation warns and retains Result data
+        with cfg=None. This entry does not guess native or legacy layouts.
+        """
         grouped = load_grouped_labber_data(
             str(source),
-            required_roles=self.required_roles,
+            required_variables=self.required_variables,
         )
         return self.record_from_grouped_data(grouped, source=str(source))
 
@@ -433,20 +549,20 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         *,
         source: str | None = None,
     ) -> RunRecord[T_Config, T_Result]:
-        self._validate_grouped_roles(grouped)
+        self._validate_grouped_variables(grouped)
         cfg_snapshot = self._cfg_from_comment(grouped.metadata.comment, source=source)
-        loaded_roles = {
-            role.dataset_role: role.loaded_from_payload(
-                grouped.roles[role.dataset_role],
+        loaded_variables = {
+            variable.data_variable: variable.loaded_from_payload(
+                grouped.variables[variable.data_variable],
                 context=(
-                    f"{self.result_type.__name__} grouped role "
-                    f"{str(role.dataset_role)!r}"
+                    f"{self.result_type.__name__} grouped variable "
+                    f"{str(variable.data_variable)!r}"
                 ),
             )
-            for role in self.roles
+            for variable in self.variables
         }
         load_data = GroupedLoadData(
-            roles=loaded_roles,
+            variables=loaded_variables,
             metadata=grouped.metadata,
             cfg_snapshot=cfg_snapshot,
         )
@@ -460,17 +576,17 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
             self.result_validator(result)
         return RunRecord(cfg=cfg_snapshot, result=result)
 
-    def _validate_grouped_roles(self, grouped: GroupedLabberData) -> None:
-        expected = set(self.required_roles)
-        present = set(grouped.roles)
+    def _validate_grouped_variables(self, grouped: GroupedLabberData) -> None:
+        expected = set(self.required_variables)
+        present = set(grouped.variables)
         missing = expected - present
         unknown = present - expected
         if missing:
             names = ", ".join(sorted(missing))
-            raise ValueError(f"missing required dataset role(s): {names}")
+            raise ValueError(f"missing required data variable(s): {names}")
         if unknown:
             names = ", ".join(sorted(unknown))
-            raise ValueError(f"unknown dataset role(s): {names}")
+            raise ValueError(f"unknown data variable(s): {names}")
 
     def _cfg_from_comment(
         self, comment: str, *, source: str | None = None
@@ -488,22 +604,18 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         )
 
 
-def _cast_memory_values(values: Any, dtype: type, *, context: str) -> np.ndarray:
-    target_dtype = np.dtype(dtype)
-    array = np.asarray(values)
-    if target_dtype.kind != "c" and np.iscomplexobj(array):
-        if np.any(np.imag(array) != 0.0):
-            raise ValueError(
-                f"{context} contains non-zero imaginary component; "
-                f"cannot load as {target_dtype}"
-            )
-        array = np.real(array)
+def _validate_cfg_schema_version(version: str) -> None:
+    if re.fullmatch(r"[0-9]+\.[0-9]+", version) is None:
+        raise ValueError(f"cfg_schema_version must be major.minor, got {version!r}")
 
+
+def _cast_memory_values(values: ArrayLike, dtype: type, *, context: str) -> np.ndarray:
+    target_dtype = np.dtype(dtype)
     if target_dtype.kind in {"i", "u"}:
-        real_array = np.asarray(array, dtype=np.float64)
+        # Integer coordinates use the typed mapping's existing rounding contract.
+        real_array = cast_labber_values(values, np.dtype(np.float64), context=context)
         rounded = np.round(real_array)
         if not np.allclose(real_array, rounded):
             raise ValueError(f"{context} values must be integers")
         return rounded.astype(target_dtype)
-
-    return np.asarray(array, dtype=target_dtype)
+    return cast_labber_values(values, target_dtype, context=context)

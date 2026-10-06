@@ -4,17 +4,15 @@ from copy import deepcopy
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     ComponentSchema,
     RoleSpec,
-    UnitSpec,
     component_registry,
     role_registry,
 )
 
-type Number = Annotated[
-    float | None, UnitSpec("test-unit"), Field(strict=True, allow_inf_nan=False)
-]
+type Number = Annotated[float | None, Field(strict=True, allow_inf_nan=False)]
 
 
 class Connections(BaseModel):
@@ -34,6 +32,8 @@ class Connections(BaseModel):
 
 
 class Connected(ComponentSchema):
+    model_config = ConfigDict(extra="forbid")
+    ext: YamlMap = Field(default_factory=dict)
     wiring: Connections = Field(default_factory=Connections)
 
 
@@ -69,9 +69,9 @@ class Supply(Connected):
 
 
 def register_fakes() -> None:
-    component_registry.register("fake/sensor", Sensor, references=("booster",))
-    component_registry.register("fake/drive/a", Driver, references=("sense", "source"))
-    component_registry.register("fake/drive/b", Driver, references=("sense", "source"))
+    component_registry.register("fake/sensor", Sensor)
+    component_registry.register("fake/drive/a", Driver)
+    component_registry.register("fake/drive/b", Driver)
     component_registry.register("fake/booster", Booster)
     component_registry.register("fake/supply", Supply)
     for name, kind in {

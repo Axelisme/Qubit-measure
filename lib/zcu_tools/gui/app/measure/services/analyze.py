@@ -232,7 +232,7 @@ class AnalyzeService(_StagedAnalyzeService):
                     logger.exception(
                         "interactive result construction failed: tab_id=%r", tab_id
                     )
-                    self._state.set_tab_analyzing(tab_id, False)
+                    self._state.set_tab_analyzing(tab_id, analyzing=False)
                     self._release(tab_id, OperationOutcome("failed", str(exc)))
                     self._bus.emit(
                         TabInteractionChangedPayload(
@@ -259,19 +259,6 @@ class AnalyzeService(_StagedAnalyzeService):
     def is_interactive_active(self, tab_id: str) -> bool:
         """Whether this tab owns an in-flight plugin session."""
         return tab_id in self._interactive_tabs
-
-    def active_interactive_tab(self) -> str | None:
-        """A tab with an in-flight interactive analyze, or None — the foreground
-        op for ``Controller.cancel_active_operation`` to settle. Arbitrary if more
-        than one (measure-gui drives one interactive picker at a time)."""
-        return next(iter(self._interactive_tabs), None)
-
-    def active_interactive_token(self) -> int | None:
-        """The handle token of the active interactive analyze, or None."""
-        tab = self.active_interactive_tab()
-        if tab is None:
-            return None
-        return self._active_tokens.get(tab)
 
     def cancel_interactive(self, tab_id: str) -> bool:
         """Cancel an in-flight INTERACTIVE analyze: settle its handle as cancelled
@@ -301,7 +288,7 @@ class AnalyzeService(_StagedAnalyzeService):
                         "cancelled interactive plot cleanup failed: tab_id=%r", tab_id
                     )
             logger.info("cancel_interactive: tab_id=%r", tab_id)
-            self._state.set_tab_analyzing(tab_id, False)
+            self._state.set_tab_analyzing(tab_id, analyzing=False)
             self._release(tab_id, OperationOutcome("cancelled"))
             self._bus.emit(
                 TabInteractionChangedPayload(
@@ -341,7 +328,7 @@ class AnalyzeService(_StagedAnalyzeService):
                 logger.exception(
                     "interactive record plot cleanup failed: tab_id=%r", tab_id
                 )
-            self._state.set_tab_analyzing(tab_id, False)
+            self._state.set_tab_analyzing(tab_id, analyzing=False)
             self._release(tab_id, OperationOutcome("failed", str(exc)))
             self._bus.emit(
                 TabInteractionChangedPayload(
@@ -357,7 +344,7 @@ class AnalyzeService(_StagedAnalyzeService):
                 )
             )
             return
-        self._state.set_tab_analyzing(tab_id, False)
+        self._state.set_tab_analyzing(tab_id, analyzing=False)
         self._release(tab_id, OperationOutcome("finished"))
         self._bus.emit(
             TabInteractionChangedPayload(

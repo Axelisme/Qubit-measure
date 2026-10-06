@@ -347,8 +347,7 @@ class NdjsonRpcEndpoint:
         """Return True if at least one control client is currently connected.
 
         Thread-safe: reads _clients under the lock so it is safe to call from
-        any thread (the router calls this on the IO thread; the owner-thread
-        refresh_feedback_widget reads it via the adapter façade).
+        any thread, including the router's IO thread.
         """
         with self._clients_lock:
             return bool(self._clients)

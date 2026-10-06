@@ -5,21 +5,21 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog
+from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-from zcu_lab.roles import register_all_roles
+from zcu_lab.templates import register_all_templates
 
 from ._helpers import Fixture, mcp_client
 
 
 @pytest.fixture()
 def library_client(qapp, tmp_path, monkeypatch):
-    catalog = RoleCatalog()
-    register_all_roles(catalog)
-    fx = Fixture(active_label="ctx001", role_catalog=catalog)
+    catalog = TemplateCatalog()
+    register_all_templates(catalog)
+    fx = Fixture(active_label="ctx001", template_catalog=catalog)
     library = ModuleLibrary()
     library.waveforms["seed"] = WaveformCfgFactory.from_raw(
         {"style": "const", "length": 0.1}

@@ -277,118 +277,15 @@ def test_cancel_analyze_without_interactive_is_graceful(cf):
 
 
 # ---------------------------------------------------------------------------
-# send_feedback / cancel_active_operation — user->agent feedback channel
+# operation cancellation
 # (ADR-0066): routes to the active op's OperationChannel; on stop, also
 # runs op-taxonomy cancel teardown (op-taxonomy lives here, not in the View).
 # ---------------------------------------------------------------------------
 
 
-def test_send_feedback_posts_without_stop(cf):
-    # stop=False with no active op: no-op (no channel to deliver to), returns None.
-    assert cf.ctrl.send_feedback("look at R2", stop=False) is None
-
-
-def test_send_feedback_nudge_delivers_to_interactive_channel(cf):
-    # stop=False while an interactive analyze is active: message arrives on
-    # the channel's consume() as user_feedback (non-terminal).
-    tab_id, token = _start_flux_picker(cf)
-    assert cf.state.is_tab_analyzing(tab_id) is True
-
-    cf.ctrl.send_feedback("nudge text", stop=False)
-
-    # Consume the channel: must surface as user_feedback (non-terminal).
-    result = cf.ctrl.await_operation(token, timeout=1.0)
-    assert result is not None
-    assert result.reason == "user_feedback"
-    assert result.feedback == "nudge text"
-    # Handle still live (non-terminal).
-    assert cf.ctrl.can_cancel_active_operation() is True
-    assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is not None
-    # Cleanup: cancel the interactive analyze.
-    cf.ctrl.cancel_analyze(tab_id)
-
-
-def test_cancel_active_operation_noop_when_idle(cf):
-    assert cf.ctrl.cancel_active_operation() is None
-
-
-def test_send_feedback_stop_cancels_interactive_analyze(cf):
-    tab_id, token = _start_flux_picker(cf)
-    assert cf.state.is_tab_analyzing(tab_id) is True
-
-    cancelled = cf.ctrl.send_feedback("stop - wrong feature", stop=True)
-
-    # Routed to the interactive analyze (no run in flight); stop=True causes
-    # the channel to receive Stop(reason) then Settled(cancelled), so
-    # await_outcome returns completed(cancelled, feedback=reason).
-    assert cancelled == f"analyze:{tab_id}"
-    assert cf.state.is_tab_analyzing(tab_id) is False
-    cf.view.unmount_interactive_analysis.assert_called_once_with(tab_id)
-    # The channel is now settled; consume it to verify feedback is folded.
-    result = cf.ctrl.await_operation(token, timeout=1.0)
-    assert result is not None
-    assert result.reason == "completed"
-    assert result.outcome is not None
-    assert result.outcome.status == "cancelled"
-    assert result.feedback == "stop - wrong feature"
-
-
 # ---------------------------------------------------------------------------
-# can_cancel_active_operation (Stage 4a, ADR-0066)
+# cancellation capability (ADR-0066)
 # ---------------------------------------------------------------------------
-
-
-def test_can_cancel_active_operation_false_when_no_op(cf):
-    """No active operation → returns False."""
-    assert cf.ctrl.can_cancel_active_operation() is False
-
-
-def test_can_cancel_active_operation_true_for_interactive_analyze(cf):
-    """Interactive analyze registers a cancel hook → returns True."""
-    tab_id, _token = _start_flux_picker(cf)
-    assert cf.state.is_tab_analyzing(tab_id) is True
-
-    result = cf.ctrl.can_cancel_active_operation()
-
-    assert result is True
-    # Cleanup.
-    cf.ctrl.cancel_analyze(tab_id)
-
-
-def test_can_cancel_active_operation_false_for_soc_connect(cf):
-    """SoC connect has no cancel hook → returns False when it is the active op.
-
-    Injects a fake live operation token with no cancel hook to simulate a
-    connect op being in-flight (the actual connect needs QICK hardware, so
-    we mock the op state directly).
-    """
-    # Mint an op without a cancel hook (simulates connect: cancel_hook=None).
-    token = cf.ctrl._operation_handles.create(
-        cancel_hook=None, origin=cf.ctrl._bus.current_origin
-    )
-    # Force the controller's run taxonomy to skip run/analyze and reach
-    # "device" via get_active_device_operations() — instead, directly inject
-    # a live operation and verify has_cancel_hook on the handles.
-    # Since _active_operation() checks running_tab_id first, and we have none,
-    # we test the handles layer directly here to avoid needing a real SoC.
-    assert cf.ctrl._operation_handles.has_cancel_hook(token) is False
-    # Cleanup: settle the injected op.
-    from zcu_tools.gui.session.operation_handles import OperationOutcome
-
-    cf.ctrl._operation_handles.settle(token, OperationOutcome("finished"))
-
-
-def test_cancel_active_operation_returns_interactive_tag(cf):
-    """The public cancel command identifies and tears down the picker."""
-    tab_id, token = _start_flux_picker(cf)
-
-    assert cf.ctrl.cancel_active_operation() == f"analyze:{tab_id}"
-    assert cf.state.is_tab_analyzing(tab_id) is False
-    assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is None
-    result = cf.ctrl.await_operation(token, timeout=1.0)
-    assert result is not None
-    assert result.outcome is not None
-    assert result.outcome.status == "cancelled"
 
 
 # ---------------------------------------------------------------------------

@@ -109,7 +109,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
 
 def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
     state, tab_id, adapter = _make_state()
-    state.set_tab_analyzing(tab_id, True)
+    state.set_tab_analyzing(tab_id, analyzing=True)
     svc, _emit, writeback = _service(state)
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:

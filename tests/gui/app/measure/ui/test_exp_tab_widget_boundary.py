@@ -100,7 +100,6 @@ def _window_with_tab():
     ctrl = MagicMock()
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     window = MainWindow(ctrl)
     tab = _tab()
     window._tab_widgets["tab-1"] = tab  # type: ignore[reportPrivateUsage] - fixture injection

@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-05，通用契約與共用 helper 測試
+**Last updated:** 2026-10-05，TemplateCatalog owner 與共用 helper 測試
 
 每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。`gui.py` 是可選的 measure-gui adapter。`autofluxdep.py` 是可選的 Autofluxdep Builder／Node 附件。Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 
@@ -11,7 +11,7 @@
 ```text
 zcu_lab/
 ├── definitions.py        # explicit measure catalog
-├── roles.py              # startup-only role catalog
+├── templates.py          # startup-only template catalog
 ├── autofluxdep_catalog.py
 └── v2/
     ├── <family>/<experiment>/
@@ -23,7 +23,7 @@ zcu_lab/
     └── overnight/         # repeated-measurement executor and its leaves
 ```
 
-`definitions.register_all` 明列 measure adapters，`roles.register_all_roles` 組合 roles。組合根注入 caller-owned catalogs，import 不註冊或操作硬體。Reload 重建 leaf、catalog 與 core-typed Notebook helper，保留 measure／autofluxdep／singleshot shared support、workflow support、roles 與框架 identity。修改固定依賴需要重啟。
+`definitions.register_all` 明列 measure adapters，`templates.register_all_templates` 組合範本。組合根注入 caller-owned catalogs，import 不註冊或操作硬體。Reload 重建 leaf、catalog 與 core-typed Notebook helper，保留 measure／autofluxdep／singleshot shared support、workflow support、templates 與框架 identity。修改固定依賴需要重啟。
 
 ## Reading routes
 

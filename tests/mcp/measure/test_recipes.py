@@ -127,7 +127,7 @@ def interactive_recipe(tmp_path, handoff_failure):
             and params["operation_id"] == 93
             and not done.is_set()
         ):
-            return {"reason": "user_feedback"}
+            return {"reason": "timeout"}
         if method == "tab.interact":
             assert params["tab_id"] == "t"
             failure = handoff_failure if initial_handoff else None
@@ -520,7 +520,7 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
                     "status": outcome,
                     "error": "Analysis failed after cancellation",
                 }
-            return {"reason": "user_feedback"}
+            return {"reason": "timeout"}
         if method == "operation.cancel":
             assert params == {"operation_id": 93}
             return {"status": "cancelling"}

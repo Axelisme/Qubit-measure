@@ -375,24 +375,44 @@ def test_started_operation_and_gui_status_share_one_agent_handle(
     ) in client.transport.sent
 
 
-def test_wait_timeout_and_feedback_are_running_results(tmp_path: Path) -> None:
+def test_wait_timeout_is_running_with_progress(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     op = discover_operation(client, 31)
-    for wire, feedback in (
-        ({"reason": "timeout"}, None),
-        ({"reason": "user_feedback", "feedback": "check frequency"}, "check frequency"),
-    ):
-        client.transport.replies["operation.await"] = {"ok": True, "result": wire}
-        client.transport.replies["operation.progress"] = {
-            "ok": True,
-            "result": {"active": True, "bars": [{"percent": 35.0, "eta_s": 12.5}]},
-        }
-        result = client.call("wait", {"op": op, "timeout": 0})
-        assert result["status"] == "running"
-        assert result["elapsed_s"] >= 0
-        assert result["progress"] == [{"percent": 35.0, "eta_s": 12.5}]
-        assert result["eta_s"] == 12.5
-        assert result.get("feedback") == feedback
+    client.transport.replies["operation.await"] = {
+        "ok": True,
+        "result": {"reason": "timeout"},
+    }
+    client.transport.replies["operation.progress"] = {
+        "ok": True,
+        "result": {"active": True, "bars": [{"percent": 35.0, "eta_s": 12.5}]},
+    }
+    result = client.call("wait", {"op": op, "timeout": 0})
+    assert result["status"] == "running"
+    assert result["elapsed_s"] >= 0
+    assert result["progress"] == [{"percent": 35.0, "eta_s": 12.5}]
+    assert result["eta_s"] == 12.5
+
+
+@pytest.mark.parametrize(
+    "reason", [None, "Stop requested", "Autofluxdep run stop requested"]
+)
+def test_wait_delivers_cancelled_stop_reason(
+    tmp_path: Path, reason: str | None
+) -> None:
+    client = make_client(tmp_path)
+    op = discover_operation(client, 31)
+    wire = {"reason": "completed", "status": "cancelled"}
+    if reason is not None:
+        wire["feedback"] = reason
+    client.transport.replies["operation.await"] = {"ok": True, "result": wire}
+
+    result = client.call("wait", {"op": op, "timeout": 0})
+    elapsed = result.pop("elapsed_s")
+    assert elapsed >= 0
+    expected = {"status": "cancelled"}
+    if reason is not None:
+        expected["feedback"] = reason
+    assert result == expected
 
 
 def test_wait_reports_failed_outcome_as_data_and_unknown_as_error(

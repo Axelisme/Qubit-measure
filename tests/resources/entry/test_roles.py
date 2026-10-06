@@ -54,11 +54,7 @@ class PairSchema(ComponentSchema):
 @pytest.fixture
 def pair_point(tmp_path: Path, registry_state_guard: None) -> Generator[PointView]:
     with ExitStack() as stack:
-        component_registry.register(
-            "notebook/pair",
-            PairSchema,
-            references=("links.control", "links.target", "links.coupler"),
-        )
+        component_registry.register("notebook/pair", PairSchema)
         stack.callback(component_registry.unregister, "notebook/pair")
         component_registry.register("coupler/notebook", ComponentSchema)
         stack.callback(component_registry.unregister, "coupler/notebook")
@@ -92,9 +88,7 @@ def test_declared_kind_patterns_choose_unique_focus_and_derive_reference(
             "beam/source": Beam,
             "beam/detector": ComponentSchema,
         }.items():
-            component_registry.register(
-                kind, model, references=("detector",) if model is Beam else ()
-            )
+            component_registry.register(kind, model)
             stack.callback(component_registry.unregister, kind)
         stack.enter_context(registered_role("beam", RoleSpec("beam/source")))
         stack.enter_context(registered_role("detector", RoleSpec("beam/detector")))
@@ -357,7 +351,7 @@ def test_explicit_and_focus_precede_via_even_without_source_role(
 
 
 @pytest.mark.parametrize("via", ["target.sense", "Q1.sense", "control.rate"])
-def test_via_requires_resolved_role_and_registered_reference(
+def test_via_requires_resolved_role_and_a_string_component_target(
     tmp_path: Path, via: str
 ) -> None:
     point = make_point(tmp_path)
@@ -380,23 +374,90 @@ def test_via_cannot_use_a_role_declared_later(tmp_path: Path) -> None:
         assert "control.sense" in error.value.reason
 
 
-def test_same_name_string_field_is_not_an_implicit_reference(tmp_path: Path) -> None:
-    class UnlinkedQubit(ComponentSchema):
+@pytest.mark.parametrize("declaration", ["same-name", "via"])
+def test_plain_string_target_resolves_and_round_trips_without_markers(
+    tmp_path: Path, registry_state_guard: None, declaration: str
+) -> None:
+    class Linked(ComponentSchema):
         sense: str
 
-    component_registry.register("fake/drive/unlinked", UnlinkedQubit)
+    component_registry.register("fake/drive/linked", Linked)
     try:
         point = make_point(tmp_path)
-        point.add_component("Q3", kind="fake/drive/unlinked", sense="R1")
-        with pytest.raises(RoleResolutionError) as error:
-            point.resolve(["driver", "sense"], focus="Q3")
-        assert error.value.role == "sense"
-        assert error.value.focus == "Q3"
+        point.add_component("Q3", kind="fake/drive/linked", sense="R1")
+        requirements = {
+            "driver": RoleSpec("fake/drive/*"),
+            "sense": RoleSpec(
+                "fake/sensor", via="driver.sense" if declaration == "via" else None
+            ),
+        }
+        assert point.Q3.sense == "R1"
+        assert point.resolve(requirements, focus="Q3").components == {
+            "driver": "Q3",
+            "sense": "R1",
+        }
+        point.Q3.sense = "R2"
+        loaded = ResultEntry.open(
+            "roles",
+            result_root=tmp_path / "results",
+            database_root=tmp_path / "database",
+        ).use_point("working")
+        assert loaded.resolve(requirements, focus="Q3").components == {
+            "driver": "Q3",
+            "sense": "R2",
+        }
     finally:
-        component_registry.unregister("fake/drive/unlinked")
+        component_registry.unregister("fake/drive/linked")
 
 
-@pytest.mark.parametrize("reference", [None, "Q2"])
+@pytest.mark.parametrize("path", ["model_dump", "links.model_dump"])
+def test_via_reads_collision_extra_target_and_follows_reload(
+    tmp_path: Path, registry_state_guard: None, path: str
+) -> None:
+    class Links(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+    class Linked(ComponentSchema):
+        model_config = ConfigDict(extra="allow")
+        links: Links
+
+    component_registry.register("fake/drive/colliding", Linked)
+    try:
+        point = make_point(tmp_path)
+        point.add_component(
+            "Q3",
+            kind="fake/drive/colliding",
+            model_dump="R1",
+            links={"model_dump": "R1"},
+        )
+        requirements = {
+            "driver": RoleSpec("fake/drive/*"),
+            "sense": RoleSpec("fake/sensor", via=f"driver.{path}"),
+        }
+        assert point.resolve(requirements, focus="Q3").components == {
+            "driver": "Q3",
+            "sense": "R1",
+        }
+        with point.edit() as draft:
+            draft.set(f"Q3.{path}", "R2")
+        loaded = ResultEntry.open(
+            "roles",
+            result_root=tmp_path / "results",
+            database_root=tmp_path / "database",
+        ).use_point("working")
+        assert loaded.resolve(requirements, focus="Q3").components == {
+            "driver": "Q3",
+            "sense": "R2",
+        }
+        with loaded.edit() as draft:
+            draft.set(f"Q3.{path}", "missing")
+        with pytest.raises(RoleResolutionError):
+            loaded.resolve(requirements, focus="Q3")
+    finally:
+        component_registry.unregister("fake/drive/colliding")
+
+
+@pytest.mark.parametrize("reference", [None, "Q2", "missing"])
 def test_missing_or_wrong_kind_reference_reports_required_role(
     tmp_path: Path, reference: str | None
 ) -> None:

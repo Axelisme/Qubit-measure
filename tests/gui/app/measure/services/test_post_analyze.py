@@ -183,7 +183,7 @@ def test_start_post_analyze_gates_on_missing_primary_result(qapp):
 
 def test_start_post_analyze_rejects_busy_tab(qapp):
     state = _make_state()
-    state.set_tab_running("tab1", True)
+    state.set_tab_running("tab1", running=True)
     svc, _ = _make_service(state, EventBus())
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:

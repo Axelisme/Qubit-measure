@@ -42,7 +42,7 @@ def await_operation(
     raise but must not send RPCs, as in GuiConnection.send_gui_rpc.
 
     Use native operation.await with a 0.25-second GUI wait and 2.25-second
-    transport deadline. Timeout/user_feedback continue observation; only a
+    transport deadline. Timeout continues observation; only a
     completed reply with a terminal status returns. Close, connection failures,
     admission errors and malformed replies raise without retry or reconnect.
     """
@@ -73,11 +73,11 @@ def await_operation(
             if status == "cancelled":
                 return OperationCompletion("cancelled", native)
             raise GuiRpcError("Invalid operation outcome", reason="incompatible_wire")
-        if reason not in ("timeout", "user_feedback"):
+        if reason != "timeout":
             raise GuiRpcError(
                 "Invalid operation await reply", reason="incompatible_wire"
             )
-        # Pace immediate feedback without holding the RPC lock. Owner control
+        # Pace immediate timeouts without holding the RPC lock. Owner control
         # notifications interrupt this wait; close is checked before next send.
         with condition:
             if not closed.is_set():

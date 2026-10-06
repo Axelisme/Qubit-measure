@@ -1,4 +1,4 @@
-"""Startup-only role composition; retained across experiment reloads."""
+"""Startup-only template composition; retained across experiment reloads."""
 
 from __future__ import annotations
 
@@ -6,8 +6,12 @@ from collections.abc import Callable
 
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, ProgramShape
 from zcu_tools.gui.app.measure.adapter import SessionEnv
-from zcu_tools.gui.app.measure.role_catalog import RoleCatalog, RoleEntry, RoleItemKind
 from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
+from zcu_tools.gui.app.measure.template_catalog import (
+    TemplateCatalog,
+    TemplateEntry,
+    TemplateItemKind,
+)
 from zcu_tools.gui.cfg import (
     ReferenceValue,
     make_custom_reference_key,
@@ -25,13 +29,13 @@ def _blank_value_factory(shape: ProgramShape) -> Callable[[SessionEnv], Referenc
     return _make
 
 
-def _blank_entries() -> list[RoleEntry]:
-    entries: list[RoleEntry] = []
+def _blank_entries() -> list[TemplateEntry]:
+    entries: list[TemplateEntry] = []
     factory: Callable[[SessionEnv], ReferenceValue]
     for shape in PROGRAM_SHAPES.modules():
         factory = _blank_value_factory(shape)
         entries.append(
-            RoleEntry(
+            TemplateEntry(
                 f"{shape.discriminator}:blank",
                 f"Blank: {shape.discriminator}",
                 "module",
@@ -42,7 +46,7 @@ def _blank_entries() -> list[RoleEntry]:
     for shape in PROGRAM_SHAPES.waveforms():
         factory = _blank_value_factory(shape)
         entries.append(
-            RoleEntry(
+            TemplateEntry(
                 f"{shape.discriminator}:blank",
                 f"Blank: {shape.discriminator}",
                 "waveform",
@@ -54,7 +58,7 @@ def _blank_entries() -> list[RoleEntry]:
 
 
 # Insertion order is dropdown order. Blank factories never adopt library entries.
-_CATALOG_ROLES: list[tuple[str, str, RoleItemKind, str]] = [
+_CATALOG_TEMPLATES: list[tuple[str, str, TemplateItemKind, str]] = [
     ("res_probe", "Resonator probe", "module", "readout_rf"),
     ("readout", "Pulse readout", "module", "readout_rf"),
     ("readout_dpm", "Optimized readout (DPM)", "module", "readout_dpm"),
@@ -70,21 +74,26 @@ _CATALOG_ROLES: list[tuple[str, str, RoleItemKind, str]] = [
     ("res_waveform", "Res-probe waveform", "waveform", "ro_waveform"),
 ]
 
-ROLE_ENTRIES: list[RoleEntry] = [
-    RoleEntry(
-        role_id,
+TEMPLATE_ENTRIES: list[TemplateEntry] = [
+    TemplateEntry(
+        template_id,
         label,
         kind,
-        ROLE_FACTORIES[role_id].shape,
-        ROLE_FACTORIES[role_id].blank,
+        ROLE_FACTORIES[template_id].shape,
+        ROLE_FACTORIES[template_id].blank,
         default_name,
     )
-    for role_id, label, kind, default_name in _CATALOG_ROLES
+    for template_id, label, kind, default_name in _CATALOG_TEMPLATES
 ]
 
-ALL_ROLE_ENTRIES: list[RoleEntry] = [*ROLE_ENTRIES, *_blank_entries()]
+ALL_TEMPLATE_ENTRIES: list[TemplateEntry] = [*TEMPLATE_ENTRIES, *_blank_entries()]
 
 
-def register_all_roles(catalog: RoleCatalog) -> None:
-    for entry in ALL_ROLE_ENTRIES:
+def register_all_templates(catalog: TemplateCatalog) -> None:
+    """Append named and blank templates in dropdown order to the caller catalog.
+
+    Duplicate IDs or invalid shapes raise the catalog registration error. Call
+    only at startup, not on reload; this function does not clear prior entries.
+    """
+    for entry in ALL_TEMPLATE_ENTRIES:
         catalog.register(entry)

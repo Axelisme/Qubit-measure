@@ -42,7 +42,6 @@ def make_ctrl():
     ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
     ctrl.get_cfg_editor_draft.return_value = MagicMock()
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_agent_connected.return_value = False
     return ctrl
 
 
@@ -140,7 +139,7 @@ def make_snapshot(
         ),
         capabilities=AdapterCapabilities(
             analysis=analysis, post_analysis=post, load_data=load
-        ),  # type: ignore[call-arg]
+        ),
         run=run_snap,
         analysis=analysis_snap,
         post_analysis=post_snap,
@@ -390,7 +389,7 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
             cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
         ),
     )
-    state.set_tab_analyzing("tab-1", True)
+    state.set_tab_analyzing("tab-1", analyzing=True)
     with pytest.raises(RuntimeError, match="busy"):
         state.remove_tab("tab-1")
     tab.detach()

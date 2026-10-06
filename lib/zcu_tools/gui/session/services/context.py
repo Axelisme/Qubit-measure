@@ -351,7 +351,7 @@ class ContextService:
         #      del_md_attr / replace_ml_*_from_schema / del_ml_* (field-level, each
         #      bumps+emits) and apply_ml_writes (batch: prepare without live writes, then one bump +
         #      one emit per kind; persistence errors occur after publication). Writeback / editor commit / inspect /
-        #      create_from_role all route here — the single write authority.
+        #      create_from_template all route here — the single write authority.
         #   2. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
         # Both bump "context"; only set_context() itself does NOT (pure swap).
         self._state.version.bump("context")

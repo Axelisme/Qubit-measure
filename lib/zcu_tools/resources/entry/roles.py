@@ -38,11 +38,18 @@ class RoleView:
 
 
 def _reference_target(component: ComponentSchema, path: str) -> str | None:
-    if path not in component_registry.references(component.kind):
-        return None
     node: object = component
     for part in path.split("."):
-        node = getattr(node, part, None) if isinstance(node, BaseModel) else None
+        if isinstance(node, BaseModel):
+            node = (
+                getattr(node, part)
+                if part in type(node).model_fields
+                else (node.model_extra or {}).get(part)
+            )
+        elif isinstance(node, Mapping):
+            node = node.get(part)
+        else:
+            return None
     return node if isinstance(node, str) else None
 
 

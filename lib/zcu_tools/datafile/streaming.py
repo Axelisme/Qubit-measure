@@ -15,9 +15,9 @@ from typing import Any
 import h5py
 import numpy as np
 
-from .grouped import DATASET_ROLE_ATTR, DATASET_ROLES_ATTR, GROUPED_VERSION_ATTR
+from .grouped import DATA_VARIABLE_ATTR, DATA_VARIABLES_ATTR, GROUPED_VERSION_ATTR
 from .labber import _str_array, _write_payload_to_log
-from .models import Axis, DatasetRole, LabberMetadata, LabberPayload, as_axis
+from .models import Axis, DataVariable, LabberMetadata, LabberPayload, as_axis
 from .paths import format_ext
 
 STREAMING_GROUPED_DATASET_VERSION = 1
@@ -27,10 +27,17 @@ STREAMING_FINALIZED_ATTR = "zcu_tools.streaming_finalized"
 
 
 @dataclass(frozen=True, slots=True)
-class StreamingLabberRoleSpec:
-    """Schema for one streamable grouped Labber role."""
+class StreamingLabberVariableSpec:
+    """Declare a full-shape grouped Labber Data Variable before writing rows.
 
-    role: DatasetRole
+    variable is its snake_case identity; data_name/data_unit label its channel.
+    axes are inner-first Axis records (or name/unit/values triples); shape is
+    the ndarray shape, equal to reversed axis lengths, with at least one dimension.
+    fill_value initializes unwritten samples; attrs adds HDF5 log attributes.
+    Invalid identity, rank or axis lengths raise ValueError at construction.
+    """
+
+    variable: DataVariable
     data_name: str
     data_unit: str
     axes: tuple[Axis, ...]
@@ -40,7 +47,7 @@ class StreamingLabberRoleSpec:
 
     def __init__(
         self,
-        role: str | DatasetRole,
+        variable: str | DataVariable,
         data_name: str,
         data_unit: str,
         axes: Sequence[Axis | tuple[str, str, Any]],
@@ -54,21 +61,23 @@ class StreamingLabberRoleSpec:
         )
         normalized_shape = tuple(int(dim) for dim in shape)
         if not normalized_shape:
-            raise ValueError("streaming role shape must have at least one dimension")
+            raise ValueError(
+                "streaming variable shape must have at least one dimension"
+            )
         if len(normalized_axes) != len(normalized_shape):
             raise ValueError(
-                f"role {role!r} axes count {len(normalized_axes)} must match "
+                f"variable {variable!r} axes count {len(normalized_axes)} must match "
                 f"shape rank {len(normalized_shape)}"
             )
         for axis, expected in zip(reversed(normalized_axes), normalized_shape):
             actual = int(np.asarray(axis.values, dtype=float).ravel().shape[0])
             if actual != expected:
                 raise ValueError(
-                    f"role {role!r} axis {axis.name!r} length {actual} != "
+                    f"variable {variable!r} axis {axis.name!r} length {actual} != "
                     f"shape dimension {expected}"
                 )
 
-        object.__setattr__(self, "role", DatasetRole(role))
+        object.__setattr__(self, "variable", DataVariable(variable))
         object.__setattr__(self, "data_name", str(data_name))
         object.__setattr__(self, "data_unit", str(data_unit))
         object.__setattr__(self, "axes", normalized_axes)
@@ -78,8 +87,8 @@ class StreamingLabberRoleSpec:
 
 
 @dataclass(slots=True)
-class _RoleHandle:
-    spec: StreamingLabberRoleSpec
+class _VariableHandle:
+    spec: StreamingLabberVariableSpec
     target: h5py.File | h5py.Group
     data: h5py.Dataset
     timestamps: h5py.Dataset
@@ -91,23 +100,25 @@ class StreamingGroupedLabberWriter:
     def __init__(
         self,
         path: str,
-        roles: Sequence[StreamingLabberRoleSpec],
+        variables: Sequence[StreamingLabberVariableSpec],
         *,
         metadata: LabberMetadata | None = None,
     ) -> None:
-        if not roles:
-            raise ValueError("StreamingGroupedLabberWriter requires at least one role")
+        if not variables:
+            raise ValueError(
+                "StreamingGroupedLabberWriter requires at least one variable"
+            )
         self.path = format_ext(path)
         self._closed = False
-        self._handles: dict[DatasetRole, _RoleHandle] = {}
+        self._handles: dict[DataVariable, _VariableHandle] = {}
 
-        role_names: list[str] = []
-        seen: set[DatasetRole] = set()
-        for spec in roles:
-            if spec.role in seen:
-                raise ValueError(f"duplicate streaming dataset role {spec.role!r}")
-            seen.add(spec.role)
-            role_names.append(str(spec.role))
+        variable_names: list[str] = []
+        seen: set[DataVariable] = set()
+        for spec in variables:
+            if spec.variable in seen:
+                raise ValueError(f"duplicate streaming data variable {spec.variable!r}")
+            seen.add(spec.variable)
+            variable_names.append(str(spec.variable))
 
         raw_metadata = metadata if metadata is not None else LabberMetadata()
         creation_time = (
@@ -126,7 +137,7 @@ class StreamingGroupedLabberWriter:
 
         self._file = h5py.File(self.path, "x")
         try:
-            for index, spec in enumerate(roles):
+            for index, spec in enumerate(variables):
                 target: h5py.File | h5py.Group
                 if index == 0:
                     target = self._file
@@ -149,11 +160,11 @@ class StreamingGroupedLabberWriter:
                     creation_time=creation_time,
                     write_tags=index == 0,
                 )
-                target.attrs[DATASET_ROLE_ATTR] = str(spec.role)
+                target.attrs[DATA_VARIABLE_ATTR] = str(spec.variable)
                 for key, value in spec.attrs.items():
                     target.attrs[str(key)] = _attr_value(value)
                 data_group = _require_group(target, "Data")
-                self._handles[spec.role] = _RoleHandle(
+                self._handles[spec.variable] = _VariableHandle(
                     spec=spec,
                     target=target,
                     data=_require_dataset(data_group, "Data"),
@@ -161,7 +172,7 @@ class StreamingGroupedLabberWriter:
                 )
 
             self._file.attrs[GROUPED_VERSION_ATTR] = STREAMING_GROUPED_DATASET_VERSION
-            self._file.attrs[DATASET_ROLES_ATTR] = _str_array(role_names)
+            self._file.attrs[DATA_VARIABLES_ATTR] = _str_array(variable_names)
             self._file.attrs[STREAMING_VERSION_ATTR] = STREAMING_DATASET_VERSION
             self._file.attrs[STREAMING_FINALIZED_ATTR] = False
             self.flush()
@@ -177,17 +188,25 @@ class StreamingGroupedLabberWriter:
 
     def write_outer_slice(
         self,
-        role: str | DatasetRole,
+        variable: str | DataVariable,
         outer_index: int,
         values: Any,
         *,
         timestamp: float | None = None,
     ) -> None:
-        """Write one workflow row along the first data dimension."""
+        """Write and flush one row for the named variable along its outer dimension.
+
+        variable selects a declared snake_case identity. outer_index selects the
+        first ndarray dimension; values must match its remaining row shape.
+        timestamp=None uses the current time. Invalid name/index/shape raises
+        ValueError for name/shape or IndexError for index; an undeclared variable
+        raises KeyError; a closed writer raises
+        RuntimeError. HDF5 I/O errors propagate.
+        """
         self._ensure_open()
-        role_key = DatasetRole(role)
+        variable_key = DataVariable(variable)
         _write_outer_slice(
-            self._handles[role_key], role_key, outer_index, values, timestamp
+            self._handles[variable_key], variable_key, outer_index, values, timestamp
         )
 
     def flush(self) -> None:
@@ -212,7 +231,7 @@ class StreamingGroupedLabberWriter:
             raise RuntimeError("streaming Labber writer is closed")
 
     @staticmethod
-    def _creation_time(handle: _RoleHandle) -> float:
+    def _creation_time(handle: _VariableHandle) -> float:
         return float(handle.target.attrs.get("creation_time", 0.0) or 0.0)
 
 
@@ -222,7 +241,7 @@ class StreamingLabberWriter:
     def __init__(
         self,
         path: str,
-        spec: StreamingLabberRoleSpec,
+        spec: StreamingLabberVariableSpec,
         *,
         metadata: LabberMetadata | None = None,
     ) -> None:
@@ -265,7 +284,7 @@ class StreamingLabberWriter:
             for key, value in spec.attrs.items():
                 self._file.attrs[str(key)] = _attr_value(value)
             data_group = _require_group(self._file, "Data")
-            self._handle = _RoleHandle(
+            self._handle = _VariableHandle(
                 spec=spec,
                 target=self._file,
                 data=_require_dataset(data_group, "Data"),
@@ -295,7 +314,7 @@ class StreamingLabberWriter:
         self._ensure_open()
         _write_outer_slice(
             self._handle,
-            self._handle.spec.role,
+            self._handle.spec.variable,
             outer_index,
             values,
             timestamp,
@@ -325,17 +344,24 @@ class StreamingLabberWriter:
 
 def open_streaming_grouped_labber_data(
     path: str,
-    roles: Sequence[StreamingLabberRoleSpec],
+    variables: Sequence[StreamingLabberVariableSpec],
     *,
     metadata: LabberMetadata | None = None,
 ) -> StreamingGroupedLabberWriter:
-    """Open a new exact-path streaming grouped Labber writer."""
-    return StreamingGroupedLabberWriter(path, roles, metadata=metadata)
+    """Create an exact-path file from ordered, unique variable schemas.
+
+    path is the local destination; variables declares full axes/shapes before
+    row writes. metadata is shared across variables, or empty when omitted.
+    Return a context-managed writer; caller must close it after use. Empty or
+    duplicate declarations raise ValueError; existing paths raise FileExistsError.
+    HDF5 I/O errors propagate, and failed initialization closes its file handle.
+    """
+    return StreamingGroupedLabberWriter(path, variables, metadata=metadata)
 
 
 def open_streaming_labber_data(
     path: str,
-    spec: StreamingLabberRoleSpec,
+    spec: StreamingLabberVariableSpec,
     *,
     metadata: LabberMetadata | None = None,
 ) -> StreamingLabberWriter:
@@ -344,8 +370,8 @@ def open_streaming_labber_data(
 
 
 def _write_outer_slice(
-    handle: _RoleHandle,
-    role: DatasetRole,
+    handle: _VariableHandle,
+    variable: DataVariable,
     outer_index: int,
     values: Any,
     timestamp: float | None,
@@ -354,7 +380,7 @@ def _write_outer_slice(
     idx = int(outer_index)
     if idx < 0 or idx >= spec.shape[0]:
         raise IndexError(
-            f"outer_index {idx} out of range for role {role!r} "
+            f"outer_index {idx} out of range for variable {variable!r} "
             f"with {spec.shape[0]} row(s)"
         )
 
@@ -362,7 +388,7 @@ def _write_outer_slice(
         arr = np.asarray(values, dtype=complex)
         if arr.shape not in {(), (1,)}:
             raise ValueError(
-                f"role {role!r} expects a scalar row, got shape {arr.shape}"
+                f"variable {variable!r} expects a scalar row, got shape {arr.shape}"
             )
         scalar = complex(arr.reshape(-1)[0])
         handle.data[idx, -2, 0] = scalar.real
@@ -375,7 +401,7 @@ def _write_outer_slice(
     arr = np.asarray(values, dtype=complex)
     if arr.shape != expected_shape:
         raise ValueError(
-            f"role {role!r} row shape {arr.shape} != expected {expected_shape}"
+            f"variable {variable!r} row shape {arr.shape} != expected {expected_shape}"
         )
 
     n_x = spec.shape[-1]
@@ -389,7 +415,7 @@ def _write_outer_slice(
         handle.timestamps[start:stop] = float(timestamp) - _creation_time(handle)
 
 
-def _creation_time(handle: _RoleHandle) -> float:
+def _creation_time(handle: _VariableHandle) -> float:
     return float(handle.target.attrs.get("creation_time", 0.0) or 0.0)
 
 
@@ -427,7 +453,7 @@ __all__ = [
     "STREAMING_FINALIZED_ATTR",
     "StreamingGroupedLabberWriter",
     "StreamingLabberWriter",
-    "StreamingLabberRoleSpec",
+    "StreamingLabberVariableSpec",
     "open_streaming_labber_data",
     "open_streaming_grouped_labber_data",
 ]

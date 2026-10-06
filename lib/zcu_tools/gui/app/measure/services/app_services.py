@@ -219,7 +219,9 @@ def build_app_services(
     )
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
-    save = SaveService(state, runner, bus, owner_scheduler=QtOwnerScheduler())
+    save = SaveService(
+        state, runner, bus, owner_scheduler=QtOwnerScheduler(), access=access
+    )
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,
@@ -258,7 +260,6 @@ def build_app_services(
         tab=tab,
         save=save,
         notify_info=notify_info,
-        access=access,
     )
     writeback_control = WritebackControlFacet(
         state=state,

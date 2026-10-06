@@ -107,7 +107,7 @@ def test_remove_busy_tab_raises():
     state = State(_make_ctx())
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
-    state.set_tab_analyzing("t1", True)
+    state.set_tab_analyzing("t1", analyzing=True)
     with pytest.raises(RuntimeError, match="busy tab"):
         state.remove_tab("t1")
 
@@ -128,7 +128,7 @@ def test_reorder_tabs_changes_order_without_replacing_sessions():
     t2 = state.get_tab("t2")
     t3 = state.get_tab("t3")
     state.set_active_tab("t2")
-    state.set_tab_running("t3", True)
+    state.set_tab_running("t3", running=True)
 
     state.reorder_tabs(["t3", "t1", "t2"])
 
@@ -163,11 +163,11 @@ def test_set_tab_running_updates_running_tab_id():
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
     assert state.is_run_active() is False
-    state.set_tab_running("t1", True)
+    state.set_tab_running("t1", running=True)
     assert state.is_run_active() is True
     assert state.running_tab_id == "t1"
     assert state.is_tab_running("t1") is True
-    state.set_tab_running("t1", False)
+    state.set_tab_running("t1", running=False)
     assert state.is_run_active() is False
     assert state.running_tab_id is None
 
@@ -177,10 +177,10 @@ def test_set_tab_running_rejects_second_running_tab():
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
     _add_tab(state, "t2", adapter)
-    state.set_tab_running("t1", True)
+    state.set_tab_running("t1", running=True)
 
     with pytest.raises(RuntimeError, match="already running"):
-        state.set_tab_running("t2", True)
+        state.set_tab_running("t2", running=True)
 
     assert state.running_tab_id == "t1"
 
@@ -190,10 +190,10 @@ def test_clear_non_running_tab_is_idempotent_and_bumps_version():
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
     _add_tab(state, "t2", adapter)
-    state.set_tab_running("t1", True)
+    state.set_tab_running("t1", running=True)
     version_before = state.version.get("tab:t2")
 
-    state.set_tab_running("t2", False)
+    state.set_tab_running("t2", running=False)
 
     assert state.running_tab_id == "t1"
     assert state.version.get("tab:t2") == version_before + 1
@@ -205,11 +205,11 @@ def test_is_tab_busy_checks_per_tab_flags():
     _add_tab(state, "t1", adapter)
     _add_tab(state, "t2", adapter)
     assert state.is_tab_busy("t1") is False
-    state.set_tab_saving_data("t1", True)
+    state.set_tab_saving_data("t1", saving_data=True)
     assert state.is_tab_busy("t1") is True
     assert state.is_tab_busy("t2") is False
-    state.set_tab_saving_data("t1", False)
-    state.set_tab_running("t2", True)
+    state.set_tab_saving_data("t1", saving_data=False)
+    state.set_tab_running("t2", running=True)
     assert state.is_tab_busy("t1") is False
     assert state.is_tab_busy("t2") is True
 

@@ -8,7 +8,8 @@ atomicity, not a crash journal or a multi-file durability guarantee.
 
 Values retain the model/caller's working units on disk. This store does not
 interpret unit metadata or convert values; untouched YAML nodes remain intact.
-Forward-minor fields stay outside the typed view without being removed on disk.
+Nonempty edits persist validated serialization, including read-time conversions.
+Forward-minor leftovers stay on disk; extra=allow models expose them in typed views.
 
 Observers run after publication and unlock. Their exceptions are logged at ERROR,
 with traceback, rather than reclassifying a completed commit as failed. External
@@ -19,7 +20,7 @@ this module does not run a file watcher.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -55,7 +56,7 @@ class DocumentChange:
     source is the YAML file path. paths contains structural tuples of mapping
     keys, never split on dots; sequences count as a whole field. For reason
     "commit", paths come from changed typed model fields in working units.
-    For reason "refresh", they come from raw SI YAML and can include header or
+    For reason "refresh", they come from raw YAML and can include header or
     forward-minor fields. A nonempty paths tuple reports structural differences,
     not every field present in the snapshot.
     """
@@ -71,10 +72,10 @@ class _Missing(Enum):
 
 
 class ConflictError(RuntimeError):
-    """A changed path no longer matches the raw SI baseline, so nothing commits.
+    """A changed path no longer matches the normalized baseline, so nothing commits.
 
     source is the YAML path; path is a tuple of unchanged mapping keys.
-    original/current are the raw SI values at that path, or the absent-key
+    original/current are the normalized values at that path, or the absent-key
     marker displayed as "<missing>". Null is None, distinct from that marker.
     """
 
@@ -85,7 +86,7 @@ class ConflictError(RuntimeError):
         original: YamlValue | _Missing,
         current: YamlValue | _Missing,
     ) -> None:
-        """Record source/path and the conflicting raw original/current values."""
+        """Record source/path and the conflicting normalized original/current values."""
         self.source = source
         self.path = path
         self.original = original
@@ -128,89 +129,149 @@ def _same_value(original: YamlValue | _Missing, current: YamlValue | _Missing) -
 
 
 def _projection(value: object) -> YamlValue:
-    """Serialize existing presence only; unset model fields stay absent.
-
-    Recurse through explicitly serialized model fields, mappings and sequences.
-    Reject the absent-key marker before leaf validation can coerce it to a string.
-    """
+    """Serialize actual model output with presence and concrete subclass fields."""
     if isinstance(value, _Missing):
         raise TypeError("Missing values cannot be serialized to YAML")
     if isinstance(value, BaseModel):
-        return {
-            name: _projection(getattr(value, name))
-            for name in value.model_dump(exclude_unset=True)
-        }
-    if isinstance(value, dict):
+        serialized = _projection(
+            value.model_dump(exclude_unset=True, serialize_as_any=True)
+        )
+        return _preserve_future_extras(serialized, value)
+    if isinstance(value, Mapping):
         value = {key: _projection(child) for key, child in value.items()}
-    elif isinstance(value, list):
+    elif isinstance(value, (list, tuple)):
         value = [_projection(child) for child in value]
     return TypeAdapter(YamlValue).validate_python(value)
 
 
-def _draft_model_projection(base: object, draft: BaseModel) -> YamlMap:
-    """Include explicit fields and mutations of previously unset defaults.
-
-    An existing model uses its edit-entry baseline. A new/replaced model uses
-    declared defaults instead. Removing an explicitly present field keeps it
-    absent. This model branch delegates nested containers to _draft_projection
-    so defaults can themselves contain typed models.
-    """
-    fields = type(draft).model_fields
-    values = {name: getattr(draft, name) for name in fields}
-    same_model = isinstance(base, BaseModel) and type(base) is type(draft)
-    base_fields = (
-        base.model_fields_set if isinstance(base, BaseModel) and same_model else set()
-    )
-    candidate: YamlMap = {
-        name: _draft_projection(
-            getattr(base, name, _Missing.VALUE), getattr(draft, name)
+def _supplement_model_extras(serialized: YamlValue, model: BaseModel) -> None:
+    """Add only temporary extras; reject non-mapping output and occupied keys."""
+    extras = model.model_extra or {}
+    if model.model_config.get("extra") == "allow" or not extras:
+        return
+    if not isinstance(serialized, dict):
+        raise ValueError(
+            f"{type(model).__name__}: temporary extras require a mapping serialization"
         )
-        for name in draft.model_dump(exclude_unset=True)
-        if name not in fields
-    }
-    for name, field in fields.items():
-        if same_model:
-            before = getattr(base, name)
-        elif field.is_required():
-            before = _Missing.VALUE
-        else:
-            before = field.get_default(call_default_factory=True, validated_data=values)
-        after = _draft_projection(before, values[name])
-        if name in draft.model_fields_set or (
-            name not in base_fields
-            and (
-                isinstance(before, _Missing)
-                or not _same_value(_projection(before), after)
-            )
-        ):
-            candidate[name] = after
-    return candidate
+    collisions = extras.keys() & serialized.keys()
+    if collisions:
+        raise ValueError(
+            f"{type(model).__name__}: temporary extras collide with serialized keys: "
+            f"{sorted(collisions)}"
+        )
+    for name, child in extras.items():
+        serialized[name] = _projection(child)
 
 
-def _draft_projection(base: object, draft: object) -> YamlValue:
-    """Project only the candidate, preserving presence and in-place mutations.
+def _preserve_future_extras(serialized: YamlValue, validated: object) -> YamlValue:
+    """Walk original positions, supplementing only remaining temporary extras.
 
-    New mapping keys/list positions have no baseline; new models compare their
-    unset fields with declared defaults. No unused original projection is built.
+    Forbid/ignore model_dump omits validation-override extras. Declared values
+    always come from actual serialization. Do not guess alias relocation.
     """
-    if isinstance(draft, BaseModel):
-        return _draft_model_projection(base, draft)
-    if isinstance(draft, dict):
-        original = base if isinstance(base, dict) else {}
-        return {
-            key: _draft_projection(original.get(key, _Missing.VALUE), child)
-            for key, child in draft.items()
+    if isinstance(validated, BaseModel):
+        _supplement_model_extras(serialized, validated)
+        children: dict[str, object] = {
+            name: getattr(validated, name) for name in type(validated).model_fields
         }
-    if isinstance(draft, list):
-        original_list = base if isinstance(base, list) else []
-        return [
-            _draft_projection(
-                original_list[index] if index < len(original_list) else _Missing.VALUE,
+        if validated.model_config.get("extra") == "allow":
+            children.update(validated.model_extra or {})
+        validated = children
+    if isinstance(validated, Mapping):
+        for name, original in validated.items():
+            child = serialized.get(name) if isinstance(serialized, dict) else None
+            _preserve_future_extras(child, original)
+    elif isinstance(validated, (list, tuple)):
+        for index, original in enumerate(validated):
+            child = (
+                serialized[index]
+                if isinstance(serialized, list) and index < len(serialized)
+                else None
+            )
+            _preserve_future_extras(child, original)
+    return serialized
+
+
+def _prepare_draft_presence(base: object, draft: object) -> None:
+    """Mark in-place default mutations on an independent draft before serialization."""
+    if isinstance(draft, BaseModel):
+        same_model = isinstance(base, BaseModel) and type(base) is type(draft)
+        base_fields = (
+            base.model_fields_set
+            if isinstance(base, BaseModel) and same_model
+            else set()
+        )
+        values = {name: getattr(draft, name) for name in type(draft).model_fields}
+        for name, field in type(draft).model_fields.items():
+            if same_model:
+                before = getattr(base, name)
+            elif field.is_required():
+                before = _Missing.VALUE
+            else:
+                before = field.get_default(
+                    call_default_factory=True, validated_data=values
+                )
+            after = values[name]
+            _prepare_draft_presence(before, after)
+            if (
+                name not in draft.model_fields_set
+                and name not in base_fields
+                and (
+                    isinstance(before, _Missing)
+                    or not _same_value(_projection(before), _projection(after))
+                )
+            ):
+                draft.model_fields_set.add(name)
+        base_extras = (
+            base.model_extra or {} if isinstance(base, BaseModel) and same_model else {}
+        )
+        for name, child in (draft.model_extra or {}).items():
+            _prepare_draft_presence(base_extras.get(name, _Missing.VALUE), child)
+    elif isinstance(draft, Mapping):
+        original = base if isinstance(base, Mapping) else {}
+        for key, child in draft.items():
+            _prepare_draft_presence(original.get(key, _Missing.VALUE), child)
+    elif isinstance(draft, (list, tuple)):
+        original_items = base if isinstance(base, (list, tuple)) else ()
+        for index, child in enumerate(draft):
+            _prepare_draft_presence(
+                original_items[index]
+                if index < len(original_items)
+                else _Missing.VALUE,
                 child,
             )
-            for index, child in enumerate(draft)
-        ]
-    return _projection(draft)
+
+
+def _draft_projection(base: object, draft: BaseModel) -> YamlValue:
+    """Serialize a detached draft, including mutations of unset native defaults."""
+    prepared = draft.model_copy(deep=True)
+    _prepare_draft_presence(base, prepared)
+    return _projection(prepared)
+
+
+def _public_snapshot[T: BaseModel](validated: T) -> T:
+    """Copy and hide temporary future extras without re-running model validation."""
+    snapshot = validated.model_copy(deep=True)
+
+    def strip(node: object) -> None:
+        if isinstance(node, BaseModel):
+            extras = node.model_extra
+            if node.model_config.get("extra") != "allow" and extras is not None:
+                node.model_fields_set.difference_update(extras)
+                extras.clear()
+            for name in type(node).model_fields:
+                strip(getattr(node, name))
+            for child in (node.model_extra or {}).values():
+                strip(child)
+        elif isinstance(node, Mapping):
+            for child in node.values():
+                strip(child)
+        elif isinstance(node, (list, tuple)):
+            for child in node:
+                strip(child)
+
+    strip(snapshot)
+    return snapshot
 
 
 def _changes(
@@ -233,13 +294,11 @@ def _patch_node(
     base: YamlValue | _Missing,
     draft: YamlValue | _Missing,
 ) -> YamlValue | _Missing:
-    """Preserve untouched SI nodes while merging working-unit replacements.
+    """Merge typed differences, preserving untouched normalized/raw nodes.
 
-    The caller must first conflict-check changed paths against the original raw
-    SI document. base/draft are typed working-unit projections, not raw nodes.
-    The result mixes surviving SI nodes and changed working values until the
-    caller converts changed paths back to SI. Lists conflict as a whole but
-    surviving positions retain their round-trip nodes.
+    Equal-length lists retain untouched fields by position. Resized lists keep
+    only the equal typed prefix, replacing the suffix without guessing identity.
+    The caller conflict-checks the entire sequence before merging.
     """
     if _same_value(base, draft):
         return current_node
@@ -264,17 +323,31 @@ def _patch_node(
         and isinstance(base, list)
         and isinstance(draft, list)
     ):
-        # A sequence conflicts as one field, but surviving positions keep raw nodes.
-        for index, value in enumerate(draft):
-            if index < len(base) and index < len(current_node):
-                merged = _patch_node(current_node[index], base[index], value)
-                if not isinstance(merged, _Missing):
-                    current_node[index] = merged
-            else:
-                current_node.append(value)
-        del current_node[len(draft) :]
-        return current_node
+        return _merge_sequence(current_node, base, draft)
     return draft
+
+
+def _merge_sequence(
+    current: list[YamlValue], base: list[YamlValue], draft: list[YamlValue]
+) -> list[YamlValue]:
+    """Preserve positions for equal lengths, or only the equal prefix on resize."""
+    if len(base) != len(draft):
+        prefix = 0
+        for before, after in zip(base, draft, strict=False):
+            if not _same_value(before, after):
+                break
+            prefix += 1
+        current[prefix:] = draft[prefix:]
+        return current
+    for index, value in enumerate(draft):
+        if index < len(current):
+            merged = _patch_node(current[index], base[index], value)
+            if not isinstance(merged, _Missing):
+                current[index] = merged
+        else:
+            current.append(value)
+    del current[len(draft) :]
+    return current
 
 
 def _lookup(document: YamlValue, path: FieldPath) -> YamlValue | _Missing:
@@ -304,7 +377,7 @@ class DocumentStore[T: BaseModel]:
     """An independent typed snapshot and optimistic transactions for one YAML file.
 
     model T owns the document shape; format identifies its persisted artifact.
-    This store owns unit conversion, raw-node preservation and single-file
+    This store owns normalization, raw-node preservation and single-file
     replacement. It never creates missing documents or watches for changes.
     A snapshot is memory-only; edit/refresh reload disk. Observers see published
     state after unlock and cannot roll back a completed write.
@@ -328,7 +401,7 @@ class DocumentStore[T: BaseModel]:
         is the exact artifact identifier in the YAML header, e.g.
         "zcu.parameter-container" for setup/point, not a kind name or "yaml".
         supported_version sets the accepted major/current minor. Future minor
-        fields survive raw round-trip but stay outside the typed snapshot.
+        fields survive round-trip; only extra=allow models expose them in snapshots.
 
         Values use the same units in the document and typed model. Unit metadata
         belongs to the caller's schema and is not interpreted here. validate
@@ -356,7 +429,7 @@ class DocumentStore[T: BaseModel]:
         self._observers: dict[int, Callable[[DocumentChange], None]] = {}
         self._next_subscription_id = 0
         self._deferred_until_unlock: list[DocumentChange] = []
-        self._document, self._snapshot = self._read()
+        self._document, _, self._snapshot = self._read()
 
     def snapshot(self) -> T:
         """Return a deep independent copy in working units, without I/O or notice."""
@@ -381,11 +454,11 @@ class DocumentStore[T: BaseModel]:
         self._editing = True
         try:
             with self.locked():
-                base_document, base = self._read()
+                _, base_normalized, base = self._read()
             draft = base.model_copy(deep=True)
             yield draft
             with self.locked():
-                document, snapshot, paths = self._commit(base_document, base, draft)
+                document, snapshot, paths = self._commit(base_normalized, base, draft)
                 self._snapshot = snapshot
                 self._document = document
         finally:
@@ -394,23 +467,24 @@ class DocumentStore[T: BaseModel]:
             self._dispatch_change(DocumentChange(self._path, paths, "commit"))
 
     def _commit(
-        self, base_document: YamlMap, base: T, draft: T
+        self, base_normalized: YamlMap, base: T, draft: T
     ) -> tuple[YamlMap, T, tuple[FieldPath, ...]]:
-        """Merge one edit, validate it and replace only this store's file.
-
-        The caller holds this store's lock. Empty patches adopt the latest
-        validated snapshot without rewriting. Failure never publishes memory.
-        """
+        """Merge canonical-path edits, validate, then patch raw nodes atomically."""
         base_values = _projection(base)
         draft_values = _draft_projection(base, draft)
         patches = tuple(_changes(base_values, draft_values))
-        document, _ = self._read()
-        self._merge_patches(document, base_document, base_values, patches)
-        paths = tuple(path for path, _ in patches)
-        snapshot = self._model_snapshot(document)
-        if patches:
-            self._replace_document(document)
-        return document, snapshot, paths
+        document, normalized, snapshot = self._read()
+        if not patches:
+            return document, snapshot, ()
+        self._merge_patches(normalized, base_normalized, base_values, patches)
+        final_normalized, snapshot = self._model_snapshot(normalized)
+        disk_patches = tuple(_changes(document, final_normalized))
+        # Use the same positional merge for raw nodes so unchanged comments survive.
+        for path, value in disk_patches:
+            raw_node = _lookup(document, path)
+            _apply(document, path, _patch_node(raw_node, raw_node, value))
+        self._replace_document(document)
+        return document, snapshot, tuple(path for path, _ in patches)
 
     def _replace_document(self, document: YamlMap) -> None:
         """Write a sibling temporary, atomically replace the file and clean up."""
@@ -467,8 +541,8 @@ class DocumentStore[T: BaseModel]:
             if not _same_value(original, latest):
                 raise ConflictError(self._path, prefix, original, latest)
 
-    def _read(self) -> tuple[YamlMap, T]:
-        """Read quote-preserving SI YAML and validate a converted working snapshot.
+    def _read(self) -> tuple[YamlMap, YamlMap, T]:
+        """Read raw nodes, normalized YAML values and a public typed snapshot.
 
         No lock is acquired here. Edit/refresh callers own their lock scope;
         initial construction may run while a different owner already holds it.
@@ -480,12 +554,14 @@ class DocumentStore[T: BaseModel]:
         # Validate the recursive shape without discarding ruamel's round-trip nodes.
         TypeAdapter(YamlMap).validate_python(raw, strict=True)
         document = cast(YamlMap, raw)
-        return document, self._model_snapshot(document)
+        normalized, snapshot = self._model_snapshot(document)
+        return document, normalized, snapshot
 
-    def _model_snapshot(self, document: YamlMap) -> T:
+    def _model_snapshot(self, document: YamlMap) -> tuple[YamlMap, T]:
         """Check the header, validate T and custom rules without converting values.
 
-        Future-minor fields are ignored only in the typed result. Validation
+        Future-minor leftovers are preserved in normalization and hidden from
+        forbid/ignore public models without revalidation. Validation
         failures propagate before callers can publish it or replace the file.
         """
         version = validate_header(
@@ -494,25 +570,27 @@ class DocumentStore[T: BaseModel]:
             supported_version=self._supported_version,
             source=self._path,
         )
-        # Ignore future fields only in the typed view; retain them in the YAML tree.
-        extra = "ignore" if version.minor > self._supported_version.minor else None
+        # Preserve only extras left after validators; legacy keys they remove stay removed.
+        extra = "allow" if version.minor > self._supported_version.minor else None
         snapshot = self._model.model_validate(
             TypeAdapter(YamlMap).validate_python(document), extra=extra
         )
+        normalized = TypeAdapter(YamlMap).validate_python(_projection(snapshot))
+        public = _public_snapshot(snapshot)
         if self._validate is not None:
-            self._validate(snapshot)
-        return snapshot
+            self._validate(public)
+        return normalized, public
 
     def refresh(self) -> bool:
         """Reload/validate disk and publish its working-unit snapshot.
 
-        Return True and notify if raw SI YAML differs, otherwise return False.
+        Return True and notify if raw YAML differs, otherwise return False.
         Header/version/schema/validate/I/O and lock failures propagate and leave
         the prior snapshot intact. Notifications wait for outermost unlock;
         observer failures are logged separately from successful publication.
         """
         with self.locked():
-            document, snapshot = self._read()
+            document, _, snapshot = self._read()
             paths = tuple(path for path, _ in _changes(self._document, document))
             self._snapshot = snapshot
             self._document = document

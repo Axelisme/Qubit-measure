@@ -9,34 +9,40 @@ from typing import Annotated, Literal
 from uuid import uuid4
 
 import pytest
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
     ComponentSchema,
-    MissingReferenceError,
     PointView,
     Provenance,
     ResultEntry,
-    UnitSpec,
     UnknownKindError,
     component_registry,
 )
+from zcu_tools.resources.entry.views import FieldView
+
+
+def field_view(value: object) -> FieldView:
+    """Require an editable container returned by a public view."""
+    assert isinstance(value, FieldView)
+    return value
 
 
 class RequiredRangeSchema(ComponentSchema):
-    low: Annotated[float, UnitSpec("1")]
-    high: Annotated[float, UnitSpec("1")]
+    low: float
+    high: float
 
 
 class DefaultTiming(BaseModel):
-    width: Annotated[float, UnitSpec("µs")]
+    width: float
     note: str
 
 
 class NotebookSchema(ComponentSchema):
-    gain: Annotated[float, UnitSpec("1"), Field(gt=0)]
+    model_config = ConfigDict(extra="forbid")
+    gain: Annotated[float, Field(gt=0)]
     title: str
     token: str = Field(default_factory=lambda: str(uuid4()))
     timing: DefaultTiming = Field(
@@ -67,17 +73,6 @@ def notebook_kind(registry_state_guard: None) -> Generator[str]:
         yield kind
     finally:
         component_registry.unregister(kind)
-
-
-@pytest.fixture
-def entry_roots(tmp_path: Path) -> tuple[Path, Path]:
-    return tmp_path / "results", tmp_path / "Database"
-
-
-@pytest.fixture
-def entry(entry_roots: tuple[Path, Path]) -> ResultEntry:
-    results, database = entry_roots
-    return ResultEntry.create("entry", result_root=results, database_root=database)
 
 
 @pytest.fixture
@@ -119,15 +114,15 @@ def test_new_point_copies_complete_components_and_keeps_independent_values(
     assert document["general"]["created_at"].endswith("Z")
 
     entry.setup.Q1.rate = 5100.0
-    entry.setup.Q1.wiring.bias_ch = 4
-    entry.setup.Q1.ext.nested = {"note": "new template"}
+    field_view(entry.setup.Q1.wiring).bias_ch = 4
+    field_view(entry.setup.Q1.ext).nested = {"note": "new template"}
     assert point.Q1.rate == 5000.0
-    assert point.Q1.wiring.bias_ch == 3
-    assert point.Q1.ext.nested == {"note": "seed"}
+    assert field_view(point.Q1.wiring).bias_ch == 3
+    assert field_view(field_view(point.Q1.ext).nested).note == "seed"
     point.Q1.rate = 5200.0
-    point.Q1.ext.nested = {"note": "point"}
+    field_view(point.Q1.ext).nested = {"note": "point"}
     assert entry.setup.Q1.rate == 5100.0
-    assert entry.setup.Q1.ext.nested == {"note": "new template"}
+    assert field_view(field_view(entry.setup.Q1.ext).nested).note == "new template"
     assert entry.new_point("later").Q1.rate == 5100.0
     assert entry.use_point("stable (cold)").Q1.rate == 5200.0
     source.unlink()
@@ -204,12 +199,15 @@ def test_add_component_requires_complete_values_and_runs_original_model(
     view.add_component("C1", kind=notebook_kind, gain=1.0, title=" Title ")
     assert view.C1.gain == 1.0
     assert view.C1.title == "title"
-    assert view.C1.timing == {"width": 2.0, "note": "factory"}
+    timing = field_view(view.C1.timing)
+    assert timing.width == 2.0
+    assert timing.note == "factory"
     with pytest.raises(ValueError, match="already exists"):
         view.add_component("C1", kind=notebook_kind, gain=2.0, title="other")
     with view.edit() as draft:
         draft.set("C1.timing.width", 3.0)
-    assert view.C1.timing == {"width": 3.0, "note": "factory"}
+    assert timing.width == 3.0
+    assert timing.note == "factory"
     stored = YAML(typ="safe").load(source.read_text())
     assert stored["components"]["C1"]["timing"]["width"] == 3.0
 
@@ -240,27 +238,25 @@ def test_seed_keeps_generated_default_values_across_independent_edits_and_reload
     assert entry.use_point("a").C1.token == token
     cloned = entry.new_point("b", clone_from=point)
     assert cloned.C1.token == token
-    assert cloned.C1.timing == point.C1.timing
+    assert field_view(cloned.C1.timing).width == field_view(point.C1.timing).width
+    assert field_view(cloned.C1.timing).note == field_view(point.C1.timing).note
     cloned.C1.gain = 3.0
     cloned.refresh()
     assert cloned.C1.token == token
     assert point.C1.gain == 2.0
 
 
-def test_point_add_component_validates_references_in_its_own_document(
+def test_point_add_component_only_changes_its_own_document(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     point = entry.new_point("a")
     entry.setup.add_component("R1", kind="fake/sensor")
     source = entry_roots[0] / "entry/points/a/point.yaml"
-    before = source.read_bytes()
-    with pytest.raises(MissingReferenceError) as error:
-        point.add_component("Q1", kind="fake/drive/a", sense="R1")
-    assert error.value.source == source
-    assert error.value.component == "Q1"
-    assert source.read_bytes() == before
-    point.add_component("R1", kind="fake/sensor")
+    setup_source = entry_roots[0] / "entry/setup.yaml"
+    before = setup_source.read_bytes()
     point.add_component("Q1", kind="fake/drive/a", sense="R1", rate=5000.0)
+    assert YAML(typ="safe").load(source)["components"]["Q1"]["sense"] == "R1"
+    assert setup_source.read_bytes() == before
     assert point.Q1.sense == "R1"
     assert entry.use_point("a").Q1.rate == 5000.0
     with pytest.raises(AttributeError):
@@ -393,14 +389,14 @@ def test_point_invalid_component_name_reports_own_source_without_publishing(
     source = entry_roots[0] / "entry/points/a/point.yaml"
     setup_source = entry_roots[0] / "entry/setup.yaml"
     stored = YAML(typ="rt").load(source.read_text())
-    stored["components"]["Q.bad"] = stored["components"].pop("Q1")
+    stored["components"]["edit"] = stored["components"].pop("Q1")
     write_yaml(source, stored)
     before = source.read_bytes()
     setup_before = setup_source.read_bytes()
     entered: list[bool] = []
 
     if operation == "edit":
-        with pytest.raises(ValueError, match="Q.bad") as error, working_point.edit():
+        with pytest.raises(ValueError, match="edit") as error, working_point.edit():
             entered.append(True)
     else:
         reload_point = (
@@ -408,7 +404,7 @@ def test_point_invalid_component_name_reports_own_source_without_publishing(
             if operation == "refresh"
             else lambda: entry.use_point("a")
         )
-        with pytest.raises(ValueError, match="Q.bad") as error:
+        with pytest.raises(ValueError, match="edit") as error:
             reload_point()
 
     assert str(source) in str(error.value)
@@ -501,7 +497,7 @@ def test_clone_copies_only_complete_point_and_module_without_reading_setup(
     assert entry.list_points() == ["source", "target"]
 
 
-def test_json_extensions_survive_seed_clone_reload_and_keep_source_units(
+def test_yaml_extensions_survive_seed_clone_reload_and_keep_source_units(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     payload: YamlMap = {
@@ -514,36 +510,40 @@ def test_json_extensions_survive_seed_clone_reload_and_keep_source_units(
     point = entry.new_point("a")
     point.general.ext["_misc-key"] = payload
     payload["new"] = "caller mutation"
-    assert point.R1.ext.blob == {
-        "empty-value": None,
-        "slash/key": [True, "opaque", {"rate": "not a physical field"}, 1.25],
-    }
-    assert point.general.ext["_misc-key"] == point.R1.ext.blob
+    blob = field_view(field_view(point.R1.ext).blob)
+    assert blob["empty-value"] is None
+    expected = [True, "opaque", {"rate": "not a physical field"}, 1.25]
+    assert blob["slash/key"] == expected
+    general_blob = field_view(point.general.ext["_misc-key"])
+    assert general_blob["empty-value"] is None
+    assert general_blob["slash/key"] == expected
+    with pytest.raises(KeyError):
+        _ = blob["new"]
     source = Provenance("manual", None, None, "2026-10-04T00:00:00Z", 2.0)
     with point.edit() as draft:
         draft.set("R1.ext.noise", 12.0, provenance=source)
     clone = entry.new_point("b", clone_from="a")
-    clone.R1.ext.blob = {"independent": False}
+    field_view(clone.R1.ext).blob = {"independent": False}
     clone.general.ext["_misc-key"] = None
     reopened = ResultEntry.open(
         "entry", result_root=entry_roots[0], database_root=entry_roots[1]
     )
     original = reopened.use_point("a")
     copied = reopened.use_point("b")
-    assert original.R1.ext.blob == point.R1.ext.blob
-    assert original.general.ext["_misc-key"] == point.R1.ext.blob
-    assert copied.R1.ext.blob == {"independent": False}
+    assert field_view(field_view(original.R1.ext).blob)["slash/key"] == expected
+    assert field_view(original.general.ext["_misc-key"])["slash/key"] == expected
+    assert field_view(field_view(copied.R1.ext).blob).independent is False
     assert copied.general.ext["_misc-key"] is None
     metadata = copied.meta("R1.ext.noise")
     assert metadata is not None
     assert metadata.stderr == 2.0
     assert metadata.cloned_from is not None
     assert metadata.cloned_from["point"] == "a"
-    copied.R1.ext.noise = 12.0
+    field_view(copied.R1.ext).noise = 12.0
     accepted = copied.meta("R1.ext.noise")
     assert accepted is not None
     assert accepted.cloned_from is None
-    assert entry.setup.R1.ext.noise == 11.0
+    assert field_view(entry.setup.R1.ext).noise == 11.0
 
 
 def test_clone_marks_each_copied_source_with_its_direct_point(
@@ -595,8 +595,8 @@ def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
     original = entry.new_point("a")
     original.Q1.duration = 12.0
     original.Q1.coherence = 13.0
-    original.Q1.wiring.bias_ch = 3
-    original.Q1.ext.nested = {"note": "accepted"}
+    field_view(original.Q1.wiring).bias_ch = 3
+    field_view(original.Q1.ext).nested = {"note": "accepted"}
     root = entry_roots[0] / "entry"
     source = root / "points/a/point.yaml"
     yaml = YAML(typ="rt")
@@ -645,8 +645,8 @@ def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
     for view in (point, entry.use_point("b")):
         assert view.Q1.duration == 12.0
         assert view.Q1.coherence == 13.0
-        assert view.Q1.wiring.bias_ch == 3
-        assert view.Q1.ext.nested == {"note": "accepted"}
+        assert field_view(view.Q1.wiring).bias_ch == 3
+        assert field_view(field_view(view.Q1.ext).nested).note == "accepted"
 
 
 def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
@@ -678,26 +678,6 @@ def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
     assert {name: (source / name).read_bytes() for name in before} == before
     assert working_point.Q1.duration == 12.0
     assert entry.new_point("b", clone_from="a").Q1.duration == 12.0
-
-
-@pytest.mark.parametrize("source_mode", ["label", "view"])
-def test_cross_entry_clone_is_rejected_and_removes_new_destination(
-    entry: ResultEntry, entry_roots: tuple[Path, Path], source_mode: str
-) -> None:
-    results, database = entry_roots
-    other = ResultEntry.create("other", result_root=results, database_root=database)
-    foreign_point = other.new_point("source")
-    foreign_source = results / "other/points/source/point.yaml"
-    before = foreign_source.read_bytes()
-    source_arg = "other/source" if source_mode == "label" else foreign_point
-    message = (
-        "single path component" if source_mode == "label" else "Cross-entry cloning"
-    )
-    with pytest.raises(ValueError, match=message):
-        entry.new_point("rejected", clone_from=source_arg)
-    assert entry.list_points() == []
-    assert not (results / "entry/points/rejected").exists()
-    assert foreign_source.read_bytes() == before
 
 
 def test_independent_handles_merge_different_leaves_in_one_point(

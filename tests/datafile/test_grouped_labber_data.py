@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from zcu_tools.datafile import (
     Axis,
-    DatasetRole,
+    DataVariable,
     LabberData,
     LabberMetadata,
     LabberPayload,
@@ -62,10 +62,10 @@ def test_grouped_roundtrip_with_metadata_and_attrs(tmp_path):
     assert written == str(path) + ".hdf5"
     with h5py.File(written, "r") as f:
         version_attr = cast(SupportsInt, f.attrs["zcu_tools.grouped_dataset_version"])
-        roles_attr = cast(Iterable[str], f.attrs["zcu_tools.dataset_roles"])
+        variables_attr = cast(Iterable[str], f.attrs["zcu_tools.dataset_roles"])
         channels_attr = cast(Iterable[str], f.attrs["zcu_tools.dataset_role_channels"])
         assert int(version_attr) == 2
-        assert list(roles_attr) == ["signal", "reference"]
+        assert list(variables_attr) == ["signal", "reference"]
         assert list(channels_attr) == ["Signal", "Reference"]
         assert "zcu_tools.dataset_role" not in f.attrs
         assert not any(str(name).startswith("Log_") for name in f)
@@ -77,7 +77,7 @@ def test_grouped_roundtrip_with_metadata_and_attrs(tmp_path):
         ]
 
     loaded = load_grouped_labber_data(
-        str(path), required_roles=("signal", DatasetRole("reference"))
+        str(path), required_variables=("signal", DataVariable("reference"))
     )
 
     assert loaded.metadata.comment == "grouped result"
@@ -85,10 +85,10 @@ def test_grouped_roundtrip_with_metadata_and_attrs(tmp_path):
     assert loaded.metadata.project == "proj"
     assert loaded.metadata.user == "alice"
     assert loaded.metadata.creation_time == 1_700_000_000.0
-    assert list(loaded.roles) == [DatasetRole("signal"), DatasetRole("reference")]
-    assert np.array_equal(loaded.roles[DatasetRole("signal")].z, _payload_2d().z)
+    assert list(loaded.variables) == [DataVariable("signal"), DataVariable("reference")]
+    assert np.array_equal(loaded.variables[DataVariable("signal")].z, _payload_2d().z)
     assert np.array_equal(
-        loaded.roles[DatasetRole("reference")].z, _payload_2d().z + 1.0
+        loaded.variables[DataVariable("reference")].z, _payload_2d().z + 1.0
     )
 
 
@@ -129,7 +129,7 @@ def test_grouped_v2_validates_complete_contract_before_file_creation(
     base = LabberPayload(("Signal", "a.u.", np.arange(3.0)), [("X", "s", axis)])
     y = np.arange(2, dtype=float)
     shape = (2, 3)
-    roles_by_case: dict[str, Mapping[str, LabberPayload]] = {
+    variables_by_case: dict[str, Mapping[str, LabberPayload]] = {
         "zero_axis": {"signal": LabberPayload(("Signal", "a.u.", np.arange(3.0)), [])},
         "shape": {
             "signal": base,
@@ -212,7 +212,7 @@ def test_grouped_v2_validates_complete_contract_before_file_creation(
 
     path = tmp_path / case
     with pytest.raises(ValueError, match=match):
-        save_grouped_labber_data(str(path), roles_by_case[case])
+        save_grouped_labber_data(str(path), variables_by_case[case])
     assert not path.with_suffix(".hdf5").exists()
 
 
@@ -264,9 +264,9 @@ def test_grouped_v2_accepts_flat_numeric_list_values(tmp_path):
         },
     )
 
-    loaded = load_grouped_labber_data(path, required_roles=("signal",))
+    loaded = load_grouped_labber_data(path, required_variables=("signal",))
     np.testing.assert_array_equal(
-        loaded.roles[DatasetRole("signal")].z, [1.0, 2.0, 3.0]
+        loaded.variables[DataVariable("signal")].z, [1.0, 2.0, 3.0]
     )
 
 
@@ -308,9 +308,9 @@ def test_grouped_loader_rejects_fractional_version_markers(
         load_grouped_labber_data(path)
 
 
-def test_grouped_v2_loader_validates_explicit_role_channel_mapping(tmp_path):
-    roles = {"signal": _payload_2d(), "reference": _payload_2d_reference()}
-    short_path = save_grouped_labber_data(str(tmp_path / "short_mapping"), roles)
+def test_grouped_v2_loader_validates_explicit_variable_channel_mapping(tmp_path):
+    variables = {"signal": _payload_2d(), "reference": _payload_2d_reference()}
+    short_path = save_grouped_labber_data(str(tmp_path / "short_mapping"), variables)
     with h5py.File(short_path, "a") as f:
         f.attrs["zcu_tools.dataset_role_channels"] = np.array(
             ["Signal"], dtype=h5py.string_dtype("utf-8")
@@ -318,7 +318,7 @@ def test_grouped_v2_loader_validates_explicit_role_channel_mapping(tmp_path):
     with pytest.raises(ValueError, match="mapping lengths"):
         load_grouped_labber_data(short_path)
 
-    wrong_path = save_grouped_labber_data(str(tmp_path / "wrong_mapping"), roles)
+    wrong_path = save_grouped_labber_data(str(tmp_path / "wrong_mapping"), variables)
     with h5py.File(wrong_path, "a") as f:
         f.attrs["zcu_tools.dataset_role_channels"] = np.array(
             ["Signal", "Not Reference"], dtype=h5py.string_dtype("utf-8")
@@ -400,7 +400,7 @@ def test_grouped_roundtrip_preserves_grid_and_common_timestamps(tmp_path, shape)
     timestamps = np.arange(np.prod(shape[:-1]), dtype=float)
     timestamps[2] = np.nan
     values = np.arange(np.prod(shape), dtype=float).reshape(shape)
-    roles = {
+    variables = {
         "signal": LabberPayload(
             ("Signal", "a.u.", values + 1j * (values + 1)),
             axes,
@@ -410,13 +410,13 @@ def test_grouped_roundtrip_preserves_grid_and_common_timestamps(tmp_path, shape)
             ("Reference", "V", values + 2), axes, timestamps=timestamps.copy()
         ),
     }
-    path = save_grouped_labber_data(str(tmp_path / "grid"), roles)
+    path = save_grouped_labber_data(str(tmp_path / "grid"), variables)
 
-    loaded = load_grouped_labber_data(path, required_roles=tuple(roles))
+    loaded = load_grouped_labber_data(path, required_variables=tuple(variables))
 
-    assert [str(role) for role in loaded.roles] == list(roles)
-    for role, expected in roles.items():
-        actual = loaded.roles[DatasetRole(role)]
+    assert [str(variable) for variable in loaded.variables] == list(variables)
+    for variable, expected in variables.items():
+        actual = loaded.variables[DataVariable(variable)]
         assert actual.data.name == expected.data.name
         assert actual.data.unit == expected.data.unit
         np.testing.assert_array_equal(actual.z, expected.z)
@@ -427,22 +427,22 @@ def test_grouped_roundtrip_preserves_grid_and_common_timestamps(tmp_path, shape)
             np.testing.assert_array_equal(actual_axis.values, expected_axis[2])
 
 
-def test_grouped_strict_required_roles_missing_and_unknown_raise(tmp_path):
+def test_grouped_strict_required_variables_missing_and_unknown_raise(tmp_path):
     path = tmp_path / "strict"
     save_grouped_labber_data(
         str(path), {"signal": _payload_2d(), "reference": _payload_2d_reference()}
     )
 
-    with pytest.raises(ValueError, match="missing required dataset role"):
+    with pytest.raises(ValueError, match="missing required data variable"):
         load_grouped_labber_data(
-            str(path), required_roles=("signal", "reference", "calibration")
+            str(path), required_variables=("signal", "reference", "calibration")
         )
 
-    with pytest.raises(ValueError, match="unknown dataset role"):
-        load_grouped_labber_data(str(path), required_roles=("signal",))
+    with pytest.raises(ValueError, match="unknown data variable"):
+        load_grouped_labber_data(str(path), required_variables=("signal",))
 
 
-def test_grouped_diagnostic_load_returns_all_roles(tmp_path):
+def test_grouped_diagnostic_load_returns_all_variables(tmp_path):
     path = tmp_path / "diagnostic"
     save_grouped_labber_data(
         str(path), {"signal": _payload_2d(), "reference": _payload_2d_reference()}
@@ -450,10 +450,10 @@ def test_grouped_diagnostic_load_returns_all_roles(tmp_path):
 
     loaded = load_grouped_labber_data(str(path))
 
-    assert set(loaded.roles) == {DatasetRole("signal"), DatasetRole("reference")}
+    assert set(loaded.variables) == {DataVariable("signal"), DataVariable("reference")}
 
 
-def test_grouped_invalid_and_duplicate_roles_raise(tmp_path):
+def test_grouped_invalid_and_duplicate_variables_raise(tmp_path):
     with pytest.raises(ValueError, match="lowercase snake_case"):
         save_grouped_labber_data(str(tmp_path / "invalid"), {"BadRole": _payload_2d()})
 
@@ -466,7 +466,7 @@ def test_grouped_invalid_and_duplicate_roles_raise(tmp_path):
             ["signal", "signal"], dtype=h5py.string_dtype("utf-8")
         )
 
-    with pytest.raises(ValueError, match="duplicate dataset role"):
+    with pytest.raises(ValueError, match="duplicate data variable"):
         load_grouped_labber_data(path)
 
 
@@ -503,12 +503,14 @@ def test_grouped_save_rejects_existing_formatted_path(tmp_path):
     assert not (tmp_path / "grouped_1.hdf5").exists()
 
 
-def test_grouped_role_value_cannot_be_labber_data(tmp_path):
+def test_grouped_variable_value_cannot_be_labber_data(tmp_path):
     data = LabberData(
         ("Signal", "arb", np.ones(3, dtype=complex)),
         axes=[Axis("Frequency", "Hz", np.arange(3, dtype=float))],
     )
 
-    invalid_roles = cast(Mapping[str | DatasetRole, LabberPayload], {"signal": data})
+    invalid_variables = cast(
+        Mapping[str | DataVariable, LabberPayload], {"signal": data}
+    )
     with pytest.raises(TypeError, match="LabberPayload"):
-        save_grouped_labber_data(str(tmp_path / "bad_value"), invalid_roles)
+        save_grouped_labber_data(str(tmp_path / "bad_value"), invalid_variables)

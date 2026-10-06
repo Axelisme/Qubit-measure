@@ -95,8 +95,8 @@ class PointView:
         """Yield a working-unit draft and commit one document on normal exit.
 
         Reload only point.yaml on entry. Required fields, original field
-        validators and same-document references must validate. Body, schema,
-        canonical, conflict or I/O failures keep the previous file and snapshot.
+        validators and model hooks must validate. Body, schema, custom validation,
+        conflict or I/O failures keep the previous file and snapshot.
         Independent handles merge disjoint leaves or reject the entire edit on
         a same-leaf conflict. No other point or setup file is read or written.
         """
@@ -112,7 +112,8 @@ class PointView:
     ) -> RoleView:
         """Resolve only declared roles from this point's cached components.
 
-        Explicit choices precede one matching focus, then registered references.
+        Explicit choices precede one matching focus, then RoleSpec.via or a
+        role-name string field on already resolved components.
         None uses the caller-registered notebook shorthand. Errors identify the
         role, focus, kind and reason. The returned name mapping stays fixed while
         values follow this bound point's working-unit snapshot and edits.
@@ -127,8 +128,8 @@ class PointView:
     def refresh(self) -> None:
         """Reload only point.yaml; invalid data keeps the cached snapshot.
 
-        Missing files, incompatible headers or invalid component/reference/
-        canonical values raise without publication. No files are committed.
+        Missing files, incompatible headers or invalid component models raise
+        without publication. No files are committed.
         """
         self._store.refresh()
 
@@ -138,8 +139,8 @@ class PointView:
         name is an unreserved public identifier and kind is a registered kind.
         fields are working-unit YAML values, including all required model fields.
         Original field validators and defaults run; references resolve only in
-        this point. Unknown names/fields, missing references, invalid values or
-        duplicate components raise the same errors as SetupView.add_component.
+        this point, when resolve is called. Invalid names, schema values or
+        duplicate components raise without publishing a value or source.
         Failure keeps the file and cached snapshot; success commits one edit.
         """
         with self._store.edit() as draft:

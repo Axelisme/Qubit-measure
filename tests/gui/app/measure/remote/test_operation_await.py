@@ -7,7 +7,6 @@ a wire result (ADR-0066):
     feedback?} (NOT a raise; feedback present only when a Stop reason was latched).
   - completed/failed → structured failed/error, not a failed tool call.
   - timeout → structured timeout/running signal.
-  - user_feedback → {reason:'user_feedback', feedback:<str>} (non-terminal).
   - completed/finished → {reason:'completed', status:'finished'}.
 """
 
@@ -134,20 +133,36 @@ def test_failed_returns_status_and_error():
 # ---------------------------------------------------------------------------
 
 
-def test_cancelled_with_feedback_returns_structured():
-    # Settled-cancelled with a Stop reason (Send & Stop scenario):
-    # the feedback is folded by _make_completed and must reach the wire payload.
-    ctrl = _ctrl(
-        AwaitResult(
-            reason="completed",
-            outcome=OperationOutcome("cancelled"),
-            feedback="stop reason from user",
-        )
+@pytest.mark.parametrize("reason", [None, "", "stop reason from user"])
+@pytest.mark.parametrize("settle_in_hook", [False, True])
+def test_cancelled_stop_reason_reaches_wire(
+    reason: str | None, settle_in_hook: bool
+) -> None:
+    handles = OperationHandles()
+
+    def cancel_hook() -> None:
+        if settle_in_hook:
+            handles.settle(token, OperationOutcome("cancelled"))
+
+    token = handles.create(cancel_hook, origin=EventOrigin(kind="user"))
+    control = OperationControlFacet(
+        save=SaveOperationOwner(),
+        handles=handles,
+        progress=UnusedProgress(),
+        run_analyze=TabOperationOwner(),
+        device=DeviceOperationOwner(),
     )
-    out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
-    assert out["reason"] == "completed"
-    assert out["status"] == "cancelled"
-    assert out["feedback"] == "stop reason from user"
+    handles.stop(token, reason)
+    params = {"operation_id": token, "timeout": 0}
+    if not settle_in_hook:
+        assert _HANDLER(control, params) == {"reason": "timeout"}
+        handles.settle(token, OperationOutcome("cancelled"))
+
+    expected = {"reason": "completed", "status": "cancelled"}
+    if reason:
+        expected["feedback"] = reason
+    assert _HANDLER(control, params) == expected
+    assert _HANDLER(control, params) == expected
 
 
 def test_cancelled_without_feedback_no_raise():
@@ -189,23 +204,8 @@ def test_timeout_returns_running_signal():
 
 
 # ---------------------------------------------------------------------------
-# user_feedback path (ADR-0066)
+# terminal result rereads
 # ---------------------------------------------------------------------------
-
-
-def test_user_feedback_returns_feedback_payload():
-    ctrl = _ctrl(AwaitResult(reason="user_feedback", feedback="recalibrate"))
-    out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
-    assert out["reason"] == "user_feedback"
-    assert "recalibrate" in str(out["feedback"])
-
-
-def test_user_feedback_multiple_messages_forwarded():
-    ctrl = _ctrl(AwaitResult(reason="user_feedback", feedback="line 1\nline 2"))
-    out = _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0})
-    assert out["reason"] == "user_feedback"
-    assert "line 1" in str(out["feedback"])
-    assert "line 2" in str(out["feedback"])
 
 
 # ---------------------------------------------------------------------------

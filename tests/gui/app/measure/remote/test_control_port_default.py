@@ -56,7 +56,6 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     assert ctrl_mock.set_cfg_editor_change_listener.call_args_list[-1].args == (None,)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
     ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
-    assert ctrl_mock.set_agent_connected_query.call_args_list[-1].args == (None,)
 
 
 def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscription(
@@ -138,4 +137,3 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
     assert ctrl_mock.set_cfg_editor_change_listener.call_args_list[-1].args == (None,)
     ctrl_mock.add_diagnostic_sink.assert_called_once_with(adapter)
     ctrl_mock.remove_diagnostic_sink.assert_called_once_with(adapter)
-    assert ctrl_mock.set_agent_connected_query.call_args_list[-1].args == (None,)

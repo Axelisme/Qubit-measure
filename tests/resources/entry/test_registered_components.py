@@ -1,9 +1,8 @@
 """Original registered models in complete documents, with registry custody."""
 
-from collections.abc import Generator, Sequence
-from contextlib import ExitStack, contextmanager
+from collections.abc import Generator
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal, Self
 
 import pytest
 from pydantic import (
@@ -13,32 +12,28 @@ from pydantic import (
     ValidationError,
     ValidatorFunctionWrapHandler,
     field_validator,
+    model_validator,
 )
 from ruamel.yaml import YAML
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
-    ComponentRegistry,
     ComponentSchema,
-    MissingReferenceError,
-    ModuleSlot,
-    Ref,
     ResultEntry,
-    RoleSpec,
-    UnitSpec,
-    UnknownFieldError,
     component_registry,
 )
-from zcu_tools.resources.entry.views import FieldView
+
+from .view_support import create_entry, field_view, registered_model
 
 
 class RequiredPhysicalSchema(ComponentSchema):
-    rate: Annotated[float, UnitSpec("MHz")]
+    model_config = ConfigDict(extra="forbid")
+    rate: float
     title: str
 
 
 class RequiredTiming(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    width: Annotated[float, UnitSpec("µs")]
+    width: float
     label: str
 
 
@@ -57,23 +52,8 @@ class PairLinks(BaseModel):
     coupler: str | None = None
 
 
-class PairSchema(ComponentSchema):
-    links: PairLinks
-
-
 class OptionalPairSchema(ComponentSchema):
     links: PairLinks | None = None
-
-
-@contextmanager
-def registered_model(
-    kind: str, model: type[ComponentSchema], *, references: Sequence[str] = ()
-) -> Generator[str]:
-    component_registry.register(kind, model, references=references)
-    try:
-        yield kind
-    finally:
-        component_registry.unregister(kind)
 
 
 @pytest.fixture
@@ -88,224 +68,131 @@ def nested_kind(registry_state_guard: None) -> Generator[str]:
         yield kind
 
 
-@pytest.fixture
-def pair_kind(registry_state_guard: None) -> Generator[str]:
-    with registered_model(
-        "notebook/pair",
-        PairSchema,
-        references=("links.control", "links.target", "links.coupler"),
-    ) as kind:
-        yield kind
-
-
-def create_entry(tmp_path: Path) -> tuple[ResultEntry, Path, Path]:
-    results, database = tmp_path / "results", tmp_path / "Database"
-    entry = ResultEntry.create("entry", result_root=results, database_root=database)
-    return entry, results, database
-
-
-def test_nested_wiring_view_returns_maps_and_preserves_snapshot_aliases(
+@pytest.mark.parametrize("owner", ["setup", "point"])
+@pytest.mark.parametrize("version", ["1.0", "1.2"])
+def test_registered_legacy_rename_preserves_source_until_explicit_acceptance(
     tmp_path: Path,
+    registry_state_guard: None,
+    owner: str,
+    version: str,
 ) -> None:
-    class Pin(BaseModel):
+    class Renamed(ComponentSchema):
         model_config = ConfigDict(extra="forbid")
-        index: int = Field(strict=True, ge=0)
+        modern: int
 
-    class Pins(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        link: Pin
+        @model_validator(mode="before")
+        @classmethod
+        def rename_legacy(cls, value: YamlMap) -> YamlMap:
+            converted = dict(value)
+            if "legacy" in converted:
+                converted["modern"] = converted.pop("legacy")
+            return converted
 
-    class Wired(ComponentSchema):
-        wiring: Pins
-
-    with registered_model("notebook/wired", Wired) as kind:
-        entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, wiring={"link": {"index": 2}})
-        value = entry.setup.N1.wiring.link
-        assert value == {"index": 2}
-        assert isinstance(value, dict)
-        value["index"] = 99
-        assert entry.setup.N1.wiring.link == {"index": 2}
-        with entry.setup.edit() as draft:
-            draft.set("N1.wiring.link.index", 5)
-            assert draft.N1.wiring.link == {"index": 5}
-            assert entry.setup.N1.wiring.link == {"index": 2}
-        entry.setup.refresh()
-        assert entry.setup.N1.wiring.link == {"index": 5}
-
-
-def test_marked_module_slots_edit_seed_and_reload_without_resolving_paths(
-    tmp_path: Path,
-) -> None:
-    class Programmed(ComponentSchema):
-        programs: Annotated[dict[str, str], ModuleSlot()] = Field(default_factory=dict)
-
-    with registered_model("notebook/programmed", Programmed) as kind:
+    with registered_model("notebook/renamed", Renamed) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component(
-            "N1", kind=kind, programs={"drive": "unresolved.drive"}
+        entry.setup.add_component("N1", kind=kind, modern=7)
+        view = entry.setup if owner == "setup" else entry.new_point("working")
+        source = (
+            results / "entry/setup.yaml"
+            if owner == "setup"
+            else results / "entry/points/working/point.yaml"
         )
-        slots = entry.setup.N1.programs
-        assert isinstance(slots, FieldView)
-        assert slots.drive == "unresolved.drive"
-        slots.drive = "another.path"
-        point = entry.new_point("working")
-        with point.edit() as draft:
-            draft.set("N1.programs.sense", "unresolved.sense")
-        point_slots = point.N1.programs
-        assert isinstance(point_slots, FieldView)
-        assert point_slots.drive == "another.path"
-        assert point_slots.sense == "unresolved.sense"
-        with pytest.raises(ValidationError):
-            point_slots.drive = 3
-        assert point_slots.drive == "another.path"
+        original_source = view.meta("N1.modern")
+        assert original_source is not None
+        yaml = YAML(typ="rt")
+        stored = yaml.load(source)
+        stored["format_version"] = version
+        component = stored["components"]["N1"]
+        component["legacy"] = component.pop("modern")
+        if version == "1.2":
+            component["future"] = {"quality": "next"}
+        yaml.dump(stored, source)
+        before = source.read_bytes()
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        reopened_slots = reopened.use_point("working").N1.programs
-        assert isinstance(reopened_slots, FieldView)
-        assert reopened_slots.sense == "unresolved.sense"
-        assert slots.drive == "another.path"
+        loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
+        assert loaded.N1.modern == 7
+        assert loaded.meta("N1.modern") == original_source
+        assert loaded.meta("N1.legacy") is None
+        with pytest.raises(AttributeError):
+            _ = loaded.N1.future
+        loaded.refresh()
+        with loaded.edit():
+            pass
+        assert source.read_bytes() == before
+        loaded.description = "unrelated commit"
+        saved = YAML(typ="safe").load(source)
+        assert saved["components"]["N1"]["modern"] == 7
+        assert "legacy" not in saved["components"]["N1"]
+        if version == "1.2":
+            assert saved["components"]["N1"]["future"] == {"quality": "next"}
+        assert loaded.meta("N1.modern") == original_source
+        assert loaded.meta("N1.legacy") is None
+        with loaded.edit() as draft:
+            draft.set("N1.modern", 8)
+        accepted = loaded.meta("N1.modern")
+        assert accepted is not None and accepted.source == "manual"
+        assert accepted.at != original_source.at
+        with pytest.raises(ValidationError), loaded.edit() as draft:
+            draft.set("N1.modren", 9)
+        assert loaded.N1.modern == 8
+        assert loaded.meta("N1.modern") == accepted
 
 
-def test_nullable_branch_reference_validates_missing_target(tmp_path: Path) -> None:
-    class Linked(ComponentSchema):
-        link: Annotated[str, Ref()] | None = None
-
-    with registered_model("notebook/nullable-branch-link", Linked) as kind:
-        entry, results, _database = create_entry(tmp_path)
-        before = (results / "entry/setup.yaml").read_bytes()
-        with pytest.raises(MissingReferenceError) as error:
-            entry.setup.add_component("L1", kind=kind, link="missing")
-        assert error.value.field == "link"
-        assert (results / "entry/setup.yaml").read_bytes() == before
-
-
-def test_nullable_branch_numeric_reference_is_rejected_before_reserving_kind() -> None:
-    class InvalidRef(ComponentSchema):
-        link: Annotated[int, Ref()] | None = None
-
-    registry = ComponentRegistry()
-    with pytest.raises(ValueError, match="reference"):
-        registry.register("notebook/branch-ref", InvalidRef)
-    registry.register("notebook/branch-ref", ComponentSchema)
-    assert registry.get("notebook/branch-ref") is ComponentSchema
-
-
-def test_nullable_branch_module_slot_is_rejected_before_reserving_kind() -> None:
-    class InvalidSlot(ComponentSchema):
-        programs: Annotated[dict[str, str], ModuleSlot()] | None = None
-
-    registry = ComponentRegistry()
-    with pytest.raises(TypeError, match="ModuleSlot requires"):
-        registry.register("notebook/branch-slot", InvalidSlot)
-    registry.register("notebook/branch-slot", ComponentSchema)
-    assert registry.get("notebook/branch-slot") is ComponentSchema
-
-
-@pytest.mark.parametrize("inner_marker", [False, True], ids=["outer", "inner"])
-def test_marked_reference_validates_add_write_and_reload(
-    tmp_path: Path, inner_marker: bool
+@pytest.mark.parametrize("owner", ["setup", "point"])
+def test_child_writes_validate_the_complete_parent_and_preserve_rejected_sources(
+    tmp_path: Path,
+    owner: str,
 ) -> None:
-    class OuterLinked(ComponentSchema):
-        link: Annotated[str | None, Ref()] = None
+    class Bounds(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        low: int
+        high: int
 
-    class InnerLinked(ComponentSchema):
-        link: Annotated[str, Ref()] | None = None
+    class Bounded(ComponentSchema):
+        box: Bounds
+        initialized: bool = False
 
-    model = InnerLinked if inner_marker else OuterLinked
-    with registered_model("notebook/marked-link", model) as kind:
+        def model_post_init(self, context: object) -> None:
+            self.initialized = True
+
+        @model_validator(mode="after")
+        def check_bounds(self) -> Self:
+            if self.box.low > self.box.high:
+                raise ValueError("low must not exceed high")
+            return self
+
+    with registered_model("notebook/bounded", Bounded) as kind:
         entry, results, database = create_entry(tmp_path)
-        before = (results / "entry/setup.yaml").read_bytes()
-        with pytest.raises(MissingReferenceError) as error:
-            entry.setup.add_component("L1", kind=kind, link="missing")
-        assert error.value.field == "link"
-        assert (results / "entry/setup.yaml").read_bytes() == before
-        entry.setup.add_component("T1", kind=kind)
-        entry.setup.add_component("L1", kind=kind, link="T1")
-        point = entry.new_point("working")
-        with pytest.raises(MissingReferenceError):
-            point.L1.link = "missing"
-        assert point.L1.link == "T1"
-        with pytest.raises(MissingReferenceError), point.edit() as draft:
-            draft.set("L1.link", "missing")
-        assert point.L1.link == "T1"
-        with point.edit() as draft:
-            draft.set("L1.link", None)
-        assert point.L1.link is None
-        point.L1.link = "T1"
+        entry.setup.add_component("N1", kind=kind, box={"low": 1, "high": 5})
+        view = entry.setup if owner == "setup" else entry.new_point("working")
+        assert view.N1.initialized is True
+        box = field_view(view.N1.box)
+        source = view.meta("N1.box.low")
+        with pytest.raises(ValidationError, match="low must not exceed high"):
+            box.low = 7
+        assert box.low == 1
+        assert view.meta("N1.box.low") == source
+        with view.edit() as draft:
+            candidate = field_view(draft.N1.box)
+            with pytest.raises(ValidationError, match="low must not exceed high"):
+                candidate["low"] = 7
+            assert candidate.low == 1
+            candidate.high = 9
+            draft.set("N1.box.low", 8)
+            assert candidate.low == 8
+            assert box.low == 1
+        assert box.low == 8 and box.high == 9
+        accepted = view.meta("N1.box.low")
+        assert accepted is not None and accepted.source == "manual"
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert reopened.use_point("working").L1.link == "T1"
-        roles = component_registry.roles
-        with ExitStack() as cleanup:
-            for name in ("marker_source", "link", "marker_target"):
-                roles.register(name, RoleSpec(kind))
-                cleanup.callback(roles.unregister, name)
-            same_name = point.resolve(["marker_source", "link"], marker_source="L1")
-            assert same_name.components == {"marker_source": "L1", "link": "T1"}
-            via = point.resolve(
-                {
-                    "marker_source": RoleSpec(kind),
-                    "marker_target": RoleSpec(kind, via="marker_source.link"),
-                },
-                marker_source="L1",
-            )
-            assert via.components == {"marker_source": "L1", "marker_target": "T1"}
-        path = results / "entry/points/working/point.yaml"
-        yaml = YAML(typ="safe")
-        document = yaml.load(path.read_text())
-        document["components"]["L1"]["link"] = "missing"
-        with path.open("w") as stream:
-            yaml.dump(document, stream)
-        before = path.read_bytes()
-        with pytest.raises(MissingReferenceError):
-            point.refresh()
-        assert point.L1.link == "T1"
-        with pytest.raises(MissingReferenceError):
-            reopened.use_point("working")
-        assert path.read_bytes() == before
-
-
-def test_nullable_nested_markers_validate_reference_and_accept_null(
-    tmp_path: Path,
-) -> None:
-    class Links(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        target: Annotated[str | None, Ref()] = None
-
-    class Linked(ComponentSchema):
-        links: Links | None = None
-
-    with registered_model("notebook/nested-links", Linked) as kind:
-        entry, _, _ = create_entry(tmp_path)
-        entry.setup.add_component("T1", kind=kind, links=None)
-        entry.setup.add_component("N1", kind=kind, links={"target": "T1"})
-        point = entry.new_point("working")
-        with pytest.raises(MissingReferenceError) as error:
-            point.N1.links = {"target": "missing"}
-        assert error.value.field == "links.target"
-        assert point.N1.links == {"target": "T1"}
-        with point.edit() as draft:
-            draft.set("N1.links.target", None)
-        point.refresh()
-        assert point.N1.links == {"target": None}
-        point.N1.links = None
-        point.refresh()
-        assert point.N1.links is None
-
-
-def test_overridden_extension_annotation_keeps_json_boundary(tmp_path: Path) -> None:
-    class Extended(ComponentSchema):
-        ext: YamlMap = Field(default_factory=dict)
-
-    with registered_model("notebook/extensions", Extended) as kind:
-        entry, _, _ = create_entry(tmp_path)
-        with pytest.raises(ValidationError):
-            entry.setup.add_component("N1", kind=kind, ext={"bad": float("inf")})
-        entry.setup.add_component("N1", kind=kind, ext={"valid": [True, None]})
-        assert entry.setup.N1.ext.valid == [True, None]
+        loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
+        loaded_box = field_view(loaded.N1.box)
+        assert loaded_box.low == 8 and loaded_box.high == 9
+        assert loaded.N1.initialized is True
 
 
 @pytest.mark.parametrize(
@@ -313,6 +200,8 @@ def test_overridden_extension_annotation_keeps_json_boundary(tmp_path: Path) -> 
 )
 def test_leaf_write_runs_owning_field_normalization(tmp_path: Path, write: str) -> None:
     class NormalizeExt(ComponentSchema):
+        ext: YamlMap = Field(default_factory=dict)
+
         @field_validator("ext")
         @classmethod
         def normalize_title(cls, value: YamlMap) -> YamlMap:
@@ -323,20 +212,20 @@ def test_leaf_write_runs_owning_field_normalization(tmp_path: Path, write: str) 
         entry, results, database = create_entry(tmp_path)
         entry.setup.add_component("N1", kind=kind, ext={"title": "prepared"})
         if write == "automatic":
-            entry.setup.N1.ext.title = "  Changed  "
+            field_view(entry.setup.N1.ext).title = "  Changed  "
         else:
             with entry.setup.edit() as draft:
                 if write == "attribute":
-                    draft.N1.ext.title = "  Changed  "
+                    field_view(draft.N1.ext).title = "  Changed  "
                 elif write == "set":
                     draft.set("N1.ext.title", "  Changed  ")
                 else:
                     setattr(draft.N1, write, {"title": "  Changed  "})
-        assert entry.setup.N1.ext.title == "changed"
+        assert field_view(entry.setup.N1.ext).title == "changed"
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert reopened.setup.N1.ext.title == "changed"
+        assert field_view(reopened.setup.N1.ext).title == "changed"
 
 
 @pytest.mark.parametrize("write", ["attribute", "set"])
@@ -344,6 +233,8 @@ def test_caught_owning_field_failure_preserves_draft(
     tmp_path: Path, write: str
 ) -> None:
     class RejectTitle(ComponentSchema):
+        ext: YamlMap = Field(default_factory=dict)
+
         @field_validator("ext")
         @classmethod
         def reject_title(cls, value: YamlMap) -> YamlMap:
@@ -358,16 +249,16 @@ def test_caught_owning_field_failure_preserves_draft(
             draft.description = "keep successful edit"
             if write == "attribute":
                 with pytest.raises(ValidationError, match="title rejected"):
-                    draft.N1.ext.title = "invalid"
+                    field_view(draft.N1.ext).title = "invalid"
             else:
                 with pytest.raises(ValidationError, match="title rejected"):
                     draft.set("N1.ext.title", "invalid")
-            assert draft.N1.ext.title == "prepared"
+            assert field_view(draft.N1.ext).title == "prepared"
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
         assert reopened.setup.description == "keep successful edit"
-        assert reopened.setup.N1.ext.title == "prepared"
+        assert field_view(reopened.setup.N1.ext).title == "prepared"
 
 
 def test_path_write_runs_nested_owning_field_normalization(tmp_path: Path) -> None:
@@ -387,11 +278,17 @@ def test_path_write_runs_nested_owning_field_normalization(tmp_path: Path) -> No
         )
         with entry.setup.edit() as draft:
             draft.set("N1.timing.label", "  Changed  ")
-            assert draft.N1.timing == {"label": "changed", "width": 1.0}
+            assert (
+                field_view(draft.N1.timing).label == "changed"
+                and field_view(draft.N1.timing).width == 1.0
+            )
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert reopened.setup.N1.timing == {"label": "changed", "width": 1.0}
+        assert (
+            field_view(reopened.setup.N1.timing).label == "changed"
+            and field_view(reopened.setup.N1.timing).width == 1.0
+        )
 
 
 @pytest.mark.parametrize("nullable", [False, True])
@@ -414,7 +311,7 @@ def test_nested_kind_is_required_in_complete_components(
         with pytest.raises(ValidationError, match="kind"):
             entry.setup.add_component("N1", kind=kind, details={})
         entry.setup.add_component("N1", kind=kind, details={"kind": "initial"})
-        assert entry.setup.N1.details == {"kind": "initial"}
+        assert field_view(entry.setup.N1.details).kind == "initial"
         source = results / "entry" / "setup.yaml"
         document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
         assert document["components"]["N1"]["details"] == {"kind": "initial"}
@@ -422,12 +319,12 @@ def test_nested_kind_is_required_in_complete_components(
         with entry.setup.edit() as draft:
             with pytest.raises(ValidationError, match="string_type"):
                 draft.set("N1.details.kind", None)
-            assert draft.N1.details == {"kind": "initial"}
+            assert field_view(draft.N1.details).kind == "initial"
             draft.set("N1.details.kind", "auxiliary")
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert reopened.setup.N1.details == {"kind": "auxiliary"}
+        assert field_view(reopened.setup.N1.details).kind == "auxiliary"
         if nullable:
             entry.setup.N1.details = None
             reopened.setup.refresh()
@@ -443,6 +340,7 @@ def test_caught_alias_validation_failure_preserves_shared_draft(
         model_config = ConfigDict(
             extra="forbid", validate_assignment=validate_assignment
         )
+        ext: YamlMap = Field(default_factory=dict)
 
         @field_validator("ext", mode="before")
         @classmethod
@@ -456,25 +354,26 @@ def test_caught_alias_validation_failure_preserves_shared_draft(
         entry, results, database = create_entry(tmp_path)
         entry.setup.add_component("N1", kind=kind, ext={"payload": {"fail": True}})
         with entry.setup.edit() as draft:
-            payload = draft.N1.ext.payload
+            payload: YamlMap = {"fail": True}
             if write == "set":
                 with pytest.raises(ValidationError, match="mutable payload rejected"):
                     draft.set("N1.ext", payload)
             else:
                 with pytest.raises(ValidationError, match="mutable payload rejected"):
                     setattr(draft.N1, write, payload)
-            assert draft.N1.ext.payload == {"fail": True}
+            assert payload == {"fail": True}
+            assert field_view(field_view(draft.N1.ext).payload).fail is True
             draft.description = "keep successful edit"
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
         assert reopened.setup.description == "keep successful edit"
-        assert reopened.setup.N1.ext.payload == {"fail": True}
+        assert field_view(field_view(reopened.setup.N1.ext).payload).fail is True
 
 
-def test_nullable_branch_unit_round_trip(tmp_path: Path) -> None:
+def test_nullable_numeric_field_round_trip(tmp_path: Path) -> None:
     class NullableFrequency(ComponentSchema):
-        rate: Annotated[float, UnitSpec("MHz")] | None = None
+        rate: float | None = None
 
     with registered_model("notebook/nullable-unit", NullableFrequency) as kind:
         entry, results, database = create_entry(tmp_path)
@@ -501,35 +400,12 @@ def test_nullable_branch_unit_round_trip(tmp_path: Path) -> None:
         assert document["components"]["N1"]["rate"] is None
 
 
-def test_unitspec_integer_output_keeps_exact_canonical_comparison(
-    tmp_path: Path, registry_state_guard: None
-) -> None:
-    class IntegerShiftedSchema(ComponentSchema):
-        rate: Annotated[int, UnitSpec("Hz")]
-
-        @field_validator("rate")
-        @classmethod
-        def shift_frequency(cls, value: int) -> int:
-            return value + 1
-
-    with registered_model("notebook/integer-shift", IntegerShiftedSchema) as kind:
-        entry, results, _ = create_entry(tmp_path)
-        source = results / "entry" / "setup.yaml"
-        before = source.read_bytes()
-        with pytest.raises(ValidationError) as failure:
-            entry.setup.add_component("N1", kind=kind, rate=1_000_000_000_000_000)
-        assert failure.value.errors()[0]["loc"] == ("components", "N1", "rate")
-        assert source.read_bytes() == before
-        with pytest.raises(AttributeError, match="Unknown component 'N1'"):
-            _ = entry.setup.N1
-
-
-def test_nullable_nested_rounding_publishes_working_canonical_values(
+def test_nullable_nested_rounding_publishes_normalized_values(
     tmp_path: Path, registry_state_guard: None
 ) -> None:
     class RoundedTiming(BaseModel):
         model_config = ConfigDict(extra="forbid")
-        rate: Annotated[float, UnitSpec("MHz")]
+        rate: float
 
         @field_validator("rate")
         @classmethod
@@ -543,7 +419,7 @@ def test_nullable_nested_rounding_publishes_working_canonical_values(
         entry, results, database = create_entry(tmp_path)
         entry.setup.add_component("N1", kind=kind, timing={"rate": 0.143})
         source = results / "entry" / "setup.yaml"
-        assert entry.setup.N1.timing == {"rate": 0.14}
+        assert field_view(entry.setup.N1.timing).rate == 0.14
         assert YAML(typ="safe").load(source)["components"]["N1"]["timing"] == {
             "rate": 0.14
         }
@@ -551,68 +427,17 @@ def test_nullable_nested_rounding_publishes_working_canonical_values(
             "entry", result_root=results, database_root=database
         )
         reopened.setup.refresh()
-        assert reopened.setup.N1.timing == {"rate": 0.14}
+        assert field_view(reopened.setup.N1.timing).rate == 0.14
         reopened.setup.N1.timing = None
         assert reopened.setup.N1.timing is None
         assert YAML(typ="safe").load(source)["components"]["N1"]["timing"] is None
 
 
-def test_in_place_field_conversion_cannot_mutate_away_canonical_drift(
-    tmp_path: Path, registry_state_guard: None
-) -> None:
-    class StampedExtensionSchema(ComponentSchema):
-        @field_validator("ext", mode="before")
-        @classmethod
-        def stamp_title(cls, value: YamlMap) -> YamlMap:
-            title = value["title"]
-            if not isinstance(title, str):
-                raise TypeError("title must be a string")
-            value["title"] = title + "!"
-            return value
-
-    with registered_model("notebook/in-place-stamp", StampedExtensionSchema) as kind:
-        entry, results, _ = create_entry(tmp_path)
-        source = results / "entry" / "setup.yaml"
-        before = source.read_bytes()
-        with pytest.raises(ValidationError) as failure:
-            entry.setup.add_component("N1", kind=kind, ext={"title": "prepared"})
-        error = failure.value.errors()[0]
-        assert error["loc"] == ("components", "N1", "ext")
-        assert "prepared!" in error["msg"] and "prepared!!" in error["msg"]
-        assert source.read_bytes() == before
-        with pytest.raises(AttributeError, match="Unknown component 'N1'"):
-            _ = entry.setup.N1
-
-
-def test_unitless_extension_structure_keeps_exact_canonical_comparison(
-    tmp_path: Path, registry_state_guard: None
-) -> None:
-    class ShiftedExtensionSchema(ComponentSchema):
-        @field_validator("ext")
-        @classmethod
-        def shift_gain(cls, value: YamlMap) -> YamlMap:
-            gain = value["gain"]
-            if not isinstance(gain, float):
-                raise TypeError("gain must be a float")
-            return {**value, "gain": gain + 5e-13}
-
-    with registered_model("notebook/extension", ShiftedExtensionSchema) as kind:
-        entry, results, _ = create_entry(tmp_path)
-        source = results / "entry" / "setup.yaml"
-        before = source.read_bytes()
-        with pytest.raises(ValidationError) as failure:
-            entry.setup.add_component("N1", kind=kind, ext={"gain": 1.0})
-        assert failure.value.errors()[0]["loc"] == ("components", "N1", "ext")
-        assert source.read_bytes() == before
-        with pytest.raises(AttributeError, match="Unknown component 'N1'"):
-            _ = entry.setup.N1
-
-
-def test_idempotent_numeric_rounding_survives_reload_and_publishes_canonical(
+def test_numeric_rounding_survives_reload(
     tmp_path: Path, registry_state_guard: None
 ) -> None:
     class RoundedSchema(ComponentSchema):
-        rate: Annotated[float, UnitSpec("MHz")]
+        rate: float
 
         @field_validator("rate")
         @classmethod
@@ -636,132 +461,6 @@ def test_idempotent_numeric_rounding_survives_reload_and_publishes_canonical(
         assert reopened.setup.N1.rate == 0.14
         assert reopened.setup.description == "rounded value retained"
         assert YAML(typ="safe").load(source)["components"]["N1"]["rate"] == 0.14
-
-
-def test_non_idempotent_nested_numeric_edit_discards_the_whole_transaction(
-    tmp_path: Path, registry_state_guard: None
-) -> None:
-    class DoubledTiming(RequiredTiming):
-        @field_validator("width")
-        @classmethod
-        def double_width(cls, value: float) -> float:
-            return value * 2
-
-    class DoubledSchema(ComponentSchema):
-        timing: DoubledTiming
-
-    with registered_model("notebook/doubled", DoubledSchema) as kind:
-        entry, results, _ = create_entry(tmp_path)
-        entry.setup.add_component("R1", kind="fake/sensor", rate=10.0)
-        entry.setup.add_component(
-            "N1", kind=kind, timing={"width": 0.0, "label": "initial"}
-        )
-        source = results / "entry" / "setup.yaml"
-        before = source.read_bytes()
-
-        def edit() -> None:
-            with entry.setup.edit() as draft:
-                draft.description = "must roll back"
-                draft.R1.rate = 15.0
-                draft.set("N1.timing.width", 10.0)
-
-        with pytest.raises(ValidationError) as failure:
-            edit()
-        error = failure.value.errors()[0]
-        assert error["loc"] == ("components", "N1", "timing", "width")
-        assert "20.0" in error["msg"] and "40.0" in error["msg"]
-        assert source.read_bytes() == before
-        assert entry.setup.R1.rate == 10.0
-        assert entry.setup.N1.timing == {"width": 0.0, "label": "initial"}
-        assert entry.setup.description is None
-
-
-@pytest.mark.parametrize("operation", ["open", "refresh", "edit"])
-def test_noncanonical_file_rejects_reload_with_source_and_preserves_snapshot(
-    tmp_path: Path,
-    registry_state_guard: None,
-    operation: Literal["open", "refresh", "edit"],
-) -> None:
-    class NormalizedSchema(ComponentSchema):
-        title: str
-
-        @field_validator("title")
-        @classmethod
-        def normalize_title(cls, value: str) -> str:
-            return value.strip().lower()
-
-    with registered_model("notebook/normalized", NormalizedSchema) as kind:
-        entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("N1", kind=kind, title="prepared")
-        source = results / "entry" / "setup.yaml"
-        yaml = YAML(typ="rt")
-        document = yaml.load(source)
-        document["components"]["N1"]["title"] = "  Changed  "
-        yaml.dump(document, source)
-        before = source.read_bytes()
-        body_entered = False
-
-        def reload() -> None:
-            nonlocal body_entered
-            if operation == "open":
-                ResultEntry.open("entry", result_root=results, database_root=database)
-            elif operation == "refresh":
-                entry.setup.refresh()
-            else:
-                with entry.setup.edit() as draft:
-                    body_entered = True
-                    draft.description = "must not commit"
-
-        with pytest.raises(ValidationError) as failure:
-            reload()
-        error = failure.value.errors()[0]
-        assert error["loc"] == ("components", "N1", "title")
-        assert "  Changed  " in error["msg"] and "changed" in error["msg"]
-        assert str(source) in error["msg"]
-        assert not body_entered
-        assert source.read_bytes() == before
-        assert entry.setup.N1.title == "prepared"
-        assert entry.setup.description is None
-
-
-@pytest.mark.parametrize("mode", ["before", "after", "wrap", "plain"])
-def test_non_idempotent_field_conversion_rejects_add_without_publishing(
-    tmp_path: Path,
-    registry_state_guard: None,
-    mode: Literal["before", "after", "wrap", "plain"],
-) -> None:
-    class StampedSchema(ComponentSchema):
-        title: str
-
-        if mode == "wrap":
-
-            @field_validator("title", mode="wrap")
-            @classmethod
-            def stamp_wrapped_title(
-                cls, value: object, handler: ValidatorFunctionWrapHandler
-            ) -> str:
-                return str(handler(value)) + "!"
-        else:
-
-            @field_validator("title", mode=mode)
-            @classmethod
-            def stamp_title(cls, value: str) -> str:
-                return value + "!"
-
-    with registered_model("notebook/stamped", StampedSchema) as kind:
-        entry, results, _ = create_entry(tmp_path)
-        entry.setup.add_component("R1", kind="fake/sensor", rate=10.0)
-        source = results / "entry" / "setup.yaml"
-        before = source.read_bytes()
-        with pytest.raises(ValidationError) as failure:
-            entry.setup.add_component("N1", kind=kind, title="prepared")
-        error = failure.value.errors()[0]
-        assert error["loc"] == ("components", "N1", "title")
-        assert "prepared!" in error["msg"] and "prepared!!" in error["msg"]
-        assert source.read_bytes() == before
-        assert entry.setup.R1.rate == 10.0
-        with pytest.raises(AttributeError, match="Unknown component 'N1'"):
-            _ = entry.setup.N1
 
 
 @pytest.mark.parametrize("mode", ["before", "after", "wrap", "plain"])
@@ -834,53 +533,48 @@ def test_optional_container_does_not_make_a_supplied_required_leaf_nullable(
         with pytest.raises(ValidationError, match="width"):
             entry.setup.N1.timing = {"label": "prepared", "width": value}
         assert setup_path.read_bytes() == before
-        assert entry.setup.N1.timing == {"label": "prepared", "width": 1.0}
+        assert (
+            field_view(entry.setup.N1.timing).label == "prepared"
+            and field_view(entry.setup.N1.timing).width == 1.0
+        )
         with entry.setup.edit() as draft:
             with pytest.raises(ValidationError, match="width"):
                 draft.set("N1.timing.width", value)
-            assert draft.N1.timing == {"label": "prepared", "width": 1.0}
+            assert (
+                field_view(draft.N1.timing).label == "prepared"
+                and field_view(draft.N1.timing).width == 1.0
+            )
             draft.set("N1.timing.width", 10.0)
-        assert entry.setup.N1.timing == {"label": "prepared", "width": 10.0}
+        assert (
+            field_view(entry.setup.N1.timing).label == "prepared"
+            and field_view(entry.setup.N1.timing).width == 10.0
+        )
 
 
-def test_optional_nested_references_validate_supplied_targets_and_allow_null(
+def test_optional_nested_strings_accept_null_and_round_trip_without_reference_checks(
     tmp_path: Path,
 ) -> None:
-    with registered_model(
-        "notebook/optional-pair",
-        OptionalPairSchema,
-        references=("links.control", "links.target", "links.coupler"),
-    ) as kind:
+    with registered_model("notebook/optional-pair", OptionalPairSchema) as kind:
         entry, results, database = create_entry(tmp_path)
-        entry.setup.add_component("Q1", kind="fake/drive/a")
-        entry.setup.add_component("Q2", kind="fake/drive/a")
         entry.setup.add_component("P0", kind=kind, links=None)
         assert entry.setup.P0.links is None
         entry.setup.add_component(
-            "P1", kind=kind, links={"control": "Q1", "target": "Q1"}
+            "P1", kind=kind, links={"control": "first", "target": "second"}
         )
         with entry.setup.edit() as draft:
-            draft.set("P1.links.target", "Q2")
+            draft.set("P1.links.target", "unresolved")
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert reopened.setup.P1.links == {"control": "Q1", "target": "Q2"}
-        setup_path = results / "entry" / "setup.yaml"
-        before = setup_path.read_bytes()
-        with pytest.raises(MissingReferenceError) as failure:
-            reopened.setup.P1.links = {"control": "Q1", "target": "absent"}
-        assert failure.value.component == "P1"
-        assert failure.value.field == "links.target"
-        assert failure.value.target == "absent"
-        assert setup_path.read_bytes() == before
-        assert reopened.setup.P1.links == {"control": "Q1", "target": "Q2"}
+        links = field_view(reopened.setup.P1.links)
+        assert links.control == "first" and links.target == "unresolved"
         reopened.setup.P1.links = None
         again = ResultEntry.open("entry", result_root=results, database_root=database)
         assert again.setup.P1.links is None
 
 
 @pytest.mark.parametrize("operation", ["add", "attribute", "set"])
-def test_optional_nested_typos_keep_the_same_path_and_field_suggestion(
+def test_optional_nested_typos_preserve_values_sources_and_disk(
     tmp_path: Path, operation: str
 ) -> None:
     with registered_model("notebook/optional-timing", OptionalNestedSchema) as kind:
@@ -890,6 +584,8 @@ def test_optional_nested_typos_keep_the_same_path_and_field_suggestion(
         )
         setup_path = results / "entry" / "setup.yaml"
         before = setup_path.read_bytes()
+        accepted = entry.setup.meta("N1.timing.width")
+        assert accepted is not None
 
         def perform_operation() -> None:
             if operation == "add":
@@ -900,17 +596,15 @@ def test_optional_nested_typos_keep_the_same_path_and_field_suggestion(
                 with entry.setup.edit() as draft:
                     draft.set("N1.timing.widht", 10.0)
 
-        with pytest.raises(UnknownFieldError) as failure:
+        with pytest.raises(ValidationError):
             perform_operation()
-        name = "N2" if operation == "add" else "N1"
-        assert failure.value.path == f"{name}.timing.widht"
-        assert failure.value.field == "widht"
-        assert "width" in failure.value.suggestions
         assert setup_path.read_bytes() == before
-        assert entry.setup.N1.timing == {"label": "prepared", "width": 1.0}
+        timing = field_view(entry.setup.N1.timing)
+        assert timing.label == "prepared" and timing.width == 1.0
+        assert entry.setup.meta("N1.timing.width") == accepted
 
 
-def test_optional_nested_complete_values_round_trip_units(
+def test_optional_nested_complete_values_round_trip_in_working_units(
     tmp_path: Path,
 ) -> None:
     with registered_model("notebook/optional-timing", OptionalNestedSchema) as kind:
@@ -918,10 +612,16 @@ def test_optional_nested_complete_values_round_trip_units(
         entry.setup.add_component(
             "N1", kind=kind, timing={"label": "prepared", "width": 1.0}
         )
-        assert entry.setup.N1.timing == {"label": "prepared", "width": 1.0}
+        assert (
+            field_view(entry.setup.N1.timing).label == "prepared"
+            and field_view(entry.setup.N1.timing).width == 1.0
+        )
         with entry.setup.edit() as draft:
             draft.set("N1.timing.width", 10.0)
-            assert draft.N1.timing == {"label": "prepared", "width": 10.0}
+            assert (
+                field_view(draft.N1.timing).label == "prepared"
+                and field_view(draft.N1.timing).width == 10.0
+            )
 
         setup_path = results / "entry" / "setup.yaml"
         assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"][
@@ -930,40 +630,22 @@ def test_optional_nested_complete_values_round_trip_units(
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
-        assert reopened.setup.N1.timing == {"label": "prepared", "width": 10.0}
+        assert (
+            field_view(reopened.setup.N1.timing).label == "prepared"
+            and field_view(reopened.setup.N1.timing).width == 10.0
+        )
         reopened.setup.N1.timing = {"label": "updated", "width": 20.0}
         assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"][
             "width"
         ] == pytest.approx(20.0)
         again = ResultEntry.open("entry", result_root=results, database_root=database)
-        assert again.setup.N1.timing == {"label": "updated", "width": 20.0}
+        assert (
+            field_view(again.setup.N1.timing).label == "updated"
+            and field_view(again.setup.N1.timing).width == 20.0
+        )
 
 
-def test_nested_reference_path_failure_discards_the_shared_draft(
-    tmp_path: Path, pair_kind: str
-) -> None:
-    entry, results, _database = create_entry(tmp_path)
-    entry.setup.add_component("Q1", kind="fake/drive/a")
-    entry.setup.add_component("Q2", kind="fake/drive/b")
-    links: YamlMap = {"control": "Q1", "target": "Q2"}
-    entry.setup.add_component("P1", kind=pair_kind, links=links)
-    setup_path = results / "entry" / "setup.yaml"
-    before = setup_path.read_bytes()
-
-    def perform_operation() -> None:
-        with entry.setup.edit() as draft:
-            draft.description = "discarded"
-            draft.set("P1.links.target", "absent")
-
-    with pytest.raises(MissingReferenceError) as failure:
-        perform_operation()
-    assert failure.value.field == "links.target"
-    assert setup_path.read_bytes() == before
-    assert entry.setup.description is None
-    assert entry.setup.P1.links == links
-
-
-def test_nested_model_values_use_yaml_maps_and_dotted_edits_in_working_units(
+def test_nested_model_views_and_dotted_edits_preserve_draft_isolation(
     tmp_path: Path, nested_kind: str
 ) -> None:
     entry, results, database = create_entry(tmp_path)
@@ -974,56 +656,24 @@ def test_nested_model_values_use_yaml_maps_and_dotted_edits_in_working_units(
     before = setup_path.read_bytes()
     with entry.setup.edit() as draft:
         draft.set("N1.timing.width", 10.0)
-        assert draft.N1.timing == {"width": 10.0, "label": "prepared"}
-        assert entry.setup.N1.timing == {"label": "prepared", "width": 1.0}
+        assert (
+            field_view(draft.N1.timing).width == 10.0
+            and field_view(draft.N1.timing).label == "prepared"
+        )
+        assert (
+            field_view(entry.setup.N1.timing).label == "prepared"
+            and field_view(entry.setup.N1.timing).width == 1.0
+        )
         assert setup_path.read_bytes() == before
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
-    assert reopened.setup.N1.timing == {"width": 10.0, "label": "prepared"}
+    assert (
+        field_view(reopened.setup.N1.timing).width == 10.0
+        and field_view(reopened.setup.N1.timing).label == "prepared"
+    )
     assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"]["width"] == (
         pytest.approx(10.0)
     )
-
-
-@pytest.mark.parametrize("field", ["control", "target", "coupler"])
-@pytest.mark.parametrize("operation", ["add", "write", "open", "refresh"])
-def test_nested_references_reject_missing_targets_with_the_declared_path(
-    tmp_path: Path, pair_kind: str, field: str, operation: str
-) -> None:
-    entry, results, database = create_entry(tmp_path)
-    setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("Q1", kind="fake/drive/a")
-    entry.setup.add_component("Q2", kind="fake/drive/b")
-    valid_links: YamlMap = {"control": "Q1", "target": "Q2"}
-    entry.setup.add_component("P1", kind=pair_kind, links=valid_links)
-    invalid_links = {**valid_links, field: "absent"}
-    if operation in ("open", "refresh"):
-        document = YAML(typ="safe").load(setup_path)
-        document["components"]["P1"]["links"] = invalid_links
-        with setup_path.open("w", encoding="utf-8") as stream:
-            YAML(typ="rt").dump(document, stream)
-    before = setup_path.read_bytes()
-
-    def perform_operation() -> None:
-        if operation == "add":
-            entry.setup.add_component("P2", kind=pair_kind, links=invalid_links)
-        elif operation == "write":
-            entry.setup.P1.links = invalid_links
-        elif operation == "refresh":
-            entry.setup.refresh()
-        else:
-            ResultEntry.open("entry", result_root=results, database_root=database)
-
-    with pytest.raises(MissingReferenceError) as failure:
-        perform_operation()
-    assert failure.value.source == setup_path
-    assert failure.value.component == ("P2" if operation == "add" else "P1")
-    assert failure.value.field == f"links.{field}"
-    assert failure.value.target == "absent"
-    assert setup_path.read_bytes() == before
-    assert entry.setup.P1.links == valid_links
-    if operation in ("add", "write"):
-        entry.setup.P1.links = valid_links
 
 
 @pytest.mark.parametrize("value", [None, "not a frequency"])

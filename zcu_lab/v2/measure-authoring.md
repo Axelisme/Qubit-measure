@@ -8,13 +8,13 @@
 
 ## 目錄佈局
 
-實驗的 leaf layout 見[套件 README](README.md)。`../definitions.py` 明列可重載的 adapter catalog，`../roles.py` 組合 startup-only role catalog。Private `_support/measure/` 保存跨 adapter 的 builder、typed seeds 與 role defaults。
+實驗的 leaf layout 見[套件 README](README.md)。`../definitions.py` 明列可重載的 adapter catalog，`../templates.py` 組合 startup-only template catalog。Private `_support/measure/` 保存跨 adapter 的 builder、typed seeds 與 role defaults。
 
 
 共用 `BaseAdapter` 位於 `gui/app/measure/adapter/base.py`。它的 authoring hook 回傳 `AdapterCfgDefinition`，並呼叫 instantiate 產生 fresh cfg。靜態 spec 留在 authoring contract，framework 不依賴 builder 或 Seed。
 通用 source loader 位於 `gui/app/measure/catalog_loader.py`，由 launcher 宣告來源與重載範圍。
 它支援明確的多個 source package，回傳尚未發布的 Registry。框架契約見
-[Experiment reload](../../lib/zcu_tools/gui/app/measure/README.md#experiment-reload)。組合根重載 `zcu_lab.v2` 與 `zcu_lab.definitions`，包含 package exports。它保留 `zcu_lab.roles`、`_support` 下的 measure／autofluxdep／singleshot 支援家族、autofluxdep／overnight 的 `_support`，以及所有框架 identity。Notebook 的 flux picker helper 引用 core 型別，隨 core 重載。`BaseAdapter` 位於重載範圍之外。新增 adapter 必須明列於 `../definitions.py`，不靠 class 掃描註冊。
+[Experiment reload](../../lib/zcu_tools/gui/app/measure/README.md#experiment-reload)。組合根重載 `zcu_lab.v2` 與 `zcu_lab.definitions`，包含 package exports。它保留 `zcu_lab.templates`、`_support` 下的 measure／autofluxdep／singleshot 支援家族、autofluxdep／overnight 的 `_support`，以及所有框架 identity。Notebook 的 flux picker helper 引用 core 型別，隨 core 重載。`BaseAdapter` 位於重載範圍之外。新增 adapter 必須明列於 `../definitions.py`，不靠 class 掃描註冊。
 
 Loader 在 GUI 關閉全部 tabs、排除進行中操作後才清除 owned import cache，從已檢查的 source
 建立新 modules，並驗證 candidate registry。它不重啟硬體，也不交易回滾任意 import side effect；
@@ -48,9 +48,9 @@ generic model/default/inheritance與validation/lowering直接從`zcu_tools.gui.c
 entry point只組current md expression、measure module shape與`SweepCfg` ports。measure adapter
 facade只提供framework contract、request/result/writeback/analyze params與session signature
 vocabulary，不forward shared generic names。role/module conversion policy仍在使用者的measure
-domain，不下沉到shared core。role registration同時攜帶context-free fresh shape factory與eval-aware
-value factory；named role沿用`ROLE_FACTORIES.shape`，blank role直接依`experiment.cfg_editing` closed catalog
-順序產生。role seed與library adopt policy仍由使用者套件擁有
+domain，不下沉到shared core。template registration同時攜帶context-free fresh shape factory與eval-aware
+value factory；named template沿用`ROLE_FACTORIES.shape`，blank template直接依`experiment.cfg_editing` closed catalog
+順序產生。cfg role seed與library adopt policy仍由使用者套件擁有
 （ADR-0065；catalog 詳見 `../../lib/zcu_tools/experiment/cfg_editing/README.md`）。
 
 Adapter的module/waveform domain helpers保留可讀名稱，但回傳shared
