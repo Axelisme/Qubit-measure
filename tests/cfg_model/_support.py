@@ -7,12 +7,14 @@ from zcu_tools.cfg_model import ModuleSpec, WaveformSamples, WaveformSpec
 class AssetInfo:
     """Current asset reads without repository globals or shared mutable state."""
 
-    def __init__(self) -> None:
+    def __init__(self, data_key: str = "shape") -> None:
+        """Serve one configured asset key, initially with duration 2.5 microseconds."""
+        self._data_key = data_key
         self.current_duration = 2.5
 
     def duration(self, data_key: str) -> float:
-        """Return the current duration of shape; other keys fail explicitly."""
-        if data_key != "shape":
+        """Return the configured asset duration; other keys fail explicitly."""
+        if data_key != self._data_key:
             raise ValueError(f"Missing asset: {data_key}")
         return self.current_duration
 

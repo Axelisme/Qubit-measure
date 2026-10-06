@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
+    CfgInputMap,
     CfgValidationContext,
     ConstWaveformCfg,
     CosineWaveformCfg,
@@ -17,6 +18,18 @@ from zcu_tools.cfg_model import (
 )
 
 from ._support import AssetInfo
+
+
+def test_arb_waveform_cfg_length_comes_from_data_duration():
+    assets = AssetInfo(data_key="dummy")
+    raw: CfgInputMap = {"style": "arb", "data": "dummy"}
+
+    cfg = WaveformCfgFactory.from_raw(raw, context=CfgValidationContext(assets=assets))
+
+    assert isinstance(cfg, ArbWaveformCfg)
+    assert cfg.length == 2.5
+    assert cfg.to_dict() == raw
+    assert raw == {"style": "arb", "data": "dummy"}
 
 
 def test_deepcopy_preserves_current_asset_binding():

@@ -24,6 +24,83 @@ from zcu_tools.cfg_model import (
 from ._support import AssetInfo, Resolver
 
 
+def test_waveform_adapter_rejects_unknown_style():
+    with pytest.raises(ValueError, match="union_tag_invalid") as failure:
+        WaveformCfgFactory.from_raw({"style": "no_such_style", "length": 1.0})
+
+    message = str(failure.value)
+    assert "Root <inline>" in message
+    assert "chain <inline>" in message
+    assert "expected waveform" in message
+
+
+def test_waveform_factory_string_ref_requires_resolver():
+    with pytest.raises(ValueError, match="Missing modules dependency") as failure:
+        WaveformCfgFactory.from_raw("stored_waveform")
+
+    message = str(failure.value)
+    assert "Root stored_waveform" in message
+    assert "chain stored_waveform" in message
+    assert "expected waveform" in message
+
+
+def test_waveform_factory_string_ref_uses_typed_context():
+    resolver = Resolver()
+    resolver.waveforms["stored_waveform"] = ConstWaveformCfg(length=0.5)
+    context = CfgValidationContext(modules=resolver)
+
+    cfg = WaveformCfgFactory.from_raw("stored_waveform", context=context)
+
+    assert isinstance(cfg, ConstWaveformCfg)
+    assert cfg.length == 0.5
+    cfg.set_param("length", 2.0)
+    assert resolver.waveforms["stored_waveform"].length == 0.5
+    assert WaveformCfgFactory.from_raw("stored_waveform", context=context).length == 0.5
+
+
+def test_nested_waveform_ref_requires_resolver():
+    raw: CfgInputMap = {
+        "style": "flat_top",
+        "length": 1.0,
+        "raise_waveform": "named_waveform",
+    }
+    with pytest.raises(ValueError, match="Missing modules dependency") as failure:
+        WaveformCfgFactory.from_raw(raw)
+
+    message = str(failure.value)
+    assert "Root <inline>" in message
+    assert "chain named_waveform" in message
+    assert "expected ramp" in message
+    assert raw == {
+        "style": "flat_top",
+        "length": 1.0,
+        "raise_waveform": "named_waveform",
+    }
+
+
+def test_waveform_factory_resolves_nested_raise_waveform_ref():
+    resolver = Resolver()
+    resolver.waveforms["gauss_rise"] = GaussWaveformCfg(length=0.2, sigma=0.05)
+    raw: CfgInputMap = {
+        "style": "flat_top",
+        "length": 1.0,
+        "raise_waveform": "gauss_rise",
+    }
+
+    cfg = WaveformCfgFactory.from_raw(
+        raw, context=CfgValidationContext(modules=resolver)
+    )
+
+    assert isinstance(cfg, FlatTopWaveformCfg)
+    assert cfg.length == 1.0
+    assert isinstance(cfg.raise_waveform, GaussWaveformCfg)
+    assert cfg.raise_waveform.length == 0.2
+    assert cfg.raise_waveform.sigma == 0.05
+    cfg.raise_waveform.set_param("only_length", 0.4)
+    assert resolver.waveforms["gauss_rise"].length == 0.2
+    assert raw == {"style": "flat_top", "length": 1.0, "raise_waveform": "gauss_rise"}
+
+
 def test_waveform_adapter_dispatches_by_style():
     cfg = WaveformCfgFactory.from_raw({"style": "gauss", "length": 1.0, "sigma": 0.2})
     assert isinstance(cfg, GaussWaveformCfg)

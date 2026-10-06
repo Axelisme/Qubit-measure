@@ -1,11 +1,6 @@
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
-from pydantic import ValidationError
-from zcu_tools.program.v2.modules import (
-    WaveformCfgFactory,  # ensures leaf subclass registration
-)
 from zcu_tools.program.v2.modules.waveform import (
     ArbWaveform,
     ArbWaveformCfg,
@@ -19,22 +14,7 @@ from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg,
     GaussWaveform,
     GaussWaveformCfg,
-    resolve_waveform_ref,
 )
-
-
-def test_arb_waveform_cfg_length_comes_from_data_duration(monkeypatch):
-    class Info:
-        duration = 2.5
-
-    monkeypatch.setattr(
-        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.inspect",
-        lambda key: Info(),
-    )
-
-    cfg = ArbWaveformCfg(data="dummy")
-
-    assert cfg.length == 2.5
 
 
 def test_waveform_build_dispatch_const():
@@ -66,48 +46,6 @@ def test_waveform_build_dispatch_drag_arb_and_flat_top():
     assert isinstance(arb, ArbWaveform)
     assert isinstance(flat_top, FlatTopWaveform)
     assert isinstance(flat_top.raise_waveform, GaussWaveform)
-
-
-def test_waveform_adapter_rejects_unknown_style():
-    with pytest.raises(ValidationError, match="union_tag_invalid"):
-        WaveformCfgFactory.from_raw({"style": "no_such_style", "length": 1.0})
-
-
-def test_waveform_factory_string_ref_requires_module_library():
-    with pytest.raises(ValueError, match="ModuleLibrary is not provided"):
-        WaveformCfgFactory.from_raw("stored_waveform")
-
-
-def test_waveform_factory_string_ref_uses_module_library():
-    ml = MagicMock()
-    ml.get_waveform.return_value = ConstWaveformCfg(length=0.5)
-
-    cfg = WaveformCfgFactory.from_raw("stored_waveform", ml=ml)
-
-    assert isinstance(cfg, ConstWaveformCfg)
-    ml.get_waveform.assert_called_once_with("stored_waveform")
-
-
-def test_waveform_type_adapter_rejects_string_ref_without_context():
-    info = MagicMock()
-    info.context = None
-
-    with pytest.raises(ValueError, match="ModuleLibrary context not found"):
-        resolve_waveform_ref("named_waveform", info)
-
-
-def test_waveform_type_adapter_resolves_nested_raise_waveform_ref():
-    ml = MagicMock()
-    ml.get_waveform.return_value = GaussWaveformCfg(length=0.2, sigma=0.05)
-
-    cfg = WaveformCfgFactory.from_raw(
-        {"style": "flat_top", "length": 1.0, "raise_waveform": "gauss_rise"},
-        ml=ml,
-    )
-
-    assert isinstance(cfg, FlatTopWaveformCfg)
-    assert isinstance(cfg.raise_waveform, GaussWaveformCfg)
-    ml.get_waveform.assert_called_once_with("gauss_rise")
 
 
 def test_waveform_to_wav_kwargs_and_create_methods():
