@@ -519,6 +519,29 @@ def test_data_driven_early_stop_with_nan_slots_remains_completed(rig: Rig) -> No
     assert len(rig.engine.records("run")[0].run_files) == 1
 
 
+def test_analysis_error_after_completed_effect_retains_file_but_never_commits(
+    rig: Rig,
+) -> None:
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        outcome = yield from env.run(run_value, Cfg(), save=save_integer)
+        assert isinstance(outcome, Completed)
+        raise ValueError("analysis failed")
+
+    rig.start(step)
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "failed"
+    assert "analysis failed" in str(status.reason)
+    assert rig.engine.records("run") == ()
+    failed = next(event for event in rig.events() if event["kind"] == "step_failed")
+    assert failed["run_files"] == ["runs/01-run_value.h5"]
+    assert isinstance(failed["error"], dict)
+    assert failed["error"]["type"] == "builtins.ValueError"
+    assert "raise ValueError" in str(failed["error"]["traceback"])
+    assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
+
+
 def test_device_setup_error_is_not_recoverable_schedule_failure(rig: Rig) -> None:
     settings = (DeviceSetup("flux", JsonParameters({"value": 0.1})),)
     observed: list[int] = []
