@@ -19,12 +19,11 @@ from zcu_tools.analysis.fluxdep.search import (
 )
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload, SearchChangedPayload
-from zcu_tools.gui.app.fluxdep.search import FluxDepSearchOwner
 from zcu_tools.gui.app.fluxdep.services import fit
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
-from zcu_tools.gui.session.operation_handles import AwaitResult, OperationOutcome
+from zcu_tools.gui.session.operation_handles import OperationOutcome
 
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
 from tests.gui.app.fluxdep.remote._search_harness import PumpedRouteHarness
@@ -449,40 +448,6 @@ def test_wait_json_admission_is_shared(
     with pytest.raises(RemoteError) as caught:
         h.request(h.client(), "operation.await", token=1, timeout=timeout)
     assert caught.value.code is ErrorCode.INVALID_PARAMS
-
-
-@pytest.mark.parametrize("timeout", [None, 0, 30])
-def test_wait_projects_native_user_feedback_without_state_observations(
-    search_case: SearchCase, monkeypatch: pytest.MonkeyPatch, timeout: float | None
-) -> None:
-    # Search currently has no GUI feedback producer. Replace only the public
-    # wait collaborator to cover this shared AwaitResult projection, not lifecycle.
-    h = search_case.harness
-    client = h.client()
-    token = _start(search_case, client)
-    fresh = h.client()
-    calls: list[tuple[int, float]] = []
-
-    def feedback(
-        self: FluxDepSearchOwner, supplied: int, seconds: float
-    ) -> AwaitResult:
-        assert not h.owner.is_owner_thread()
-        assert self.outcome(supplied) is None
-        calls.append((supplied, seconds))
-        return AwaitResult("user_feedback", feedback="請先檢查輸入")
-
-    monkeypatch.setattr(FluxDepSearchOwner, "await_outcome", feedback)
-    assert _result(
-        h.request(fresh, "operation.await", token=token, timeout=timeout)
-    ) == {
-        "token": token,
-        "reason": "user_feedback",
-        "outcome": None,
-        "feedback": "請先檢查輸入",
-    }
-    assert calls == [(token, 10.0 if timeout is None else timeout)]
-    _error(h.request(fresh, "fit.search"), "precondition_failed", "stale_version")
-    assert h.ctrl.search.active_token == token
 
 
 @pytest.mark.parametrize(

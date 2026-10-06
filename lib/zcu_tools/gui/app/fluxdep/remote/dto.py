@@ -447,11 +447,12 @@ class OperationCancelledReply(TypedDict):
 class OperationAwaitReply(TypedDict):
     """token identifies the retained handle; reason reports how waiting ended.
 
-    outcome is terminal on completed, otherwise possibly None. feedback is the
-    native user-feedback string or None. Timeout does not cancel or reveal state.
+    outcome is terminal on completed and None on timeout. feedback carries
+    accumulated Stop reasons on cancelled outcomes, otherwise None.
+    Timeout does not cancel or reveal state.
     """
 
     token: int
-    reason: Literal["completed", "timeout", "user_feedback"]
+    reason: Literal["completed", "timeout"]
     outcome: OperationOutcomeReply | None
     feedback: str | None
