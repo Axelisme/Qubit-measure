@@ -15,6 +15,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumRemovedPayload,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.project import ProjectInfo
 
 
@@ -102,12 +103,15 @@ def test_reset_and_realignment_preserve_native_points_and_publish_once(
     assert ctrl.state.version.get(spectrum_version_key(name)) == before + 1
     assert len(seen) == 1
 
-    with pytest.raises(ValueError, match="aligned"):
+    with pytest.raises(FailedPreconditionError) as caught:
         ctrl.reset_points(name)
-    with pytest.raises(KeyError):
+    assert caught.value.reason_code == "spectrum_not_aligned"
+    with pytest.raises(InvalidInputError) as caught:
         ctrl.reset_points("absent")
-    with pytest.raises(KeyError):
+    assert caught.value.reason_code == "unknown_spectrum"
+    with pytest.raises(InvalidInputError) as caught:
         ctrl.reset_alignment("absent")
+    assert caught.value.reason_code == "unknown_spectrum"
     assert ctrl.state.spectrums[name] is entry
     assert len(seen) == 1
     assert ctrl.state.version.get(spectrum_version_key(name)) == before + 1
