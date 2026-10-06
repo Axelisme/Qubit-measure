@@ -9,15 +9,13 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-from zcu_lab.v2.twotone.rb.core import (
+from zcu_lab.v2.twotone.rb.core import RB_Exp, RBCfg
+from zcu_lab.v2.twotone.rb.program import RBModuleCfg, RBSweepCfg
+from zcu_lab.v2.twotone.rb.sequence import (
     CAYLEY,
     GATE_EFFECT_MAP,
     INVERSE_INDEX,
     BasicGate,
-    RB_Exp,
-    RBCfg,
-    RBModuleCfg,
-    RBSweepCfg,
     build_seed_program_tables,
 )
 
