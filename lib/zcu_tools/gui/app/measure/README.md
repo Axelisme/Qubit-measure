@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-05，framework BaseAdapter 與 multi-source catalog loader
+**Last updated:** 2026-10-05，共用 interactive contracts 與單層 undo
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -701,9 +701,9 @@ on the concrete controller.
 
 ## Interactive analysis
 
-`interactive/` owns the Qt-free `Session` (detached committed snapshots, atomic
-owner-loop commit and subscription), `PluginDefinition`, typed `Action`, and
-validated command declarations. `AnalyzeService` opens and retains one session
+Shared `gui.interactive` owns the Qt-free `Session` (detached committed snapshots,
+atomic owner-loop commit, subscription and single-level undo), `PluginDefinition`,
+typed `Action`, and validated command declarations. `AnalyzeService` opens and retains one session
 and operation handle per tab; it captures run/context/params at start. Done
 validates the committed state before closing input, then uses the existing
 analysis-result/writeback terminal path. Cancellation, setup failure and result

@@ -15,7 +15,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## GUI Service Architecture
 
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、owner、capability、domain fact、前端反應與 explicit plotting 責任。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、interactive 與單層 undo、owner、capability、domain fact、前端反應與 explicit plotting 責任。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher、runtime、app startup coordination、rendering 初始化與 remote 的責任分界。
 
 ## Cfg / Value Model
@@ -34,7 +34,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
-- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：四個 app 的共用傳輸和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、穩定名稱寫回，以及 analysis-only JSON 投影。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：四個 app 的共用傳輸、GUI seen mechanism 和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
 ## Persistence
 

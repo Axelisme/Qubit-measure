@@ -1,4 +1,4 @@
-"""Measure app-local interactive analysis contracts (no Qt or flux domain)."""
+"""Shared GUI interactive analysis contracts (no Qt or domain policy)."""
 
 from .plugin import Action, Command, PluginDefinition
 from .session import Session

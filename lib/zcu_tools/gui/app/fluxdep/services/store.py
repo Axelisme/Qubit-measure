@@ -28,7 +28,12 @@ class SpectrumStore:
         return list(self._state.spectrums.keys())
 
     def get_spectrum(self, name: str) -> SpectrumEntry:
-        return self._state.spectrums[name]
+        """Return State's live entry by literal name on the owner thread.
+
+        Unknown names raise InvalidInputError (unknown_spectrum); foreign
+        threads raise RuntimeError. The entry is not copied.
+        """
+        return self._state.get_spectrum(name)
 
     def remove_spectrum(self, name: str) -> None:
         self._state.remove_spectrum(name)

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.datafile import LabberData, save_labber_data
 from zcu_tools.gui.app.fluxdep.services.load import (
     LoadService,
     transpose_spectrum_data,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, spectrum_version_key
+from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
 
 
 def test_load_spectrum_populates_state(spectrum_hdf5):
@@ -28,7 +30,7 @@ def test_load_spectrum_populates_state(spectrum_hdf5):
     assert entry.raw["signals"].shape == (len(dev_values), len(freqs_ghz))
     # newly loaded: not aligned, no points yet
     assert entry.aligned is False
-    assert entry.points_selected is False
+    assert entry.points_completed is False
     assert entry.points["freqs"].size == 0
     # version keys bumped (per-spectrum + set)
     assert st.version.get(spectrum_version_key(name)) == 1
@@ -56,6 +58,7 @@ def test_load_spectrum_inherits_alignment(spectrum_hdf5):
         flux_int=2.0,
         flux_period=2.0,
         new_fluxs=st.spectrums[first].raw["dev_values"].copy(),
+        new_point_fluxs=np.empty(0, dtype=np.float64),
     )
 
     # load again (same file → same basename would clash; use a second file)
@@ -70,10 +73,54 @@ def test_load_spectrum_inherits_alignment(spectrum_hdf5):
 def test_load_spectrum_inherit_from_unknown_raises(spectrum_hdf5):
     filepath, *_ = spectrum_hdf5
     st = FluxDepState()
-    with pytest.raises(KeyError):
+    with pytest.raises(InvalidInputError) as caught:
         LoadService(st).load_spectrum(
             filepath, spec_type="OneTone", inherit_from="nope"
         )
+    assert caught.value.reason_code == "unknown_spectrum"
+    assert st.spectrums == {}
+    assert st.version.snapshot() == {}
+
+
+def test_non_2d_native_load_is_nominal_invalid_input(tmp_path):
+    path = save_labber_data(
+        str(tmp_path / "trace"),
+        z=("Signal", "a.u.", np.ones(3, dtype=np.complex128)),
+        axes=[("Device", "native", np.arange(3))],
+    )
+    st = FluxDepState()
+    with pytest.raises(InvalidInputError) as caught:
+        LoadService(st).load_spectrum(path, "OneTone")
+    assert caught.value.reason_code == "spectrum_not_2d"
+    assert st.spectrums == {}
+    assert st.version.snapshot() == {}
+
+
+def test_zero_axis_parsed_load_is_nominal_invalid_input(monkeypatch):
+    parsed = LabberData(("Signal", "a.u.", np.array(1.0 + 0j)), [])
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.fluxdep.services.load.load_labber_data",
+        lambda _filepath: parsed,
+    )
+    st = FluxDepState()
+    before = st.version.snapshot()
+
+    with pytest.raises(InvalidInputError) as caught:
+        LoadService(st).load_spectrum("no-axes.hdf5", "OneTone")
+
+    assert caught.value.category == "invalid_input"
+    assert caught.value.reason_code == "spectrum_not_2d"
+    assert st.spectrums == {}
+    assert st.version.snapshot() == before
+
+
+def test_native_load_io_failure_remains_unexpected(tmp_path):
+    st = FluxDepState()
+    with pytest.raises(FileNotFoundError) as caught:
+        LoadService(st).load_spectrum(str(tmp_path / "missing.hdf5"), "OneTone")
+    assert not isinstance(caught.value, ExpectedError)
+    assert st.spectrums == {}
+    assert st.version.snapshot() == {}
 
 
 # --- transpose -------------------------------------------------------------
@@ -92,7 +139,7 @@ def test_transpose_spectrum_data_swaps_axes_and_signal():
 def test_load_transpose_recovers_canonical_axes(transposed_spectrum_hdf5):
     """A legacy x=freq/y=flux file loaded with transpose_axes=True must come back
     with dev_values=flux and freqs in GHz."""
-    filepath, flux, freqs_ghz, signals = transposed_spectrum_hdf5
+    filepath, flux, freqs_ghz, _signals = transposed_spectrum_hdf5
     st = FluxDepState()
     name = LoadService(st).load_spectrum(
         filepath, spec_type="OneTone", transpose_axes=True
@@ -106,7 +153,7 @@ def test_load_transpose_recovers_canonical_axes(transposed_spectrum_hdf5):
 def test_load_without_transpose_keeps_legacy_axes_wrong(transposed_spectrum_hdf5):
     """Sanity: loading the legacy file WITHOUT transpose mis-reads the axes
     (freqs ≈ 0 after the Hz→GHz scaling of what is really the flux axis)."""
-    filepath, flux, freqs_ghz, _signals = transposed_spectrum_hdf5
+    filepath, _flux, _freqs_ghz, _signals = transposed_spectrum_hdf5
     st = FluxDepState()
     name = LoadService(st).load_spectrum(filepath, spec_type="OneTone")
     entry = st.spectrums[name]
@@ -129,6 +176,7 @@ def test_inherited_load_marks_alignment_seeded(spectrum_hdf5):
         flux_int=2.0,
         flux_period=2.0,
         new_fluxs=st.spectrums[first].raw["dev_values"].copy(),
+        new_point_fluxs=np.empty(0, dtype=np.float64),
     )
     second = svc.load_spectrum(filepath, spec_type="TwoTone", inherit_from=first)
     # inheriting a spectrum's alignment marks the new one as seeded
@@ -139,7 +187,8 @@ def test_inherited_load_marks_alignment_seeded(spectrum_hdf5):
 # --- processed reload ------------------------------------------------------
 
 
-def test_load_processed_roundtrip(spectrum_hdf5, tmp_path):
+@pytest.mark.parametrize("empty", [False, True])
+def test_load_processed_roundtrip(spectrum_hdf5, tmp_path, empty):
     from zcu_tools.gui.app.fluxdep.services.alignment import (
         AlignmentService,
         PointsService,
@@ -151,7 +200,11 @@ def test_load_processed_roundtrip(spectrum_hdf5, tmp_path):
     st = FluxDepState()
     name = LoadService(st).load_spectrum(filepath, spec_type="OneTone")
     AlignmentService(st).set_alignment(name, flux_half=0.0, flux_int=1.0)
-    PointsService(st).set_points(name, np.array([0.0, 2.0]), np.array([5.0, 5.5]))
+    PointsService(st).set_points(
+        name,
+        np.empty(0) if empty else np.array([0.0, 2.0]),
+        np.empty(0) if empty else np.array([5.0, 5.5]),
+    )
     out = str(tmp_path / "spectrums.hdf5")
     ExportService(st).export_spectrums(filepath=out)
 
@@ -161,7 +214,12 @@ def test_load_processed_roundtrip(spectrum_hdf5, tmp_path):
     assert names == [name]
     entry = st2.spectrums[name]
     assert entry.aligned is True
-    assert entry.points_selected is True
+    assert entry.points_completed is True
     assert entry.spec_type == "OneTone"  # type now persisted (was lost → TwoTone)
     assert entry.flux_period == 2.0
-    np.testing.assert_allclose(entry.points["freqs"], [5.0, 5.5])
+    np.testing.assert_allclose(entry.points["freqs"], [] if empty else [5.0, 5.5])
+    assert entry.point_count == (0 if empty else 2)
+    LoadService(st2).load_spectrum(filepath, spec_type="OneTone")
+    reloaded = st2.spectrums[name]
+    assert not reloaded.points_completed and not reloaded.aligned
+    assert reloaded.point_count == 0

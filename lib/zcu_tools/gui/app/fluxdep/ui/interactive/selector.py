@@ -1,360 +1,412 @@
-"""SelectorWidget — cross-spectrum joint-point-cloud filtering.
-
-Port of the notebook's InteractiveSelector: overlays every spectrum's heatmap as
-the background, scatters the joint point cloud (assembled from all spectra's
-selected points), and lets a circular brush select/erase points across the whole
-collection. A distance threshold downsamples the kept points (``downsample_points``,
-reused verbatim). The transient brush circle uses a Qt QTimer (the notebook used a
-threading.Timer).
-"""
+"""Disposable Qt controls for the app-owned joint-cloud selection."""
 
 from __future__ import annotations
 
 import logging
-import time
-
-logger = logging.getLogger(__name__)
+from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import replace
 
 import numpy as np
-from matplotlib.backend_bases import MouseEvent
-from matplotlib.patches import Ellipse
-from numpy.typing import NDArray
-from qtpy.QtCore import (  # type: ignore[attr-defined]
-    Qt,
-    QTimer,
-)
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QComboBox,
-    QLabel,
-    QPushButton,
-    QSlider,
-    QWidget,
-)
+from matplotlib.backend_bases import MouseButton, MouseEvent
+from qtpy import QtCore, QtWidgets
 
-from zcu_tools.analysis.fluxdep import (
-    cast2real_and_norm,
-    downsample_points,
-    points_in_normalized_brush,
+from zcu_tools.analysis.fluxdep.cross_selection import (
+    CrossSelectionResult,
+    CrossSelectionState,
+    CrossSelectionView,
+    analyze_cross_selection,
+    project_cross_selection,
 )
-from zcu_tools.analysis.fluxdep.models import SpectrumResult
+from zcu_tools.analysis.fluxdep.stroke import (
+    BrushMode,
+    BrushPoint,
+    BrushStroke,
+    BrushTool,
+)
+from zcu_tools.gui.app.fluxdep.interactive import CrossSelectionContext
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.plotting.fluxdep.cross_selection import CrossSelectionPlot
 
 from .base import InteractiveMplWidget
 
-_SCALE = 1000
+logger = logging.getLogger(__name__)
+
+CrossSelectionPreviewSubmitter = Callable[
+    [
+        Callable[[], CrossSelectionView],
+        Callable[[CrossSelectionView], None],
+        Callable[[Exception], None],
+    ],
+    None,
+]
 
 
 class SelectorWidget(InteractiveMplWidget):
-    """Brush selection over the joint point cloud of several spectra."""
+    """View of one context, never a second committed selection/filter mask.
+
+    Controls use shared Actions and Session.undo; Apply calls the app owner.
+    Canvas press captures width/mode; release commits one complete stroke,
+    including an outside-axes release. Move is pointer-only preview.
+    """
 
     def __init__(
         self,
-        spectrums: dict[str, SpectrumResult],
-        min_distance: float = 0.0,
-        brush_width: float = 0.05,
-        parent: QWidget | None = None,
+        context: CrossSelectionContext,
+        *,
+        on_apply: Callable[[], CrossSelectionResult],
+        submit_preview: CrossSelectionPreviewSubmitter | None = None,
     ) -> None:
-        # Controls on the LEFT to match the Search / Show tabs (the cross-spectrum
-        # filter lives in the same Analyze panel).
-        super().__init__(parent, controls_side="left")
-        self._spectrums = spectrums
-        self._s_fluxs = np.concatenate(
-            [s["points"]["fluxs"] for s in spectrums.values()]
-        )
-        self._s_freqs = np.concatenate(
-            [s["points"]["freqs"] for s in spectrums.values()]
-        )
-        # Start with EVERYTHING selected (do not inherit the previous brush
-        # selection — removed points would be hard to bring back). The stable
-        # downsample threshold IS inherited via min_distance.
-        self._selected = np.ones_like(self._s_fluxs, dtype=bool)
-        self._init_min_distance = min_distance
-        self._filter_mask = np.ones_like(self._selected, dtype=bool)
-        self._temp_circle: Ellipse | None = None
-        self._temp_timer: QTimer | None = None
+        """Attach open context with Apply callback and 80ms-debounced projection.
 
-        # Off-main-thread downsample with instant-cancel by generation (O(N²)).
-        self._runner = BackgroundRunner(self)
+        on_apply publishes via owner and retains input/Undo; failures appear in
+        Status and remain editable. None submit_preview creates an owned runner.
+        Injected submitter delivers on owner loop; caller owns external cleanup.
+        Success/error must match current numerical snapshot/generation, attached
+        widget and open input. Tool-only changes reproject without downsampling.
+        Closed context raises FailedPreconditionError. Detach transfers no app
+        ownership and does not cancel its session. Construct/use on the Qt owner.
+        """
+        context.session.ensure_input_open()
+        super().__init__(controls_side="left")
+        self._context = context
+        self._on_apply = on_apply
+        self._detached = False
         self._generation = 0
-        self._debounce = QTimer(self)
-        self._debounce.setSingleShot(True)
-        self._debounce.setInterval(80)
-        self._debounce.timeout.connect(self._launch_worker)
-
-        self._compute_bounds()
-        self._build_controls(brush_width)
-        self._init_plots()
-        # Initial render is synchronous so the figure is complete on first show
-        # (the debounced apply_filter only runs later, on interaction).
-        self._run_filter()
-
-    # --- bounds + controls ----------------------------------------------
-
-    def _compute_bounds(self) -> None:
-        spects = [s["spectrum"] for s in self._spectrums.values()]
-        sp_fluxs = np.concatenate([s["fluxs"] for s in spects])
-        sp_freqs = np.concatenate([s["freqs"] for s in spects])
-        self._flux_bound = (
-            float(min(np.nanmin(sp_fluxs), self._s_fluxs.min())),
-            float(max(np.nanmax(sp_fluxs), self._s_fluxs.max())),
+        self._view: CrossSelectionView | None = None
+        self._observed = context.session.snapshot()
+        self._previous: CrossSelectionState | None = None
+        self._vertices: list[BrushPoint] = []
+        self._gesture_width = 0.0
+        self._gesture_mode: BrushMode = "select"
+        self._plot = CrossSelectionPlot(self.figure, context.plugin.inputs)
+        (self._pointer,) = self.figure.axes[0].plot(
+            [], [], linestyle="--", linewidth=1, color="#007e91", zorder=7
         )
-        self._freq_bound = (
-            float(min(np.nanmin(sp_freqs), self._s_freqs.min())),
-            float(max(np.nanmax(sp_freqs), self._s_freqs.max())),
+        self._runner = BackgroundRunner(self) if submit_preview is None else None
+        self._submit_preview = (
+            submit_preview if submit_preview is not None else self._submit_owned
         )
-
-    def _slider(self, lo: float, hi: float, val: float) -> QSlider:
-        s = QSlider(Qt.Orientation.Horizontal)
-        s.setMinimum(int(lo * _SCALE))
-        s.setMaximum(int(hi * _SCALE))
-        s.setValue(int(val * _SCALE))
-        return s
-
-    def _build_controls(self, brush_width: float) -> None:
-        self.controls_layout.addWidget(QLabel("Brush width"))
-        self._width = self._slider(0.01, 0.1, brush_width)
-        self.controls_layout.addWidget(self._width)
-
-        self.controls_layout.addWidget(QLabel("Min distance"))
-        self._thresh = self._slider(0.0, 0.1, self._init_min_distance)
-        self._thresh.valueChanged.connect(lambda _v: self.apply_filter())
-        self.controls_layout.addWidget(self._thresh)
-
-        self._operation = QComboBox()
-        self._operation.addItems(["Select", "Erase"])
-        self.controls_layout.addWidget(self._operation)
-
-        perform_all = QPushButton("Perform on all")
-        perform_all.clicked.connect(self._on_perform_all)
-        self.controls_layout.addWidget(perform_all)
-
-        # "Apply" (not "Finish"): the cross-spectrum filter is not a terminal
-        # pipeline step — it commits the current selection to State for Search.
-        self.apply_button = self.add_finish_button("Apply")
-        self.status_label = QLabel("")
-        self.status_label.setWordWrap(True)
-        self.controls_layout.addWidget(self.status_label)
-
-    def _width_val(self) -> float:
-        return self._width.value() / _SCALE
-
-    def _thresh_val(self) -> float:
-        return self._thresh.value() / _SCALE
-
-    def _operation_select(self) -> bool:
-        return self._operation.currentText() == "Select"
-
-    # --- plotting --------------------------------------------------------
-
-    def _init_plots(self) -> None:
-        self._ax = self.figure.add_subplot(1, 1, 1)
-        for name, spect in self._spectrums.items():
-            t0 = time.perf_counter()
-            signals = spect["spectrum"]["signals"]
-            flux_mask = np.any(~np.isnan(signals), axis=1)
-            freq_mask = np.any(~np.isnan(signals), axis=0)
-            signals = signals[flux_mask, :][:, freq_mask]
-            sp_fluxs = spect["spectrum"]["fluxs"][flux_mask]
-            sp_freqs = spect["spectrum"]["freqs"][freq_mask]
-            if sp_fluxs.size == 0 or sp_freqs.size == 0:
-                continue
-            # Contrast boost on the REAL magnitude (cast2real_and_norm already
-            # takes abs): a fractional power on the complex array is ~30x slower
-            # for no benefit (it gets abs'd anyway).
-            real_signals = cast2real_and_norm(signals) ** 1.5
-            logger.debug(
-                "selector background %r: cast %.0fms, shape=%s",
-                name,
-                (time.perf_counter() - t0) * 1000,
-                real_signals.shape,
+        self._timer = QtCore.QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(80)
+        self._timer.timeout.connect(self._start_preview)
+        self._width = self._slider("Brush width")
+        self._distance = self._slider("Min distance")
+        self._mode = QtWidgets.QComboBox()
+        self._mode.setAccessibleName("Operation")
+        self._mode.addItems(["Select", "Erase"])
+        self.controls_layout.addWidget(self._mode)
+        self._width.valueChanged.connect(
+            lambda value: self._execute(
+                lambda: context.plugin.set_tool.execute(
+                    context.session, BrushTool(width=value / 1000)
+                )
             )
-            self._ax.imshow(
-                real_signals.T,
-                aspect="auto",
-                origin="lower",
-                interpolation="antialiased",  # downsample large images (was "none")
-                extent=(sp_fluxs[0], sp_fluxs[-1], sp_freqs[0], sp_freqs[-1]),
-                cmap="gray_r",  # neutral grayscale so the coloured points stand out
+        )
+        self._distance.valueChanged.connect(
+            lambda value: self._execute(
+                lambda: context.plugin.set_min_distance.execute(
+                    context.session, value / 1000
+                )
             )
-        # Kept points red, dropped points a saturated blue: red/blue is a
-        # warm/cool complementary pair, so both stand out against the gray_r
-        # background and against each other (the earlier faint blue-grey had too
-        # little contrast with the red). Kept points are also drawn larger than
-        # dropped so the selection reads at a glance. Two separate scatters so the
-        # kept points draw ON TOP of the dropped ones (a single scatter draws in
-        # index order, letting dropped points cover kept ones).
-        self._scatter_dropped = self._ax.scatter([], [], c="#1f77ff", s=6, zorder=2)
-        self._scatter_kept = self._ax.scatter([], [], c="#e02020", s=18, zorder=3)
-        self._update_scatters()
-        self._ax.set_xlim(*self._flux_bound)
-        self._ax.set_ylim(*self._freq_bound)
-        self._ax.set_xlabel("Flux")
-        self._ax.set_ylabel("Frequency (GHz)")
-
-    def _cur_selected(self) -> NDArray[np.bool_]:
-        cur = np.zeros_like(self._selected, dtype=bool)
-        cur[np.where(self._selected)[0][self._filter_mask]] = True
-        return cur
-
-    def _update_scatters(self) -> None:
-        """Put kept points in the top scatter, dropped in the bottom one."""
-        kept = self._cur_selected()
-
-        def _offsets(mask: NDArray[np.bool_]) -> NDArray[np.float64]:
-            if not mask.any():
-                return np.empty((0, 2), dtype=np.float64)
-            return np.column_stack((self._s_fluxs[mask], self._s_freqs[mask]))
-
-        self._scatter_kept.set_offsets(_offsets(kept))
-        self._scatter_dropped.set_offsets(_offsets(~kept))
-
-    def _selected_normalised(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        flux_span = self._flux_bound[1] - self._flux_bound[0]
-        freq_span = self._freq_bound[1] - self._freq_bound[0]
-        return (
-            self._s_fluxs[self._selected] / flux_span,
-            self._s_freqs[self._selected] / freq_span,
         )
-
-    def apply_filter(self) -> None:
-        """Re-apply the downsample filter, debounced + off-main (interactive use).
-
-        The public entry for slider / brush changes: it just schedules the
-        synchronous worker (``_run_filter``) after a debounce so rapid changes
-        coalesce and the O(N²) downsample never stalls the UI. The first render
-        calls ``_run_filter`` directly (below) so the figure is complete at once.
-        """
-        self._generation += 1
-        self._debounce.start()
-
-    def _run_filter(self) -> None:
-        """Compute the downsample filter synchronously and redraw at once.
-
-        The core both paths share: the debounced ``apply_filter`` runs it on a
-        worker thread; the initial render calls it directly so the figure shows
-        its final content immediately (rather than blank until a tab switch
-        forced a repaint).
-        """
-        self._generation += 1
-        sel_x, sel_y = self._selected_normalised()
-        mask = downsample_points(sel_x, sel_y, self._thresh_val())
-        self._set_filter_mask(mask)
-
-    def _launch_worker(self) -> None:
-        # Capture the generation + a parameter snapshot in the closure; the
-        # staleness check (cancellation by discarding stale-generation results)
-        # stays in this widget, not the runner.
-        generation = self._generation
-        sel_x, sel_y = self._selected_normalised()
-        threshold = self._thresh_val()
-
-        def _compute() -> NDArray[np.bool_]:
-            return downsample_points(sel_x, sel_y, threshold)
-
-        self._runner.submit(
-            _compute,
-            on_done=lambda mask, g=generation: self._on_worker_done(g, mask),
-            on_error=self._on_worker_error,
-            run_in_pool=True,
+        self._mode.currentTextChanged.connect(
+            lambda text: self._execute(
+                lambda: context.plugin.set_tool.execute(
+                    context.session,
+                    BrushTool(mode="select" if text == "Select" else "erase"),
+                )
+            )
         )
+        self._button(
+            "Perform on all",
+            lambda: context.plugin.perform_on_all.execute(context.session, None),
+        )
+        self._button(
+            "Clear", lambda: context.plugin.clear.execute(context.session, None)
+        )
+        self._undo = self._button("Undo", context.session.undo)
+        self._button("Apply", self._apply_selection)
+        self._show_changes = QtWidgets.QCheckBox("Show changes")
+        self._show_changes.setAccessibleName("Show changes")
+        self._show_changes.setChecked(True)
+        self._show_changes.toggled.connect(self._render)
+        self.controls_layout.addWidget(self._show_changes)
+        self._status = QtWidgets.QLabel()
+        self._status.setAccessibleName("Status")
+        self._status.setWordWrap(True)
+        self.controls_layout.addWidget(self._status)
+        self.controls_layout.addStretch()
+        self._unsubscribe = context.session.subscribe(self._show_committed)
+        self._reproject_controls()
+        self._schedule_preview()
 
-    def _on_worker_error(self, exc: Exception) -> None:
-        # A downsample failing is non-fatal (a transient parameter combo); log and
-        # keep the prior filter on screen rather than crashing the selector.
-        logger.exception("downsample worker failed", exc_info=exc)
+    def preview_view(self) -> CrossSelectionView | None:
+        """Read detached latest successful view, or None pending/failed/detached.
 
-    def _on_worker_done(self, generation: int, filter_mask: NDArray[np.bool_]) -> None:
-        if generation != self._generation:
-            return  # superseded by a newer change — drop the stale result
-        self._set_filter_mask(filter_mask)
+        Never calculate inline or return a stale generation or mutable cache.
+        """
+        return deepcopy(self._view) if self._input_open() else None
 
-    def _set_filter_mask(self, filter_mask: NDArray[np.bool_]) -> None:
-        """Record the downsample mask, re-split kept/dropped scatters, and redraw."""
-        self._filter_mask = filter_mask
-        self._update_scatters()
-        self.redraw()
+    def get_result(self) -> CrossSelectionResult:
+        """Synchronously analyze the latest open snapshot, never cached preview.
 
-    # --- interaction -----------------------------------------------------
+        Does not publish, close input or consume Undo. Closed/detached view raises
+        FailedPreconditionError; numerical invalid state raises ValueError.
+        """
+        if not self._input_open():
+            raise FailedPreconditionError("cross-selection view is detached or closed")
+        return analyze_cross_selection(
+            self._context.plugin.inputs, self._context.session.snapshot()
+        )
 
     def on_press(self, event: MouseEvent) -> None:
-        if event.xdata is None or event.ydata is None:
+        """Begin a left-button gesture in plot axes, capturing committed tool."""
+        if not self._input_open() or event.button != MouseButton.LEFT:
             return
-        x, y, width = float(event.xdata), float(event.ydata), self._width_val()
-        toggle = points_in_normalized_brush(
-            self._s_fluxs,
-            self._s_freqs,
-            x=x,
-            y=y,
-            width=width,
-            x_bound=self._flux_bound,
-            y_bound=self._freq_bound,
+        point = self._point(event)
+        if point is None:
+            return
+        state = self._context.session.snapshot()
+        self._gesture_width, self._gesture_mode = state.width, state.mode
+        self._vertices = [point]
+        self._render_pointer()
+
+    def on_move(self, event: MouseEvent) -> None:
+        """Append valid flux/GHz vertices to pointer preview, without commit."""
+        if not self._input_open() or not self._vertices:
+            return
+        point = self._point(event)
+        if point is not None and point != self._vertices[-1]:
+            self._vertices.append(point)
+            self._render_pointer()
+
+    def on_release(self, event: MouseEvent) -> None:
+        """Submit one stroke, using collected vertices even outside axes.
+
+        Failed stroke makes no partial commit; restore controls and show error.
+        """
+        if not self._input_open() or not self._vertices:
+            return
+        point = self._point(event)
+        if point is not None and point != self._vertices[-1]:
+            self._vertices.append(point)
+        stroke = BrushStroke(
+            tuple(self._vertices), self._gesture_width, self._gesture_mode
         )
-        self._selected[toggle] = self._operation_select()
-        self._show_temp_circle(x, y, width)
-        self.apply_filter()
-
-    def _on_perform_all(self) -> None:
-        self._selected[:] = self._operation_select()
-        self.apply_filter()
-
-    def _show_temp_circle(self, x: float, y: float, width: float) -> None:
-        if self._temp_circle is not None:
-            self._temp_circle.remove()
-            self._temp_circle = None
-        if self._temp_timer is not None:
-            self._temp_timer.stop()
-            self._temp_timer = None
-
-        x_range = self._flux_bound[1] - self._flux_bound[0]
-        y_range = self._freq_bound[1] - self._freq_bound[0]
-        color = "yellow" if self._operation_select() else "black"
-        self._temp_circle = Ellipse(
-            (x, y),
-            width=width * x_range * 2,
-            height=width * y_range * 2,
-            angle=0,
-            fill=False,
-            color=color,
-            linestyle="--",
-            linewidth=1,
+        self._vertices.clear()
+        self._render_pointer()
+        self._execute(
+            lambda: self._context.plugin.stroke.execute(self._context.session, stroke)
         )
-        self._ax.add_patch(self._temp_circle)
-
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        timer.timeout.connect(self._remove_temp_circle)
-        self._temp_timer = timer
-        timer.start(1000)
-
-    def _remove_temp_circle(self) -> None:
-        if self._temp_circle is not None:
-            self._temp_circle.remove()
-            self._temp_circle = None
-            self.redraw()
-        self._temp_timer = None
-
-    # --- result ----------------------------------------------------------
 
     def quiesce(self) -> None:
-        """Stop the debounce timer and join any in-flight pool worker.
+        """Disable this view, stop timer, join/flush owned runner on owner loop.
 
-        Call this before ``deleteLater()`` (e.g. from ``AnalyzePanelWidget._refresh_filter_tab``
-        or the host window's ``closeEvent``) to prevent a pending ``QMetaCallEvent``
-        from being dispatched onto a freed C++ object after the widget is destroyed.
+        Invalidate deliveries first. External cleanup remains caller's. Does not
+        cancel the app-owned context. Safe to repeat; reattach with a new widget.
         """
-        self._debounce.stop()
-        self._runner.quiesce()
+        self._detached = True
+        self._generation += 1
+        self._timer.stop()
+        self._view = None
+        self._vertices.clear()
+        self._render_pointer()
+        if self._runner is not None:
+            self._runner.quiesce()
+        for control in self.findChildren(QtWidgets.QWidget):
+            control.setEnabled(False)
 
-    def get_result(
+    def teardown(self) -> None:
+        """Permanently detach/unsubscribe and quiesce without cancelling context.
+
+        Late success/error cannot update this view or Apply; safe to repeat.
+        """
+        self._unsubscribe()
+        self.quiesce()
+
+    def _slider(self, name: str) -> QtWidgets.QSlider:
+        self.controls_layout.addWidget(QtWidgets.QLabel(name))
+        slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        slider.setAccessibleName(name)
+        slider.setRange(0, 100)
+        self.controls_layout.addWidget(slider)
+        return slider
+
+    def _button(
+        self, name: str, operation: Callable[[], object]
+    ) -> QtWidgets.QPushButton:
+        button = QtWidgets.QPushButton(name)
+        button.setAccessibleName(name)
+        button.clicked.connect(lambda: self._execute(operation))
+        self.controls_layout.addWidget(button)
+        return button
+
+    def _input_open(self) -> bool:
+        if self._detached:
+            return False
+        try:
+            self._context.session.ensure_input_open()
+        except FailedPreconditionError:
+            self._generation += 1
+            self._timer.stop()
+            self._view = None
+            self._vertices.clear()
+            self._render_pointer()
+            for control in self.findChildren(QtWidgets.QWidget):
+                control.setEnabled(False)
+            return False
+        return True
+
+    def _execute(self, operation: Callable[[], object]) -> None:
+        if not self._input_open():
+            return
+        try:
+            operation()
+        except (InvalidInputError, FailedPreconditionError) as exc:
+            self._reproject_controls()
+            self._status.setText(str(exc))
+        except Exception as exc:
+            # Isolate Qt callbacks while preserving the committed state and failure.
+            logger.exception("Cross-selection control failed")
+            self._reproject_controls()
+            self._status.setText(str(exc))
+
+    def _apply_selection(self) -> None:
+        result = self._on_apply()
+        self._status.setText(
+            f"Applied {np.count_nonzero(result.selected)}/{result.selected.size}; input remains open"
+        )
+
+    def _reproject_controls(self) -> None:
+        state = self._context.session.snapshot()
+        for slider, value in (
+            (self._width, state.width),
+            (self._distance, state.min_distance),
+        ):
+            blocked = slider.blockSignals(True)
+            slider.setValue(round(value * 1000))
+            slider.blockSignals(blocked)
+        blocked = self._mode.blockSignals(True)
+        self._mode.setCurrentText("Select" if state.mode == "select" else "Erase")
+        self._mode.blockSignals(blocked)
+        self._undo.setEnabled(self._context.session.can_undo())
+
+    def _show_committed(self) -> None:
+        if not self._input_open():
+            return
+        state = self._context.session.snapshot()
+        changed = not _same_analysis(state, self._observed)
+        if changed:
+            # Analysis Actions create Undo; Undo consumes it before notifying.
+            forward = self._context.session.can_undo()
+            self._previous = None if forward else self._observed
+        self._observed = state
+        self._reproject_controls()
+        if changed:
+            self._schedule_preview()
+        elif self._view is not None:
+            self._view = replace(self._view, state=deepcopy(state))
+            self._render()
+
+    def _schedule_preview(self) -> None:
+        self._generation += 1
+        self._view = None
+        self._status.setText("Updating selection…")
+        self._timer.start()
+
+    def _submit_owned(
         self,
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
-        # Finish is terminal: compute the final downsample synchronously from the
-        # current parameters (a pending worker may not have run yet).
-        sel_x, sel_y = self._selected_normalised()
-        self._filter_mask = downsample_points(sel_x, sel_y, self._thresh_val())
-        cur = self._cur_selected()
-        return self._s_fluxs[cur], self._s_freqs[cur], cur
+        compute: Callable[[], CrossSelectionView],
+        on_done: Callable[[CrossSelectionView], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        if self._runner is None:
+            raise RuntimeError("owned cross-selection runner is unavailable")
+        self._runner.submit(compute, on_done=on_done, on_error=on_error)
 
-    def min_distance(self) -> float:
-        """The current downsample threshold (remembered for the next session)."""
-        return self._thresh_val()
+    def _start_preview(self) -> None:
+        if not self._input_open():
+            return
+        generation = self._generation
+        state = self._context.session.snapshot()
+        previous = deepcopy(self._previous)
+        inputs = self._context.plugin.inputs
+
+        def current() -> bool:
+            return (
+                generation == self._generation
+                and self._input_open()
+                and _same_analysis(state, self._context.session.snapshot())
+            )
+
+        def done(view: CrossSelectionView) -> None:
+            if not current():
+                return
+            # Tool-only updates do not rerun downsampling; display their latest fields.
+            self._view = replace(deepcopy(view), state=self._context.session.snapshot())
+            self._render()
+            self._status.setText(
+                f"Selected {np.count_nonzero(view.result.selected)}/{view.result.selected.size}; "
+                f"added {len(view.added_points)}, removed {len(view.removed_points)}"
+            )
+
+        def error(exc: Exception) -> None:
+            if not current():
+                return
+            self._view = None
+            self._status.setText(str(exc))
+
+        try:
+            self._submit_preview(
+                lambda: project_cross_selection(inputs, state, previous=previous),
+                done,
+                error,
+            )
+        except Exception as exc:
+            # Submission failure is presentation-only; Apply still computes synchronously.
+            logger.exception("Cross-selection preview submission failed")
+            error(exc)
+
+    def _render(self) -> None:
+        if self._input_open() and self._view is not None:
+            self._plot.show_state(
+                self._view, show_changes=self._show_changes.isChecked()
+            )
+            self.redraw()
+
+    def _point(self, event: MouseEvent) -> BrushPoint | None:
+        if (
+            event.inaxes is not self.figure.axes[0]
+            or event.xdata is None
+            or event.ydata is None
+            or not np.isfinite(event.xdata)
+            or not np.isfinite(event.ydata)
+        ):
+            return None
+        return BrushPoint(float(event.xdata), float(event.ydata))
+
+    def _render_pointer(self) -> None:
+        self._pointer.set_data(
+            [p.x for p in self._vertices], [p.y for p in self._vertices]
+        )
+        self.redraw()
+
+
+def _same_analysis(first: CrossSelectionState, second: CrossSelectionState) -> bool:
+    if not (
+        np.array_equal(first.selected, second.selected)
+        and first.min_distance == second.min_distance
+    ):
+        return False
+    a, b = first.last_change, second.last_change
+    if a is None or b is None:
+        return a is b
+    return (
+        np.array_equal(a.selected, b.selected)
+        and a.min_distance == b.min_distance
+        and a.vertices == b.vertices
+        and a.width == b.width
+    )

@@ -110,6 +110,10 @@ class OperationSpec:
     - ``on_terminal``: called on the main thread when the bg work completes or
       errors. Receives (BgResult, SettleFn); the policy performs domain side-
       effects (State writes, signals) and calls settle exactly once.
+    - ``on_opened``: optional owner-thread hook receiving the newly opened
+      token after lease registration, before progress notification or submit. Use it to
+      latch domain admission/current activity. A hook failure settles failed,
+      cleans opened resources, and propagates like any startup failure.
     """
 
     exclusion: ExclusionRequest | None
@@ -119,17 +123,25 @@ class OperationSpec:
     work: Callable[[Any], Any]
     run_in_pool: bool
     on_terminal: Callable[[BgResult, SettleFn], None]
+    # Called before progress notifications or submit, so domain owners can
+    # latch admission and retain the token even when startup later fails.
+    on_opened: Callable[[int], None] | None = None
 
 
 class OperationRunner:
     """Kind-agnostic operation lifecycle mechanism (ADR-0066). Only mechanism;
-    every op's domain policy is injected via OperationSpec. Only recognises ports."""
+    every op's domain policy is injected via OperationSpec. Only recognises ports.
+
+    gate/progress may be None for operations that do not request those facets.
+    Missing required facets fail in begin before any handle is created.
+    Background callbacks and begin must execute on the domain owner thread.
+    """
 
     def __init__(
         self,
-        gate: ExclusionGate,
+        gate: ExclusionGate | None,
         handles: OperationHandles,
-        progress: ProgressHub,
+        progress: ProgressHub | None,
         bg: BackgroundExecutor,
         bus: BaseEventBus,
     ) -> None:
@@ -145,18 +157,22 @@ class OperationRunner:
         Steps (in order):
         1. ``ensure_can_start`` (if exclusion) — fast-fail on conflict.
         2. ``handles.create(cancel_hook)`` — mint the token.
-        3. ``gate.register`` (if exclusion) — register the lease.
+        3. gate.register (if exclusion), then on_opened(token) (if configured).
         4. ``progress.make_factory`` (if wants_progress) — mint the pbar factory.
         5. Build the call-once settle closure and submit to bg.
 
-        Returns the operation token. Raises on conflict (step 1 — nothing minted)
-        or on submit failure (step 5 — settle(failed) unwinds all opened resources
-        before re-raising).
+        Returns the operation token. Missing gate/progress facets and conflicts
+        raise before a handle is minted. Hook, registration, factory or submit
+        failure settles failed, unwinds opened resources and re-raises.
 
         The ``ensure_can_start`` raise propagates directly: no token was minted,
         no resources allocated, no cleanup needed.
         """
-        if spec.exclusion is not None:
+        if spec.exclusion is not None and self._gate is None:
+            raise RuntimeError("operation requires an exclusion gate")
+        if spec.wants_progress and self._progress is None:
+            raise RuntimeError("operation requires a progress service")
+        if spec.exclusion is not None and self._gate is not None:
             self._gate.ensure_can_start(
                 spec.exclusion.kind, resource_id=spec.exclusion.resource_id
             )
@@ -164,25 +180,24 @@ class OperationRunner:
         origin = self._bus.current_origin
         token = self._handles.create(cancel_hook=spec.cancel_hook, origin=origin)
 
-        if spec.exclusion is not None:
-            self._gate.register(
-                token,
-                spec.exclusion.kind,
-                owner_id=spec.exclusion.owner_id,
-                origin_kind=origin.kind,
-                note=spec.exclusion.note,
-                resource_id=spec.exclusion.resource_id,
-            )
-
-        factory = (
-            self._progress.make_factory(token, spec.owner_id)
-            if spec.wants_progress
-            else None
-        )
-
         settle = self._make_settle(spec, token)
-
         try:
+            if spec.exclusion is not None and self._gate is not None:
+                self._gate.register(
+                    token,
+                    spec.exclusion.kind,
+                    owner_id=spec.exclusion.owner_id,
+                    origin_kind=origin.kind,
+                    note=spec.exclusion.note,
+                    resource_id=spec.exclusion.resource_id,
+                )
+            if spec.on_opened is not None:
+                spec.on_opened(token)
+            factory = (
+                self._progress.make_factory(token, spec.owner_id)
+                if spec.wants_progress and self._progress is not None
+                else None
+            )
             self._bg.submit(
                 lambda: spec.work(factory),
                 run_in_pool=spec.run_in_pool,
@@ -244,7 +259,7 @@ class OperationRunner:
                 )
                 return  # call-once: duplicate calls are no-ops
             done = True
-            if spec.wants_progress:
+            if spec.wants_progress and self._progress is not None:
                 try:
                     self._progress.discard_operation(token)
                 except Exception:
@@ -255,7 +270,7 @@ class OperationRunner:
                 self._handles.settle(token, outcome)
             except Exception:
                 logger.exception("operation handle settle failed: token=%d", token)
-            if spec.exclusion is not None:
+            if spec.exclusion is not None and self._gate is not None:
                 try:
                     self._gate.release(token)
                 except Exception:

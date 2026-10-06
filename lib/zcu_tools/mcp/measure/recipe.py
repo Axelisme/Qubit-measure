@@ -20,6 +20,7 @@ from math import isfinite
 from threading import Condition, Event
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, TypeGuard
 
+from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.analysis_execution import (
     AnalysisExecution,
@@ -27,7 +28,6 @@ from zcu_tools.mcp.measure.analysis_execution import (
     ExecutionSnapshot,
 )
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
-from zcu_tools.mcp.measure.images import validated_png
 from zcu_tools.mcp.measure.interaction import handoff_interaction
 from zcu_tools.mcp.measure.operation_wait import await_operation
 from zcu_tools.mcp.measure.raw_save import RawSaveReceipt, RawSaveRequest, save_raw_data

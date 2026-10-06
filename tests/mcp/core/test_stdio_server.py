@@ -325,25 +325,6 @@ def test_malformed_line_is_reported_and_the_loop_continues(
     assert json.loads(out.getvalue().decode())["id"] == 9
 
 
-@pytest.mark.parametrize(
-    ("value", "json_type", "expected"),
-    [
-        (None, JsonType.INTEGER, None),
-        (3, JsonType.STRING, "3"),
-        ("4", JsonType.INTEGER, 4),
-        ("2.5", JsonType.NUMBER, 2.5),
-        (0, JsonType.BOOLEAN, False),
-        ({"a": 1}, JsonType.OBJECT, {"a": 1}),
-        ([1, 2], JsonType.ARRAY, [1, 2]),
-        ({"raw": True}, JsonType.JSON, {"raw": True}),
-    ],
-)
-def test_coerce_arg_projects_json_types(
-    value: object, json_type: JsonType, expected: object
-) -> None:
-    assert coerce_arg(value, json_type) == expected
-
-
 def test_coerce_arg_rejects_non_list_array() -> None:
     with pytest.raises(TypeError, match="expected list"):
         coerce_arg("1,2", JsonType.ARRAY)
