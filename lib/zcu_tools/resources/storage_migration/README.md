@@ -13,4 +13,4 @@
 
 `state.py` 集中 report／manifest encoding 與 copy、native、move 共用的 publication recovery。它不提供跨檔交易、掉電保證、硬體操作或多程序 writer 協調。
 
-`tools/migrate_storage.py` 是離線組合根。具體 mapping 與固定 native declarations 位於 `zcu_lab`，沒有動態 discovery 或新 runtime registry。Module cfg 的轉換仍歸後續 owner；本 package 只產生對照、待處理記錄與字串引用。完整合成 matrix、正式 gates 與 agent 遷移說明書仍是 #18 的未完成驗收。
+`tools/migrate_storage.py` 是離線組合根。具體 mapping 與固定 native declarations 位於 `zcu_lab`，沒有動態 discovery 或新 runtime registry。Module cfg 的轉換仍歸後續 owner；本 package 只產生對照、待處理記錄與字串引用。操作授權、來源保全、pending／resume 與修改 kind 的步驟見 [Agent 離線遷移說明書](../../../../docs/storage-migration.md)。
