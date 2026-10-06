@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-06，期 0 保存 I/O seam
+**Last updated:** 2026-10-07，期 0 tunables owner
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -10,7 +10,7 @@
 
 `Next` 配對步驟摘要與下一步 state。`Done` 不新增點 record，`Aborted` 表達明確的業務終止。`Completed` 配對 experiment 返回時的 Run.cfg 副本與 Result，saver 決定單次檔案格式。`Failed` 表達可由 workflow 處理的 Schedule 失敗，不包含部分 Result。
 
-`workflow` 將具名宣告附在原函式，不執行 init，也不建立全域 catalog。`WorkflowRegistry` 由宿主顯式填入，每次重載建立新 instance。Tunables 宣告檢查 JSON schema；Engine 的啟動與整批更新驗證另屬執行邊界。
+`workflow` 將具名宣告附在原函式，不執行 init，也不建立全域 catalog。`WorkflowRegistry` 由宿主顯式填入，每次重載建立新 instance。Tunables 宣告檢查 JSON schema，dot path 的 leaf／model 判定也由宣告 owner 提供。Package 內的 TunableValues 集中完整 model 驗證、deepcopy capture 與 revision，整批 journal append 成功後才發布新值。它不擁有 run_id 或 lifecycle 政策，這些仍由 Engine 接合。當前 step 的 capture 不受新 revision 影響。
 
 `InitEnv` 只提供原始 UTC start 與 detached context。`WorkflowEnv` 的 typed helpers 使用 `yield from`，把 request 與回應的型別交接留在核心。環境共用 engine-owned 顯示資源；缺少 context capability 時存取立即 raise。
 

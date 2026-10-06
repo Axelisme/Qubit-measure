@@ -101,6 +101,70 @@ def workflow_definition[P: BaseModel, T: BaseModel, S, R, C](
     return definition
 
 
+def validate_tunable_path(model_type: type[BaseModel], path: str) -> None:
+    """Require a dot path to a scalar/list/tuple leaf of a tunables model.
+
+    model_type must obey the declaration's JSON-only, extra-forbid schema.
+    Field names, not aliases, define paths. Unknown fields, array indices,
+    empty components, and replacement of any model layer raise ValueError.
+    Optional model layers still cannot be replaced as a whole, even when None.
+    This declaration-owner operation hides schema references and unions from
+    the update owner; it does not read or modify a model instance.
+    """
+    if not path or any(not part for part in path.split(".")):
+        raise ValueError("Tunable paths require nonempty model field components")
+    schema = TypeAdapter(JsonValue).validate_python(
+        model_type.model_json_schema(by_alias=False)
+    )
+    if not isinstance(schema, dict):
+        raise ValueError("Tunables require a model schema")
+    definitions = schema.get("$defs", {})
+    if not isinstance(definitions, dict):
+        raise ValueError("Invalid tunables schema definitions")
+    _check_schema(schema, definitions, set())
+    candidates: tuple[JsonValue, ...] = (schema,)
+    for part in path.split("."):
+        candidates = _field_schemas(candidates, definitions, part)
+        if not candidates:
+            raise ValueError(f"Unknown tunable field path: {path!r}")
+    if any(_model_schemas(candidate, definitions) for candidate in candidates):
+        raise ValueError("Tunable changes cannot replace an entire model")
+
+
+def _field_schemas(
+    candidates: tuple[JsonValue, ...], definitions: dict[str, JsonValue], name: str
+) -> tuple[JsonValue, ...]:
+    fields: list[JsonValue] = []
+    for candidate in candidates:
+        for model in _model_schemas(candidate, definitions):
+            properties = model.get("properties")
+            if isinstance(properties, dict) and name in properties:
+                fields.append(properties[name])
+    return tuple(fields)
+
+
+def _model_schemas(
+    schema: JsonValue, definitions: dict[str, JsonValue]
+) -> tuple[dict[str, JsonValue], ...]:
+    if not isinstance(schema, dict):
+        raise ValueError("Tunables require a JSON-compatible schema")
+    reference = schema.get("$ref")
+    if isinstance(reference, str):
+        return _model_schemas(
+            definitions[reference.removeprefix("#/$defs/")], definitions
+        )
+    alternatives = schema.get("anyOf")
+    if isinstance(alternatives, list):
+        return tuple(
+            model
+            for alternative in alternatives
+            for model in _model_schemas(alternative, definitions)
+        )
+    if schema.get("type") == "object":
+        return (schema,)
+    return ()
+
+
 class WorkflowRegistry:
     """One explicitly populated catalog; names are unique and insertion-ordered.
 
