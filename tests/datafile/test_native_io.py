@@ -108,7 +108,7 @@ def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
 
     with h5.File(destination, "r") as file:
         assert file.attrs["format"] == "zcu.experiment-data"
-        assert file.attrs["format_version"] == "1.0"
+        assert file.attrs["format_version"] == "2.0"
         signal = hdf_dataset(file, "data/readout/signal")
         assert signal.attrs["units"] == "V"
         assert signal.id.get_type().get_member_name(0) == b"r"
@@ -241,7 +241,7 @@ def test_missing_provenance_is_not_silently_unknown(
 @pytest.mark.parametrize(
     "location,attribute,value",
     [
-        ("/", "format_version", "2.0"),
+        ("/", "format_version", "1.0"),
         ("/", "completion", "finished"),
         ("/", "started_at", "not-a-time"),
         ("/data/readout/signal", "units", "A"),

@@ -78,50 +78,13 @@ class CfgSnapshot:
 
 
 @dataclass(frozen=True, kw_only=True)
-class CloneOrigin:
-    """Historical source entry UUID and optional work-point label."""
-
-    entry_id: UUID
-    point: str | None
-
-
-@dataclass(frozen=True, kw_only=True)
-class ParameterSource:
-    """Audit origin of a parameter value in working units.
-
-    source is manual or a local ledger event ID. kind and run_id are optional
-    historical identifiers. at is a UTC ISO timestamp. stderr is an optional
-    uncertainty in the parameter's working units. cloned_from identifies the
-    original entry/work point for a clone, or None for a non-cloned value.
-    Persistence does not resolve or invent ledger evidence.
-    """
-
-    source: str
-    kind: str | None
-    run_id: str | None
-    at: str
-    stderr: float | None
-    cloned_from: CloneOrigin | None
-
-
-@dataclass(frozen=True, kw_only=True)
-class ParameterSnapshot:
-    """JSON value, optional working-unit label and its audit source."""
-
-    value: JsonValue
-    unit: str | None
-    source: ParameterSource
-
-
-@dataclass(frozen=True, kw_only=True)
 class RunSnapshot:
-    """Start-of-run entry state without live handles or a container reference.
+    """Historical entry state without live handles or a container reference.
 
-    entry_id is the entry UUID. entry_name is its name at run start.
+    entry_id is the entry UUID. entry_name is its name at context capture.
     point and description are optional work-point label and description.
-    roles maps role names to component names; params maps dotted parameter paths
-    to historical ParameterSnapshots, in working units. No writer recaptures
-    values from a live entry. Unknown context fields use NativeExtensions.
+    roles maps role names to component names. No writer recaptures values from a
+    live entry. Unknown context fields use NativeExtensions.
     """
 
     entry_id: UUID
@@ -129,7 +92,6 @@ class RunSnapshot:
     point: str | None
     description: str | None
     roles: Mapping[str, str]
-    params: Mapping[str, ParameterSnapshot]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -161,7 +123,7 @@ class RunMetadata:
     started_at is UTC ISO; finished_at is UTC ISO or absent evidence None.
     completion is complete, partial or stopped measurement progress, not a
     transaction status. labber_path is the last successful Labber path or None.
-    snapshot is start-of-run entry state; provenance is historical environment
+    snapshot is caller-captured entry state; provenance is historical environment
     evidence. Native I/O rejects malformed values with a located ValueError.
     """
 

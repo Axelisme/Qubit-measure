@@ -254,7 +254,7 @@ def test_same_major_nested_unknown_cfg_is_projected_but_before_validator_sees_ra
     )
     save_run(record, path, spec=SINGLE, metadata=native_metadata(SINGLE.tag))
     with h5.File(path, "r+") as file:
-        file.attrs["format_version"] = "1.7"
+        file.attrs["format_version"] = "2.7"
         file["cfg"].attrs["cfg_schema_version"] = "3.9"
         raw = json.loads(hdf_json_text(file, "cfg"))
         raw["future"] = {"unknown": [1, None]}

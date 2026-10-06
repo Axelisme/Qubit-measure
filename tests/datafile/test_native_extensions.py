@@ -73,9 +73,6 @@ def _write_fixed_json(source: Path, *, spare_bytes: int = 0) -> dict[str, str]:
     with h5.File(source, "r+") as file:
         context = json.loads(hdf_json_text(file, "context"))
         context["future"] = {"unicode": "未知", "number": 1e-6}
-        context["params"]["Q1.freq"]["source"]["future"] = "kept"
-        # Typed metadata projects stderr to float; JSON number spelling may stay int.
-        context["params"]["Q1.freq"]["source"]["stderr"] = 1
         raw["cfg"] = '{"a":1,"b":2,"future":"未知","number":1e-6}'
         raw["context"] = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         refs = file.create_dataset("json_refs", (2,), dtype=h5.ref_dtype)
@@ -342,7 +339,7 @@ def _write_future_native(source: Path) -> None:
     """Create synthetic forward-minor HDF5 extensions for the rewrite contract."""
     save_run_data(source, native_payload(), native_metadata(), cfg=native_cfg())
     with h5.File(source, "r+") as file:
-        file.attrs["format_version"] = "1.9"
+        file.attrs["format_version"] = "2.9"
         file.attrs["future"] = "root-value"
         variable = hdf_group(file, "data/readout")
         variable.attrs["future"] = 17
@@ -374,10 +371,6 @@ def _write_future_native(source: Path) -> None:
         hdf_dataset(file, "cfg")[()] = json.dumps(cfg)
         context = json.loads(hdf_json_text(file, "context"))
         context["future"] = {"leaf": [False, 9]}
-        param = context["params"]["Q1.freq"]
-        param["future"] = "parameter"
-        param["source"]["future"] = "source"
-        param["source"]["cloned_from"]["future"] = "clone"
         hdf_dataset(file, "context")[()] = json.dumps(context)
         # Unmarked data children are extensions, not malformed variables.
         hdf_group(file, "data").create_group("future_layout").create_dataset(
@@ -410,7 +403,7 @@ def test_detached_image_preserves_minor_unknown_nodes_links_and_references(
     )
     assert load_run_data(destination).metadata == stored.metadata
     with h5.File(destination, "r") as file:
-        assert file.attrs["format_version"] == "1.9"
+        assert file.attrs["format_version"] == "2.9"
         assert file.attrs["future"] == "root-value"
         assert hdf_group(file, "data/readout").attrs["future"] == 17
         signal = hdf_dataset(file, "data/readout/signal")
@@ -451,23 +444,13 @@ def test_image_rewrite_updates_known_values_without_merging_dynamic_maps(
     with h5.File(source, "r+") as file:
         context = json.loads(hdf_json_text(file, "context"))
         context["future"] = "kept"
-        context["params"]["Q1.freq"]["future"] = "param-kept"
-        context["params"]["Q1.freq"]["source"]["future"] = "source-kept"
         hdf_dataset(file, "context")[()] = json.dumps(context)
         file["signal_alias"] = hdf_dataset(file, "data/readout/signal")
     stored = load_run_data(source, preserve_unknown=True)
     snapshot = stored.metadata.snapshot
-    parameter = snapshot.params["Q1.freq"]
-    updated_parameter = replace(
-        parameter,
-        value={"new": [True, None]},
-        source=replace(parameter.source, cloned_from=None),
-    )
     metadata = replace(
         stored.metadata,
-        snapshot=replace(
-            snapshot, roles={"resonator": "R2"}, params={"Q1.freq": updated_parameter}
-        ),
+        snapshot=replace(snapshot, roles={"resonator": "R2"}),
     )
     payload = stored.payload
     payload.variables[next(iter(payload.variables))].z[:] = [5 + 6j, 7 + 8j]
@@ -478,12 +461,6 @@ def test_image_rewrite_updates_known_values_without_merging_dynamic_maps(
         actual = json.loads(hdf_json_text(file, "context"))
         assert actual["future"] == "kept"
         assert actual["roles"] == {"resonator": "R2"}
-        assert set(actual["params"]) == {"Q1.freq"}
-        param = actual["params"]["Q1.freq"]
-        assert param["value"] == {"new": [True, None]}
-        assert param["future"] == "param-kept"
-        assert param["source"]["future"] == "source-kept"
-        assert param["source"]["cloned_from"] is None
         assert json.loads(hdf_json_text(file, "cfg")) == {"only": "new"}
         assert (
             hdf_dataset(file, "signal_alias").id
