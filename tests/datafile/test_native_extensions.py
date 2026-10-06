@@ -6,6 +6,7 @@ from pathlib import Path
 
 import h5py as h5
 import numpy as np
+import pytest
 from zcu_tools.datafile import load_run_data, save_run_data
 
 from tests._native_support import (
@@ -16,6 +17,163 @@ from tests._native_support import (
     native_metadata,
     native_payload,
 )
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "cfg",
+        "context",
+        "provenance",
+        "data",
+        "data/readout/signal",
+        "data/readout/frequency",
+        "data/readout/timestamps",
+    ],
+)
+@pytest.mark.parametrize("route", ["direct", "soft_chain", "soft_parent"])
+@pytest.mark.parametrize("preserve_unknown", [False, True])
+def test_known_nodes_reject_external_targets_before_dereferencing(
+    tmp_path: Path,
+    location: str,
+    route: str,
+    preserve_unknown: bool,
+) -> None:
+    source, target = tmp_path / "source.h5", tmp_path / "external.h5"
+    save_run_data(source, native_payload(), native_metadata(), cfg=native_cfg())
+    target.write_bytes(source.read_bytes())
+    before = target.read_bytes()
+    with h5.File(source, "r+") as file:
+        del file[location]
+        if route == "direct":
+            file[location] = h5.ExternalLink(str(target), "/" + location)
+        elif route == "soft_chain":
+            file["outside"] = h5.ExternalLink(str(target), "/" + location)
+            file["hop"] = h5.SoftLink("/outside")
+            file[location] = h5.SoftLink("/hop")
+        else:
+            file["outside"] = h5.ExternalLink(str(target), "/")
+            file[location] = h5.SoftLink("/outside/" + location)
+    with pytest.raises(ValueError) as caught:
+        load_run_data(source, preserve_unknown=preserve_unknown)
+    assert str(source) in str(caught.value)
+    assert "/" + location in str(caught.value)
+    assert "external" in str(caught.value).lower()
+    assert target.read_bytes() == before
+    # The same boundary must fail before trying to open an absent target.
+    target.unlink()
+    with pytest.raises(ValueError, match="external"):
+        load_run_data(source, preserve_unknown=preserve_unknown)
+
+
+def _write_fixed_json(source: Path, *, spare_bytes: int = 0) -> dict[str, str]:
+    """Build legal fixed UTF-8 datasets with aliases and references."""
+    save_run_data(source, native_payload(), native_metadata(), cfg=native_cfg())
+    raw: dict[str, str] = {}
+    with h5.File(source, "r+") as file:
+        context = json.loads(hdf_json_text(file, "context"))
+        context["future"] = {"unicode": "未知", "number": 1e-6}
+        context["params"]["Q1.freq"]["source"]["future"] = "kept"
+        raw["cfg"] = '{"a":1,"b":2,"future":"未知","number":1e-6}'
+        raw["context"] = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+        refs = file.create_dataset("json_refs", (2,), dtype=h5.ref_dtype)
+        for index, name in enumerate(("cfg", "context")):
+            old = hdf_dataset(file, name)
+            attrs = dict(old.attrs)
+            del file[name]
+            dataset = file.create_dataset(
+                name,
+                data=raw[name].encode("utf-8"),
+                dtype=h5.string_dtype(
+                    "utf-8", length=len(raw[name].encode("utf-8")) + spare_bytes
+                ),
+            )
+            dataset.attrs.update(attrs)
+            file[name + "_alias"] = dataset
+            refs[index] = dataset.ref
+    return raw
+
+
+def test_fixed_json_roundtrip_retains_values_raw_text_aliases_and_references(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.h5"
+    raw = _write_fixed_json(source)
+    stored = load_run_data(source, preserve_unknown=True)
+    source.unlink()
+    destination = tmp_path / "rewritten.h5"
+    save_run_data(
+        destination,
+        stored.payload,
+        stored.metadata,
+        cfg=stored.cfg,
+        extensions=stored.extensions,
+    )
+    actual = load_run_data(destination)
+    assert actual.cfg == stored.cfg
+    assert actual.metadata == stored.metadata
+    with h5.File(destination, "r") as file:
+        for index, name in enumerate(("cfg", "context")):
+            dataset = hdf_dataset(file, name)
+            assert hdf_json_text(file, name) == raw[name]
+            assert dataset.id == file[name + "_alias"].id
+            assert dataset.id == file[hdf_dataset(file, "json_refs")[index]].id
+
+
+@pytest.mark.parametrize("name", ["cfg", "context"])
+@pytest.mark.parametrize("fits", [True, False])
+def test_fixed_json_edits_obey_utf8_capacity_and_atomic_failure(
+    tmp_path: Path,
+    name: str,
+    fits: bool,
+) -> None:
+    source = tmp_path / "source.h5"
+    _write_fixed_json(source, spare_bytes=256)
+    stored = load_run_data(source, preserve_unknown=True)
+    source.unlink()
+    value = "新" * (3 if fits else 1000)
+    cfg, metadata = stored.cfg, stored.metadata
+    if name == "cfg":
+        cfg = replace(cfg, values={"new": value})
+    else:
+        metadata = replace(
+            metadata, snapshot=replace(metadata.snapshot, description=value)
+        )
+    destination = tmp_path / "destination.h5"
+    destination.write_bytes(b"existing destination")
+    if not fits:
+        before = set(tmp_path.iterdir())
+        with pytest.raises(ValueError) as caught:
+            save_run_data(
+                destination,
+                stored.payload,
+                metadata,
+                cfg=cfg,
+                extensions=stored.extensions,
+                replace=True,
+            )
+        assert str(destination) in str(caught.value)
+        assert "/" + name in str(caught.value)
+        assert "capacity" in str(caught.value)
+        assert destination.read_bytes() == b"existing destination"
+        assert set(tmp_path.iterdir()) == before
+    else:
+        save_run_data(
+            destination,
+            stored.payload,
+            metadata,
+            cfg=cfg,
+            extensions=stored.extensions,
+            replace=True,
+        )
+        actual = load_run_data(destination)
+        assert actual.cfg == cfg
+        assert actual.metadata == metadata
+        with h5.File(destination, "r") as file:
+            dataset = hdf_dataset(file, name)
+            index = 0 if name == "cfg" else 1
+            assert dataset.id == file[name + "_alias"].id
+            assert dataset.id == file[hdf_dataset(file, "json_refs")[index]].id
 
 
 def _write_future_native(source: Path) -> None:
