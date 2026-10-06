@@ -1,6 +1,7 @@
 """Public Engine control, isolation, and journal-authoritative commit contracts."""
 
 import json
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
@@ -13,6 +14,8 @@ from zcu_tools.experiment.workflows import (
     DeviceSnapshot,
     Done,
     Effect,
+    Engine,
+    EnginePorts,
     InitEnv,
     InvalidRunState,
     MissingCapability,
@@ -27,12 +30,40 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 
-from ._engine_fakes import START, Plan, Rig, State, Tunables
+from ._engine_fakes import START, Plan, RecordingBar, Rig, State, Tunables
 
 
 @pytest.fixture
 def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path)
+
+
+class ReadCallbackBar(RecordingBar):
+    """Read real progress and invoke an armed host callback exactly once."""
+
+    on_read: Callable[[], None] | None = None
+
+    @property
+    def n(self) -> int | float:
+        callback = self.on_read
+        self.on_read = None
+        if callback is not None:
+            callback()
+        return super().n
+
+
+@pytest.fixture
+def capture_bar(rig: Rig) -> ReadCallbackBar:
+    bar = ReadCallbackBar(total=2, desc="work")
+
+    def progress(**_kwargs: object) -> ReadCallbackBar:
+        return bar
+
+    rig.bars.append(bar)
+    rig.engine = Engine(
+        EnginePorts(rig.plots, progress, rig.clock, context=7, devices=rig.devices)
+    )
+    return bar
 
 
 def points(
@@ -249,6 +280,59 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
         event for event in rig.events() if event["kind"] == "step_discarded"
     )
     assert discarded["reason"] == "stop"
+
+
+def test_final_capture_rejects_resume_until_paused_segment_returns(
+    rig: Rig, capture_bar: ReadCallbackBar
+) -> None:
+    attempts: list[str] = []
+
+    def reject_takeover() -> None:
+        attempts.append("resume")
+        with pytest.raises(InvalidRunState):
+            rig.engine.resume("run", devices=DeviceSnapshot(()))
+        with pytest.raises(InvalidRunState):
+            rig.engine.execute("run")
+
+    def pause(_signal: object) -> None:
+        rig.engine.pause("run")
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
+    ) -> Step[State, int]:
+        bar = env.pbar("work", 2)
+        bar.set_progress(1)
+        try:
+            yield from env.wait_until(START + timedelta(seconds=20))
+            return Next(1, state)
+        finally:
+            capture_bar.on_read = reject_takeover
+
+    rig.clock.on_wait = pause
+    rig.start(step)
+    paused = rig.engine.execute("run")
+    assert attempts == ["resume"]
+    assert (
+        paused.lifecycle,
+        paused.call_seq,
+        paused.committed_seq,
+        paused.revision,
+    ) == ("paused", 1, 0, 0)
+    assert paused.progress[0].completed == 1
+
+    rig.engine.update_tunables(
+        "run",
+        (TunableChange("value", 9),),
+        expected_revision=0,
+        actor=Actor("user", "test"),
+    )
+    assert rig.engine.resume("run", devices=DeviceSnapshot(())).lifecycle == "running"
+    resumed = rig.engine.execute("run")
+    assert (resumed.lifecycle, resumed.call_seq, resumed.revision) == ("paused", 2, 1)
+    assert attempts == ["resume", "resume"]
+    capture_bar.set_progress(2)
+    assert (paused.lifecycle, paused.call_seq, paused.revision) == ("paused", 1, 0)
+    assert paused.progress[0].completed == 1
 
 
 @pytest.mark.parametrize("control", ["pause", "stop"])
