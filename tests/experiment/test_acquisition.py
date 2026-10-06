@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 from zcu_tools.datafile import SoftwareProvenance
@@ -38,16 +39,28 @@ def software_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setattr(acquisition.socket, "gethostname", lambda: "acquisition-host")
 
 
+@pytest.mark.parametrize(
+    "started,prefix",
+    [
+        (datetime(2026, 10, 6, 12, 34, 56, 123456, tzinfo=UTC), "20261006T123456Z"),
+        (datetime(1, 1, 1, tzinfo=UTC), "00010101T000000Z"),
+    ],
+)
 def test_run_id_uses_supplied_utc_time_and_distinct_six_hex_suffixes(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, started: datetime, prefix: str
 ) -> None:
-    monkeypatch.setattr(
-        acquisition.secrets, "token_hex", Mock(side_effect=["000001", "000002"])
+    identities = iter(
+        [
+            UUID("00000100-0000-4000-8000-000000000000"),
+            UUID("00000200-0000-4000-8000-000000000000"),
+        ]
     )
-    started = datetime(2026, 10, 6, 12, 34, 56, 123456, tzinfo=UTC)
+    monkeypatch.setattr(
+        "zcu_tools.resources.entry.save_layout.uuid4", lambda: next(identities)
+    )
 
-    assert new_run_id(started) == "20261006T123456Z-000001"
-    assert new_run_id(started) == "20261006T123456Z-000002"
+    assert new_run_id(started) == f"{prefix}-000001"
+    assert new_run_id(started) == f"{prefix}-000002"
 
 
 @pytest.mark.parametrize(

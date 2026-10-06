@@ -6,7 +6,6 @@ import hashlib
 import inspect
 import json
 import platform
-import secrets
 import socket
 import subprocess
 from dataclasses import dataclass, replace
@@ -17,6 +16,7 @@ from typing import Literal
 
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.resources.entry import new_run_id as generate_run_id
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ def new_run_id(started_at: datetime) -> str:
     """
     if started_at.tzinfo is None or started_at.utcoffset() != timedelta(0):
         raise ValueError("started_at must be a timezone-aware UTC datetime")
-    return f"{started_at:%Y%m%dT%H%M%SZ}-{secrets.token_hex(3)}"
+    return generate_run_id(at=started_at)
 
 
 def capture_software_provenance(
