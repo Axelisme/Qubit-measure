@@ -8,13 +8,16 @@ spin boxes, and Search being blocked when the database path is empty / missing.
 from __future__ import annotations
 
 import pytest
+from PyQt6.QtWidgets import QGroupBox, QLineEdit
 from qtpy.QtWidgets import QSizePolicy, QTabWidget  # type: ignore[attr-defined]
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
     _BOUND_PRESETS,
     AnalyzePanelWidget,
 )
+from zcu_tools.gui.app.fluxdep.ui.transitions_form import TransitionsForm
 
 
 @pytest.fixture
@@ -23,6 +26,48 @@ def panel(qapp):
     w = AnalyzePanelWidget(ctrl)
     yield w, ctrl
     w.deleteLater()
+
+
+@pytest.mark.parametrize("publish_before_panel", [False, True])
+def test_published_fit_inputs_reach_search_and_show(qapp, publish_before_panel):
+    ctrl = Controller(FluxDepState())
+    widget = None
+    if not publish_before_panel:
+        widget = AnalyzePanelWidget(ctrl)
+    try:
+        ctrl.set_fit_params(
+            "/task/database.h5",
+            (3.0, 12.0),
+            (0.3, 1.5),
+            (0.2, 1.2),
+            TransitionDict({"transitions": [(0, 1)]}),
+            None,
+            None,
+        )
+        if widget is None:
+            widget = AnalyzePanelWidget(ctrl)
+        widget.show_tab("search")
+        search_form = next(
+            group
+            for group in widget.findChildren(QGroupBox)
+            if group.title() == "Search parameters"
+        )
+        assert any(
+            edit.text() == ctrl.state.fit.database_path
+            for edit in search_form.findChildren(QLineEdit)
+        ), "Search must display the currently published database"
+        for form in widget.findChildren(TransitionsForm):
+            transitions = form.get_transitions()
+            assert transitions.get("transitions") == [(0, 1)]
+            assert not transitions.get("mirror"), (
+                "Search and Show must not retain default mirror transitions"
+            )
+    finally:
+        if widget is not None:
+            widget.quiesce()
+            widget.dispose()
+            widget.deleteLater()
+        ctrl.interactive.dispose()
 
 
 def test_three_tabs_filter_search_show(panel):
