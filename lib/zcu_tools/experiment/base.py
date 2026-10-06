@@ -155,9 +155,12 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         """Read declared single/grouped Labber data into a new memory-unit record.
 
         source is an exact local Path. Incorrect variables, axes, units or shape
-        raise ValueError and I/O errors propagate. A missing cfg comment returns
-        cfg=None; an invalid cfg comment warns and returns cfg=None while keeping
-        valid Result data. This entry does not guess native or legacy layouts.
+        raise ValueError and I/O errors propagate. Missing cfg or non-envelope
+        comment text returns cfg=None with valid Result data. Recognized comment
+        envelopes with invalid cfg/comment/timestamp field types raise ValueError.
+        A valid envelope whose cfg object fails the declared cfg model warns and
+        returns cfg=None while keeping valid Result data. This entry does not
+        guess native or legacy layouts.
         """
         from zcu_tools.datafile import load_labber_data
         from zcu_tools.experiment.utils import parse_comment

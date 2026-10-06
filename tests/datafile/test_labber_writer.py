@@ -256,7 +256,7 @@ def test_single_scalar_is_rejected_before_creating_destination(tmp_path: Path) -
         metadata=LabberMetadata(),
         representation="single",
     )
-    with pytest.raises(ValueError) as error:
+    with pytest.raises(ValueError, match="step axis") as error:
         write_labber(destination, payload, cfg=_cfg())
     assert str(destination) in str(error.value)
     assert "readout" in str(error.value)
