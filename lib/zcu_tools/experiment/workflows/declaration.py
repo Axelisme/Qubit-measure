@@ -159,6 +159,7 @@ def _validate_declaration(
     _check_schema(schema, definitions, set())
 
 
+# Schema nodes nest models/arrays/references; visited definitions bound this recursive walk.
 def _check_schema(
     schema: JsonValue, definitions: dict[str, JsonValue], visited: set[str]
 ) -> None:
