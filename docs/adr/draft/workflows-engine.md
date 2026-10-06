@@ -56,9 +56,9 @@ workflow 取得原生 matplotlib Axes，從 state 重畫累積資料。Live 綁�
 
 ## 可執行依賴投影
 
-實作時新增 `.importlinter` contract ID `workflows-core-no-ui`，候選編號 C18。source 為 `zcu_tools.experiment.workflows`，禁止依賴 `zcu_tools.gui`、`zcu_tools.mcp`、`zcu_tools.notebook`、QtPy 與各 Qt binding。Qt 外部套件檢查需啟用 import-linter 的 external package 分析。這條 contract 不增加 ignore_imports。
+期 0 候選已建立 `experiment.workflows` package，並在 `.importlinter` 宣告 C18，contract ID 為 `workflows-core-no-ui`。source 為 `zcu_tools.experiment.workflows`，禁止依賴 `zcu_tools.gui`、`zcu_tools.mcp`、`zcu_tools.notebook`、QtPy 與各 Qt binding。Import-linter 已啟用 external package 分析，涵蓋 Qt 外部套件。這條 contract 不增加 ignore_imports。
 
-期 0 尚未建立 package，因此本波不加入無法解析 source 的 contract。本篇在 contract 落地並通過之前保持 draft。既有 C8、C9、C16 同時限制分層、循環與 framework 反向 import 使用者套件。核心對 progress_bar 與 runtime 的依賴使用 C8 的既有方向，不把 GUI 排除規則的債務當成先例。
+本篇保持 draft。候選實作與 C18 已有 gate 證據，不代表持久分支已採用或期 0 已完整接受。既有 C8、C9、C16 同時限制分層、循環與 framework 反向 import 使用者套件。核心對 progress_bar 與 runtime 的依賴使用 C8 的既有方向，不把 GUI 排除規則的債務當成先例。
 
 ## 取捨
 
