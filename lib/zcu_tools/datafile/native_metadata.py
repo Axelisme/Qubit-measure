@@ -6,9 +6,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import h5py as h5
-from pydantic import TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from .native_models import CfgSnapshot, JsonObject, RunMetadata
+from .native_nodes import known_group, known_node
 
 _JSON = TypeAdapter(JsonObject)
 _METADATA = TypeAdapter(RunMetadata)
@@ -46,9 +47,9 @@ def _reject_json_constant(value: str) -> None:
 def read_json(node: h5.Group, name: str) -> JsonObject:
     """Read a required scalar UTF-8 JSON dataset under node, without pruning keys."""
     location = f"{str(node.name).rstrip('/')}/{name}"
-    if name not in node:
+    dataset = known_node(node, name)
+    if dataset is None:
         raise ValueError(f"{location}: missing dataset")
-    dataset = node[name]
     if not isinstance(dataset, h5.Dataset) or dataset.shape != ():
         raise ValueError(f"{location}: expected scalar JSON dataset")
     dtype = h5.check_string_dtype(dataset.dtype)
@@ -60,13 +61,46 @@ def read_json(node: h5.Group, name: str) -> JsonObject:
     return json_object(text, location)
 
 
+def _same_json_value(old: JsonValue, new: JsonValue) -> bool:
+    # JSON numbers compare by value, but true must not compare equal to 1.
+    if isinstance(old, bool) or isinstance(new, bool):
+        return type(old) is type(new) and old == new
+    if isinstance(old, dict) and isinstance(new, dict):
+        return old.keys() == new.keys() and all(
+            _same_json_value(value, new[key]) for key, value in old.items()
+        )
+    if isinstance(old, list) and isinstance(new, list):
+        return len(old) == len(new) and all(
+            _same_json_value(a, b) for a, b in zip(old, new, strict=True)
+        )
+    return old == new
+
+
 def write_json(node: h5.Group, name: str, value: JsonObject) -> h5.Dataset:
-    """Write full JSON values, updating an existing scalar dataset in place."""
+    """Write full JSON values while retaining an existing scalar's identity.
+
+    Unchanged JSON retains raw text, including compact number/Unicode spelling.
+    Changed fixed UTF-8 strings must fit their encoded byte capacity, otherwise
+    raise a located ValueError before assignment. New datasets use vlen UTF-8.
+    """
     text = json.dumps(value, ensure_ascii=False, allow_nan=False)
-    if name in node:
-        dataset = node[name]
-        if not isinstance(dataset, h5.Dataset) or dataset.shape != ():
+    dataset = known_node(node, name)
+    if dataset is not None:
+        old = read_json(node, name)
+        if not isinstance(dataset, h5.Dataset):
             raise ValueError(f"{node.name}/{name}: expected scalar JSON dataset")
+        if _same_json_value(old, value):
+            return dataset
+        dtype = h5.check_string_dtype(dataset.dtype)
+        if (
+            dtype is not None
+            and dtype.length is not None
+            and len(text.encode("utf-8")) > dtype.length
+        ):
+            raise ValueError(
+                f"{str(node.name).rstrip('/')}/{name}: JSON exceeds fixed UTF-8 "
+                f"byte capacity {dtype.length}"
+            )
         dataset[()] = text
         return dataset
     return node.create_dataset(name, data=text, dtype=h5.string_dtype("utf-8"))
@@ -171,7 +205,7 @@ def write_metadata(file: h5.File, metadata: RunMetadata, cfg: CfgSnapshot) -> No
     provenance = raw["provenance"]
     if not isinstance(provenance, dict):
         raise ValueError("/provenance: expected JSON object")
-    group = file.require_group("provenance")
+    group = known_group(file, "provenance")
     group.attrs["software_versions"] = json.dumps(provenance["software_versions"])
     for name in _OPTIONAL_EVIDENCE:
         group.attrs[name] = provenance[name] if provenance[name] is not None else ""
@@ -200,7 +234,7 @@ def read_metadata(file: h5.File, source: Path) -> tuple[RunMetadata, CfgSnapshot
             None if name in {"finished_at", "labber_path"} and value == "" else value
         )
     cfg_values = read_json(file, "cfg")
-    cfg_node = file["cfg"]
+    cfg_node = known_node(file, "cfg")
     if not isinstance(cfg_node, h5.Dataset):
         raise ValueError("/cfg: expected dataset")
     cfg = CfgSnapshot(
@@ -209,9 +243,8 @@ def read_metadata(file: h5.File, source: Path) -> tuple[RunMetadata, CfgSnapshot
         schema_version=text_attr(cfg_node, "cfg_schema_version"),
     )
     raw["snapshot"] = read_json(file, "context")
-    if "provenance" not in file or not isinstance(
-        group := file["provenance"], h5.Group
-    ):
+    group = known_node(file, "provenance")
+    if not isinstance(group, h5.Group):
         raise ValueError("/provenance: missing group")
     evidence: JsonObject = {
         "software_versions": json_object(

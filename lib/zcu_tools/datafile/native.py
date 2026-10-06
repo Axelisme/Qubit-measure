@@ -27,6 +27,7 @@ from .native_models import (
     StoredRun,
     VariableSchema,
 )
+from .native_nodes import known_group, known_node
 
 
 def save_run_data(
@@ -46,8 +47,10 @@ def save_run_data(
     same-directory temporary file, close it, then atomically publish; failures
     remove this call's temp and preserve the prior destination.
     extensions reuses a detached validated image for same-shape generic rewrites;
-    None creates version 1.0. Invalid known data raises a destination/location
-    ValueError. I/O errors propagate. No cross-file or power-loss guarantee.
+    None creates version 1.0. Known nodes must resolve within this file. Existing
+    fixed UTF-8 JSON retains unchanged raw text; edits beyond byte capacity fail.
+    Invalid known data raises a destination/location ValueError. I/O errors
+    propagate. No cross-file or power-loss guarantee.
     """
     if not replace and destination.exists():
         raise FileExistsError(destination)
@@ -79,6 +82,10 @@ def save_run_data(
         else:
             # link publishes without overwriting a destination created after validation.
             os.link(temp, destination)
+    except ValueError as error:
+        if isinstance(error, FormatError):
+            raise
+        raise ValueError(f"{destination}: {error}") from error
     finally:
         temp.unlink(missing_ok=True)
 
@@ -93,7 +100,9 @@ def load_run_data(source: Path, *, preserve_unknown: bool = False) -> StoredRun:
     preserve_unknown=True additionally captures a detached HDF5 image for an
     explicit generic lossless rewrite; False returns extensions=None.
     Unknown nodes are not decoded or used to traverse external link targets.
-    I/O errors propagate. No live instruments or registry are consulted.
+    Known nodes must also be local, including any soft-link targets; external
+    targets fail before dereferencing. I/O errors propagate. No live instruments
+    or registry are consulted.
     """
     with h5.File(source, "r") as file:
         try:
@@ -134,8 +143,8 @@ def _validate_header(file: h5.File, source: Path) -> None:
 def _write_array(
     group: h5.Group, name: str, values: np.ndarray, unit: str
 ) -> h5.Dataset:
-    if name in group:
-        existing = group[name]
+    existing = known_node(group, name)
+    if existing is not None:
         if not isinstance(existing, h5.Dataset):
             raise ValueError(f"{group.name}/{name}: expected numeric dataset")
         if existing.shape == values.shape and existing.dtype == values.dtype:
@@ -150,11 +159,7 @@ def _write_array(
 
 
 def _write_payload(file: h5.File, payload: ExperimentPayload, labber_json: str) -> None:
-    data = (
-        file["data"] if "data" in file else file.create_group("data", track_order=True)
-    )
-    if not isinstance(data, h5.Group):
-        raise ValueError("/data: expected group")
+    data = known_group(file, "data")
     data.attrs["representation"] = payload.representation
     if "metadata" in data.attrs:
         prior = json_object(text_attr(data, "metadata"), "/data: metadata")
@@ -162,7 +167,7 @@ def _write_payload(file: h5.File, payload: ExperimentPayload, labber_json: str) 
         labber_json = json.dumps(prior, ensure_ascii=False, allow_nan=False)
     data.attrs["metadata"] = labber_json
     for variable, item in payload.variables.items():
-        group = data.require_group(variable)
+        group = known_group(data, variable)
         group.attrs["signal"] = item.data.name
         group.attrs["axes"] = np.array(
             [axis.name for axis in item.axes], dtype=h5.string_dtype("utf-8")
@@ -191,7 +196,8 @@ def _write_payload(file: h5.File, payload: ExperimentPayload, labber_json: str) 
 
 def _numeric_dataset(group: h5.Group, name: str, *, real: bool = False) -> h5.Dataset:
     location = f"{group.name}/{name}"
-    if name not in group or not isinstance(dataset := group[name], h5.Dataset):
+    dataset = known_node(group, name)
+    if not isinstance(dataset, h5.Dataset):
         raise ValueError(f"{location}: missing numeric dataset")
     if dataset.dtype.kind not in ("iuf" if real else "iufc"):
         raise ValueError(f"{location}: expected numeric dtype")
@@ -254,7 +260,8 @@ def _read_variable(group: h5.Group) -> LabberPayload:
 
 
 def _read_payload(file: h5.File) -> ExperimentPayload:
-    if "data" not in file or not isinstance(data := file["data"], h5.Group):
+    data = known_node(file, "data")
+    if not isinstance(data, h5.Group):
         raise ValueError("/data: missing group")
     representation = text_attr(data, "representation")
     if representation != "single" and representation != "grouped":

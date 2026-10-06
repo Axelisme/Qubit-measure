@@ -54,7 +54,7 @@ def test_known_nodes_reject_external_targets_before_dereferencing(
         else:
             file["outside"] = h5.ExternalLink(str(target), "/")
             file[location] = h5.SoftLink("/outside/" + location)
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError, match="external") as caught:
         load_run_data(source, preserve_unknown=preserve_unknown)
     assert str(source) in str(caught.value)
     assert "/" + location in str(caught.value)
@@ -74,6 +74,8 @@ def _write_fixed_json(source: Path, *, spare_bytes: int = 0) -> dict[str, str]:
         context = json.loads(hdf_json_text(file, "context"))
         context["future"] = {"unicode": "未知", "number": 1e-6}
         context["params"]["Q1.freq"]["source"]["future"] = "kept"
+        # Typed metadata projects stderr to float; JSON number spelling may stay int.
+        context["params"]["Q1.freq"]["source"]["stderr"] = 1
         raw["cfg"] = '{"a":1,"b":2,"future":"未知","number":1e-6}'
         raw["context"] = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         refs = file.create_dataset("json_refs", (2,), dtype=h5.ref_dtype)
@@ -143,7 +145,7 @@ def test_fixed_json_edits_obey_utf8_capacity_and_atomic_failure(
     destination.write_bytes(b"existing destination")
     if not fits:
         before = set(tmp_path.iterdir())
-        with pytest.raises(ValueError) as caught:
+        with pytest.raises(ValueError, match="capacity") as caught:
             save_run_data(
                 destination,
                 stored.payload,
@@ -174,6 +176,71 @@ def test_fixed_json_edits_obey_utf8_capacity_and_atomic_failure(
             index = 0 if name == "cfg" else 1
             assert dataset.id == file[name + "_alias"].id
             assert dataset.id == file[hdf_dataset(file, "json_refs")[index]].id
+
+
+@pytest.mark.parametrize("name", ["cfg", "context", "data/readout/signal"])
+def test_known_local_soft_links_remain_readable_and_rewritable(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    source = tmp_path / "source.h5"
+    save_run_data(source, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(source, "r+") as file:
+        parent_name, _, leaf = name.rpartition("/")
+        parent = hdf_group(file, parent_name) if parent_name else file
+        parent["local_target"] = parent[leaf]
+        del parent[leaf]
+        # Resolve a relative hop and a local absolute target without losing identity.
+        parent["hop"] = h5.SoftLink(parent["local_target"].name)
+        parent[leaf] = h5.SoftLink("hop")
+    stored = load_run_data(source, preserve_unknown=True)
+    source.unlink()
+    destination = tmp_path / "rewritten.h5"
+    save_run_data(
+        destination,
+        stored.payload,
+        stored.metadata,
+        cfg=stored.cfg,
+        extensions=stored.extensions,
+    )
+    assert load_run_data(destination).metadata == stored.metadata
+    with h5.File(destination, "r") as file:
+        assert isinstance(file.get(name, getlink=True), h5.SoftLink)
+        parent_name, _, _ = name.rpartition("/")
+        target = (parent_name + "/" if parent_name else "") + "local_target"
+        assert hdf_dataset(file, name).id == hdf_dataset(file, target).id
+
+
+def test_fixed_json_edit_distinguishes_boolean_from_number(tmp_path: Path) -> None:
+    source = tmp_path / "source.h5"
+    _write_fixed_json(source, spare_bytes=256)
+    stored = load_run_data(source, preserve_unknown=True)
+    cfg = replace(stored.cfg, values={**stored.cfg.values, "a": True})
+    destination = tmp_path / "updated.h5"
+    save_run_data(
+        destination,
+        stored.payload,
+        stored.metadata,
+        cfg=cfg,
+        extensions=stored.extensions,
+    )
+    assert load_run_data(destination).cfg.values["a"] is True
+
+
+@pytest.mark.parametrize("cycle", [False, True])
+def test_known_invalid_local_soft_link_fails_with_location(
+    tmp_path: Path,
+    cycle: bool,
+) -> None:
+    source = tmp_path / "source.h5"
+    save_run_data(source, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(source, "r+") as file:
+        del file["cfg"]
+        file["cfg"] = h5.SoftLink("/cfg" if cycle else "/absent")
+    with pytest.raises(ValueError, match="/cfg") as caught:
+        load_run_data(source)
+    assert str(source) in str(caught.value)
+    assert "/cfg" in str(caught.value)
 
 
 def _write_future_native(source: Path) -> None:
