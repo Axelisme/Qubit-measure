@@ -2,7 +2,8 @@
 
 Calibration values and traces are fake deterministic values, not physical policy.
 The JSON savers only exercise the exact-path saver seam, even for .h5 paths.
-They are not the official/native data format and are replaced during phase 1.
+They are not the official/native data format. Phase 1 replaces T1_fluxdep;
+phase 3 replaces echo/overnight and removes fake calibration before retirement.
 Import declares functions only; it does not register workflows or start a run.
 """
 
