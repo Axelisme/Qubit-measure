@@ -163,6 +163,9 @@ class RunPaths:
 
     ``metadata_root`` holds manifest/journal. ``data_root`` holds iterations.
     Engine.start validates distinct roots and refuses existing directories.
+    The data-root filesystem must support same-directory hard links for atomic
+    no-clobber publication. Unsupported-link errors fail the run with their
+    original I/O cause; there is no overwrite fallback or automatic retry.
     """
 
     metadata_root: Path

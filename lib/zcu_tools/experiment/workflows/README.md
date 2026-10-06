@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-06，期 0 宣告、Run seam 與 record encoder
+**Last updated:** 2026-10-06，期 0 保存 I/O seam
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -17,6 +17,8 @@
 `Run` 為 experiment 複製 dataclass cfg，將同一個 StopSignal 與明確 env 接入既有 Schedule。Schedule 的局部 cfg 不倒灌回 Run，後一個 completed outcome 不覆蓋前一個非 completed。Engine 的錯誤分流、提交與存檔仍由 engine 接合，不由 Schedule wrapper 決定。
 
 Record encoder 將摘要投影成 detached JSON。非有限數字變成 null，曲線陣列與過大 record 會警告。只有摘要序列化可降級為 repr；deepcopy、必要 journal 欄位與檔案 I/O 不能借用此降級規則。
+
+Package 內的保存 seam 集中 typed journal、manifest、iteration 路徑與單次檔案發布，不另建公開宿主 API。Journal 使用 Engine 的同一把 control lock，逐行追加並 flush，不宣稱 fsync 或崩潰接續。Manifest 只摘要生命週期，不保存每點 record 或 state。單次 saver 寫入同目錄 temporary，關閉後以 hard link 原子發布 final，再 unlink temporary。data_root 的檔案系統須支援 hard link；不支援時保留原始 I/O cause，不覆蓋、不自動 retry。發布後清除失敗會保留 final 與 temporary，兩個路徑指向同一檔案，不是獨立備份。Engine segment 與失敗／控制接合仍待實作。
 
 Live 宣告只把本次 buffer 投影到 engine-owned artists，不進 state。`assemble_rows`／`assemble_scalars` 把稀疏結果組成 detached 顯示陣列，保留缺值與 filled mask，不插值。
 
