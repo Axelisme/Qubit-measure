@@ -528,6 +528,15 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         )
 
     def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
+        """Read canonical grouped Labber at an exact local path into a record.
+
+        Required variables, axes, units or shape mismatches raise ValueError;
+        I/O errors propagate. Missing cfg or non-envelope comment text returns
+        cfg=None with valid Result data. Recognized envelopes with invalid
+        cfg/comment/timestamp field types raise ValueError. A valid envelope
+        whose cfg object fails cfg_type validation warns and retains Result data
+        with cfg=None. This entry does not guess native or legacy layouts.
+        """
         grouped = load_grouped_labber_data(
             str(source),
             required_variables=self.required_variables,

@@ -21,7 +21,8 @@ facade。caller 優先從 package root import model 與 function。
 - `write_labber` 從同一 `ExperimentPayload` 輸出 single 或 canonical
   common-grid grouped Labber，包括單成員 grouped。它只寫 caller 的 exact path，
   不加副檔名、不覆寫、不呼叫 native writer。兩個格式的失敗隔離由 caller 編排，
-  batch-level 保存流程不在 datafile。Labber axes 必須可表示成 real coordinates。
+  batch-level 保存流程不在 datafile。Labber 至少需要一個 step axis，coordinates
+  必須可表示成 real；scalar 在建立目的檔前拒絕，不影響 native 的 scalar 契約。
 - `encode_labber_comment`／`decode_labber_comment` 與 `LabberComment`
   擁有 cfg/comment/timestamp envelope。不屬於 envelope 的手寫文字原樣保留；
   可辨識 envelope 的欄位型別錯誤直接報錯，不猜歷史 cfg 或量測時間。

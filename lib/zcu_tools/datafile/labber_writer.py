@@ -27,6 +27,8 @@ def write_labber(
     metadata is retained. This entry neither normalizes the filename nor calls
     the native writer. Existing paths raise FileExistsError; malformed payloads
     or incompatible grouped grids raise ValueError; I/O errors propagate.
+    Labber requires at least one step axis; scalar payloads are rejected before
+    creating the destination, without restricting native scalar persistence.
     A failed write may leave a partial new file; no cross-file transaction is
     promised. cfg identity/version remains native-only metadata.
     """
@@ -37,6 +39,10 @@ def write_labber(
     if payload.representation == "single" and len(payload.variables) != 1:
         raise ValueError("single representation requires exactly one variable")
     for variable, signal in payload.variables.items():
+        if not signal.axes:
+            raise ValueError(
+                f"{destination}: {variable} requires at least one Labber step axis"
+            )
         validate_labber_payload(
             signal,
             schema=VariableSchema(
