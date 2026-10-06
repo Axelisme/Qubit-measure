@@ -43,6 +43,10 @@ class Tunables(BaseModel):
     note: str | None = None
 
 
+class StrictTunables(Tunables):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
 @pytest.fixture
 def journal() -> list[TunablesChanged]:
     return []
@@ -247,6 +251,26 @@ def test_start_nonfinite_values_are_not_coerced_to_missing(
         TunableValues(Tunables, invalid, RLock(), journal.append)
     assert caught.value.errors()[0]["loc"] == ("points", 0)
     assert journal == []
+
+
+def test_strict_tuple_model_allows_other_scalar_update(
+    journal: list[TunablesChanged],
+) -> None:
+    values = TunableValues(StrictTunables, StrictTunables(), RLock(), journal.append)
+    snapshot = values.update(
+        (TunableChange("reps", 3),),
+        expected_revision=0,
+        actor=Actor("user", "owner"),
+    )
+    assert snapshot.revision == 1
+    assert values.capture().model == StrictTunables(reps=3)
+    assert values.capture().model.points == (1.0, 2.0)
+    assert len(journal) == 1
+    event = journal[0]
+    assert (event.revision_before, event.revision_after) == (0, 1)
+    assert [(change.path, change.old, change.new) for change in event.changes] == [
+        ("reps", 2, 3),
+    ]
 
 
 def test_tuple_replacement_and_snapshots_do_not_alias_request_or_model(
