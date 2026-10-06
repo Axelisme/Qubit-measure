@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Generator
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import RLock
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -12,7 +13,7 @@ from matplotlib.figure import Figure
 from ...progress_bar import BaseProgressBar
 from .display import Live1D, Live2D, Live2DRow
 from .effects import DeviceEffect, RunEffect, WaitEffect
-from .models import Completed, Effect, Failed, MissingCapability
+from .models import Completed, Effect, Failed, MissingCapability, ProgressSnapshot
 from .ports import PlotPort, ProgressFactory
 from .run import Run
 
@@ -57,6 +58,7 @@ class Displays:
         self._progress = progress
         self._axes: dict[str, Axes] = {}
         self._bars: dict[str, BaseProgressBar] = {}
+        self._lock = RLock()
 
     def axes(self, name: str) -> Axes:
         """Return stable named axes; reject empty names with ValueError."""
@@ -72,12 +74,25 @@ class Displays:
             raise ValueError(
                 "Progress requires a nonempty name and nonnegative integer total"
             )
-        if desc not in self._bars:
-            self._bars[desc] = self._progress(total=total, desc=desc)
-        bar = self._bars[desc]
-        if bar.total != total:
-            raise ValueError(f"Progress total changed for {desc!r}")
-        return bar
+        with self._lock:
+            if desc not in self._bars:
+                self._bars[desc] = self._progress(total=total, desc=desc)
+            bar = self._bars[desc]
+            if bar.total != total:
+                raise ValueError(f"Progress total changed for {desc!r}")
+            return bar
+
+    def snapshot(self) -> tuple[ProgressSnapshot, ...]:
+        """Return detached display values; they are not commit evidence.
+
+        Bar creation and snapshot iteration are serialized. A backend may
+        update numeric values concurrently; this is a display-only observation.
+        """
+        with self._lock:
+            return tuple(
+                ProgressSnapshot(name, bar.total, bar.n)
+                for name, bar in self._bars.items()
+            )
 
     def refresh(self) -> None:
         """Snapshot each used figure once; propagate plotting failures."""
@@ -129,7 +144,7 @@ class WorkflowEnv[C](InitEnv[C]):
         experiment must have an ASCII letter/digit/underscore function name;
         anonymous or unnamed callables raise ValueError at effect entry.
         cfg must be a deepcopy-able dataclass. save must write and close the
-        exact temporary path; the engine renames it before returning Completed.
+        exact temporary path; the engine publishes it before returning Completed.
         live optionally projects a unique buffer. setup_devices=False skips
         automatic cfg.dev setup. Outer, live, saver, and deepcopy errors
         propagate; Schedule failures return Failed without data or a run file.

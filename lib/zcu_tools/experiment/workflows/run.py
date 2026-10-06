@@ -14,8 +14,9 @@ from qick import QickConfig
 from ..stop_signal import StopSignal
 from ..v2.runtime import Schedule, SignalBuffer
 from ..v2.runtime.schedule import ScheduleOutcome
+from .display import Live1D, Live2D, Live2DRow
 from .models import MissingCapability
-from .ports import DevicePort
+from .ports import DevicePort, DeviceSetup, PlotPort
 
 
 class Run[Cfg]:
@@ -47,6 +48,9 @@ class Run[Cfg]:
         self._devices = devices
         self._outcome = ScheduleOutcome()
         self._buffers: list[tuple[SignalBuffer, tuple[NDArray[np.float64], ...]]] = []
+        self._live: Live1D | Live2D | Live2DRow | None = None
+        self._plots: PlotPort | None = None
+        self._live_error: BaseException | None = None
 
     @property
     def soc(self) -> object:
@@ -68,6 +72,44 @@ class Run[Cfg]:
         if self._devices is None:
             raise MissingCapability("devices")
         return self._devices
+
+    @property
+    def device_setup(self) -> tuple[DeviceSetup, ...] | None:
+        """Return cfg.dev settings, or None when absent/disabled.
+
+        A present dev must be None or a tuple of DeviceSetup. Invalid cfg
+        adaptation raises TypeError before the device adapter is invoked.
+        """
+        settings = getattr(self.cfg, "dev", None)
+        if settings is None:
+            return None
+        if not isinstance(settings, tuple) or not all(
+            isinstance(setting, DeviceSetup) for setting in settings
+        ):
+            raise TypeError("cfg.dev must be tuple[DeviceSetup, ...] or None")
+        return settings
+
+    @property
+    def live_error(self) -> BaseException | None:
+        """Return the first live failure cause, preserving object identity.
+
+        Engine checks this before interpreting a Schedule outcome, because
+        Schedule may have caught a projection or snapshot callback failure.
+        """
+        return self._live_error
+
+    def bind_live(self, live: Live1D | Live2D | Live2DRow, plots: PlotPort) -> None:
+        """Bind one live declaration before experiment code creates buffers.
+
+        This package-internal Engine seam is not an additional host API.
+        More than one buffer with live enabled is ambiguous and fails the run.
+        Projection/refresh errors propagate and remain available in live_error.
+        Binding after buffer creation or binding twice raises ValueError.
+        """
+        if self._buffers or self._live is not None:
+            raise ValueError("Live must be bound once before buffer creation")
+        self._live = live
+        self._plots = plots
 
     @property
     def outcome(self) -> ScheduleOutcome:
@@ -105,9 +147,68 @@ class Run[Cfg]:
                 or not np.isfinite(axis).all()
             ):
                 raise ValueError("Buffer axes must be finite matching float64 vectors")
-        buffer = SignalBuffer(shape)
-        self._buffers.append((buffer, tuple(axis.copy() for axis in axes)))
+        captured_axes = tuple(axis.copy() for axis in axes)
+        if self._live is not None and self._buffers:
+            error = ValueError("Live requires exactly one unambiguous buffer")
+            self._live_error = error
+            raise error
+
+        def update(data: NDArray[np.complex128]) -> None:
+            self._update_live(data, captured_axes)
+
+        buffer = SignalBuffer(
+            shape, on_update=update if self._live is not None else None
+        )
+        self._buffers.append((buffer, captured_axes))
         return buffer
+
+    def _update_live(
+        self, data: NDArray[np.complex128], axes: tuple[NDArray[np.float64], ...]
+    ) -> None:
+        live, plots = self._live, self._plots
+        if live is None or plots is None:
+            raise RuntimeError("Live callback has no binding")
+        try:
+            projected = live.y(data)
+            if projected.shape != data.shape or not np.isrealobj(projected):
+                raise ValueError(
+                    "Live projection must preserve shape and produce real values"
+                )
+            if isinstance(live, Live1D):
+                if data.ndim != 1:
+                    raise ValueError("Live1D requires a one-dimensional buffer")
+                live.line.set_data(axes[0], projected)
+                figure = live.line.get_figure(root=True)
+            else:
+                if isinstance(live, Live2D):
+                    if data.ndim != 2:
+                        raise ValueError("Live2D requires a two-dimensional buffer")
+                    live.image.set_data(projected)
+                else:
+                    image = np.array(
+                        live.image.get_array(), dtype=np.float64, copy=True
+                    )
+                    if (
+                        data.ndim != 1
+                        or image.ndim != 2
+                        or type(live.row) is not int
+                        or not 0 <= live.row < image.shape[0]
+                        or data.size != image.shape[1]
+                    ):
+                        raise ValueError(
+                            "Live2DRow requires a valid row and matching width"
+                        )
+                    image[live.row] = projected
+                    live.image.set_data(image)
+                figure = live.image.get_figure(root=True)
+            if figure is None:
+                raise ValueError("Live artist must belong to a Figure")
+            plots.refresh(figure)
+        except (Exception, KeyboardInterrupt) as error:
+            # Keep the display source even when Schedule catches this callback.
+            if self._live_error is None:
+                self._live_error = error
+            raise
 
     @contextmanager
     def schedule(

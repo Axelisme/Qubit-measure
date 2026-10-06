@@ -61,6 +61,12 @@ class TunableValues[T: BaseModel]:
         self._lock = control_lock
         self._append = append
 
+    @property
+    def revision(self) -> int:
+        """Return the current version without re-encoding the model."""
+        with self._lock:
+            return self._revision
+
     def capture(self) -> CapturedTunables[T]:
         """Capture the revision and deepcopy model for one invocation.
 

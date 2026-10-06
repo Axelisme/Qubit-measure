@@ -9,6 +9,7 @@ from .display import (
     assemble_rows,
     assemble_scalars,
 )
+from .engine import Engine
 from .env import InitEnv, WorkflowEnv
 from .models import (
     Aborted,
