@@ -7,10 +7,13 @@ from zcu_tools.cfg_model import (
     CfgInputMap,
     CfgValidationContext,
     ConstWaveformCfg,
+    DirectReadoutCfg,
     FlatTopWaveformCfg,
     FlatTopWaveformSpec,
     GaussWaveformCfg,
     ModuleCfgFactory,
+    NoneResetCfg,
+    PulseCfg,
     PulseSpec,
     TwoPulseResetCfg,
     TwoPulseResetSpec,
@@ -202,3 +205,52 @@ def test_runtime_child_revalidates_fields_instead_of_trusting_prior_cfg():
 
     with pytest.raises(ValueError, match="length"):
         WaveformCfgFactory.from_raw(raw)
+
+
+class TestModuleCfgFactoryFromRaw:
+    def test_dispatch_pulse(self):
+        cfg = ModuleCfgFactory.from_raw(
+            {
+                "type": "pulse",
+                "waveform": {"style": "const", "length": 0.5},
+                "ch": 1,
+                "nqz": 1,
+                "freq": 4000.0,
+                "gain": 0.5,
+            }
+        )
+        assert isinstance(cfg, PulseCfg)
+
+    def test_dispatch_readout_direct(self):
+        cfg = ModuleCfgFactory.from_raw(
+            {"type": "readout/direct", "ro_ch": 0, "ro_length": 1.0, "ro_freq": 5000.0}
+        )
+        assert isinstance(cfg, DirectReadoutCfg)
+
+    def test_dispatch_reset_none(self):
+        cfg = ModuleCfgFactory.from_raw({"type": "reset/none"})
+        assert isinstance(cfg, NoneResetCfg)
+
+
+class TestWaveformCfgFactoryFromRaw:
+    def test_dispatch_const(self):
+        cfg = WaveformCfgFactory.from_raw({"style": "const", "length": 1.0})
+        assert isinstance(cfg, ConstWaveformCfg)
+
+    def test_dispatch_gauss(self):
+        cfg = WaveformCfgFactory.from_raw(
+            {"style": "gauss", "length": 1.0, "sigma": 0.2}
+        )
+        assert isinstance(cfg, GaussWaveformCfg)
+        assert cfg.sigma == 0.2
+
+    def test_dispatch_flat_top_with_nested_raise(self):
+        cfg = WaveformCfgFactory.from_raw(
+            {
+                "style": "flat_top",
+                "length": 1.0,
+                "raise_waveform": {"style": "gauss", "length": 0.2, "sigma": 0.05},
+            }
+        )
+        assert isinstance(cfg, FlatTopWaveformCfg)
+        assert isinstance(cfg.raise_waveform, GaussWaveformCfg)

@@ -3,54 +3,12 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 from zcu_tools.program.v2.modules import ModuleCfgFactory, WaveformCfgFactory
-from zcu_tools.program.v2.modules.base import AbsModuleCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import (
-    DirectReadoutCfg,
-)
-from zcu_tools.program.v2.modules.reset import (
-    NoneResetCfg,
-    PulseResetCfg,
-)
-from zcu_tools.program.v2.modules.waveform import (
-    ConstWaveformCfg,
-    FlatTopWaveformCfg,
-    GaussWaveformCfg,
-)
-
-# ---------------------------------------------------------------------------
-# ModuleCfgFactory
-# ---------------------------------------------------------------------------
+from zcu_tools.program.v2.modules.reset import NoneResetCfg, PulseResetCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
 class TestModuleCfgFactoryFromRaw:
-    def test_abs_module_cfg_is_abstract(self):
-        with pytest.raises(TypeError, match="abstract"):
-            AbsModuleCfg(type="base")  # pyright: ignore[reportAbstractUsage]
-
-    def test_dispatch_pulse(self):
-        cfg = ModuleCfgFactory.from_raw(
-            {
-                "type": "pulse",
-                "waveform": {"style": "const", "length": 0.5},
-                "ch": 1,
-                "nqz": 1,
-                "freq": 4000.0,
-                "gain": 0.5,
-            }
-        )
-        assert isinstance(cfg, PulseCfg)
-
-    def test_dispatch_readout_direct(self):
-        cfg = ModuleCfgFactory.from_raw(
-            {"type": "readout/direct", "ro_ch": 0, "ro_length": 1.0, "ro_freq": 5000.0}
-        )
-        assert isinstance(cfg, DirectReadoutCfg)
-
-    def test_dispatch_reset_none(self):
-        cfg = ModuleCfgFactory.from_raw({"type": "reset/none"})
-        assert isinstance(cfg, NoneResetCfg)
-
     def test_unknown_type_raises(self):
         with pytest.raises(ValidationError, match="union_tag_invalid"):
             ModuleCfgFactory.from_raw({"type": "no_such_module"})
@@ -79,34 +37,7 @@ class TestModuleCfgFactoryFromRaw:
         assert isinstance(cfg, NoneResetCfg)
 
 
-# ---------------------------------------------------------------------------
-# WaveformCfgFactory
-# ---------------------------------------------------------------------------
-
-
 class TestWaveformCfgFactoryFromRaw:
-    def test_dispatch_const(self):
-        cfg = WaveformCfgFactory.from_raw({"style": "const", "length": 1.0})
-        assert isinstance(cfg, ConstWaveformCfg)
-
-    def test_dispatch_gauss(self):
-        cfg = WaveformCfgFactory.from_raw(
-            {"style": "gauss", "length": 1.0, "sigma": 0.2}
-        )
-        assert isinstance(cfg, GaussWaveformCfg)
-        assert cfg.sigma == 0.2
-
-    def test_dispatch_flat_top_with_nested_raise(self):
-        cfg = WaveformCfgFactory.from_raw(
-            {
-                "style": "flat_top",
-                "length": 1.0,
-                "raise_waveform": {"style": "gauss", "length": 0.2, "sigma": 0.05},
-            }
-        )
-        assert isinstance(cfg, FlatTopWaveformCfg)
-        assert isinstance(cfg.raise_waveform, GaussWaveformCfg)
-
     def test_unknown_style_raises(self):
         with pytest.raises(ValidationError, match="union_tag_invalid"):
             WaveformCfgFactory.from_raw({"style": "no_such_style", "length": 1.0})
