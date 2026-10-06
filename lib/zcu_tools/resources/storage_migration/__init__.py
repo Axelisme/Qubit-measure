@@ -5,6 +5,7 @@ loaders do not use legacy fallback. The shipped CLI supplies explicit mapping,
 entry definition registration and native experiment validation.
 """
 
+from .converter import migrate_storage
 from .errors import MigrationInputError
 from .evidence import load_run_evidence
 from .models import (
@@ -51,4 +52,5 @@ __all__ = [
     "PendingItem",
     "RunAssignment",
     "load_run_evidence",
+    "migrate_storage",
 ]

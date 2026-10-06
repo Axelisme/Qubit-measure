@@ -3,16 +3,18 @@
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from zcu_tools.datafile import JsonObject
 
 from .errors import MigrationInputError
-from .models import LegacyRunEvidence, MigrationRunEvidenceDocument
+from .models import LegacyRunEvidence, MigrationRequest, MigrationRunEvidenceDocument
+from .paths import contained_path
+from .state import MigrationSession
 
 _JSON = TypeAdapter(JsonObject)
 
@@ -42,6 +44,19 @@ def load_run_evidence(source: Path) -> MigrationRunEvidenceDocument:
     """
     try:
         text = source.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise MigrationInputError(f"{source}: {exc}") from exc
+    return parse_run_evidence(text, source=source)
+
+
+def parse_run_evidence(text: str, *, source: Path) -> MigrationRunEvidenceDocument:
+    """Validate UTF-8 JSON text with the load_run_evidence contract.
+
+    source labels diagnostics only; no filesystem access occurs. Return typed
+    entries plus complete raw fields. Malformed JSON, unsupported headers and
+    invalid entry identities/times raise MigrationInputError naming source.
+    """
+    try:
         raw = _JSON.validate_python(
             json.loads(
                 text,
@@ -119,3 +134,102 @@ def _validate_entry(entry: LegacyRunEvidence, index: int) -> None:
         finished = _utc_time(entry.finished_at, f"{location}.finished_at")
         if finished < started:
             raise ValueError(f"{location}.finished_at: precedes started_at")
+
+
+def has_legacy_expression(value: JsonValue) -> bool:
+    """Detect recognized legacy expression strings recursively without evaluating them."""
+    if isinstance(value, str):
+        return value.startswith(("=", "${", "md.", "ml."))
+    if isinstance(value, dict):
+        return any(has_legacy_expression(child) for child in value.values())
+    if isinstance(value, list):
+        return any(has_legacy_expression(child) for child in value)
+    return False
+
+
+def select_run_evidence(
+    request: MigrationRequest,
+    session: MigrationSession,
+) -> MigrationRunEvidenceDocument | None:
+    """Select stored/supplemental historical evidence and checkpoint its complete raw document.
+
+    request may extend only unplanned sources; session owns the existing snapshot.
+    Reject changed planned evidence, typed/raw disagreement, escaped or missing
+    sources with MigrationInputError. Return the selected document or None.
+    dry_run updates memory only; filesystem/checkpoint failures propagate."""
+    stored = session.manifest.evidence
+    incoming = request.run_evidence
+    if incoming is None:
+        return (
+            None
+            if stored is None
+            else parse_run_evidence(
+                json.dumps(stored, allow_nan=False), source=session.path
+            )
+        )
+    checked = parse_run_evidence(
+        json.dumps(incoming.raw, allow_nan=False), source=session.path
+    )
+    if checked.entries != incoming.entries or (
+        checked.format,
+        checked.format_version,
+    ) != (incoming.format, incoming.format_version):
+        raise MigrationInputError(
+            "run_evidence: typed projection disagrees with raw document"
+        )
+    if stored is not None:
+        old = parse_run_evidence(
+            json.dumps(stored, allow_nan=False), source=session.path
+        )
+        old_entries = stored["entries"]
+        new_entries = incoming.raw["entries"]
+        if not isinstance(old_entries, list) or not isinstance(new_entries, list):
+            raise MigrationInputError("run_evidence: entries must be a list")
+        merged_entries = list(old_entries)
+        for index, entry in enumerate(checked.entries):
+            old_index = next(
+                (
+                    i
+                    for i, prior in enumerate(old.entries)
+                    if prior.source == entry.source
+                ),
+                None,
+            )
+            planned = any(
+                item.source
+                == (
+                    session.manifest.report.source.database_path / entry.source
+                ).resolve()
+                for item in session.manifest.files
+            )
+            if old_index is not None:
+                if planned and old_entries[old_index] != new_entries[index]:
+                    raise MigrationInputError(
+                        f"{entry.source}: evidence for a planned source cannot change"
+                    )
+                merged_entries[old_index] = new_entries[index]
+            else:
+                if planned:
+                    raise MigrationInputError(
+                        f"{entry.source}: cannot add evidence to a planned source"
+                    )
+                merged_entries.append(new_entries[index])
+        raw = dict(stored)
+        raw.update(incoming.raw)
+        raw["entries"] = merged_entries
+        checked = parse_run_evidence(
+            json.dumps(raw, allow_nan=False), source=session.path
+        )
+    source_root = session.manifest.report.source.database_path
+    for entry in checked.entries:
+        source = contained_path(source_root / entry.source, source_root)
+        if not source.is_file() and not any(
+            state.source == source
+            and state.operation == "move_labber"
+            and state.phase in ("published", "source_removed")
+            for state in session.manifest.files
+        ):
+            raise MigrationInputError(f"{source}: evidence source does not exist")
+    session.manifest = replace(session.manifest, evidence=checked.raw)
+    session.checkpoint()
+    return checked

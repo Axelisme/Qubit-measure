@@ -301,6 +301,8 @@ class MigrationManifest:
     owned publications; runs records fixed run assignments. parameters_complete
     and data_complete record finished steps (pending may remain). report is the
     cumulative report to rebuild after interrupted report publication.
+    report_published records ownership of the first report publication; False
+    means an existing path must match that exact initial report before recovery.
     format/format_version identify zcu.storage-migration 1.x. raw retains loaded
     unknown fields; an empty raw denotes a new manifest.
     """
@@ -315,6 +317,7 @@ class MigrationManifest:
     parameters_complete: bool
     data_complete: bool
     report: MigrationReport
+    report_published: bool = False
     format: str = "zcu.storage-migration"
     format_version: str = "1.0"
     raw: JsonObject = field(default_factory=dict)

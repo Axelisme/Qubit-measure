@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-06，讀檔轉換與參數容器定義
+**Last updated:** 2026-10-06，讀檔轉換、參數容器與離線遷移
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
@@ -11,6 +11,7 @@
 - [`syncfile.py`](syncfile.py) 提供現行持久化物件共用的 mtime 同步機制；同步規則見其 module docstring。
 - [`document_store.py`](document_store.py) 提供新格式 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖，目前未接線到現行 runtime。
 - [`entry/`](entry/README.md) 組合條目身分、setup 範本與獨立完整的 point。每個視圖綁自己的 DocumentStore，建立 point 時複製 seed。
+- [`storage_migration/`](storage_migration/README.md) 組合離線 legacy 轉換、evidence 與可續跑 publication。Caller 注入具體 mapping 與 native 驗證，不接正常 runtime。
 
 ## Scope 差別
 
