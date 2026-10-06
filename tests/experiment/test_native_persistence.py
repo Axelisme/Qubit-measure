@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import h5py as h5
 import numpy as np
@@ -11,10 +11,13 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 from zcu_tools.datafile import (
     DataVariable,
+    decode_labber_comment,
     load_grouped_labber_data,
+    load_labber_data,
     load_run_data,
     save_run_data,
     validate_experiment_payload,
+    write_labber,
 )
 from zcu_tools.experiment import (
     AxesSpec,
@@ -22,13 +25,16 @@ from zcu_tools.experiment import (
     GroupedAxesSpec,
     GroupedLoadData,
     PersistableExperiment,
+    PreparedRunData,
     RunRecord,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
     ZSpec,
     load_run,
+    load_run_with_metadata,
     native_schemas,
+    prepare_run_data,
     save_run,
 )
 from zcu_tools.experiment.axes_spec import Axis
@@ -300,6 +306,199 @@ def test_shared_base_grouped_labber_entry_remains_separate_from_native(
     assert tuple(load_grouped_labber_data(str(path)).variables) == (
         DataVariable("resonator"),
     )
+
+
+def test_prepare_single_data_feeds_both_formats_with_same_cfg_and_comment(
+    tmp_path: Path,
+) -> None:
+    record = RunRecord(
+        cfg=NativeCfg(name="captured"),
+        result=SingleResult(np.array([4000.0, 5000.0]), np.array([2 + 3j, 4 - 5j])),
+    )
+    comment = "量測結果\nKeep the original text."
+    prepared = prepare_run_data(record, spec=SINGLE, comment=comment)
+    assert prepared.payload.representation == "single"
+    assert prepared.payload.metadata.comment == comment
+    assert prepared.payload.metadata.tags == [SINGLE.tag]
+    assert prepared.cfg.cfg_type == "NativeCfg"
+    assert prepared.cfg.schema_version == SINGLE.cfg_schema_version
+    assert record.cfg is not None
+    assert prepared.cfg.values == record.cfg.model_dump(mode="json")
+    signal = prepared.payload.variables[DataVariable("resonator")]
+    np.testing.assert_array_equal(signal.axes[0].values, record.result.frequency * 1e6)
+    np.testing.assert_allclose(signal.z, record.result.signal * 1e-3)
+    assert list(tmp_path.iterdir()) == []
+    native, labber = tmp_path / "native.h5", tmp_path / "labber.h5"
+    save_run_data(
+        native, prepared.payload, native_metadata(SINGLE.tag), cfg=prepared.cfg
+    )
+    write_labber(labber, prepared.payload, cfg=prepared.cfg)
+    stored = load_run_data(native)
+    decoded = decode_labber_comment(load_labber_data(str(labber)).metadata.comment)
+    assert stored.cfg == prepared.cfg
+    assert stored.payload.metadata.comment == comment
+    assert decoded.cfg == prepared.cfg.values
+    assert decoded.comment == comment
+    record.cfg.name = "later"
+    record.cfg.nested.count = 99
+    assert prepared.cfg.values["name"] == "captured"
+    nested = prepared.cfg.values["nested"]
+    assert isinstance(nested, dict)
+    assert nested["count"] == 3
+
+
+def test_prepared_envelope_isolates_mappings_without_copying_arrays() -> None:
+    record = RunRecord(
+        cfg=NativeCfg(), result=SingleResult(np.array([4000.0]), np.array([1j]))
+    )
+    original = prepare_run_data(record, spec=SINGLE, comment="original")
+    variables = dict(original.payload.variables)
+    payload = replace(original.payload, variables=variables)
+    prepared = PreparedRunData(payload=payload, cfg=original.cfg)
+    variables.clear()
+    payload.metadata.tags.append("later")
+    payload.metadata.comment = "later"
+    original.cfg.values["name"] = "later"
+    nested = original.cfg.values["nested"]
+    assert isinstance(nested, dict)
+    nested["count"] = 99
+    assert tuple(prepared.payload.variables) == (DataVariable("resonator"),)
+    assert prepared.payload.metadata.tags == [SINGLE.tag]
+    assert prepared.payload.metadata.comment == "original"
+    assert prepared.cfg.values["name"] == "historical"
+    prepared_nested = prepared.cfg.values["nested"]
+    assert isinstance(prepared_nested, dict)
+    assert prepared_nested["count"] == 3
+    assert (
+        prepared.payload.variables[DataVariable("resonator")].z
+        is original.payload.variables[DataVariable("resonator")].z
+    )
+
+
+def test_prepare_grouped_data_keeps_heterogeneous_grids_and_validator() -> None:
+    record = RunRecord(
+        cfg=NativeCfg(),
+        result=GroupedResult(
+            np.array([4000.0, 5000.0]),
+            np.array([1j, 2j]),
+            np.array([1.0, 2.0, 3.0]),
+            np.array([0.5, 0.3, 0.1]),
+        ),
+    )
+    prepared = prepare_run_data(record, spec=GROUPED, comment="grouped")
+    assert prepared.payload.representation == "grouped"
+    assert tuple(prepared.payload.variables) == GROUPED.required_variables
+    decay = prepared.payload.variables[DataVariable("decay")]
+    np.testing.assert_allclose(decay.axes[0].values, record.result.delay * 1e-6)
+    np.testing.assert_allclose(decay.z, record.result.decay)
+
+    def reject_result(result: GroupedResult) -> None:
+        raise ValueError("rejected result")
+
+    with pytest.raises(ValueError, match="rejected result"):
+        prepare_run_data(
+            record, spec=replace(GROUPED, result_validator=reject_result), comment=""
+        )
+
+
+@pytest.mark.parametrize(
+    ("cfg", "result", "error", "message"),
+    [
+        (None, SingleResult(np.array([4000.0]), np.array([1j])), ValueError, "cfg"),
+        (
+            ExpCfgModel(),
+            SingleResult(np.array([4000.0]), np.array([1j])),
+            TypeError,
+            "cfg",
+        ),
+        (
+            NativeCfg(),
+            GroupedResult(
+                np.array([1.0]), np.array([1j]), np.array([1.0]), np.array([1.0])
+            ),
+            TypeError,
+            "Result",
+        ),
+        (
+            NativeCfg(),
+            SingleResult(np.array([4000.0, 5000.0]), np.array([1j])),
+            ValueError,
+            "shape|axis|length",
+        ),
+    ],
+)
+def test_prepare_rejects_invalid_record(
+    cfg: NativeCfg | None,
+    result: SingleResult,
+    error: type[Exception],
+    message: str,
+) -> None:
+    with pytest.raises(error, match=message):
+        prepare_run_data(RunRecord(cfg=cfg, result=result), spec=SINGLE, comment="")
+
+
+@pytest.mark.parametrize("comment", [None, 3, b"bytes"])
+def test_prepare_rejects_non_text_comment(comment: str) -> None:
+    record = RunRecord(
+        cfg=NativeCfg(), result=SingleResult(np.array([4000.0]), np.array([1j]))
+    )
+    with pytest.raises(ValidationError, match="string"):
+        prepare_run_data(record, spec=SINGLE, comment=comment)
+
+
+def test_prepare_scalar_native_data_does_not_add_labber_restrictions(
+    tmp_path: Path,
+) -> None:
+    @dataclass
+    class ScalarResult:
+        signal: np.ndarray
+
+    spec = AxesSpec(
+        axes=(),
+        z=SINGLE.z,
+        result_type=ScalarResult,
+        cfg_type=NativeCfg,
+        tag="test/scalar",
+    )
+    record = RunRecord(cfg=NativeCfg(), result=ScalarResult(np.array(1j)))
+    prepared = prepare_run_data(record, spec=spec, comment="scalar")
+    native, labber = tmp_path / "scalar.h5", tmp_path / "no-axis-labber.h5"
+    save_run_data(native, prepared.payload, native_metadata(spec.tag), cfg=prepared.cfg)
+    loaded, metadata = load_run_with_metadata(native, spec=spec)
+    np.testing.assert_allclose(loaded.result.signal, record.result.signal)
+    assert metadata == native_metadata(spec.tag)
+    with pytest.raises(ValueError, match="step axis"):
+        write_labber(labber, prepared.payload, cfg=prepared.cfg)
+    assert not labber.exists()
+
+
+@pytest.mark.parametrize("completion", ["complete", "partial", "stopped"])
+def test_full_metadata_load_preserves_historical_evidence(
+    tmp_path: Path,
+    completion: Literal["complete", "partial", "stopped"],
+) -> None:
+    record = RunRecord(
+        cfg=NativeCfg(), result=SingleResult(np.array([4000.0]), np.array([1j]))
+    )
+    metadata = replace(native_metadata(SINGLE.tag), completion=completion)
+    path = tmp_path / "historical.h5"
+    save_run(record, path, spec=SINGLE, metadata=metadata)
+    loaded, restored = load_run_with_metadata(path, spec=SINGLE)
+    old_loaded, snapshot = load_run(path, spec=SINGLE)
+    assert restored == metadata
+    assert snapshot == restored.snapshot
+    assert loaded.cfg == old_loaded.cfg == record.cfg
+    np.testing.assert_allclose(loaded.result.signal, old_loaded.result.signal)
+    with pytest.raises(ValueError, match="experiment"):
+        load_run_with_metadata(path, spec=replace(SINGLE, tag="wrong"))
+
+
+def test_public_persistence_declaration_supports_single_grouped_and_missing() -> None:
+    assert SingleExperiment().persistence_spec() is SINGLE
+    assert GroupedExperiment().persistence_spec() is GROUPED
+    missing = PersistableExperiment[SingleResult, NativeCfg]()
+    with pytest.raises(NotImplementedError, match="AXES_SPEC"):
+        missing.persistence_spec()
 
 
 def test_typed_load_selects_declared_variables_and_ignores_extra_variable(
