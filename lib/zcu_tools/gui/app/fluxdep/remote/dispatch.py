@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
+
+import numpy as np
+from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
@@ -29,12 +32,18 @@ from zcu_tools.gui.remote.readonly_handlers import (
 )
 
 from .dto import (
+    ActiveSpectrumReply,
+    AxisSnapshot,
     FitParametersReply,
     FitResultReply,
+    NameReply,
     PointcloudReply,
     ProjectSetupReply,
+    SelectionSnapshotReply,
     SpectrumListItem,
     SpectrumListReply,
+    SpectrumRemovedReply,
+    SpectrumSnapshotReply,
     StateCheckReply,
     TransitionWire,
 )
@@ -93,6 +102,98 @@ def _h_spectrum_list(
             )
             for entry in spectrums.values()
         ]
+    }
+
+
+def _axis_snapshot(
+    axis: NDArray[np.float64], unit: Literal["native", "Phi_0", "GHz"]
+) -> AxisSnapshot:
+    return {
+        "count": int(axis.size),
+        "minimum": float(axis.min()) if axis.size else None,
+        "maximum": float(axis.max()) if axis.size else None,
+        "unit": unit,
+    }
+
+
+def _h_spectrum_snapshot(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> SpectrumSnapshotReply:
+    name = params["name"]
+    assert isinstance(name, str)  # ParamSpec validated the nonempty literal name.
+    entry = adapter.ctrl.state.spectrums.get(name)
+    if entry is None:
+        return {"name": name, "exists": False}
+    return {
+        "name": entry.name,
+        "exists": True,
+        "spec_type": entry.spec_type,
+        "aligned": entry.aligned,
+        "points_completed": entry.points_completed,
+        "alignment_seeded": entry.alignment_seeded,
+        "flux_half": entry.flux_half,
+        "flux_int": entry.flux_int,
+        "flux_period": entry.flux_period,
+        "raw_axes": {
+            "dev_values": _axis_snapshot(entry.raw["dev_values"], "native"),
+            "fluxs": _axis_snapshot(entry.raw["fluxs"], "Phi_0"),
+            "freqs": _axis_snapshot(entry.raw["freqs"], "GHz"),
+            "signals_shape": list(entry.raw["signals"].shape),
+        },
+        "points": {
+            "dev_values": entry.points["dev_values"].tolist(),
+            "fluxs": entry.points["fluxs"].tolist(),
+            "freqs": entry.points["freqs"].tolist(),
+        },
+    }
+
+
+def _h_spectrum_remove(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> SpectrumRemovedReply:
+    name = params["name"]
+    assert isinstance(name, str)  # ParamSpec validated the nonempty literal name.
+    adapter.ctrl.remove_spectrum(name)
+    return {"name": name, "removed": True}
+
+
+def _h_spectrum_set_active(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> ActiveSpectrumReply:
+    name = params["name"]
+    assert name is None or isinstance(name, str)  # ParamSpec applied null/default.
+    adapter.ctrl.set_active_spectrum(name)
+    return {"active_spectrum": adapter.ctrl.state.active_spectrum}
+
+
+def _h_spectrum_reset_alignment(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> NameReply:
+    name = params["name"]
+    assert isinstance(name, str)  # ParamSpec validated the nonempty literal name.
+    adapter.ctrl.reset_alignment(name)
+    return {"name": name}
+
+
+def _h_spectrum_reset_points(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> NameReply:
+    name = params["name"]
+    assert isinstance(name, str)  # ParamSpec validated the nonempty literal name.
+    adapter.ctrl.reset_points(name)
+    return {"name": name}
+
+
+def _h_selection_snapshot(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> SelectionSnapshotReply:
+    del params
+    selection = adapter.ctrl.state.selection
+    return {
+        "selected": selection.selected.tolist()
+        if selection.selected is not None
+        else None,
+        "min_distance": selection.min_distance,
     }
 
 
@@ -163,6 +264,12 @@ _HANDLERS: dict[str, Handler] = {
     "project.info": h_project_info,
     "project.setup": _h_project_setup,
     "spectrum.list": _h_spectrum_list,
+    "spectrum.snapshot": _h_spectrum_snapshot,
+    "spectrum.remove": _h_spectrum_remove,
+    "spectrum.set_active": _h_spectrum_set_active,
+    "spectrum.reset_alignment": _h_spectrum_reset_alignment,
+    "spectrum.reset_points": _h_spectrum_reset_points,
+    "selection.snapshot": _h_selection_snapshot,
     "selection.pointcloud": _h_selection_pointcloud,
     "fit.result": _h_fit_result,
     "resources.versions": h_resources_versions,

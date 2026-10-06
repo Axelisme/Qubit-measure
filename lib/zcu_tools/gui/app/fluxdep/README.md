@@ -44,7 +44,8 @@ scipy fit**（fit_spectrum 留在 notebook，未移植）。
 分層 `app → Controller(façade) → services → State`。MainWindow 是人使用的 driving
 view；RemoteControlAdapter 是 agent 的命令與觀測入口。它與 GUI 共用
 Controller owners，資源的 per-connection observation 與 guard 由 shared remote 執行。
-目前支援原有查詢與 project setup；其餘 pipeline commands 正在 task 中實作。
+目前支援完整 project／spectrum／selection 查詢及 project／spectrum 編輯命令。
+載入、search、export 與 interactive RPC 正在 task 中實作。
 
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、
   `spectrums: dict[str, SpectrumEntry]`、`active_spectrum`、`selection`(SelectionState)、
@@ -190,6 +191,10 @@ Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 d
 `selection.pointcloud`、`state.check` 與 `resources.versions` 不建立完整 observation。
 `project.setup` 必須先讀 project，使用 Controller 與原生 ProjectInfo paths。成功 self-write
 只推進同連線已讀且相符的版本，其他連線與 GUI 修改後仍須明示重讀。
+Spectrum snapshot 回完整 calibration／published points 與 raw axes extents，不輸出 complex signal matrix。
+合法的 absent name 回 absence 並建立 version 0 observation。Leaf guard 不展開 name 內的 literal star。
+Remove、reset 與 active selection 共用原生 Controller owners；同名重建會使舊 observation stale。
+Selection snapshot 回完整 published mask 與 normalized min_distance，不讀 live Session。
 六個原有 read projections 保持原值；其餘 pipeline methods 尚在實作。
 
 MCP entrypoint 使用共用 `McpBridge`，工具從 method specs 生成。完整控制工具的 workflow
@@ -257,8 +262,8 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   `[Frequency, Flux]`（freq 掃在外層）→ 軸反。**不是固定特性**（TwoTone 通常正、OneTone 常反），
   要看實際檔案。GUI 的「Transpose axes」toggle（`services/load.py` 的 `transpose_spectrum_data`）
   讓 user 從 preview 判斷後交換。
-- **Remote pipeline 尚未完成**：目前 agent 可觀測與設定 project，其餘分析仍由 GUI 驅動。
-  完整 remote pipeline 與 MCP 圖像驗收由 fluxdep-mcp-control task 推進，不把部分 RPC 當成整條分析可用。
+- **Remote pipeline 尚未完成**：目前 agent 可觀測與編輯 project／spectrum，載入、search、export
+  與互動命令仍待實作。完整 MCP workflow 與圖像驗收由 fluxdep-mcp-control task 推進。
 
 ## Entry Points
 
