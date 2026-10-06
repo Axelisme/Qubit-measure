@@ -83,12 +83,12 @@ class LoadService:
         parsing failures propagate without caller-correctable classification.
         """
         ld = load_labber_data(filepath)
-        dev_values = np.asarray(ld.axes[0].values)
         if len(ld.axes) < 2:
             raise InvalidInputError(
                 f"{filepath!r} has no frequency axis (not a 2D spectrum)",
                 reason_code="spectrum_not_2d",
             )
+        dev_values = np.asarray(ld.axes[0].values)
         freqs = np.asarray(ld.axes[1].values)
         # native load_labber_data returns z as (Ny, Nx) = (N_freq, N_dev); the
         # downstream pipeline (format_rawdata, SpectrumData) expects device-major

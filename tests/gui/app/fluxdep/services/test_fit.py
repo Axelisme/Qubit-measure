@@ -160,11 +160,9 @@ def test_removed_last_spectrum_leaves_stale_selection(tiny_database, capture_sea
     st.remove_spectrum("s1")
     before = st.version.snapshot()
 
+    query = svc.capture_search if capture_search else svc.selected_pointcloud
     with pytest.raises(FailedPreconditionError) as caught:
-        if capture_search:
-            svc.capture_search()
-        else:
-            svc.selected_pointcloud()
+        query()
 
     assert caught.value.category == "failed_precondition"
     assert caught.value.reason_code == "selection_stale"
@@ -174,7 +172,9 @@ def test_removed_last_spectrum_leaves_stale_selection(tiny_database, capture_sea
 
 
 @pytest.mark.parametrize("publish_empty_selection", [False, True])
-def test_empty_collection_without_stale_selection(tiny_database, publish_empty_selection):
+def test_empty_collection_without_stale_selection(
+    tiny_database, publish_empty_selection
+):
     st = FluxDepState()
     if publish_empty_selection:
         SelectionService(st).set_selection(np.empty(0, dtype=np.bool_))

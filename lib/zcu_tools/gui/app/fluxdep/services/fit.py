@@ -112,11 +112,12 @@ class FitService:
         for entry in self._state.spectrums.values():
             flux_parts.append(np.asarray(entry.points["fluxs"], dtype=np.float64))
             freq_parts.append(np.asarray(entry.points["freqs"], dtype=np.float64))
-        if not flux_parts:
-            empty = np.empty(0, dtype=np.float64)
-            return empty, empty.copy()
-        fluxs = np.concatenate(flux_parts)
-        freqs = np.concatenate(freq_parts)
+        if flux_parts:
+            fluxs = np.concatenate(flux_parts)
+            freqs = np.concatenate(freq_parts)
+        else:
+            fluxs = np.empty(0, dtype=np.float64)
+            freqs = np.empty(0, dtype=np.float64)
 
         mask = self._state.selection.selected
         if mask is None:
