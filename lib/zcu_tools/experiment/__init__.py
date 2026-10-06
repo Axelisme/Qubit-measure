@@ -3,6 +3,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from . import config
+    from .acquisition import (
+        AcquisitionEvidence,
+        capture_software_provenance,
+        new_run_id,
+    )
     from .axes_spec import (
         IDENTITY,
         MHZ_TO_HZ,
@@ -33,6 +38,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "config",
+    "AcquisitionEvidence",
+    "capture_software_provenance",
+    "new_run_id",
     "ExpCfgModel",
     "RunRecord",
     "RunSnapshot",
@@ -62,6 +70,9 @@ __all__ = [
 
 _EXPORT_MODULES = {
     "config": ".config",
+    "AcquisitionEvidence": ".acquisition",
+    "capture_software_provenance": ".acquisition",
+    "new_run_id": ".acquisition",
     "ExpCfgModel": ".cfg_model",
     "RunRecord": ".records",
     "RunSnapshot": ".native_persistence",

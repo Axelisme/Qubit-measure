@@ -101,7 +101,8 @@ class SoftwareProvenance:
     software_versions maps package names to versions (empty means no evidence).
     git_commit is a SHA or None; git_dirty is True, False or unknown None.
     qick_version, soc_fingerprint and hostname are nonempty strings or None.
-    None represents absent legacy evidence, not swallowed live capture failures.
+    None represents genuinely unavailable evidence, including legacy files,
+    non-Git installations or opaque cached-config handles, not capture failures.
     All six disk attrs are required. Optional strings use empty UTF-8 attrs for
     None, and git_dirty uses true/false/unknown, never bool(string).
     """
