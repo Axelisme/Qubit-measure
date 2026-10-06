@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import replace
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -50,6 +52,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
+    FitChangedPayload,
     InteractiveChangedPayload,
     SearchChangedPayload,
 )
@@ -132,6 +135,7 @@ class AnalyzePanelWidget(QWidget):
         self._plot_host = QtPlotHost(self._diag_container, QtOwnerScheduler())
         self._diagnostics = Plots(self._plot_host)
         self._load_from_state()
+        self._bus_subs.subscribe(ctrl.bus, FitChangedPayload, self._on_fit_changed)
         self._bus_subs.subscribe(
             ctrl.bus, SearchChangedPayload, self._on_search_changed
         )
@@ -365,6 +369,16 @@ class AnalyzePanelWidget(QWidget):
         self._transitions_form.set_transitions(fit.transitions)
         self._transitions_show.set_transitions(fit.transitions)
         self._export_btn.setEnabled(fit.has_result)
+        # Compare published inputs, not results, to preserve local display edits.
+        self._loaded_fit_inputs = replace(
+            fit, transitions=deepcopy(fit.transitions), params=None
+        )
+
+    def _on_fit_changed(self, payload: FitChangedPayload) -> None:
+        del payload
+        if replace(self._ctrl.state.fit, params=None) != self._loaded_fit_inputs:
+            self._load_from_state()
+        self._refresh_search()
 
     @property
     def current_tab(self) -> AnalyzeTab:
@@ -666,7 +680,7 @@ class AnalyzePanelWidget(QWidget):
         missing = self._missing_freq_message(show_transitions, fit.r_f, fit.sample_f)
         if missing:
             self._status.setText("Show: " + missing.split(".")[0] + ".")
-            show_transitions = self._transitions_form.get_transitions()  # fit set
+            show_transitions = fit.transitions
 
         aligned = next((e for e in spectrums.values() if e.aligned), None)
         try:

@@ -7,10 +7,13 @@ spin boxes, and Search being blocked when the database path is empty / missing.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
-from PyQt6.QtWidgets import QGroupBox, QLineEdit
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from PyQt6.QtWidgets import QDoubleSpinBox, QGroupBox, QLabel, QLineEdit, QPushButton
 from qtpy.QtWidgets import QSizePolicy, QTabWidget  # type: ignore[attr-defined]
 from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
@@ -25,11 +28,17 @@ def panel(qapp):
     ctrl = Controller(FluxDepState())
     w = AnalyzePanelWidget(ctrl)
     yield w, ctrl
+    w.quiesce()
+    w.dispose()
     w.deleteLater()
+    ctrl.interactive.dispose()
 
 
 @pytest.mark.parametrize("publish_before_panel", [False, True])
-def test_published_fit_inputs_reach_search_and_show(qapp, publish_before_panel):
+@pytest.mark.parametrize("frequencies", [(None, None), (7.0, 3.0)])
+def test_published_fit_inputs_reach_search_and_show(
+    qapp, publish_before_panel, frequencies
+):
     ctrl = Controller(FluxDepState())
     widget = None
     if not publish_before_panel:
@@ -41,8 +50,7 @@ def test_published_fit_inputs_reach_search_and_show(qapp, publish_before_panel):
             (0.3, 1.5),
             (0.2, 1.2),
             TransitionDict({"transitions": [(0, 1)]}),
-            None,
-            None,
+            *frequencies,
         )
         if widget is None:
             widget = AnalyzePanelWidget(ctrl)
@@ -56,6 +64,19 @@ def test_published_fit_inputs_reach_search_and_show(qapp, publish_before_panel):
             edit.text() == ctrl.state.fit.database_path
             for edit in search_form.findChildren(QLineEdit)
         ), "Search must display the currently published database"
+        assert [box.value() for box in search_form.findChildren(QDoubleSpinBox)] == [
+            3.0,
+            12.0,
+            0.3,
+            1.5,
+            0.2,
+            1.2,
+        ]
+        assert [
+            edit.text()
+            for edit in search_form.findChildren(QLineEdit)
+            if edit.placeholderText() == "(unset)"
+        ] == ["" if value is None else f"{value:g}" for value in frequencies]
         for form in widget.findChildren(TransitionsForm):
             transitions = form.get_transitions()
             assert transitions.get("transitions") == [(0, 1)]
@@ -68,6 +89,81 @@ def test_published_fit_inputs_reach_search_and_show(qapp, publish_before_panel):
             widget.dispose()
             widget.deleteLater()
         ctrl.interactive.dispose()
+
+
+@pytest.mark.parametrize("display_edit", ["none", "subset", "missing_frequency"])
+def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
+    panel, monkeypatch, display_edit
+):
+    from zcu_tools.gui.app.fluxdep.ui import analyze_panel
+
+    widget, ctrl = panel
+    ctrl.set_fit_params(
+        "/task/database.h5",
+        (3.0, 12.0),
+        (0.3, 1.5),
+        (0.2, 1.2),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    show_form = next(
+        group for group in widget.findChildren(QGroupBox) if group.title() == "Display"
+    ).findChildren(TransitionsForm)[0]
+    search_form = next(
+        group
+        for group in widget.findChildren(QGroupBox)
+        if group.title() == "Search parameters"
+    ).findChildren(TransitionsForm)[0]
+    if display_edit == "subset":
+        show_form.set_transitions(TransitionDict({"transitions": [(0, 2)]}))
+    elif display_edit == "missing_frequency":
+        show_form.set_transitions(TransitionDict({"mirror": [(0, 1)]}))
+        # An unsubmitted Search edit is not the visualization's fit input.
+        search_form.set_transitions(TransitionDict({"mirror": [(0, 1)]}))
+    display_before_result = show_form.get_transitions()
+    bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    ctrl.record_search_result(
+        DatabaseSearchResult(
+            params=(5.0, 1.0, 0.5),
+            best_distance=0.1,
+            best_scale=1.0,
+            best_index=0,
+            entry_results=np.array([[0.1, 1.0]]),
+            entry_params=np.array([[5.0, 1.0, 0.5]]),
+            fluxs=np.array([0.0, 0.1]),
+            freqs=np.array([1.0, 1.0]),
+            predicted_freqs=np.array([1.0, 1.0]),
+            bounds=bounds,
+        )
+    )
+    assert show_form.get_transitions() == display_before_result
+    monkeypatch.setattr(
+        analyze_panel,
+        "calculate_energy_vs_flux",
+        lambda params, fluxs, **kwargs: (
+            None,
+            np.tile(np.arange(15, dtype=float), (len(fluxs), 1)),
+        ),
+    )
+    widget.show_tab("show")
+    next(
+        button
+        for button in widget.findChildren(QPushButton)
+        if button.text() == "Apply"
+    ).click()
+    assert not any(
+        label.text().startswith("Could not draw:")
+        for label in widget.findChildren(QLabel)
+    )
+    canvas = widget.findChildren(FigureCanvasQTAgg)[0]
+    assert len(canvas.figure.axes) == 1
+    lines = canvas.figure.axes[0].lines
+    assert len(lines) == 1
+    expected_frequency = 2.0 if display_edit == "subset" else 1.0
+    np.testing.assert_allclose(lines[0].get_ydata(), expected_frequency)
+    assert ctrl.state.fit.transitions == {"transitions": [(0, 1)]}
+    assert ctrl.state.fit.params == (5.0, 1.0, 0.5)
 
 
 def test_three_tabs_filter_search_show(panel):

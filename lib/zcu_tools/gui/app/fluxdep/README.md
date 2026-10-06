@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Interactive control RPC
+**Last updated:** 2026-10-06. Published fit inputs in GUI controls
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -265,6 +265,8 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（預設按 `viz.derive_auto_limits` = notebook
     `auto_derive_limits`）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
   AnalyzePanel 是 **MainWindow 持有的單例**（建一次留 stack，切走只隱藏不銷毀），所有 tab 狀態保留。
+  Panel 訂閱已發布的 fit 變更，新 inputs 同步到 Search 與 Show；僅結果改變時保留本地 display edits。
+  Visualization 的 fallback 使用已發布的 fit transitions，不使用未提交的 Search 表單。
 - Search 診斷图 builder 建立原生 Agg Figure，不登記 pyplot manager。Panel 替換或關閉時 release presentation，不以全域 `plt.close("all")` 管理其他 caller 的圖。
 - `transitions` 沿用 `analysis.fluxdep.models.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar
   與任意 `transitions{n}`/`mirror{n}` 動態 list 群）——這正是 extra_items 的設計用途，**不改 pydantic/
