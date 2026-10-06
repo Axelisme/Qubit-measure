@@ -336,6 +336,35 @@ class TestNoneResetCfg:
 
 
 class TestPulseResetCfg:
+    def test_pulse_cfg_as_string_uses_typed_context(self):
+        resolver = Resolver()
+        pulse = PulseSpec(
+            ch=1,
+            nqz=1,
+            freq=4000.0,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=0.2),
+        )
+        resolver.modules["my_pulse"] = pulse
+        raw: CfgInputMap = {"type": "reset/pulse", "pulse_cfg": "my_pulse"}
+        input_before = deepcopy(raw)
+        spec_before = pulse.model_dump()
+
+        cfg = ModuleCfgFactory.from_raw(
+            raw, context=CfgValidationContext(modules=resolver)
+        )
+
+        assert isinstance(cfg, PulseResetCfg)
+        assert isinstance(cfg.pulse_cfg, PulseCfg)
+        assert cfg.pulse_cfg.ch == 1
+        assert cfg.pulse_cfg.freq == 4000.0
+        assert cfg.pulse_cfg.gain == 0.5
+        assert cfg.pulse_cfg.waveform.length == 0.2
+        cfg.set_param("gain", 0.9)
+        cfg.set_param("length", 0.5)
+        assert raw == input_before
+        assert pulse.model_dump() == spec_before
+
     def _dict(self) -> CfgInputMap:
         return {"type": "reset/pulse", "pulse_cfg": _reset_pulse_dict()}
 
@@ -376,6 +405,43 @@ class TestPulseResetCfg:
 
 
 class TestTwoPulseResetCfg:
+    def test_pulse_cfgs_as_strings_use_typed_context(self):
+        resolver = Resolver()
+        pulse = PulseSpec(
+            ch=1,
+            nqz=1,
+            freq=4000.0,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=0.2),
+        )
+        resolver.modules["p1"] = pulse
+        resolver.modules["p2"] = pulse
+        raw: CfgInputMap = {
+            "type": "reset/two_pulse",
+            "pulse1_cfg": "p1",
+            "pulse2_cfg": "p2",
+        }
+        input_before = deepcopy(raw)
+        spec_before = pulse.model_dump()
+
+        cfg = ModuleCfgFactory.from_raw(
+            raw, context=CfgValidationContext(modules=resolver)
+        )
+
+        assert isinstance(cfg, TwoPulseResetCfg)
+        for child in (cfg.pulse1_cfg, cfg.pulse2_cfg):
+            assert isinstance(child, PulseCfg)
+            assert child.ch == 1
+            assert child.freq == 4000.0
+            assert child.gain == 0.5
+            assert child.waveform.length == 0.2
+        cfg.set_param("gain1", 0.9)
+        cfg.pulse1_cfg.set_param("length", 0.5)
+        assert cfg.pulse2_cfg.gain == 0.5
+        assert cfg.pulse2_cfg.waveform.length == 0.2
+        assert raw == input_before
+        assert pulse.model_dump() == spec_before
+
     def _dict(self) -> CfgInputMap:
         return {
             "type": "reset/two_pulse",
@@ -446,6 +512,47 @@ class TestTwoPulseResetCfg:
 
 
 class TestBathResetCfg:
+    def test_cfgs_as_strings_use_typed_context(self):
+        resolver = Resolver()
+        pulse = PulseSpec(
+            ch=1,
+            nqz=1,
+            freq=4000.0,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=0.2),
+        )
+        resolver.modules["res_pulse"] = pulse
+        resolver.modules["qub_pulse"] = pulse
+        resolver.modules["pi2_pulse"] = pulse
+        raw: CfgInputMap = {
+            "type": "reset/bath",
+            "cavity_tone_cfg": "res_pulse",
+            "qubit_tone_cfg": "qub_pulse",
+            "pi2_cfg": "pi2_pulse",
+        }
+        input_before = deepcopy(raw)
+        spec_before = pulse.model_dump()
+
+        cfg = ModuleCfgFactory.from_raw(
+            raw, context=CfgValidationContext(modules=resolver)
+        )
+
+        assert isinstance(cfg, BathResetCfg)
+        for child in (cfg.cavity_tone_cfg, cfg.qubit_tone_cfg, cfg.pi2_cfg):
+            assert isinstance(child, PulseCfg)
+            assert child.ch == 1
+            assert child.freq == 4000.0
+            assert child.gain == 0.5
+            assert child.waveform.length == 0.2
+        cfg.set_param("res_gain", 0.9)
+        cfg.cavity_tone_cfg.set_param("length", 0.5)
+        assert cfg.qubit_tone_cfg.gain == 0.5
+        assert cfg.qubit_tone_cfg.waveform.length == 0.2
+        assert cfg.pi2_cfg.gain == 0.5
+        assert cfg.pi2_cfg.waveform.length == 0.2
+        assert raw == input_before
+        assert pulse.model_dump() == spec_before
+
     def _dict(self) -> CfgInputMap:
         return {
             "type": "reset/bath",

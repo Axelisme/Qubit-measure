@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock
-
 import pytest
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.reset import (
@@ -21,10 +19,6 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWavefor
 # ---------------------------------------------------------------------------
 
 
-def _ml():
-    return MagicMock()
-
-
 def _make_pulse_cfg(ch=1, freq=4000.0, length=0.2, gain=0.5):
     return PulseCfg(
         waveform=ConstWaveformCfg(length=length),
@@ -43,63 +37,6 @@ def _make_pi2_cfg():
         freq=4000.0,
         gain=0.5,
     )
-
-
-# ---------------------------------------------------------------------------
-# PulseResetCfg
-# ---------------------------------------------------------------------------
-
-
-class TestPulseResetCfg:
-    def test_pulse_cfg_as_string(self):
-        ml = _ml()
-        ml.get_module.return_value = _make_pulse_cfg()
-        d = {"type": "reset/pulse", "pulse_cfg": "my_pulse"}
-        cfg = PulseResetCfg.model_validate(d, context={"ml": ml})
-        ml.get_module.assert_called_once_with("my_pulse")
-        assert isinstance(cfg, PulseResetCfg)
-        assert isinstance(cfg.pulse_cfg, PulseCfg)
-
-
-# ---------------------------------------------------------------------------
-# TwoPulseResetCfg
-# ---------------------------------------------------------------------------
-
-
-class TestTwoPulseResetCfg:
-    def test_pulse_cfgs_as_strings(self):
-        ml = _ml()
-        ml.get_module.return_value = _make_pulse_cfg()
-        d = {
-            "type": "reset/two_pulse",
-            "pulse1_cfg": "p1",
-            "pulse2_cfg": "p2",
-        }
-        cfg = TwoPulseResetCfg.model_validate(d, context={"ml": ml})
-        assert ml.get_module.call_count == 2
-        assert isinstance(cfg, TwoPulseResetCfg)
-        assert isinstance(cfg.pulse1_cfg, PulseCfg)
-
-
-# ---------------------------------------------------------------------------
-# BathResetCfg
-# ---------------------------------------------------------------------------
-
-
-class TestBathResetCfg:
-    def test_cfgs_as_strings(self):
-        ml = _ml()
-        ml.get_module.return_value = _make_pulse_cfg()
-        d = {
-            "type": "reset/bath",
-            "cavity_tone_cfg": "res_pulse",
-            "qubit_tone_cfg": "qub_pulse",
-            "pi2_cfg": "pi2_pulse",
-        }
-        cfg = BathResetCfg.model_validate(d, context={"ml": ml})
-        assert ml.get_module.call_count == 3
-        assert isinstance(cfg, BathResetCfg)
-        assert isinstance(cfg.cavity_tone_cfg, PulseCfg)
 
 
 # ---------------------------------------------------------------------------
