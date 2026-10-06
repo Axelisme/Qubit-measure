@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
@@ -28,7 +28,15 @@ from zcu_tools.gui.remote.readonly_handlers import (
     h_resources_versions,
 )
 
-from ..state import SpecType
+from .dto import (
+    FitParametersReply,
+    FitResultReply,
+    PointcloudReply,
+    SpectrumListItem,
+    SpectrumListReply,
+    StateCheckReply,
+    TransitionWire,
+)
 from .method_specs import METHOD_SPECS
 
 logger = logging.getLogger(__name__)
@@ -49,26 +57,9 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 # ---------------------------------------------------------------------------
 
 
-class SpectrumListItem(TypedDict):
-    """One spectrum's workflow and availability projection.
-
-    name: Loaded spectrum identifier.
-    spec_type: Picking tool kind, OneTone or TwoTone.
-    aligned: Whether alignment is currently committed.
-    points_completed: Whether picking completed, even with zero points.
-    point_count: Non-negative number of annotated points, not a stage gate.
-    """
-
-    name: str
-    spec_type: SpecType
-    aligned: bool
-    points_completed: bool
-    point_count: int
-
-
 def _h_spectrum_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
+) -> SpectrumListReply:
     del params
     spectrums = adapter.ctrl.state.spectrums
     return {
@@ -87,7 +78,7 @@ def _h_spectrum_list(
 
 def _h_selection_pointcloud(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
+) -> PointcloudReply:
     del params
     fluxs, freqs = adapter.ctrl.derive_pointcloud()
     return {"fluxs": fluxs.tolist(), "freqs": freqs.tolist()}
@@ -95,19 +86,23 @@ def _h_selection_pointcloud(
 
 def _h_fit_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
+) -> FitResultReply:
     del params
     fit = adapter.ctrl.state.fit
-    params_payload = (
+    params_payload: FitParametersReply | None = (
         {"EJ": fit.params[0], "EC": fit.params[1], "EL": fit.params[2]}
         if fit.params is not None
         else None
     )
     # transitions is a TypedDict with tuple values; lists serialise over JSON.
-    transitions_payload = {
-        key: [list(p) for p in value] if isinstance(value, list) else value
-        for key, value in fit.transitions.items()
-    }
+    transitions_payload: TransitionWire = {}
+    for key, value in fit.transitions.items():
+        if isinstance(value, list):
+            transitions_payload[key] = [list(pair) for pair in value]
+        elif key == "r_f":
+            transitions_payload["r_f"] = value
+        elif key == "sample_f":
+            transitions_payload["sample_f"] = value
     return {
         "has_result": fit.has_result,
         "params": params_payload,
@@ -129,7 +124,7 @@ def _h_fit_result(
 
 def _h_state_check(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
+) -> StateCheckReply:
     del params
     state = adapter.ctrl.state
     return {

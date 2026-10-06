@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Generic, TypeVar
+from typing import Generic, TypedDict, TypeVar
 
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxLineRole,
@@ -24,6 +24,17 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec, validate_params
 
 R = TypeVar("R")
 logger = logging.getLogger(__name__)
+
+
+class FluxPickInfo(TypedDict):
+    """Worker facts separate from the committed line state.
+
+    alignment_busy is true while the alignment worker has not settled.
+    alignment_error is the latest failure message, or None when no failure exists.
+    """
+
+    alignment_busy: bool
+    alignment_error: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +154,7 @@ class SharedFluxPickPlugin(PluginDefinition[FluxPickState, R], Generic[R]):
         """Whether this plugin has an unsettled alignment worker."""
         return self._alignment_busy
 
-    def info(self) -> Mapping[str, object]:
+    def info(self) -> FluxPickInfo:
         """Return alignment_busy and nullable alignment_error, separate from state."""
         return {
             "alignment_busy": self._alignment_busy,

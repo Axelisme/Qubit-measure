@@ -6,8 +6,6 @@ non-empty required strings, bool-rejecting integers/numbers, JSON-safe values.
 
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.param_spec import (
@@ -215,15 +213,13 @@ def test_build_input_schema_marks_required_and_types():
     )
     schema = build_input_schema(specs)
     assert schema["type"] == "object"
-    # build_input_schema is typed as dict[str, object]; narrow the nested shape
-    # for indexing (the runtime value is a JSON-schema dict-of-dicts).
-    props = cast("dict[str, dict]", schema["properties"])
+    props = schema["properties"]
     assert props["tab_id"] == {"type": "string"}
     assert props["flag"] == {"type": "boolean"}
     # JSON => an UNTYPED schema (no "type" key) so the MCP client never coerces a
     # value against a string member (which would stringify a number e.g. 0.2).
     assert "type" not in props["payload"]
-    assert set(cast("list", schema["required"])) == {"tab_id", "payload"}
+    assert set(schema.get("required", [])) == {"tab_id", "payload"}
 
 
 def test_json_schema_property_is_untyped_but_keeps_description():
@@ -231,10 +227,10 @@ def test_json_schema_property_is_untyped_but_keeps_description():
     # but a description, when present, is still rendered.
     prop = schema_property(ParamSpec("v", JsonType.JSON, description="any value"))
     assert "type" not in prop
-    assert prop["description"] == "any value"
+    assert prop.get("description") == "any value"
 
 
 def test_non_json_schema_property_keeps_its_type():
     # The other kinds still render a concrete "type" (only JSON goes untyped).
-    assert schema_property(ParamSpec("n", JsonType.NUMBER))["type"] == "number"
-    assert schema_property(ParamSpec("b", JsonType.BOOLEAN))["type"] == "boolean"
+    assert schema_property(ParamSpec("n", JsonType.NUMBER)).get("type") == "number"
+    assert schema_property(ParamSpec("b", JsonType.BOOLEAN)).get("type") == "boolean"

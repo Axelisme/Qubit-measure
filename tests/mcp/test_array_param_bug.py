@@ -30,19 +30,19 @@ from zcu_tools.gui.remote.param_spec import (
 def test_array_schema_property_has_type_array():
     """ARRAY must emit {"type": "array"} so the MCP client does not stringify."""
     prop = schema_property(ParamSpec("paths", JsonType.ARRAY))
-    assert prop["type"] == "array"
+    assert prop.get("type") == "array"
 
 
 def test_array_schema_property_has_string_items():
     """items must be {"type": "string"} — all current ARRAY params are string lists."""
     prop = schema_property(ParamSpec("paths", JsonType.ARRAY))
-    assert prop["items"] == {"type": "string"}
+    assert prop.get("items") == {"type": "string"}
 
 
 def test_array_schema_property_keeps_description():
     prop = schema_property(ParamSpec("ids", JsonType.ARRAY, description="some ids"))
-    assert prop["description"] == "some ids"
-    assert prop["type"] == "array"
+    assert prop.get("description") == "some ids"
+    assert prop.get("type") == "array"
 
 
 def test_build_input_schema_marks_array_param():
@@ -55,9 +55,9 @@ def test_build_input_schema_marks_array_param():
     assert isinstance(props, dict)
     paths_prop = props["paths"]
     assert isinstance(paths_prop, dict)
-    assert paths_prop["type"] == "array"
-    assert paths_prop["items"] == {"type": "string"}
-    assert schema["required"] == ["paths"]
+    assert paths_prop.get("type") == "array"
+    assert paths_prop.get("items") == {"type": "string"}
+    assert schema.get("required") == ["paths"]
 
 
 # ---------------------------------------------------------------------------

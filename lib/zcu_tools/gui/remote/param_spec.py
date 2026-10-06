@@ -26,8 +26,40 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+from typing import Literal, NotRequired, TypedDict
 
 from .errors import ErrorCode, RemoteError
+
+SchemaJsonType = Literal["string", "integer", "number", "boolean", "object", "array"]
+
+
+class SchemaProperty(TypedDict, total=False):
+    """One property schema; omitted type accepts any JSON value.
+
+    type is the JSON primitive/container kind. items declares array element shape.
+    minItems/maxItems are nonnegative array lengths. enum lists allowed strings.
+    description is human-readable parameter guidance. Absent fields impose no
+    corresponding constraint; defaults remain ParamSpec-owned, not schema fields.
+    """
+
+    type: SchemaJsonType
+    items: SchemaProperty
+    minItems: int
+    maxItems: int
+    enum: list[str]
+    description: str
+
+
+class InputSchema(TypedDict):
+    """Method's agent-facing object schema.
+
+    type is always object. properties maps visible parameter names to schemas.
+    required lists mandatory visible names; omission means none are mandatory.
+    """
+
+    type: Literal["object"]
+    properties: dict[str, SchemaProperty]
+    required: NotRequired[list[str]]
 
 
 class JsonType(str, Enum):
@@ -237,7 +269,7 @@ def validate_params(
     return out
 
 
-def schema_property(spec: ParamSpec) -> dict[str, object]:
+def schema_property(spec: ParamSpec) -> SchemaProperty:
     """Render one ParamSpec as a JSON-schema property (for MCP inputSchema).
 
     ``JsonType.JSON`` renders with NO ``type`` key at all — an untyped schema is
@@ -247,7 +279,7 @@ def schema_property(spec: ParamSpec) -> dict[str, object]:
     field check. Omitting ``type`` means the client passes the value through
     untouched (a number stays a number), so a JSON param never gets stringified.
     """
-    prop: dict[str, object] = {}
+    prop: SchemaProperty = {}
     if spec.json_type is JsonType.ARRAY:
         # Emit typed array schema with string items; all current ARRAY params are
         # string lists.  A concrete "type" is required so the MCP client does not
@@ -266,13 +298,14 @@ def schema_property(spec: ParamSpec) -> dict[str, object]:
             },
         )
     elif spec.json_type is not JsonType.JSON:
-        prop["type"] = {
+        scalar_types: dict[JsonType, SchemaJsonType] = {
             JsonType.STRING: "string",
             JsonType.INTEGER: "integer",
             JsonType.NUMBER: "number",
             JsonType.BOOLEAN: "boolean",
             JsonType.OBJECT: "object",
-        }[spec.json_type]
+        }
+        prop["type"] = scalar_types[spec.json_type]
     if spec.enum is not None:
         prop["enum"] = list(spec.enum)
     if spec.description:
@@ -280,7 +313,7 @@ def schema_property(spec: ParamSpec) -> dict[str, object]:
     return prop
 
 
-def build_input_schema(specs: tuple[ParamSpec, ...]) -> dict[str, object]:
+def build_input_schema(specs: tuple[ParamSpec, ...]) -> InputSchema:
     """Render a method's ParamSpec tuple as a JSON-schema object.
 
     ``mcp_hidden`` params are wire-only (mcp-filled) and excluded from the
@@ -289,7 +322,7 @@ def build_input_schema(specs: tuple[ParamSpec, ...]) -> dict[str, object]:
     visible = tuple(spec for spec in specs if not spec.mcp_hidden)
     properties = {spec.name: schema_property(spec) for spec in visible}
     required = [spec.name for spec in visible if spec.required]
-    schema: dict[str, object] = {"type": "object", "properties": properties}
+    schema: InputSchema = {"type": "object", "properties": properties}
     if required:
         schema["required"] = required
     return schema
