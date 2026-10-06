@@ -1,20 +1,9 @@
 #!/usr/bin/env python
-"""MCP server bridge for the fluxdep-gui ``RemoteControlAdapter``.
+"""Stdio MCP entry for the Fluxdep GUI's analysis-control pipeline.
 
-Communicates with an MCP host (Gemini / Claude / VS Code) via stdio JSON-RPC
-2.0, and forwards calls to the live fluxdep GUI's ``RemoteControlAdapter`` over a
-single persistent TCP socket. The exposed tools are READ-ONLY: every analysis
-method tool is generated 1:1 from the wire-method contract table (``METHOD_SPECS``,
-all pure queries — the user drives the GUI); the agent-facing lifecycle tools
-(``fluxdep_launch`` / ``fluxdep_connect`` / ``fluxdep_disconnect``) are built by
-the shared read-only factory and fork ``scripts/run_fluxdep_gui.py``.
-
-The whole server body (``send_gui_rpc``, the lifecycle tools, cleanup, the stdio
-loop) lives in :func:`zcu_tools.mcp.core.readonly_server.build_readonly_server`;
-this module keeps only fluxdep's config + instructions + the imports the factory
-needs. Events are dropped (the agent uses request/reply, not event subscription).
-
-Threading: see :mod:`zcu_tools.mcp.core.bridge`.
+The GUI's declarations generate schemas and time budgets. The control assembly
+shares lifecycle, forwarding, PNG delivery and stdio mechanisms without copying
+GUI guards, interactive owners or search operations. Events are not subscribed.
 """
 
 from __future__ import annotations
@@ -36,53 +25,67 @@ _BOOTSTRAP["bootstrap_standalone_server"](
     ),
 )
 
-# NOTE: absolute imports (NOT relative) — this module is launched as a script
-# (``python .../server.py`` per .mcp.json), so it has no parent package.
-from zcu_tools.gui.app.fluxdep.remote.method_specs import (  # noqa: E402
-    METHOD_SPECS,
-)
 from zcu_tools.gui.app.fluxdep.remote.wire_version import (  # noqa: E402
     WIRE_VERSION as MCP_WIRE_VERSION,
 )
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402
-from zcu_tools.mcp.core.readonly_server import (  # noqa: E402
-    READONLY_MCP_VERSION,
-    build_readonly_server,
-)
+from zcu_tools.mcp.fluxdep.assembly import build_fluxdep_server  # noqa: E402
 
-# This MCP server's own code revision — reported (not compared) in the version
-# note so an agent can confirm a reconnect picked up bridge-side edits.
-MCP_VERSION = READONLY_MCP_VERSION
+MCP_VERSION = 2
 
 _SERVER_INSTRUCTIONS = """\
-Observe a live fluxdep-gui (fluxonium flux-dependence analysis) over a TCP socket.
+Control the Fluxdep analysis pipeline in the same GUI the user can drive.
+No hardware is controlled. Use existing data only within the user's authorization.
 
-This bridge is READ-ONLY: the USER drives the analysis in the GUI (load spectra,
-pick half/integer flux lines, select spectral points, cross-spectrum filter, run
-the database fit, export). The agent's job is to watch and report current state —
-there are no load / align / point-pick / select / fit / export tools, because
-point-picking and axis-orientation judgement need the user's eye on the preview.
+Start with fluxdep_connect to an existing GUI, or explicitly fluxdep_launch.
+Disconnect and MCP server exit leave the GUI running. There is no stop tool.
 
-Getting started:
-  1. fluxdep_launch opens a GUI subprocess for the user (auto-connects the bridge).
-     Or fluxdep_connect to attach to a GUI the user already started.
-  2. The user does the analysis in the GUI; you observe it with the read tools.
-  fluxdep_disconnect detaches the bridge without stopping the GUI. There is no
-  stop tool — the agent never closes the user's GUI.
+Before writes, explicitly read the required published resources on this connection:
+project_info, spectrum_list, each spectrum_snapshot, selection_snapshot, fit_result.
+State checks, derived pointclouds, interactive state and PNG do not establish those
+observations. Writes never perform hidden reads. On stale rejection, inspect the
+GUI changes and reread the relevant full resources before deciding what to do.
 
-Read tools (all pure queries):
-  - fluxdep_state_check → {has_project, spectrum_count, has_active}.
-  - fluxdep_project_info → {chip_name, qub_name, result_dir, database_path}.
-  - fluxdep_spectrum_list → each loaded spectrum's {name, spec_type, aligned,
-    points_completed, point_count}. Completion includes zero points; use
-    point_count for available data, not the completion flag.
-  - fluxdep_selection_pointcloud → the joint {fluxs, freqs} cloud assembled from
-    every spectrum's selected points (freqs in GHz).
-  - fluxdep_fit_result → {has_result, params:{EJ,EC,EL} or null, database_path,
-    EJb, ECb, ELb, transitions, r_f, sample_f} — the user's fit inputs + result.
+Pipeline:
+1. Read project_info; project_setup applies identity and native paths.
+2. Read collection/all current spectrum snapshots; spectrum_load loads OneTone or
+   TwoTone data, or spectrum_load_processed restores a processed export. New spectra
+   need explicit snapshots before editing. Names are literal, including punctuation.
+3. Read spectrum_list, set the active spectrum, then read its spectrum_snapshot.
+   spectrum_interactive_open(name, kind) opens line, onetone or twotone input.
+4. interactive_read inspects without opening or changing focus. Open/read/command
+   receipts contain identity, committed state, available commands and native image
+   content. context.figure is MIME/byte metadata, not a saved file. Inactive reads
+   return null context without an image. Inspect axes and units before choosing points.
+5. spectrum_interactive_command uses the returned context_id, literal name and a
+   plugin command with its declared params. undo restores one committed step.
+   finish publishes even a zero-point completed spectrum; cancel closes input.
+6. Read collection/all sources (including zero-point spectra) and selection_snapshot;
+   selection_interactive_open/command edits the joint cloud. apply publishes while
+   preserving editable input; cancel closes. Width is normalized radius. Follow each
+   returned command schema. Receipts show numeric changes and the same captured PNG.
+7. Read fit_result before fit_set_params. EJb/ECb/ELb are numeric bounds in GHz.
+   Project database_path is the raw-data root; fit database_path is the search file.
+   Read project, fit, collection, every source and selection before fit_search.
+8. fit_search returns the app token. operation_status without token finds latest GUI
+   or agent activity. operation_await(token, timeout) waits at most 30 seconds and
+   never cancels on timeout. operation_cancel is a stop request, not terminal proof.
+   A failed operation is outcome data, distinct from an invocation error. After
+   completion reread fit_result; operation reads do not refresh any write guard.
+9. export_spectrums is create-only unless overwrite is explicit. fit_export_params
+   uses native JSON merge. Read their declared resources first. Failures may retain
+   confirmed output prefixes; there is no rollback.
 
-A failed call always raises; the read tools are idempotent, so retrying a read is
-safe.
+The user may take over at any time. Open reuses an eligible identity; commands
+require the current identity. Terminal receipts describe the requested old identity,
+not a synchronous GUI successor. To inspect the successor, explicitly interactive_read.
+
+Tools send one RPC. They do not reconnect, retry, replay or repair stale observations.
+Timeout/disconnection/image-delivery failure does not prove a mutation had no effect.
+Read current state before choosing another command. Image delivery failure does not
+undo accepted GUI publication. Stdio handles calls synchronously; an await occupies
+this server until it returns. Transport deadlines must cover the method's budget
+(35 seconds for operation_await) plus reply overhead.
 """
 
 _CONFIG = MCPBridgeConfig(
@@ -99,17 +102,9 @@ _CONFIG = MCPBridgeConfig(
     run_script_name="run_fluxdep_gui.py",
 )
 
-# lib/zcu_tools/mcp/fluxdep -> repo root
-_SERVER = build_readonly_server(
-    _CONFIG, METHOD_SPECS, repo_root=Path(__file__).parents[4], gui_name="fluxdep-gui"
-)
-
-# Module-level aliases preserved for tests that patch the bridge / inspect tools.
-_BRIDGE = _SERVER.bridge
-send_gui_rpc = _SERVER.send_gui_rpc
+_SERVER = build_fluxdep_server(_CONFIG, repo_root=Path(__file__).parents[4])
 TOOLS = _SERVER.tools
 main = _SERVER.main
-
 
 if __name__ == "__main__":
     main()

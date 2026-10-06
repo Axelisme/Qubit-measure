@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-06, resource retirement and shared remote observations
+**Last updated:** 2026-10-06, resource observations and parameter schema ownership
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -53,8 +53,12 @@ not maintain another seen map. See ADR-0068 for the app-policy split.
 
 `gui.remote.ParamSpec` owns optional string enum declarations, schema projection
 and request membership validation. Callers without an enum keep their existing
-required/null/default behavior. Domain plugins supply their own authoritative
-choices; MCP does not maintain another allowlist.
+required/null/default behavior. ARRAY declarations also own the schema element
+kind, with string as the default and number available for native fit bounds.
+Element shape/type/finite validation remains with each domain handler. MCP preserves
+scalar JSON types for GUI admission instead of converting malformed inputs.
+Domain plugins supply their own authoritative choices; MCP does not maintain
+another allowlist.
 
 ## Expected Errors (`expected_error.py`)
 

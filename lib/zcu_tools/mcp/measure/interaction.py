@@ -6,8 +6,8 @@ import base64
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
-from zcu_tools.mcp.measure.images import validated_png
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 if TYPE_CHECKING:

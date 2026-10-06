@@ -69,7 +69,7 @@ class JsonType(str, Enum):
     BOOLEAN = "boolean"
     OBJECT = "object"
     JSON = "json"  # any JSON-serializable value
-    ARRAY = "array"  # homogeneous string list; emits {"type":"array","items":{"type":"string"}}
+    ARRAY = "array"  # list container; schema items are ParamSpec-owned
     NUMBER_PAIRS = "number_pairs"  # nonempty array of finite numeric pairs
 
 
@@ -151,6 +151,16 @@ def _validate_string_enum(values: tuple[object, ...]) -> None:
 
 @dataclass(frozen=True)
 class ParamSpec:
+    """One wire parameter and its agent-facing declaration.
+
+    name is the literal key; json_type selects primitive admission. required
+    rejects absent/null values; otherwise default is delivered for either.
+    description documents the input. mcp_hidden omits it only from MCP schemas.
+    enum restricts STRING membership. array_item_type declares ARRAY schema
+    items (string by default, or number), without changing handler validation.
+    Invalid enum/item declarations raise ValueError during construction.
+    """
+
     name: str
     json_type: JsonType
     required: bool = True
@@ -161,8 +171,15 @@ class ParamSpec:
     # (e.g. ``expected_versions``), never surfaced to the agent.
     mcp_hidden: bool = False
     enum: tuple[str, ...] | None = None
+    # ARRAY schema element kind, not element validation. Other kinds keep string.
+    # Domain handlers still own element type, shape, finite values and reasons.
+    array_item_type: Literal["string", "number"] = "string"
 
     def __post_init__(self) -> None:
+        if self.array_item_type not in ("string", "number"):
+            raise ValueError("array_item_type must be string or number")
+        if self.json_type is not JsonType.ARRAY and self.array_item_type != "string":
+            raise ValueError("array_item_type requires an ARRAY parameter")
         if self.enum is None:
             return
         if self.json_type is not JsonType.STRING:
@@ -281,11 +298,10 @@ def schema_property(spec: ParamSpec) -> SchemaProperty:
     """
     prop: SchemaProperty = {}
     if spec.json_type is JsonType.ARRAY:
-        # Emit typed array schema with string items; all current ARRAY params are
-        # string lists.  A concrete "type" is required so the MCP client does not
-        # stringify the whole array (the failure mode of the old J.JSON spelling).
+        # Concrete array/item kinds prevent MCP clients from stringifying values.
+        # Element validation remains with the handler, not this schema projection.
         prop["type"] = "array"
-        prop["items"] = {"type": "string"}
+        prop["items"] = {"type": spec.array_item_type}
     elif spec.json_type is JsonType.NUMBER_PAIRS:
         prop.update(
             type="array",

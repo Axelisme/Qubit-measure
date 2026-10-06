@@ -168,9 +168,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "numbers. Optional separate r_f/sample_f default to null.",
         params=(
             ParamSpec("database_path", JsonType.STRING),
-            ParamSpec("EJb", JsonType.ARRAY),
-            ParamSpec("ECb", JsonType.ARRAY),
-            ParamSpec("ELb", JsonType.ARRAY),
+            ParamSpec("EJb", JsonType.ARRAY, array_item_type="number"),
+            ParamSpec("ECb", JsonType.ARRAY, array_item_type="number"),
+            ParamSpec("ELb", JsonType.ARRAY, array_item_type="number"),
             ParamSpec("transitions", JsonType.OBJECT),
             ParamSpec("r_f", JsonType.NUMBER, required=False),
             ParamSpec("sample_f", JsonType.NUMBER, required=False),
