@@ -60,6 +60,13 @@ from .dto import (
     StateCheckReply,
     TransitionWire,
 )
+from .interactive import (
+    h_interactive_read,
+    h_selection_interactive_command,
+    h_selection_interactive_open,
+    h_spectrum_interactive_command,
+    h_spectrum_interactive_open,
+)
 from .method_specs import METHOD_SPECS
 
 logger = logging.getLogger(__name__)
@@ -494,6 +501,11 @@ _HANDLERS: dict[str, Handler] = {
     "spectrum.reset_points": _h_spectrum_reset_points,
     "selection.snapshot": _h_selection_snapshot,
     "selection.pointcloud": _h_selection_pointcloud,
+    "interactive.read": h_interactive_read,
+    "spectrum.interactive.open": h_spectrum_interactive_open,
+    "spectrum.interactive.command": h_spectrum_interactive_command,
+    "selection.interactive.open": h_selection_interactive_open,
+    "selection.interactive.command": h_selection_interactive_command,
     "fit.result": _h_fit_result,
     "fit.set_params": _h_fit_set_params,
     "fit.search": _h_fit_search,

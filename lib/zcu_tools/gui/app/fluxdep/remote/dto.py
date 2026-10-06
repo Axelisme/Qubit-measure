@@ -7,7 +7,194 @@ from typing import Literal, NotRequired, TypedDict
 from typing_extensions import TypedDict as ExtTypedDict
 
 from zcu_tools.gui.app.fluxdep.state import SpecType
+from zcu_tools.gui.interactive.flux_pick import FluxPickInfo
 from zcu_tools.gui.project import ProjectInfoPayload
+from zcu_tools.gui.remote.param_spec import InputSchema
+
+
+class PngImage(TypedDict):
+    """Native PNG: png_b64 is ASCII base64; bytes is its decoded byte count."""
+
+    png_b64: str
+    bytes: int
+
+
+class CommandDeclaration(TypedDict):
+    """Available command: name is plugin/reserved ID; schema is its JSON input."""
+
+    name: str
+    schema: InputSchema
+
+
+class EmptyPluginInfo(TypedDict):
+    """No plugin-specific operation status is currently exposed."""
+
+
+class LineStateReply(TypedDict):
+    """Device-axis reference lines and presentation flags from one snapshot."""
+
+    flux_half: float
+    flux_int: float
+    conjugate: bool
+    magnitude_only: bool
+
+
+class OneToneStateReply(TypedDict):
+    """Dimensionless prominence [0,5] and full ordered device-axis peak indices."""
+
+    threshold: float
+    peak_indices: list[int]
+
+
+class TwoToneStateReply(TypedDict):
+    """Detector/tool settings and counts from one exact native projection.
+
+    threshold is [1,20]; sigma is [0,5] (gaussian requires >=0.001).
+    smooth_method is wavelet/gaussian. width is normalized radius [0,0.1],
+    mode is select/erase. mask_shape is [device_count, frequency_count].
+    masked_count counts true cells; point_count counts detected device/GHz points.
+    """
+
+    threshold: float
+    sigma: float
+    smooth_method: Literal["wavelet", "gaussian"]
+    width: float
+    mode: Literal["select", "erase"]
+    mask_shape: list[int]
+    masked_count: int
+    point_count: int
+
+
+class SelectionStateReply(TypedDict):
+    """Joint-cloud input state, not the published selection.
+
+    min_distance and width are normalized [0,0.1]; width is radius.
+    mode is select/erase. selected is the full input mask in captured insertion
+    order; selected_count counts kept points after native downsampling.
+    """
+
+    min_distance: float
+    width: float
+    mode: Literal["select", "erase"]
+    selected: list[bool]
+    selected_count: int
+
+
+class ContextReplyBase(TypedDict):
+    """One owner-lifetime identity's committed state and native image.
+
+    context_id is positive, not an edit revision. closed means this identity
+    retired, even if a successor exists. plugin is its native plugin ID.
+    commands lists current declarations (empty when closed). can_undo follows
+    Session history and is false when closed. figure depicts this exact capture.
+    """
+
+    context_id: int
+    closed: bool
+    plugin: str
+    commands: list[CommandDeclaration]
+    can_undo: bool
+    figure: PngImage
+
+
+class LineContextReply(ContextReplyBase):
+    """Line context: literal spectrum_name, line state and alignment status."""
+
+    kind: Literal["line"]
+    spectrum_name: str
+    state: LineStateReply
+    info: FluxPickInfo
+
+
+class OneToneContextReply(ContextReplyBase):
+    """OneTone context: literal spectrum_name, peak state and empty info."""
+
+    kind: Literal["onetone"]
+    spectrum_name: str
+    state: OneToneStateReply
+    info: EmptyPluginInfo
+
+
+class TwoToneContextReply(ContextReplyBase):
+    """TwoTone context: literal spectrum_name, detector/mask state, empty info."""
+
+    kind: Literal["twotone"]
+    spectrum_name: str
+    state: TwoToneStateReply
+    info: EmptyPluginInfo
+
+
+class SelectionContextReply(ContextReplyBase):
+    """Joint context: no spectrum target, full-cloud state and empty info."""
+
+    kind: Literal["selection"]
+    spectrum_name: None
+    state: SelectionStateReply
+    info: EmptyPluginInfo
+
+
+InteractiveContextReply = (
+    LineContextReply | OneToneContextReply | TwoToneContextReply | SelectionContextReply
+)
+
+
+class LineChanges(TypedDict):
+    """Before/after native device positions and conjugation flags."""
+
+    flux_half_before: float
+    flux_half_after: float
+    flux_int_before: float
+    flux_int_after: float
+    conjugate_before: bool
+    conjugate_after: bool
+
+
+class OneToneChanges(TypedDict):
+    """Prominence before/after and nonnegative added/removed device peak counts."""
+
+    threshold_before: float
+    threshold_after: float
+    peaks_added: int
+    peaks_removed: int
+
+
+class TwoToneChanges(TypedDict):
+    """Nonnegative mask-cell and detected device/GHz positional differences."""
+
+    mask_added: int
+    mask_removed: int
+    points_added: int
+    points_removed: int
+
+
+class SelectionChanges(TypedDict):
+    """Nonnegative kept-index added/removed counts; duplicates stay distinct."""
+
+    points_added: int
+    points_removed: int
+
+
+class InteractiveEffect(TypedDict):
+    """Successful command receipt for the returned identity.
+
+    command is the invoked ID; closed equals context.closed. changes compares
+    the snapshots immediately before/after this command, including inverse Undo.
+    """
+
+    command: str
+    closed: bool
+    changes: LineChanges | OneToneChanges | TwoToneChanges | SelectionChanges
+
+
+class InteractiveReply(TypedDict):
+    """Read/open/command receipt; inactive read has both fields null.
+
+    context belongs to the requested identity, never a synchronous successor.
+    effect is null for reads/opens and populated only after a successful command.
+    """
+
+    context: InteractiveContextReply | None
+    effect: InteractiveEffect | None
 
 
 class SpectrumListItem(TypedDict):

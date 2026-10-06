@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Search and operation RPC
+**Last updated:** 2026-10-06. Interactive control RPC
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -45,7 +45,8 @@ scipy fit**（fit_spectrum 留在 notebook，未移植）。
 view；RemoteControlAdapter 是 agent 的命令與觀測入口。它與 GUI 共用
 Controller owners，資源的 per-connection observation 與 guard 由 shared remote 執行。
 目前支援完整 project／spectrum／selection／fit 查詢、project／spectrum 編輯與載入、
-fit inputs replacement、原生 spectrum／params 匯出及 app-owned search／operation。Interactive RPC 正在 task 中實作。
+fit inputs replacement、原生 spectrum／params 匯出、app-owned search／operation，
+以及四種 shared Session 的互動命令與原生 PNG。
 
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、
   `spectrums: dict[str, SpectrumEntry]`、`active_spectrum`、`selection`(SelectionState)、
@@ -207,7 +208,16 @@ Export 不改 State 或建立 observation；原生失敗保留成功前綴，不
 Search 使用同一 app owner token，status 可找 GUI 或 agent 的最新 activity。Await 在 IO thread
 等待，不碰 State／seen；timeout 不取消，cancel receipt 不代表 cancelled outcome。
 Async terminal 不刷新 fit observation，成功後須明示讀 fit.result。Unknown／evicted token 明示拒絕。
-六個原有 read projections 保持原值；interactive methods 尚在實作。
+六個原有 read projections 保持原值。
+
+Interactive open 必須先讀來源，picker name 必須已為 active。Read 只 inspect，不開輸入、
+不切畫面，也不建立 published-resource observation。Command 帶 owner-lifetime context_id，
+先核對身份與 target，再呼叫同一 plugin Actions／Session Undo／app publication。
+每次回覆使用同一 committed snapshot 投影數值與獨立 Agg PNG。TwoTone 的 mask-cell count
+與 detected-point count 分開；selection 保留完整 input mask 與 downsample 後的 kept count。
+Finish／cancel 的 receipt 保留退休 identity，即使同步 GUI callback 已開下一份 context。
+Apply 不關閉有效 joint input。Publication 或 rendering 失敗不宣稱 rollback。
+PNG 使用 shared renderer，不採用 Qt canvas，也不保存為產物。
 
 MCP entrypoint 使用共用 `McpBridge`，工具從 method specs 生成。完整控制工具的 workflow
 與圖像驗收尚未完成。MCP 不訂閱業務 event-push，不維護第二份 seen map。
@@ -274,8 +284,8 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   `[Frequency, Flux]`（freq 掃在外層）→ 軸反。**不是固定特性**（TwoTone 通常正、OneTone 常反），
   要看實際檔案。GUI 的「Transpose axes」toggle（`services/load.py` 的 `transpose_spectrum_data`）
   讓 user 從 preview 判斷後交換。
-- **Remote pipeline 尚未完成**：目前 agent 可觀測、編輯與載入 project／spectrum，替換 fit inputs 與
-  匯出 spectrum／params，並啟動、觀察及取消搜尋。互動命令仍待實作。完整 MCP workflow 與圖像驗收由 fluxdep-mcp-control task 推進。
+- **MCP workflow 尚未驗收**：GUI RPC 已提供 pipeline commands、互動回覆、匯出及搜尋操作。
+  MCP tools workflow、原生圖像辨識與真實資料 e2e 由 fluxdep-mcp-control task 的後續票驗證。
 
 ## Entry Points
 

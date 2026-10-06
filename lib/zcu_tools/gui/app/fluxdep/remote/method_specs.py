@@ -108,6 +108,51 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Derive the joint (flux, freq) point cloud assembled from every "
         "spectrum's selected points. Returns {fluxs:[...], freqs:[...]}.",
     ),
+    # Live interactive state is not a full published-resource observation.
+    "interactive.read": MethodSpec(
+        30.0,
+        "Inspect the live context without opening input or changing display. "
+        "Returns state and native PNG, or null when inactive; no guard is refreshed.",
+    ),
+    "spectrum.interactive.open": MethodSpec(
+        30.0,
+        "Open/reuse a picker for an already active literal spectrum after "
+        "reading its snapshot. kind is line, onetone or twotone. Returns the "
+        "owner identity, commands, state and native PNG.",
+        params=(
+            ParamSpec("name", JsonType.STRING),
+            ParamSpec("kind", JsonType.STRING, enum=("line", "onetone", "twotone")),
+        ),
+    ),
+    "spectrum.interactive.command": MethodSpec(
+        30.0,
+        "Command the current picker identity after reading its spectrum. "
+        "Use plugin commands or parameterless undo, finish, cancel. params "
+        "defaults to an empty object. Terminal receipt retains the old identity.",
+        params=(
+            ParamSpec("name", JsonType.STRING),
+            ParamSpec("context_id", JsonType.INTEGER),
+            ParamSpec("command", JsonType.STRING),
+            ParamSpec("params", JsonType.OBJECT, required=False, default={}),
+        ),
+    ),
+    "selection.interactive.open": MethodSpec(
+        30.0,
+        "Open/reuse the joint-cloud selection after reading collection, "
+        "all spectrum snapshots (including zero-point spectra), and selection. "
+        "Returns identity, commands, input state and native PNG.",
+    ),
+    "selection.interactive.command": MethodSpec(
+        30.0,
+        "Command the current joint identity after reading all sources and "
+        "selection. Use plugin commands or parameterless undo, apply, cancel. "
+        "Apply publishes without closing; input reads/PNG do not refresh guards.",
+        params=(
+            ParamSpec("context_id", JsonType.INTEGER),
+            ParamSpec("command", JsonType.STRING),
+            ParamSpec("params", JsonType.OBJECT, required=False, default={}),
+        ),
+    ),
     # Database-search fit (v2)
     "fit.result": MethodSpec(
         5.0,
@@ -221,6 +266,20 @@ OBSERVATION_POLICIES: dict[str, ResourceObservationPolicy] = {
     ),
     "selection.snapshot": ResourceObservationPolicy(reveals=("selection",)),
     "selection.pointcloud": ResourceObservationPolicy(),
+    "interactive.read": ResourceObservationPolicy(),
+    "spectrum.interactive.open": ResourceObservationPolicy(
+        guard_deps=("spectrum:{name}",)
+    ),
+    "spectrum.interactive.command": ResourceObservationPolicy(
+        guard_deps=("spectrum:{name}",), refresh_after_write=True
+    ),
+    "selection.interactive.open": ResourceObservationPolicy(
+        guard_deps=("spectrums:__set__", "spectrum:*", "selection")
+    ),
+    "selection.interactive.command": ResourceObservationPolicy(
+        guard_deps=("spectrums:__set__", "spectrum:*", "selection"),
+        refresh_after_write=True,
+    ),
     "fit.result": ResourceObservationPolicy(reveals=("fit",)),
     "fit.set_params": ResourceObservationPolicy(
         guard_deps=("fit",), refresh_after_write=True
