@@ -14,6 +14,7 @@ from zcu_tools.cfg_model import (
     ModuleCfgFactory,
     NoneResetCfg,
     PulseCfg,
+    PulseResetCfg,
     PulseSpec,
     TwoPulseResetCfg,
     TwoPulseResetSpec,
@@ -231,6 +232,45 @@ class TestModuleCfgFactoryFromRaw:
         cfg = ModuleCfgFactory.from_raw({"type": "reset/none"})
         assert isinstance(cfg, NoneResetCfg)
 
+    def test_unknown_type_raises(self):
+        with pytest.raises(ValueError, match="union_tag_invalid") as failure:
+            ModuleCfgFactory.from_raw({"type": "no_such_module"})
+        assert "Root <inline>; chain <inline>; expected module:" in str(failure.value)
+
+    def test_missing_discriminator_raises(self):
+        with pytest.raises(ValueError, match="union_tag_not_found") as failure:
+            ModuleCfgFactory.from_raw({"ch": 1})
+        assert "Root <inline>; chain <inline>; expected module:" in str(failure.value)
+
+    def test_typed_context_materializes_string_ref(self):
+        resolver = Resolver()
+        pulse = PulseSpec(
+            waveform=ConstWaveformCfg(length=0.2),
+            ch=1,
+            nqz=1,
+            freq=4000.0,
+            gain=0.5,
+        )
+        resolver.modules["library_pulse"] = pulse
+        expected_pulse = pulse.to_dict()
+        raw: CfgInputMap = {"type": "reset/pulse", "pulse_cfg": "library_pulse"}
+
+        cfg = ModuleCfgFactory.from_raw(
+            raw, context=CfgValidationContext(modules=resolver)
+        )
+
+        assert isinstance(cfg, PulseResetCfg)
+        assert cfg.pulse_cfg.to_dict() == expected_pulse
+        cfg.pulse_cfg.set_param("gain", 0.9)
+        assert cfg.pulse_cfg.gain == 0.9
+        assert pulse.to_dict() == expected_pulse
+        assert resolver.modules["library_pulse"].to_dict() == expected_pulse
+        assert raw == {"type": "reset/pulse", "pulse_cfg": "library_pulse"}
+
+    def test_no_context_when_not_provided(self):
+        cfg = ModuleCfgFactory.from_raw({"type": "reset/none"})
+        assert isinstance(cfg, NoneResetCfg)
+
 
 class TestWaveformCfgFactoryFromRaw:
     def test_dispatch_const(self):
@@ -254,3 +294,13 @@ class TestWaveformCfgFactoryFromRaw:
         )
         assert isinstance(cfg, FlatTopWaveformCfg)
         assert isinstance(cfg.raise_waveform, GaussWaveformCfg)
+
+    def test_unknown_style_raises(self):
+        with pytest.raises(ValueError, match="union_tag_invalid") as failure:
+            WaveformCfgFactory.from_raw({"style": "no_such_style", "length": 1.0})
+        assert "Root <inline>; chain <inline>; expected waveform:" in str(failure.value)
+
+    def test_missing_discriminator_raises(self):
+        with pytest.raises(ValueError, match="union_tag_not_found") as failure:
+            WaveformCfgFactory.from_raw({"length": 1.0})
+        assert "Root <inline>; chain <inline>; expected waveform:" in str(failure.value)
