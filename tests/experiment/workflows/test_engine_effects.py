@@ -500,6 +500,58 @@ def test_live_finalization_projects_latest_values(
     np.testing.assert_array_equal(snapshots[-1][0], expected)
 
 
+@pytest.mark.parametrize("control", ["pause", "stop"])
+@pytest.mark.parametrize("failure", ["none", "refresh", "cleanup", "effect"])
+def test_live_finalization_after_generator_shutdown(
+    rig: Rig, control: str, failure: str
+) -> None:
+    def acquire(_run: Run[Cfg]) -> int:
+        if control == "pause":
+            rig.engine.pause("run")
+        else:
+            rig.engine.stop("run")
+        if failure == "effect":
+            raise OSError("primary effect failure")
+        return 1
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
+    ) -> Step[State, int]:
+        axes = env.axes("live")
+        (line,) = axes.plot([0.0], [1.0])
+        try:
+            yield from env.run(acquire, Cfg(), save=save_integer)
+        finally:
+            line.set_ydata([9.0])
+            if failure != "none":
+                rig.plots.error = OSError("shutdown refresh failure")
+            if failure == "cleanup":
+                raise OSError("primary cleanup failure")
+        return Next(1, state)
+
+    rig.start(step)
+    status = rig.engine.execute("run")
+    assert status.committed_seq == 0
+    assert "experiment_failed" not in rig.kinds()
+    assert not tuple(rig.paths.data_root.rglob("*.h5"))
+    if failure == "none":
+        assert status.lifecycle == ("paused" if control == "pause" else "stopped")
+        assert "step_discarded" in rig.kinds()
+        np.testing.assert_array_equal(rig.plots.snapshots[-1][0], [9.0])
+    else:
+        assert status.lifecycle == "failed"
+        expected = (
+            "shutdown refresh failure"
+            if failure == "refresh"
+            else f"primary {failure} failure"
+        )
+        assert status.reason == f"OSError: {expected}"
+        failed = next(event for event in rig.events() if event["kind"] == "step_failed")
+        error = failed["error"]
+        assert isinstance(error, dict)
+        assert error["message"] == expected
+
+
 def test_workflow_can_abort_after_a_recoverable_failed_effect(rig: Rig) -> None:
     def failed(run: Run[Cfg]) -> int:
         buffer = run.buffer((1,), axes=(np.array([0.0]),))

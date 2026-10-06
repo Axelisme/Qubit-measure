@@ -136,6 +136,8 @@ class Run[Cfg]:
         one-dimensional float64 axis of matching length per dimension.
         Invalid dimensions, dtype, rank, length, or values raise ValueError.
         Buffers start with NaNs; partial data remains valid runtime output.
+        Live callbacks project every update without dropping the last values;
+        snapshot coalescing belongs to the host PlotPort.
         """
         if not shape or any(type(size) is not int or size <= 0 for size in shape):
             raise ValueError("Buffer dimensions must be positive integers")
@@ -159,7 +161,9 @@ class Run[Cfg]:
             self._update_live(data, captured_axes)
 
         buffer = SignalBuffer(
-            shape, on_update=update if self._live is not None else None
+            shape,
+            on_update=update if self._live is not None else None,
+            update_interval=None,
         )
         self._buffers.append((buffer, captured_axes))
         return buffer

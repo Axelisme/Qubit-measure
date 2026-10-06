@@ -218,15 +218,15 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             outcome = self._drive(generator)
         except _DiscardStep:
             # close may run user finally blocks; their failures are not cancellation.
-            generator.close()
+            self._close_step(generator)
             self._discard_iteration()
             return
         except BaseException:
             # Cleanup cannot replace the acquisition/analysis failure source.
             try:
-                generator.close()
+                self._close_step(generator)
             except (Exception, KeyboardInterrupt):
-                _logger.exception("Workflow generator cleanup also failed")
+                _logger.exception("Workflow shutdown also failed")
             raise
         self._displays.refresh()
         if isinstance(outcome, Next):
@@ -248,6 +248,18 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                     )
                 )
                 self._end(lifecycle, reason)
+
+    def _close_step(self, generator: Step[S, R]) -> None:
+        """Close the producer and refresh its final artists, preserving close errors."""
+        try:
+            generator.close()
+        except BaseException:
+            try:
+                self._displays.refresh()
+            except (Exception, KeyboardInterrupt):
+                _logger.exception("Final display refresh also failed")
+            raise
+        self._displays.refresh()
 
     def _drive(self, generator: Step[S, R]) -> Next[R, S] | Done | Aborted:
         while True:
