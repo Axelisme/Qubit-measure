@@ -1,198 +1,36 @@
 """Observable migration, source preservation and explicit resume contracts."""
 
-import hashlib
 import json
-from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
-from pydantic import ConfigDict, TypeAdapter
 from zcu_tools.datafile import (
-    AxisSchema,
-    CfgSnapshot,
     DataVariable,
-    ExperimentPayload,
     JsonObject,
-    LabberMetadata,
-    LabberPayload,
-    SoftwareProvenance,
-    VariableSchema,
     load_run_data,
-    write_labber,
 )
-from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
+from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.views import FieldView
 from zcu_tools.resources.storage_migration import (
     KeyRule,
-    LegacyRunEvidence,
-    LegacySnapshotEvidence,
     MigrationInputError,
     MigrationMapping,
     MigrationRequest,
+    ModuleRule,
     load_run_evidence,
     migrate_storage,
 )
 
-from tests.resources.entry.fakes import registry_state
+from tests.resources.storage_migration.fakes import (
+    manifest_path,
+    noop_validation,
+    write_meta,
+    write_run,
+)
 
-
-class SyntheticProbe(ComponentSchema):
-    """Test-only working-unit component; no concrete lab names or schema."""
-
-    model_config = ConfigDict(extra="forbid")
-    kind: str = "migration_test_probe"
-    frequency: float
-
-
-@pytest.fixture(scope="module", autouse=True)
-def registered_kind() -> Generator[None]:
-    before = registry_state()
-    component_registry.register("migration_test_probe", SyntheticProbe)
-    expected = registry_state()
-    try:
-        yield
-        assert registry_state() == expected, "migration module polluted registries"
-    finally:
-        component_registry.unregister("migration_test_probe")
-        assert registry_state() == before
-
-
-@pytest.fixture(autouse=True)
-def registry_guard(
-    request: pytest.FixtureRequest, registered_kind: None
-) -> Generator[None]:
-    before = registry_state()
-    yield
-    assert registry_state() == before, f"registry polluter: {request.node.nodeid}"
-
-
-@pytest.fixture
-def mapping() -> MigrationMapping:
-    return MigrationMapping(
-        mapping_version="1.0",
-        components={"C1": {"kind": "migration_test_probe", "frequency": 1.0}},
-        rules=(
-            KeyRule(
-                old_key="old_frequency",
-                target_path="C1.frequency",
-                action="value",
-                reason="Explicit mapping",
-            ),
-            KeyRule(
-                old_key="old_error",
-                target_path="C1.frequency",
-                action="stderr",
-                reason="Same working unit",
-            ),
-            KeyRule(
-                old_key="obsolete",
-                target_path=None,
-                action="remove",
-                reason="No longer used",
-            ),
-        ),
-        roles={"probe": "C1"},
-        data_schemas={
-            "synthetic_scan": (
-                VariableSchema(
-                    variable=DataVariable("signal"),
-                    axes=(AxisSchema(name="x", unit="s", dtype=np.dtype("float64")),),
-                    signal_name="signal",
-                    signal_unit="V",
-                    signal_dtype=np.dtype("complex128"),
-                ),
-            )
-        },
-    )
-
-
-@pytest.fixture
-def request_data(tmp_path: Path) -> MigrationRequest:
-    request = MigrationRequest(
-        result_root=tmp_path / "result",
-        database_root=tmp_path / "Database",
-        results_root=tmp_path / "results",
-        source_chip="chip",
-        source_qubit="qubit",
-        name="destination",
-        part="all",
-    )
-    (request.result_root / "chip" / "qubit").mkdir(parents=True)
-    (request.database_root / "chip" / "qubit").mkdir(parents=True)
-    return request
-
-
-def write_meta(request: MigrationRequest, label: str, values: JsonObject) -> Path:
-    source = request.result_root / "chip" / "qubit" / label / "meta_info.json"
-    source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text(json.dumps(values), encoding="utf-8")
-    return source
-
-
-def write_run(request: MigrationRequest) -> tuple[MigrationRequest, Path]:
-    source = request.database_root / "chip" / "qubit" / "2025" / "10" / "scan.hdf5"
-    source.parent.mkdir(parents=True, exist_ok=True)
-    cfg = CfgSnapshot(
-        values={"frequency": 12.5}, cfg_type="SyntheticCfg", schema_version="1.0"
-    )
-    payload = ExperimentPayload(
-        variables={
-            DataVariable("signal"): LabberPayload(
-                ("signal", "V", np.array([1 + 2j, 3 + 4j])),
-                [("x", "s", np.array([0.0, 1.0]))],
-            )
-        },
-        metadata=LabberMetadata(tags=["synthetic_scan"]),
-        representation="single",
-    )
-    write_labber(source, payload, cfg=cfg)
-    with source.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    evidence = LegacyRunEvidence(
-        source=Path("2025/10/scan.hdf5"),
-        source_hash=digest,
-        experiment="synthetic_scan",
-        cfg=cfg,
-        started_at="2025-10-01T00:00:00Z",
-        finished_at=None,
-        completion="stopped",
-        snapshot=LegacySnapshotEvidence(
-            entry_name="historical",
-            point="point_at_acquisition",
-            description=None,
-            roles={},
-            params={},
-        ),
-        provenance=SoftwareProvenance(
-            software_versions={},
-            git_commit=None,
-            git_dirty=None,
-            qick_version=None,
-            soc_fingerprint=None,
-            hostname=None,
-        ),
-    )
-    raw = TypeAdapter(LegacyRunEvidence).dump_python(evidence, mode="json")
-    document = {
-        "format": "zcu.migration-run-evidence",
-        "format_version": "1.7",
-        "entries": [raw],
-        "future": {"keep": True},
-    }
-    evidence_path = request.result_root.parent / "evidence.json"
-    evidence_path.write_text(json.dumps(document), encoding="utf-8")
-    return replace(request, run_evidence=load_run_evidence(evidence_path)), source
-
-
-def noop_validation(path: Path, tag: str) -> None:
-    assert path.is_file()
-    assert tag == "synthetic_scan"
-
-
-def manifest_path(request: MigrationRequest) -> Path:
-    return request.results_root / request.name / "records" / "migration-state.json"
+pytestmark = pytest.mark.usefixtures("registry_guard")
 
 
 @pytest.mark.parametrize("which", ["result", "database"])
@@ -379,10 +217,11 @@ def test_native_is_readable_and_validated_before_source_removal(
     before = source.read_bytes()
     observed: list[Path] = []
 
-    def validate(path: Path, tag: str) -> None:
+    def validate(path: Path, tag: str, cfg_type: str) -> None:
         assert source.read_bytes() == before
         stored = load_run_data(path)
         assert stored.metadata.experiment == tag
+        assert stored.cfg.cfg_type == cfg_type
         assert stored.metadata.completion == "stopped"
         assert stored.metadata.snapshot.point == "point_at_acquisition"
         assert stored.metadata.snapshot.entry_name == "historical"
@@ -414,8 +253,8 @@ def test_validation_failure_retains_source_and_reuses_run_identity(
     request, source = write_run(request_data)
     paths: list[Path] = []
 
-    def fail(path: Path, tag: str) -> None:
-        noop_validation(path, tag)
+    def fail(path: Path, tag: str, cfg_type: str) -> None:
+        noop_validation(path, tag, cfg_type)
         paths.append(path)
         raise RuntimeError("typed spec rejected")
 
@@ -426,10 +265,10 @@ def test_validation_failure_retains_source_and_reuses_run_identity(
     assert before["files"][0]["phase"] == "published"
     assert not before["files"][0]["native_validated"]
 
-    def succeed(path: Path, tag: str) -> None:
+    def succeed(path: Path, tag: str, cfg_type: str) -> None:
         assert source.is_file()
         assert path == paths[0]
-        noop_validation(path, tag)
+        noop_validation(path, tag, cfg_type)
 
     report = migrate_storage(
         replace(request, resume=True, run_evidence=None),
@@ -447,8 +286,8 @@ def test_validated_native_hash_conflict_retains_labber_source(
 ) -> None:
     request, source = write_run(request_data)
 
-    def fail(path: Path, tag: str) -> None:
-        noop_validation(path, tag)
+    def fail(path: Path, tag: str, cfg_type: str) -> None:
+        noop_validation(path, tag, cfg_type)
         raise RuntimeError("pause")
 
     with pytest.raises(RuntimeError):
@@ -496,7 +335,7 @@ def test_dry_run_never_publishes_or_calls_validator(
     request, source = write_run(request_data)
     write_meta(request, "context", {"old_frequency": 8.0})
 
-    def forbidden(path: Path, tag: str) -> None:
+    def forbidden(path: Path, tag: str, cfg_type: str) -> None:
         pytest.fail(f"dry-run called validator: {path} {tag}")
 
     result = migrate_storage(
@@ -719,10 +558,10 @@ def test_native_resume_before_labber_move_keeps_assignment(
         native["destination_hash"] = None
     state_path.write_text(json.dumps(manifest))
 
-    def validate(path: Path, tag: str) -> None:
+    def validate(path: Path, tag: str, cfg_type: str) -> None:
         assert source.is_file()
         assert path == destination
-        noop_validation(path, tag)
+        noop_validation(path, tag, cfg_type)
 
     result = migrate_storage(
         replace(request, resume=True), mapping=mapping, validate_native=validate
@@ -758,8 +597,8 @@ def test_callback_cannot_change_native_and_authorize_source_deletion(
 ) -> None:
     request, source = write_run(request_data)
 
-    def change(path: Path, tag: str) -> None:
-        noop_validation(path, tag)
+    def change(path: Path, tag: str, cfg_type: str) -> None:
+        noop_validation(path, tag, cfg_type)
         path.write_bytes(b"modified by callback")
 
     with pytest.raises(MigrationInputError, match="hash"):
@@ -772,8 +611,8 @@ def test_planned_evidence_is_immutable_including_future_fields(
 ) -> None:
     request, source = write_run(request_data)
 
-    def fail(path: Path, tag: str) -> None:
-        noop_validation(path, tag)
+    def fail(path: Path, tag: str, cfg_type: str) -> None:
+        noop_validation(path, tag, cfg_type)
         raise RuntimeError("pause validation")
 
     with pytest.raises(RuntimeError, match="pause"):
@@ -792,3 +631,119 @@ def test_planned_evidence_is_immutable_including_future_fields(
             validate_native=noop_validation,
         )
     assert source.is_file()
+
+
+@pytest.mark.parametrize(
+    "unit_evidence", [None, "declared-working-unit", "=unresolved"]
+)
+def test_parameter_requires_explicit_unit_evidence(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+    unit_evidence: str | None,
+) -> None:
+    values: JsonObject = {"old_frequency": 12.5}
+    if unit_evidence is not None:
+        values["unit_evidence"] = unit_evidence
+    write_meta(request_data, "context", values)
+    rule = replace(mapping.rules[0], requires_keys=("unit_evidence",))
+    report = migrate_storage(
+        replace(request_data, part="parameters"),
+        mapping=replace(mapping, rules=(rule,)),
+        validate_native=noop_validation,
+    )
+    point = ResultEntry.open(
+        request_data.name,
+        result_root=request_data.results_root,
+        database_root=request_data.database_root,
+    ).use_point("context")
+    accepted = unit_evidence == "declared-working-unit"
+    assert point.C1.frequency == (12.5 if accepted else 1.0)
+    pending = [item for item in report.pending if item.location == "old_frequency"]
+    assert bool(pending) is not accepted
+    if pending:
+        assert "unit_evidence" in pending[0].reason
+
+
+def test_wrapped_channel_creates_a_complete_optional_container(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+) -> None:
+    write_meta(request_data, "context", {"old_channel": 7})
+    report = migrate_storage(
+        replace(request_data, part="parameters"),
+        mapping=replace(
+            mapping,
+            rules=(
+                KeyRule(
+                    old_key="old_channel",
+                    target_path="C1.channel",
+                    wrap_key="ch",
+                    action="value",
+                    reason="Complete channel from explicit evidence",
+                ),
+            ),
+        ),
+        validate_native=noop_validation,
+    )
+    point = ResultEntry.open(
+        request_data.name,
+        result_root=request_data.results_root,
+        database_root=request_data.database_root,
+    ).use_point("context")
+    channel = point.C1.channel
+    assert isinstance(channel, FieldView)
+    assert channel.ch == 7
+    decision = next(
+        item for item in report.key_mappings if item.old_key == "old_channel"
+    )
+    assert decision.new_path == "C1.channel.ch"
+    assert point.meta("C1.channel.ch") is not None
+
+
+def test_module_candidates_keep_destinations_and_declared_reference_priority(
+    request_data: MigrationRequest,
+    mapping: MigrationMapping,
+) -> None:
+    meta = write_meta(request_data, "context", {"old_frequency": 12.5})
+    library = meta.parent / "module_cfg.yaml"
+    library.write_text(
+        "second_choice: {type: synthetic, value: 2}\n"
+        "first_choice: {type: synthetic, value: 1}\n"
+        "unknown_module: {type: unknown}\n",
+        encoding="utf-8",
+    )
+    rules = tuple(
+        ModuleRule(
+            old_name=name,
+            target_path=f"C1.pulses.{name}",
+            reference_path="C1.module.chosen",
+            reason="Explicit candidate",
+        )
+        for name in ("first_choice", "second_choice")
+    )
+    report = migrate_storage(
+        replace(request_data, part="parameters"),
+        mapping=replace(mapping, module_rules=rules),
+        validate_native=noop_validation,
+    )
+    point = ResultEntry.open(
+        request_data.name,
+        result_root=request_data.results_root,
+        database_root=request_data.database_root,
+    ).use_point("context")
+    module = point.C1.module
+    assert isinstance(module, FieldView)
+    assert module.chosen == "C1.pulses.first_choice"
+    destinations = {
+        item.old_key: item.new_path
+        for item in report.key_mappings
+        if item.old_file == library
+    }
+    assert destinations == {
+        "first_choice": "C1.pulses.first_choice",
+        "second_choice": "C1.pulses.second_choice",
+        "unknown_module": None,
+    }
+    assert all(
+        "由 4a 轉換" in item.reason for item in report.pending if item.source == library
+    )

@@ -160,7 +160,7 @@ executionEnvironments = [
   { root = "lib", extraPaths = ["lib", "."] },
   { root = "tests", extraPaths = ["lib", "tools", "."] },
   { root = "scripts", extraPaths = ["lib", "."] },
-  { root = "tools", extraPaths = ["lib", "tools"] },
+  { root = "tools", extraPaths = ["lib", "tools", "."] },
 ]
 # strict, minus the rules whose diagnostics are produced by untyped third-party
 # packages (qick, pyvisa, scqubits, qtpy) rather than by this repository. Measured

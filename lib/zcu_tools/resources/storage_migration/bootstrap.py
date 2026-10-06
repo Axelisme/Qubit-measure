@@ -44,6 +44,21 @@ def validate_mapping(mapping: MigrationMapping) -> None:
             raise MigrationInputError(f"{rule.old_key}: invalid action")
         if rule.action in ("value", "stderr", "module") and not rule.target_path:
             raise MigrationInputError(f"{rule.old_key}: target_path is required")
+        if rule.wrap_key is not None and (
+            rule.action != "value" or not rule.wrap_key or "." in rule.wrap_key
+        ):
+            raise MigrationInputError(
+                f"{rule.old_key}: invalid wrap_key for value rule"
+            )
+        if any(not key for key in rule.requires_keys):
+            raise MigrationInputError(f"{rule.old_key}: empty evidence key")
+    names: set[str] = set()
+    for module in mapping.module_rules:
+        if not module.old_name or module.old_name in names or not module.target_path:
+            raise MigrationInputError(
+                f"{module.old_name!r}: invalid module declaration"
+            )
+        names.add(module.old_name)
 
 
 def _locations(

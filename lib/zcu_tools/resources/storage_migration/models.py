@@ -26,12 +26,34 @@ class KeyRule:
     old_key is the literal legacy key. target_path is its dotted component,
     provenance or module destination, required for value/stderr/module actions.
     action selects value, stderr, deferred module conversion, removal or pending.
-    reason explains the decision for the human-facing report.
+    reason explains the decision for the human-facing report. wrap_key, when
+    non-None, wraps a value in one named field for a complete container write;
+    only value actions support it. requires_keys lists explicit, non-expression
+    keys required in the same source JSON; absent evidence leaves this pending.
     """
 
     old_key: str
     target_path: str | None
     action: MappingAction
+    reason: str
+    wrap_key: str | None = None
+    requires_keys: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, kw_only=True)
+class ModuleRule:
+    """One deferred flat-library name with an explicit destination and reference.
+
+    old_name is the literal source library key. target_path is the future library
+    key (component.partition.name), not a published cfg. reference_path is a
+    component module-slot path or None. Rule order chooses the first present
+    candidate per slot; other candidates retain their own destinations. reason
+    explains this declaration without validating or converting module cfg.
+    """
+
+    old_name: str
+    target_path: str
+    reference_path: str | None
     reason: str
 
 
@@ -43,7 +65,9 @@ class MigrationMapping:
     components maps component names to complete seeds in working units.
     rules is an ordered tuple of explicit legacy key decisions.
     roles maps role names to component names.
-    data_schemas maps declared experiment tags to generic disk-unit schemas.
+    data_schemas maps (experiment tag, cfg_type) pairs to disk-unit schemas;
+    both strings are exact historical identities, with no tag-only fallback.
+    module_rules declares deferred flat module names in reference priority order.
     The composition root registers the seeds' kinds with entry before use.
     """
 
@@ -51,7 +75,8 @@ class MigrationMapping:
     components: Mapping[str, JsonObject]
     rules: tuple[KeyRule, ...]
     roles: Mapping[str, str]
-    data_schemas: Mapping[str, tuple[VariableSchema, ...]]
+    data_schemas: Mapping[tuple[str, str], tuple[VariableSchema, ...]]
+    module_rules: tuple[ModuleRule, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -78,7 +103,9 @@ class LegacyRunEvidence:
 
     source is relative to Database/source_chip/source_qubit, never absolute or
     containing '..'. source_hash is its lowercase SHA256. experiment is a
-    declared tag, not a filename inference. cfg is the complete historical cfg.
+    declared tag, not a filename inference. cfg is the complete historical cfg,
+    or None when cfg/cfg_type evidence is missing; the converter keeps it pending
+    and the document retains the complete unresolved JSON in raw.
     started_at is a UTC ISO acquisition time; finished_at is UTC ISO or None.
     completion is the historical complete/partial/stopped state.
     snapshot holds historical entry/point/parameter evidence. provenance holds
@@ -90,7 +117,7 @@ class LegacyRunEvidence:
     source: Path
     source_hash: str
     experiment: str
-    cfg: CfgSnapshot
+    cfg: CfgSnapshot | None
     started_at: str
     finished_at: str | None
     completion: Literal["complete", "partial", "stopped"]

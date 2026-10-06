@@ -38,6 +38,8 @@ from .state import MigrationSession, clear_pending, record_pending
 
 
 def _check_evidence(evidence: LegacyRunEvidence, entry: ResultEntry | None) -> None:
+    if evidence.cfg is None:
+        raise ValueError("cfg.cfg_type: missing explicit historical identity")
     if has_legacy_expression(evidence.cfg.values):
         raise ValueError("cfg: legacy expression cannot be converted")
     for path, parameter in evidence.snapshot.params.items():
@@ -83,16 +85,19 @@ def _load_payload(
     entry: ResultEntry | None,
     mapping: MigrationMapping,
 ) -> ExperimentPayload:
-    schema = mapping.data_schemas.get(legacy.experiment)
+    if legacy.cfg is None:
+        raise ValueError("cfg.cfg_type: missing explicit historical identity")
+    identity = (legacy.experiment, legacy.cfg.cfg_type)
+    schema = mapping.data_schemas.get(identity)
     if schema is None:
-        raise ValueError(f"Undeclared experiment tag {legacy.experiment!r}")
+        raise ValueError(f"Undeclared native schema (tag, cfg_type) {identity!r}")
     if session.baseline(source) != legacy.source_hash:
         raise ValueError(
             "source_hash: acquisition evidence disagrees with source bytes"
         )
     _check_evidence(legacy, entry)
     payload = load_legacy_labber_payload(source, schema=schema)
-    tags = set(payload.metadata.tags) & mapping.data_schemas.keys()
+    tags = set(payload.metadata.tags) & {tag for tag, _cfg_type in mapping.data_schemas}
     if tags and tags != {legacy.experiment}:
         raise ValueError(
             f"experiment: evidence {legacy.experiment!r} disagrees with file tags {sorted(tags)!r}"
@@ -130,14 +135,15 @@ def _validate_native(
     session: MigrationSession,
     native: MigrationFileState,
     experiment: str,
-    validate_native: Callable[[Path, str], None],
+    cfg_type: str,
+    validate_native: Callable[[Path, str, str], None],
 ) -> MigrationFileState:
     session.verify_destination(native)
     if native.native_validated:
         return native
     try:
         load_run_data(native.destination)
-        validate_native(native.destination, experiment)
+        validate_native(native.destination, experiment, cfg_type)
         session.verify_destination(native)
         native = replace(native, native_validated=True)
         session.update_file(native)
@@ -155,7 +161,7 @@ def _convert_run(
     mapping: MigrationMapping,
     source: Path,
     legacy: LegacyRunEvidence | None,
-    validate_native: Callable[[Path, str], None],
+    validate_native: Callable[[Path, str, str], None],
 ) -> None:
     if legacy is None:
         record_pending(
@@ -163,6 +169,15 @@ def _convert_run(
             source,
             "run evidence",
             "Missing explicit historical snapshot/acquisition/completion evidence; Labber source retained",
+        )
+        return
+    cfg = legacy.cfg
+    if cfg is None:
+        record_pending(
+            session,
+            source,
+            "run evidence",
+            "cfg.cfg_type: missing explicit historical identity; Labber source retained",
         )
         return
     native = session.state(source, "native")
@@ -216,12 +231,14 @@ def _convert_run(
             raise MigrationInputError(
                 f"{source}: missing payload for native publication"
             )
-        save_run_data(path, payload, metadata, cfg=legacy.cfg)
+        save_run_data(path, payload, metadata, cfg=cfg)
 
     native = session.publish(source, native_path, operation="native", build=build)
     if session.dry_run:
         return
-    native = _validate_native(session, native, legacy.experiment, validate_native)
+    native = _validate_native(
+        session, native, legacy.experiment, cfg.cfg_type, validate_native
+    )
     session.completed(native)
     relative = source.relative_to(session.manifest.report.source.database_path)
     moved = session.publish(
@@ -239,7 +256,7 @@ def convert_data(
     entry: ResultEntry | None,
     mapping: MigrationMapping,
     evidence_document: MigrationRunEvidenceDocument | None,
-    validate_native: Callable[[Path, str], None],
+    validate_native: Callable[[Path, str, str], None],
 ) -> None:
     """Convert evidence-backed Labber sources, then copy/verify/remove only validated originals.
 

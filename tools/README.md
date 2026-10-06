@@ -1,9 +1,9 @@
 # tools/
 
-`tools/` 放 repo 內部的品質檢查；review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者入口——板端 server、GUI 啟動、資料工具。
-兩者的讀者不同，不混用。
+`tools/` 放 repo 內部的品質檢查，以及永久保留的離線 `migrate_storage.py`。後者由明確歷史 evidence 與 lab mapping 轉換舊 result／Database，不控制硬體、不接正常 runtime fallback。review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者入口——板端 server、GUI 啟動、資料工具。
+品質檢查與使用者啟動腳本的讀者不同。Migration CLI 是永久離線工具，保留在 tools，不接量測啟動流程。
 
-本目錄的檢查是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，把 JSON receipt 輸出到
+除離線 migration CLI 外，本目錄的檢查是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，把 JSON receipt 輸出到
 stdout。`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_correspondence.py`
 另把人類可讀的違規行輸出到 stderr；`check_suppressions.py` 只計量不判定，在 stderr 列出使用量最多的
 抑制（最多 20 筆）並固定 exit 0；`check_ratchet.py` 與

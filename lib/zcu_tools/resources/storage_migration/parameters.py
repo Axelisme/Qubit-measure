@@ -51,6 +51,15 @@ def _accept_parameter(
     values: JsonObject,
     mapping: MigrationMapping,
 ) -> str | None:
+    missing = tuple(
+        key
+        for key in rule.requires_keys
+        if key not in values
+        or values[key] is None
+        or has_legacy_expression(values[key])
+    )
+    if missing:
+        return f"Missing explicit evidence keys: {', '.join(missing)}"
     if view is None:
         return None
     path = rule.target_path
@@ -82,7 +91,8 @@ def _accept_parameter(
                 provenance=replace(provenance, stderr=float(value)),
             )
         else:
-            draft.set(path, _YAML_VALUE.validate_python(value, strict=True))
+            accepted = {rule.wrap_key: value} if rule.wrap_key is not None else value
+            draft.set(path, _YAML_VALUE.validate_python(accepted, strict=True))
     return None
 
 
@@ -146,7 +156,11 @@ def _map_parameters(
                         old_file=source,
                         old_key=key,
                         new_file=new_file,
-                        new_path=path
+                        new_path=f"{path}.{rule.wrap_key}"
+                        if path is not None
+                        and rule is not None
+                        and rule.wrap_key is not None
+                        else path
                         if path is not None
                         else "general.ext"
                         if action == "pending"
@@ -163,7 +177,13 @@ def _map_parameters(
             draft.set("general.ext", ext)
 
 
-def _defer_modules(session: MigrationSession, source: Path, target: Path) -> None:
+def _defer_modules(
+    session: MigrationSession,
+    source: Path,
+    target: Path,
+    mapping: MigrationMapping,
+    view: SetupView | PointView | None,
+) -> None:
     if not source.is_file():
         return
     source = contained_path(source, session.manifest.report.source.result_path)
@@ -171,8 +191,28 @@ def _defer_modules(session: MigrationSession, source: Path, target: Path) -> Non
     modules = _YAML_MAP.validate_python(
         YAML(typ="safe").load(source.read_text(encoding="utf-8")), strict=True
     )
+    references: dict[str, str] = {}
+    for rule in mapping.module_rules:
+        if rule.old_name in modules and rule.reference_path is not None:
+            references.setdefault(rule.reference_path, rule.target_path)
+    if view is not None and references:
+        with view.edit() as draft:
+            for path, reference in references.items():
+                draft.set(path, reference)
     for name in modules:
-        record_pending(session, source, name, "Legacy module library: 由 4a 轉換")
+        rule = next(
+            (rule for rule in mapping.module_rules if rule.old_name == name), None
+        )
+        reason = (
+            f"{rule.reason}; 由 4a 轉換"
+            if rule is not None
+            else ("Unknown legacy module; no inferred destination; 由 4a 轉換")
+        )
+        if rule is not None and rule.reference_path is not None:
+            reason += (
+                f"; {rule.reference_path} references {references[rule.reference_path]}"
+            )
+        record_pending(session, source, name, reason)
         report = session.manifest.report
         items = tuple(
             item
@@ -188,9 +228,9 @@ def _defer_modules(session: MigrationSession, source: Path, target: Path) -> Non
                         old_file=source,
                         old_key=name,
                         new_file=target,
-                        new_path=None,
+                        new_path=rule.target_path if rule is not None else None,
                         action="module",
-                        reason="由 4a 轉換; retain legacy module name for cfg owner",
+                        reason=reason,
                     ),
                 ),
             )
@@ -228,7 +268,11 @@ def _convert_context(
         )
     _map_parameters(session, source, target, values, mapping, view)
     _defer_modules(
-        session, candidate.parent / "module_cfg.yaml", target.parent / "module_cfg.yaml"
+        session,
+        candidate.parent / "module_cfg.yaml",
+        target.parent / "module_cfg.yaml",
+        mapping,
+        view,
     )
     session.baseline(source)
 

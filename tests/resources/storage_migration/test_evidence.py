@@ -90,6 +90,7 @@ def test_load_preserves_future_fields_and_historical_snapshot(tmp_path: Path) ->
     assert parameter.value == 12.5
     assert parameter.unit == "MHz"
     assert parameter.source.stderr == 0.2
+    assert entry.cfg is not None
     assert entry.cfg.values["future_cfg"] == {"retained": True}
     assert entry.provenance.hostname is None
 

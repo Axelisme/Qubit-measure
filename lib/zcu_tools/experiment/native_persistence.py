@@ -13,6 +13,7 @@ from zcu_tools.datafile import (
     LabberMetadata,
     RunMetadata,
     RunSnapshot,
+    VariableSchema,
     load_run_data,
     save_run_data,
     validate_experiment_payload,
@@ -31,6 +32,19 @@ from .records import RunRecord
 
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
 ResultT = TypeVar("ResultT")
+
+
+def native_schemas(
+    spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
+) -> tuple[VariableSchema, ...]:
+    """Project an explicit experiment declaration to generic disk-unit schemas.
+
+    spec is the same single or grouped declaration accepted by save_run/load_run.
+    Return one schema per declared variable, preserving axes, names, units,
+    dtypes and required identities. Do not inspect files, cfg or live hardware.
+    Invalid declared units/dtypes propagate datafile schema validation errors.
+    """
+    return tuple(variable.native_schema() for variable in _variable_specs(spec))
 
 
 def save_run(

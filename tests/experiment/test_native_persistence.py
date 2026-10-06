@@ -14,6 +14,7 @@ from zcu_tools.datafile import (
     load_grouped_labber_data,
     load_run_data,
     save_run_data,
+    validate_experiment_payload,
 )
 from zcu_tools.experiment import (
     AxesSpec,
@@ -27,6 +28,7 @@ from zcu_tools.experiment import (
     VariableZSpec,
     ZSpec,
     load_run,
+    native_schemas,
     save_run,
 )
 from zcu_tools.experiment.axes_spec import Axis
@@ -133,6 +135,7 @@ def test_single_instance_native_round_trip_keeps_cfg_snapshot_and_memory_units(
     np.testing.assert_array_equal(loaded.result.frequency, result.frequency)
     np.testing.assert_allclose(loaded.result.signal, result.signal, rtol=1e-15)
     stored = load_run_data(path)
+    validate_experiment_payload(stored.payload, schema=native_schemas(SINGLE))
     assert stored.cfg.cfg_type == "NativeCfg"
     assert stored.cfg.schema_version == "3.2"
     assert tuple(stored.payload.variables) == (DataVariable("resonator"),)
@@ -163,6 +166,7 @@ def test_grouped_instance_uses_shared_native_entry_for_different_grids(
             getattr(loaded.result, field), getattr(result, field), rtol=1e-15
         )
     stored = load_run_data(path)
+    validate_experiment_payload(stored.payload, schema=native_schemas(GROUPED))
     assert stored.payload.representation == "grouped"
     assert tuple(stored.payload.variables) == GROUPED.required_variables
     np.testing.assert_allclose(

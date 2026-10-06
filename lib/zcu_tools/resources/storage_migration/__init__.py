@@ -26,9 +26,11 @@ from .models import (
     MigrationRequest,
     MigrationRunEvidenceDocument,
     MigrationSource,
+    ModuleRule,
     PendingItem,
     RunAssignment,
 )
+from .state import report_json
 
 __all__ = [
     "FailureItem",
@@ -49,8 +51,10 @@ __all__ = [
     "MigrationRequest",
     "MigrationRunEvidenceDocument",
     "MigrationSource",
+    "ModuleRule",
     "PendingItem",
     "RunAssignment",
     "load_run_evidence",
     "migrate_storage",
+    "report_json",
 ]

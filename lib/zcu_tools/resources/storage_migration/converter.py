@@ -19,7 +19,7 @@ def migrate_storage(
     request: MigrationRequest,
     *,
     mapping: MigrationMapping,
-    validate_native: Callable[[Path, str], None],
+    validate_native: Callable[[Path, str, str], None],
 ) -> MigrationReport:
     """Convert an explicit legacy entry without modifying its old result tree.
 
@@ -28,7 +28,7 @@ def migrate_storage(
     explicit key rules and disk schemas; register kinds in entry's shared registry
     before calling. Values/stderr keep working units; expressions are not evaluated.
     module_cfg conversion remains pending for the cfg owner, not generic YAML.
-    validate_native receives each published native path and proven experiment tag;
+    validate_native receives the published native path, experiment tag and cfg_type;
     it must load against its declared experiment spec without modifying the file.
     It runs synchronously before the corresponding Labber source can be deleted.
 
@@ -38,7 +38,8 @@ def migrate_storage(
     completes planned/prepared/published moves without deleting unverified sources.
     Completed setup/point documents remain editable and are validated, not restored.
     dry_run reads/validates sources and returns a report without any writes, moves
-    or validation callback. Missing acquisition evidence is reported as pending.
+    or validation callback. Missing cfg identity/acquisition evidence or an undeclared
+    (tag, cfg_type) schema is pending; never fall back to a tag-only declaration.
 
     Return the cumulative report of attempted parts. Normal runs persist manifest
     checkpoints and the fixed report location. Input/manifest/hash conflicts raise

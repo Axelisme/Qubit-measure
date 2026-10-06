@@ -38,6 +38,8 @@ def load_run_evidence(source: Path) -> MigrationRunEvidenceDocument:
     absolute/'..'/empty paths, invalid lowercase SHA256 or non-UTC acquisition
     times with MigrationInputError identifying source and field. Never infer
     experiment, point, completion or acquisition time from paths or file dates.
+    Missing cfg or missing/null/empty cfg_type projects cfg=None, retaining the
+    unresolved raw JSON for the converter to report pending, never a fallback.
     Actual source containment (including symlinks), hash/metadata agreement and
     declared experiment schema checks belong to migrate_storage.
     Propagate filesystem errors; do not return an empty success on read failure.
@@ -65,7 +67,9 @@ def parse_run_evidence(text: str, *, source: Path) -> MigrationRunEvidenceDocume
             ),
             strict=True,
         )
-        envelope = _ENVELOPE.validate_json(text, strict=True)
+        envelope = _ENVELOPE.validate_json(
+            json.dumps(_evidence_projection(raw)), strict=True
+        )
         _validate_header(envelope)
         seen: set[Path] = set()
         for index, entry in enumerate(envelope.entries):
@@ -81,6 +85,30 @@ def parse_run_evidence(text: str, *, source: Path) -> MigrationRunEvidenceDocume
         entries=envelope.entries,
         raw=raw,
     )
+
+
+def _evidence_projection(raw: JsonObject) -> JsonObject:
+    projected = dict(raw)
+    entries = raw.get("entries")
+    if not isinstance(entries, list):
+        return projected
+    projected_entries: list[JsonValue] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            projected_entries.append(entry)
+            continue
+        cfg = entry.get("cfg")
+        if cfg is None or (isinstance(cfg, dict) and cfg.get("cfg_type") in (None, "")):
+            if isinstance(cfg, dict) and "values" in cfg:
+                try:
+                    _JSON.validate_python(cfg["values"], strict=True)
+                except ValidationError as exc:
+                    raise ValueError(f"cfg.values: {exc}") from exc
+            projected_entries.append({**entry, "cfg": None})
+        else:
+            projected_entries.append(entry)
+    projected["entries"] = projected_entries
+    return projected
 
 
 def _finite_json_float(value: str) -> float:
