@@ -1,0 +1,54 @@
+"""Offline legacy conversion inputs, evidence loading and durable state models.
+
+This owner never imports experiment or concrete lab definitions. Normal runtime
+loaders do not use legacy fallback. The shipped CLI supplies explicit mapping,
+entry definition registration and native experiment validation.
+"""
+
+from .errors import MigrationInputError
+from .evidence import load_run_evidence
+from .models import (
+    FailureItem,
+    FileMigrationItem,
+    KeyMappingItem,
+    KeyRule,
+    LegacyRunEvidence,
+    LegacySnapshotEvidence,
+    MappingAction,
+    MigrationDestination,
+    MigrationFileState,
+    MigrationIdentity,
+    MigrationManifest,
+    MigrationMapping,
+    MigrationPart,
+    MigrationReport,
+    MigrationRequest,
+    MigrationRunEvidenceDocument,
+    MigrationSource,
+    PendingItem,
+    RunAssignment,
+)
+
+__all__ = [
+    "FailureItem",
+    "FileMigrationItem",
+    "KeyMappingItem",
+    "KeyRule",
+    "LegacyRunEvidence",
+    "LegacySnapshotEvidence",
+    "MappingAction",
+    "MigrationDestination",
+    "MigrationFileState",
+    "MigrationIdentity",
+    "MigrationInputError",
+    "MigrationManifest",
+    "MigrationMapping",
+    "MigrationPart",
+    "MigrationReport",
+    "MigrationRequest",
+    "MigrationRunEvidenceDocument",
+    "MigrationSource",
+    "PendingItem",
+    "RunAssignment",
+    "load_run_evidence",
+]
