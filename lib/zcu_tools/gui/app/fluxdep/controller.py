@@ -200,6 +200,15 @@ class Controller(BaseController[FluxDepState, EventBus]):
     # --- export ----------------------------------------------------------
 
     def export_spectrums(self, filepath: str | None = None, mode: str = "x") -> str:
+        """Write the native spectrum collection and return its output path.
+
+        Owner-thread command. None uses
+        <project.result_dir>/data/fluxdep/spectrums.hdf5.
+        mode is the native h5py mode: x creates only, w replaces an existing
+        file. Empty collection raises FailedPreconditionError (no_spectrums)
+        before I/O. I/O errors propagate and may leave partial output.
+        State and resource observations do not change.
+        """
         return self._export.export_spectrums(filepath, mode)
 
     # --- database-search fit (v2) ---------------------------------------
@@ -214,6 +223,16 @@ class Controller(BaseController[FluxDepState, EventBus]):
         r_f: float | None,
         sample_f: float | None,
     ) -> None:
+        """Replace search inputs and clear any result; emit FitChanged once.
+
+        Owner-thread command. database_path is the search database file, not
+        the project's raw-data directory. EJb/ECb/ELb are lower/upper bounds
+        in GHz. transitions holds native integer level-pair categories and
+        optional r_f/sample_f values in GHz; separate frequencies are injected
+        by the search kernel according to transitions_with_freqs. None clears
+        a separate frequency. Domain validation happens when searching.
+        This command neither checks the database nor starts a search.
+        """
         self._fit.set_params(database_path, EJb, ECb, ELb, transitions, r_f, sample_f)
         self._emit(FitChangedPayload(has_result=self._state.fit.has_result))
 
@@ -276,4 +295,12 @@ class Controller(BaseController[FluxDepState, EventBus]):
         return result
 
     def export_params(self, savepath: str | None = None) -> str:
+        """Merge the current fit into params.json and return its output path.
+
+        Owner-thread command. None uses params.json under project.result_dir.
+        Independent sections are preserved. Calibration comes from the first
+        aligned spectrum. FailedPreconditionError reports no_fit_result or
+        no_aligned_spectrum before I/O; native I/O errors propagate. State and
+        resource observations do not change.
+        """
         return self._fit.export_params(savepath)

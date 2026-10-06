@@ -114,6 +114,42 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Read the current fit inputs and result: {has_result, params:{EJ,EC,EL} "
         "or null, database_path, EJb, ECb, ELb, transitions, r_f, sample_f}.",
     ),
+    "fit.set_params": MethodSpec(
+        5.0,
+        "Replace all fit inputs after reading fit.result; clear the old result "
+        "without starting a search. database_path is the search database file. "
+        "EJb, ECb and ELb are finite [lower, upper] bounds in GHz. transitions "
+        "maps category names to integer pairs; reserved r_f/sample_f are finite "
+        "numbers. Optional separate r_f/sample_f default to null.",
+        params=(
+            ParamSpec("database_path", JsonType.STRING),
+            ParamSpec("EJb", JsonType.ARRAY),
+            ParamSpec("ECb", JsonType.ARRAY),
+            ParamSpec("ELb", JsonType.ARRAY),
+            ParamSpec("transitions", JsonType.OBJECT),
+            ParamSpec("r_f", JsonType.NUMBER, required=False),
+            ParamSpec("sample_f", JsonType.NUMBER, required=False),
+        ),
+    ),
+    "export.spectrums": MethodSpec(
+        30.0,
+        "Export the native spectrum collection after reading project.info, "
+        "spectrum.list and every current spectrum snapshot. Optional filepath "
+        "defaults to the project result directory. Existing files are rejected "
+        "unless overwrite is true; I/O failure may leave partial output.",
+        params=(
+            ParamSpec("filepath", JsonType.STRING, required=False),
+            ParamSpec("overwrite", JsonType.BOOLEAN, required=False, default=False),
+        ),
+    ),
+    "fit.export_params": MethodSpec(
+        30.0,
+        "Export the current fit result after reading project.info, fit.result, "
+        "spectrum.list and every current spectrum snapshot. Optional savepath "
+        "defaults to params.json in the project result directory. Merge with "
+        "independent sections and use the first aligned spectrum's calibration.",
+        params=(ParamSpec("savepath", JsonType.STRING, required=False),),
+    ),
     # Resource version table (optimistic-concurrency guard baseline). Full
     # snapshot is bookkeeping, not a full editable read. Only GUI shared
     # dispatch owns per-connection seen; MCP must not infer observations here.
@@ -155,6 +191,15 @@ OBSERVATION_POLICIES: dict[str, ResourceObservationPolicy] = {
     "selection.snapshot": ResourceObservationPolicy(reveals=("selection",)),
     "selection.pointcloud": ResourceObservationPolicy(),
     "fit.result": ResourceObservationPolicy(reveals=("fit",)),
+    "fit.set_params": ResourceObservationPolicy(
+        guard_deps=("fit",), refresh_after_write=True
+    ),
+    "export.spectrums": ResourceObservationPolicy(
+        guard_deps=("project", "spectrums:__set__", "spectrum:*")
+    ),
+    "fit.export_params": ResourceObservationPolicy(
+        guard_deps=("project", "fit", "spectrums:__set__", "spectrum:*")
+    ),
     "resources.versions": ResourceObservationPolicy(),
     "state.check": ResourceObservationPolicy(),
 }

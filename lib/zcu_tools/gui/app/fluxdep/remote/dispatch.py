@@ -13,6 +13,7 @@ Adding a method:
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Literal
 
@@ -24,7 +25,9 @@ if TYPE_CHECKING:
     # this module). String annotations keep pyright checking the call sites.
     from .service import RemoteControlAdapter
 
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.project import ProjectInfo, is_real_project, project_info_payload
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.readonly_handlers import (
     h_project_info,
@@ -36,14 +39,17 @@ from .dto import (
     AxisSnapshot,
     FitParametersReply,
     FitResultReply,
+    FitUpdatedReply,
     NameReply,
     NamesReply,
+    ParamsExportedReply,
     PointcloudReply,
     ProjectSetupReply,
     SelectionSnapshotReply,
     SpectrumListItem,
     SpectrumListReply,
     SpectrumRemovedReply,
+    SpectrumsExportedReply,
     SpectrumSnapshotReply,
     StateCheckReply,
     TransitionWire,
@@ -263,6 +269,116 @@ def _h_fit_result(
     }
 
 
+def _finite_number(value: object, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"'{label}' must be a finite number"
+        )
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"'{label}' must be representable as a float"
+        ) from exc
+    if not math.isfinite(number):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"'{label}' must be a finite number"
+        )
+    return number
+
+
+def _fit_bounds(value: object, label: str) -> tuple[float, float]:
+    if not isinstance(value, list) or len(value) != 2:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"'{label}' must be a two-element number list"
+        )
+    return _finite_number(value[0], label), _finite_number(value[1], label)
+
+
+def _fit_transitions(value: object) -> TransitionDict:
+    if not isinstance(value, dict):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'transitions' must be an object")
+    transitions: TransitionDict = {}
+    for key, group in value.items():
+        if not isinstance(key, str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "'transitions' keys must be strings"
+            )
+        if key == "r_f":
+            transitions["r_f"] = _finite_number(group, "transitions.r_f")
+        elif key == "sample_f":
+            transitions["sample_f"] = _finite_number(group, "transitions.sample_f")
+        else:
+            if not isinstance(group, list):
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS, f"'transitions.{key}' must be a pair list"
+                )
+            pairs: list[tuple[int, int]] = []
+            for pair in group:
+                if (
+                    not isinstance(pair, list)
+                    or len(pair) != 2
+                    or isinstance(pair[0], bool)
+                    or not isinstance(pair[0], int)
+                    or isinstance(pair[1], bool)
+                    or not isinstance(pair[1], int)
+                ):
+                    raise RemoteError(
+                        ErrorCode.INVALID_PARAMS,
+                        f"'transitions.{key}' must contain two-element integer lists",
+                    )
+                pairs.append((pair[0], pair[1]))
+            transitions[key] = pairs
+    return transitions
+
+
+def _h_fit_set_params(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> FitUpdatedReply:
+    database_path = params["database_path"]
+    assert isinstance(database_path, str)  # ParamSpec validated the nonempty path.
+    # Parse the complete request before publishing. Domain interpretation of
+    # bounds/categories and separate frequency precedence stays in the kernel.
+    EJb = _fit_bounds(params["EJb"], "EJb")
+    ECb = _fit_bounds(params["ECb"], "ECb")
+    ELb = _fit_bounds(params["ELb"], "ELb")
+    transitions = _fit_transitions(params["transitions"])
+    r_f = _finite_number(params["r_f"], "r_f") if params["r_f"] is not None else None
+    sample_f = (
+        _finite_number(params["sample_f"], "sample_f")
+        if params["sample_f"] is not None
+        else None
+    )
+    adapter.ctrl.set_fit_params(
+        database_path, EJb, ECb, ELb, transitions, r_f, sample_f
+    )
+    return {"fit": _h_fit_result(adapter, {})}
+
+
+def _h_export_spectrums(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> SpectrumsExportedReply:
+    filepath = params["filepath"]
+    overwrite = params["overwrite"]
+    # ParamSpec supplied optional defaults; only the native create/replace
+    # modes are exposed, not arbitrary h5py modes.
+    assert filepath is None or isinstance(filepath, str)
+    assert isinstance(overwrite, bool)
+    return {
+        "filepath": adapter.ctrl.export_spectrums(
+            filepath, mode="w" if overwrite else "x"
+        )
+    }
+
+
+def _h_fit_export_params(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> ParamsExportedReply:
+    savepath = params["savepath"]
+    assert savepath is None or isinstance(savepath, str)
+    return {"savepath": adapter.ctrl.export_params(savepath)}
+
+
 # ---------------------------------------------------------------------------
 # State handler (app-specific; project.info + resources.versions are shared, see
 # zcu_tools.gui.remote.readonly_handlers).
@@ -300,6 +416,9 @@ _HANDLERS: dict[str, Handler] = {
     "selection.snapshot": _h_selection_snapshot,
     "selection.pointcloud": _h_selection_pointcloud,
     "fit.result": _h_fit_result,
+    "fit.set_params": _h_fit_set_params,
+    "export.spectrums": _h_export_spectrums,
+    "fit.export_params": _h_fit_export_params,
     "resources.versions": h_resources_versions,
     "state.check": _h_state_check,
 }
