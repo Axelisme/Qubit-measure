@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from .module import ModuleSpec
+    from .waveform import WaveformSpec
 
 
 @dataclass(frozen=True)
@@ -41,3 +45,34 @@ class WaveformAssetInfo(Protocol):
     def samples(self, data_key: str) -> WaveformSamples:
         """Read isolated, validated I/Q samples and their reference time axis."""
         ...
+
+
+class ModuleResolver(Protocol):
+    """Read unexpanded Specs from one fixed library snapshot using concrete keys.
+
+    Implementations isolate returned values and validate key-family partitions.
+    Missing keys and invalid families raise ValueError with key evidence.
+    No focus, role shorthand, asset lookup, or child materialization is performed.
+    """
+
+    def module_spec(self, path: str) -> ModuleSpec:
+        """Return an isolated module Spec for path; reject missing or non-module keys."""
+        ...
+
+    def waveform_spec(self, path: str) -> WaveformSpec:
+        """Return an isolated waveform Spec for path; reject missing or non-waveform keys."""
+        ...
+
+
+@dataclass(frozen=True)
+class CfgValidationContext:
+    """Explicit dependencies for one materialization call.
+
+    modules supplies the fixed library snapshot for string references, or None
+    when no lookup is needed. assets reads current bytes in a fixed asset scope,
+    or None when no arb envelope is needed. Missing required dependencies raise
+    ValueError at use; no global fallback or caching is permitted.
+    """
+
+    modules: ModuleResolver | None = None
+    assets: WaveformAssetInfo | None = None
