@@ -11,6 +11,7 @@
 root_packages =
     zcu_tools
     zcu_lab
+include_external_packages = True
 
 # ADR-0063: only an external composition root bootstraps concrete entry definitions.
 [importlinter:contract:entry-definitions-composition-only]
@@ -20,6 +21,22 @@ source_modules =
     zcu_tools
 forbidden_modules =
     zcu_lab.components
+
+# Named-workflow core has no frontend or Qt dependency, including external Qt roots.
+[importlinter:contract:workflows-core-no-ui]
+name = C18: named workflow execution does not depend on frontends or Qt
+type = forbidden
+source_modules =
+    zcu_tools.experiment.workflows
+forbidden_modules =
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
+    qtpy
+    PyQt5
+    PyQt6
+    PySide2
+    PySide6
 
 [importlinter:contract:experiment-no-gui]
 name = C1: the experiment domain does not depend on the GUI
