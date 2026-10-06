@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Nominal error producers and app-owned presentation
+**Last updated:** 2026-10-06. Project RPC and shared resource observations
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -41,10 +41,10 @@ scipy fit**（fit_spectrum 留在 notebook，未移植）。
 
 ## Architecture Overview
 
-分層 `app → Controller(façade) → services → State`。MainWindow 是唯一的 driving
-view（給人）；RemoteControlAdapter 是 **read-only observing view**（給 agent 讀
-狀態，不驅動分析）。仿 measure ADR-0068 的 view-split 機制，但 fluxdep 的 remote
-view 只暴露查詢，不暴露 mutation。
+分層 `app → Controller(façade) → services → State`。MainWindow 是人使用的 driving
+view；RemoteControlAdapter 是 agent 的命令與觀測入口。它與 GUI 共用
+Controller owners，資源的 per-connection observation 與 guard 由 shared remote 執行。
+目前支援原有查詢與 project setup；其餘 pipeline commands 正在 task 中實作。
 
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、
   `spectrums: dict[str, SpectrumEntry]`、`active_spectrum`、`selection`(SelectionState)、
@@ -88,7 +88,7 @@ view 只暴露查詢，不暴露 mutation。
   一份供 find_points/result_preview。MainWindow 擁有的 EventBus subscriptions 在 window close
   釋放，避免分析 view 被 bus callback 保活。
 - **`remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
-  （`gui/remote/control_service`，零 policy 覆寫），讓 agent **只讀**觀測（無任何 mutation RPC）。MCP
+  （`gui/remote/control_service`），注入 app observation policies 與 resource versions。MCP
   entrypoint 位於 `zcu_tools/mcp/fluxdep/server.py`；`McpBridge` 在
   `zcu_tools/mcp/core/bridge`。
 
@@ -180,35 +180,21 @@ Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 d
 互動圖背景一律 `gray_r`（白底、高值=黑），紅點落在高值共振線上對比最強
 （vs viridis 高值=黃，紅點不明顯）。對齊 notebook plotly 版的 Greys。
 
-### Remote RPC + MCP（**read-only** observing view，共用 gui/remote transport）
-GUI 側：`RemoteControlAdapter` 是第二個 driving-shaped view，但只讀。它 **subclass 共用
-`RemoteControlServiceBase`**（`gui/remote/control_service`），後者擁有 router scaffolding
-（`route` 骨架 + events.* handlers + `_dispatch_on_owner` bare marshal + EventBus
-subscribe/serialize/broadcast，底層的 socket/framing/handshake 再委給
-`NdjsonRpcEndpoint`）。fluxdep 是 read-only → **零 policy 覆寫**（連 `_get_bus` 都用 base
-預設 `ctrl.bus`、event serializers 以 payload `type` 為 key），本檔 `service.py` 只剩
-domain 注入（method registry / serializers / 版本 / `server_name="FluxDepRemoteServer"`）。
-method 註冊用共用 `MethodSpec`/`build_method_registry`（`gui/remote/method_spec`）。
-MCP 側：`zcu_tools/mcp/fluxdep/server.py` 是 thin entrypoint over 共用 `McpBridge`
-（`zcu_tools/mcp/core/bridge`：MCP-server-side transport，socket state 是 instance attr）—
-config（`fluxdep_` tool 前綴）+ bridge + 3 個生命週期工具。**MCP 層 events dropped**：
-MCP bridge 不訂任何 event-push（無 `on_event` hook）；RPC 層的 `RemoteControlAdapter`
-則訂閱 7 種 EventBus payload 並透過 `broadcast` 推送給已訂閱的 RPC 客戶端。
-- **只讀不變式**：`method_specs`/`dispatch` 只有 6 個純查詢 method
-  （`project.info`/`spectrum.list`/`selection.pointcloud`/`fit.result`/
-  `resources.versions`/`state.check`），**無任何 mutation**。所有分析（load/align/
-  pick/select/fit/export）是 user 在 GUI 裡做；agent 只觀測。原因：選點與軸向判斷需
-  人眼看 preview，agent 沒有。`test_dispatch.test_registry_is_read_only` 守這條線。
-- **`project.info` / `resources.versions` 用共用 handler**：`dispatch.py` 直接註冊 `gui/remote/readonly_handlers.py` 的 `h_project_info` / `h_resources_versions`（dispersive 用同一份，兩 app 永遠同步）；`_h_state_check` 仍 app-local（用 `gui/project.py` 的 `is_real_project` 判 placeholder）。
-- **MCP 工具集**：讀工具自 method_specs 生成（`fluxdep_project_info`/`spectrum_list`/
-  `selection_pointcloud`/`fit_result`/`state_check`；`resources.versions` 不曝露）+ 3 個
-  生命週期手寫工具（`fluxdep_launch`/`connect`/`disconnect`）。**無 `fluxdep_stop`**——
-  agent 不關 user 的 GUI。
-- `spectrum.list` 回 name、spec_type、aligned、points_completed、point_count。空完成的 point_count 是 0，完成旗標不代表有點可用。
-- 因 method 全無參數，`method_specs` 的 `params` 為空。
-- **省略**（measure-only policy，fluxdep 不需）：version guard / async operation handle /
-  diagnostic fan-out / CfgEditor session / render-view——這些都留在 measure 端的
-  RemoteControlAdapter + mcp_server，不在共用 transport 裡。
+### Remote RPC 與 MCP
+
+`RemoteControlAdapter` 注入 app 的 methods、event serializers、resource versions 與 observation policies。
+`RemoteControlServiceBase` 擁有 route、owner marshal、每條連線的 seen map 與 guard。
+`NdjsonRpcEndpoint` 擁有 socket、framing、authentication 與回覆交付。App 不複製這些機制。
+
+完整 `project.info`、`spectrum.list`、`fit.result` 分別揭露 project、集合及 fit。
+`selection.pointcloud`、`state.check` 與 `resources.versions` 不建立完整 observation。
+`project.setup` 必須先讀 project，使用 Controller 與原生 ProjectInfo paths。成功 self-write
+只推進同連線已讀且相符的版本，其他連線與 GUI 修改後仍須明示重讀。
+六個原有 read projections 保持原值；其餘 pipeline methods 尚在實作。
+
+MCP entrypoint 使用共用 `McpBridge`，工具從 method specs 生成。完整控制工具的 workflow
+與圖像驗收尚未完成。MCP 不訂閱業務 event-push，不維護第二份 seen map。
+RPC clients 可自行訂閱 EventBus facts。Agent 不關閉使用者的 GUI。
 
 ### Database search 的 app ownership
 `FitService.capture_search` 在 State owner capture detached `SearchInput`。
@@ -228,7 +214,7 @@ Hide 或 detach 不取消，重新 activate 讀 owner snapshot。
 診斷圖失敗不改數值 outcome。
 
 `Controller.search_database` 保留 headless owner-inline capture／compute／record 便利入口，
-不取 operation token。Remote 尚無 mutation RPC；後續 RPC 使用同一 search owner。
+不取 operation token。Remote search 尚在實作，使用同一 search owner，不另建 operation registry。
 
 ### Caller-correctable errors
 
@@ -271,13 +257,12 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   `[Frequency, Flux]`（freq 掃在外層）→ 軸反。**不是固定特性**（TwoTone 通常正、OneTone 常反），
   要看實際檔案。GUI 的「Transpose axes」toggle（`services/load.py` 的 `transpose_spectrum_data`）
   讓 user 從 preview 判斷後交換。
-- **分析全在 GUI（agent 只讀）**：load/定線/選點/篩選/fit/export 都是 user 互動；選點與軸向
-  判斷需人眼看 preview。agent 沒有 mutation RPC，只能讀狀態回報，**不可代為操作**。被要求「跑
-  分析」時要誠實說明只能 launch GUI + 讀狀態。
+- **Remote pipeline 尚未完成**：目前 agent 可觀測與設定 project，其餘分析仍由 GUI 驅動。
+  完整 remote pipeline 與 MCP 圖像驗收由 fluxdep-mcp-control task 推進，不把部分 RPC 當成整條分析可用。
 
 ## Entry Points
 
-- `scripts/run_fluxdep_gui.py` — 啟動（`--control-port` 開 read-only RPC 給 agent/MCP）。
+- `scripts/run_fluxdep_gui.py` — 啟動（`--control-port` 開 RPC 給 agent/MCP）。
 - `.mcp.json` 註冊 `fluxdep-gui` MCP server；skill `run-fluxdep-gui`
   (`.claude/skills/`，三副本同步 .agent/.codex；`sync_skills.sh` 只同步 SKILL.md) 只含
-  SKILL.md。GUI 不提供操作 RPC；socket 層驗證限於 launch + read-only state。
+  SKILL.md。既有 skill 尚描述 read-only workflow；完整控制 workflow 與 skill 更新留在 MCP tools task。

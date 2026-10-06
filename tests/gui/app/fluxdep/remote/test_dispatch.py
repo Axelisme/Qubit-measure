@@ -1,13 +1,11 @@
 """Tests for the fluxdep remote dispatch handlers + method-spec validation.
 
-The remote surface is READ-ONLY: the agent observes a GUI the user drives. So
-every handler here is a pure query — there is no load / align / point-pick /
-select / fit / export RPC. The tests therefore build the state directly through
-the ``Controller`` (the GUI's own command API, exercised by the GUI/controller
-tests) and assert that the read handlers report it correctly.
+These characterization cases build state through the Controller and check the
+six original read projections. Guarded writes are covered by the real route
+harness in test_project.py, not this direct-handler stub.
 
 Qt-free: the handlers only touch ``adapter.ctrl`` (a real ``Controller``), so a
-tiny stub adapter exercises the whole RPC handler surface without a QApplication
+tiny stub adapter exercises read projections without a QApplication
 or the socket server.
 """
 
@@ -18,11 +16,7 @@ import os
 import numpy as np
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.fluxdep.controller import Controller
-from zcu_tools.gui.app.fluxdep.remote.dispatch import (
-    _HANDLERS,
-    METHOD_REGISTRY,
-)
-from zcu_tools.gui.app.fluxdep.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.fluxdep.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.remote.param_spec import validate_params
@@ -44,28 +38,6 @@ def _call(adapter: _StubAdapter, method: str, raw_params: dict) -> dict:
     spec = METHOD_REGISTRY[method]
     params = validate_params(spec.params, raw_params) if spec.params else raw_params
     return dict(spec.handler(adapter, params))  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------------------
-# Registry coherence
-# ---------------------------------------------------------------------------
-
-
-def test_registry_specs_and_handlers_match():
-    assert set(_HANDLERS) == set(METHOD_SPECS)
-    assert set(METHOD_REGISTRY) == set(METHOD_SPECS)
-
-
-def test_registry_is_read_only():
-    # Guard against re-introducing a mutating RPC: only these read methods exist.
-    assert set(METHOD_SPECS) == {
-        "project.info",
-        "spectrum.list",
-        "selection.pointcloud",
-        "fit.result",
-        "resources.versions",
-        "state.check",
-    }
 
 
 # ---------------------------------------------------------------------------

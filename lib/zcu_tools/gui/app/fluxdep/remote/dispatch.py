@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     # this module). String annotations keep pyright checking the call sites.
     from .service import RemoteControlAdapter
 
-from zcu_tools.gui.project import is_real_project
+from zcu_tools.gui.project import ProjectInfo, is_real_project, project_info_payload
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.readonly_handlers import (
     h_project_info,
@@ -32,6 +32,7 @@ from .dto import (
     FitParametersReply,
     FitResultReply,
     PointcloudReply,
+    ProjectSetupReply,
     SpectrumListItem,
     SpectrumListReply,
     StateCheckReply,
@@ -47,14 +48,33 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 
 
 # ---------------------------------------------------------------------------
-# Read-only handlers — the agent observes, the user drives.
-#
-# Every handler here is a pure query that runs on the Qt main thread and returns
-# a wire dict. There are deliberately NO mutating handlers (load / align / pick
-# points / select / fit / export): those are user actions in the GUI. Point
-# picking and axis-orientation judgement need the human's eye on the preview,
-# which the agent does not have, so driving them over RPC was removed.
+# Owner-thread handlers. Shared dispatch validates ParamSpec inputs and
+# applies the declared observation policy before invoking these functions.
 # ---------------------------------------------------------------------------
+
+
+def _h_project_setup(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> ProjectSetupReply:
+    chip_name = params["chip_name"]
+    qub_name = params["qub_name"]
+    result_dir = params["result_dir"]
+    database_path = params["database_path"]
+    # ParamSpec already validated these strings, including optional defaults.
+    assert isinstance(chip_name, str)
+    assert isinstance(qub_name, str)
+    assert isinstance(result_dir, str)
+    assert isinstance(database_path, str)
+    adapter.ctrl.setup_project(
+        ProjectInfo(
+            chip_name=chip_name,
+            qub_name=qub_name,
+            result_dir=result_dir,
+            database_path=database_path,
+            root_dir=adapter.ctrl.get_project_root(),
+        )
+    )
+    return {"project": project_info_payload(adapter.ctrl.state.project)}
 
 
 def _h_spectrum_list(
@@ -141,6 +161,7 @@ def _h_state_check(
 
 _HANDLERS: dict[str, Handler] = {
     "project.info": h_project_info,
+    "project.setup": _h_project_setup,
     "spectrum.list": _h_spectrum_list,
     "selection.pointcloud": _h_selection_pointcloud,
     "fit.result": _h_fit_result,
