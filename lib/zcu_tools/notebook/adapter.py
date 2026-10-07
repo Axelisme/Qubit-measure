@@ -141,8 +141,10 @@ class NotebookExperiment(Generic[CoreT]):
         Require soc, soccfg and a DeviceManager before starting. Capture
         software-only provenance before acquisition; propagate capture errors.
         Time core.run and its error check in UTC, excluding plot finalization.
-        Existing normal stopped returns publish stopped evidence; failed or
-        interrupted signals raise. Any acquisition or presentation failure
+        Normal stopped or interrupted returns publish stopped evidence and a
+        saveable record. Failed signals and exceptions escaping core.run raise.
+        This includes KeyboardInterrupt before a Schedule scope (device setup)
+        or after it. Any acquisition or presentation failure
         retains the previous record, analysis and acquisition evidence.
         """
         if self._soc is None or self._soccfg is None:
@@ -170,7 +172,9 @@ class NotebookExperiment(Generic[CoreT]):
             started_at = datetime.now(UTC)
             run_id = new_run_id(started_at)
             result = self._core.run(working_cfg, context=context)
-            context.cancel_signal.raise_if_error()
+            error = context.cancel_signal.error
+            if error is not None and error.status != "interrupted":
+                context.cancel_signal.raise_if_error()
             finished_at = datetime.now(UTC)
             evidence = AcquisitionEvidence(
                 run_id=run_id,
