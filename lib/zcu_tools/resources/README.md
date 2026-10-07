@@ -1,13 +1,13 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-06，讀檔轉換、參數容器與離線遷移
+**Last updated:** 2026-10-07，waveform asset 內部職責分離
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。它不是通用 storage framework，也不包含 datafile。
 
 - [`context/`](context/README.md) 管理具名工作 scope 內的 MetaDict 與 ModuleLibrary。
 - [`qubit_params.py`](qubit_params.py) 管理 result scope 的 typed `params.json` handoff；方法與 section 規則見 [qubit_params.md](qubit_params.md)。
 - [`sample_table/`](sample_table/README.md) 管理樣品量測 CSV 與 opt-in v2 欄位協定。
-- [`waveform_assets.py`](waveform_assets.py) 管理 qubit-scoped `.npz` arbitrary waveform asset；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。
+- [`waveform_assets.py`](waveform_assets.py) 是 qubit-scoped arbitrary waveform asset 的公開入口，持有 Database 與 scope binding。內部 data、formula 與 NPZ 模組分別負責 payload／preview、recipe／rendering 與 archive 讀寫；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。
 - [`syncfile.py`](syncfile.py) 提供現行持久化物件共用的 mtime 同步機制；同步規則見其 module docstring。
 - [`document_store.py`](document_store.py) 提供 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖。Entry 與 point-local ModuleLibrary 已使用它，GUI／MCP 的參數切換尚未完成。
 - [`entry/`](entry/README.md) 組合條目身分、setup 範本與獨立完整的 point。每個視圖綁自己的 DocumentStore，建立 point 時複製 seed。

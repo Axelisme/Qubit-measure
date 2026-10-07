@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 from zcu_tools.gui.event_bus import BasePayload, OriginKind
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.context_types import ComponentFocus, ContextSourceBinding
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
     from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
@@ -29,7 +30,8 @@ class SessionEvent(str, Enum):
 
     MD_CHANGED = "md_changed"  # MetaDict attribute was set or deleted
     ML_CHANGED = "ml_changed"  # ModuleLibrary contents changed
-    CONTEXT_SWITCHED = "context_switched"  # active md/ml context switched
+    CONTEXT_SWITCHED = "context_switched"  # parameter binding switched
+    COMPONENT_FOCUS_CHANGED = "component_focus_changed"
     SOC_CHANGED = "soc_changed"  # soc/soccfg connection changed
     PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed
     DEVICE_CHANGED = "device_changed"  # device registered or dropped
@@ -69,11 +71,24 @@ class MdChangedPayload(SessionPayload):
 
 @dataclass(frozen=True)
 class ContextSwitchedPayload(SessionPayload):
-    """Payload for CONTEXT_SWITCHED: active md/ml context switched."""
+    """Installed binding fact, emitted after parameters and focus are published.
+
+    binding_id is the service-local source ID, or None for EMPTY.
+    sources is the ordered persistent source binding, or None without sources.
+    Neither field grants write access or changes a captured consumer's target.
+    """
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.CONTEXT_SWITCHED
-    md: MetaDict
-    ml: ModuleLibrary
+    binding_id: int | None
+    sources: ContextSourceBinding | None
+
+
+@dataclass(frozen=True)
+class ComponentFocusChangedPayload(SessionPayload):
+    """Installed session selection; focus carries target, name, and ordered options."""
+
+    EVENT: ClassVar[SessionEvent] = SessionEvent.COMPONENT_FOCUS_CHANGED
+    focus: ComponentFocus
 
 
 @dataclass(frozen=True)

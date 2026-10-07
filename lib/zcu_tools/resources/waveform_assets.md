@@ -1,8 +1,16 @@
 # `waveform_assets` 參考
 
-**Last updated:** 2026-10-01 — formula writes separate from inspection
+**Last updated:** 2026-10-07 — internal data, formula and NPZ ownership
 
 本檔是 [`waveform_assets.py`](waveform_assets.py) 的 owner 參考，記錄 `ArbWaveformDatabase` 的檔案格式、方法與約束。家族導覽見 [resources README](README.md)。
+
+公開 imports 仍從 `waveform_assets` 取得。它持有 Database 與 asset scope binding；內部責任分為：
+
+- [`_waveform_data.py`](_waveform_data.py)：資料型別、payload／array validation、numeric 限制與 preview arithmetic。
+- [`_waveform_formula.py`](_waveform_formula.py)：FormulaSegment／Recipe、受限 AST、SymPy evaluation 與 rendering。
+- [`_waveform_npz.py`](_waveform_npz.py)：NPZ archive 讀寫與內嵌 recipe JSON 解碼，JSON 編碼沿用 Recipe 的方法。
+
+Formula 與 NPZ 重用 data 的驗證規則。Data 只以型別註記引用 Recipe，不在 runtime 載入 formula，避免循環依賴。
 
 ## `ArbWaveformDatabase`
 

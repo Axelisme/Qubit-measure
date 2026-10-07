@@ -43,19 +43,21 @@ class KeyRule:
 
 @dataclass(frozen=True, kw_only=True)
 class ModuleRule:
-    """One deferred flat-library name with an explicit destination and reference.
+    """One flat-library key with an explicit family, destination and slot reference.
 
-    old_name is the literal source library key. target_path is the future library
-    key (component.partition.name), not a published cfg. reference_path is a
-    component module-slot path or None. Rule order chooses the first present
-    candidate per slot; other candidates retain their own destinations. reason
-    explains this declaration without validating or converting module cfg.
+    old_name is the literal source library key. target_path is the proposed concrete
+    key (component.partition.name). Publication requires successful Spec conversion.
+    reference_path is a component module-slot path or None. Rule order chooses the
+    first present candidate per slot; other candidates retain their own destinations. reason
+    explains this declaration. kind selects the source modules or waveforms
+    partition; waveform rules must not supply a module-slot reference_path.
     """
 
     old_name: str
     target_path: str
     reference_path: str | None
     reason: str
+    kind: Literal["module", "waveform"] = "module"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -232,9 +234,14 @@ class KeyMappingItem:
     """Report location of one key decision.
 
     old_file is an absolute source file; old_key is its literal legacy key.
-    new_file and new_path are the absolute target file and dotted target path,
-    or None when removed/pending. action selects the explicit rule operation;
-    reason explains conversion, deferral or removal without evaluating values.
+    new_file is the absolute target file, or None when no destination handle is
+    acquired (including library dry-run/root rows) or the key is removed/pending.
+    new_path is the proposed dotted target path, or None without a declared target.
+    A library dry-run may have new_path with new_file=None; this alone is not pending.
+    action selects the explicit rule operation. reason explains conversion, deferral
+    or removal without evaluating values.
+    library_kind is module/waveform for a library entry, or None for meta keys.
+    Same-name library keys in different source partitions remain distinct.
     """
 
     old_file: Path
@@ -243,13 +250,14 @@ class KeyMappingItem:
     new_path: str | None
     action: MappingAction
     reason: str
+    library_kind: Literal["module", "waveform"] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
 class FileMigrationItem:
     """Completed file action with absolute source/destination and SHA256 hashes.
 
-    status is converted for native, moved only after Labber source removal, or
+    status is converted for native or typed module cfg, moved after Labber source removal, or
     preserved for a byte-identical copy. Pending and failed actions are separate.
     """
 
@@ -359,6 +367,22 @@ class MigrationIdentity:
 
 
 @dataclass(frozen=True, kw_only=True)
+class ModuleFilePublication:
+    """A completed single-file library commit, not a publication phase.
+
+    source and destination are absolute legacy/canonical module_cfg paths.
+    source_hash and destination_hash are SHA256 hex digests after successful
+    library edit. Resume verifies them without rewriting the document.
+    This record supplies no recovery for a write not yet recorded in manifest.
+    """
+
+    source: Path
+    destination: Path
+    source_hash: str
+    destination_hash: str
+
+
+@dataclass(frozen=True, kw_only=True)
 class MigrationManifest:
     """Durable state for this tool's entry, not a multi-file transaction.
 
@@ -372,7 +396,9 @@ class MigrationManifest:
     report_published records ownership of the first report publication; False
     means an existing path must match that exact initial report before recovery.
     format/format_version identify zcu.storage-migration 1.x. raw retains loaded
-    unknown fields; an empty raw denotes a new manifest.
+    unknown fields; an empty raw denotes a new manifest. module_files records
+    completed point-local library commits; pending entries may remain in report.
+    Module files and manifest are not a cross-file atomic transaction.
     """
 
     identity: MigrationIdentity
@@ -389,3 +415,4 @@ class MigrationManifest:
     format: str = "zcu.storage-migration"
     format_version: str = "1.0"
     raw: JsonObject = field(default_factory=dict)
+    module_files: tuple[ModuleFilePublication, ...] = ()

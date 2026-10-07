@@ -18,6 +18,7 @@ from zcu_tools.resources.context.library import (
     LibrarySnapshot,
     ModuleLibrary,
     ModuleLibraryDocument,
+    library_key_kind,
 )
 from zcu_tools.resources.document_store import (
     ConflictError,
@@ -103,6 +104,53 @@ def local_source(files: tuple[Path, Path]) -> Provenance:
         record={"summary": {"gain": 0.25}},
     )
     return Provenance(EVENT_ID, "rabi", None, AT, 0.01)
+
+
+@pytest.mark.parametrize(
+    ("path", "kind"),
+    [
+        ("Q1.pulses.pi", "module"),
+        ("R1.readout.default", "module"),
+        ("Q1.reset.none", "module"),
+        ("Q1.waveforms.base", "waveform"),
+    ],
+)
+def test_library_key_kind_uses_exact_root_partition(path: str, kind: str) -> None:
+    assert library_key_kind(path) == kind
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "Q1.pulses",
+        "Q1.pulses.pi.gain",
+        ".pulses.pi",
+        "Q1.unknown.x",
+        "Q1.waveforms.",
+    ],
+)
+def test_library_key_kind_rejects_invalid_or_leaf_paths(path: str) -> None:
+    with pytest.raises(ValueError, match="[Ll]ibrary"):
+        library_key_kind(path)
+
+
+def test_library_without_assets_supports_specs_but_rejects_arb_materialization(
+    files: tuple[Path, Path],
+) -> None:
+    path, ledger = files
+    library = ModuleLibrary(path, ledger=ledger, entry_id=ENTRY_ID)
+    with library.edit() as draft:
+        draft.set_waveform(
+            "Q1.waveforms.arb",
+            waveform_spec_from_raw({"style": "arb", "data": "present"}),
+        )
+    snapshot = library.snapshot()
+    assert (
+        snapshot.entry_value("Q1.waveforms.arb", kind="waveform")["data"] == "present"
+    )
+    with pytest.raises(ValueError, match="assets"):
+        snapshot.get_waveform("Q1.waveforms.arb")
 
 
 def test_header_only_open_and_empty_edit_do_not_rewrite(
