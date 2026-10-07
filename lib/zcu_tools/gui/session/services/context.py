@@ -25,6 +25,8 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.events import (
     ComponentFocusChangedPayload,
     ContextSwitchedPayload,
+    MdChangedPayload,
+    MlChangedPayload,
 )
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext, RoleBinding
 from zcu_tools.gui.session.value_lookup import (
@@ -124,13 +126,13 @@ class ContextService:
         parameters = ParameterContext(
             point=PointDocument(
                 format=PARAMETER_FORMAT,
-                format_version=str(PARAMETER_VERSION),
+                format_version=f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
                 general=PointGeneral(created_at=datetime.now(timezone.utc).isoformat()),
             ),
             library=LibrarySnapshot(
                 ModuleLibraryDocument(
                     format=MODULE_LIBRARY_FORMAT,
-                    format_version=str(MODULE_LIBRARY_VERSION),
+                    format_version=f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
                 ),
                 assets=assets,
             ),
@@ -301,7 +303,39 @@ class ContextService:
         Cross-entry, stale DRAFT, path/schema/source, conflict and I/O failures
         propagate without publishing a candidate. No retry or batch receipt.
         """
-        raise NotImplementedError
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        parameters = self._published_parameters()
+        if isinstance(target, EntryDraft):
+            document = entry.updated_point(
+                parameters.document(), path, value, source=source
+            )
+        else:
+            point = (
+                self._point
+                if target == parameters.target and self._point is not None
+                else entry.use_point(target.point)
+            )
+            with point.edit() as draft:
+                draft.set(path, value, provenance=source)
+            if target != parameters.target:
+                return
+            document = snapshot(point)
+            self._points = tuple(
+                replace(info, description=document.general.description or "")
+                if info.label == target.point
+                else info
+                for info in self._points
+            )
+        self._publish_write(
+            ParameterContext(
+                point=document,
+                library=parameters.library,
+                target=target,
+                roles=None,
+            ),
+            parameter=True,
+        )
 
     def set_module(
         self,
@@ -317,7 +351,25 @@ class ContextService:
         uses one library transaction; DRAFT replaces an isolated memory library.
         No lowering, materialization, accepted event production or batch receipt.
         """
-        raise NotImplementedError
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        parameters = self._published_parameters()
+        if isinstance(target, EntryDraft):
+            library = parameters.library.replaced_module(path, value, provenance=source)
+            entry.validate_library(library.document())
+        else:
+            handle = self._write_library(entry, target, parameters)
+            with handle.edit() as draft:
+                draft.set_module(path, value, provenance=source)
+            if target != parameters.target:
+                return
+            library = handle.snapshot()
+        self._publish_write(
+            ParameterContext(
+                point=parameters.document(), library=library, target=target, roles=None
+            ),
+            parameter=False,
+        )
 
     def set_waveform(
         self,
@@ -332,7 +384,27 @@ class ContextService:
         Target/publication/source/error rules match set_module. Owner rejects
         invalid roots/families/sources before installing any candidate.
         """
-        raise NotImplementedError
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        parameters = self._published_parameters()
+        if isinstance(target, EntryDraft):
+            library = parameters.library.replaced_waveform(
+                path, value, provenance=source
+            )
+            entry.validate_library(library.document())
+        else:
+            handle = self._write_library(entry, target, parameters)
+            with handle.edit() as draft:
+                draft.set_waveform(path, value, provenance=source)
+            if target != parameters.target:
+                return
+            library = handle.snapshot()
+        self._publish_write(
+            ParameterContext(
+                point=parameters.document(), library=library, target=target, roles=None
+            ),
+            parameter=False,
+        )
 
     def entry_ledger(self, entry_id: str) -> RecordsLedger:
         """Return only the currently opened entry's ledger; never append an event.
@@ -373,6 +445,40 @@ class ContextService:
                 f"Entry {entry_id!r} is not opened", reason_code="entry_not_open"
             )
         return self._entry
+
+    def _require_write_target(self, target: ContextTarget) -> ResultEntry:
+        """Reject cross-entry and stale memory targets before opening a resource."""
+        entry = self._require_entry(target.entry_id)
+        if isinstance(target, EntryDraft) and not self.has_draft_context():
+            raise FailedPreconditionError(
+                "The entry's memory DRAFT is no longer selected",
+                reason_code="draft_not_selected",
+            )
+        return entry
+
+    def _published_parameters(self) -> ParameterContext:
+        """Read the carrier without requiring unrelated selected-source data."""
+        parameters = self._state.session_env.parameters
+        if parameters is None:
+            raise RuntimeError("Opened entry has no parameter projection")
+        return parameters
+
+    def _write_library(
+        self, entry: ResultEntry, target: SavedPoint, parameters: ParameterContext
+    ) -> ModuleLibrary:
+        """Use the selected handle for conflicts, or open a detached Spec-only handle."""
+        if target == parameters.target and self._library is not None:
+            return self._library
+        return entry.module_library(target.point)
+
+    def _publish_write(self, parameters: ParameterContext, *, parameter: bool) -> None:
+        """Install a committed projection/version before its single content fact."""
+        self._state.set_context(replace(self._state.session_env, parameters=parameters))
+        self._state.version.bump("context")
+        payload = MdChangedPayload if parameter else MlChangedPayload
+        self._bus.emit(
+            payload(binding_id=self._binding_id, content_changed=True, fault=None)
+        )
 
     def _load_points(self, entry: ResultEntry) -> tuple[WorkingPointInfo, ...]:
         return tuple(

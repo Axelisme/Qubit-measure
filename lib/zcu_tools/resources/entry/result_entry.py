@@ -31,7 +31,7 @@ from .schema import (
     SetupDocument,
     is_forward_minor,
 )
-from .views import SetupView
+from .views import SetupView, prepare_point_update
 
 if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary, ModuleLibraryDocument
@@ -155,7 +155,14 @@ class ResultEntry:
         No point/store/file creation, notification or event append. Manual does
         not read a ledger; explicit event sources may read local ledger evidence.
         """
-        raise NotImplementedError
+        return prepare_point_update(
+            document,
+            path,
+            value,
+            source=source,
+            ledger=self._result_path / "records/ledger.jsonl",
+            entry_id=self.entry_id,
+        )
 
     def validate_library(self, document: ModuleLibraryDocument) -> None:
         """Validate a memory library's keys/Specs/sources against this entry.
@@ -165,7 +172,9 @@ class ResultEntry:
         sources do not read ledger evidence. Invalid keys/schema/sources raise;
         explicit local event sources retain ledger/attachment/I/O failures.
         """
-        raise NotImplementedError
+        document.validate_content(
+            ledger=self._result_path / "records/ledger.jsonl", entry_id=self.entry_id
+        )
 
     def list_points(self) -> list[str]:
         """Return sorted labels of directories containing both point files.

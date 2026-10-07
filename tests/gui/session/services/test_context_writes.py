@@ -110,7 +110,7 @@ def _meta(capture: ParameterContext, kind: Kind) -> Provenance | None:
         "module": "Q1.pulses.pi.gain",
         "waveform": "Q1.waveforms.base.length",
     }[kind]
-    return capture.meta(path)
+    return capture.meta(path) if kind == "parameter" else capture.library.meta(path)
 
 
 def _select(session: _Session, label: str) -> SavedPoint:

@@ -211,6 +211,7 @@ def _accept_sources(
     source: Provenance,
 ) -> None:
     record = ProvenanceData.from_provenance(source)
+    record.cloned_from = None
     _remove_sources(document, path)
     for leaf in _leaf_paths(value, path):
         document.provenance[leaf] = record.model_copy(deep=True)
@@ -458,7 +459,7 @@ class LibrarySnapshot:
             candidate,
             path,
             projection.entry_value(path, kind="module"),
-            _manual_source(),
+            provenance if provenance is not None else _manual_source(),
         )
         return LibrarySnapshot(candidate, assets=self._assets)
 
@@ -483,7 +484,7 @@ class LibrarySnapshot:
             candidate,
             path,
             projection.entry_value(path, kind="waveform"),
-            _manual_source(),
+            provenance if provenance is not None else _manual_source(),
         )
         return LibrarySnapshot(candidate, assets=self._assets)
 

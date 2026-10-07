@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-07, entry/point binding and analysis-only operation facets
+**Last updated:** 2026-10-08, captured-target setters
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -8,6 +8,8 @@ app保留帶領域context的錯誤文字與unsupported-target轉譯。
 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。measure 與 autofluxdep 共用這層。
 
 `ContextService` 私下持有 `ResultEntry` 與 point/library handles。開啟 entry 發布空的記憶體 DRAFT，選取或建立 point 後發布 ACTIVE。它先完成資源與 asset capability 準備，再替換 session binding。準備失敗保留原 binding；point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。
+
+三個 target setter 經 resources owner 驗證值與來源。DRAFT 只替換記憶體，SavedPoint 使用單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發一個 MD／ML fact，保留焦點與 binding ID。同 entry 的其他 point 可獨立寫入，不改目前投影；舊 capture 保持隔離。
 
 ## Context、session environment 與 Run snapshot
 

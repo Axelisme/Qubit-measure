@@ -157,6 +157,34 @@ def manual_update(
     return PointDocument.model_validate(_logical_value(candidate))
 
 
+def prepare_point_update(
+    document: PointDocument,
+    path: str,
+    value: YamlValue,
+    *,
+    source: Provenance | None,
+    ledger: Path,
+    entry_id: str,
+) -> PointDocument:
+    """Prepare an isolated working-unit point candidate for the owning entry.
+
+    document is the validated memory point; path is a concrete component/general
+    dotted field and value is YAML data. ledger is this entry's ledger.jsonl path
+    and entry_id its UUID. source=None records manual provenance without reading
+    ledger; explicit Provenance uses existing local source validation and clears
+    accepted clone origin. Preserve other fields/created_at and all inputs.
+    Invalid path/schema/source raises before return; explicit source ledger,
+    attachment and I/O failures propagate. No point/YAML/store creation, commit,
+    event append or notification.
+    """
+    if source is None:
+        return manual_update(document, path, value)
+    metadata = _accepted_source(source, ledger, entry_id)
+    candidate = document.model_copy(deep=True)
+    _set_document_value(candidate, path, value, metadata=metadata)
+    return PointDocument.model_validate(_logical_value(candidate))
+
+
 def accept_source(view: EditView, path: str, *, provenance: Provenance) -> None:
     """Attach a local source to an existing draft value without changing it.
 

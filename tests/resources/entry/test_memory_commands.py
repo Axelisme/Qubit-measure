@@ -59,7 +59,7 @@ def test_entry_prepares_isolated_point_candidate_with_local_source(
     assert document_value(original, "general.ext") == {}
     updated.general.ext["gain"] = 99.0
     assert document_value(original, "general.ext") == {}
-    assert snapshot(entry.use_point("a")) == original
+    assert snapshot(entry.use_point("a")).model_dump() == original.model_dump()
 
 
 def test_entry_point_candidate_rejects_unknown_local_source_without_mutation(
@@ -72,7 +72,7 @@ def test_entry_point_candidate_rejects_unknown_local_source_without_mutation(
         entry.updated_point(original, "general.flux_value", 0.2, source=bad)
     assert error.value.__cause__ is not None
     assert original == before
-    assert snapshot(entry.use_point("a")) == before
+    assert snapshot(entry.use_point("a")).model_dump() == before.model_dump()
 
 
 @pytest.mark.parametrize("known", [False, True], ids=["unknown", "local"])
