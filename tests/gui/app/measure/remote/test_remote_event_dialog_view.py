@@ -159,8 +159,14 @@ def test_all_event_serializer_payload_shapes_are_locked() -> None:
             ContextSwitchedPayload(md=opaque, ml=opaque),
             {"requery": ["context.active"]},
         ),
-        (MdChangedPayload(md=opaque), {"requery": ["context.md_get_attr"]}),
-        (MlChangedPayload(ml=opaque), {"requery": ["context.ml_get"]}),
+        (
+            MdChangedPayload(binding_id=1, content_changed=True, fault=None),
+            {"requery": ["context.md_get_attr"]},
+        ),
+        (
+            MlChangedPayload(binding_id=1, content_changed=True, fault=None),
+            {"requery": ["context.ml_get"]},
+        ),
         (SocChangedPayload(soc=None, soccfg=None), {"connected": False}),
     ]
 
@@ -422,11 +428,11 @@ def test_unsubscribe_stops_push(fx):
 
 
 def test_md_changed_emits_requery_hint(fx):
-    """Composite payloads (MetaDict here) must not cross the wire."""
+    """Domain facts produce a requery hint, not resource handles."""
     sock = open_client(fx.service.port)
     try:
         call(sock, "events.subscribe", {"events": ["md_changed"]})
-        fx.bus.emit(MdChangedPayload(md=MagicMock()))
+        fx.bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
         msg = recv_push(sock, "md_changed")
         assert msg["payload"] == {"requery": ["context.md_get_attr"]}
     finally:

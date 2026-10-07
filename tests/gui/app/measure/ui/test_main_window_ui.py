@@ -1390,7 +1390,7 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
     assert not tab.cfg_form.is_valid()
     assert not tab.run_btn.isEnabled()
     ml.modules["drive-pulse"] = cast(Any, raw)
-    fx.bus.emit(MlChangedPayload(ml))
+    fx.bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
     widget = tab.cfg_form.findChild(QWidget, "cfgInput:drive")
     assert widget is not None
     combo = widget.findChild(QComboBox)

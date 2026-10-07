@@ -193,7 +193,9 @@ def test_source_event_publishes_every_tab_before_callback(application: Fixture) 
     unsubscribe = editors[0].watch(callback)
     application.state.session_env.md.update(x=9.0)
     application.state.version.bump("context")
-    application.bus.emit(MdChangedPayload(md=application.state.session_env.md))
+    application.bus.emit(
+        MdChangedPayload(binding_id=1, content_changed=True, fault=None)
+    )
     unsubscribe()
     assert len(observed) == 1
     assert observed[0][0].source_basis == observed[0][1].source_basis

@@ -8,7 +8,7 @@ only for wire serialisation. Experiment-surface events (tabs / runs / node-sweep
 stay in each app's own event module.
 
 Import-clean: only TYPE_CHECKING references to the session ``SocHandle`` surfaces
-and MetaDict/ModuleLibrary, so this sits in ``gui/session`` below the apps.
+and source diagnostics, so this sits in ``gui/session`` below the apps.
 """
 
 from __future__ import annotations
@@ -20,16 +20,19 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 from zcu_tools.gui.event_bus import BasePayload, OriginKind
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.session.context_types import ComponentFocus, ContextSourceBinding
+    from zcu_tools.gui.session.context_types import (
+        ComponentFocus,
+        ContextSourceBinding,
+        ContextSourceFault,
+    )
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class SessionEvent(str, Enum):
     """Session-core event names (the wire-name vocabulary)."""
 
-    MD_CHANGED = "md_changed"  # MetaDict attribute was set or deleted
-    ML_CHANGED = "ml_changed"  # ModuleLibrary contents changed
+    MD_CHANGED = "md_changed"  # published point content/health changed
+    ML_CHANGED = "ml_changed"  # published library content/health changed
     CONTEXT_SWITCHED = "context_switched"  # parameter binding switched
     COMPONENT_FOCUS_CHANGED = "component_focus_changed"
     SOC_CHANGED = "soc_changed"  # soc/soccfg connection changed
@@ -63,10 +66,17 @@ class SimulatedEnvironmentFinishedPayload(SessionPayload):
 
 @dataclass(frozen=True)
 class MdChangedPayload(SessionPayload):
-    """Payload for MD_CHANGED: a MetaDict attribute was set or deleted."""
+    """Installed point content/health fact, without a writable resource.
+
+    binding_id is the current internal source ID. content_changed distinguishes
+    data change from health-only publication. fault is the detached diagnostic,
+    or None after success. Observers read the already installed projection.
+    """
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.MD_CHANGED
-    md: MetaDict
+    binding_id: int
+    content_changed: bool
+    fault: ContextSourceFault | None
 
 
 @dataclass(frozen=True)
@@ -93,10 +103,17 @@ class ComponentFocusChangedPayload(SessionPayload):
 
 @dataclass(frozen=True)
 class MlChangedPayload(SessionPayload):
-    """Payload for ML_CHANGED: ModuleLibrary contents changed."""
+    """Installed library content/health fact, without a writable resource.
+
+    binding_id is the current internal source ID. content_changed distinguishes
+    data change from health-only publication. fault is the detached diagnostic,
+    or None after success. Observers read the already installed projection.
+    """
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.ML_CHANGED
-    ml: ModuleLibrary
+    binding_id: int
+    content_changed: bool
+    fault: ContextSourceFault | None
 
 
 @dataclass(frozen=True)

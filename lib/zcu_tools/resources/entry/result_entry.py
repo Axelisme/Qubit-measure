@@ -14,6 +14,7 @@ from uuid import uuid4
 from ruamel.yaml import YAML
 
 from zcu_tools.cfg_model import WaveformAssetInfo
+from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
 from . import _point_origin
@@ -22,7 +23,7 @@ from .errors import RenameRecoveryError
 from .ledger import RecordsLedger
 from .ledger_models import ImportPayload, LedgerEvent, Origin, validate_origin
 from .points import PointView
-from .provenance import ProvenanceData, validate_source
+from .provenance import Provenance, ProvenanceData, validate_source
 from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -30,7 +31,7 @@ from .schema import (
     SetupDocument,
     is_forward_minor,
 )
-from .views import SetupView
+from .views import SetupView, prepare_point_update
 
 if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary, ModuleLibraryDocument
@@ -135,6 +136,45 @@ class ResultEntry:
         Missing records directories raise; accessing this property writes no files.
         """
         return RecordsLedger(self._result_path / "records", entry_id=self.entry_id)
+
+    def updated_point(
+        self,
+        document: PointDocument,
+        path: str,
+        value: YamlValue,
+        *,
+        source: Provenance | None = None,
+    ) -> PointDocument:
+        """Return an isolated working-unit point candidate for a memory command.
+
+        path is a concrete component/general dotted field, without role expansion.
+        Reuse the view's field/schema validation. Omitted source is manual;
+        explicit Provenance is validated against this entry's actual ledger and
+        clears clone origin on accepted leaves. Preserve unmodified fields and
+        created_at. Input/schema/source failures leave inputs unchanged.
+        No point/store/file creation, notification or event append. Manual does
+        not read a ledger; explicit event sources may read local ledger evidence.
+        """
+        return prepare_point_update(
+            document,
+            path,
+            value,
+            source=source,
+            ledger=self._result_path / "records/ledger.jsonl",
+            entry_id=self.entry_id,
+        )
+
+    def validate_library(self, document: ModuleLibraryDocument) -> None:
+        """Validate a memory library's keys/Specs/sources against this entry.
+
+        Delegate the existing library document validation without mutation,
+        materialization, asset access, YAML I/O or event production. Manual
+        sources do not read ledger evidence. Invalid keys/schema/sources raise;
+        explicit local event sources retain ledger/attachment/I/O failures.
+        """
+        document.validate_content(
+            ledger=self._result_path / "records/ledger.jsonl", entry_id=self.entry_id
+        )
 
     def list_points(self) -> list[str]:
         """Return sorted labels of directories containing both point files.

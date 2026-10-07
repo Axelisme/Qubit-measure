@@ -797,8 +797,8 @@ def test_session_events_refresh_current_cfg_editor(app, monkeypatch):
 
     md = ctrl.get_current_md()
     ml = ctrl.get_current_ml()
-    ctrl.bus.emit(MdChangedPayload(md=md))
-    ctrl.bus.emit(MlChangedPayload(ml=ml))
+    ctrl.bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
+    ctrl.bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
     ctrl.bus.emit(ContextSwitchedPayload(md=md, ml=ml))
     ctrl.bus.emit(DeviceChangedPayload(name="flux_dev"))
 

@@ -520,7 +520,7 @@ def test_ml_changed_has_no_main_window_reaction() -> None:
     bus = BaseEventBus()
     coordinator.bind(bus)
 
-    bus.emit(MlChangedPayload(cast(Any, None)))
+    bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert log.calls == []
 

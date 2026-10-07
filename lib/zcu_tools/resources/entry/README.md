@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-08，point storage role attribution
+**Last updated:** 2026-10-08，entry-scoped memory source validation
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -17,6 +17,8 @@ Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(doc
 `document_fields(document)` 列舉 logical data 的隔離 DocumentField。Models／mapping 展開為葉列，list、null 與空 mapping 是單列。Segments 保留 literal keys；有空字串或點號的 row 沒有 editable_path，不以另一條 dotted path 冒充它。Rows 保留完整 provenance 和 cloned_from，不執行 serializers/model hooks、不讀檔或顯示 opaque forward-minor 資料。
 
 `manual_update(document, path, value, stderr=...)` 複製完整記憶體 point，重用 view 的欄位驗證與 manual 來源規則，不建立 store、讀檔或查 ledger。`accept_source(edit, path, provenance=...)` 在已準備的 draft 值上附加本地來源，處理 container leaves 並清除 clone 標記，不重跑值的 validator 或 model hook。來源驗證失敗不改 draft。兩個能力都以 package function 提供，不保留新的元件名稱。
+
+`ResultEntry.updated_point` 使用相同欄位規則準備隔離的記憶體候選，明確來源沿本 entry 的 ledger 驗證。`validate_library` 委派 library owner 檢查記憶體文件及本地來源。這兩個入口不建立 point/store、不保存或追加事件，manual 不讀 ledger。
 
 PointView 的公開 constructor 必須提供 result_root 與 database_root，加上 source、entry_id，在建構時一次捕捉完整來源身分。直接建構的 view 與 ResultEntry 回傳的 view 使用相同 clone 規則，不依靠事後補登記。
 

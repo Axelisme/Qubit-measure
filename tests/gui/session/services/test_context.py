@@ -113,6 +113,18 @@ def _entry_command(context: ContextService, command: str, entry_id: str) -> obje
     return context.entry_ledger(entry_id)
 
 
+def test_parameter_write_preserves_selected_component_focus(
+    context: ContextService,
+    rich_entry: ResultEntry,
+) -> None:
+    context.install_entry(rich_entry)
+    target = context.new_point(_new_request(rich_entry, "a"))
+    focus = context.set_component_focus("Q1")
+    context.set_parameter(target, "Q1.rate", 4500.0)
+    assert context.get_component_focus() == focus
+    assert context.read_context().value("Q1.rate") == 4500.0
+
+
 def test_empty_queries_have_no_entry_point_or_component_selection(
     context: ContextService,
 ) -> None:

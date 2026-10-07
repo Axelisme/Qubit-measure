@@ -1,6 +1,6 @@
 # `zcu_tools.resources.context` — named experiment work contexts
 
-**Last updated:** 2026-10-07，ModuleLibrary 的文件 owner 與隔離快照
+**Last updated:** 2026-10-08，snapshot replacement 的明確來源
 
 本 package 管理實驗工作 scope 的參數資源。`MetaDict` 與 `ContextManager` 保留既有具名 context 的責任。`ModuleLibrary` 使用 point-local typed 文件，不再使用 flat modules／waveforms 或 SyncFile。
 
@@ -12,7 +12,7 @@
 - 文件存 `ModuleSpec`／`WaveformSpec`。Spec 保留 inline child 或具體 key 引用，不存 provider、asset bytes 或 runtime object。
 - `LibrarySnapshot` 是不讀檔的隔離投影，也是 core factory 的 `ModuleResolver`。Spec 查詢不展開引用。成品查詢以固定 snapshot 與顯式 asset capability materialize cfg。
 - `entry_value` 提供未 materialize 的工作單位 Spec mapping。`entry_state` 同時提供相對 leaf 的原始來源，供固定 proposal 比對，不補缺失來源。
-- Snapshot replacement、delete 與 rename 都返回新候選，不更新原值或文件。純 rename 搬移 Spec、reference 字串與全部來源，不求值 child、不掃描其他引用或 cascade。
+- Snapshot replacement、delete 與 rename 都返回新候選，不更新原值或文件。Replacement 接受 manual 或明確 Provenance，接受新 leaves 並清除 clone origin；純快照不查 ledger，寫入 owner 在安裝記憶體候選前驗證本地來源。純 rename 搬移 Spec、reference 字串與全部來源，不求值 child、不掃描其他引用或 cascade。
 - `ModuleLibrary.edit()` 使用 `DocumentStore.edit()`。Body 內的 `LibraryEdit.snapshot()` 反映前項寫入。Body、schema、source、conflict 或 I/O 失敗不發布候選。
 - 值與來源同檔提交。普通 replacement 記 manual 並清除 clone origin。明確來源沿 `entry.provenance` 驗證本條目 ledger 事件與附檔，不另設 producer。
 - `snapshot()` 只複製已發布記憶體。`refresh()` 顯式重載；`subscribe()` 在 publication 後通知。Handle 不自動監看、mtime sync 或建立缺失文件。

@@ -76,9 +76,9 @@ def _make_write_port(state: State, bus: EventBus):
         if writes.md or touched_ml:
             state.version.bump("context")
         if writes.md:
-            bus.emit(MdChangedPayload(md=ctx.md))
+            bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
         if touched_ml:
-            bus.emit(MlChangedPayload(ml=ctx.ml))
+            bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     port.apply_writes.side_effect = _apply_writes
     return port
