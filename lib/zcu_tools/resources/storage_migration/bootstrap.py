@@ -329,7 +329,7 @@ def prepare_session(
     else:
         manifest, entry = _new_session(request, mapping, source, destination)
     session = MigrationSession(path, manifest, dry_run=request.dry_run)
-    validate_owned_state(session)
+    validate_owned_state(session, entry=entry)
     session.checkpoint()
     publish_report(session)
     return session, entry

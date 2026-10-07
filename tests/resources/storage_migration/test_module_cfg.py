@@ -438,7 +438,9 @@ def test_completed_library_is_hash_checked_without_rewriting_on_resume(
     assert source.read_bytes() == original
 
 
-@pytest.mark.parametrize("changed", ["source", "destination"])
+@pytest.mark.parametrize(
+    "changed", ["source", "destination", "destination-invalid-yaml"]
+)
 def test_resume_rejects_changed_library_hash_without_overwriting(
     request_data: MigrationRequest,
     library_mapping: MigrationMapping,
@@ -449,7 +451,10 @@ def test_resume_rejects_changed_library_hash_without_overwriting(
     _convert(request, library_mapping)
     destination = _entry(request).module_library("context").source_path
     path = source if changed == "source" else destination
-    path.write_bytes(path.read_bytes() + b"\n ")
+    if changed == "destination-invalid-yaml":
+        path.write_bytes(b"not-a-library\n")
+    else:
+        path.write_bytes(path.read_bytes() + b"\n ")
     before = (source.read_bytes(), destination.read_bytes())
     with pytest.raises(MigrationInputError, match="hash"):
         _convert(replace(request, resume=True), library_mapping)

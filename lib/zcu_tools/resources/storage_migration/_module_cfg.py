@@ -221,13 +221,16 @@ def convert_module_cfg(
     try:
         source_hash = session.baseline(source)
         with source.open("r", encoding="utf-8") as stream:
-            values = _JSON.validate_python(YAML(typ="safe").load(stream), strict=True)
-        if not isinstance(values.get("modules"), dict) or not isinstance(
-            values.get("waveforms"), dict
+            envelope: object = YAML(typ="safe").load(stream)
+        if (
+            not isinstance(envelope, dict)
+            or not isinstance(envelope.get("modules"), dict)
+            or not isinstance(envelope.get("waveforms"), dict)
         ):
             raise MigrationInputError(
                 f"{source}: expected waveforms/modules mapping envelope"
             )
+        values = _JSON.validate_python(envelope, strict=True)
         if label is None or session.dry_run:
             # No destination handle has been acquired; point dry-runs still
             # validate candidates and retain their canonical key decisions.
