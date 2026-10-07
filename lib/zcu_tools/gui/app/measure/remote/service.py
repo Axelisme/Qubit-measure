@@ -10,9 +10,9 @@ layers measure-gui's own dispatch policy on top by overriding the base seams:
   - ``_new_client_ctx`` → a :class:`_ClientCtx` that also tracks CfgEditor
     sessions; ``_on_client_close_extra`` reclaims them on drop;
   - ``_route_extra`` → the editor.subscribe/unsubscribe state-owning methods;
-  - ``_guard`` → the optimistic version guard (run on the main thread inside the
-    handler ``_run`` so its compare-and-act is atomic); ``_after_success`` →
-    CfgEditor session lifecycle tracking;
+  - shared resource observations → injected method policies and Controller
+    versions; ``_resource_key`` supplies writeback pane aliases;
+  - ``_after_success`` → CfgEditor session lifecycle tracking;
   - ``_extra_start`` / ``_extra_stop`` → the per-editor change stream and the
     out-of-band diagnostic channel (``notify_diagnostic``), both pushed via
     ``endpoint.broadcast`` independent of EventBus.
@@ -72,7 +72,6 @@ if TYPE_CHECKING:
 from .dispatch import METHOD_REGISTRY
 from .events import EVENT_SERIALIZERS, wire_event_name
 from .method_entries import METHOD_ENTRIES
-from .method_entries._registry import AgentMethodPolicy
 from .wire_version import GUI_VERSION, WIRE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -85,7 +84,7 @@ class _ClientCtx(SubscriptionCtx):
     owns (reclaimed on drop) and subscribed to (for the per-editor change stream).
     """
 
-    __slots__ = ("editor_ids", "subscribed_editors", "seen")
+    __slots__ = ("editor_ids", "subscribed_editors")
 
     def __init__(self) -> None:
         super().__init__()
@@ -93,8 +92,6 @@ class _ClientCtx(SubscriptionCtx):
         self.editor_ids: set[str] = set()
         # CfgEditor session ids this connection subscribed to for change push.
         self.subscribed_editors: set[str] = set()
-        # Only accessed by the owner-thread guard and observation hooks.
-        self.seen: dict[str, int] = {}
 
 
 def _ctx(link: ClientLink) -> _ClientCtx:
@@ -149,6 +146,10 @@ class RemoteControlAdapter(RemoteControlServiceBase):
             method_registry=METHOD_REGISTRY,
             event_serializers=EVENT_SERIALIZERS,
             wire_event_name=wire_event_name,
+            resource_versions=controller.resources_versions,
+            observation_policies={
+                entry.method: entry.agent for entry in METHOD_ENTRIES
+            },
         )
         self.render_view = render_view
         self.tab_control = controller.tab_control
@@ -160,9 +161,6 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         self.context_control = controller.context_control
         self.device_control = controller.device_control
         self.predictor_control = controller.predictor_control
-        self._agent_policies: dict[str, AgentMethodPolicy] = {
-            entry.method: entry.agent for entry in METHOD_ENTRIES
-        }
 
     # ------------------------------------------------------------------
     # Base seams
@@ -254,104 +252,6 @@ class RemoteControlAdapter(RemoteControlServiceBase):
                 ),
             )
         return template.format_map(values)
-
-    def _guard(
-        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
-    ) -> None:
-        assert isinstance(ctx, _ClientCtx)
-        deps = self._agent_policies[method].guard_deps
-        if not deps:
-            return
-        current = self._ctrl_resource_versions()
-        required: set[str] = set()
-        for template in deps:
-            if template == "device:*":
-                required.update(key for key in current if key.startswith("device:"))
-                required.update(key for key in ctx.seen if key.startswith("device:"))
-            else:
-                required.add(self._resource_key(template, params))
-        stale = sorted(
-            key
-            for key in required
-            if key not in ctx.seen or ctx.seen[key] != current.get(key, 0)
-        )
-        if stale:
-            raise RemoteError(
-                ErrorCode.PRECONDITION_FAILED,
-                "a resource you depend on was changed in the GUI since you last "
-                "saw it; review then retry",
-                reason="stale_version",
-                data={"stale": stale},
-            )
-
-    def _ctrl_resource_versions(self) -> dict[str, int]:
-        return dict(self.ctrl.resources_versions())
-
-    def _before_handler(
-        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
-    ) -> dict[str, int] | None:
-        del ctx, params
-        if self._agent_policies[method].refresh_after_write:
-            return self._ctrl_resource_versions()
-        return None
-
-    @staticmethod
-    def _self_write_updates(
-        seen: Mapping[str, int], before: Mapping[str, int], current: Mapping[str, int]
-    ) -> dict[str, int]:
-        updates: dict[str, int] = {}
-        for key in before.keys() | current.keys():
-            old, new = before.get(key, 0), current.get(key, 0)
-            if old != new and key in seen and seen[key] == old:
-                updates[key] = new
-        return updates
-
-    def _owner_success(
-        self,
-        ctx: SubscriptionCtx,
-        method: str,
-        params: Mapping[str, object],
-        result: Mapping[str, object],
-        before: dict[str, int] | None,
-    ) -> Callable[[], None] | None:
-        assert isinstance(ctx, _ClientCtx)
-        policy = self._agent_policies[method]
-        current = self._ctrl_resource_versions()
-        updates = (
-            self._self_write_updates(ctx.seen, before, current)
-            if before is not None
-            else {}
-        )
-        if before is not None and policy.created_resource is not None:
-            identity = result.get("tab_id")
-            if isinstance(identity, str) and identity:
-                key = self._resource_key(policy.created_resource, result)
-                if before.get(key, 0) == 0 and current.get(key, 0) == 1:
-                    updates[key] = 1
-        if (
-            policy.reveals
-            and all(name not in params for name in policy.reveals_without)
-            and all(params.get(name) for name in policy.reveals_when_nonempty)
-        ):
-            for template in policy.reveals:
-                key = self._resource_key(template, params)
-                updates[key] = current.get(key, 0)
-        if not updates:
-            return None
-        previous = {key: ctx.seen.get(key) for key in updates}
-        ctx.seen.update(updates)
-
-        def _rollback() -> None:
-            for key, version in updates.items():
-                if ctx.seen.get(key) != version:
-                    continue
-                old = previous[key]
-                if old is None:
-                    ctx.seen.pop(key, None)
-                else:
-                    ctx.seen[key] = old
-
-        return _rollback
 
     def _after_success(
         self,

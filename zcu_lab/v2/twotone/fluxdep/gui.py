@@ -22,7 +22,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
+from zcu_tools.gui.interactive import PluginDefinition, Session
 
 from zcu_lab.v2._support.measure.flux_pick_frontend import make_flux_pick_frontend
 from zcu_lab.v2._support.measure.flux_pick_plugin import (

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.datafile import (
     DataVariable,
     JsonObject,
@@ -15,6 +16,9 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.views import FieldView
 from zcu_tools.resources.storage_migration import (
     KeyRule,
+    LegacyParameterSnapshot,
+    LegacyParameterSource,
+    LegacyRunEvidence,
     MigrationInputError,
     MigrationMapping,
     MigrationRequest,
@@ -304,6 +308,59 @@ def test_native_is_readable_and_validated_before_source_removal(
     manifest = json.loads(manifest_path(request).read_text())
     assert request.run_evidence is not None
     assert manifest["evidence"] == request.run_evidence.raw
+
+
+@pytest.mark.parametrize("origin", ["manual", "missing-event", "invalid-time"])
+def test_historical_parameters_remain_evidence_and_unresolved_sources_stay_pending(
+    request_data: MigrationRequest, mapping: MigrationMapping, origin: str
+) -> None:
+    request, source = write_run(request_data)
+    assert request.run_evidence is not None
+    evidence = request.run_evidence.entries[0]
+    parameter = LegacyParameterSnapshot(
+        value=12.5,
+        unit="MHz",
+        source=LegacyParameterSource(
+            source="manual" if origin == "invalid-time" else origin,
+            kind=None,
+            run_id=None,
+            at="2025-09-30T00:00:00"
+            if origin == "invalid-time"
+            else "2025-09-30T00:00:00Z",
+            stderr=0.2,
+            cloned_from=None,
+        ),
+    )
+    evidence = replace(
+        evidence,
+        snapshot=replace(evidence.snapshot, params={"C1.frequency": parameter}),
+    )
+    raw = json.loads(json.dumps(request.run_evidence.raw))
+    raw["entries"][0] = TypeAdapter(LegacyRunEvidence).dump_python(
+        evidence, mode="json"
+    )
+    path = request.result_root.parent / "with-parameters.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    request = replace(request, run_evidence=load_run_evidence(path))
+    report = migrate_storage(
+        request,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    manifest = json.loads(manifest_path(request).read_text())
+    assert manifest["evidence"] == raw
+    if origin == "manual":
+        assert len(report.converted_files) == 1
+        stored = load_run_data(report.converted_files[0].destination)
+        assert stored.metadata.snapshot.entry_name == evidence.snapshot.entry_name
+        assert stored.cfg == evidence.cfg
+        assert len(report.moved_labber_files) == 1
+    else:
+        assert source.is_file()
+        assert not report.converted_files
+        expected_reason = "timestamp" if origin == "invalid-time" else "missing-event"
+        assert any(expected_reason in item.reason for item in report.pending)
 
 
 def test_validation_failure_retains_source_and_reuses_run_identity(

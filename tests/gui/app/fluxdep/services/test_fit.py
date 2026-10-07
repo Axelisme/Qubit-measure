@@ -15,17 +15,21 @@ import h5py
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
-from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, SearchCancelled
 from zcu_tools.analysis.spectrum import SpectrumData
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
     default_params_path,
 )
+from zcu_tools.gui.app.fluxdep.services.store import SelectionService
 from zcu_tools.gui.app.fluxdep.state import (
     FIT_VERSION_KEY,
     FluxDepState,
     SpectrumEntry,
 )
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import ProjectInfo
 
 # --- fixtures --------------------------------------------------------------
@@ -86,7 +90,7 @@ def _aligned_entry_with_points(name: str, fluxs, freqs) -> SpectrumEntry:
         flux_int=0.5,
         flux_period=1.0,
         aligned=True,
-        points_selected=True,
+        points_completed=True,
     )
 
 
@@ -108,6 +112,15 @@ def test_selected_pointcloud_no_mask_returns_all():
     np.testing.assert_allclose(freqs, [5.0, 5.05, 5.1, 5.15])
 
 
+def test_selected_pointcloud_skips_empty_completed_spectra():
+    st = _state_with_points()
+    st.put_spectrum(_aligned_entry_with_points("noise", [], []))
+    svc = FitService(st)
+    fluxs, freqs = svc.selected_pointcloud()
+    assert fluxs.size == 4
+    np.testing.assert_array_equal(freqs, [5.0, 5.05, 5.1, 5.15])
+
+
 def test_selected_pointcloud_applies_mask():
     st = _state_with_points()
     st.set_selection(np.array([True, False, True, False]))
@@ -121,10 +134,11 @@ def test_selected_pointcloud_stale_mask_raises():
     # selection set, then a point added → mask length now disagrees
     st.set_selection(np.array([True, False, True, False]))
     st.put_spectrum(_aligned_entry_with_points("s2", [0.4], [5.2]))
-    with pytest.raises(
-        ValueError, match="selection mask length 4 != joint point cloud"
-    ):
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
         FitService(st).selected_pointcloud()
+    assert caught.value.reason_code == "selection_stale"
+    assert st.version.snapshot() == before
 
 
 # --- compute_search / record_result ----------------------------------------
@@ -134,6 +148,48 @@ def test_selected_pointcloud_stale_mask_raises():
 # breakpoint search scales each entry's params; narrow bounds can reject every
 # scale, which is a real "infeasible" error, not what these tests probe).
 _WIDE = ((0.1, 50.0), (0.01, 10.0), (0.01, 10.0))
+
+
+@pytest.mark.parametrize("capture_search", [False, True])
+def test_removed_last_spectrum_leaves_stale_selection(tiny_database, capture_search):
+    st = _state_with_points()
+    mask = np.array([True, False, True, False])
+    SelectionService(st).set_selection(mask)
+    svc = FitService(st)
+    svc.set_params(tiny_database[0], *_WIDE, TransitionDict({}), 0.0, 0.0)
+    st.remove_spectrum("s1")
+    before = st.version.snapshot()
+
+    query = svc.capture_search if capture_search else svc.selected_pointcloud
+    with pytest.raises(FailedPreconditionError) as caught:
+        query()
+
+    assert caught.value.category == "failed_precondition"
+    assert caught.value.reason_code == "selection_stale"
+    assert st.version.snapshot() == before
+    assert st.spectrums == {}
+    np.testing.assert_array_equal(st.selection.selected, mask)
+
+
+@pytest.mark.parametrize("publish_empty_selection", [False, True])
+def test_empty_collection_without_stale_selection(
+    tiny_database, publish_empty_selection
+):
+    st = FluxDepState()
+    if publish_empty_selection:
+        SelectionService(st).set_selection(np.empty(0, dtype=np.bool_))
+    svc = FitService(st)
+    svc.set_params(tiny_database[0], *_WIDE, TransitionDict({}), 0.0, 0.0)
+    before = st.version.snapshot()
+
+    fluxs, freqs = svc.selected_pointcloud()
+    assert fluxs.shape == freqs.shape == (0,)
+    assert fluxs.dtype == freqs.dtype == np.dtype(np.float64)
+    with pytest.raises(FailedPreconditionError) as caught:
+        svc.capture_search()
+    assert caught.value.category == "failed_precondition"
+    assert caught.value.reason_code == "no_selected_points"
+    assert st.version.snapshot() == before
 
 
 def test_compute_search_does_not_touch_state(tiny_database):
@@ -149,13 +205,44 @@ def test_compute_search_does_not_touch_state(tiny_database):
     )
     fit_version_before = st.version.get(FIT_VERSION_KEY)
 
-    result = svc.compute_search()
+    result = svc.compute_search(svc.capture_search())
 
     # compute_search must NOT write State (no result recorded, no extra bump).
     assert isinstance(result, DatabaseSearchResult)
     assert len(result.params) == 3
     assert st.fit.params is None  # still no result on State
     assert st.version.get(FIT_VERSION_KEY) == fit_version_before
+
+
+@pytest.mark.parametrize("synchronous", [False, True])
+def test_controller_cancelled_search_keeps_published_fit(tiny_database, synchronous):
+    st = _state_with_points()
+    ctrl = Controller(st)
+    ctrl.set_fit_params(
+        tiny_database[0],
+        *_WIDE,
+        TransitionDict({"transitions": [(0, 1), (0, 2)]}),
+        0.0,
+        0.0,
+    )
+    st.set_fit_result((3.0, 1.0, 0.5))
+    version = st.version.get(FIT_VERSION_KEY)
+    changes: list[FitChangedPayload] = []
+    subscription = ctrl.bus.subscribe(FitChangedPayload, changes.append)
+    search = (
+        ctrl.search_database
+        if synchronous
+        else lambda **kwargs: ctrl.compute_search(ctrl.capture_search(), **kwargs)
+    )
+    try:
+        with pytest.raises(SearchCancelled):
+            search(cancel_requested=lambda: True)
+        assert st.fit.params == (3.0, 1.0, 0.5)
+        assert st.version.get(FIT_VERSION_KEY) == version
+        assert changes == []
+    finally:
+        subscription.unsubscribe()
+        ctrl.interactive.dispose()
 
 
 def test_record_result_writes_state(tiny_database):
@@ -170,26 +257,34 @@ def test_record_result_writes_state(tiny_database):
         0.0,
     )
     before = st.version.get(FIT_VERSION_KEY)
-    result = svc.compute_search()
+    result = svc.compute_search(svc.capture_search())
     svc.record_result(result)
     assert st.fit.params == result.params
     assert st.fit.has_result
     assert st.version.get(FIT_VERSION_KEY) == before + 1
 
 
-def test_compute_search_fast_fails_without_database():
+def test_capture_search_fast_fails_without_database():
     st = _state_with_points()
-    with pytest.raises(ValueError, match="database"):
-        FitService(st).compute_search()
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
+        FitService(st).capture_search()
+    assert caught.value.reason_code == "no_database_path"
+    assert st.version.snapshot() == before
 
 
-def test_compute_search_fast_fails_without_points(tiny_database):
+def test_capture_search_fast_fails_without_points(tiny_database):
     db_path = tiny_database[0]
-    st = FluxDepState()  # no spectra
+    st = FluxDepState()
+    st.put_spectrum(_aligned_entry_with_points("noise", [], []))
+    assert st.spectrums["noise"].points_completed
     svc = FitService(st)
     svc.set_params(db_path, *_WIDE, TransitionDict({}), 0.0, 0.0)
-    with pytest.raises(ValueError, match="selected points"):
-        svc.compute_search()
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
+        svc.capture_search()
+    assert caught.value.reason_code == "no_selected_points"
+    assert st.version.snapshot() == before
 
 
 # --- export_params ---------------------------------------------------------
@@ -215,17 +310,27 @@ def test_export_params_writes_json(tmp_path):
     assert fluxdep_fit.timestamp is not None
 
 
-def test_export_params_fast_fails_without_result():
+def test_export_params_fast_fails_without_result(tmp_path):
     st = _state_with_points()
-    with pytest.raises(ValueError, match="no fit result"):
-        FitService(st).export_params("/tmp/x.json")
+    path = tmp_path / "params.json"
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
+        FitService(st).export_params(str(path))
+    assert caught.value.reason_code == "no_fit_result"
+    assert not path.exists()
+    assert st.version.snapshot() == before
 
 
-def test_export_params_fast_fails_without_aligned():
-    st = FluxDepState()  # no aligned spectrum
+def test_export_params_fast_fails_without_aligned(tmp_path):
+    st = FluxDepState()
     st.set_fit_result((5.0, 1.2, 0.4))
-    with pytest.raises(ValueError, match="aligned"):
-        FitService(st).export_params("/tmp/x.json")
+    path = tmp_path / "params.json"
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
+        FitService(st).export_params(str(path))
+    assert caught.value.reason_code == "no_aligned_spectrum"
+    assert not path.exists()
+    assert st.version.snapshot() == before
 
 
 def test_default_params_path():

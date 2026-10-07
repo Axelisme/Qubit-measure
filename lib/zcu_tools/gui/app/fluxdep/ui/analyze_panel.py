@@ -20,7 +20,9 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from copy import deepcopy
+from dataclasses import replace
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
@@ -49,10 +51,16 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.event_bus import (
+    FitChangedPayload,
+    InteractiveChangedPayload,
+    SearchChangedPayload,
+)
+from zcu_tools.gui.app.fluxdep.search import SEARCH_OWNER_ID
 from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
+from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
-from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
@@ -60,10 +68,12 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .error_messages import friendly_fit_message
-from .gui_pbar import GuiProgressBarChannel
 from .transitions_form import TransitionsForm
 
 logger = logging.getLogger(__name__)
+
+AnalyzeTab = Literal["filter", "search", "show"]
+_ANALYZE_TABS: tuple[AnalyzeTab, ...] = ("filter", "search", "show")
 
 _N_SIM_FLUX = 1000  # simulated flux grid resolution for the visualisation
 
@@ -116,19 +126,30 @@ class AnalyzePanelWidget(QWidget):
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
-        self._runner = BackgroundRunner(self)
-        self._channel = GuiProgressBarChannel()
-        self._channel.progress.connect(self._on_progress)
+        self._bus_subs = EventSubscriptions()
+        self._shown_token: int | None = None
         self._filter_widget: SelectorWidget | None = None
+        self._filter_context_id: int | None = None
 
         self._build_ui()
         self._plot_host = QtPlotHost(self._diag_container, QtOwnerScheduler())
         self._diagnostics = Plots(self._plot_host)
         self._load_from_state()
-        # Filter is the initially-current tab, but currentChanged does NOT fire
-        # for the already-selected tab — so build its selector now, else it stayed
-        # a placeholder until the user switched away and back.
-        self._refresh_filter_tab()
+        self._bus_subs.subscribe(ctrl.bus, FitChangedPayload, self._on_fit_changed)
+        self._bus_subs.subscribe(
+            ctrl.bus, SearchChangedPayload, self._on_search_changed
+        )
+        self._bus_subs.subscribe(
+            ctrl.bus, InteractiveChangedPayload, self._on_interactive_changed
+        )
+        progress = ctrl.search.progress_control
+        self._progress_dispose = (
+            progress.attach_progress(SEARCH_OWNER_ID, self._refresh_progress)
+            if progress is not None
+            else None
+        )
+        self._refresh_search()
+        # MainWindow explicitly activates this singleton on every Analyze click.
 
     # --- construction ----------------------------------------------------
 
@@ -164,54 +185,22 @@ class AnalyzePanelWidget(QWidget):
         return holder
 
     def _refresh_filter_tab(self) -> None:
-        """(Re)build the cross-spectrum selector for the current spectra."""
-        from zcu_tools.analysis.fluxdep.models import SpectrumResult
+        """Attach current valid app context, after retiring the prior view."""
         from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 
-        if self._filter_widget is not None:
-            # Quiesce before deleteLater: the SelectorWidget may have a pooled
-            # worker in flight whose queued done delivery must be flushed now,
-            # while the carrier is still alive (prevents segfault on next pump).
-            self._filter_widget.quiesce()
-            self._filter_layout.removeWidget(self._filter_widget)
-            self._filter_widget.deleteLater()
-            self._filter_widget = None
-
-        spectrums: dict[str, SpectrumResult] = {
-            n: SpectrumResult(
-                type=e.spec_type,
-                flux_half=e.flux_half,
-                flux_int=e.flux_int,
-                flux_period=e.flux_period,
-                spectrum=e.raw,
-                points=e.points,
-            )
-            for n, e in self._ctrl.state.spectrums.items()
-            if e.points_selected
-        }
-        if not spectrums:
+        self.detach()
+        if not any(e.point_count > 0 for e in self._ctrl.state.spectrums.values()):
             self._filter_placeholder.setVisible(True)
             return
+        context = self._ctrl.interactive.begin_cross_selection()
+        active = self._ctrl.interactive.inspect()
+        if active is None or active.context is not context:
+            raise RuntimeError("selection context changed while attaching its view")
+        self._filter_context_id = active.context_id
         self._filter_placeholder.setVisible(False)
-        import time as _time
-
-        _t0 = _time.perf_counter()
         selector = SelectorWidget(
-            spectrums, min_distance=self._ctrl.state.selection.min_distance
+            context, on_apply=self._ctrl.interactive.apply_cross_selection
         )
-        logger.debug(
-            "filter tab: built SelectorWidget for %d spectra in %.0fms",
-            len(spectrums),
-            (_time.perf_counter() - _t0) * 1000,
-        )
-
-        def _on_finish() -> None:
-            _fluxs, _freqs, selected = selector.get_result()
-            self._ctrl.set_selection(selected, selector.min_distance())
-            n, total = int(selected.sum()), int(selected.size)
-            selector.status_label.setText(f"Applied: {n}/{total} points selected")
-
-        selector.finished.connect(_on_finish)
         self._filter_widget = selector
         self._filter_layout.addWidget(selector)
 
@@ -221,6 +210,28 @@ class AnalyzePanelWidget(QWidget):
         from qtpy.QtCore import Qt  # type: ignore[attr-defined]
         from qtpy.QtWidgets import QSplitter  # type: ignore[attr-defined]
 
+        form_box = self._build_search_form()
+
+        # Right: the search's native diagnostic figure, explicitly presented.
+        self._diag_stack = QStackedWidget()
+        diag_placeholder = QLabel("Search to see the diagnostic plot.")
+        diag_placeholder.setEnabled(False)
+        self._diag_stack.addWidget(diag_placeholder)
+        self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(form_box)
+        splitter.addWidget(self._diag_stack)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([360, 640])
+        holder = QWidget()
+        QVBoxLayout(holder).addWidget(splitter)
+        return holder
+
+    # --- Show tab --------------------------------------------------------
+
+    def _build_search_form(self) -> QGroupBox:
         form_box = QGroupBox("Search parameters")
         form = QFormLayout(form_box)
 
@@ -260,6 +271,10 @@ class AnalyzePanelWidget(QWidget):
         self._search_btn = QPushButton("Search database")
         self._search_btn.clicked.connect(self._on_search)
         form.addRow(self._search_btn)
+        self._cancel_btn = QPushButton("Cancel search")
+        self._cancel_btn.clicked.connect(self._on_cancel_search)
+        self._cancel_btn.setEnabled(False)
+        form.addRow(self._cancel_btn)
 
         self._progress = QProgressBar()
         self._progress.setVisible(False)
@@ -277,24 +292,7 @@ class AnalyzePanelWidget(QWidget):
         self._status.setWordWrap(True)
         form.addRow(self._status)
 
-        # Right: the search's native diagnostic figure, explicitly presented.
-        self._diag_stack = QStackedWidget()
-        diag_placeholder = QLabel("Search to see the diagnostic plot.")
-        diag_placeholder.setEnabled(False)
-        self._diag_stack.addWidget(diag_placeholder)
-        self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(form_box)
-        splitter.addWidget(self._diag_stack)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([360, 640])
-        holder = QWidget()
-        QVBoxLayout(holder).addWidget(splitter)
-        return holder
-
-    # --- Show tab --------------------------------------------------------
+        return form_box
 
     def _build_show_tab(self) -> QWidget:
         from qtpy.QtCore import Qt  # type: ignore[attr-defined]
@@ -371,10 +369,85 @@ class AnalyzePanelWidget(QWidget):
         self._transitions_form.set_transitions(fit.transitions)
         self._transitions_show.set_transitions(fit.transitions)
         self._export_btn.setEnabled(fit.has_result)
+        # Compare published inputs, not results, to preserve local display edits.
+        self._loaded_fit_inputs = replace(
+            fit, transitions=deepcopy(fit.transitions), params=None
+        )
+
+    def _on_fit_changed(self, payload: FitChangedPayload) -> None:
+        del payload
+        if replace(self._ctrl.state.fit, params=None) != self._loaded_fit_inputs:
+            self._load_from_state()
+        self._refresh_search()
+
+    @property
+    def current_tab(self) -> AnalyzeTab:
+        """Current domain tab: filter, search, or show, on the State owner."""
+        self._ctrl.state.assert_owner_thread()
+        return _ANALYZE_TABS[self._tabs.currentIndex()]
+
+    def show_tab(self, tab: AnalyzeTab) -> None:
+        """Select and refresh a domain tab on the State-owner Qt thread.
+
+        Filter reuses an attached valid context without resetting input/Undo.
+        Search/show detach Filter and cancel its live context, even if already
+        selected. Search forms/progress refresh from the app owner. Invalid tab
+        raises ValueError; foreign-thread access raises RuntimeError.
+        This does not raise or activate the top-level window.
+        """
+        self._ctrl.state.assert_owner_thread()
+        if tab not in _ANALYZE_TABS:
+            raise ValueError(f"unknown analyze tab {tab!r}")
+        index = _ANALYZE_TABS.index(tab)
+        if index != self._tabs.currentIndex():
+            self._tabs.setCurrentIndex(index)
+        elif tab == "filter":
+            active = self._ctrl.interactive.inspect()
+            if (
+                active is None
+                or active.context_id != self._filter_context_id
+                or self._filter_widget is None
+            ):
+                self._refresh_filter_tab()
+        else:
+            self._on_tab_changed(index)
+        self._refresh_search()
+
+    def _on_interactive_changed(self, payload: InteractiveChangedPayload) -> None:
+        if payload.phase == "closed" and payload.context_id == self._filter_context_id:
+            self.detach()
+
+    def activate(self) -> None:
+        """Activate the singleton; on Filter, reattach valid or new app context.
+
+        Explicit refresh; MainWindow routes Analyze clicks through show_tab.
+        Retire the old view first, so hidden controls cannot Apply stale data.
+        Empty cloud shows a placeholder; invalid inputs propagate to the caller.
+        """
+        self._refresh_search()
+        if self._tabs.tabText(self._tabs.currentIndex()) == "Filter":
+            self._refresh_filter_tab()
+
+    def detach(self) -> None:
+        """Retire Filter's view without cancelling the app context.
+
+        Call when switching to a spectrum editor. Other tabs/forms remain intact.
+        The app owns context invalidation on active/source/picker switches.
+        """
+        if self._filter_widget is not None:
+            self._filter_widget.teardown()
+            self._filter_layout.removeWidget(self._filter_widget)
+            self._filter_widget.deleteLater()
+            self._filter_widget = None
+        self._filter_context_id = None
 
     def _on_tab_changed(self, index: int) -> None:
         if self._tabs.tabText(index) == "Filter":
             self._refresh_filter_tab()
+        else:
+            self.detach()
+            if self._ctrl.interactive.current_cross_selection() is not None:
+                self._ctrl.interactive.cancel()
 
     # --- Search actions --------------------------------------------------
 
@@ -463,33 +536,59 @@ class AnalyzePanelWidget(QWidget):
         except ValueError as exc:
             self._status.setText(f"Invalid parameters: {exc}")
             return
-        self._search_btn.setEnabled(False)
-        self._export_btn.setEnabled(False)
-        self._progress.setVisible(True)
-        self._progress.setRange(0, 0)
-        self._status.setText("Searching…")
+        previous = self._ctrl.search.current
+        try:
+            self._ctrl.search.start()
+        except Exception as exc:
+            logger.exception("search start failed")
+            self._refresh_search()
+            # Opened failures already published one SearchChanged warning.
+            if self._ctrl.search.current == previous:
+                self._on_search_error(exc)
 
-        pbar_factory = self._channel.factory()
-        self._runner.submit(
-            lambda: self._ctrl.compute_search(pbar_factory=pbar_factory),
-            on_done=self._on_search_done,
-            on_error=self._on_search_error,
-            run_in_pool=True,
-        )
+    def _on_cancel_search(self) -> None:
+        token = self._ctrl.search.active_token
+        if token is not None:
+            self._ctrl.search.cancel(token)
 
-    def _on_progress(self, n: float, total: float, desc: str) -> None:
-        if total > 0:
-            self._progress.setRange(0, int(total))
-            self._progress.setValue(int(n))
+    def _on_search_changed(self, payload: SearchChangedPayload) -> None:
+        self._refresh_search()
+        if payload.status == "failed":
+            self._show_message("Search failed", payload.error or "Search failed.")
+
+    def _refresh_search(self) -> None:
+        activity = self._ctrl.search.current
+        pending = activity is not None and activity.status == "pending"
+        self._search_btn.setEnabled(not pending)
+        self._cancel_btn.setEnabled(pending)
+        self._progress.setVisible(pending)
+        self._export_btn.setEnabled(self._ctrl.state.fit.has_result and not pending)
+        if pending:
+            self._status.setText("Searching…")
+            self._refresh_progress()
+        elif activity is not None:
+            if activity.status == "finished":
+                result = self._ctrl.search.result
+                if result is not None and activity.token != self._shown_token:
+                    self._shown_token = activity.token
+                    self._present_search_result(result)
+            elif activity.status == "failed":
+                self._status.setText(f"Search failed: {activity.error}")
+            else:
+                self._status.setText("Search cancelled.")
+
+    def _refresh_progress(self) -> None:
+        progress = self._ctrl.search.progress_control
+        bars = progress.progress_bars(SEARCH_OWNER_ID) if progress is not None else ()
+        if bars:
+            _bar_id, model = bars[-1]
+            self._progress.setRange(0, model.qt_maximum())
+            self._progress.setValue(model.qt_value())
+            self._progress.setFormat(model.format())
         else:
             self._progress.setRange(0, 0)
-        if desc:
-            self._status.setText(desc)
 
-    def _on_search_done(self, result: DatabaseSearchResult) -> None:
-        self._search_btn.setEnabled(True)
-        self._progress.setVisible(False)
-        self._ctrl.record_search_result(result)
+    def _present_search_result(self, result: DatabaseSearchResult) -> None:
         EJ, EC, EL = result.params
         self._status.setText(f"EJ={EJ:.3f}  EC={EC:.3f}  EL={EL:.3f}")
         self._export_btn.setEnabled(True)
@@ -510,23 +609,24 @@ class AnalyzePanelWidget(QWidget):
         # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
 
     def quiesce(self) -> None:
-        """Stop any in-flight search worker and the embedded selector's worker.
+        """Drain the embedded selector only; search belongs to the app runner.
 
-        Call from the host window's ``closeEvent`` before the C++ object tree is
-        destroyed: both ``_runner`` (search) and the embedded ``SelectorWidget._runner``
-        (filter) may have queued main-thread deliveries that must be flushed while
-        their carriers are still alive.
+        The host must drain its search runner before disposing this panel.
+        Hiding or detaching this view does not cancel app-owned search.
         """
-        # Quiesce the embedded SelectorWidget first (it has its own debounce + runner).
         if self._filter_widget is not None:
             self._filter_widget.quiesce()
-        # Then quiesce our own search runner.
-        self._runner.quiesce()
+
+    def dispose(self) -> None:
+        """Release subscriptions and presentation after app search has drained."""
+        self._bus_subs.unsubscribe_all()
+        if self._progress_dispose is not None:
+            self._progress_dispose()
+            self._progress_dispose = None
+        self.release_figures()
 
     def _on_search_error(self, exc: Exception) -> None:
         logger.exception("search worker failed", exc_info=exc)
-        self._search_btn.setEnabled(True)
-        self._progress.setVisible(False)
         self._status.setText("Search failed.")
         self._show_message("Search failed", friendly_fit_message("Search", exc))
 
@@ -580,7 +680,7 @@ class AnalyzePanelWidget(QWidget):
         missing = self._missing_freq_message(show_transitions, fit.r_f, fit.sample_f)
         if missing:
             self._status.setText("Show: " + missing.split(".")[0] + ".")
-            show_transitions = self._transitions_form.get_transitions()  # fit set
+            show_transitions = fit.transitions
 
         aligned = next((e for e in spectrums.values() if e.aligned), None)
         try:

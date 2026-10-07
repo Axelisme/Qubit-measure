@@ -1,132 +1,240 @@
-"""LinePickerWidget — pick the half-flux and integer-flux lines on a 2D spectrum.
-
-Thin Qt chrome around the toolkit-agnostic ``TwoLinePicker`` kernel (in
-``zcu_tools.analysis.fluxdep``): the canvas is a Qt-embedded FigureCanvasQTAgg,
-the conjugate toggle, swap / auto-align buttons and the info label are Qt
-widgets wired to the core, and
-``get_result`` returns the core's picked positions. The core is passive (it only
-mutates state), so this widget repaints (``_repaint``) after each interaction it
-drives. measure-gui drives the same core through its own interactive analysis
-session, which repaints via the host port instead.
-
-``fold_initial_lines`` / ``find_best_mirror_position`` are re-exported from the
-core for backwards compatibility (callers used to import them from here).
-"""
+"""Session-backed fluxdep line picking, with disposable pointer preview."""
 
 from __future__ import annotations
 
-import numpy as np
-from numpy.typing import NDArray
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QCheckBox,
-    QLabel,
-    QPushButton,
-    QWidget,
-)
+import logging
+from collections.abc import Callable
+
+from matplotlib.backend_bases import MouseButton, MouseEvent
+from qtpy import QtCore, QtGui, QtWidgets
 
 from zcu_tools.analysis.fluxdep import (
     TwoLinePicker,
     find_best_mirror_position,
     fold_initial_lines,
 )
+from zcu_tools.gui.app.fluxdep.interactive import LinePickContext
+from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.plotting.fluxdep.pick import configure_flux_pick_axes
 
-from .base import InteractiveMplWidget
-
-__all__ = [
-    "LinePickerWidget",
-    "find_best_mirror_position",
-    "fold_initial_lines",
-]
+__all__ = ["LinePickerWidget", "find_best_mirror_position", "fold_initial_lines"]
+logger = logging.getLogger(__name__)
 
 
 class LinePickerWidget(InteractiveMplWidget):
-    """Drag/align the half-flux (red) and integer-flux (blue) vertical lines."""
+    """Present one owner's live context, without owning committed line state.
 
-    def __init__(
-        self,
-        signals: NDArray[np.complex128],
-        dev_values: NDArray[np.float64],
-        freqs: NDArray[np.float64],
-        flux_half: float | None = None,
-        flux_int: float | None = None,
-        force_magnitude: bool = False,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        # The magnitude-only projection is fixed by the spectrum type (OneTone
-        # True — phase uninformative; TwoTone False) via force_magnitude, applied
-        # to the core at construction — there is no runtime toggle.
-        self._info: QLabel | None = None
+    Controls use context.plugin actions and context.session undo. The finished
+    signal requests owner Finish; get_result is only a committed-state read.
+    Invalid moves restore the snapshot and display their error, not a commit.
+    """
 
-        # The core owns the data, plots, line state and interaction; this widget
-        # is only the Qt shell. The core is passive — it never repaints — so the
-        # widget calls _repaint (info label + canvas) after each drive.
+    def __init__(self, context: LinePickContext) -> None:
+        """Attach to an open context and capture its immutable rendering inputs.
+
+        Closing the context rejects input. Teardown detaches only presentation;
+        the owner may mount another view of the same session.
+        """
+        context.session.ensure_input_open()
+        super().__init__()
+        self._context = context
+        self._detached = False
+        inputs = context.plugin.inputs
+        state = context.session.snapshot()
         self._picker = TwoLinePicker(
             self.figure,
-            signals,
-            dev_values,
-            freqs,
-            flux_half=flux_half,
-            flux_int=flux_int,
-            force_magnitude=force_magnitude,
+            inputs.signals,
+            inputs.dev_values,
+            inputs.freqs,
+            flux_half=state.flux_half,
+            flux_int=state.flux_int,
+            force_magnitude=state.magnitude_only,
         )
-        self._build_controls()
-        self._repaint()  # initial paint
+        configure_flux_pick_axes(self.figure)
+        self._conjugate = QtWidgets.QCheckBox("Conjugate Line")
+        self._conjugate.toggled.connect(
+            lambda enabled: self._execute(
+                lambda: context.plugin.actions.conjugate.execute(
+                    context.session, enabled
+                )
+            )
+        )
+        self.controls_layout.addWidget(self._conjugate)
+        self._swap = self._add_button(
+            "Swap Lines",
+            lambda: context.plugin.actions.swap.execute(context.session, None),
+        )
+        self._align = self._add_button(
+            "Auto Align", lambda: context.plugin.start_alignment(context.session)
+        )
+        self._undo = self._add_button("Undo", context.session.undo)
+        self._info = QtWidgets.QLabel()
+        self._info.setWordWrap(True)
+        self.controls_layout.addWidget(self._info)
+        self._finish = self.add_finish_button()
+        # Replace the base's unguarded signal forwarding with an input-gated request.
+        self._finish.clicked.disconnect()
+        self._finish.clicked.connect(self._request_finish)
+        self._unsubscribe = context.session.subscribe(self._show_committed)
+        self._unsubscribe_alignment = context.plugin.subscribe_alignment(
+            lambda _busy, _error: self._refresh_controls()
+        )
+        self.canvas.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self.canvas.installEventFilter(self)
+        self.installEventFilter(self)
+        self._show_committed()
 
-    # --- controls --------------------------------------------------------
+    def _add_button(
+        self, label: str, operation: Callable[[], object]
+    ) -> QtWidgets.QPushButton:
+        button = QtWidgets.QPushButton(label)
+        button.clicked.connect(lambda: self._execute(operation))
+        self.controls_layout.addWidget(button)
+        return button
 
-    def _build_controls(self) -> None:
-        self._conjugate_checkbox = QCheckBox("Conjugate Line")
-        # Conjugate is a flag with no visual change until the next drag — no repaint.
-        self._conjugate_checkbox.toggled.connect(self._picker.set_conjugate)
-        self.controls_layout.addWidget(self._conjugate_checkbox)
+    def _input_open(self) -> bool:
+        if self._detached:
+            return False
+        try:
+            self._context.session.ensure_input_open()
+        except FailedPreconditionError:
+            for control in (
+                self._conjugate,
+                self._swap,
+                self._align,
+                self._undo,
+                self._finish,
+            ):
+                control.setEnabled(False)
+            return False
+        return True
 
-        swap_button = QPushButton("Swap Lines")
-        swap_button.clicked.connect(self._on_swap)
-        self.controls_layout.addWidget(swap_button)
+    def _execute(self, operation: Callable[[], object]) -> None:
+        if not self._input_open():
+            return
+        self.cancel_preview()
+        try:
+            operation()
+        except (InvalidInputError, FailedPreconditionError) as exc:
+            self._show_committed()
+            self._info.setText(str(exc))
+        except Exception as exc:
+            # Qt input callbacks isolate failures rather than aborting the GUI loop.
+            logger.exception("line-picker control failed")
+            self._show_committed()
+            self._info.setText(str(exc))
 
-        align_button = QPushButton("Auto Align")
-        align_button.clicked.connect(self._on_auto_align)
-        self.controls_layout.addWidget(align_button)
+    def _request_finish(self) -> None:
+        if self._input_open():
+            self.cancel_preview()
+            self.finished.emit()
 
-        info = QLabel(self._picker.info_text())
-        info.setWordWrap(True)
-        self._info = info
-        self.controls_layout.addWidget(info)
+    def _refresh_controls(self) -> None:
+        if not self._input_open():
+            return
+        self._undo.setEnabled(self._context.session.can_undo())
+        self._align.setEnabled(not self._context.plugin.alignment_busy)
+        error = self._context.plugin.info()["alignment_error"]
+        self._info.setText(
+            str(error) if error is not None else self._picker.info_text()
+        )
 
-        self.add_finish_button()
+    def _show_committed(self) -> None:
+        if self._detached:
+            return
+        state = self._context.session.snapshot()
+        self._picker.show_state(state)
+        self._conjugate.blockSignals(True)
+        self._conjugate.setChecked(state.conjugate)
+        self._conjugate.blockSignals(False)
+        self._refresh_controls()
+        self.redraw()
 
-    def _repaint(self) -> None:
-        # Refresh the info label (reads live positions) and paint the Qt canvas.
-        if self._info is not None:
+    def on_press(self, event: MouseEvent) -> None:
+        """Select a line on the main spectrum axes; do not commit."""
+        if (
+            self._input_open()
+            and event.button == MouseButton.LEFT
+            and self._picker.is_main_axes(event.inaxes)
+        ):
+            self._picker.on_press(event.xdata)
+
+    def on_move(self, event: MouseEvent) -> None:
+        """Preview a valid device position while a line is selected."""
+        if not self._input_open() or not self._picker.is_main_axes(event.inaxes):
+            return
+        try:
+            self._picker.on_move(event.xdata)
+        except ValueError as exc:
+            self.cancel_preview()
+            self._info.setText(str(exc))
+        else:
             self._info.setText(self._picker.info_text())
-        self.canvas.draw_idle()
+            self.redraw()
 
-    # --- mouse interaction (base dispatches in-axes events here) ----------
-
-    def on_press(self, event) -> None:  # noqa: ANN001 - MouseEvent via base
-        self._picker.on_press(event.xdata)  # selection only — no visual change
-
-    def on_move(self, event) -> None:  # noqa: ANN001 - MouseEvent via base
-        self._picker.on_move(event.xdata)
-        self._repaint()
-
-    def on_release(self, event) -> None:  # noqa: ANN001 - MouseEvent via base
-        self._picker.on_release(event.xdata, event.ydata)
-        self._repaint()
-
-    # --- button / toggle actions -----------------------------------------
-
-    def _on_swap(self) -> None:
-        self._picker.swap()
-        self._repaint()
-
-    def _on_auto_align(self) -> None:
-        self._picker.auto_align()  # synchronous in fluxdep (small spectra)
-        self._repaint()
-
-    # --- result ----------------------------------------------------------
+    def on_release(self, event: MouseEvent) -> None:
+        """Commit a valid selected-line placement through the shared move action."""
+        if not self._input_open():
+            return
+        role = self._picker.selected_role
+        if (
+            not self._picker.is_main_axes(event.inaxes)
+            or event.xdata is None
+            or event.ydata is None
+            or event.button != MouseButton.LEFT
+        ):
+            self.cancel_preview()
+            return
+        if role is not None:
+            position = float(event.xdata)
+            self._execute(
+                lambda: self._context.plugin.actions.move.execute(
+                    self._context.session, (role, position)
+                )
+            )
 
     def get_result(self) -> tuple[float, float]:
-        """Selected (flux_half, flux_int)."""
-        return self._picker.positions()
+        """Read committed half/integer device positions, not pointer preview."""
+        state = self._context.session.snapshot()
+        return state.flux_half, state.flux_int
+
+    def cancel_preview(self) -> None:
+        """Restore the latest snapshot on focus loss, hide or Escape."""
+        self._show_committed()
+
+    def teardown(self) -> None:
+        """Idempotently detach subscriptions and controls, leaving context open."""
+        if self._detached:
+            return
+        self.cancel_preview()
+        self._detached = True
+        self._unsubscribe()
+        self._unsubscribe_alignment()
+        self.canvas.removeEventFilter(self)
+        self.removeEventFilter(self)
+        for control in (
+            self._conjugate,
+            self._swap,
+            self._align,
+            self._undo,
+            self._finish,
+        ):
+            control.setEnabled(False)
+
+    def _dispatch_release(self, event: object) -> None:
+        # The base filters outside-axes releases, but those must discard gestures.
+        if isinstance(event, MouseEvent):
+            self.on_release(event)
+
+    def eventFilter(self, a0: QtCore.QObject | None, a1: QtCore.QEvent | None) -> bool:
+        """Discard presentation-only gestures on focus loss, hide or Escape."""
+        if a1 is not None:
+            if a1.type() in (QtCore.QEvent.Type.FocusOut, QtCore.QEvent.Type.Hide):
+                self.cancel_preview()
+            elif (
+                isinstance(a1, QtGui.QKeyEvent) and a1.key() == QtCore.Qt.Key.Key_Escape
+            ):
+                self.cancel_preview()
+                return True
+        return super().eventFilter(a0, a1)

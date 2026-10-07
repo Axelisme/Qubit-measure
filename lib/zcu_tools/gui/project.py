@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import TypedDict
 
 # Placeholder chip / qubit names used until the user sets a real project. They
 # live here (the ProjectInfo's home) so both the export path and ProjectInfo's
@@ -122,7 +123,21 @@ class ProjectInfo:
 # ---------------------------------------------------------------------------
 
 
-def project_info_payload(project: ProjectInfo) -> dict:
+class ProjectInfoPayload(TypedDict):
+    """Applied project identity and native paths shared by analysis apps.
+
+    chip_name and qub_name identify the applied chip/qubit, including placeholders.
+    result_dir is the processed-output directory. database_path is the raw-data
+    root, not a fluxdep search database file. Paths retain ProjectInfo spelling.
+    """
+
+    chip_name: str
+    qub_name: str
+    result_dir: str
+    database_path: str
+
+
+def project_info_payload(project: ProjectInfo) -> ProjectInfoPayload:
     """Build the 4-field wire payload for ``project.info`` handlers.
 
     Both fluxdep-gui and dispersive-gui expose an identical ``project.info``

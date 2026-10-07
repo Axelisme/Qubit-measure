@@ -23,7 +23,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (required_string("adapter_name", "Adapter to instantiate"),),
         ),
         agent=AgentMethodPolicy(
-            refresh_after_write=True, created_resource="tab:{tab_id}"
+            refresh_after_write=True,
+            created_resource="tab:{tab_id}",
+            created_identity="tab_id",
         ),
     ),
     method_entry(
@@ -43,6 +45,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             guard_deps=("context",),
             refresh_after_write=True,
             created_resource="tab:{tab_id}",
+            created_identity="tab_id",
         ),
     ),
     method_entry(

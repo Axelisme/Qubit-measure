@@ -13,6 +13,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     SpectrumEntry,
 )
+from zcu_tools.gui.expected_error import InvalidInputError
 
 
 def _empty_points() -> PointsData:
@@ -47,6 +48,14 @@ def test_store_list_get_remove():
     assert store.list_spectrums() == ["b"]
 
 
+def test_store_unknown_lookup_uses_nominal_state_contract():
+    st = FluxDepState()
+    with pytest.raises(InvalidInputError) as caught:
+        SpectrumStore(st).get_spectrum("missing")
+    assert caught.value.reason_code == "unknown_spectrum"
+    assert st.version.snapshot() == {}
+
+
 def test_store_set_active():
     st = FluxDepState()
     st.put_spectrum(_entry("a"))
@@ -65,7 +74,9 @@ def _with_points(st: FluxDepState, name: str, devs, freqs) -> None:
 def test_derive_pointcloud_concatenates_in_order():
     st = FluxDepState()
     _with_points(st, "a", [0.0, 1.0], [5.0, 5.1])
+    _with_points(st, "noise", [], [])
     _with_points(st, "b", [2.0], [5.2])
+    assert st.spectrums["noise"].points_completed
     sel = SelectionService(st)
     fluxs, freqs = sel.derive_pointcloud()
     assert fluxs.shape == (3,)
@@ -74,6 +85,7 @@ def test_derive_pointcloud_concatenates_in_order():
 
 def test_derive_pointcloud_empty():
     st = FluxDepState()
+    _with_points(st, "noise", [], [])
     fluxs, freqs = SelectionService(st).derive_pointcloud()
     assert fluxs.size == 0 and freqs.size == 0
 

@@ -14,6 +14,7 @@ import os
 from zcu_tools.analysis.fluxdep.io import dump_spectrums
 from zcu_tools.analysis.fluxdep.models import SpectrumResult
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.expected_error import FailedPreconditionError
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +49,14 @@ class ExportService:
 
         Fast-fails if the collection is empty. ``mode`` is the h5py file mode
         (default ``"x"`` = create, fail if exists; pass ``"w"`` to overwrite).
-        Returns the resolved path.
+        Returns the resolved path. An empty collection raises
+        FailedPreconditionError (no_spectrums) before creating any file.
+        Native I/O failures propagate without classification.
         """
         if not self._state.spectrums:
-            raise ValueError("no spectra to export")
+            raise FailedPreconditionError(
+                "no spectra to export", reason_code="no_spectrums"
+            )
 
         path = filepath if filepath is not None else self.default_path()
         spectrums: dict[str, SpectrumResult] = {

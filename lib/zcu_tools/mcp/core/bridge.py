@@ -76,6 +76,15 @@ class MCPBridgeConfig(McpServerConfig):
     # with the GUI writer. Distinct from app_name (measure's app_name is "gui").
     app_slug: str = ""
 
+    @property
+    def stderr_file(self) -> Path:
+        """File that receives the launched GUI's stderr, next to ``log_file``.
+
+        Each launch truncates it. A file never fills up the way an unread pipe
+        does, so warnings written after startup cannot block the GUI.
+        """
+        return self.log_file.with_name(self.log_file.name + ".stderr")
+
 
 def resolve_connect_port(config: MCPBridgeConfig, requested: int | None) -> int:
     """Pick the port a ``connect`` tool should attach to.
@@ -607,7 +616,9 @@ class McpBridge:
         """Fork the GUI subprocess on ``port``, wait until ready, maybe connect.
 
         ``repo_root`` anchors ``scripts/<run_script_name>``. ``extra_args`` are
-        appended to the launch command (apps that need extra flags).
+        appended to the launch command (apps that need extra flags). The GUI's
+        stderr goes to ``config.stderr_file``, truncated on each launch; an
+        ``OSError`` from opening that file aborts the launch.
         """
         cfg = self.config
         if self._proc is not None and self._proc.poll() is None:
@@ -638,22 +649,24 @@ class McpBridge:
         if extra_args:
             cmd += list(extra_args)
 
-        if os.name == "nt":
-            self._proc = subprocess.Popen(
-                cmd,
-                cwd=str(repo_root),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
-            )
-        else:
-            self._proc = subprocess.Popen(
-                cmd,
-                cwd=str(repo_root),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
-            )
+        # The child keeps its own copy of the handle; the parent closes its copy.
+        with cfg.stderr_file.open("wb") as stderr:
+            if os.name == "nt":
+                self._proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(repo_root),
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
+                )
+            else:
+                self._proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(repo_root),
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr,
+                    start_new_session=True,
+                )
         self._write_pid_file(self._proc.pid)
 
         ready = self._wait_for_launch(self._proc, port)
@@ -664,7 +677,7 @@ class McpBridge:
                 f"call {cfg.tool_prefix}connect manually when ready."
             )
 
-        log_note = f" DEBUG log: {cfg.log_file}"
+        log_note = f" DEBUG log: {cfg.log_file}; stderr: {cfg.stderr_file}"
         if auto_connect:
             self.connect(port, token)
             return (
@@ -675,19 +688,18 @@ class McpBridge:
         return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
 
     def _wait_for_launch(self, proc: subprocess.Popen[bytes], port: int) -> bool:
-        """Wait for readiness, reporting an early process exit with its stderr."""
+        """Wait for readiness, reporting an early process exit with its stderr tail."""
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
             rc = proc.poll()
             if rc is not None:
-                stderr = b""
-                if proc.stderr is not None:
-                    stderr = proc.stderr.read() or b""
+                stderr = self.config.stderr_file.read_bytes()
                 tail = stderr.decode("utf-8", "replace").strip().splitlines()[-5:]
                 self._proc = None
                 raise RuntimeError(
                     f"GUI process exited during startup (returncode={rc}) before "
-                    f"port {port} was ready. Last stderr:\n" + "\n".join(tail)
+                    f"port {port} was ready. Last stderr "
+                    f"({self.config.stderr_file}):\n" + "\n".join(tail)
                 )
             if port_is_open(port):
                 return True

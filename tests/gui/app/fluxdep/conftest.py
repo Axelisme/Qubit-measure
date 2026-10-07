@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
+from zcu_tools.analysis.fluxdep.twotone import TwoToneInputs
 from zcu_tools.datafile import save_labber_data
+from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 
 
 @pytest.fixture(autouse=True, name="_drain_qt_events")
@@ -74,3 +78,114 @@ def transposed_spectrum_hdf5(tmp_path):
         ],
     )
     return filepath + ".hdf5", flux, freqs_ghz, signals
+
+
+@pytest.fixture
+def twotone_inputs() -> TwoToneInputs:
+    """Descending device rows with a sloped finite resonance in GHz."""
+    devs = np.linspace(1.0, -1.0, 24)
+    freqs = np.linspace(4.0, 6.0, 80)
+    center = 4.8 + 0.3 * devs
+    amplitude = np.exp(-(((freqs[None, :] - center[:, None]) / 0.08) ** 2))
+    signals = np.asarray(1.0 + 1j * amplitude, dtype=np.complex128)
+    return TwoToneInputs(FluxPickInputs(signals, devs, freqs))
+
+
+@pytest.fixture
+def twotone_controller(twotone_inputs: TwoToneInputs):
+    """Aligned TwoTone owner with descending axes for publication sorting."""
+    spectrum = twotone_inputs.spectrum
+    state = FluxDepState()
+    state.put_spectrum(
+        SpectrumEntry(
+            name="two",
+            spec_type="TwoTone",
+            raw={
+                "signals": spectrum.signals.copy(),
+                "dev_values": spectrum.dev_values.copy(),
+                "freqs": spectrum.freqs.copy(),
+                "fluxs": spectrum.dev_values.copy(),
+            },
+            points={
+                "dev_values": np.empty(0),
+                "freqs": np.empty(0),
+                "fluxs": np.empty(0),
+            },
+        )
+    )
+    ctrl = Controller(state)
+    ctrl.set_active_spectrum("two")
+    ctrl.set_alignment("two", -0.5, 0.5)
+    yield ctrl
+    ctrl.interactive.dispose()
+
+
+@pytest.fixture
+def onetone_controller():
+    """Aligned two-dip OneTone, descending devices to observe service sorting."""
+    devs = np.linspace(1.0, 0.0, 40)
+    freqs = np.linspace(5.0, 6.0, 20)
+    profile = np.exp(-((freqs - freqs[10]) ** 2) / (2 * 0.08**2))
+    depth = np.full(devs.size, 0.3)
+    for center in (0.25, 0.75):
+        depth += 0.5 * np.exp(-((devs - center) ** 2) / (2 * 0.03**2))
+    signals = np.asarray(1 - depth[:, None] * profile[None, :], dtype=np.complex128)
+    state = FluxDepState()
+    state.put_spectrum(
+        SpectrumEntry(
+            name="one",
+            spec_type="OneTone",
+            raw={
+                "signals": signals,
+                "dev_values": devs,
+                "freqs": freqs,
+                "fluxs": devs.copy(),
+            },
+            points={
+                "dev_values": np.empty(0),
+                "freqs": np.empty(0),
+                "fluxs": np.empty(0),
+            },
+        )
+    )
+    ctrl = Controller(state)
+    ctrl.set_active_spectrum("one")
+    ctrl.set_alignment("one", 0.2, 0.7)
+    yield ctrl
+    ctrl.interactive.dispose()
+
+
+@pytest.fixture
+def cross_controller():
+    """Joint cloud with duplicate identities and an intervening empty source."""
+    state = FluxDepState()
+    for name, cloud_fluxs, cloud_freqs in (
+        ("a", [0.0, 0.5, 1.0], [4.0, 4.5, 5.0]),
+        ("empty", [], []),
+        ("b", [0.5], [4.5]),
+    ):
+        axis = np.array([0.0, 0.2, 0.4, 0.7, 1.0])
+        fluxs = np.array(cloud_fluxs, dtype=np.float64)
+        freqs = np.array(cloud_freqs, dtype=np.float64)
+        state.put_spectrum(
+            SpectrumEntry(
+                name=name,
+                spec_type="TwoTone",
+                raw={
+                    "dev_values": axis.copy(),
+                    "fluxs": axis,
+                    "freqs": np.array([4.0, 4.3, 5.0]),
+                    "signals": np.ones((5, 3), dtype=np.complex128),
+                },
+                points={"dev_values": fluxs.copy(), "fluxs": fluxs, "freqs": freqs},
+                flux_half=0.5,
+                flux_int=1.0,
+                flux_period=1.0,
+                aligned=True,
+                points_completed=True,
+            )
+        )
+    ctrl = Controller(state)
+    ctrl.set_active_spectrum("a")
+    yield ctrl
+    ctrl.interactive.dispose()

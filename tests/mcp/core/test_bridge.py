@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
-from io import BytesIO
 from pathlib import Path
 from queue import Queue
 from threading import Event
@@ -185,30 +185,49 @@ def test_launched_gui_ignores_shared_pid_file(tmp_path: Path) -> None:
     assert bridge.launched_gui is False
 
 
+class _ChildStderr:
+    """Popen stand-in whose child writes ``output`` to the stderr it receives.
+
+    A real child blocks once an unread pipe fills, so the stand-in only accepts
+    a writable file handle.
+    """
+
+    def __init__(self, proc: MagicMock) -> None:
+        self.proc = proc
+        self.output = b""
+
+    def __call__(self, cmd: list[str], **kwargs: Any) -> MagicMock:
+        del cmd
+        stderr = kwargs["stderr"]
+        if stderr in (None, subprocess.PIPE):
+            raise AssertionError(f"GUI stderr must go to a file, got {stderr!r}")
+        stderr.write(self.output)
+        return self.proc
+
+
 @pytest.fixture
 def launch_bridge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[McpBridge, MagicMock, Mock, Mock]:
+) -> tuple[McpBridge, _ChildStderr, Mock, Mock]:
     config = _config(tmp_path)
     script = tmp_path / "scripts" / config.run_script_name
     script.parent.mkdir()
     script.touch()
     bridge = McpBridge(config)
-    proc = MagicMock(pid=4242, stderr=None)
+    proc = MagicMock(pid=4242)
     proc.poll.return_value = None
+    child = _ChildStderr(proc)
     probe = Mock(side_effect=[False, True])
     connect = Mock(return_value="connected")
-    monkeypatch.setattr(
-        "zcu_tools.mcp.core.bridge.subprocess.Popen", Mock(return_value=proc)
-    )
+    monkeypatch.setattr("zcu_tools.mcp.core.bridge.subprocess.Popen", child)
     monkeypatch.setattr("zcu_tools.mcp.core.bridge.port_is_open", probe)
     monkeypatch.setattr(bridge, "connect", connect)
-    return bridge, proc, probe, connect
+    return bridge, child, probe, connect
 
 
 @pytest.mark.parametrize("auto_connect", [False, True])
 def test_launch_ready_preserves_connection_choice(
-    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock],
+    launch_bridge: tuple[McpBridge, _ChildStderr, Mock, Mock],
     tmp_path: Path,
     *,
     auto_connect: bool,
@@ -223,25 +242,40 @@ def test_launch_ready_preserves_connection_choice(
         connect.assert_not_called()
 
 
-@pytest.mark.parametrize("stderr", [None, b"startup details"])
-def test_launch_reports_early_exit_without_connecting(
-    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock],
-    tmp_path: Path,
-    stderr: bytes | None,
+def test_launch_keeps_gui_stderr_in_file_without_blocking(
+    launch_bridge: tuple[McpBridge, _ChildStderr, Mock, Mock], tmp_path: Path
 ) -> None:
-    bridge, proc, _, connect = launch_bridge
-    proc.poll.return_value = 7
-    proc.stderr = BytesIO(stderr) if stderr is not None else None
+    bridge, child, _, _ = launch_bridge
+    stderr_file = bridge.config.stderr_file
+    stderr_file.write_bytes(b"previous launch")
+    child.output = b"warning\n" * 32768  # 256 KiB, well past a pipe buffer
+    result = bridge.launch(tmp_path, 18765, auto_connect=False)
+    assert str(stderr_file) in result
+    assert stderr_file.read_bytes() == child.output
+    assert bridge.launched_gui
+
+
+@pytest.mark.parametrize("stderr", [b"", b"noise\n" * 10 + b"startup details\n"])
+def test_launch_reports_early_exit_without_connecting(
+    launch_bridge: tuple[McpBridge, _ChildStderr, Mock, Mock],
+    tmp_path: Path,
+    stderr: bytes,
+) -> None:
+    bridge, child, _, connect = launch_bridge
+    child.proc.poll.return_value = 7
+    child.output = stderr
     with pytest.raises(RuntimeError, match="returncode=7") as error:
         bridge.launch(tmp_path, 18765)
-    if stderr is not None:
-        assert "startup details" in str(error.value)
+    message = str(error.value)
+    assert str(bridge.config.stderr_file) in message
+    if stderr:
+        assert message.endswith("noise\nnoise\nnoise\nnoise\nstartup details")
     assert not bridge.launched_gui
     connect.assert_not_called()
 
 
 def test_launch_timeout_retains_process_without_claiming_connection(
-    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock],
+    launch_bridge: tuple[McpBridge, _ChildStderr, Mock, Mock],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -256,7 +290,7 @@ def test_launch_timeout_retains_process_without_claiming_connection(
 
 
 def test_launch_rejects_occupied_port_without_owning_process(
-    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock], tmp_path: Path
+    launch_bridge: tuple[McpBridge, _ChildStderr, Mock, Mock], tmp_path: Path
 ) -> None:
     bridge, _, probe, connect = launch_bridge
     probe.side_effect = None
@@ -268,7 +302,7 @@ def test_launch_rejects_occupied_port_without_owning_process(
 
 
 def test_launch_tolerates_unwritable_pid_file(
-    launch_bridge: tuple[McpBridge, MagicMock, Mock, Mock],
+    launch_bridge: tuple[McpBridge, _ChildStderr, Mock, Mock],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

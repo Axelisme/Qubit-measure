@@ -94,7 +94,7 @@ class InteractiveMplWidget(QWidget):
         """Mouse moved inside an axes. Override in subclass."""
 
     def on_release(self, event: MouseEvent) -> None:
-        """Mouse button released inside an axes. Override in subclass."""
+        """Mouse released, including outside axes so a gesture can finish."""
 
     # --- dispatch (filter to in-axes events) -----------------------------
 
@@ -110,5 +110,4 @@ class InteractiveMplWidget(QWidget):
 
     def _dispatch_release(self, event: Event) -> None:
         mouse = cast(MouseEvent, event)
-        if mouse.inaxes is not None:
-            self.on_release(mouse)
+        self.on_release(mouse)

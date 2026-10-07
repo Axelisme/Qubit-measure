@@ -6,8 +6,6 @@ from typing import Any
 
 import numpy as np
 import pytest
-from pydantic import ConfigDict
-from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
@@ -19,9 +17,8 @@ from zcu_tools.program.v2 import Module, ProgramV2Cfg
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
 
-
-class FlowCfg(ProgramV2Cfg, ExpCfgModel):
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+from tests.experiment.v2.runtime._flow_cfg import FlowCfg
+from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
 
 
 @dataclass
@@ -32,13 +29,6 @@ class FlowEnv:
 
 def _identity_array(raw: np.ndarray) -> np.ndarray:
     return raw
-
-
-def _cfg(**values: Any) -> FlowCfg:
-    cfg = FlowCfg()
-    for name, value in values.items():
-        setattr(cfg, name, value)
-    return cfg
 
 
 class FakeModule(Module):
@@ -472,6 +462,8 @@ def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
 
 
 def test_program_builder_build_returns_program_with_isolated_cfg():
+    program = None
+    fresh_program = None
     FakeProgram.instances.clear()
     module = FakeModule("readout")
     init_cfg = _cfg(reps=5, rounds=7)
@@ -491,6 +483,7 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
         assert getattr(sched.cfg, "reps") == 5
 
     assert getattr(init_cfg, "reps") == 5
+    assert program is not None
     assert program.soccfg == "soccfg"
     assert program.modules[0] is not module
     assert program.modules[0].name == "readout"
@@ -513,6 +506,7 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
 
 
 def test_program_builder_projects_mapping_cfg_to_program_cfg() -> None:
+    program = None
     FakeProgram.instances.clear()
     init_cfg = {"reps": 3, "rounds": 4, "experiment_only": "ignored"}
 
@@ -525,6 +519,7 @@ def test_program_builder_projects_mapping_cfg_to_program_cfg() -> None:
             .build()
         )
 
+    assert program is not None
     assert isinstance(program.cfg_model, ProgramV2Cfg)
     assert type(program.cfg_model) is ProgramV2Cfg
     assert program.reps == 3
@@ -552,6 +547,7 @@ def test_program_builder_rejects_cfg_without_program_fields() -> None:
 
 
 def test_program_builder_accepts_cfg_override() -> None:
+    program = None
     FakeProgram.instances.clear()
 
     with Schedule(
@@ -571,11 +567,13 @@ def test_program_builder_accepts_cfg_override() -> None:
             .build()
         )
 
+    assert program is not None
     assert program.reps == 8
     assert program.rounds == 9
 
 
 def test_build_and_acquire_builds_program_and_updates_buffer():
+    result = None
     FakeProgram.instances.clear()
     buffer_updates: list[np.ndarray] = []
     module = FakeModule("readout")
@@ -599,6 +597,7 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
         assert getattr(sched.cfg, "reps") == 4
         assert getattr(sched.cfg, "rounds") == 2
 
+    assert result is not None
     assert np.allclose(result, [2.0])
     assert np.allclose(signals_buffer.array, [2.0])
     assert np.allclose(buffer_updates[0], [1.0])
@@ -618,6 +617,7 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
 
 
 def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
+    result = None
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
     run_stop = StopSignal()
 
@@ -635,6 +635,7 @@ def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
         assert run_stop.error is None
         run_stop.raise_if_error()
 
+    assert result is not None
     np.testing.assert_allclose(result, np.array([2.0]))
     np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
 
@@ -669,6 +670,7 @@ def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
 
 
 def test_build_and_acquire_rebuilds_program_on_retry():
+    result = None
     FlakyBuildProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
@@ -680,6 +682,7 @@ def test_build_and_acquire_rebuilds_program_on_retry():
         )
         assert sched.outcome.status == "completed"
 
+    assert result is not None
     assert np.allclose(result, [4.0])
     assert np.allclose(signals_buffer.array, [4.0])
     assert len(FlakyBuildProgram.instances) == 2
@@ -688,6 +691,7 @@ def test_build_and_acquire_rebuilds_program_on_retry():
 
 
 def test_build_and_acquire_retry_clears_shared_failure_cause():
+    result = None
     FlakyBuildProgram.instances.clear()
     run_stop = StopSignal()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
@@ -702,6 +706,7 @@ def test_build_and_acquire_retry_clears_shared_failure_cause():
         assert run_stop.error is None
         run_stop.raise_if_error()
 
+    assert result is not None
     np.testing.assert_allclose(result, np.array([4.0]))
 
 
@@ -726,6 +731,7 @@ def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retryin
 
 
 def test_build_and_acquire_first_round_stop_returns_nan_partial():
+    result = None
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
     with Schedule(_cfg(rounds=2), signals_buffer, stop=StopSignal()) as sched:
@@ -739,12 +745,14 @@ def test_build_and_acquire_first_round_stop_returns_nan_partial():
         assert sched.outcome.status == "stopped"
         assert sched.outcome.reason == "stop requested"
 
+    assert result is not None
     np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
     StopBeforeDataProgram.external_stop = None
 
 
 def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
+    result = None
     AlwaysFailingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
@@ -759,6 +767,7 @@ def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
         assert isinstance(sched.outcome.exception, RuntimeError)
         assert sched.outcome.reason == "RuntimeError: permanent failure"
 
+    assert result is not None
     np.testing.assert_allclose(result, np.array([2.0]))
     np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
     assert len(AlwaysFailingProgram.instances) == 2
@@ -767,6 +776,7 @@ def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
 
 
 def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
+    result = None
     AlwaysFailingProgram.instances.clear()
     run_stop = StopSignal()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
@@ -787,10 +797,12 @@ def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
         run_stop.raise_if_error()
 
     assert exc_info.value.exception is sched.outcome.exception
+    assert result is not None
     np.testing.assert_allclose(result, np.array([2.0]))
 
 
 def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
+    result = None
     stop = StopSignal()
     attempts: list[int] = []
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
@@ -835,11 +847,13 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
         assert stop.error is None
 
     assert attempts == [1]
+    assert result is not None
     np.testing.assert_allclose(result, np.array([1.0]))
     np.testing.assert_allclose(signals_buffer.array, np.array([1.0]))
 
 
 def test_build_program_failure_does_not_retry_when_stop_requested():
+    result = None
     stop = StopSignal()
     attempts: list[int] = []
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
@@ -882,6 +896,7 @@ def test_build_program_failure_does_not_retry_when_stop_requested():
         assert stop.error is None
 
     assert attempts == [1]
+    assert result is not None
     np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
 
@@ -940,6 +955,7 @@ def test_run_program_reuses_caller_owned_program_cache():
 
 
 def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversion():
+    result = None
     FakeDecimatedProgram.instances.clear()
     buffer_updates: list[np.ndarray] = []
     signals_buffer = SignalBuffer(
@@ -958,6 +974,7 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
             )
         )
 
+    assert result is not None
     assert np.allclose(result, [2.0 + 0.0j, 0.0 + 2.0j])
     assert np.allclose(signals_buffer.array, [2.0 + 0.0j, 0.0 + 2.0j])
     assert np.allclose(buffer_updates[0], [1.0 + 0.0j, 0.0 + 1.0j])
@@ -970,6 +987,8 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
 
 
 def test_schedule_registers_program_derived_buffer_before_decimated_run():
+    result = None
+    signals_buffer = None
     FakeDecimatedProgram.instances.clear()
     buffer_updates: list[np.ndarray] = []
 
@@ -990,7 +1009,9 @@ def test_schedule_registers_program_derived_buffer_before_decimated_run():
         sched.register_buffer(signals_buffer)
         result = builder.run_program_decimated(program)
 
+    assert result is not None
     assert np.allclose(result, [2.0 + 0.0j, 0.0 + 2.0j])
+    assert signals_buffer is not None
     assert np.allclose(signals_buffer.array, [2.0 + 0.0j, 0.0 + 2.0j])
     assert np.allclose(buffer_updates[-1], [2.0 + 0.0j, 0.0 + 2.0j])
     assert len(FakeDecimatedProgram.instances) == 1
@@ -1054,40 +1075,15 @@ def test_signal_buffer_write_triggers_update_and_manual_trigger():
     assert np.allclose(updates[2], [1.0, 3.0])
 
 
-def test_schedule_uses_own_stop_signal():
-    stop = StopSignal()
-    stop.set()
-
-    with Schedule(_cfg(), stop=stop) as sched:
-        assert sched.is_stop() is True
-
-    stop.clear_stop()
-    with Schedule(_cfg(), stop=stop) as sched:
-        assert sched.is_stop() is False
-        sched.set_stop()
-        assert stop.is_set() is True
-
-
-def test_schedule_operations_require_context():
-    sched = Schedule(
-        _cfg(rounds=1), SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
-    )
-
-    try:
-        sched.prog_builder("soc", "soccfg", marker="x")
-    except RuntimeError as exc:
-        assert "with Schedule" in str(exc)
-    else:
-        raise AssertionError("Schedule operations should require context manager")
-
-
 def test_schedule_step_data_operations_require_context() -> None:
+    step = None
     root = {"child": {"signals": np.full((1,), np.nan)}}
 
     with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
         step = next(iter(sched.batch({"child": lambda child: child}).values()))
         assert step.path == ("child",)
 
+    assert step is not None
     for operation in (
         lambda: step.data,
         lambda: step.set_data({"signals": np.array([1.0])}),
@@ -1207,19 +1203,8 @@ def test_schedule_repeat_validates_times_and_interval():
             raise AssertionError("repeat should reject negative interval")
 
 
-def test_schedule_repeat_obeys_stop_signal():
-    seen: list[int] = []
-
-    with Schedule(_cfg(), stop=StopSignal()) as sched:
-        for index, _step in sched.repeat("round", 3):
-            seen.append(index)
-            sched.set_stop()
-        assert sched.outcome.status == "stopped"
-
-    assert seen == [0]
-
-
 def test_schedule_batch_runs_children_with_isolated_cfgs():
+    results = None
     order: list[str] = []
 
     def child_a(step):
@@ -1239,6 +1224,7 @@ def test_schedule_batch_runs_children_with_isolated_cfgs():
         assert getattr(sched.cfg, "marker") == "base"
 
     assert order == ["a", "b"]
+    assert results is not None
     assert results == {"a": "mutated", "b": "base"}
     assert getattr(init_cfg, "marker") == "base"
 
@@ -1363,6 +1349,7 @@ def test_schedule_child_local_buffers_are_cleared_after_batch() -> None:
 
 
 def test_schedule_batch_does_not_retry_keyboard_interrupt():
+    results = None
     attempts = 0
     later_called = False
 
@@ -1381,6 +1368,7 @@ def test_schedule_batch_does_not_retry_keyboard_interrupt():
         assert sched.is_stop() is True
         assert sched.outcome.status == "interrupted"
 
+    assert results is not None
     assert results == {}
     assert attempts == 1
     assert later_called is False

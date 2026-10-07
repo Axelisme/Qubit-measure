@@ -209,7 +209,7 @@ def test_terminal_callback_restores_captured_operation_origin() -> None:
 
 
 def test_exclusion_present_calls_ensure_register_release():
-    runner, gate, handles, progress, bg = _make_runner()
+    runner, gate, _handles, _progress, bg = _make_runner()
     excl = ExclusionRequest(
         kind="run", owner_id="tab1", note="test operation", resource_id=None
     )
@@ -263,7 +263,7 @@ def test_exclusion_request_rejects_blank_note() -> None:
 
 
 def test_exclusion_absent_skips_ensure_register_release():
-    runner, gate, handles, progress, bg = _make_runner()
+    runner, gate, _handles, _progress, bg = _make_runner()
 
     def on_terminal(bgr: BgResult, settle: SettleFn) -> None:
         settle(OperationOutcome("finished"))
@@ -286,7 +286,7 @@ def test_exclusion_absent_skips_ensure_register_release():
 
 
 def test_exclusion_with_resource_id_passes_resource_id_to_gate():
-    runner, gate, handles, progress, bg = _make_runner()
+    runner, gate, _handles, _progress, bg = _make_runner()
     excl = ExclusionRequest(
         kind="device_setup",
         owner_id="dev1",
@@ -327,7 +327,7 @@ def test_exclusion_with_resource_id_passes_resource_id_to_gate():
 
 
 def test_wants_progress_calls_make_factory_and_discard():
-    runner, gate, handles, progress, bg = _make_runner()
+    runner, _gate, _handles, progress, bg = _make_runner()
 
     received_factory: list[Any] = []
 
@@ -356,7 +356,7 @@ def test_wants_progress_calls_make_factory_and_discard():
 
 
 def test_wants_progress_false_skips_make_factory_and_discard():
-    runner, gate, handles, progress, bg = _make_runner()
+    runner, _gate, _handles, progress, bg = _make_runner()
 
     received_factory: list[Any] = []
 
@@ -426,7 +426,7 @@ def test_submit_fail_calls_settle_failed_and_unwinds():
 
 
 def test_on_terminal_receives_ok_result_on_done():
-    runner, gate, handles, progress, bg = _make_runner()
+    runner, _gate, _handles, _progress, bg = _make_runner()
 
     received: list[BgResult] = []
 
@@ -454,7 +454,7 @@ def test_on_terminal_receives_ok_result_on_done():
 
 
 def test_on_terminal_receives_error_result_on_error():
-    runner, gate, handles, progress, bg = _make_runner()
+    runner, _gate, _handles, _progress, bg = _make_runner()
 
     received: list[BgResult] = []
 
@@ -590,7 +590,7 @@ def test_settle_call_once_second_call_is_logged_noop(caplog):
 
 def test_ensure_raises_does_not_create_handle_or_call_settle():
     gate = _FakeGate(conflict=True)
-    runner, _, handles, progress, bg = _make_runner(gate=gate)
+    runner, _, handles, progress, _bg = _make_runner(gate=gate)
     excl = ExclusionRequest(kind="run", owner_id="tab1", note="test operation")
 
     terminal_calls: list[BgResult] = []
@@ -619,3 +619,48 @@ def test_ensure_raises_does_not_create_handle_or_call_settle():
     assert progress.discard_calls == []
     assert progress.factories == {}
     assert terminal_calls == []
+
+
+def test_no_facets_needed_can_run_without_injected_gate_or_progress():
+    handles = OperationHandles()
+    bg = _FakeBg()
+    runner = OperationRunner(None, handles, None, bg, BaseEventBus())
+    opened: list[int] = []
+    spec = OperationSpec(
+        exclusion=None,
+        owner_id="numeric",
+        wants_progress=False,
+        cancel_hook=None,
+        work=lambda _factory: 42,
+        run_in_pool=True,
+        on_terminal=lambda _result, settle: settle(OperationOutcome("finished")),
+        on_opened=opened.append,
+    )
+    token = runner.begin(spec)
+    assert opened == [token]
+    assert handles.known_outcome(token) is None
+    bg.deliver_result()
+    assert handles.known_outcome(token) == OperationOutcome("finished")
+
+
+@pytest.mark.parametrize("facet", ["gate", "progress"])
+def test_missing_requested_facet_rejects_before_opening_handle(facet):
+    handles = OperationHandles()
+    opened: list[int] = []
+    runner = OperationRunner(None, handles, None, _FakeBg(), BaseEventBus())
+    spec = OperationSpec(
+        exclusion=ExclusionRequest("run", "numeric", "test")
+        if facet == "gate"
+        else None,
+        owner_id="numeric",
+        wants_progress=facet == "progress",
+        cancel_hook=None,
+        work=lambda _factory: 42,
+        run_in_pool=True,
+        on_terminal=lambda _result, settle: settle(OperationOutcome("finished")),
+        on_opened=opened.append,
+    )
+    with pytest.raises(RuntimeError, match=facet):
+        runner.begin(spec)
+    assert handles.live_count() == 0
+    assert opened == []

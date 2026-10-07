@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import cast
 
 import pytest
-from zcu_tools.gui.app.measure.interactive import Action, Command, PluginDefinition
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.interactive import Action, Command, PluginDefinition
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec, validate_params
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 

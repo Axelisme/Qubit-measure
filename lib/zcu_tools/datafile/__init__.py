@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .analysis_document import AnalysisDocument, encode_analysis_document
 from .comment import LabberComment, decode_labber_comment, encode_labber_comment
 from .grouped import load_grouped_labber_data, save_grouped_labber_data
 from .labber import (
@@ -25,12 +26,9 @@ from .native_metadata import json_values_equal, validate_cfg_snapshot
 from .native_models import (
     AxisSchema,
     CfgSnapshot,
-    CloneOrigin,
     ExperimentPayload,
     JsonObject,
     NativeExtensions,
-    ParameterSnapshot,
-    ParameterSource,
     RunMetadata,
     RunSnapshot,
     SoftwareProvenance,
@@ -53,6 +51,8 @@ from .streaming import (
 )
 
 __all__ = [
+    "AnalysisDocument",
+    "encode_analysis_document",
     "LabberComment",
     "encode_labber_comment",
     "decode_labber_comment",
@@ -60,9 +60,6 @@ __all__ = [
     "VariableSchema",
     "ExperimentPayload",
     "CfgSnapshot",
-    "CloneOrigin",
-    "ParameterSource",
-    "ParameterSnapshot",
     "RunSnapshot",
     "SoftwareProvenance",
     "RunMetadata",

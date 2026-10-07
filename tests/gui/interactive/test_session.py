@@ -7,8 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import pytest
-from zcu_tools.gui.app.measure.interactive import Session
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.interactive import Session
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 

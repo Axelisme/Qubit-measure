@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-02 — native search diagnostic figures
+**Last updated:** 2026-10-06 — cross-spectrum Qt/native projection
 
 `make_search_diagnostic_figure(result)` accepts the completed `DatabaseSearchResult`
 from [`analysis.fluxdep.search`](../../analysis/fluxdep/README.md) and returns a
@@ -14,7 +14,28 @@ its explicit Plots owner; Notebook publishes the ordinary figure with display.
 an Agg canvas for an accepted device-axis selection. It reuses `TwoLinePicker`
 rendering without pyplot registration, display, widgets, or figure adoption. The
 caller owns naming, presentation and release. Numerical validation stays in the
-shared analysis kernel.
+shared analysis kernel. `pick.configure_flux_pick_axes(figure)` supplies the
+coordinate-grid presentation shared by the fluxdep Qt preview and native output,
+without changing analysis state or canvas ownership.
+
+`onetone.OneTonePickPlot` projects captured OneTone inputs and committed peak
+indices onto device/GHz and normalized-amplitude panels. The Qt OneTone view and
+`make_onetone_pick_figure` share its layout and reusable artists. The builder
+returns a separate Agg Figure; projecting onto a supplied GUI Figure does not
+change its canvas. Neither path commits threshold or selection state.
+
+`twotone.TwoTonePickPlot` renders a numerical `TwoTonePickView` onto a supplied
+Figure in native device/GHz axes. Current points, optional mask and positional
+added/removed changes share the Qt/native renderer. Stroke endpoint outlines use
+normalized radius scaled by each axis span. `make_twotone_pick_figure` computes
+the projection and returns a separate Agg Figure, with optional previous-snapshot
+feedback for Undo. Neither renderer commits state or owns a Qt canvas.
+
+`cross_selection.CrossSelectionPlot` shares calibrated flux/GHz rendering between
+Qt and `make_cross_selection_figure`. Background cells follow sample centers,
+including descending/nonuniform axes. Kept/dropped points, optional index-based
+changes and normalized-radius stroke outlines use the captured joint bounds.
+Native output owns a separate Agg canvas; rendering preserves the supplied canvas.
 
 This package does not own Qt canvas attachment, backend selection, interactive
 `TwoLinePicker` gestures, or analysis state. Importing the root `plotting` package

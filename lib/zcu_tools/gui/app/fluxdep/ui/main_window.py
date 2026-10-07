@@ -26,7 +26,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .analyze_panel import AnalyzePanelWidget
+    from .analyze_panel import AnalyzePanelWidget, AnalyzeTab
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
@@ -46,17 +46,27 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
+    InteractiveChangedPayload,
+    SearchChangedPayload,
     SpectrumAddedPayload,
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
+from zcu_tools.gui.app.fluxdep.interactive import (
+    ActiveInteractiveContext,
+    CrossSelectionContext,
+    LinePickContext,
+    OneTonePickContext,
+    TwoTonePickContext,
+)
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
-from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
-from zcu_tools.gui.event_bus import EventSubscriptions
+from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
+from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
 logger = logging.getLogger(__name__)
 
@@ -64,16 +74,39 @@ logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     """The fluxdep analysis window shell."""
 
-    def __init__(self, ctrl: Controller) -> None:
+    def __init__(
+        self,
+        ctrl: Controller,
+        *,
+        interactive_runner: BackgroundRunner | None = None,
+        search_runner: BackgroundRunner | None = None,
+    ) -> None:
+        """Mount views and retain app-owned interactive/search Qt runners.
+
+        Both runners become child QObjects. Close requests search cancellation
+        and refuses disposal until search_runner drains. Interactive disposal
+        then precedes its runner drain. Omitted runners support headless
+        composition; a caller injecting search background must also supply its
+        lifecycle runner here so close can drain queued owner deliveries.
+        """
         super().__init__()
         self._ctrl = ctrl
+        self._interactive_runner = interactive_runner
+        self._search_runner = search_runner
+        if search_runner is not None:
+            search_runner.setParent(self)
+        if interactive_runner is not None:
+            interactive_runner.setParent(self)
         self._bus_subs = EventSubscriptions()
+        self._routing_editor = False
+        self._editor_context_id: int | None = None
         self.setWindowTitle("fluxdep-gui")
         self.resize(1100, 700)
 
         self._build_ui()
         self._subscribe_events()
         self._refresh_list()
+        self._rebuild_editor()
 
     # --- construction ----------------------------------------------------
 
@@ -158,7 +191,48 @@ class MainWindow(QMainWindow):
         self._bus_subs.subscribe(
             bus, ActiveSpectrumChangedPayload, self._on_active_changed
         )
+        self._bus_subs.subscribe_with_meta(
+            bus, InteractiveChangedPayload, self._on_interactive_changed
+        )
+        self._bus_subs.subscribe_with_meta(
+            bus, SearchChangedPayload, self._on_search_changed
+        )
         self.destroyed.connect(self._bus_subs.unsubscribe_all)
+
+    def _on_interactive_changed(
+        self, payload: InteractiveChangedPayload, meta: EventMeta
+    ) -> None:
+        if payload.phase == "closed":
+            if payload.context_id == self._editor_context_id:
+                self._clear_editor()
+            return
+        if meta.origin.kind != "agent" or self._routing_editor:
+            return
+        active = self._ctrl.interactive.inspect()
+        if active is not None and active.context_id == payload.context_id:
+            self._present_context(active)
+
+    def _present_context(self, active: ActiveInteractiveContext) -> None:
+        self._routing_editor = True
+        try:
+            if isinstance(active.context, CrossSelectionContext):
+                self._show_analyze("filter")
+            elif active.context_id == self._editor_context_id:
+                if self._current_editor is not None:
+                    self._editor_stack.setCurrentWidget(self._current_editor)
+            else:
+                self._clear_editor()
+                self._mount_picker(active.context)
+        finally:
+            self._routing_editor = False
+
+    def _on_search_changed(
+        self, payload: SearchChangedPayload, meta: EventMeta
+    ) -> None:
+        if meta.origin.kind == "agent" and payload.status == "pending":
+            activity = self._ctrl.search.current
+            if activity is not None and activity.token == payload.token:
+                self._show_analyze("search")
 
     def _on_spectrum_added(self, _payload: SpectrumAddedPayload) -> None:
         self._refresh_list()
@@ -169,7 +243,7 @@ class MainWindow(QMainWindow):
 
     def _on_spectrum_changed(self, payload: SpectrumChangedPayload) -> None:
         self._refresh_list()
-        # A stage change (aligned / points_selected) on the active spectrum must
+        # A stage change (aligned / points_completed) on the active spectrum must
         # advance its editing widget (line-picker → point-selector → done).
         if payload.name == self._ctrl.state.active_spectrum:
             self._rebuild_editor()
@@ -185,7 +259,7 @@ class MainWindow(QMainWindow):
             entry = self._ctrl.state.spectrums[name]
             stage = (
                 "✓pts"
-                if entry.points_selected
+                if entry.aligned and entry.points_completed
                 else "✓align"
                 if entry.aligned
                 else "new"
@@ -216,14 +290,15 @@ class MainWindow(QMainWindow):
 
     def _clear_editor(self) -> None:
         if self._current_editor is not None:
-            # Quiesce any in-flight pool worker before scheduling C++ deletion:
-            # FindPointsWidget owns a BackgroundRunner whose queued done delivery
-            # must be flushed while the carrier is still alive (prevents segfault).
-            if hasattr(self._current_editor, "quiesce"):
-                self._current_editor.quiesce()  # type: ignore[union-attr]
+            if isinstance(
+                self._current_editor,
+                (LinePickerWidget, OneToneWidget, FindPointsWidget),
+            ):
+                self._current_editor.teardown()
             self._editor_stack.removeWidget(self._current_editor)
             self._current_editor.deleteLater()
             self._current_editor = None
+        self._editor_context_id = None
         self._editor_stack.setCurrentWidget(self._placeholder)
 
     def _rebuild_editor(self) -> None:
@@ -235,81 +310,79 @@ class MainWindow(QMainWindow):
         its result back through the Controller, which advances the stage and
         re-triggers this.
         """
-        self._clear_editor()
-        name = self._ctrl.state.active_spectrum
-        if name is None:
-            return
-        entry = self._ctrl.state.spectrums[name]
+        # begin_* emits synchronously; this stage route already mounts its context.
+        self._routing_editor = True
+        try:
+            self._clear_editor()
+            name = self._ctrl.state.active_spectrum
+            if name is None:
+                return
+            entry = self._ctrl.state.spectrums[name]
 
-        if not entry.aligned:
-            self._mount_line_picker(entry)
-        elif not entry.points_selected:
-            self._mount_point_selector(entry)
-        else:
-            # finished — read-only view with the re-do buttons alongside it
-            self._mount(
-                ResultPreviewWidget(
-                    entry,
-                    on_repick_lines=self._on_repick_lines,
-                    on_reselect_points=self._on_reselect_points,
+            if not entry.aligned:
+                self._mount_line_picker(entry)
+            elif not entry.points_completed:
+                self._mount_point_selector(entry)
+            else:
+                self._mount(
+                    ResultPreviewWidget(
+                        entry,
+                        on_repick_lines=self._on_repick_lines,
+                        on_reselect_points=self._on_reselect_points,
+                    )
                 )
-            )
+        finally:
+            self._routing_editor = False
 
     def _mount(self, widget: QWidget) -> None:
+        if self._analyze_panel is not None:
+            self._analyze_panel.detach()
         self._current_editor = widget
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)
 
     def _mount_line_picker(self, entry: SpectrumEntry) -> None:
-        # Seed the picker from the entry's alignment only when it is meaningful
-        # (inherited or already aligned); a fresh load uses the picker defaults.
-        seed = entry.alignment_seeded or entry.aligned
-        widget = LinePickerWidget(
-            entry.raw["signals"],
-            entry.raw["dev_values"],
-            entry.raw["freqs"],
-            flux_half=entry.flux_half if seed else None,
-            flux_int=entry.flux_int if seed else None,
-            force_magnitude=entry.spec_type == "OneTone",
-        )
-        name = entry.name
-
-        def _on_finish() -> None:
-            half, integer = widget.get_result()
-            self._ctrl.set_alignment(name, half, integer)
-
-        widget.finished.connect(_on_finish)
-        self._mount(widget)
+        self._mount_picker(self._ctrl.interactive.begin_line_pick(entry.name))
 
     def _mount_point_selector(self, entry: SpectrumEntry) -> None:
-        if entry.spec_type == "OneTone":
-            widget: InteractiveMplWidget = OneToneWidget(
-                entry.raw["signals"],
-                entry.raw["dev_values"],
-                entry.raw["freqs"],
-                flux_half=entry.flux_half,
-                flux_int=entry.flux_int,
-            )
+        context = (
+            self._ctrl.interactive.begin_onetone_pick(entry.name)
+            if entry.spec_type == "OneTone"
+            else self._ctrl.interactive.begin_twotone_pick(entry.name)
+        )
+        self._mount_picker(context)
+
+    def _mount_picker(
+        self, context: LinePickContext | OneTonePickContext | TwoTonePickContext
+    ) -> None:
+        widget: LinePickerWidget | OneToneWidget | FindPointsWidget
+        if isinstance(context, LinePickContext):
+            widget = LinePickerWidget(context)
+            widget.finished.connect(self._finish_lines)
+        elif isinstance(context, OneTonePickContext):
+            widget = OneToneWidget(context)
+            widget.finished.connect(self._ctrl.interactive.finish_onetone_pick)
         else:
-            widget = FindPointsWidget(
-                entry.raw["signals"], entry.raw["dev_values"], entry.raw["freqs"]
-            )
-        name = entry.name
-
-        def _on_finish() -> None:
-            dev_values, freqs = widget.get_result()  # type: ignore[attr-defined]
-            self._ctrl.set_points(name, dev_values, freqs)
-
-        widget.finished.connect(_on_finish)
+            widget = FindPointsWidget(context)
+            widget.finished.connect(self._ctrl.interactive.finish_twotone_pick)
         self._mount(widget)
+        active = self._ctrl.interactive.inspect()
+        if active is None or active.context is not context:
+            raise RuntimeError("picker context changed while attaching its view")
+        self._editor_context_id = active.context_id
+
+    def _finish_lines(self) -> None:
+        try:
+            self._ctrl.interactive.finish_line_pick()
+        except (FailedPreconditionError, ValueError, RuntimeError) as exc:
+            self._show_error("Alignment failed", str(exc))
 
     def _on_repick_lines(self) -> None:
         """Re-open the line picker for the active spectrum (redo alignment)."""
         name = self._ctrl.state.active_spectrum
         if name is None:
             return
-        self._clear_editor()
-        self._mount_line_picker(self._ctrl.state.spectrums[name])
+        self._ctrl.reset_alignment(name)
 
     def _on_reselect_points(self) -> None:
         """Re-open the point selector for the active spectrum (redo selection).
@@ -326,8 +399,7 @@ class MainWindow(QMainWindow):
                 "Not aligned", "Pick the flux lines first (Re-pick lines)."
             )
             return
-        self._clear_editor()
-        self._mount_point_selector(entry)
+        self._ctrl.reset_points(name)
 
     def _on_analyze_clicked(self) -> None:
         """Show the analysis panel (Filter / Search / Show tabs) — a singleton.
@@ -336,17 +408,19 @@ class MainWindow(QMainWindow):
         stage-driven ``_current_editor`` but leaves this panel alive, so its
         tabs / form / database path / figures are preserved across switches.
         """
-        from .analyze_panel import AnalyzePanelWidget
-
-        if not any(e.points_selected for e in self._ctrl.state.spectrums.values()):
+        if not any(e.point_count > 0 for e in self._ctrl.state.spectrums.values()):
             self._show_error("No points", "Select points on a spectrum first.")
             return
-        # Drop the stage-driven editor (transient) but DON'T touch the analyze
-        # panel; show it, building it on first use.
+        self._show_analyze(None)
+
+    def _show_analyze(self, tab: AnalyzeTab | None) -> None:
+        from .analyze_panel import AnalyzePanelWidget
+
         self._clear_editor()
         if self._analyze_panel is None:
             self._analyze_panel = AnalyzePanelWidget(self._ctrl)
             self._editor_stack.addWidget(self._analyze_panel)
+        self._analyze_panel.show_tab(tab or self._analyze_panel.current_tab)
         self._editor_stack.setCurrentWidget(self._analyze_panel)
 
     def _on_load_clicked(self) -> None:
@@ -497,20 +571,30 @@ class MainWindow(QMainWindow):
     # --- close path --------------------------------------------------------
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
-        """Quiesce all background workers before the C++ widget tree is torn down.
+        """Refuse close until search startup and worker/delivery have settled.
 
-        ``_current_editor`` (FindPointsWidget) is handled by ``_clear_editor`` when
-        it is replaced; but if it is still mounted at close time its worker must be
-        joined here.  ``_analyze_panel`` is a singleton that lives until the window
-        closes and owns both a search runner and an embedded SelectorWidget runner —
-        both must be joined before Qt destroys the child objects.
+        begin_close permanently blocks admission and requests cancellation.
+        Keep subscriptions, figures and Qt owners alive on drain refusal.
+        A later close attempt can finish once the runner and search owner drain.
         """
+        self._ctrl.search.begin_close()
+        search_drained = self._search_runner is None or self._search_runner.quiesce()
+        # Startup notifications can reenter close before any worker is submitted.
+        if not search_drained or self._ctrl.search.active_token is not None:
+            if a0 is not None:
+                a0.ignore()
+            return
+        self._ctrl.interactive.dispose()
+        if self._interactive_runner is not None:
+            self._interactive_runner.quiesce()
         self._bus_subs.unsubscribe_all()
+        if isinstance(self._current_editor, LinePickerWidget):
+            self._current_editor.teardown()
         if self._current_editor is not None and hasattr(
             self._current_editor, "quiesce"
         ):
             self._current_editor.quiesce()  # type: ignore[union-attr]
         if self._analyze_panel is not None:
             self._analyze_panel.quiesce()
-            self._analyze_panel.release_figures()
+            self._analyze_panel.dispose()
         super().closeEvent(a0)

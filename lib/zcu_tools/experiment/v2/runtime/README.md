@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-05，通用 executor 範例
+**Last updated:** 2026-10-07，完成狀態與 scope lifecycle 測試分工
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -54,6 +54,8 @@ path，並觸發該 buffer 的 update hook。
 
 ### `Schedule`
 
+`outcome.py` 擁有完成狀態值與 exception reason 格式化。`Schedule` 擁有狀態轉換、stop token 與 partial buffer 的生命週期。`RunStatus`、`ScheduleOutcome` 仍可從既有 runtime 與 schedule 入口匯入。
+
 `Schedule` 是一次 run 的 scope：入口 deepcopy cfg、typed env、持有 `StopSignal`，並
 建立 host-side control flow。
 
@@ -105,7 +107,7 @@ with Schedule(cfg, signals_buffer) as sched:
 
 ### `ProgramBuilder`
 
-`ProgramBuilder` 是 QICK program 的 builder 與 acquire adapter。
+`ProgramBuilder` 是 QICK program 的 builder 與 acquire adapter。`acquire_cancel.py` 擁有 acquire-local stop 與借用 run stop 的合成旗標，讓 data-driven early stop 不會改變 run outcome。
 
 - `build()` 建立並回傳 program。
 - `run_program(program)` 執行 caller 傳入的 integrated-acquire program。
@@ -175,6 +177,7 @@ executor leaf contract 由 `runtime/task.py` 擁有：
 - `StopSignal` 是唯一 stop token，定義於 `experiment.stop_signal`。Caller 每次 run 建立一個，
   必須透過 `Schedule(..., stop=context.cancel_signal)` 顯式傳入。Executor 與所有 leaf
   共用同一個 token；runtime 不查 ambient scope，也不補建隱式 token。
+- `Schedule` scope 接住一次 `KeyboardInterrupt`，包含 scan/repeat 的 caller loop body，將 shared signal 記為 `interrupted` 並保留 buffer，讓 with 後的 return 組出部分結果。其他例外不改變原有傳播。Scope 外中斷不受保護，Notebook 將正常返回的 interrupted 表示為 stopped；其他 caller 的 `raise_if_error()` 仍拋錯。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   acquire-local composite `cancel_flag` 傳給 program acquire：它讀取 `StopSignal` 的 external
   stop，但 `round_hook` 內的 data stop 只停止目前 program acquire，不會污染 `Schedule.outcome`。
@@ -208,9 +211,11 @@ executor leaf contract 由 `runtime/task.py` 擁有：
 
 ## 測試
 
-`tests/experiment/v2/runtime/test_flow.py` 覆蓋 Schedule、typed env、SignalBuffer、
-ProgramBuilder、host scan/repeat/batch、ProgramBuilder retry、`ScheduleOutcome` 與
-decimated acquire。
+`tests/experiment/v2/runtime/test_flow.py` 覆蓋 typed env、SignalBuffer、ProgramBuilder、
+host scan/repeat/batch、ProgramBuilder retry、`ScheduleOutcome` 與 decimated acquire。
+`test_schedule_lifecycle.py` 覆蓋 context 使用邊界、shared stop token、host body 中斷的
+partial/NaN 保存、其他 exception 傳播與 repeat stop。兩個檔案重用同一個 test cfg builder，
+案例仍經公開 Schedule／buffer／StopSignal 接縫驗證，不直接測 outcome 的內部 helper。
 `test_result_tree.py` 覆蓋 ResultTree node set、child buffer、subscription、flush 與
 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 executor template lifecycle、
 retry/stop partial result 與 composed bundle delegation。單一實驗模組只保留 runtime

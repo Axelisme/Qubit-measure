@@ -11,13 +11,18 @@ from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, Point
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import ProjectInfo
 
 
 def test_export_empty_raises(tmp_path):
     st = FluxDepState()
-    with pytest.raises(ValueError, match="no spectra to export"):
-        ExportService(st).export_spectrums(filepath=str(tmp_path / "empty.hdf5"))
+    path = tmp_path / "empty.hdf5"
+    with pytest.raises(FailedPreconditionError) as caught:
+        ExportService(st).export_spectrums(filepath=str(path))
+    assert caught.value.reason_code == "no_spectrums"
+    assert not path.exists()
+    assert st.version.snapshot() == {}
 
 
 def test_export_roundtrips_via_load_spectrums(spectrum_hdf5, tmp_path):

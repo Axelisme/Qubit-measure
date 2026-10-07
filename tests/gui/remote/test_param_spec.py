@@ -6,8 +6,6 @@ non-empty required strings, bool-rejecting integers/numbers, JSON-safe values.
 
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.param_spec import (
@@ -21,6 +19,65 @@ from zcu_tools.gui.remote.param_spec import (
 
 def _spec(json_type: JsonType, *, required=True, default=None) -> tuple[ParamSpec, ...]:
     return (ParamSpec("x", json_type, required=required, default=default),)
+
+
+def test_number_pairs_decode_owned_finite_coordinates():
+    from zcu_tools.gui.remote.param_spec import NumberPairs
+
+    raw = [[1, 2.5], [-3.0, 4]]
+    decoded = validate_params(
+        (ParamSpec("vertices", JsonType.NUMBER_PAIRS),), {"vertices": raw}
+    )
+    pairs = decoded["vertices"]
+    assert isinstance(pairs, NumberPairs)
+    assert pairs.values == ((1.0, 2.5), (-3.0, 4.0))
+    raw[0][0] = 99
+    assert pairs.values[0] == (1.0, 2.5)
+    again = validate_params(
+        (ParamSpec("vertices", JsonType.NUMBER_PAIRS),), {"vertices": pairs}
+    )
+    assert again["vertices"] == pairs
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        [],
+        "0,1",
+        [[0]],
+        [[0, 1, 2]],
+        [(0, 1)],
+        [[True, 1]],
+        [["0", 1]],
+        [[float("nan"), 1]],
+        [[0, float("inf")]],
+        [[10**1000, 1]],
+        [0, 1],
+    ],
+)
+def test_number_pairs_reject_invalid_wire_values(value):
+    with pytest.raises(RemoteError) as error:
+        validate_params(
+            (ParamSpec("vertices", JsonType.NUMBER_PAIRS),), {"vertices": value}
+        )
+    assert error.value.code == ErrorCode.INVALID_PARAMS
+
+
+def test_number_pairs_schema_is_numeric_nested_array():
+    schema = build_input_schema((ParamSpec("vertices", JsonType.NUMBER_PAIRS),))
+    assert schema["properties"] == {
+        "vertices": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "number"},
+            },
+        }
+    }
 
 
 def test_required_string_accepts_non_empty():
@@ -109,6 +166,14 @@ def test_number_rejects_bool_and_coerces_int():
     assert validate_params(_spec(JsonType.NUMBER), {"x": 3}) == {"x": 3.0}
 
 
+@pytest.mark.parametrize("value", [10**1000, -(10**1000)], ids=["positive", "negative"])
+def test_number_conversion_overflow_is_invalid_params(value):
+    with pytest.raises(RemoteError, match="representable") as error:
+        validate_params(_spec(JsonType.NUMBER), {"x": value})
+    assert error.value.code == ErrorCode.INVALID_PARAMS
+    assert isinstance(error.value.__cause__, OverflowError)
+
+
 def test_boolean_requires_bool():
     assert validate_params(_spec(JsonType.BOOLEAN), {"x": True}) == {"x": True}
     with pytest.raises(RemoteError, match="must be a boolean"):
@@ -148,15 +213,13 @@ def test_build_input_schema_marks_required_and_types():
     )
     schema = build_input_schema(specs)
     assert schema["type"] == "object"
-    # build_input_schema is typed as dict[str, object]; narrow the nested shape
-    # for indexing (the runtime value is a JSON-schema dict-of-dicts).
-    props = cast("dict[str, dict]", schema["properties"])
+    props = schema["properties"]
     assert props["tab_id"] == {"type": "string"}
     assert props["flag"] == {"type": "boolean"}
     # JSON => an UNTYPED schema (no "type" key) so the MCP client never coerces a
     # value against a string member (which would stringify a number e.g. 0.2).
     assert "type" not in props["payload"]
-    assert set(cast("list", schema["required"])) == {"tab_id", "payload"}
+    assert set(schema.get("required", [])) == {"tab_id", "payload"}
 
 
 def test_json_schema_property_is_untyped_but_keeps_description():
@@ -164,10 +227,10 @@ def test_json_schema_property_is_untyped_but_keeps_description():
     # but a description, when present, is still rendered.
     prop = schema_property(ParamSpec("v", JsonType.JSON, description="any value"))
     assert "type" not in prop
-    assert prop["description"] == "any value"
+    assert prop.get("description") == "any value"
 
 
 def test_non_json_schema_property_keeps_its_type():
     # The other kinds still render a concrete "type" (only JSON goes untyped).
-    assert schema_property(ParamSpec("n", JsonType.NUMBER))["type"] == "number"
-    assert schema_property(ParamSpec("b", JsonType.BOOLEAN))["type"] == "boolean"
+    assert schema_property(ParamSpec("n", JsonType.NUMBER)).get("type") == "number"
+    assert schema_property(ParamSpec("b", JsonType.BOOLEAN)).get("type") == "boolean"

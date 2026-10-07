@@ -1,12 +1,15 @@
 # `zcu_tools.resources.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-07，point-local typed library 轉換
+**Last updated:** 2026-10-07，typed library 轉換與 legacy evidence owner
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
 - 組合根提供 mapping、entry 的共用 kind 註冊、planning 前的 concrete cfg validation 與發布後的 native validation callback。Lib 不 import `zcu_lab`、experiment 或舊資源容器。
 - Native schema 與兩個 callbacks 以 `(source tag, cfg_type)` 的明確歷史身分配對。缺 cfg identity、無對應 schema 或 typed-invalid cfg 時只 pending，不回退 tag-only。`native_tags` 只轉換新 RunMetadata 的 tag，不改歷史 raw 或正常 loader。
 - Parameters 與 data 可分開執行。第二部分明確 resume 同一 manifest，不合併任意既有條目。完成的 setup／point 仍可編輯；resume 驗證當前文件，不恢復舊值。
+- Legacy evidence 1.x 的 params 與來源稽核使用本 package 的 `LegacyParameterSnapshot`、
+  `LegacyParameterSource`、`LegacyCloneOrigin`。Wire shape 不變，完整 raw evidence 留在 manifest。
+  Converter 產生 native 2.0 簡單 context，不把歷史 params 投影到 native。
 - Manifest 保存固定 entry／run 身分、來源 baseline、完整 evidence raw 與逐檔 publication 狀態。Report 是累積快照。兩者保留同 major 的未知 JSON 欄位。
 - Native publication 與驗證完成後才搬移對應 Labber。搬移先複製、驗證雜湊，再刪來源。Source_removed 只驗證目的 hash，舊位置重用不改既有 run，也不刪新檔。缺歷史證據時保留來源並列 pending，不猜名稱或補量測時間。
 - 整個舊 result_root 不改動；首次與 resume 都拒絕會寫入或刪除該樹的配置。未知樣品、圖片與 workflow 資產副本不是正常 runtime 資料。

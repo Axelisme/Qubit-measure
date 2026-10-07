@@ -12,7 +12,9 @@ from zcu_tools.resources.entry import (
     Output,
     ResultEntry,
     SaveLayout,
+    WorkflowRoots,
     new_run_id,
+    workflow_roots,
 )
 
 SAVED_AT = datetime(2026, 10, 6, 0, 30, tzinfo=timezone(timedelta(hours=8)))
@@ -93,22 +95,22 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             ),
         ),
         (
-            ArtifactKey("analysis", "fit", "analysis", "coefficients"),
+            ArtifactKey("analysis", "fit", "analysis", "analysis"),
             None,
             (
                 (
                     "json",
-                    "Database/entry/runs/opaque_run%id/analysis/analysis_fit_coefficients.json",
+                    "Database/entry/runs/opaque_run%id/analysis/analysis.json",
                 ),
             ),
         ),
         (
-            ArtifactKey("caller", "fit", "analysis", "residuals"),
+            ArtifactKey("caller", "fit", "analysis", "post_analysis"),
             "point",
             (
                 (
                     "json",
-                    "Database/entry/runs/opaque_run%id/analysis/caller_fit_residuals.json",
+                    "Database/entry/runs/opaque_run%id/analysis/post_analysis.json",
                 ),
             ),
         ),
@@ -134,7 +136,7 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             (
                 (
                     "json",
-                    "Database/entry/runs/opaque_run%id/analysis/%255F%5F%25_n%5F_m%5F%25.json",
+                    "Database/entry/runs/opaque_run%id/analysis/m_%.json",
                 ),
             ),
         ),
@@ -176,17 +178,31 @@ def test_members_of_one_artifact_have_distinct_destinations(
     second = layout(tmp_path).outputs(replace(key, member_name="second"))
     extension = "png" if member == "figure" else "json"
     folder = "figures" if member == "figure" else "analysis"
+    prefix = "post%5Fanalysis_fit_" if member == "figure" else ""
     assert (
         first[0].path
         == tmp_path
-        / f"Database/entry/runs/opaque_run%id/{folder}/post%5Fanalysis_fit_first.{extension}"
+        / f"Database/entry/runs/opaque_run%id/{folder}/{prefix}first.{extension}"
     )
     assert (
         second[0].path
         == tmp_path
-        / f"Database/entry/runs/opaque_run%id/{folder}/post%5Fanalysis_fit_second.{extension}"
+        / f"Database/entry/runs/opaque_run%id/{folder}/{prefix}second.{extension}"
     )
     assert set(first).isdisjoint(second)
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_analysis_member_identity_shares_destination_across_artifacts(
+    tmp_path: Path, pane: str
+) -> None:
+    saving = layout(tmp_path)
+    first = saving.outputs(ArtifactKey("analysis", "results", "analysis", pane))
+    other = saving.outputs(ArtifactKey("post_analysis", "another", "analysis", pane))
+
+    assert first == other
+    assert first[0].path.name == f"{pane}.json"
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize("run_id", ["opaque_run%id", "opaque_1", "名稱"])
@@ -428,3 +444,64 @@ def test_result_entry_exposes_readonly_exact_paths_for_layout(
         with pytest.raises(AttributeError):
             setattr(entry, attribute, results / "elsewhere")
     assert tree_bytes(results.parent) == before
+
+
+def test_workflow_roots_are_exact_and_do_not_publish(tmp_path: Path) -> None:
+    roots = workflow_roots(
+        result_path=tmp_path / "results" / "entry",
+        database_path=tmp_path / "Database" / "entry",
+        run_id="opaque_run%id",
+    )
+    assert roots == WorkflowRoots(
+        result=tmp_path / "results" / "entry" / "workflows" / "opaque_run%id",
+        database=tmp_path / "Database" / "entry" / "workflows" / "opaque_run%id",
+    )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_workflow_roots_resolve_relative_entry_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    roots = workflow_roots(
+        result_path=Path("results/entry"),
+        database_path=Path("Database/entry"),
+        run_id="run",
+    )
+    assert roots.result == tmp_path / "results" / "entry" / "workflows" / "run"
+    assert roots.database == tmp_path / "Database" / "entry" / "workflows" / "run"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("run_id", UNSAFE)
+def test_workflow_roots_reject_unsafe_run_identity(tmp_path: Path, run_id: str) -> None:
+    with pytest.raises(ValueError, match="run_id"):
+        workflow_roots(
+            result_path=tmp_path / "results" / "entry",
+            database_path=tmp_path / "Database" / "entry",
+            run_id=run_id,
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("root", ["results", "Database"])
+@pytest.mark.parametrize("relative_link", ["workflows", "workflows/run"])
+def test_workflow_roots_reject_symlink_escape_without_publishing(
+    tmp_path: Path, root: str, relative_link: str
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "evidence").write_bytes(b"untouched")
+    link = tmp_path / root / "entry" / relative_link
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside, target_is_directory=True)
+    before_names = {path.relative_to(tmp_path) for path in tmp_path.rglob("*")}
+    before_contents = tree_bytes(tmp_path)
+    with pytest.raises(ValueError, match="escapes"):
+        workflow_roots(
+            result_path=tmp_path / "results" / "entry",
+            database_path=tmp_path / "Database" / "entry",
+            run_id="run",
+        )
+    assert {path.relative_to(tmp_path) for path in tmp_path.rglob("*")} == before_names
+    assert tree_bytes(tmp_path) == before_contents

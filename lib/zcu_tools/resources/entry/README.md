@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-07，logical document field projection
+**Last updated:** 2026-10-07，logical document projection、point storage capture 與 workflow roots
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -56,11 +56,13 @@ Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交
 
 ## 輸出位置
 
-`ResultEntry.result_path` 與 `database_path` 是唯讀的條目目錄，不是上層 roots。`SaveLayout` 接收這兩個 exact paths、opaque run_id、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。它不建立目錄或檔案，也不接線現行保存流程。
+`ResultEntry.result_path` 與 `database_path` 是唯讀的條目目錄，不是上層 roots。`SaveLayout` 接收這兩個 exact paths、opaque run_id、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。它不建立目錄或檔案。共用 saver 使用這些輸出，entry 不編排保存。`capture_point_storage(view)` 從 bound point 的 constructor origin 與 cached snapshot 捕捉 entry 身分、名稱、point、description、exact paths 與 scoped ledger，不 refresh 或重開 ResultEntry。
 
-`ArtifactKey` 用 section、artifact name 與 member kind 定位輸出。Figure 與 analysis 另需 member_name，保留同 artifact 的多成員身分。名稱不承載物理語意，安全路徑段規則共用 entry owner。輸出檔名先編碼 percent，再編碼 underscore，避免 token 與分隔符混淆。Symlink 不能讓目的地離開 entry root。
+`ArtifactKey` 用 section、artifact name 與 member kind 定位輸出。Figure 與 analysis 另需 member_name，保留同 artifact 的多成員身分。名稱不承載物理語意，安全路徑段規則共用 entry owner。Figure 檔名先編碼 percent，再編碼 underscore，避免 token 與分隔符混淆。Analysis 使用安全的 member_name 作檔名，producer 傳入 pane 名稱；section／artifact name 不參與 JSON 路徑。同 pane 可以跨 artifact 共用目的地，保存依選集順序覆寫，不做批次內容去重或路徑衝突預檢。Symlink 不能讓目的地離開 entry root。
 
-Data 回傳 run 的 data.h5 與當地日期樹內的 Labber 新檔名。Figure 回傳 run PNG 與 point 或全域 figures 副本。Analysis 回傳單一 run JSON。`Output` 提供 writer format 與絕對 exact path。Labber suffix 重用 datafile helper，只避讓既有檔案，不原子保留。其他 paths 固定，上層保存流程擁有 replacement 與失敗隔離。
+Data 回傳 run 的 data.h5 與當地日期樹內的 Labber 新檔名。Figure 回傳 run PNG 與 point 或全域 figures 副本。Analysis 回傳 `runs/<run_id>/analysis/<member_name>.json`。`Output` 提供 writer format 與絕對 exact path。Labber suffix 重用 datafile helper，只避讓既有檔案，不原子保留。其他 paths 固定，上層保存流程擁有 replacement 與失敗隔離。
+
+`workflow_roots(result_path=..., database_path=..., run_id=...)` 使用同一組 exact entry paths，回傳 frozen `WorkflowRoots`。Result 是小型 manifest/journal 的 `workflows/<run_id>/`，database 是大量 acquisition data 的對稱目錄。它沿既有安全單段與 symlink escape 規則，只計算 absolute exact paths，不建立目錄或檔案，也不需要 point 或 saved_at。Workflow engine 擁有目錄建立與保存，不借 single acquisition 的 outputs 推導 workflow roots。
 
 `new_run_id` 將帶 timezone 的時間轉為 UTC 時間戳，加上六個小寫 UUID4 hex 字元。預設取 UTC 現在，不從名稱解析時間，也不保證跨程序唯一性。
 

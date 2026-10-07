@@ -1,6 +1,6 @@
 # GUI plotting
 
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-06, shared PNG rendering
 
 此目錄提供 explicit Matplotlib／Qt 接入，不決定各 app 的 figure 接受或保存政策。
 根 package 延遲載入 Qt 與 Matplotlib 匯出。Runtime 在 QApplication 建立後初始化
@@ -17,6 +17,8 @@ FigureContainer 包裝 QStackedWidget 與 placeholder。host.py 維護 weak-key
 Figure-to-container registry，並透過 GUI-thread QObject 處理 explicit attach 與
 canvas removal。容器可以同時保留多張圖，重新 attach 會選取對應 canvas。
 容器 clear 清掉動態 canvas 與 registry entry，不清空原生 Figure。
+
+`figure_export.render_figure_png` 提供固定 geometry 的原生 Figure PNG。Measure agent screenshots 使用這個 shared rendering owner，save／preview 政策仍屬於 app。Caller 持有 exclusive rendering slot；成功與失敗都恢復原尺寸，不轉移 canvas ownership，也不註冊 pyplot Figure。
 
 ## Thread 與 rendering 邊界
 

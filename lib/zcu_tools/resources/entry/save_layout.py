@@ -70,6 +70,42 @@ def _checked_path(root: Path, destination: Path) -> Path:
     return path
 
 
+@dataclass(frozen=True)
+class WorkflowRoots:
+    """Exact absolute workflow directories returned by workflow_roots.
+
+    result stores small workflow metadata, such as manifest and journal.
+    database stores heavy acquisition data. Neither directory need exist;
+    this value does not create them or reserve a workflow run identity.
+    """
+
+    result: Path
+    database: Path
+
+
+def workflow_roots(
+    *, result_path: Path, database_path: Path, run_id: str
+) -> WorkflowRoots:
+    """Calculate two exact workflow directories without publishing anything.
+
+    result_path and database_path are exact entry directories, not parent roots;
+    relative paths become absolute and directories need not exist. run_id is an
+    opaque nonempty single segment, using the same POSIX/Windows-safe rules as
+    SaveLayout. Return each entry's workflows/run_id directory. Invalid run_id
+    or a destination resolving outside its entry root raises ValueError.
+    Filesystem resolution errors propagate; do not create directories or files,
+    reserve names, or require point identity or a save timestamp.
+    """
+    validate_path_segment(run_id, field="run_id")
+    result_root = result_path.resolve()
+    database_root = database_path.resolve()
+    destination = Path("workflows") / run_id
+    return WorkflowRoots(
+        result=_checked_path(result_root, destination),
+        database=_checked_path(database_root, destination),
+    )
+
+
 class SaveLayout:
     """Calculate run and member destinations without publishing files or directories.
 
@@ -111,8 +147,10 @@ class SaveLayout:
 
         Data returns canonical data_h5 then a new Labber filename. Multiple data
         artifacts share the run's data.h5. Figure returns run PNG then point/global
-        PNG copy. Analysis returns one run JSON. Filename tokens escape percent
-        then underscore, preserving member identity. A symlink escaping either
+        PNG copy. Analysis returns analysis/<member_name>.json; section/name do
+        not affect that destination. Producers supply their pane as member_name.
+        Figure filename tokens escape percent then underscore, preserving
+        member identity. A symlink escaping either
         entry root raises ValueError; filesystem lookup errors propagate.
         """
         run = Path("runs") / self._run_id
@@ -134,19 +172,20 @@ class SaveLayout:
 
         # ArtifactKey validates this non-data invariant at construction.
         assert key.member_name is not None
-        filename = "_".join(
-            _encode(token) for token in (key.section, key.name, key.member_name)
-        )
         if key.member == "analysis":
             return (
                 Output(
                     "json",
                     _checked_path(
-                        self._database_path, run / "analysis" / f"{filename}.json"
+                        self._database_path,
+                        run / "analysis" / f"{key.member_name}.json",
                     ),
                 ),
             )
 
+        filename = "_".join(
+            _encode(token) for token in (key.section, key.name, key.member_name)
+        )
         figure = _checked_path(self._database_path, run / "figures" / f"{filename}.png")
         copy_folder = (
             Path("figures")

@@ -28,8 +28,16 @@ from .provenance import ClonedFrom, Provenance
 from .registry import ComponentRegistry, RoleRegistry, RoleSpec, component_registry
 from .result_entry import ResultEntry, rename_entry
 from .roles import RoleView, role_registry
-from .save_layout import ArtifactKey, Output, SaveLayout, new_run_id
+from .save_layout import (
+    ArtifactKey,
+    Output,
+    SaveLayout,
+    WorkflowRoots,
+    new_run_id,
+    workflow_roots,
+)
 from .schema import ComponentSchema
+from .storage import PointStorageBinding, capture_point_storage
 from .views import (
     ComponentView,
     DocumentField,

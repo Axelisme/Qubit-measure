@@ -8,8 +8,8 @@ from dataclasses import asdict, dataclass, field, replace
 from threading import Condition, Event, Lock, Thread
 from typing import Any, Literal, TypedDict
 
+from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
-from zcu_tools.mcp.measure.images import validated_png
 from zcu_tools.mcp.measure.operation_wait import await_operation
 from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError, MeasureMcpSession
 

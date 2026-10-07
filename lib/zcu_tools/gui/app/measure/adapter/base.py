@@ -33,8 +33,8 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
-from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.interactive import PluginDefinition, Session
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (

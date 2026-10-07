@@ -10,8 +10,8 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import OperationRunner
 

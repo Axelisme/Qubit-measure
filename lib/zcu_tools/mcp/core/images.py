@@ -8,6 +8,11 @@ from zcu_tools.mcp.core.reply import PngImage
 
 
 def validated_png(png: bytes) -> PngImage:
+    """Return reply-owned PNG bytes after complete chunk and pixel decoding.
+
+    No files or GUI state are accessed. Raise ValueError for corrupt/truncated
+    PNG data; callers retain any previously accepted GUI command receipt.
+    """
     # Decoders can accept a truncated trailer; require the complete PNG end chunk.
     if not png.endswith(b"\x00\x00\x00\x00IEND\xaeB\x60\x82"):
         raise ValueError("Invalid PNG image: missing or truncated IEND chunk")

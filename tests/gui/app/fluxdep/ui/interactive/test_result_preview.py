@@ -31,7 +31,7 @@ def _entry() -> SpectrumEntry:
         flux_half=0.0,
         flux_int=1.0,
         aligned=True,
-        points_selected=True,
+        points_completed=True,
     )
 
 

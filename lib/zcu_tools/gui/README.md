@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-05, injected experiment logging namespaces
+**Last updated:** 2026-10-06, resource observations and parameter schema ownership
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -28,12 +28,37 @@ Shared endpoint 無法編碼 RPC 回覆時送有界的 `internal` error，reason
 若 correlated fallback 仍無法編碼，或 reply queue 拒收，就中止該連線，交 IO owner
 釋放其 app context。Push 的 drop policy 不變；shared transport 不解讀 method、guard 或 operation。
 
+## Resource version lifecycle
+
+`VersionTable` owns the shared counter mechanism; apps own keys and semantic
+writes on their owner thread. Exact `retire(key)` makes an absent resource read
+as 0 while retaining its last counter. Same-key recreation advances beyond that
+counter, so reusable names cannot match an old observation. `drop_prefix` instead
+forgets both live and retired counters, and later bumps restart at 1. Owners
+choose retirement for reusable identities and forgetting only when key reuse
+cannot revive an old baseline. Counter history lasts only for the table lifetime.
+
+## Remote resource observations
+
+`gui.remote.RemoteControlServiceBase` owns per-connection seen maps, stale
+comparison, full-read observations and successful self-write tracking. Apps inject
+owner-thread version snapshots and `ResourceObservationPolicy` declarations; they
+retain resource keys, version producers and domain effects. Guard, handler and
+observation share one owner turn. Handler failure, timeout or unsuccessful reply
+delivery cannot establish a new observation. Observation rollback never rolls
+back business effects. Read-only apps omit this optional policy binding. MCP does
+not maintain another seen map. See ADR-0068 for the app-policy split.
+
 ## Remote parameter declarations
 
 `gui.remote.ParamSpec` owns optional string enum declarations, schema projection
 and request membership validation. Callers without an enum keep their existing
-required/null/default behavior. Domain plugins supply their own authoritative
-choices; MCP does not maintain another allowlist.
+required/null/default behavior. ARRAY declarations also own the schema element
+kind, with string as the default and number available for native fit bounds.
+Element shape/type/finite validation remains with each domain handler. MCP preserves
+scalar JSON types for GUI admission instead of converting malformed inputs.
+Domain plugins supply their own authoritative choices; MCP does not maintain
+another allowlist.
 
 ## Expected Errors (`expected_error.py`)
 

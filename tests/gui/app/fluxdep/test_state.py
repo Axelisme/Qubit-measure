@@ -1,6 +1,8 @@
-"""Tests for fluxdep-gui state: VersionTable (copied mechanism) + FluxDepState."""
+"""Public state writes and resource versions for fluxdep-gui."""
 
 from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -15,6 +17,12 @@ from zcu_tools.gui.app.fluxdep.state import (
     SpecType,
     VersionTable,
     spectrum_version_key,
+)
+from zcu_tools.gui.expected_error import (
+    ExpectedError,
+    ExpectedErrorCategory,
+    FailedPreconditionError,
+    InvalidInputError,
 )
 from zcu_tools.gui.project import ProjectInfo
 
@@ -38,7 +46,7 @@ def _make_entry(name: str, spec_type: SpecType = "OneTone") -> SpectrumEntry:
 
 
 # ---------------------------------------------------------------------------
-# VersionTable (copied verbatim from measure — verify mechanism intact)
+# Shared VersionTable's existing bump/forget behavior
 # ---------------------------------------------------------------------------
 
 
@@ -103,6 +111,43 @@ def test_remove_spectrum_drops_key_bumps_set():
     assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 2  # add + remove
 
 
+@pytest.mark.parametrize("name", ["foo", "譜:*", "a:b"])
+def test_remove_spectrum_preserves_prefix_sibling(name: str):
+    st = FluxDepState()
+    sibling = _make_entry(name + "bar")
+    st.put_spectrum(_make_entry(name))
+    st.put_spectrum(sibling)
+    st.put_spectrum(sibling)
+    st.set_active(sibling.name)
+
+    st.remove_spectrum(name)
+
+    assert st.spectrums == {sibling.name: sibling}
+    assert st.active_spectrum == sibling.name
+    assert st.version.get(spectrum_version_key(name)) == 0
+    assert st.version.get(spectrum_version_key(sibling.name)) == 2
+    assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 3
+
+
+def test_same_name_recreation_never_reuses_a_spectrum_version():
+    st = FluxDepState()
+    entry = _make_entry("a")
+    key = spectrum_version_key(entry.name)
+    st.put_spectrum(entry)
+    assert st.version.get(key) == 1
+
+    st.remove_spectrum(entry.name)
+    assert st.version.get(key) == 0
+    st.put_spectrum(_make_entry(entry.name))
+    assert st.version.get(key) == 2
+
+    st.remove_spectrum(entry.name)
+    assert st.version.get(key) == 0
+    st.put_spectrum(_make_entry(entry.name))
+    assert st.version.get(key) == 3
+    assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 5
+
+
 def test_remove_active_spectrum_clears_active():
     st = FluxDepState()
     st.put_spectrum(_make_entry("a"))
@@ -111,10 +156,64 @@ def test_remove_active_spectrum_clears_active():
     assert st.active_spectrum is None
 
 
-def test_set_active_unknown_raises():
+def test_unknown_named_commands_leave_state_unchanged():
     st = FluxDepState()
-    with pytest.raises(KeyError):
-        st.set_active("nope")
+    st.put_spectrum(_make_entry("譜:*"))
+    st.set_active("譜:*")
+    before = st.version.snapshot()
+    entry = st.spectrums["譜:*"]
+    for command in (
+        lambda: st.get_spectrum("nope"),
+        lambda: st.remove_spectrum("nope"),
+        lambda: st.set_active("nope"),
+        lambda: st.reset_alignment("nope"),
+        lambda: st.reset_points("nope"),
+    ):
+        with pytest.raises(InvalidInputError) as caught:
+            command()
+        assert caught.value.category is ExpectedErrorCategory.INVALID_INPUT
+        assert caught.value.reason_code == "unknown_spectrum"
+        assert st.spectrums == {"譜:*": entry}
+        assert st.active_spectrum == "譜:*"
+        assert st.version.snapshot() == before
+
+
+@pytest.mark.parametrize("name", ["譜:*", "a:b", "plain"])
+def test_get_spectrum_returns_live_literal_entry(name: str):
+    st = FluxDepState()
+    entry = _make_entry(name)
+    st.put_spectrum(entry)
+    before = st.version.snapshot()
+    assert st.get_spectrum(name) is entry
+    assert st.version.snapshot() == before
+
+
+def test_get_spectrum_rejects_foreign_thread_without_mutation():
+    st = FluxDepState()
+    entry = _make_entry("a")
+    st.put_spectrum(entry)
+    before = st.version.snapshot()
+    with (
+        ThreadPoolExecutor(max_workers=1) as pool,
+        pytest.raises(RuntimeError, match="owner|thread") as caught,
+    ):
+        pool.submit(st.get_spectrum, "a").result()
+    assert not isinstance(caught.value, ExpectedError)
+    assert st.get_spectrum("a") is entry
+    assert st.version.snapshot() == before
+
+
+def test_reset_points_unaligned_is_correctable_without_mutation():
+    st = FluxDepState()
+    entry = _make_entry("a")
+    st.put_spectrum(entry)
+    before = st.version.snapshot()
+    with pytest.raises(FailedPreconditionError) as caught:
+        st.reset_points("a")
+    assert caught.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
+    assert caught.value.reason_code == "spectrum_not_aligned"
+    assert st.spectrums["a"] is entry
+    assert st.version.snapshot() == before
 
 
 def test_set_alignment_marks_aligned_and_bumps():
@@ -123,7 +222,12 @@ def test_set_alignment_marks_aligned_and_bumps():
     v0 = st.version.get(spectrum_version_key("a"))
     new_fluxs = st.spectrums["a"].raw["dev_values"].copy()
     st.set_alignment(
-        "a", flux_half=1.0, flux_int=2.0, flux_period=2.0, new_fluxs=new_fluxs
+        "a",
+        flux_half=1.0,
+        flux_int=2.0,
+        flux_period=2.0,
+        new_fluxs=new_fluxs,
+        new_point_fluxs=np.empty(0, dtype=np.float64),
     )
     entry = st.spectrums["a"]
     assert entry.aligned is True
@@ -141,13 +245,11 @@ def test_set_points_marks_selected_and_bumps():
         freqs=np.array([5.0]),
     )
     st.set_points("a", pts)
-    assert st.spectrums["a"].points_selected is True
+    assert st.spectrums["a"].points_completed is True
     assert st.version.get(spectrum_version_key("a")) == v0 + 1
 
 
-def test_set_points_empty_does_not_mark_selected():
-    # an empty point set (user deselected everything) is recorded but must not be
-    # flagged points_selected — downstream readers would crash on an empty cloud.
+def test_set_points_empty_completes_stage_without_available_points():
     st = FluxDepState()
     st.put_spectrum(_make_entry("a"))
     v0 = st.version.get(spectrum_version_key("a"))
@@ -157,8 +259,34 @@ def test_set_points_empty_does_not_mark_selected():
         freqs=np.array([], dtype=np.float64),
     )
     st.set_points("a", empty)
-    assert st.spectrums["a"].points_selected is False
+    assert st.spectrums["a"].points_completed is True
+    assert st.spectrums["a"].point_count == 0
     assert st.version.get(spectrum_version_key("a")) == v0 + 1
+
+
+@pytest.mark.parametrize(
+    "invalid", [np.array([1.0]), np.array([[1.0, 2.0]]), np.array([np.nan, 2.0])]
+)
+def test_alignment_rejects_invalid_point_mapping_without_mutation(invalid):
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    st.set_points(
+        "a",
+        PointsData(
+            dev_values=np.array([0.0, 1.0]),
+            fluxs=np.array([0.5, 1.0]),
+            freqs=np.array([5.0, 5.1]),
+        ),
+    )
+    entry = st.spectrums["a"]
+    version = st.version.get(spectrum_version_key("a"))
+    raw_fluxs = entry.raw["fluxs"].copy()
+    with pytest.raises(ValueError, match="new_point_fluxs|finite"):
+        st.set_alignment("a", 0.0, 1.0, 2.0, np.array([0.5, 0.75, 1.0]), invalid)
+    assert st.spectrums["a"] is entry
+    np.testing.assert_array_equal(entry.raw["fluxs"], raw_fluxs)
+    np.testing.assert_array_equal(entry.points["fluxs"], [0.5, 1.0])
+    assert st.version.get(spectrum_version_key("a")) == version
 
 
 def test_set_selection_bumps_selection():

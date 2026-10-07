@@ -25,7 +25,7 @@ from zcu_tools.resources.entry import (
 )
 
 from .errors import MigrationInputError
-from .evidence import has_legacy_expression
+from .evidence import has_legacy_expression, parse_utc_time
 from .models import (
     KeyMappingItem,
     LegacyRunEvidence,
@@ -46,6 +46,7 @@ def _check_evidence(evidence: LegacyRunEvidence, entry: ResultEntry | None) -> N
         raise ValueError("cfg: legacy expression cannot be converted")
     for path, parameter in evidence.snapshot.params.items():
         source = parameter.source
+        parse_utc_time(source.at, f"snapshot.params.{path}.source.at")
         if source.source != "manual":
             if entry is None:
                 raise ValueError(f"snapshot.params.{path}: ledger source is not proven")
@@ -77,7 +78,6 @@ def _run_metadata(
             point=snapshot.point,
             description=snapshot.description,
             roles=snapshot.roles,
-            params=snapshot.params,
         ),
         provenance=legacy.provenance,
     )

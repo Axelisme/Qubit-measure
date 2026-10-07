@@ -1,5 +1,6 @@
 """Behavior of the common Notebook record and operation ownership seam."""
 
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import NoReturn, assert_type
 from unittest.mock import Mock
@@ -7,11 +8,14 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import DeviceManager, FakeDevice
+from zcu_tools.experiment import AcquisitionEvidence
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment
+from zcu_tools.notebook import adapter as adapter_module
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.notebook._adapter_fakes import Cfg as _Cfg
@@ -142,7 +146,12 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     manager.register_device("flux", second_device)
     core.contexts[0].cancel_signal.set_error("failed", "old run", None)
 
+    first_evidence = adapter.acquisition_for(first)
     second = adapter.run(cfg)
+    second_evidence = adapter.acquisition_for(second)
+    assert second_evidence.run_id != first_evidence.run_id
+    with pytest.raises(ValueError, match="acquisition"):
+        adapter.acquisition_for(first)
 
     assert first.cfg == _Cfg(scale=3.0)
     assert first.result == 3.0
@@ -258,9 +267,7 @@ def test_run_requires_device_manager_before_starting_operation() -> None:
     assert adapter.last_run is None
 
 
-@pytest.mark.parametrize(
-    "failure", ["core", "finish", "signal-failed", "signal-interrupted"]
-)
+@pytest.mark.parametrize("failure", ["core", "finish", "signal-failed"])
 def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     core = _Core()
     host = _Host()
@@ -269,12 +276,13 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     )(core)
     previous_run = adapter.run(_Cfg(scale=3.0))
     previous_run_presentation = adapter.run_presentation
+    previous_evidence = adapter.acquisition_for(previous_run)
     previous_analysis = adapter.analyze(_Options(weights=[2.0]))
     previous_analysis_presentation = adapter.analysis_presentation
     core.fail_run = failure == "core"
     host.fail_present = failure == "finish"
     if failure.startswith("signal-"):
-        core.signal_outcome = "failed" if failure == "signal-failed" else "interrupted"
+        core.signal_outcome = "failed"
     cfg = _Cfg(scale=9.0)
     error_type = ScheduleOutcomeError if failure.startswith("signal-") else ValueError
 
@@ -288,6 +296,7 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
 
     assert cfg.scale == 9.0
     assert adapter.last_run is previous_run
+    assert adapter.acquisition_for(previous_run) == previous_evidence
     assert adapter.run_presentation is previous_run_presentation
     assert adapter.analysis is previous_analysis
     assert adapter.analysis_presentation is previous_analysis_presentation
@@ -298,20 +307,22 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     )
 
 
-def test_stopped_partial_run_without_error_is_committed() -> None:
+@pytest.mark.parametrize("outcome", ["stopped", "interrupted"])
+def test_stopped_partial_run_is_committed(outcome: str) -> None:
     core = _Core()
     host = _Host()
     adapter = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=DeviceManager(), host=host
     )(core)
     previous = adapter.load(Path("loaded"))
-    core.signal_outcome = "stopped"
+    core.signal_outcome = "stopped" if outcome == "stopped" else "interrupted"
 
     partial = adapter.run(_Cfg(scale=9.0))
 
     assert partial is adapter.last_run
     assert partial is not previous
     assert partial.result == 9.0
+    assert adapter.acquisition_for(partial).completion == "stopped"
     assert core.contexts[-1].cancel_signal.is_set()
     assert host.released == []
 
@@ -322,8 +333,11 @@ def test_failed_analysis_preserves_success_and_releases_diagnostic(
 ) -> None:
     core = _Core()
     host = _Host()
-    adapter = NotebookAdapter(host=host)(core)
-    source = adapter.load(Path("loaded"))
+    adapter = NotebookAdapter(
+        soc=object(), soccfg=object(), device_manager=DeviceManager(), host=host
+    )(core)
+    source = adapter.run(_Cfg(scale=5.0))
+    evidence = adapter.acquisition_for(source)
     previous = adapter.analyze(_Options(weights=[2.0]))
     previous_presentation = adapter.analysis_presentation
     core.fail_analysis = failure == "core"
@@ -333,6 +347,7 @@ def test_failed_analysis_preserves_success_and_releases_diagnostic(
         adapter.analyze(_Options(weights=[3.0]))
 
     assert adapter.last_run is source
+    assert adapter.acquisition_for(source) == evidence
     assert adapter.analysis is previous
     assert adapter.analysis_presentation is previous_presentation
     assert len(host.released) == 1
@@ -510,6 +525,138 @@ def test_save_defaults_to_last_run_not_explicit_historical_analysis(
     assert entry.last_run is loaded
     assert entry.analysis is analysis
     assert analysis.source is first
+
+
+def test_acquisition_boundaries_exclude_capture_and_presentation(
+    monkeypatch: pytest.MonkeyPatch,
+    software_provenance: SoftwareProvenance,
+) -> None:
+    started = datetime(2026, 10, 6, 12, tzinfo=UTC)
+    finished = started + timedelta(seconds=10)
+    current = started - timedelta(seconds=10)
+
+    class Clock:
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> datetime:
+            assert tz is UTC
+            return current
+
+    def capture(*, context: RunContext | None = None) -> SoftwareProvenance:
+        nonlocal current
+        assert context is not None
+        current = started
+        return software_provenance
+
+    class TimedCore(_Core):
+        def run(self, config: _Cfg, *, context: RunContext) -> float:
+            nonlocal current
+            assert current == started
+            result = super().run(config, context=context)
+            current = finished
+            return result
+
+    class TimedHost(_Host):
+        def present(self, figure: Figure) -> None:
+            nonlocal current
+            current = finished + timedelta(seconds=20)
+            super().present(figure)
+
+    monkeypatch.setattr(adapter_module, "datetime", Clock)
+    monkeypatch.setattr(adapter_module, "capture_software_provenance", capture)
+    adapter = NotebookAdapter(
+        soc=object(), soccfg=object(), device_manager=DeviceManager(), host=TimedHost()
+    )(TimedCore())
+
+    record = adapter.run(_Cfg(scale=3.0))
+    evidence = adapter.acquisition_for(record)
+    assert_type(evidence, AcquisitionEvidence)
+    assert evidence.started_at == started
+    assert evidence.finished_at == finished
+    assert evidence.completion == "complete"
+    assert evidence.run_id.startswith("20261006T120000Z-")
+    assert evidence.provenance == software_provenance
+    assert current > evidence.finished_at
+    adapter.analyze(_Options(weights=[2.0]))
+    assert adapter.acquisition_for(record) == evidence
+
+
+def test_acquisition_identity_rejects_foreign_handmade_and_loaded_sources() -> None:
+    factory = NotebookAdapter(
+        soc=object(), soccfg=object(), device_manager=DeviceManager(), host=_Host()
+    )
+    adapter, other = factory(_Core()), factory(_Core())
+    foreign = other.run(_Cfg())
+    with pytest.raises(ValueError, match="acquisition"):
+        adapter.acquisition_for(foreign)
+
+    record = adapter.run(_Cfg(scale=3.0))
+    handmade = RunRecord(cfg=record.cfg, result=record.result)
+    assert handmade == record
+    for invalid in (foreign, handmade):
+        with pytest.raises(ValueError, match="acquisition"):
+            adapter.acquisition_for(invalid)
+
+    evidence = adapter.acquisition_for(record)
+    with pytest.raises(FileNotFoundError):
+        adapter.load(Path("missing"))
+    assert adapter.acquisition_for(record) == evidence
+
+    loaded = adapter.load(Path("loaded"))
+    for invalid in (record, loaded):
+        with pytest.raises(ValueError, match="acquisition"):
+            adapter.acquisition_for(invalid)
+
+
+def test_acquisition_isolates_provider_and_query_version_mappings(
+    software_provenance: SoftwareProvenance,
+) -> None:
+    versions = software_provenance.software_versions
+    assert isinstance(versions, dict)
+
+    class MutatingCore(_Core):
+        def run(self, config: _Cfg, *, context: RunContext) -> float:
+            versions["python"] = "changed during acquisition"
+            return super().run(config, context=context)
+
+    adapter = NotebookAdapter(
+        soc=object(), soccfg=object(), device_manager=DeviceManager(), host=_Host()
+    )(MutatingCore())
+    record = adapter.run(_Cfg())
+    first = adapter.acquisition_for(record)
+    assert first.provenance.software_versions["python"] == "test"
+    versions["python"] = "provider changed"
+    queried = first.provenance.software_versions
+    assert isinstance(queried, dict)
+    queried["python"] = "query changed"
+
+    second = adapter.acquisition_for(record)
+    assert second is not first
+    assert second.provenance.software_versions["python"] == "test"
+
+
+def test_capture_failure_retains_success_without_starting_core(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    core = _Core()
+    adapter = NotebookAdapter(
+        soc=object(), soccfg=object(), device_manager=DeviceManager(), host=_Host()
+    )(core)
+    record = adapter.run(_Cfg())
+    evidence = adapter.acquisition_for(record)
+    analysis = adapter.analyze(_Options(weights=[2.0]))
+    monkeypatch.setattr(
+        adapter_module,
+        "capture_software_provenance",
+        Mock(side_effect=OSError("Software capture failed")),
+    )
+
+    with pytest.raises(OSError, match="Software capture failed"):
+        adapter.run(_Cfg(scale=9.0))
+
+    assert len(core.contexts) == 1
+    assert adapter.last_run is record
+    assert adapter.analysis is analysis
+    assert adapter.acquisition_for(record) == evidence
 
 
 @pytest.mark.parametrize("unique", [False, True])
