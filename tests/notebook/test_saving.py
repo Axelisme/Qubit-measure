@@ -25,6 +25,7 @@ from zcu_tools.plotting.plots import NonPresentingHost
 from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import (
     AcceptedPayload,
+    AcquiredPayload,
     JsonObject,
     JsonValue,
     LedgerEvent,
@@ -114,6 +115,13 @@ def point(tmp_path: Path) -> PointView:
     return entry.new_point("sweet", description="save-time context")
 
 
+def acquired_payload(ledger: RecordsLedger) -> AcquiredPayload:
+    """Read the saved run's acquired payload and fail on a missing/wrong event."""
+    event = next(event for event in ledger.events() if event.kind == "acquired")
+    assert isinstance(event.payload, AcquiredPayload)
+    return event.payload
+
+
 def analysis_document() -> AnalysisDocument:
     return AnalysisDocument(
         pane="analysis", parameters={"skip": 1}, summary={"frequency": 5000.0}
@@ -193,6 +201,7 @@ def test_real_caller_writes_all_formats_and_retains_acquisition(
     saved = exp.save_run(
         point,
         source=source,
+        roles=None,
         figures={"fit": saving_figure()},
         analysis=(analysis_document(),),
         comment="original comment",
@@ -232,6 +241,7 @@ def test_real_caller_writes_all_formats_and_retains_acquisition(
         database_root=tmp_path / "Database",
     ).ledger
     assert [event.kind for event in ledger.events()] == ["acquired", "saved"]
+    assert acquired_payload(ledger).roles == {}
 
 
 def test_resave_rewrites_fixed_outputs_and_uses_new_labber_file(
@@ -474,6 +484,30 @@ def test_stale_or_unowned_source_fails_before_creating_run_outputs(
     assert not (tmp_path / "Database" / "entry" / "runs").exists()
 
 
+def test_save_run_rejects_cross_point_roles_before_outputs_and_events(
+    accept_point: PointView,
+    ledger: RecordsLedger,
+    tmp_path: Path,
+) -> None:
+    entry = ResultEntry.open(
+        "entry",
+        result_root=tmp_path / "results",
+        database_root=tmp_path / "Database",
+    )
+    other_point = entry.new_point("other", clone_from=accept_point)
+    roles = other_point.resolve(("notebook_target",), notebook_target="D2")
+    assert roles.components == {"notebook_target": "D2"}
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    events_before = tuple(ledger.events())
+
+    with pytest.raises(ValueError):
+        exp.save_run(accept_point, source=source, roles=roles)
+
+    assert not any(entry.database_path.rglob("*"))
+    assert tuple(ledger.events()) == events_before
+
+
 def test_ledger_append_failure_propagates_after_files_are_written(
     point: PointView,
     tmp_path: Path,
@@ -515,6 +549,13 @@ def test_accept_writes_role_values_and_local_accepted_provenance(
     source = exp.run(SavingCfg())
     roles = accept_point.resolve(("notebook_target",), notebook_target="D1")
     saved = exp.save_run(accept_point, source=source, roles=roles)
+    native = next(
+        item.output.path
+        for item in saved.report.outputs
+        if item.output.format == "data_h5"
+    )
+    assert load_run_data(native).metadata.snapshot.roles == {"notebook_target": "D1"}
+    assert acquired_payload(ledger).roles == {"notebook_target": "D1"}
     event_id = saved.accept(
         {
             "notebook_target.rate": (1250.0, stderr),
