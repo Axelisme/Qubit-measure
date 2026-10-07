@@ -81,6 +81,16 @@ def _resolve(
     return node
 
 
+def _inline_ref(node: dict[str, JsonValue], root: dict[str, JsonValue]) -> None:
+    """Copy a shared definition into this occurrence, retaining field metadata."""
+    resolved = _resolve(node, root)
+    if resolved is not node:
+        metadata = {key: value for key, value in node.items() if key != "$ref"}
+        node.clear()
+        node.update(copy_object(resolved))
+        node.update(metadata)
+
+
 def _field_metadata(info: FieldInfo, target: dict[str, JsonValue]) -> None:
     if complex in alternatives(info.annotation):
         variants: list[JsonValue] = [
@@ -150,12 +160,15 @@ def _container_nodes(
 
 
 def _child_nodes(
-    info: FieldInfo, target: dict[str, JsonValue]
+    info: FieldInfo, target: dict[str, JsonValue], root: dict[str, JsonValue]
 ) -> tuple[tuple[type[BaseModel], dict[str, JsonValue]], ...]:
+    _inline_ref(target, root)
+    node = _non_null(target)
+    _inline_ref(node, root)
     models = model_types(info.annotation)
     if len(models) == 1:
-        return ((models[0], _non_null(target)),)
-    variants = _non_null(target).get("oneOf")
+        return ((models[0], node),)
+    variants = node.get("oneOf")
     if isinstance(variants, list):
         return tuple(
             (model, variant)
@@ -165,7 +178,7 @@ def _child_nodes(
     return tuple(
         pair
         for child_info, child_target in _container_nodes(info, target)
-        for pair in _child_nodes(child_info, child_target)
+        for pair in _child_nodes(child_info, child_target, root)
     )
 
 
@@ -200,12 +213,7 @@ def _decorate(
         return
     # Track only this ancestry; reused sibling occurrences have distinct choices.
     seen = seen | {model}
-    resolved = _resolve(node, root)
-    if resolved is not node:
-        metadata = {key: value for key, value in node.items() if key != "$ref"}
-        node.clear()
-        node.update(copy_object(resolved))
-        node.update(metadata)
+    _inline_ref(node, root)
     options = {**inherited, **local_choices(model, env)}
     props = node.get("properties")
     if not isinstance(props, dict):
@@ -214,13 +222,14 @@ def _decorate(
         target = props.get(name)
         if not isinstance(target, dict):
             continue
+        _inline_ref(target, root)
         _field_metadata(info, target)
         child_options = {
             path[1:]: values
             for path, values in options.items()
             if len(path) > 1 and path[0] == name
         }
-        for child, variant in _child_nodes(info, target):
+        for child, variant in _child_nodes(info, target, root):
             _decorate(child, variant, root, env, seen, child_options)
         values = options.get((name,))
         if values is not None:

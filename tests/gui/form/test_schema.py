@@ -14,6 +14,8 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
+    LinRange,
+    RangeInput,
 )
 from zcu_tools.resources.context import MetaDict
 
@@ -377,6 +379,43 @@ def test_schema_recomputes_dynamic_choices_for_each_request() -> None:
     assert not alpha.is_valid({"mode": "beta"})
     assert beta.is_valid({"mode": "beta"})
     assert not beta.is_valid({"mode": "alpha"})
+
+
+def test_public_range_alias_projects_choices_without_reused_field_pollution() -> None:
+    class RangeAliasForm(FormModel):
+        """Use the exported alias rather than an equivalent inline union."""
+
+        restricted: RangeInput = Field(default_factory=LinRange)
+        unrestricted: RangeInput = Field(default_factory=LinRange)
+
+        @classmethod
+        def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+            """Restrict n at one occurrence of the public alias."""
+            return {("restricted", "n"): (2,)}
+
+    env = FormEnv(md=MetaDict())
+    validator = Draft202012Validator(RangeAliasForm.input_schema(env))
+    counts: tuple[JsonValue, ...] = (2, {"expr": "2"})
+    for count in counts:
+        valid: dict[str, JsonValue] = {
+            "restricted": {"kind": "linrange", "n": count},
+            "unrestricted": {"kind": "linrange", "n": 3},
+        }
+        assert validator.is_valid(valid)
+        result = FormState(FormInput(RangeAliasForm, valid)).result(env)
+        assert isinstance(result, RangeAliasForm)
+        assert isinstance(result.restricted, LinRange)
+        assert isinstance(result.unrestricted, LinRange)
+        assert result.restricted.n == 2
+        assert result.unrestricted.n == 3
+    invalid: dict[str, JsonValue] = {
+        "restricted": {"kind": "linrange", "n": 3},
+        "unrestricted": {"kind": "linrange", "n": 3},
+    }
+    errors = FormState(FormInput(RangeAliasForm, invalid)).result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("restricted", "n") in errors.messages
+    assert not validator.is_valid(invalid)
 
 
 def test_whole_container_choices_share_json_value_membership() -> None:

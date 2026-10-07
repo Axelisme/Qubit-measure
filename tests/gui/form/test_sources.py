@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Annotated
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import Field, JsonValue
 from pydantic_core import PydanticCustomError
 from zcu_tools.cfg_model import PulseSpec
@@ -16,6 +17,7 @@ from zcu_tools.gui.form import (
     FormPath,
     FormState,
     ModuleInline,
+    ModuleInput,
     ModuleRef,
     field_error,
 )
@@ -60,6 +62,35 @@ def library(gain: float = 0.25) -> LibrarySnapshot:
             components={"Q1": ComponentLibrary(pulses={"pi": pulse})},
         )
     )
+
+
+def test_public_module_alias_projects_reference_choices() -> None:
+    class ModuleAliasForm(FormModel):
+        """Parent options reach the exported module union reference branch."""
+
+        drive: ModuleInput = Field(
+            default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
+        )
+
+        @classmethod
+        def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+            """Allow the fixed reference name at its model-field path."""
+            return {("drive", "name"): ("Q1.pulses.pi",)}
+
+    env = FormEnv(md=MetaDict(), library=library())
+    validator = Draft202012Validator(ModuleAliasForm.input_schema(env))
+    valid: dict[str, JsonValue] = {"drive": {"kind": "ref", "name": "Q1.pulses.pi"}}
+    assert validator.is_valid(valid)
+    assert isinstance(
+        FormState(FormInput(ModuleAliasForm, valid)).result(env), ModuleAliasForm
+    )
+    invalid: dict[str, JsonValue] = {
+        "drive": {"kind": "ref", "name": "Q1.pulses.absent"}
+    }
+    errors = FormState(FormInput(ModuleAliasForm, invalid)).result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("drive", "name") in errors.messages
+    assert not validator.is_valid(invalid)
 
 
 def test_ref_to_inline_seeds_a_detached_spec_without_materializing_children() -> None:
