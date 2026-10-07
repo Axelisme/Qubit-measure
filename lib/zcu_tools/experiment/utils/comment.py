@@ -1,45 +1,52 @@
+"""Experiment cfg mapping to the datafile-owned Labber comment codec."""
+
 from __future__ import annotations
 
-import json
-import time
-from typing import Any
+from pydantic import TypeAdapter
 
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.datafile import (
+    CfgSnapshot,
+    JsonObject,
+    decode_labber_comment,
+    encode_labber_comment,
+)
 from zcu_tools.utils import format_obj
 
 
+def make_labber_cfg_snapshot(cfg: ConfigBase, *, schema_version: str) -> CfgSnapshot:
+    """Map this cfg to a JSON snapshot for the Labber writer.
+
+    cfg supplies the experiment's complete configuration; schema_version comes
+    from its declared spec. cfg_type records the cfg class name, not an import
+    path. Convert array/NumPy/QickParam values with the existing plain-value
+    mapping. Unsupported JSON values raise ValueError. No live state is read.
+    """
+    return CfgSnapshot(
+        values=TypeAdapter(JsonObject).validate_python(format_obj(cfg.to_dict())),
+        cfg_type=type(cfg).__name__,
+        schema_version=schema_version,
+    )
+
+
 def make_comment(cfg: ConfigBase, comment: str | None = None) -> str:
+    """Map cfg to JSON and encode it with optional text and local format time.
+
+    cfg is the experiment's ConfigBase snapshot. format_obj converts its array
+    and NumPy values into JSON values. Invalid cfg JSON or text raises ValueError.
+    The envelope encoding belongs to datafile, not this adapter.
     """
-    Generate a formatted comment string from a configuration dictionary.
-
-    Args:
-        cfg (dict): Configuration dictionary to be converted to a string.
-        prepend (str, optional): Additional string to prepend to the comment. Defaults to "".
-
-    Returns:
-        str: A formatted comment string.
-    """
-    dump_dict = {}
-
-    dump_dict["cfg"] = format_obj(cfg.to_dict())
-    if comment is not None:
-        dump_dict["comment"] = comment
-
-    dump_dict["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
-
-    return json.dumps(dump_dict, indent=2)
+    return encode_labber_comment(format_obj(cfg.to_dict()), comment)
 
 
 def parse_comment(
     comment: str,
-) -> tuple[dict[str, Any] | None, str | None, str | None]:
-    try:
-        dump_dict = json.loads(comment)
-    except json.JSONDecodeError:
-        return None, None, None
+) -> tuple[JsonObject | None, str | None, str | None]:
+    """Return cfg JSON, user text and local envelope timestamp, in that order.
 
-    return (
-        dump_dict.get("cfg"),
-        dump_dict.get("comment"),
-        dump_dict.get("timestamp"),
-    )
+    Non-envelope text is preserved in the second result with cfg/time absent.
+    Recognized envelopes with invalid field types raise ValueError. This adapter
+    does not validate cfg as an experiment model or infer historical run time.
+    """
+    decoded = decode_labber_comment(comment)
+    return decoded.cfg, decoded.comment, decoded.timestamp

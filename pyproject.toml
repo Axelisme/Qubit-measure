@@ -76,6 +76,8 @@ dev = [
 ]
 # Development diagnostics; include this group when bootstrapping dev environments.
 quality = ["pytest-randomly", "deptry", "pip-audit", "radon>=6.0.1,<7"]
+# Optional native data.h5 interoperability tests; not a runtime dependency.
+test = ["xarray", "h5netcdf"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -158,7 +160,7 @@ executionEnvironments = [
   { root = "lib", extraPaths = ["lib", "."] },
   { root = "tests", extraPaths = ["lib", "tools", "."] },
   { root = "scripts", extraPaths = ["lib", "."] },
-  { root = "tools", extraPaths = ["lib", "tools"] },
+  { root = "tools", extraPaths = ["lib", "tools", "."] },
 ]
 # strict, minus the rules whose diagnostics are produced by untyped third-party
 # packages (qick, pyvisa, scqubits, qtpy) rather than by this repository. Measured

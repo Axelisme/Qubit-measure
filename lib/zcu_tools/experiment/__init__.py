@@ -20,12 +20,17 @@ if TYPE_CHECKING:
     from .base import PersistableExperiment
     from .cfg_model import ExpCfgModel
     from .interfaces import RecordExperiment, SynchronousExperiment
+    from .native_persistence import RunSnapshot, load_run, native_schemas, save_run
     from .records import AnalysisRecord, RunRecord
 
 __all__ = [
     "config",
     "ExpCfgModel",
     "RunRecord",
+    "RunSnapshot",
+    "save_run",
+    "load_run",
+    "native_schemas",
     "AnalysisRecord",
     "RecordExperiment",
     "SynchronousExperiment",
@@ -48,6 +53,10 @@ _EXPORT_MODULES = {
     "config": ".config",
     "ExpCfgModel": ".cfg_model",
     "RunRecord": ".records",
+    "RunSnapshot": ".native_persistence",
+    "save_run": ".native_persistence",
+    "load_run": ".native_persistence",
+    "native_schemas": ".native_persistence",
     "AnalysisRecord": ".records",
     "RecordExperiment": ".interfaces",
     "SynchronousExperiment": ".interfaces",

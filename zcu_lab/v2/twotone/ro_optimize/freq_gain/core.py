@@ -90,7 +90,7 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=FreqGainResult,
         cfg_type=FreqGainCfg,
-        tag="twotone/ge/ro_optimize/freq",
+        tag="twotone/ge/ro_optimize/freq_gain",
     )
 
     def run(

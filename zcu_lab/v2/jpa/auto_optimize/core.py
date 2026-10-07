@@ -19,6 +19,7 @@ from zcu_tools.experiment import (
     MHZ_TO_HZ,
     GroupedAxesSpec,
     GroupedLoadData,
+    PersistableExperiment,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
@@ -260,7 +261,9 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class AutoOptimizeExp:
+class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
+    AXES_SPEC = JPA_AUTO_GROUPED_AXES_SPEC
+
     def run(self, cfg: JPAOptCfg, *, context: RunContext) -> JPAOptimizeResult:
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
@@ -431,22 +434,15 @@ class AutoOptimizeExp:
         colors = cmap(norm(phases))
         colors[:, 3] = alphas
 
-        # Matplotlib's 3D stub narrows zs/s to int, unlike the runtime API.
-        ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=colors, s=0.1)  # pyright: ignore[reportArgumentType]
+        # Convert NumPy coordinates/size at the Matplotlib boundary; its scalar defaults are typed as int.
+        ax.scatter(
+            params[:, 0],
+            params[:, 1],
+            params[:, 2].tolist(),
+            c=colors,
+            s=np.asarray(0.1).item(),
+        )
 
         ax.set_xlabel("Flux value")
         ax.set_ylabel("Freq (MHz)")
         ax.set_zlabel("Power (dBm)")
-
-    def save(
-        self,
-        source: RunRecord[JPAOptCfg, JPAOptimizeResult],
-        destination: Path,
-        *,
-        comment: str | None = None,
-        tag: str = "jpa/auto_optimize",
-    ) -> None:
-        JPA_AUTO_GROUPED_AXES_SPEC.save(source, destination, comment=comment, tag=tag)
-
-    def load(self, source: Path) -> RunRecord[JPAOptCfg, JPAOptimizeResult]:
-        return load_jpa_auto_grouped_result(source)

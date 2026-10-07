@@ -366,14 +366,14 @@ def save_labber_data(
     ).save(path)
 
 
-def _save_labber_data(path: str, ld: LabberData) -> str:
-    """Core writer for uniform-grid data (the ``Data/Data`` scalar layout)."""
-    path = format_ext(path)
+def write_labber_data_file(path: str, ld: LabberData) -> str:
+    """Write ld's inner-first uniform data/metadata at exact path; return it.
+    Existing paths raise FileExistsError; invalid shapes raise ValueError.
+    I/O errors propagate and may leave a partial new file.
+    """
     log_name = os.path.splitext(os.path.basename(path))[0]
-
     with h5py.File(path, "x") as f:
         _write_uniform_log_group(f, ld, log_name=log_name, write_tags=True)
-
     return path
 
 
