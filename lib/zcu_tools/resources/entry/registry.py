@@ -1,8 +1,9 @@
 """Component model declarations, independent of experiment definitions."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from difflib import get_close_matches
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from .errors import UnknownKindError
@@ -46,6 +47,21 @@ class RoleRegistry:
         if any(not pattern for pattern in patterns):
             raise ValueError("A focus kind pattern must not be empty")
         self._shorthand, self._focus_kinds = names, patterns
+
+    def default_focus(self, components: Mapping[str, ComponentSchema]) -> str | None:
+        """Select the sole name whose kind matches focus_kinds, or None.
+
+        Already validated component models are only inspected, never rebuilt.
+        Empty/multiple candidates return None without changing this registry.
+        """
+        candidates = [
+            name
+            for name, component in components.items()
+            if any(
+                fnmatchcase(component.kind, pattern) for pattern in self._focus_kinds
+            )
+        ]
+        return candidates[0] if len(candidates) == 1 else None
 
     @property
     def shorthand(self) -> tuple[str, ...]:
@@ -112,6 +128,14 @@ class ComponentRegistry:
     def unregister(self, kind: str) -> None:
         """Remove a kind; missing kinds raise KeyError."""
         del self._models[kind]
+
+    def kinds(self) -> tuple[str, ...]:
+        """Return an immutable registration-order snapshot without validating models.
+
+        Unregistering and registering again places the name last. Previously
+        returned tuples do not change; no factory or model hook runs.
+        """
+        return tuple(self._models)
 
     def get(
         self, kind: str, *, source: Path | None = None, component: str | None = None

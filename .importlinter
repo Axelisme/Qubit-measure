@@ -136,8 +136,6 @@ ancestors =
 depth = 0
 ignore_imports =
     zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
-    # Debt, see C10.
-    zcu_tools.resources.context.library -> zcu_tools.program.v2
 
 [importlinter:contract:stateful-independent]
 name = C10: stateful capability modules do not import each other
@@ -148,9 +146,6 @@ modules =
     zcu_tools.device
     zcu_tools.qick_remote
 ignore_imports =
-    # Debt: cfg schema moves to the cfg_model kernel; removed with storage-redesign's
-    # module library and the zcu_lab move (stage 2).
-    zcu_tools.resources.context.library -> zcu_tools.program.v2
     # Debt: program depends on cfg_model Protocols instead (stage 1, backlog).
     zcu_tools.program.v2.modules -> zcu_tools.resources.context
     zcu_tools.program.v2.modules.base -> zcu_tools.resources.context

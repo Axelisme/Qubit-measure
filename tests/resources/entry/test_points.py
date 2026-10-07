@@ -20,6 +20,7 @@ from zcu_tools.resources.entry import (
     ResultEntry,
     UnknownKindError,
     component_registry,
+    snapshot,
 )
 from zcu_tools.resources.entry.views import FieldView
 
@@ -469,7 +470,7 @@ def test_clone_copies_only_complete_point_and_module_without_reading_setup(
     root = entry_roots[0] / "entry"
     source = root / "points/source"
     (source / "module_cfg.yaml").write_text(
-        "format: zcu.module-library\nformat_version: '1.0'\nQ1: {pulse: arbitrary}\n"
+        "format: zcu.module-library\nformat_version: '1.0'\ncomponents: {Q1: {}}\n"
     )
     (source / "data.h5").write_bytes(b"not cloned")
     (source / "image.png").write_bytes(b"not cloned")
@@ -724,3 +725,25 @@ def test_same_leaf_conflict_rejects_whole_point_transaction(
     working_point.refresh()
     assert working_point.Q1.rate == (5200.0 if conflict == "rate" else 5000.0)
     assert working_point.Q1.duration == (12.0 if conflict == "rate" else 14.0)
+
+
+@pytest.mark.parametrize("clone_from", [None, "source"])
+@pytest.mark.parametrize("description", [None, "", "explicit description"])
+def test_point_description_is_set_within_create_and_preserves_source(
+    entry: ResultEntry,
+    clone_from: str | None,
+    description: str | None,
+) -> None:
+    source = entry.new_point("source")
+    source.description = "source description"
+    created = entry.new_point(
+        "destination", clone_from=clone_from, description=description
+    )
+    expected = (
+        description
+        if description is not None
+        else ("source description" if clone_from is not None else None)
+    )
+    assert snapshot(created).general.description == expected
+    assert snapshot(entry.use_point("destination")).general.description == expected
+    assert entry.use_point("source").description == "source description"

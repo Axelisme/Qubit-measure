@@ -1,23 +1,22 @@
 from collections.abc import Callable
 
 import pytest
-from zcu_tools.program.v2.modules.base import AbsModuleCfg
-from zcu_tools.program.v2.modules.pulse import PulseCfg
-from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
-from zcu_tools.program.v2.modules.reset import (
-    BathResetCfg,
-    NoneResetCfg,
-    PulseResetCfg,
-    TwoPulseResetCfg,
-)
-from zcu_tools.program.v2.modules.waveform import (
+from zcu_tools.cfg_model import (
+    AbsModuleCfg,
     AbsWaveformCfg,
     ArbWaveformCfg,
+    BathResetCfg,
     ConstWaveformCfg,
     CosineWaveformCfg,
+    DirectReadoutCfg,
     DragWaveformCfg,
     FlatTopWaveformCfg,
     GaussWaveformCfg,
+    NoneResetCfg,
+    PulseCfg,
+    PulseReadoutCfg,
+    PulseResetCfg,
+    TwoPulseResetCfg,
 )
 
 CfgFactory = Callable[[], AbsModuleCfg | AbsWaveformCfg]
