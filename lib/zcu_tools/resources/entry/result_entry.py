@@ -28,6 +28,7 @@ from .schema import (
     PARAMETER_VERSION,
     PointDocument,
     SetupDocument,
+    is_forward_minor,
 )
 from .views import SetupView
 
@@ -279,8 +280,18 @@ class ResultEntry:
                 entry_id=source_entry.entry_id,
             )
             shutil.copyfile(source / "module_cfg.yaml", destination / "module_cfg.yaml")
+        forward_minor = is_forward_minor(
+            {
+                "format": point_document.format,
+                "format_version": point_document.format_version,
+            },
+            source=source / "point.yaml",
+        )
+        # Validate known source fields without narrowing the point's future-field policy.
         point_sources = {
-            path: ProvenanceData.model_validate(metadata)
+            path: ProvenanceData.model_validate(
+                metadata, extra="ignore" if forward_minor else None
+            )
             for path, metadata in point_document.provenance.items()
         }
         for metadata in point_sources.values():

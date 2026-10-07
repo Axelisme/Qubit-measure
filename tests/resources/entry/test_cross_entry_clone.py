@@ -343,6 +343,69 @@ def test_library_clone_failure_cleans_destination_and_keeps_source(
     assert source.read_bytes() == before
 
 
+@pytest.mark.parametrize("same_entry", [False, True])
+@pytest.mark.parametrize("manual_source", [False, True])
+def test_clone_preserves_forward_minor_point_provenance(
+    entry: ResultEntry,
+    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+    same_entry: bool,
+    manual_source: bool,
+) -> None:
+    foreign, recorded, event = foreign_recorded_point
+    source_point = foreign.new_point("manual") if manual_source else recorded
+    label = "manual" if manual_source else "source"
+    source_file = foreign.result_path / f"points/{label}/point.yaml"
+    source_store = DocumentStore(
+        source_file,
+        PointDocument,
+        format=PARAMETER_FORMAT,
+        supported_version=PARAMETER_VERSION,
+    )
+    with source_store.edit() as document:
+        document.format_version = "1.1"
+        document.provenance["Q1.rate"]["future_quality"] = {
+            "checked": True,
+            "method": "future-validator",
+        }
+    before = source_file.read_bytes()
+    original_metadata = source_store.snapshot().provenance["Q1.rate"]
+    destination = foreign if same_entry else entry
+    events_before = len(destination.ledger.events())
+
+    cloned = destination.new_point("future-copy", clone_from=source_point)
+
+    stored = DocumentStore(
+        destination.result_path / "points/future-copy/point.yaml",
+        PointDocument,
+        format=PARAMETER_FORMAT,
+        supported_version=PARAMETER_VERSION,
+    ).snapshot()
+    metadata = stored.provenance["Q1.rate"]
+    public_metadata = cloned.meta("Q1.rate")
+    assert public_metadata is not None
+    if manual_source:
+        expected_id = "manual"
+    elif same_entry:
+        expected_id = event.id
+    else:
+        expected_id = destination.ledger.events()[-1].id
+    assert public_metadata.source == expected_id
+    assert metadata == {
+        **original_metadata,
+        "source": expected_id,
+        "cloned_from": {"entry_id": foreign.entry_id, "point": label},
+    }
+    assert cloned.Q1.rate == source_point.Q1.rate
+    assert len(destination.ledger.events()) == events_before + int(
+        not same_entry and not manual_source
+    )
+    if not same_entry and not manual_source:
+        imported = destination.ledger.get(expected_id)
+        assert isinstance(imported.event.payload, ImportPayload)
+        assert imported.event.payload.source_event_id == event.id
+    assert source_file.read_bytes() == before
+
+
 @pytest.mark.parametrize("source_mode", ["label", "view"])
 @pytest.mark.parametrize("origin,call_id", [("notebook", None), ("mcp", "clone-call")])
 def test_cross_entry_clone_imports_once_and_uses_published_values(
