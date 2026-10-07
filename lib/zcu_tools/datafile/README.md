@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-06，Native 2.0 簡單 context 與明確遷移
+**Last updated:** 2026-10-07，Native 2.0、真實舊資料匯入與分析 JSON
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -10,6 +10,7 @@ facade。caller 優先從 package root import model 與 function。
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
   不同 variables 可以使用不同網格。`VariableSchema` 與
   `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
+- `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要，僅接受有限的 strict JSON 值。`encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。
 - `validate_cfg_snapshot` 擁有 cfg 的 JSON、非空 cfg_type 與完整 major.minor 格式規則。
   Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
   Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。
@@ -18,8 +19,6 @@ facade。caller 優先從 package root import model 與 function。
   關檔後發布；`replace=True` 原子替換，失敗清理 temp 並保留原 destination。
 - `RunSnapshot` 只記 entry UUID、當時名稱、工作點、描述與角色對應，不記引用參數。
   `/cfg` 保存完整 cfg 值，量測時間與 completion 由 caller 提供。
-- `migrate_native_run_v1` 是明確的離線 1.x→2.0 入口。它寫新檔、保留來源與其他未知內容，
-  只移除舊 context.params，不覆寫或就地轉換。Normal loader 不接受 major 1。
 - Native loading 預設只投影已知內容。明示 `preserve_unknown=True` 才取得
   `NativeExtensions` detached HDF5 image。Generic caller 把 image 傳回 writer，
   保留同 major minor 的未知 JSON／HDF5 內容與不改形 rewrite 的 references。

@@ -30,7 +30,9 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。Labber 成功後，保存編排才更新最近成功的 labber_path；本次失敗保留此前連結。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
 
-SaveLayout、native／Labber writers 與 typed preparation 已提供上述路徑及格式能力。GUI 與 notebook 的 canonical 新 run 保存接線尚未完成，analysis JSON encoder 與共用 batch saver 也尚未交付。這些保存契約不代表目前 GUI Save 或 NotebookExperiment.save 已走新路徑。正式接線沿 entry／point 的公開 capability，不新增舊容器或私有 origin bridge。
+`datafile.AnalysisDocument` 與 encoder 擁有窗格 JSON 格式。`experiment.run_saving.save_artifacts` 接 typed data、Figure 與 AnalysisDocument，逐成員編碼一次，逐輸出隔離失敗，回傳一次 SaveReport 並追加 saved。`NotebookExperiment.save_run` 綁定 PointView，使用 entry owner 的 capture_point_storage，保存 adapter 驗證過的 acquisition source。SavedRun 固定該 run 的資料、context 與 evidence，PartialSaveError 保留同一 handle 供明確再存，不建立恢復收據或自動 retry。
+
+GUI Save 尚未接此新 run 保存流程。Notebook 原本的本機單檔 save 仍走原入口，不猜格式。正式接線使用 entry／point 的公開 capability，不新增舊容器或私有 origin bridge。C8 與 C9 涵蓋 notebook → experiment/datafile/resources 的依賴，C12 保持 datafile 不依賴 stateful resources。
 
 ### 資料表示與完整性
 

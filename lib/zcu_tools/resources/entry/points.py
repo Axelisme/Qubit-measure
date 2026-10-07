@@ -17,6 +17,7 @@ from .views import (
     GeneralView,
     add_component_to_draft,
     document_meta,
+    register_view_read,
     stage_component,
     stage_general,
 )
@@ -39,19 +40,32 @@ class PointView:
         *,
         ledger: Path,
         entry_id: str,
+        result_root: Path,
+        database_root: Path,
     ) -> None:
         """Bind one validated working-unit store without I/O.
 
         source is store's point.yaml path under the owning entry's points/label.
         The store owns single-file validation, conflict checks and persistence.
         ResultEntry supplies these dependencies; construction does not reload or
-        validate them. There are no shared setup or multi-file callbacks.
+        validate them. ledger is this entry's records/ledger.jsonl and entry_id
+        its immutable UUID. result_root and database_root are the caller's owning
+        roots; they are resolved once. Complete clone identity is bound here,
+        including for directly constructed views. Cloning requires matching roots
+        and reloads the published source, not this cached snapshot. No later
+        identity registration is required. There are no multi-file callbacks.
         """
         self._store = store
         self._source = source
         self._ledger = ledger
         self._entry_id = entry_id
-        _point_origin.register(self, source)
+        origin = _point_origin.PointOrigin(
+            source=source,
+            entry_id=entry_id,
+            result_root=result_root.resolve(),
+            database_root=database_root.resolve(),
+        )
+        register_view_read(self, store, source, origin=origin)
 
     @property
     def general(self) -> GeneralView:

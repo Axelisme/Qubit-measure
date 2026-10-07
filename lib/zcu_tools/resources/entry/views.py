@@ -5,19 +5,22 @@ Copy incoming values before assignment: notebook models can validate assignment.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Collection, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from math import isfinite
 from pathlib import Path
-from typing import overload
+from typing import TYPE_CHECKING, overload
 
 from pydantic import BaseModel, TypeAdapter
 
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
+from ._point_origin import PointOrigin
+from .errors import RoleResolutionError
 from .provenance import Provenance, validate_source
 from .registry import component_registry
 from .schema import (
@@ -29,7 +32,324 @@ from .schema import (
     validate_component_name,
 )
 
+if TYPE_CHECKING:
+    from .points import PointView
+
+
 type _FieldNode = BaseModel | dict[str, object]
+type _ViewDocument = (
+    DocumentStore[SetupDocument]
+    | DocumentStore[PointDocument]
+    | SetupDocument
+    | PointDocument
+)
+
+
+@dataclass(frozen=True)
+class _ViewRead:
+    """Package-owned access for three view types without reserving method names.
+
+    document is the store/draft owned by this view.
+    source is the bound YAML path, or None for an edit draft with no source getter.
+    origin is a point's constructor identity, or None for setup/edit views.
+    source_metadata validates/copies sources using an edit's local ledger;
+    None for read-only views. It never changes the draft or produces an event.
+    """
+
+    document: _ViewDocument
+    source: Path | None
+    origin: PointOrigin | None
+    source_metadata: Callable[[Provenance], YamlMap] | None
+
+
+def register_view_read(
+    view: object,
+    document: _ViewDocument,
+    source: Path | None,
+    *,
+    origin: PointOrigin | None = None,
+    source_metadata: Callable[[Provenance], YamlMap] | None = None,
+) -> None:
+    """Bind one entry-internal read record during view construction, without I/O.
+
+    Not a package export. document is the view's validated store/draft, source
+    its YAML path (None for EditView), and origin its full point identity (None
+    for setup/edit). source_metadata is an edit's local source-validation
+    capability, absent for read-only views. The private attribute cannot collide
+    with legal components.
+    Already bound handles raise ValueError; objects without an instance dictionary
+    raise TypeError. No model hook or callback runs.
+    """
+    state = vars(view)
+    if "_entry_read" in state:
+        raise ValueError("Entry view is already bound")
+    state["_entry_read"] = _ViewRead(document, source, origin, source_metadata)
+
+
+def _view_read(view: object) -> _ViewRead:
+    # One owner-local reflective boundary keeps private state off the view namespace.
+    binding: object = vars(view)["_entry_read"]
+    if not isinstance(binding, _ViewRead):
+        raise TypeError("Invalid entry view read binding")
+    return binding
+
+
+def point_origin(view: PointView) -> PointOrigin:
+    """Return the point's immutable constructor identity without I/O.
+
+    Entry-internal helper, not a package export. A non-point binding raises
+    ValueError; no destination identity is used to fill missing information.
+    """
+    origin = _view_read(view).origin
+    if origin is None:
+        raise ValueError("View has no point origin")
+    return origin
+
+
+@overload
+def snapshot(view: PointView) -> PointDocument: ...
+
+
+@overload
+def snapshot(view: SetupView) -> SetupDocument: ...
+
+
+@overload
+def snapshot(view: EditView) -> SetupDocument | PointDocument: ...
+
+
+def snapshot(
+    view: PointView | SetupView | EditView,
+) -> SetupDocument | PointDocument:
+    """Copy this handle's cached document or edit draft without I/O or validation.
+
+    The result is deeply isolated, uses working units and preserves the typed
+    document's field visibility. Mutating it does not change the handle or disk.
+    """
+    document = _view_read(view).document
+    if isinstance(document, DocumentStore):
+        return document.snapshot()
+    return document.model_copy(deep=True)
+
+
+def manual_update(
+    document: PointDocument,
+    path: str,
+    value: YamlValue,
+    *,
+    stderr: float | None = None,
+) -> PointDocument:
+    """Copy and validate a manual working-unit write to an actual point field.
+
+    path is a dotted component/general field, without role expansion. Invalid
+    paths, missing components, schema values or non-finite/negative stderr
+    raise before returning. The input and caller's value remain isolated.
+    Record manual provenance on the accepted path and its leaves, clearing
+    clone origin. Preserve general.created_at unless explicitly assigned.
+    No file, ledger, notification or default timestamp creation is involved.
+    """
+    if stderr is not None and (not isfinite(stderr) or stderr < 0):
+        raise ValueError("stderr must be finite and non-negative, or None")
+    candidate = document.model_copy(deep=True)
+    metadata = _manual_source()
+    metadata["stderr"] = stderr
+    _set_document_value(candidate, path, value, metadata=metadata)
+    return PointDocument.model_validate(_logical_value(candidate))
+
+
+def accept_source(view: EditView, path: str, *, provenance: Provenance) -> None:
+    """Attach a local source to an existing draft value without changing it.
+
+    path is an actual dotted component/general field. Containers accept all
+    current leaves and clear clone origin on the path and descendants.
+    Missing values/invalid paths or invalid local ledger sources raise without
+    changing the source table. Ledger schema and I/O errors propagate.
+    Never validate the value, run model hooks or commit; view.edit() owns commit.
+    """
+    parts = _path_parts(path)
+    if len(parts) < 2:
+        raise ValueError(f"{path!r}: expected a dotted field path")
+    binding = _view_read(view)
+    draft = binding.document
+    if isinstance(draft, DocumentStore) or binding.source_metadata is None:
+        raise TypeError("Source acceptance requires an edit draft")
+    value = document_value(draft, path)
+    metadata = binding.source_metadata(provenance)
+    draft.provenance = _sources_after_write(draft.provenance, path, value, metadata)
+
+
+def source_path(view: PointView | SetupView) -> Path:
+    """Return the YAML path bound to this handle, without I/O.
+
+    EditView has no source getter; its caller captures the owning handle's path.
+    """
+    source = _view_read(view).source
+    if source is None:
+        raise TypeError("Edit drafts have no bound source path")
+    return source
+
+
+@dataclass(frozen=True)
+class DocumentField:
+    """One detached logical leaf, list or empty mapping in document order.
+
+    segments retains literal keys without a components wrapper. editable_path
+    is their dotted path, or None if any segment is empty or contains a dot.
+    value uses working units; provenance is the full recorded source or None,
+    including cloned_from when present. Rows never expose opaque future data.
+    """
+
+    segments: tuple[str, ...]
+    editable_path: str | None
+    value: YamlValue
+    provenance: Provenance | None
+
+
+def document_fields(
+    document: SetupDocument | PointDocument,
+) -> tuple[DocumentField, ...]:
+    """List isolated logical rows without I/O, validation or serialization hooks.
+
+    Expand models/mappings in data order; lists, null and empty mappings remain
+    single rows. Preserve unaddressable literal keys with editable_path=None
+    and no dotted provenance lookup. Invalid logical YAML values raise TypeError
+    or Pydantic ValidationError rather than hiding the document.
+    """
+    rows: list[DocumentField] = []
+
+    def append_rows(segments: tuple[str, ...], value: YamlValue) -> None:
+        if isinstance(value, dict) and value:
+            for key, child in value.items():
+                append_rows((*segments, key), child)
+            return
+        path = (
+            ".".join(segments)
+            if all(part and "." not in part for part in segments)
+            else None
+        )
+        source = document.provenance.get(path) if path is not None else None
+        provenance = (
+            TypeAdapter(Provenance).validate_python(deepcopy(source))
+            if source is not None
+            else None
+        )
+        rows.append(DocumentField(segments, path, value, provenance))
+
+    append_rows(("general",), _logical_value(document.general))
+    for name, component in document.components.items():
+        append_rows((name,), _logical_value(component))
+    return tuple(rows)
+
+
+def document_value(document: SetupDocument | PointDocument, path: str) -> YamlValue:
+    """Read an actual dotted component/general path from this document only.
+
+    Return an isolated working-unit YAML value, including explicit null and
+    logical containers. Never run validators, serializers or read another file.
+    Invalid or unaddressable syntax raises ValueError. Missing components,
+    fields, unset optional values or non-container ancestors raise AttributeError.
+    Model fields and extras take precedence over class attributes; hidden
+    forward-minor data stays hidden. Roles are not expanded here.
+    """
+    parts = _path_parts(path)
+    node: object = document if parts[0] == "general" else document.components
+    for index, part in enumerate(parts):
+        prefix = ".".join(parts[: index + 1])
+        if isinstance(node, BaseModel):
+            node = _read_field(node, part, ".".join(parts[:index]))
+        elif isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            raise AttributeError(f"{prefix}: path {path!r} is not readable")
+    return _logical_value(node)
+
+
+def resolve_path(
+    document: PointDocument,
+    path: str,
+    *,
+    roles: Mapping[str, str],
+    reserved_names: Collection[str] = (),
+) -> str:
+    """Resolve a dotted path's first segment using captured role-to-component names.
+
+    Read only this document. Preserve the remaining segments without checking
+    leaf or library-key existence. Component names and the general namespace
+    stay unchanged. Empty paths or segments raise ValueError. A prefix shared
+    by roles, components, logical general fields or reserved_names raises
+    RoleResolutionError identifying the namespaces. Unknown prefixes and roles
+    bound to missing components also raise RoleResolutionError. General fields
+    require the general prefix; bare metadata keys are not supported.
+    No I/O, model validation, serialization or mutation occurs.
+    """
+    parts = _path_parts(path)
+    prefix = parts[0]
+    namespaces: list[str] = []
+    if prefix in roles:
+        namespaces.append("role")
+    if prefix in document.components:
+        namespaces.append("component")
+    if (
+        prefix == "general"
+        or prefix in type(document.general).model_fields
+        or prefix in (document.general.model_extra or {})
+    ):
+        namespaces.append("general")
+    if prefix in reserved_names:
+        namespaces.append("reserved")
+    if len(namespaces) > 1:
+        raise RoleResolutionError(
+            prefix,
+            None,
+            None,
+            f"Ambiguous path prefix {prefix!r}: namespaces {', '.join(namespaces)}",
+        )
+    if prefix in roles:
+        target = roles[prefix]
+        if target not in document.components:
+            raise RoleResolutionError(
+                prefix, None, None, f"Role targets missing component {target!r}"
+            )
+        parts[0] = target
+    elif prefix not in document.components and prefix != "general":
+        if "general" in namespaces:
+            reason = f"General field {prefix!r} requires the general namespace"
+        elif "reserved" in namespaces:
+            reason = f"Path prefix {prefix!r} is a reserved expression name"
+        else:
+            reason = f"Unknown path prefix {prefix!r}"
+        raise RoleResolutionError(prefix, None, None, reason)
+    return ".".join(parts)
+
+
+def _path_parts(path: str) -> list[str]:
+    parts = path.split(".")
+    if not all(parts):
+        raise ValueError(f"{path!r}: expected a nonempty dotted path")
+    return parts
+
+
+def _logical_value(node: object) -> YamlValue:
+    """Copy logical data without calling model serializers or validators."""
+    if isinstance(node, BaseModel):
+        result: YamlMap = {}
+        for name in type(node).model_fields:
+            value = _model_field_value(node, name)
+            if name in node.model_fields_set or value is not None:
+                result[name] = _logical_value(value)
+        for name, value in (node.model_extra or {}).items():
+            result[name] = _logical_value(value)
+        return result
+    if isinstance(node, dict):
+        mapping: YamlMap = {}
+        for name, value in node.items():
+            if not isinstance(name, str):
+                raise TypeError("Logical YAML mappings require string keys")
+            mapping[name] = _logical_value(value)
+        return mapping
+    if isinstance(node, list):
+        return [_logical_value(value) for value in node]
+    return TypeAdapter[YamlValue](YamlValue).validate_python(deepcopy(node))
 
 
 def _retain_component_defaults(model: BaseModel) -> None:
@@ -128,8 +448,14 @@ def _sources_after_write(
 def document_meta(
     document: SetupDocument | PointDocument, path: str
 ) -> Provenance | None:
-    """Project one independent source only when its cached value exists."""
-    root = document if path.split(".")[0] == "general" else document.components
+    """Return an isolated source for this document's actual dotted path.
+
+    Missing values, null or missing sources return None. Invalid empty paths or
+    empty path segments raise ValueError. Reads use only this document, without
+    file I/O, role expansion or model hooks; stderr stays in working units.
+    """
+    parts = _path_parts(path)
+    root = document if parts[0] == "general" else document.components
     if _field_value(root, path) is None or path not in document.provenance:
         return None
     return TypeAdapter(Provenance).validate_python(deepcopy(document.provenance[path]))
@@ -398,6 +724,58 @@ class ComponentView:
             self._fields[name] = value
 
 
+def _accepted_source(provenance: Provenance, ledger: Path, entry_id: str) -> YamlMap:
+    """Validate and isolate source fields before touching any draft."""
+    accepted = TypeAdapter(Provenance).validate_python(asdict(provenance))
+    validate_source(accepted, ledger, entry_id)
+    metadata = TypeAdapter[YamlMap](YamlMap).validate_python(asdict(accepted))
+    metadata.pop("cloned_from", None)
+    return metadata
+
+
+def _set_document_value(
+    draft: SetupDocument | PointDocument,
+    path: str,
+    value: YamlValue,
+    *,
+    metadata: YamlMap | None,
+) -> None:
+    """Share field validation and acceptance across persistent and memory edits."""
+    parts = _path_parts(path)
+    if len(parts) < 2:
+        raise ValueError(f"{path!r}: expected a dotted field path")
+    edit_root: AbstractContextManager[BaseModel]
+    if parts[0] == "general":
+        edit_root = stage_general(draft, ".".join(parts[1:]))
+    else:
+        if parts[0] not in draft.components:
+            raise AttributeError(f"Unknown component {parts[0]!r}")
+        edit_root = stage_component(draft, parts[0], ".".join(parts[1:]))
+    with edit_root as root:
+        node: _FieldNode = root
+        for index, name in enumerate(parts[1:-1], start=1):
+            parent_path = ".".join(parts[:index])
+            if isinstance(node, BaseModel):
+                child = _read_field(node, name, parent_path)
+                node.model_fields_set.add(name)
+            else:
+                child = node[name]
+            if not isinstance(child, (BaseModel, dict)):
+                raise AttributeError(f"{parent_path}.{name}: not a field container")
+            node = child
+
+        @contextmanager
+        def edit_node(_name: str) -> Generator[_FieldNode]:
+            yield node
+
+        FieldView(lambda: node, edit_node, ".".join(parts[:-1]))[parts[-1]] = value
+    if metadata is not None:
+        root = draft if parts[0] == "general" else draft.components
+        draft.provenance = _sources_after_write(
+            draft.provenance, path, _field_value(root, path), metadata
+        )
+
+
 class EditView:
     def __init__(
         self, draft: SetupDocument | PointDocument, *, ledger: Path, entry_id: str
@@ -405,6 +783,14 @@ class EditView:
         self._draft = draft
         self._ledger = ledger
         self._entry_id = entry_id
+        register_view_read(
+            self,
+            draft,
+            None,
+            source_metadata=lambda provenance: _accepted_source(
+                provenance, ledger, entry_id
+            ),
+        )
 
     @property
     def general(self) -> GeneralView:
@@ -428,45 +814,12 @@ class EditView:
         and owns commit, conflict and publication. Empty or dotted mapping keys
         cannot be addressed through this dotted syntax.
         """
-        metadata: YamlMap | None = None
-        if provenance is not None:
-            accepted = TypeAdapter(Provenance).validate_python(asdict(provenance))
-            validate_source(accepted, self._ledger, self._entry_id)
-            metadata = TypeAdapter[YamlMap](YamlMap).validate_python(asdict(accepted))
-            metadata.pop("cloned_from", None)
-        parts = path.split(".")
-        if len(parts) < 2 or not all(parts):
-            raise ValueError(f"{path!r}: expected a dotted field path")
-        edit_root: AbstractContextManager[BaseModel]
-        if parts[0] == "general":
-            edit_root = self._edit_general(".".join(parts[1:]))
-        else:
-            if parts[0] not in self._draft.components:
-                raise AttributeError(f"Unknown component {parts[0]!r}")
-            edit_root = self._edit_component(parts[0], ".".join(parts[1:]))
-        with edit_root as root:
-            node: _FieldNode = root
-            for index, name in enumerate(parts[1:-1], start=1):
-                parent_path = ".".join(parts[:index])
-                if isinstance(node, BaseModel):
-                    child = _read_field(node, name, parent_path)
-                    node.model_fields_set.add(name)
-                else:
-                    child = node[name]
-                if not isinstance(child, (BaseModel, dict)):
-                    raise AttributeError(f"{parent_path}.{name}: not a field container")
-                node = child
-
-            @contextmanager
-            def edit_node(_name: str) -> Generator[_FieldNode]:
-                yield node
-
-            FieldView(lambda: node, edit_node, ".".join(parts[:-1]))[parts[-1]] = value
-        if metadata is not None:
-            root = self._draft if parts[0] == "general" else self._draft.components
-            self._draft.provenance = _sources_after_write(
-                self._draft.provenance, path, _field_value(root, path), metadata
-            )
+        metadata = (
+            None
+            if provenance is None
+            else _accepted_source(provenance, self._ledger, self._entry_id)
+        )
+        _set_document_value(self._draft, path, value, metadata=metadata)
 
     @property
     def description(self) -> str | None:
@@ -511,6 +864,7 @@ class SetupView:
         self._ledger = ledger
         self._entry_id = entry_id
         self._edit_document = store.edit
+        register_view_read(self, store, source)
 
     @property
     def general(self) -> GeneralView:

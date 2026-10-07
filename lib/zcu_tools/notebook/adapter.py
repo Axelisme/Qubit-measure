@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
-from zcu_tools.datafile import format_ext, reserve_labber_filepath
+from matplotlib.figure import Figure
+
+from zcu_tools.datafile import AnalysisDocument, format_ext, reserve_labber_filepath
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.acquisition import (
     AcquisitionEvidence,
@@ -17,11 +20,17 @@ from zcu_tools.experiment.acquisition import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.interfaces import RecordExperiment, SynchronousExperiment
+from zcu_tools.experiment.interfaces import (
+    PersistableRecordExperiment,
+    RecordExperiment,
+    SynchronousExperiment,
+)
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
+from zcu_tools.notebook.saving import SavedRun
 from zcu_tools.plotting.plots import PlotHost, Plots
+from zcu_tools.resources.entry import PointView, RoleView
 
 CoreT = TypeVar("CoreT", bound=RecordExperiment[Any, Any], covariant=True)
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
@@ -227,6 +236,38 @@ class NotebookExperiment(Generic[CoreT]):
         self.run_presentation = None
         self.analysis_presentation = None
         return record
+
+    def save_run(
+        self: NotebookExperiment[PersistableRecordExperiment[CfgT, ResultT]],
+        ctx: PointView,
+        *,
+        source: RunRecord[CfgT, ResultT],
+        roles: RoleView | None = None,
+        figures: Mapping[str, Figure] | None = None,
+        analysis: tuple[AnalysisDocument, ...] = (),
+        comment: str = "",
+    ) -> SavedRun[CfgT, ResultT]:
+        """Save this adapter's latest acquired record into a bound point's run.
+
+        ctx provides cached save-time context and exact entry storage. source
+        must be the same object returned by the most recent successful run;
+        loaded, stale, manual and other-adapter records fail before output I/O.
+        roles, if provided, must come from ctx.resolve; None records no roles.
+        Named figures create PNGs/copies, analysis supplies JSON-safe pane
+        results, and comment remains raw user text. A returned SavedRun can
+        explicitly rewrite the same run after later adapter operations.
+        PartialSaveError retains that handle and latest output report; ledger
+        errors propagate directly. Do not retry or guess a historical source.
+        """
+        saved = SavedRun(
+            ctx,
+            source=source,
+            spec=self._core.persistence_spec(),
+            acquisition=self.acquisition_for(source),
+            roles=roles,
+        )
+        saved.save(figures=figures, analysis=analysis, comment=comment)
+        return saved
 
     def save(
         self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],

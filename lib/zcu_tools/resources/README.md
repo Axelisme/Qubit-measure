@@ -9,7 +9,7 @@
 - [`sample_table/`](sample_table/README.md) 管理樣品量測 CSV 與 opt-in v2 欄位協定。
 - [`waveform_assets.py`](waveform_assets.py) 管理 qubit-scoped `.npz` arbitrary waveform asset；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。
 - [`syncfile.py`](syncfile.py) 提供現行持久化物件共用的 mtime 同步機制；同步規則見其 module docstring。
-- [`document_store.py`](document_store.py) 提供新格式 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖，目前未接線到現行 runtime。
+- [`document_store.py`](document_store.py) 提供 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖。Entry 與 point-local ModuleLibrary 已使用它，GUI／MCP 的參數切換尚未完成。
 - [`entry/`](entry/README.md) 組合條目身分、setup 範本與獨立完整的 point。每個視圖綁自己的 DocumentStore，建立 point 時複製 seed。
 - [`storage_migration/`](storage_migration/README.md) 組合離線 legacy 轉換、evidence 與可續跑 publication。Caller 注入具體 mapping 與 native 驗證，不接正常 runtime。
 

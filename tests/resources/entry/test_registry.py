@@ -56,6 +56,27 @@ def test_registry_lifecycle_rejects_duplicates_and_allows_explicit_replacement()
     assert registry.get("notebook/pair") is NestedPairSchema
 
 
+def test_kinds_preserves_registration_order_and_isolates_previous_snapshots() -> None:
+    def unexpected_factory() -> str:
+        raise AssertionError("Kind enumeration must not construct component models")
+
+    class FactoryModel(ComponentSchema):
+        target: str = Field(default_factory=unexpected_factory)
+
+    registry = ComponentRegistry()
+    assert registry.kinds() == ()
+    registry.register("z/first", FactoryModel)
+    registry.register("a/second", PairSchema)
+    before = registry.kinds()
+    assert before == ("z/first", "a/second")
+
+    registry.unregister("z/first")
+    assert registry.kinds() == ("a/second",)
+    registry.register("z/first", FactoryModel)
+    assert registry.kinds() == ("a/second", "z/first")
+    assert before == ("z/first", "a/second")
+
+
 def test_registration_preserves_required_wiring_indices_without_physical_units() -> (
     None
 ):
