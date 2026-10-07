@@ -18,6 +18,23 @@ from zcu_tools.gui.form import (
 from zcu_tools.resources.context import MetaDict
 
 
+class WholeContainerChoicesForm(FormModel):
+    """Use JSON options for whole numeric and complex container leaves."""
+
+    samples: tuple[float, ...]
+    phasors: tuple[complex, ...]
+    offsets: dict[str, complex]
+
+    @classmethod
+    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Return the finite wire values allowed for each complete container."""
+        return {
+            ("samples",): ([1.0],),
+            ("phasors",): ([{"__complex__": [1.0, 2.0]}],),
+            ("offsets",): ({"drive": {"__complex__": [1.0, 2.0]}},),
+        }
+
+
 class SchemaForm(FormModel):
     """Project numeric/complex envelopes, nullable values and dynamic enums."""
 
@@ -174,3 +191,31 @@ def test_schema_recomputes_dynamic_choices_for_each_request() -> None:
     assert not alpha.is_valid({"mode": "beta"})
     assert beta.is_valid({"mode": "beta"})
     assert not beta.is_valid({"mode": "alpha"})
+
+
+def test_whole_container_choices_share_json_value_membership() -> None:
+    env = FormEnv(md=MetaDict())
+    valid: dict[str, JsonValue] = {
+        "samples": [1.0],
+        "phasors": [{"__complex__": [1.0, 2.0]}],
+        "offsets": {"drive": {"__complex__": [1.0, 2.0]}},
+    }
+    validator = Draft202012Validator(WholeContainerChoicesForm.input_schema(env))
+    assert validator.is_valid(valid)
+    result = FormState(FormInput(WholeContainerChoicesForm, valid)).result(env)
+    assert isinstance(result, WholeContainerChoicesForm), result
+    assert result.samples == (1.0,)
+    assert result.phasors == (1.0 + 2.0j,)
+    assert result.offsets == {"drive": 1.0 + 2.0j}
+
+    invalid_values: tuple[tuple[str, JsonValue], ...] = (
+        ("samples", [2.0]),
+        ("phasors", [{"__complex__": [3.0, 4.0]}]),
+        ("offsets", {"drive": {"__complex__": [3.0, 4.0]}}),
+    )
+    for field, invalid_value in invalid_values:
+        invalid = {**valid, field: invalid_value}
+        assert not validator.is_valid(invalid)
+        error = FormState(FormInput(WholeContainerChoicesForm, invalid)).result(env)
+        assert isinstance(error, FormErrors)
+        assert set(error.messages) == {(field,)}
