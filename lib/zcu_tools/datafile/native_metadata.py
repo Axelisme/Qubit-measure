@@ -152,8 +152,6 @@ def validate_metadata(metadata: RunMetadata, cfg: CfgSnapshot) -> None:
     _validate_utc(checked.started_at, "/: started_at")
     if checked.finished_at is not None:
         _validate_utc(checked.finished_at, "/: finished_at")
-    for key, parameter in checked.snapshot.params.items():
-        _validate_utc(parameter.source.at, f"/context/params/{key}/source: at")
     for name in _OPTIONAL_EVIDENCE:
         value = getattr(checked.provenance, name)
         if value == "":
@@ -171,38 +169,11 @@ def _validate_utc(value: str, location: str) -> None:
         raise ValueError(f"{location}: expected UTC ISO timestamp")
 
 
-def _merge_context(old: JsonObject, new: JsonObject) -> JsonObject:
-    merged = dict(old)
-    merged.update(new)
-    old_params, new_params = old.get("params"), new.get("params")
-    if isinstance(new_params, dict):
-        params: JsonObject = {}
-        for key, value in new_params.items():
-            prior = old_params.get(key) if isinstance(old_params, dict) else None
-            if isinstance(prior, dict) and isinstance(value, dict):
-                param = dict(prior)
-                param.update(value)
-                old_source, new_source = prior.get("source"), value.get("source")
-                if isinstance(old_source, dict) and isinstance(new_source, dict):
-                    source = dict(old_source)
-                    source.update(new_source)
-                    old_clone = old_source.get("cloned_from")
-                    new_clone = new_source.get("cloned_from")
-                    if isinstance(old_clone, dict) and isinstance(new_clone, dict):
-                        source["cloned_from"] = {**old_clone, **new_clone}
-                    param["source"] = source
-                params[key] = param
-            else:
-                params[key] = value
-        merged["params"] = params
-    return merged
-
-
 def write_metadata(file: h5.File, metadata: RunMetadata, cfg: CfgSnapshot) -> None:
     """Update known run attrs and JSON, preserving context's unknown fixed siblings.
 
-    Caller validates metadata first. cfg.values and dynamic roles/params are
-    complete replacements; retained params preserve unknown fixed-field keys.
+    Caller validates metadata first. cfg.values and dynamic roles are complete
+    replacements; unknown fixed context siblings remain unchanged.
     Existing scalar datasets retain their HDF5 object identity.
     """
     raw = json_object(_METADATA.dump_json(metadata).decode(), "/")
@@ -222,7 +193,7 @@ def write_metadata(file: h5.File, metadata: RunMetadata, cfg: CfgSnapshot) -> No
     if not isinstance(snapshot, dict):
         raise ValueError("/context: snapshot must be a JSON object")
     if "context" in file:
-        snapshot = _merge_context(read_json(file, "context"), snapshot)
+        snapshot = {**read_json(file, "context"), **snapshot}
     write_json(file, "context", snapshot)
     provenance = raw["provenance"]
     if not isinstance(provenance, dict):

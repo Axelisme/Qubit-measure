@@ -242,12 +242,12 @@ def process_download_task(creds, task):
 def main():
     """Main function to parse arguments and trigger the download."""
     parser = argparse.ArgumentParser(
-        description="Download qubit measurement results from a specified Google Drive folder."
+        description="Download result entries from a specified Google Drive folder to results/<name>."
     )
     parser.add_argument(
-        "qubit_names",
+        "entry_names",
         nargs="+",
-        help="The names of the qubits (e.g., Si001 Si002). These correspond to folders inside the 'result/' directory.",
+        help="Result entry names (e.g., Si001 Si002). Each Drive entry is downloaded to repo results/<name>.",
     )
     parser.add_argument(
         "-j",
@@ -270,22 +270,22 @@ def main():
     drive_service, creds = authenticate_drive()
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    for qubit_name in args.qubit_names:
-        print(f"\nProcessing qubit: {qubit_name}")
+    for entry_name in args.entry_names:
+        print(f"\nProcessing entry: {entry_name}")
 
-        # Find the remote folder for this qubit
-        qubit_folder_id = find_folder_id(drive_service, qubit_name, parent_folder_id)
+        # Find the remote folder for this entry
+        entry_folder_id = find_folder_id(drive_service, entry_name, parent_folder_id)
 
-        if qubit_folder_id:
-            local_target_folder = os.path.join(project_root, "result", qubit_name)
+        if entry_folder_id:
+            local_target_folder = os.path.join(project_root, "results", entry_name)
             print(
-                f"Collecting download tasks from Drive folder '{qubit_name}' to '{local_target_folder}'..."
+                f"Collecting download tasks from Drive folder '{entry_name}' to '{local_target_folder}'..."
             )
 
             # Collect all download tasks
             tasks = []
             collect_download_tasks(
-                drive_service, qubit_folder_id, local_target_folder, tasks
+                drive_service, entry_folder_id, local_target_folder, tasks
             )
 
             if tasks:
@@ -296,11 +296,11 @@ def main():
                 Parallel(n_jobs=args.jobs, backend="threading")(
                     delayed(process_download_task)(creds, task) for task in tasks
                 )
-                print(f"Download complete for {qubit_name}.")
+                print(f"Download complete for {entry_name}.")
             else:
-                print(f"No files to download for {qubit_name}.")
+                print(f"No files to download for {entry_name}.")
         else:
-            print(f"Skipping download for {qubit_name} as remote folder was not found.")
+            print(f"Skipping download for {entry_name} as remote folder was not found.")
 
 
 if __name__ == "__main__":

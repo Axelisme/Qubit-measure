@@ -93,22 +93,22 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             ),
         ),
         (
-            ArtifactKey("analysis", "fit", "analysis", "coefficients"),
+            ArtifactKey("analysis", "fit", "analysis", "analysis"),
             None,
             (
                 (
                     "json",
-                    "Database/entry/runs/opaque_run%id/analysis/analysis_fit_coefficients.json",
+                    "Database/entry/runs/opaque_run%id/analysis/analysis.json",
                 ),
             ),
         ),
         (
-            ArtifactKey("caller", "fit", "analysis", "residuals"),
+            ArtifactKey("caller", "fit", "analysis", "post_analysis"),
             "point",
             (
                 (
                     "json",
-                    "Database/entry/runs/opaque_run%id/analysis/caller_fit_residuals.json",
+                    "Database/entry/runs/opaque_run%id/analysis/post_analysis.json",
                 ),
             ),
         ),
@@ -134,7 +134,7 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             (
                 (
                     "json",
-                    "Database/entry/runs/opaque_run%id/analysis/%255F%5F%25_n%5F_m%5F%25.json",
+                    "Database/entry/runs/opaque_run%id/analysis/m_%.json",
                 ),
             ),
         ),
@@ -176,17 +176,31 @@ def test_members_of_one_artifact_have_distinct_destinations(
     second = layout(tmp_path).outputs(replace(key, member_name="second"))
     extension = "png" if member == "figure" else "json"
     folder = "figures" if member == "figure" else "analysis"
+    prefix = "post%5Fanalysis_fit_" if member == "figure" else ""
     assert (
         first[0].path
         == tmp_path
-        / f"Database/entry/runs/opaque_run%id/{folder}/post%5Fanalysis_fit_first.{extension}"
+        / f"Database/entry/runs/opaque_run%id/{folder}/{prefix}first.{extension}"
     )
     assert (
         second[0].path
         == tmp_path
-        / f"Database/entry/runs/opaque_run%id/{folder}/post%5Fanalysis_fit_second.{extension}"
+        / f"Database/entry/runs/opaque_run%id/{folder}/{prefix}second.{extension}"
     )
     assert set(first).isdisjoint(second)
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_analysis_member_identity_shares_destination_across_artifacts(
+    tmp_path: Path, pane: str
+) -> None:
+    saving = layout(tmp_path)
+    first = saving.outputs(ArtifactKey("analysis", "results", "analysis", pane))
+    other = saving.outputs(ArtifactKey("post_analysis", "another", "analysis", pane))
+
+    assert first == other
+    assert first[0].path.name == f"{pane}.json"
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize("run_id", ["opaque_run%id", "opaque_1", "名稱"])

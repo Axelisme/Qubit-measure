@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
+from pydantic import JsonValue
+
 from zcu_tools.datafile import (
     CfgSnapshot,
     JsonObject,
-    ParameterSnapshot,
     SoftwareProvenance,
     VariableSchema,
 )
@@ -84,6 +85,42 @@ class MigrationMapping:
 
 
 @dataclass(frozen=True, kw_only=True)
+class LegacyCloneOrigin:
+    """Historical source entry UUID and optional work-point label."""
+
+    entry_id: UUID
+    point: str | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class LegacyParameterSource:
+    """Audit origin of a parameter value in working units.
+
+    source is manual or a local ledger event ID. kind and run_id are optional
+    historical identifiers. at is a UTC ISO timestamp. stderr is an optional
+    uncertainty in the parameter's working units. cloned_from identifies the
+    original entry/work point for a clone, or None for a non-cloned value.
+    Persistence does not resolve or invent ledger evidence.
+    """
+
+    source: str
+    kind: str | None
+    run_id: str | None
+    at: str
+    stderr: float | None
+    cloned_from: LegacyCloneOrigin | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class LegacyParameterSnapshot:
+    """JSON value, optional working-unit label and its audit source."""
+
+    value: JsonValue
+    unit: str | None
+    source: LegacyParameterSource
+
+
+@dataclass(frozen=True, kw_only=True)
 class LegacySnapshotEvidence:
     """Historical entry state with no invented legacy entry UUID.
 
@@ -98,7 +135,7 @@ class LegacySnapshotEvidence:
     point: str | None
     description: str | None
     roles: Mapping[str, str]
-    params: Mapping[str, ParameterSnapshot]
+    params: Mapping[str, LegacyParameterSnapshot]
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -11,7 +11,7 @@ from .labber import (
 )
 from .labber_schema import cast_labber_values, validate_labber_payload
 from .labber_writer import write_labber
-from .migration import load_legacy_labber_payload
+from .migration import load_legacy_labber_payload, migrate_native_run_v1
 from .models import (
     Axis,
     DataVariable,
@@ -25,12 +25,9 @@ from .native_metadata import json_values_equal, validate_cfg_snapshot
 from .native_models import (
     AxisSchema,
     CfgSnapshot,
-    CloneOrigin,
     ExperimentPayload,
     JsonObject,
     NativeExtensions,
-    ParameterSnapshot,
-    ParameterSource,
     RunMetadata,
     RunSnapshot,
     SoftwareProvenance,
@@ -60,9 +57,6 @@ __all__ = [
     "VariableSchema",
     "ExperimentPayload",
     "CfgSnapshot",
-    "CloneOrigin",
-    "ParameterSource",
-    "ParameterSnapshot",
     "RunSnapshot",
     "SoftwareProvenance",
     "RunMetadata",
@@ -76,6 +70,7 @@ __all__ = [
     "save_run_data",
     "load_run_data",
     "load_legacy_labber_payload",
+    "migrate_native_run_v1",
     "validate_experiment_payload",
     "validate_cfg_snapshot",
     "Axis",
