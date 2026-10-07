@@ -136,7 +136,8 @@ def inputs() -> Inputs:
             relax_delay=200.0,
             modules=LenRabiModuleCfg(qub_pulse=pi_pulse, readout=readout),
             sweep=LenRabiSweepCfg(
-                length=SweepCfg(start=0.05, stop=1.2, expts=31, step=1.15 / 30)
+                # Blocking pulse timestamps also use the coarser processor clock.
+                length=SweepCfg(start=0.05, stop=1.2, expts=9, step=1.15 / 8)
             ),
         ),
         FreqGainCfg(
@@ -274,6 +275,21 @@ def test_preexisting_stop_keeps_native_partial_result_and_stopped_history(
     run = Run(inputs.t1, stop, soc=inputs.soc, soccfg=inputs.soccfg)
     result = run_t1(run)
     assert run.outcome.status == "stopped"
+    assert np.isnan(result.signals).all()
+    assert result.evidence.completion == "stopped"
+
+
+def test_unresolvable_rabi_grid_keeps_native_schedule_failure(inputs: Inputs) -> None:
+    cfg = inputs.rabi.model_copy(deep=True)
+    cfg.sweep.length = SweepCfg(start=0.05, stop=1.2, expts=31, step=1.15 / 30)
+    run = Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    result = run_len_rabi(run)
+    outcome = run.outcome
+    assert outcome.status == "failed"
+    assert isinstance(outcome.exception, RuntimeError)
+    assert "resolution" in str(outcome.exception)
+    assert run.cancel_signal.error is not None
+    assert run.cancel_signal.error.exception is outcome.exception
     assert np.isnan(result.signals).all()
     assert result.evidence.completion == "stopped"
 
