@@ -318,8 +318,6 @@ class ContextService:
             )
             with point.edit() as draft:
                 draft.set(path, value, provenance=source)
-            if target != parameters.target:
-                return
             document = snapshot(point)
             self._points = tuple(
                 replace(info, description=document.general.description or "")
@@ -327,6 +325,8 @@ class ContextService:
                 else info
                 for info in self._points
             )
+            if target != parameters.target:
+                return
         self._publish_write(
             ParameterContext(
                 point=document,
