@@ -20,9 +20,7 @@ from zcu_lab.workflows.v0 import (
     FluxPlan,
     OvernightPlan,
     OvernightTunables,
-    T1Tunables,
     T2EchoTunables,
-    t1_fluxdep,
     t1_overnight,
     t2echo_fluxdep,
 )
@@ -69,27 +67,6 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
     return records, clock, devices
 
 
-def test_t1_fluxdep_commits_offline_fits_and_preserves_per_effect_files(
-    tmp_path: Path,
-) -> None:
-    records, _, devices = execute_example(
-        tmp_path,
-        t1_fluxdep,
-        FluxPlan(flux_dev="flux", fluxes=(0.1, 0.2), points=7),
-        T1Tunables(),
-    )
-    assert [len(record.run_files) for record in records] == [4, 3]
-    assert devices.values == [("flux", 0.1), ("flux", 0.2)]
-    for record in records:
-        point = record.encoded_record.value
-        assert isinstance(point, dict)
-        assert point["reason"] is None
-        value = point["t1"]
-        assert isinstance(value, dict)
-        assert value["value_us"] == pytest.approx(20.0)
-    assert (tmp_path / "data/iter/000003/files/summary.png").is_file()
-
-
 def test_t2echo_fluxdep_uses_the_same_core_with_its_own_typed_record(
     tmp_path: Path,
 ) -> None:
@@ -123,24 +100,6 @@ def test_overnight_waits_absolute_round_deadlines_and_reuses_calibration(
         20.0,
     ]
     assert devices.values == [("flux", 0.2)]
-
-
-def test_fit_gate_rejection_commits_missing_values_and_continues(
-    tmp_path: Path,
-) -> None:
-    records, _, _ = execute_example(
-        tmp_path,
-        t1_fluxdep,
-        FluxPlan(flux_dev="flux", fluxes=(0.1, 0.2), points=7),
-        T1Tunables(max_rel_err=0.01),
-    )
-    assert len(records) == 2
-    for record in records:
-        point = record.encoded_record.value
-        assert isinstance(point, dict)
-        assert point["t1"] is None
-        assert point["reason"] == "fit rejected"
-        assert record.run_files[-1].endswith("run_t1.h5")
 
 
 def test_overnight_retries_unaccepted_calibration_on_next_round(tmp_path: Path) -> None:

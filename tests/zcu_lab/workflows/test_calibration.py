@@ -269,12 +269,13 @@ def test_rabi_schedule_failure_retains_frequency_file_but_not_calibration(
 ) -> None:
     rig = Rig(inputs, tmp_path)
     rig.plan = rig.plan.model_copy(update={"rabi_points": 51})
-    rig.start(CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125))
+    # The initial pulse rounds to zero; valid grid spacing still reaches Schedule.
+    rig.start(CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.001))
     status = rig.engine.execute("calibration")
     assert status.lifecycle == "done", status.reason
     result = rig.results[0]
     assert isinstance(result, CalibrationFailed) and result.stage == "rabi"
-    assert "resolution" in result.reason
+    assert "length" in result.reason
     assert rig.carries == [CalCarry(rig.seed)]
     assert not rig.rabis and not rig.readouts
     assert len(rig.engine.records("calibration")[0].run_files) == 1

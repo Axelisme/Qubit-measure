@@ -141,15 +141,16 @@ def test_preexisting_stop_keeps_native_partial_result_and_stopped_history(
     assert result.evidence.completion == "stopped"
 
 
-def test_unresolvable_rabi_grid_keeps_native_schedule_failure(inputs: Inputs) -> None:
+def test_invalid_rabi_pulse_keeps_native_schedule_failure(inputs: Inputs) -> None:
     cfg = inputs.rabi.model_copy(deep=True)
-    cfg.sweep.length = SweepCfg(start=0.05, stop=1.2, expts=31, step=1.15 / 30)
+    # Coordinates are valid, but the first pulse is shorter than the generator minimum.
+    cfg.sweep.length = SweepCfg(start=0.0, stop=1.2, expts=31, step=1.2 / 30)
     run = Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
     result = run_len_rabi(run)
     outcome = run.outcome
     assert outcome.status == "failed"
     assert isinstance(outcome.exception, RuntimeError)
-    assert "resolution" in str(outcome.exception)
+    assert "length" in str(outcome.exception)
     assert run.cancel_signal.error is not None
     assert run.cancel_signal.error.exception is outcome.exception
     assert np.isnan(result.signals).all()

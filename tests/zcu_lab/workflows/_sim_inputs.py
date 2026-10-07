@@ -1,8 +1,10 @@
 """Simulator inputs shared by the native workflow seam tests."""
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from qick import QickConfig
+from zcu_tools.datafile import RunSnapshot
 from zcu_tools.program.v2.mocksoc import MockQickSoc, make_mock_soc
 from zcu_tools.program.v2.modules import DirectReadoutCfg, PulseCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -23,6 +25,8 @@ from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainSweepCfg,
 )
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1ModuleCfg, T1SweepCfg
+from zcu_lab.workflows.calibration import Calibrated, CalibrationPlan
+from zcu_lab.workflows.t1 import T1Plan
 
 
 @dataclass
@@ -111,7 +115,6 @@ def make_inputs() -> Inputs:
             relax_delay=200.0,
             modules=LenRabiModuleCfg(qub_pulse=pi_pulse, readout=readout),
             sweep=LenRabiSweepCfg(
-                # Blocking pulse timestamps also use the coarser processor clock.
                 length=SweepCfg(start=0.05, stop=1.2, expts=9, step=1.15 / 8)
             ),
         ),
@@ -135,3 +138,39 @@ def make_inputs() -> Inputs:
             sweep=T1SweepCfg(length=SweepCfg(start=0.0, stop=80.0, expts=21, step=4.0)),
         ),
     )
+
+
+def make_snapshot() -> RunSnapshot:
+    """Return explicit historical metadata for these isolated offline acquisitions."""
+    return RunSnapshot(
+        entry_id=UUID("78fa0941-f9ce-49d4-9665-4eb9302b8162"),
+        entry_name="offline",
+        point="native",
+        description="simulator workflow seam",
+        roles={"qubit": "Q1"},
+    )
+
+
+def make_plan(inputs: Inputs) -> T1Plan:
+    """Build complete native inputs without replacing acquisition logic."""
+    return T1Plan(
+        flux_dev="flux",
+        fluxes=(1.0, 1.1),
+        points=21,
+        calibration=CalibrationPlan(
+            frequency=inputs.freq,
+            rabi=inputs.rabi,
+            readout=inputs.readout,
+        ),
+        t1=inputs.t1,
+        snapshot=make_snapshot(),
+    )
+
+
+def seed_from_inputs(inputs: Inputs, *, pi_length_us: float = 0.4) -> Calibrated:
+    """Create accepted scalars matching this simulator's native drive/readout."""
+    frequency = inputs.rabi.modules.qub_pulse.freq
+    readout = inputs.readout.modules.readout
+    assert isinstance(frequency, float)
+    assert isinstance(readout.pulse_cfg.freq, float)
+    return Calibrated(frequency, pi_length_us, readout.pulse_cfg.freq, 0.15)

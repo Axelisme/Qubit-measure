@@ -2,8 +2,8 @@
 
 Calibration values and traces are fake deterministic values, not physical policy.
 The JSON savers only exercise the exact-path saver seam, even for .h5 paths.
-They are not the official/native data format. Phase 1 replaces T1_fluxdep;
-phase 3 replaces echo/overnight and removes fake calibration before retirement.
+They are not the official/native data format. Native T1_fluxdep lives in t1.py.
+Phase 3 replaces echo/overnight and removes fake calibration before retirement.
 Import declares functions only; it does not register workflows or start a run.
 """
 
@@ -91,23 +91,6 @@ class DecayKnobs(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reps: int = Field(default=100, ge=1, le=10000)
     rounds: int = Field(default=10, ge=1, le=1000)
-
-
-class T1Tunables(BaseModel):
-    """T1 generation and acceptance knobs.
-
-    cal controls calibration; t1 controls acquire averaging. guess_us seeds
-    the lifetime estimate. sweep_factor/relax_factor scale that estimate into
-    timing. max_rel_err is the strict upper bound on relative fit uncertainty.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    cal: CalTunables = Field(default_factory=CalTunables)
-    t1: DecayKnobs = Field(default_factory=DecayKnobs)
-    guess_us: float = Field(default=20.0, ge=1.0, le=1000.0)
-    sweep_factor: float = Field(default=5.0, ge=2.0, le=10.0)
-    relax_factor: float = Field(default=3.0, ge=1.0, le=10.0)
-    max_rel_err: float = Field(default=0.3, ge=0.01, le=1.0)
 
 
 class T2EchoTunables(BaseModel):
@@ -422,109 +405,6 @@ def calibrate(
 
 
 @dataclass(frozen=True)
-class T1Point:
-    """One attempted T1 point.
-
-    index is zero-based; flux is the native setpoint. cal records calibration
-    success/failure. t1 is an accepted estimate or None; reason explains a
-    missing estimate and is None on success.
-    """
-
-    index: int
-    flux: float
-    cal: Calibration
-    t1: DecayValue | None
-    reason: str | None
-
-
-@dataclass
-class T1State:
-    """T1 loop state: remaining native setpoints and calibration carry in cal.
-
-    t1_by_flux contains ordered (setpoint, accepted lifetime in us) pairs.
-    """
-
-    remaining: list[float]
-    cal: CalCarry
-    t1_by_flux: list[tuple[float, float]]
-
-
-def init_t1(env: InitEnv[DemoContext], plan: FluxPlan) -> T1State:
-    """Create detached T1 state from the fixed plan and initial host context."""
-    return T1State(list(plan.fluxes), initial_carry(env), [])
-
-
-def t1_cfg(plan: FluxPlan, tun: T1Tunables, cal: Calibrated, guess: float) -> DecayCfg:
-    """Build complete T1 cfg using a positive lifetime guess in microseconds."""
-    return DecayCfg(
-        "t1",
-        cal,
-        plan.points,
-        tun.sweep_factor * guess,
-        tun.relax_factor * guess,
-        tun.t1.reps,
-        tun.t1.rounds,
-    )
-
-
-@workflow(
-    "T1_fluxdep",
-    plan=FluxPlan,
-    tunables=T1Tunables,
-    state=T1State,
-    record=T1Point,
-    init=init_t1,
-    requires=("devices", "context"),
-)
-def t1_fluxdep(
-    env: WorkflowEnv[DemoContext],
-    plan: FluxPlan,
-    tun: T1Tunables,
-    state: T1State,
-) -> Step[T1State, T1Point]:
-    """Attempt the next flux point; commit missing fits with an explicit reason.
-
-    The engine supplies detached state and captured tunables. Effects acquire
-    and save offline traces; calibration updates carry only after full success.
-    After all points, save a summary figure and return Done without a record.
-    Adapter, plotting, analysis, and saver errors propagate to the engine.
-    """
-    index = len(plan.fluxes) - len(state.remaining)
-    env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
-    redraw(env, "t1/vs_flux", state.t1_by_flux)
-    if not state.remaining:
-        save_plot(env.axes("t1/vs_flux"), env.iter_dir / "summary.png")
-        return Done()
-    flux = state.remaining.pop(0)
-    yield from env.set_device(plan.flux_dev, flux)
-    cal = yield from calibrate(env, tun.cal, flux, state.cal)
-    if isinstance(cal, CalibrationFailed):
-        return Next(T1Point(index, flux, cal, None, cal.reason), state)
-
-    guess = smooth_last([v for _, v in state.t1_by_flux], tun.guess_us)
-    ax = env.axes("t1/decay")
-    ax.cla()
-    (line,) = ax.plot([], [])
-    outcome = yield from env.run(
-        run_t1,
-        t1_cfg(plan, tun, cal, guess),
-        save=save_decay,
-        live=Live1D(line, y=lambda signals: signals.real),
-    )
-    if isinstance(outcome, Failed):
-        return Next(T1Point(index, flux, cal, None, outcome.reason), state)
-    fit = analyze_decay(outcome.cfg, outcome.result)
-    if fit is None or fit.rel_err >= tun.max_rel_err:
-        return Next(T1Point(index, flux, cal, None, "fit rejected"), state)
-
-    ax.plot(outcome.result.times_us, np.exp(-outcome.result.times_us / fit.value_us))
-    ax.set_title(f"T1 = {fit.value_us:.2f} us")
-    save_plot(ax, env.iter_dir / "decay.png")
-    state.t1_by_flux.append((flux, fit.value_us))
-    return Next(T1Point(index, flux, cal, fit, None), state)
-
-
-@dataclass(frozen=True)
 class T2EchoPoint:
     """One attempted echo point.
 
@@ -743,11 +623,10 @@ def t1_overnight(
 
 
 def register_all(registry: WorkflowRegistry) -> None:
-    """Add the three offline workflows to a host-owned catalog.
+    """Add the echo/overnight offline demonstrations to a host-owned catalog.
 
     Import does not create a registry. Duplicate names raise ValueError from the
     supplied registry; the host creates a fresh registry for each reload.
     """
-    registry.add(t1_fluxdep)
     registry.add(t2echo_fluxdep)
     registry.add(t1_overnight)

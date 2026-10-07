@@ -1,15 +1,17 @@
 # `zcu_lab.workflows` — 使用者 workflow
 
-**Last updated:** 2026-10-07，原生 calibration 與 T1 cfg 接縫
+**Last updated:** 2026-10-07，原生 T1 declaration、saver 與離線讀回
 
 本 package 擁有具體 workflow 的校準、cfg 組裝、分析、record 與 state。通用迭代、取消、提交與保存路徑由 `zcu_tools.experiment.workflows` 負責。宿主建立 catalog，再明確注入框架；import 不啟動 run。
 
-`v0` 提供 T1 fluxdep、T2echo fluxdep 與 T1 overnight 的期 0 離線示範。Experiment 使用真實 Run／Schedule seam，但 trace 與校準值都是 deterministic 假值，不操作硬體，也不代表新的物理策略。JSON saver 只驗證 exact-path 契約，不是 native 資料格式。期 1 將 T1_fluxdep 換成真實 experiment 與 saver。T2echo／overnight 依期 3 處置，期 3 退役前不保留假校準。不能把示範當成量測入口。
+`v0` 提供 T2echo fluxdep 與 T1 overnight 的期 0 離線示範。Experiment 使用真實 Run／Schedule seam，但 trace 與校準值都是 deterministic 假值，不操作硬體，也不代表物理策略。JSON saver 只驗證 exact-path 契約，不是 native 資料格式。T2echo／overnight 在期 3 替換，退役前移除假校準。原示範的 T1_fluxdep 已由 `t1` 的 native declaration 取代。
 
 `analysis` 提供純資料的 frequency、length-Rabi 與 T1 fits。它重用 native signal projections 與 fitting helpers，保留原生單位、estimate、uncertainty 與 residual 診斷，不操作硬體、不畫圖、不保存或決定 calibration 接受度。Fit residual 不是 readout SNR，兩者由 workflow policy 分開判斷。Length-Rabi 使用既有 native free-phase/no-decay 路線；phase 固定為零會在已觀察的 simulator trace 陷入 optimizer fallback。
 
 `calibration` 以完整 native templates 執行 frequency、length-Rabi 與按 cadence 的 readout landscape。它擁有接受度與純資料 carry，全部成功才更新校準歷史。Scalar seed 可作深度唯讀 context，mutable native cfg 放在 engine 會複製的 plan，不以 frozen 外殼宣稱深度唯讀。三個 saver 以具名參數物件明確注入，不放進 context 或建立 registry。接受度、cadence 與 Rabi range 的預設值是暫定 tunables，待使用者在 CP-B／CP-C 確認，不是已驗證的物理預設。
 
-`t1` 持有固定 flux plan、captured tunables、純資料 state 與完整 native cfg 生成。Pi drive 使用量出 pi duration 的 Rabi waveform／gain，delay grid 與 relax delay 由 lifetime guess 生成。Mutable native templates 留在 plan，不放進 context。完整 T1 declaration／step、shipped host 與 native saver 接線仍待上游保存契約接受。
+`t1` 宣告 `T1_fluxdep`，逐 setpoint 執行完整 calibration 與 native T1。Plan 持有固定 setpoints、native templates 與 caller 捕捉的歷史 RunSnapshot，context 只含 scalar seed。Pi drive 使用量出 pi duration 的 Rabi waveform／gain。Delay grid 與 relax delay 由 lifetime history 的 EWMA guess 生成。校準失敗與 fit 不接受提交具名 reason，只有接受的 lifetime 加入 history。Pause／stop 由 Engine 丟棄當前步驟，已發布的 acquisition 保留。
 
-完整執行的整合行為由 `tests/experiment/workflows/` 在 Engine seam 驗證。`tests/zcu_lab/workflows/` 驗證具體 acquisition、analysis、calibration policy 與 T1 cfg generation 的公開接縫，不測宿主腳本或文件內容。
+`saving` 的四個具體 writer 使用各 experiment 的既有 persistence declaration 與 native `save_run`。Writer 接 Engine 的 exact path，不決定 entry layout，也不捕捉 live context。Acquisition evidence 提供 run_id、時間、completion 與 software provenance；caller 的 RunSnapshot 提供當時的 entry／point／roles。保存不以 workflow run_id 或保存時間覆寫 acquisition facts。
+
+`tests/experiment/workflows/` 驗證通用 Engine 契約。`tests/zcu_lab/workflows/` 由具體 callback、calibration 與 native T1 的 Engine seam，驗證真實 simulator、typed native load、完整與拒絕路徑、pause 新 revision 重做及 stop 保留 prior commit。不測宿主腳本或文件內容。

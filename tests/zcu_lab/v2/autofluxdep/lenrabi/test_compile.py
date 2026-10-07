@@ -1,10 +1,12 @@
 """The shipped LenRabiNode reaches a valid swept-pulse compile without acquire."""
 
+from pathlib import Path
 from typing import NoReturn
 
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
+from zcu_tools.cfg_model import WaveformSamples
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.autofluxdep.nodes.builder import RunEnv
 from zcu_tools.gui.app.autofluxdep.nodes.io import Snapshot
@@ -18,15 +20,25 @@ from zcu_tools.program.v2.modules import (
     PulseReadoutCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.resources.context import ModuleLibrary
+from zcu_tools.resources.entry import ResultEntry
 
 import zcu_lab.v2.autofluxdep.lenrabi.autofluxdep as lenrabi
 from tests.gui.app.autofluxdep._helpers import make_run_context
+from tests.program.v2.support.waveform_assets import InMemoryWaveformAsset
 
 
 def test_lenrabi_node_generated_length_sweep_compiles_before_acquisition(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    entry = ResultEntry.create(
+        "compile", result_root=tmp_path / "results", database_root=tmp_path / "database"
+    )
+    entry.new_point("offline")
+    assets = InMemoryWaveformAsset(
+        "unused",
+        WaveformSamples(time=np.array([0.0, 1.0]), idata=np.zeros(2), qdata=None),
+    )
     compiled: list[ModularProgramV2] = []
 
     def stop_at_acquisition(
@@ -70,7 +82,7 @@ def test_lenrabi_node_generated_length_sweep_compiles_before_acquisition(
         schema=schema,
         context=make_run_context(soc=soc, soccfg=soccfg),
         device_snapshot={},
-        ml=ModuleLibrary(),
+        ml=entry.module_library("offline", assets=assets),
         result=result,
     )
     snapshot = Snapshot(

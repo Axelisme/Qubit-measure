@@ -12,34 +12,9 @@ from zcu_tools.program.v2.sweep import SweepCfg
 
 from zcu_lab.workflows.acquire import run_t1
 from zcu_lab.workflows.analysis import analyze_t1
-from zcu_lab.workflows.calibration import Calibrated, CalibrationPlan
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables, init_t1, t1_cfg
+from zcu_lab.workflows.t1 import T1Tunables, init_t1, t1_cfg
 
-from ._sim_inputs import Inputs
-
-
-def make_plan(inputs: Inputs) -> T1Plan:
-    """Build complete native inputs without replacing acquisition logic."""
-    return T1Plan(
-        flux_dev="flux",
-        fluxes=(1.0, 1.1),
-        points=21,
-        calibration=CalibrationPlan(
-            frequency=inputs.freq,
-            rabi=inputs.rabi,
-            readout=inputs.readout,
-        ),
-        t1=inputs.t1,
-    )
-
-
-def seed_from_inputs(inputs: Inputs, *, pi_length_us: float = 0.4) -> Calibrated:
-    """Create accepted scalars matching this simulator's native drive/readout."""
-    frequency = inputs.rabi.modules.qub_pulse.freq
-    readout = inputs.readout.modules.readout
-    assert isinstance(frequency, float)
-    assert isinstance(readout.pulse_cfg.freq, float)
-    return Calibrated(frequency, pi_length_us, readout.pulse_cfg.freq, 0.15)
+from ._sim_inputs import Inputs, make_plan, seed_from_inputs
 
 
 def test_init_t1_detaches_remaining_setpoints_and_each_runs_history(

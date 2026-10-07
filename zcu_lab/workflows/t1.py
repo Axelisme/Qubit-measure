@@ -1,26 +1,45 @@
 """Native T1 flux-dependence plan, state and complete cfg generation.
 
-The workflow owns generation and accepted scalar history. Engine owns copied
-inputs and execution. Native saver/declaration wiring is added separately.
+The workflow owns generation, calibration policy and accepted scalar history.
+Engine owns copied inputs, cancellation, exact destinations and publication.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from functools import partial
+from pathlib import Path
 
+from matplotlib.axes import Axes
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from zcu_tools.experiment.workflows import InitEnv
+from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.workflows import (
+    Done,
+    Failed,
+    InitEnv,
+    Live1D,
+    Next,
+    Step,
+    WorkflowEnv,
+    workflow,
+)
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
+from zcu_lab.workflows.acquire import run_t1
+from zcu_lab.workflows.analysis import analyze_t1
 from zcu_lab.workflows.calibration import (
     CalCarry,
     Calibrated,
+    CalibrationFailed,
     CalibrationPlan,
+    CalibrationSavers,
     CalibrationTunables,
     apply_readout_calibration,
+    calibrate,
 )
+from zcu_lab.workflows.saving import save_frequency, save_rabi, save_readout, save_t1
 
 
 class T1Plan(BaseModel):
@@ -32,6 +51,8 @@ class T1Plan(BaseModel):
     Rabi drive whose waveform/gain determines the measured pi duration.
     t1 provides reset, readout routing, optional dev and other native settings;
     its pi drive and length grid are replaced by t1_cfg. uniform must be True.
+    snapshot is the host-captured entry identity, work point and roles retained
+    with every acquisition. It does not choose destinations or read live state.
     The frozen outer plan still contains mutable cfg; Engine deep-copies it.
     """
 
@@ -43,6 +64,7 @@ class T1Plan(BaseModel):
     points: int = Field(default=51, ge=5, description="Uniform T1 delay samples")
     calibration: CalibrationPlan = Field(description="Complete calibration inputs")
     t1: T1Cfg = Field(description="Complete uniform native T1 template")
+    snapshot: RunSnapshot = Field(description="Host-captured historical entry state")
 
     @model_validator(mode="after")
     def _validate_uniform(self) -> T1Plan:
@@ -129,3 +151,116 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
         start=0.0, stop=stop, expts=plan.points, step=stop / (plan.points - 1)
     )
     return cfg
+
+
+@dataclass(frozen=True)
+class T1Point:
+    """Committed outcome of one absolute flux setpoint.
+
+    index is zero-based in plan.fluxes. flux uses the connected device's units.
+    calibration is the accepted scalar calibration or its stage/reason failure.
+    lifetime_us and error_us are accepted lifetime/error in microseconds, or both
+    None when acquisition/fit failed. reason is None on success, otherwise the
+    calibration, Schedule or fit-rejection reason. Raw traces live in native files.
+    """
+
+    index: int
+    flux: float
+    calibration: Calibrated | CalibrationFailed
+    lifetime_us: float | None
+    error_us: float | None
+    reason: str | None
+
+
+def _save_plot(ax: Axes, destination: Path) -> None:
+    figure = ax.get_figure(root=True)
+    if figure is None:
+        raise ValueError("Cannot save axes without a root figure")
+    figure.savefig(destination)
+
+
+@workflow(
+    "T1_fluxdep",
+    plan=T1Plan,
+    tunables=T1Tunables,
+    state=T1State,
+    record=T1Point,
+    init=init_t1,
+    requires=("soc", "devices", "context"),
+)
+def t1_fluxdep(
+    env: WorkflowEnv[Calibrated],
+    plan: T1Plan,
+    tun: T1Tunables,
+    state: T1State,
+) -> Step[T1State, T1Point]:
+    """Attempt the next setpoint with native acquisitions and exact-path saving.
+
+    Engine supplies detached state and captured tunables. Calibration updates
+    carry only on full success. Failed calibration/acquisition or rejected T1
+    fit commits a point with its reason, without accepted lifetime history.
+    Accepted T1 appends lifetime/error and saves its decay plot. The final step
+    saves a summary built from committed lifetime history and returns Done.
+    Pause/stop discards the current step through Engine. Native adapter, fitting,
+    plotting and saver errors propagate; already published files remain.
+    """
+    index = len(plan.fluxes) - len(state.remaining)
+    env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
+    summary = env.axes("t1/vs_flux")
+    summary.cla()
+    if state.t1_by_flux:
+        fluxes, lifetimes = zip(*state.t1_by_flux, strict=True)
+        summary.scatter(fluxes, lifetimes)
+    summary.set(xlabel="flux setpoint", ylabel="T1 (us)")
+    if not state.remaining:
+        _save_plot(summary, env.iter_dir / "summary.png")
+        return Done()
+
+    flux = state.remaining.pop(0)
+    yield from env.set_device(plan.flux_dev, flux)
+    cal = yield from calibrate(
+        env,
+        plan.calibration,
+        tun.cal,
+        flux,
+        state.cal,
+        savers=CalibrationSavers(
+            partial(save_frequency, snapshot=plan.snapshot),
+            partial(save_rabi, snapshot=plan.snapshot),
+            partial(save_readout, snapshot=plan.snapshot),
+        ),
+    )
+    if isinstance(cal, CalibrationFailed):
+        return Next(T1Point(index, flux, cal, None, None, cal.reason), state)
+
+    guess = tun.guess_us
+    for _, lifetime in state.t1_by_flux:
+        guess = 0.5 * lifetime + 0.5 * guess
+    ax = env.axes("t1/decay")
+    ax.cla()
+    (line,) = ax.plot([], [])
+    outcome = yield from env.run(
+        run_t1,
+        t1_cfg(plan, tun, cal, guess),
+        save=partial(save_t1, snapshot=plan.snapshot),
+        live=Live1D(line, y=lambda signals: signals.real),
+    )
+    if isinstance(outcome, Failed):
+        return Next(T1Point(index, flux, cal, None, None, outcome.reason), state)
+    fit = analyze_t1(outcome.result)
+    residual = fit.quality.normalized_residual_rms
+    if not (
+        math.isfinite(fit.lifetime_us)
+        and fit.lifetime_us > 0
+        and math.isfinite(fit.error_us)
+        and fit.error_us >= 0
+        and fit.error_us / fit.lifetime_us < tun.max_rel_err
+        and residual is not None
+        and residual < tun.max_fit_residual
+    ):
+        return Next(T1Point(index, flux, cal, None, None, "T1 fit rejected"), state)
+    ax.plot(outcome.result.times, fit.fitted, label="fit")
+    ax.set_title(f"T1 = {fit.lifetime_us:.2f} us")
+    _save_plot(ax, env.iter_dir / "decay.png")
+    state.t1_by_flux.append((flux, fit.lifetime_us))
+    return Next(T1Point(index, flux, cal, fit.lifetime_us, fit.error_us, None), state)
