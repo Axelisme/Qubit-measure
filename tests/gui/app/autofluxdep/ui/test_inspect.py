@@ -183,7 +183,9 @@ def test_bus_md_change_refreshes_open_dialog(dialog, ctrl):
     # shared bus; the open dialog is subscribed and must rebuild its table.
     md = ctrl.get_current_md()
     md.new_key = 1.23
-    ctrl.get_bus().emit(MdChangedPayload(md=md))
+    ctrl.get_bus().emit(
+        MdChangedPayload(binding_id=1, content_changed=True, fault=None)
+    )
 
     assert dialog._md_table.rowCount() == 2
 
