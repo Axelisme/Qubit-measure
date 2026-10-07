@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
+from ._path_segments import validate_path_segment
 from .ledger import RecordsLedger
 from .points import PointView
+from .views import point_origin, snapshot
 
 
 @dataclass(frozen=True)
@@ -35,4 +37,27 @@ def capture_point_storage(view: PointView) -> PointStorageBinding:
     RecordsLedger checks the existing records directory; its I/O errors and
     invalid bound UUID propagate. No hardware is read.
     """
-    raise NotImplementedError
+    origin = point_origin(view)
+    entry_id = UUID(origin.entry_id)
+    relative = origin.source.resolve().relative_to(origin.result_root)
+    if (
+        len(relative.parts) != 4
+        or relative.parts[1] != "points"
+        or relative.parts[3] != "point.yaml"
+    ):
+        raise ValueError("Point origin must be <entry>/points/<point>/point.yaml")
+    entry_name, _, point, _ = relative.parts
+    validate_path_segment(entry_name, field="entry_name")
+    validate_path_segment(point, field="point")
+    document = snapshot(view)
+    result_path = origin.result_root / entry_name
+    database_path = origin.database_root / entry_name
+    return PointStorageBinding(
+        entry_id=entry_id,
+        entry_name=entry_name,
+        point=point,
+        description=document.general.description,
+        result_path=result_path,
+        database_path=database_path,
+        ledger=RecordsLedger(result_path / "records", entry_id=str(entry_id)),
+    )
