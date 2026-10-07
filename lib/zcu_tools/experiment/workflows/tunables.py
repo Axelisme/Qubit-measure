@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from math import isfinite
@@ -56,7 +56,9 @@ class TunableValues[T: BaseModel]:
         originals: Mapping[str, str] | None = None,
     ) -> None:
         self._model_type = model_type
-        self._originals: dict[str, str] = {} if originals is None else dict(originals)
+        self._originals = _copy_originals(
+            model_type, () if originals is None else originals.items()
+        )
         self._values = deepcopy(
             model_type.model_validate(
                 values.model_dump(mode="python"), by_name=True, by_alias=False
@@ -85,7 +87,9 @@ class TunableValues[T: BaseModel]:
     def snapshot(self) -> TunablesSnapshot:
         """Return detached JSON values and opaque originals at one revision."""
         with self._lock:
-            return TunablesSnapshot(self._revision, _model_json(self._values))
+            return TunablesSnapshot(
+                self._revision, _model_json(self._values), dict(self._originals)
+            )
 
     def update(
         self,
@@ -122,9 +126,14 @@ class TunableValues[T: BaseModel]:
             _check_batch(changes)
             before = _model_json(self._values)
             candidate = deepcopy(before)
+            candidate_originals = dict(self._originals)
             for change in changes:
                 validate_tunable_path(self._model_type, change.path)
                 _replace_leaf(candidate, change)
+                if change.original is None:
+                    candidate_originals.pop(change.path, None)
+                else:
+                    candidate_originals[change.path] = _original_text(change.original)
             # Reject nonfinite values before JSON encoding can replace them with null.
             _check_finite(candidate, (), self._model_type.__name__)
             # JSON arrays remain valid inputs for model-declared strict tuples.
@@ -137,14 +146,35 @@ class TunableValues[T: BaseModel]:
                     change.path,
                     deepcopy(_leaf_value(before, change.path)),
                     deepcopy(_leaf_value(after, change.path)),
+                    self._originals.get(change.path),
+                    candidate_originals.get(change.path),
                 )
                 for change in changes
             )
             event = TunablesChanged(actor, self._revision, self._revision + 1, applied)
             self._append(event)
             self._values = model
+            self._originals = candidate_originals
             self._revision += 1
-            return TunablesSnapshot(self._revision, after)
+            return TunablesSnapshot(self._revision, after, dict(self._originals))
+
+
+def _original_text(original: object) -> str:
+    if not isinstance(original, str):
+        raise ValueError("Tunable originals must be str text")
+    return original
+
+
+def _copy_originals(
+    model_type: type[BaseModel], originals: Iterable[tuple[object, object]]
+) -> dict[str, str]:
+    copied: dict[str, str] = {}
+    for path, original in originals:
+        if not isinstance(path, str):
+            raise ValueError("Original paths must be model field strings")
+        validate_tunable_path(model_type, path)
+        copied[path] = _original_text(original)
+    return copied
 
 
 def _check_batch(changes: tuple[TunableChange, ...]) -> None:
