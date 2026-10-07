@@ -6,9 +6,27 @@ Acquisition evidence is captured at acquisition time, not at save time.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from zcu_tools.experiment.acquisition import AcquisitionEvidence
+import numpy as np
+from zcu_tools.experiment.acquisition import (
+    AcquisitionEvidence,
+    capture_software_provenance,
+    new_run_id,
+)
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.snr import snr_as_signal
+from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.experiment.workflows import Run
+from zcu_tools.program.v2 import (
+    Branch,
+    Delay,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    sweep2param,
+)
 
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiResult
@@ -76,7 +94,40 @@ def run_qubit_freq(run: Run[FreqCfg]) -> FrequencyAcquisition:
     in Run.outcome for Engine to interpret; this callback does not rethrow them.
     No device setup, analysis, plotting or saving occurs here.
     """
-    raise NotImplementedError("Frequency acquisition body is not implemented")
+    soc, soccfg = run.soc, run.soccfg
+    cfg = run.cfg
+    freqs = sweep2array(
+        cfg.sweep.freq,
+        "freq",
+        {"soccfg": soccfg, "gen_ch": cfg.modules.qub_pulse.ch},
+    )
+    buffer = run.buffer((len(freqs),), axes=(freqs,))
+    provenance = capture_software_provenance(context=None)
+    started_at = datetime.now(UTC)
+    run_id = new_run_id(started_at)
+
+    with run.schedule(buffer) as sched:
+        modules = sched.cfg.modules
+        freq_sweep = sched.cfg.sweep.freq
+        modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+        (
+            sched.prog_builder(soc, soccfg)
+            .add_reset("reset", modules.reset)
+            .add_pulse("init_pulse", modules.init_pulse)
+            .add_pulse("qub_pulse", modules.qub_pulse)
+            .add_readout("readout", modules.readout)
+            .declare_sweep("freq", freq_sweep)
+            .build_and_acquire()
+        )
+
+    evidence = AcquisitionEvidence(
+        run_id=run_id,
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        completion="stopped" if run.cancel_signal.is_set() else "complete",
+        provenance=provenance,
+    )
+    return FrequencyAcquisition(freqs=freqs, signals=buffer.array, evidence=evidence)
 
 
 def run_len_rabi(run: Run[LenRabiCfg]) -> RabiAcquisition:
@@ -89,7 +140,42 @@ def run_len_rabi(run: Run[LenRabiCfg]) -> RabiAcquisition:
     Capability/metadata errors propagate; Schedule errors stay in Run.outcome.
     No device setup, analysis, plotting or saving occurs here.
     """
-    raise NotImplementedError("Length-Rabi acquisition body is not implemented")
+    cfg = run.cfg
+    if cfg.modules.qub_pulse.waveform.style not in ("const", "flat_top"):
+        raise ValueError("Length-Rabi requires const or flat_top pulse style")
+    soc, soccfg = run.soc, run.soccfg
+    lengths = sweep2array(
+        cfg.sweep.length,
+        "time",
+        {"soccfg": soccfg, "gen_ch": cfg.modules.qub_pulse.ch},
+    )
+    buffer = run.buffer((len(lengths),), axes=(lengths,))
+    provenance = capture_software_provenance(context=None)
+    started_at = datetime.now(UTC)
+    run_id = new_run_id(started_at)
+
+    with run.schedule(buffer) as sched:
+        modules = sched.cfg.modules
+        length_sweep = sched.cfg.sweep.length
+        modules.qub_pulse.set_param("length", sweep2param("length", length_sweep))
+        (
+            sched.prog_builder(soc, soccfg)
+            .add_reset("reset", modules.reset)
+            .add_pulse("init_pulse", modules.init_pulse)
+            .add_pulse("qubit_pulse", modules.qub_pulse)
+            .add_readout("readout", modules.readout)
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire()
+        )
+
+    evidence = AcquisitionEvidence(
+        run_id=run_id,
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        completion="stopped" if run.cancel_signal.is_set() else "complete",
+        provenance=provenance,
+    )
+    return RabiAcquisition(lengths=lengths, signals=buffer.array, evidence=evidence)
 
 
 def run_ro_landscape(run: Run[FreqGainCfg]) -> ReadoutAcquisition:
@@ -101,7 +187,51 @@ def run_ro_landscape(run: Run[FreqGainCfg]) -> ReadoutAcquisition:
     branch and swept readout. Capability/metadata errors propagate; Schedule
     errors stay in Run.outcome. No device setup, analysis, plotting or saving.
     """
-    raise NotImplementedError("Readout acquisition body is not implemented")
+    soc, soccfg = run.soc, run.soccfg
+    cfg = run.cfg
+    round_info = {"soccfg": soccfg, "gen_ch": cfg.modules.readout.pulse_cfg.ch}
+    freqs = sweep2array(cfg.sweep.freq, "freq", round_info)
+    gains = sweep2array(cfg.sweep.gain, "gain", round_info)
+    buffer = run.buffer((len(freqs), len(gains)), axes=(freqs, gains))
+    provenance = capture_software_provenance(context=None)
+    started_at = datetime.now(UTC)
+    run_id = new_run_id(started_at)
+
+    with run.schedule(buffer) as sched:
+        modules = sched.cfg.modules
+        freq_sweep = sched.cfg.sweep.freq
+        gain_sweep = sched.cfg.sweep.gain
+        modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+        modules.readout.set_param("gain", sweep2param("gain", gain_sweep))
+        tracker = MomentTracker()
+        (
+            sched.prog_builder(soc, soccfg)
+            .add(
+                Reset("reset", modules.reset),
+                Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
+                Readout("readout", modules.readout),
+            )
+            .declare_sweep("ge", 2)
+            .declare_sweep("freq", freq_sweep)
+            .declare_sweep("gain", gain_sweep)
+            .build_and_acquire(
+                raw2signal_fn=lambda _raw: snr_as_signal(
+                    [tracker], ge_axis=1, skew_penalty=sched.cfg.skew_penalty
+                ),
+                trackers=[tracker],
+            )
+        )
+
+    evidence = AcquisitionEvidence(
+        run_id=run_id,
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        completion="stopped" if run.cancel_signal.is_set() else "complete",
+        provenance=provenance,
+    )
+    return ReadoutAcquisition(
+        freqs=freqs, gains=gains, signals=np.abs(buffer.array), evidence=evidence
+    )
 
 
 def run_t1(run: Run[T1Cfg]) -> T1Acquisition:
@@ -114,4 +244,38 @@ def run_t1(run: Run[T1Cfg]) -> T1Acquisition:
     Capability/metadata errors propagate; Schedule errors stay in Run.outcome.
     No device setup, analysis, plotting or saving occurs here.
     """
-    raise NotImplementedError("T1 acquisition body is not implemented")
+    cfg = run.cfg
+    if not cfg.uniform or not isinstance(cfg.sweep.length, SweepCfg):
+        raise ValueError("T1 requires uniform mode with a SweepCfg length sweep")
+    soc, soccfg = run.soc, run.soccfg
+    times = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
+    buffer = run.buffer((len(times),), axes=(times,))
+    provenance = capture_software_provenance(context=None)
+    started_at = datetime.now(UTC)
+    run_id = new_run_id(started_at)
+
+    with run.schedule(buffer) as sched:
+        modules = sched.cfg.modules
+        # Use the validated Run sweep without mutating it; modules are schedule-local.
+        length_sweep = cfg.sweep.length
+        length_param = sweep2param("length", length_sweep)
+        (
+            sched.prog_builder(soc, soccfg)
+            .add(
+                Reset("reset", modules.reset),
+                Pulse("pi_pulse", modules.pi_pulse),
+                Delay("t1_delay", length_param),
+                Readout("readout", modules.readout),
+            )
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire()
+        )
+
+    evidence = AcquisitionEvidence(
+        run_id=run_id,
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        completion="stopped" if run.cancel_signal.is_set() else "complete",
+        provenance=provenance,
+    )
+    return T1Acquisition(times=times, signals=buffer.array, evidence=evidence)
