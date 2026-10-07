@@ -14,6 +14,7 @@ from collections.abc import (
 )
 from copy import deepcopy
 from dataclasses import dataclass
+from types import TracebackType
 from typing import Any, Generic, Literal, Protocol, Self, TypeAlias, cast, overload
 
 import numpy as np
@@ -214,9 +215,24 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._is_active = True
         return self
 
-    def __exit__(self, *_) -> Literal[False]:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        """Close the scope using Python's exception type, value and traceback.
+
+        Suppress KeyboardInterrupt and record interrupted on the shared stop
+        signal, preserving buffered data for the caller's partial-result return.
+        Do not suppress other exceptions or change their existing outcome.
+        """
         self._is_active = False
         self._is_closed = True
+        if isinstance(exc, KeyboardInterrupt):
+            # Let the caller return buffered partial data after a Notebook stop.
+            self._mark_interrupted(exc)
+            return True
         return False
 
     @property

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-05，通用 executor 範例
+**Last updated:** 2026-10-07，Schedule scope 保留中斷後的部分數據
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
@@ -175,6 +175,7 @@ executor leaf contract 由 `runtime/task.py` 擁有：
 - `StopSignal` 是唯一 stop token，定義於 `experiment.stop_signal`。Caller 每次 run 建立一個，
   必須透過 `Schedule(..., stop=context.cancel_signal)` 顯式傳入。Executor 與所有 leaf
   共用同一個 token；runtime 不查 ambient scope，也不補建隱式 token。
+- `Schedule` scope 接住一次 `KeyboardInterrupt`，包含 scan/repeat 的 caller loop body，將 shared signal 記為 `interrupted` 並保留 buffer，讓 with 後的 return 組出部分結果。其他例外不改變原有傳播。Scope 外中斷不受保護，Notebook 將正常返回的 interrupted 表示為 stopped；其他 caller 的 `raise_if_error()` 仍拋錯。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   acquire-local composite `cancel_flag` 傳給 program acquire：它讀取 `StopSignal` 的 external
   stop，但 `round_hook` 內的 data stop 只停止目前 program acquire，不會污染 `Schedule.outcome`。

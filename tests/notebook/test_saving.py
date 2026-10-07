@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Self
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
 from zcu_tools.datafile import (
     AnalysisDocument,
@@ -16,6 +17,7 @@ from zcu_tools.datafile import (
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment, PartialSaveError
 from zcu_tools.notebook import adapter as adapter_module
 from zcu_tools.notebook import saving as saving_module
@@ -40,6 +42,8 @@ from zcu_tools.resources.entry.schema import PointDocument
 
 from tests._native_support import native_metadata
 from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
+from tests.notebook import _interrupt_fakes
+from tests.notebook._interrupt_fakes import InterruptedCore, InterruptedExecutorCore
 from tests.resources.entry.fakes import Driver, registry_state, restore_registry
 
 
@@ -114,6 +118,72 @@ def analysis_document() -> AnalysisDocument:
     return AnalysisDocument(
         pane="analysis", parameters={"skip": 1}, summary={"frequency": 5000.0}
     )
+
+
+@pytest.mark.parametrize("mode", ["software", "program", "executor"])
+def test_interrupted_acquisition_preserves_saveable_partial(
+    point: PointView, mode: str
+) -> None:
+    core = (
+        InterruptedExecutorCore()
+        if mode == "executor"
+        else InterruptedCore("software" if mode == "software" else "program")
+    )
+    exp = NotebookAdapter(
+        soc=object(),
+        soccfg=object(),
+        device_manager=DeviceManager(),
+        host=NonPresentingHost(),
+    )(core)
+    record = exp.run(SavingCfg())
+    expected = np.array([1.0, np.nan, np.nan], dtype=np.complex128)
+    assert record is exp.last_run
+    assert exp.acquisition_for(record).completion == "stopped"
+    np.testing.assert_allclose(record.result.signal, expected, equal_nan=True)
+    assert core.context is not None
+    assert core.context.cancel_signal.error is not None
+    assert core.context.cancel_signal.error.status == "interrupted"
+    with pytest.raises(ScheduleOutcomeError):
+        core.context.cancel_signal.raise_if_error()
+    saved = exp.save_run(point, source=record)
+    native = next(
+        item.output.path
+        for item in saved.report.outputs
+        if item.output.format == "data_h5"
+    )
+    labber = next(
+        item.output.path
+        for item in saved.report.outputs
+        if item.output.format == "labber"
+    )
+    loaded = load_run_data(native)
+    assert loaded.metadata.completion == "stopped"
+    restored, _ = core.load_run(native)
+    np.testing.assert_allclose(restored.result.signal, expected, equal_nan=True)
+    np.testing.assert_allclose(
+        load_labber_data(str(labber)).z, expected, equal_nan=True
+    )
+
+
+def test_setup_devices_interrupt_escapes_and_preserves_previous_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    core = InterruptedCore("setup")
+    exp = NotebookAdapter(
+        soc=object(),
+        soccfg=object(),
+        device_manager=DeviceManager(),
+        host=NonPresentingHost(),
+    )(core)
+    previous = exp.run(SavingCfg())
+    evidence = exp.acquisition_for(previous)
+    interrupt = KeyboardInterrupt("setup_devices stopped")
+    monkeypatch.setattr(_interrupt_fakes, "setup_devices", Mock(side_effect=interrupt))
+    with pytest.raises(KeyboardInterrupt) as caught:
+        exp.run(SavingCfg())
+    assert caught.value is interrupt
+    assert exp.last_run is previous
+    assert exp.acquisition_for(previous) == evidence
 
 
 def test_real_caller_writes_all_formats_and_retains_acquisition(

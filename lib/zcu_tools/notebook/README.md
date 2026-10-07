@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-07，bound point 保存與 Notebook accepted writeback
+**Last updated:** 2026-10-07，Notebook stop 保留可存的部分數據
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -51,9 +51,9 @@ Notebook 不走 GUI WritebackService，也不做 append 前候選驗證。Ledger
 
 Cfg 組裝使用 `experiment.cfg_assembler.CfgEnv(md, ml, device_manager)`。Notebook 顯式呼叫 `make_cfg(raw_cfg, CfgModel, env, overrides=...)` 時讀取當次裝置資訊，失敗直接報錯；底層 assembler 與 GUI 仍使用 caller 給定的 snapshot。CfgEnv 不執行 setup、不解析 md expression，也不關閉資源。切換 md／ml 後重新建立 CfgEnv。Run 不重做 make_cfg、不刷新 cfg、不重連或自動補裝置。Driver mapping 只固定名稱到 instance，不是資源 lease，driver guards 與既有 owner 不變。
 
-`acquisition_for(source)` 只接受此 NotebookExperiment 最近成功 run 的同一 RunRecord，回傳隔離的 run identity、UTC 開始／結束時間、complete／stopped 與 software provenance。Run 在 core acquire 前捕捉 software evidence，正常返回且 StopSignal 錯誤檢查通過後結束計時，不包含 plots.finish、analyze 或 save。Presentation 成功後才成組發布 record 與 evidence。Analyze 與所有失敗保留 evidence，下一次成功 run 取代它，成功 load 清除它。Loaded、手組、另一 adapter 或過期 record 不能取得此 acquisition evidence。現有 Schedule 可以透過共享 StopSignal 正常返回 stopped；adapter 不另加 cancellation 入口。
+`acquisition_for(source)` 只接受此 NotebookExperiment 最近成功 run 的同一 RunRecord，回傳隔離的 run identity、UTC 開始／結束時間、complete／stopped 與 software provenance。Run 在 core acquire 前捕捉 software evidence，正常返回且 StopSignal 錯誤檢查通過後結束計時，不包含 plots.finish、analyze 或 save。Presentation 成功後才成組發布 record 與 evidence。Analyze 與所有失敗保留 evidence，下一次成功 run 取代它，成功 load 清除它。Loaded、手組、另一 adapter 或過期 record 不能取得此 acquisition evidence。Schedule 會接住 scope 內的一次 KeyboardInterrupt，保留 buffer 與 interrupted signal。Notebook 將這種正常返回發布為 stopped record，已完成點與其餘 NaN 可沿 save_run 保存。Adapter 不另加 cancellation 入口。
 
-NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run 在提交前檢查 StopSignal 的失敗原因，failed／interrupted 會拋錯；無錯誤的 stopped partial 仍可提交。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。Notebook 的 run、同步分析與 GE post 共用失敗呈現的收尾，保留 producer 與 cleanup 錯誤，只釋放本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
+NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run 在提交前檢查 StopSignal 的失敗原因。Failed 仍拋錯，interrupted 視為使用者停止，與無錯誤的 stopped partial 一樣可提交。Schedule 外的 KeyboardInterrupt（例如 setup_devices）直接傳播，保留舊成果。GUI／MCP 的 raise_if_error 政策不變。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。Notebook 的 run、同步分析與 GE post 共用失敗呈現的收尾，保留 producer 與 cleanup 錯誤，只釋放本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
 
 明確 Notebook host 同步執行 caller 的操作，caller 負責順序。Host 在發布前完成
 widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。

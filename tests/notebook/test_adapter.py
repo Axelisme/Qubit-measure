@@ -267,9 +267,7 @@ def test_run_requires_device_manager_before_starting_operation() -> None:
     assert adapter.last_run is None
 
 
-@pytest.mark.parametrize(
-    "failure", ["core", "finish", "signal-failed", "signal-interrupted"]
-)
+@pytest.mark.parametrize("failure", ["core", "finish", "signal-failed"])
 def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     core = _Core()
     host = _Host()
@@ -284,7 +282,7 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     core.fail_run = failure == "core"
     host.fail_present = failure == "finish"
     if failure.startswith("signal-"):
-        core.signal_outcome = "failed" if failure == "signal-failed" else "interrupted"
+        core.signal_outcome = "failed"
     cfg = _Cfg(scale=9.0)
     error_type = ScheduleOutcomeError if failure.startswith("signal-") else ValueError
 
@@ -309,14 +307,15 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     )
 
 
-def test_stopped_partial_run_without_error_is_committed() -> None:
+@pytest.mark.parametrize("outcome", ["stopped", "interrupted"])
+def test_stopped_partial_run_is_committed(outcome: str) -> None:
     core = _Core()
     host = _Host()
     adapter = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=DeviceManager(), host=host
     )(core)
     previous = adapter.load(Path("loaded"))
-    core.signal_outcome = "stopped"
+    core.signal_outcome = "stopped" if outcome == "stopped" else "interrupted"
 
     partial = adapter.run(_Cfg(scale=9.0))
 
