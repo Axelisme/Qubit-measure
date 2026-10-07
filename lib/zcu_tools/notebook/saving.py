@@ -137,6 +137,8 @@ class SavedRun(Generic[CfgT, ResultT]):
         encoding failures affect that member only, not data or other files.
         None preserves retained content/comment;
         empty mapping/tuple clears that set. comment is raw user text.
+        Labber files use the host's current local date; run identity and
+        acquisition timestamps stay unchanged.
         Append acquired once before the first save and saved once per call.
         PartialSaveError retains this same handle and the latest report.
         Ledger errors propagate directly; do not retry, roll back or recapture.
@@ -179,7 +181,7 @@ class SavedRun(Generic[CfgT, ResultT]):
             database_path=self._storage.database_path,
             run_id=self.run_id,
             point=self._storage.point,
-            saved_at=datetime.now(UTC),
+            saved_at=datetime.now(UTC).astimezone(),
         )
         self._report = save_artifacts(
             artifacts,

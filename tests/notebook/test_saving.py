@@ -1,7 +1,8 @@
 """Real Notebook run/save caller over fake acquisition and production storage."""
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
+from typing import Self
 from unittest.mock import Mock
 
 import pytest
@@ -16,6 +17,7 @@ from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment, PartialSaveError
 from zcu_tools.notebook import adapter as adapter_module
+from zcu_tools.notebook import saving as saving_module
 from zcu_tools.plotting.plots import NonPresentingHost
 from zcu_tools.resources.entry import (
     JsonObject,
@@ -150,6 +152,101 @@ def test_resave_rewrites_fixed_outputs_and_uses_new_labber_file(
     loaded = load_run_data(native)
     assert loaded.cfg.values["gain"] == 2.0
     assert loaded.payload.metadata.comment == "updated comment"
+
+
+@pytest.mark.parametrize(
+    ("offset_hours", "saved_at", "expected_dates"),
+    [
+        (
+            8,
+            datetime(2026, 12, 31, 16, 30, tzinfo=UTC),
+            (("2027", "01", "Data_0101"), ("2027", "01", "Data_0102")),
+        ),
+        (
+            -7,
+            datetime(2027, 1, 1, 1, 30, tzinfo=UTC),
+            (("2026", "12", "Data_1231"), ("2027", "01", "Data_0101")),
+        ),
+        (
+            0,
+            datetime(2027, 1, 1, 0, 30, tzinfo=UTC),
+            (("2027", "01", "Data_0101"), ("2027", "01", "Data_0102")),
+        ),
+    ],
+)
+def test_save_and_resave_use_host_local_labber_date(
+    point: PointView,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    offset_hours: int,
+    saved_at: datetime,
+    expected_dates: tuple[tuple[str, str, str], tuple[str, str, str]],
+) -> None:
+    local_zone = timezone(timedelta(hours=offset_hours))
+    now = saved_at
+
+    # Isolate clock and host timezone without changing process-global TZ state.
+    class HostClock(datetime):
+        """Supply fixed instants and emulate this test's local timezone."""
+
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> Self:
+            return cls.fromtimestamp(now.timestamp(), tz)
+
+        def astimezone(self, tz: tzinfo | None = None) -> Self:
+            return super().astimezone(local_zone if tz is None else tz)
+
+    monkeypatch.setattr(saving_module, "datetime", HostClock)
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    acquisition = exp.acquisition_for(source)
+    saved = exp.save_run(point, source=source)
+    first = saved.report
+    now += timedelta(days=1)
+    second = saved.save()
+    reports = (first, second)
+    labber_paths: list[Path] = []
+    native_paths: list[Path] = []
+    for report, expected in zip(reports, expected_dates, strict=True):
+        assert report.run_id == acquisition.run_id
+        assert all(item.status == "saved" for item in report.outputs)
+        labber = next(
+            item.output.path
+            for item in report.outputs
+            if item.output.format == "labber"
+        )
+        labber_paths.append(labber)
+        assert labber.is_file()
+        assert (
+            labber.relative_to(tmp_path / "Database" / "entry" / "Labber").parts[:3]
+            == expected
+        )
+        native_paths.append(
+            next(
+                item.output.path
+                for item in report.outputs
+                if item.output.format == "data_h5"
+            )
+        )
+    assert labber_paths[0] != labber_paths[1]
+    assert native_paths[0] == native_paths[1]
+    loaded = load_run_data(native_paths[1])
+    assert datetime.fromisoformat(loaded.metadata.started_at) == acquisition.started_at
+    assert loaded.metadata.finished_at is not None
+    assert (
+        datetime.fromisoformat(loaded.metadata.finished_at) == acquisition.finished_at
+    )
+    assert loaded.metadata.labber_path == str(labber_paths[1])
+    ledger = ResultEntry.open(
+        "entry",
+        result_root=tmp_path / "results",
+        database_root=tmp_path / "Database",
+    ).ledger
+    events = ledger.events()
+    assert [event.kind for event in events] == ["acquired", "saved", "saved"]
+    assert all(
+        datetime.fromisoformat(event.at).utcoffset() == timedelta(0) for event in events
+    )
 
 
 def test_partial_error_retains_handle_and_explicit_resave_reuses_directory(
