@@ -164,8 +164,11 @@ class FormModel(BaseModel):
         not address mapping keys, sequence indexes or ordinary model sections.
         input_schema and result reject invalid declared paths with ValueError.
         Validation and input schema share these options, without restricting
-        another field that reuses the same nested model. Numeric/complex leaves
-        permit a well-formed arithmetic Expr; result validates its evaluated
+        another field that reuses the same nested model. When enclosing and
+        nested FormModels declare options for the same leaf, the deepest local
+        declaration wins, including empty options. Nonoverlapping enclosing
+        options remain in effect. Numeric/complex leaves permit a well-formed
+        arithmetic Expr; result validates its evaluated
         value against choices. The reused evaluator does not return strings.
         Empty options for one declared path permit no value. Consumers needing
         an absent captured device/library source raise field_error at that path.

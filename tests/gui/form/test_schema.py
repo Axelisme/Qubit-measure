@@ -104,6 +104,49 @@ class NullableChoicesForm(FormModel):
     ] = None
 
 
+class DeepChoicesForm(FormModel):
+    """The deepest local hook overrides both ancestors."""
+
+    mode: str = "deep"
+
+    @classmethod
+    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Constrain the leaf at the deepest model occurrence."""
+        return {("mode",): ("deep",)}
+
+
+class LocalChoicesForm(FormModel):
+    """Reused children keep local choices and inherit other parent paths."""
+
+    mode: str = "child"
+    level: float = 2.0
+    nested: DeepChoicesForm = Field(default_factory=DeepChoicesForm)
+
+    @classmethod
+    def choices(cls, env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """An empty local declaration must also override its parent."""
+        return {
+            ("mode",): () if env.md.get("empty_child") else ("child",),
+            ("nested", "mode"): ("middle",),
+        }
+
+
+class EnclosingChoicesForm(FormModel):
+    """Only the restricted occurrence inherits the enclosing level constraint."""
+
+    restricted: LocalChoicesForm = Field(default_factory=LocalChoicesForm)
+    unrestricted: LocalChoicesForm = Field(default_factory=LocalChoicesForm)
+
+    @classmethod
+    def choices(cls, env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Use conflicting and nonoverlapping choices at separate occurrences."""
+        return {
+            ("restricted", "mode"): () if env.md.get("empty_parent") else ("parent",),
+            ("restricted", "level"): (2.0,),
+            ("restricted", "nested", "mode"): ("ancestor",),
+        }
+
+
 class NestedChoicesForm(FormModel):
     """Top-level choices target reused, nullable and tagged nested fields."""
 
@@ -227,6 +270,59 @@ def test_nullable_union_rejects_invalid_branch_local_choice_path() -> None:
     active = FormState(FormInput(InvalidNullableForm, {"branch": {"kind": "alpha"}}))
     with pytest.raises(ValueError, match="path|field|leaf"):
         active.result(env)
+
+
+@pytest.mark.parametrize("empty_parent", [False, True])
+@pytest.mark.parametrize("empty_child", [False, True])
+def test_deepest_local_choices_override_only_overlapping_parent_paths(
+    empty_parent: bool, empty_child: bool
+) -> None:
+    md = MetaDict()
+    md.update({"empty_parent": empty_parent, "empty_child": empty_child})
+    env = FormEnv(md=md.snapshot())
+    validator = Draft202012Validator(EnclosingChoicesForm.input_schema(env))
+    valid: dict[str, JsonValue] = {
+        "restricted": {
+            "mode": "child",
+            "level": {"expr": "2"},
+            "nested": {"mode": "deep"},
+        },
+        "unrestricted": {"mode": "child", "level": 3.0, "nested": {"mode": "deep"}},
+    }
+    assert validator.is_valid(valid) is not empty_child
+    result = FormState(FormInput(EnclosingChoicesForm, valid)).result(env)
+    if empty_child:
+        assert isinstance(result, FormErrors)
+        assert ("restricted", "mode") in result.messages
+        assert ("unrestricted", "mode") in result.messages
+        return
+    assert isinstance(result, EnclosingChoicesForm)
+    assert result.restricted.mode == result.unrestricted.mode == "child"
+    assert result.restricted.nested.mode == result.unrestricted.nested.mode == "deep"
+    assert result.restricted.level == 2.0
+    assert result.unrestricted.level == 3.0
+    invalid_fields: tuple[tuple[str, JsonValue], ...] = (
+        ("mode", "parent"),
+        ("level", 3.0),
+        ("nested", {"mode": "middle"}),
+    )
+    for field, bad in invalid_fields:
+        restricted: dict[str, JsonValue] = {
+            "mode": "child",
+            "level": 2.0,
+            "nested": {"mode": "deep"},
+        }
+        restricted[field] = bad
+        invalid: dict[str, JsonValue] = {**valid, "restricted": restricted}
+        assert not validator.is_valid(invalid)
+        errors = FormState(FormInput(EnclosingChoicesForm, invalid)).result(env)
+        assert isinstance(errors, FormErrors)
+        path = (
+            ("restricted", "nested", "mode")
+            if field == "nested"
+            else ("restricted", field)
+        )
+        assert path in errors.messages
 
 
 @pytest.mark.parametrize("path", [("samples", 0), ("offsets", "rack.left")])

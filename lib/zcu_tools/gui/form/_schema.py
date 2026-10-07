@@ -7,8 +7,9 @@ from pydantic import BaseModel, JsonValue
 from pydantic.fields import FieldInfo
 
 from ._json import copy_object
-from ._structure import alternatives, choice_fields, model_types
-from .model import Display, FormEnv, FormModel
+from ._sources import local_choices
+from ._structure import alternatives, model_types
+from .model import Display, FormEnv, FormModel, FormPath
 
 _EXPR: dict[str, JsonValue] = {
     "type": "object",
@@ -78,32 +79,6 @@ def _resolve(
             if isinstance(target, dict):
                 return target
     return node
-
-
-def _nodes_at(
-    node: dict[str, JsonValue], path: tuple[str | int, ...], root: dict[str, JsonValue]
-) -> tuple[dict[str, JsonValue], ...]:
-    resolved = _resolve(node, root)
-    if resolved is not node:
-        metadata = {key: value for key, value in node.items() if key != "$ref"}
-        node.clear()
-        node.update(copy_object(resolved))
-        node.update(metadata)
-    if not path:
-        return (node,)
-    props = node.get("properties")
-    if isinstance(props, dict):
-        target = props.get(str(path[0]))
-        if isinstance(target, dict):
-            return _nodes_at(target, path[1:], root)
-    targets: list[dict[str, JsonValue]] = []
-    for key in ("anyOf", "oneOf", "allOf"):
-        branches = node.get(key)
-        if isinstance(branches, list):
-            for branch in branches:
-                if isinstance(branch, dict):
-                    targets.extend(_nodes_at(branch, path, root))
-    return tuple(targets)
 
 
 def _field_metadata(info: FieldInfo, target: dict[str, JsonValue]) -> None:
@@ -194,20 +169,6 @@ def _child_nodes(
     )
 
 
-def _choices(
-    model: type[BaseModel],
-    node: dict[str, JsonValue],
-    root: dict[str, JsonValue],
-    env: FormEnv,
-) -> None:
-    if not issubclass(model, FormModel):
-        return
-    for path, options in model.choices(env).items():
-        choice_fields(model, path)
-        for target in _nodes_at(node, path, root):
-            _apply_choices(target, options)
-
-
 def _apply_choices(
     target: dict[str, JsonValue], options: tuple[JsonValue, ...]
 ) -> None:
@@ -233,11 +194,19 @@ def _decorate(
     root: dict[str, JsonValue],
     env: FormEnv,
     seen: set[type[BaseModel]],
+    inherited: Mapping[FormPath, tuple[JsonValue, ...]],
 ) -> None:
     if model in seen:
         return
-    seen.add(model)
-    node = _resolve(node, root)
+    # Track only this ancestry; reused sibling occurrences have distinct choices.
+    seen = seen | {model}
+    resolved = _resolve(node, root)
+    if resolved is not node:
+        metadata = {key: value for key, value in node.items() if key != "$ref"}
+        node.clear()
+        node.update(copy_object(resolved))
+        node.update(metadata)
+    options = {**inherited, **local_choices(model, env)}
     props = node.get("properties")
     if not isinstance(props, dict):
         return
@@ -246,14 +215,21 @@ def _decorate(
         if not isinstance(target, dict):
             continue
         _field_metadata(info, target)
+        child_options = {
+            path[1:]: values
+            for path, values in options.items()
+            if len(path) > 1 and path[0] == name
+        }
         for child, variant in _child_nodes(info, target):
-            _decorate(child, variant, root, env, seen)
-    _choices(model, node, root, env)
+            _decorate(child, variant, root, env, seen, child_options)
+        values = options.get((name,))
+        if values is not None:
+            _apply_choices(target, values)
 
 
 def input_schema(model: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
     """Project a Pydantic schema to partial tagged JSON input for this environment."""
     raw = copy_object(model.model_json_schema())
     root = copy_object(_partial(raw))
-    _decorate(model, root, root, env, set())
+    _decorate(model, root, root, env, set(), {})
     return root
