@@ -3,9 +3,11 @@
 from collections.abc import Callable, Mapping, Sequence
 from fnmatch import fnmatchcase
 from types import MappingProxyType
+from uuid import UUID
 
 from pydantic import BaseModel
 
+from ._point_origin import PointOrigin
 from .errors import RoleResolutionError
 from .registry import RoleSpec, component_registry
 from .schema import ComponentSchema
@@ -13,20 +15,35 @@ from .views import ComponentView
 
 
 class RoleView:
-    """Frozen name mapping with component values read/written through its point."""
+    """Fixed role-to-component names and values bound to one owning point.
 
-    __slots__ = ("_components", "_component")
+    Obtain this view through PointView.resolve. Component values follow that
+    point; resolved names and constructor origin never follow another selection.
+    """
+
+    __slots__ = ("_components", "_component", "__dict__")
 
     def __init__(
         self,
         components: Mapping[str, str],
         component: Callable[[str], ComponentView],
+        *,
+        origin: PointOrigin,
     ) -> None:
+        """Copy resolved names and bind the owning point's constructor identity.
+
+        components maps declared role names to concrete component names.
+        component reads/edits that same point; unknown names raise AttributeError.
+        origin is its immutable PointOrigin, not an inferred callback identity.
+        PointView.resolve supplies all three from one bound point.
+        """
+        self._origin = origin
         self._components = MappingProxyType(dict(components))
         self._component = component
 
     @property
     def components(self) -> Mapping[str, str]:
+        """Return the fixed, read-only role-to-concrete-name mapping."""
         return self._components
 
     def __getattr__(self, role: str) -> ComponentView:
@@ -35,6 +52,29 @@ class RoleView:
         except KeyError as cause:
             raise AttributeError(f"Unknown resolved role {role!r}") from cause
         return self._component(name)
+
+
+def capture_role_components(roles: RoleView, origin: PointOrigin) -> Mapping[str, str]:
+    """Copy fixed names for a RoleView from this complete point origin.
+
+    Entry-internal helper, not a package export. roles comes from PointView.resolve;
+    origin is the destination point's constructor identity. Compare UUID,
+    resolved source and both owning roots, not handle/callback identity.
+    Missing or mismatched origin raises ValueError even for an empty mapping.
+    No YAML contents or role declarations are read or re-resolved.
+    """
+    # Entry-internal metadata must not reserve another public role attribute.
+    bound: object = vars(roles).get("_origin")
+    if not isinstance(bound, PointOrigin):
+        raise ValueError("RoleView has no bound point origin")
+    if (
+        UUID(bound.entry_id) != UUID(origin.entry_id)
+        or bound.result_root != origin.result_root
+        or bound.database_root != origin.database_root
+        or bound.source.resolve() != origin.source.resolve()
+    ):
+        raise ValueError("RoleView must belong to the same bound point and entry")
+    return MappingProxyType(dict(roles.components))
 
 
 def _reference_target(component: ComponentSchema, path: str) -> str | None:

@@ -17,6 +17,7 @@ from .views import (
     GeneralView,
     add_component_to_draft,
     document_meta,
+    point_origin,
     register_view_read,
     stage_component,
     stage_general,
@@ -130,10 +131,11 @@ class PointView:
         role-name string field on already resolved components.
         None uses the caller-registered notebook shorthand. Errors identify the
         role, focus, kind and reason. The returned name mapping stays fixed while
-        values follow this bound point's working-unit snapshot and edits.
+        values follow this bound point's working-unit snapshot and edits. Its
+        constructor origin also binds the returned roles to this entry/point.
         """
         names = resolve_names(self._store.snapshot().components, roles, focus, explicit)
-        return RoleView(names, self.__getattr__)
+        return RoleView(names, self.__getattr__, origin=point_origin(self))
 
     def meta(self, path: str) -> Provenance | None:
         """Return an independent cached source in working units, or None."""

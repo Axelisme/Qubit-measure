@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Annotated
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import Field, JsonValue
 from pydantic_core import PydanticCustomError
 from zcu_tools.cfg_model import PulseSpec
@@ -16,6 +17,7 @@ from zcu_tools.gui.form import (
     FormPath,
     FormState,
     ModuleInline,
+    ModuleInput,
     ModuleRef,
     field_error,
 )
@@ -60,6 +62,84 @@ def library(gain: float = 0.25) -> LibrarySnapshot:
             components={"Q1": ComponentLibrary(pulses={"pi": pulse})},
         )
     )
+
+
+class NullableModuleForm(FormModel):
+    """Keep the public alias metadata inside a nullable field annotation."""
+
+    drive: ModuleInput | None = Field(
+        default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
+    )
+
+
+@pytest.mark.parametrize("operation", ["defaults", "write", "result"])
+def test_nullable_module_alias_requires_used_library(operation: str) -> None:
+    env = FormEnv(md=MetaDict())
+    reference: dict[str, JsonValue] = {"kind": "ref", "name": "Q1.pulses.pi"}
+    if operation == "defaults":
+        with pytest.raises(PydanticCustomError, match="drive.name"):
+            NullableModuleForm.default_input(env)
+    elif operation == "write":
+        state = FormState(FormInput(NullableModuleForm, {"drive": None}))
+        before = state.input.data
+        base = state.base.data
+        notifications: list[dict[str, JsonValue]] = []
+        state.subscribe(lambda: notifications.append(state.input.data))
+        with pytest.raises(PydanticCustomError, match="drive.name"):
+            state.write({("drive",): reference}, env)
+        assert state.input.data == before
+        assert state.base.data == base
+        assert notifications == []
+    else:
+        state = FormState(FormInput(NullableModuleForm, {"drive": reference}))
+        errors = state.result(env)
+        assert isinstance(errors, FormErrors)
+        assert ("drive", "name") in errors.messages
+    null = FormState(FormInput(NullableModuleForm, {"drive": None})).result(env)
+    assert isinstance(null, NullableModuleForm)
+    assert null.drive is None
+
+
+def test_nullable_module_alias_uses_captured_library_for_active_branch_switch() -> None:
+    source = library()
+    env = FormEnv(md=MetaDict(), library=source)
+    before = source.document()
+    state = FormState(NullableModuleForm.default_input(env))
+    state.write({("drive", "kind"): "inline"}, env)
+    result = state.result(env)
+    assert isinstance(result, NullableModuleForm)
+    assert isinstance(result.drive, ModuleInline)
+    assert result.drive.module == source.module_spec("Q1.pulses.pi")
+    assert source.document() == before
+
+
+def test_public_module_alias_projects_reference_choices() -> None:
+    class ModuleAliasForm(FormModel):
+        """Parent options reach the exported module union reference branch."""
+
+        drive: ModuleInput = Field(
+            default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
+        )
+
+        @classmethod
+        def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+            """Allow the fixed reference name at its model-field path."""
+            return {("drive", "name"): ("Q1.pulses.pi",)}
+
+    env = FormEnv(md=MetaDict(), library=library())
+    validator = Draft202012Validator(ModuleAliasForm.input_schema(env))
+    valid: dict[str, JsonValue] = {"drive": {"kind": "ref", "name": "Q1.pulses.pi"}}
+    assert validator.is_valid(valid)
+    assert isinstance(
+        FormState(FormInput(ModuleAliasForm, valid)).result(env), ModuleAliasForm
+    )
+    invalid: dict[str, JsonValue] = {
+        "drive": {"kind": "ref", "name": "Q1.pulses.absent"}
+    }
+    errors = FormState(FormInput(ModuleAliasForm, invalid)).result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("drive", "name") in errors.messages
+    assert not validator.is_valid(invalid)
 
 
 def test_ref_to_inline_seeds_a_detached_spec_without_materializing_children() -> None:

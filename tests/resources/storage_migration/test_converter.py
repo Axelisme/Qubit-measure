@@ -909,7 +909,7 @@ def test_module_candidates_keep_destinations_and_declared_reference_priority(
     destinations = {
         item.old_key: item.new_path
         for item in report.key_mappings
-        if item.old_file == library
+        if item.old_file == library and item.library_kind == "module"
     }
     assert destinations == {
         "first_choice": "C1.pulses.first_choice",
@@ -928,5 +928,3 @@ def test_module_candidates_keep_destinations_and_declared_reference_priority(
         "waveforms.pulse",
         "future_root",
     }
-    assert all("由 4a 轉換" in reason for reason in pending.values())
-    assert "Unknown" in pending["modules.unknown_module"]

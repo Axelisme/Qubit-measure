@@ -6,6 +6,7 @@ Form paths never interpret dots in a mapping key as separators.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Literal, Self
@@ -21,7 +22,7 @@ from zcu_tools.resources.context.library import LibrarySnapshot
 type FormPath = tuple[str | int, ...]
 """Relative model-field/mapping-key error path; integers are sequence indexes."""
 type FormWritePath = tuple[str, ...]
-"""Model-field/mapping-key path; sequence index writes are not supported."""
+"""Model-field leaf path; sequence indexes and mapping-key writes are rejected."""
 type FormValue = (
     str
     | int
@@ -84,12 +85,16 @@ class FormErrors:
 
 @dataclass(frozen=True)
 class FormChange:
-    """One changed scalar or whole sequence relative to the input base.
+    """One changed scalar, whole sequence or typed mapping relative to base.
 
-    path is a model-field/mapping-key path, never a sequence index. input is
-    detached JSON including its expression/complex envelope. value is ordinary
-    evaluated data. original is the scalar expression text without its envelope,
-    or None for direct input; it is suitable for the Engine's opaque original.
+    path is a model-field leaf path, never a sequence index or mapping key.
+    input is detached JSON including expression/complex envelopes. value is
+    ordinary evaluated data. original is scalar expression text without its
+    envelope, or None for direct input and whole containers; it is suitable
+    for the Engine's opaque original. Empty typed mappings remain whole leaves.
+    Only current active input leaves are reported. Removed branch fields have
+    no tombstone; structural changes retain their discriminator or null leaf.
+    Ordinary model containers are not leaves.
     """
 
     path: FormWritePath
@@ -105,7 +110,9 @@ def field_error(path: FormPath, message: str) -> PydanticCustomError:
     message is the field's error text. Use ordinary ValueError for a model-wide
     error. FormState translates this error without exposing a new error owner.
     """
-    raise NotImplementedError("F1 internal implementation pending")
+    return PydanticCustomError(
+        "form_field", "{message}", {"path": path, "message": message}
+    )
 
 
 class FormModel(BaseModel):
@@ -126,7 +133,11 @@ class FormModel(BaseModel):
         Domain overrides may include Expr/complex JSON. Used missing library or
         device sources raise field_error with the consuming path. No I/O occurs.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._sources import check_sources
+
+        data = cls.defaults(env, {})
+        check_sources(cls, data, env)
+        return FormInput(cls, data)
 
     @classmethod
     def defaults(
@@ -139,15 +150,28 @@ class FormModel(BaseModel):
         model or replace missing keys with None. Domain factories may use env
         and previous; source failures propagate with the consuming field path.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._structure import static_defaults
+
+        del env, previous
+        return static_defaults(cls)
 
     @classmethod
     def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Return dynamic legal values by relative field path; empty means none.
 
-        These options are shared by validation and the input schema. Empty
-        options for one declared path permit no value. Consumers requiring an
-        absent captured device/library source raise field_error at that path.
+        Paths contain model-field names and target scalar or whole-container
+        leaves, including fields inside nullable/tagged-union models. They do
+        not address mapping keys, sequence indexes or ordinary model sections.
+        input_schema and result reject invalid declared paths with ValueError.
+        Validation and input schema share these options, without restricting
+        another field that reuses the same nested model. When enclosing and
+        nested FormModels declare options for the same leaf, the deepest local
+        declaration wins, including empty options. Nonoverlapping enclosing
+        options remain in effect. Numeric/complex leaves permit a well-formed
+        arithmetic Expr; result validates its evaluated
+        value against choices. The reused evaluator does not return strings.
+        Empty options for one declared path permit no value. Consumers needing
+        an absent captured device/library source raise field_error at that path.
         """
         return {}
 
@@ -160,7 +184,9 @@ class FormModel(BaseModel):
         describes partial JSON input, not just a valid ordinary model. Domain
         source failures from choices propagate; no refresh or file access occurs.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._schema import input_schema
+
+        return input_schema(cls, env)
 
 
 class FormInput[F: FormModel]:
@@ -174,21 +200,26 @@ class FormInput[F: FormModel]:
         Non-JSON/nonfinite data raises ValueError; unknown fields, malformed tags
         and invalid values remain input for result/compatible restoration.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._json import copy_object
+
+        self._model = model
+        self._data = copy_object(data)
 
     @property
     def model(self) -> type[F]:
         """Return the ordinary form class paired with this input."""
-        raise NotImplementedError("F1 internal implementation pending")
+        return self._model
 
     @property
     def data(self) -> dict[str, JsonValue]:
         """Return a detached JSON tree; changing it cannot edit this input."""
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._json import copy_object
+
+        return copy_object(self._data)
 
     def to_json(self) -> str:
         """Encode only input, losslessly retaining missing/null and scalar tags."""
-        raise NotImplementedError("F1 internal implementation pending")
+        return json.dumps(self._data, allow_nan=False)
 
     @staticmethod
     def from_json[Model: FormModel](model: type[Model], text: str) -> FormInput[Model]:
@@ -199,7 +230,13 @@ class FormInput[F: FormModel]:
         Model compatibility is deliberately deferred to write_compatible so old
         field names or changed leaf types can be reported instead of hidden.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._json import copy_object
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON input: {exc}") from exc
+        return FormInput(model, copy_object(data))
 
 
 class FormState[F: FormModel]:
@@ -207,17 +244,20 @@ class FormState[F: FormModel]:
 
     def __init__(self, base: FormInput[F]) -> None:
         """Copy base into both input and comparison base without evaluation."""
-        raise NotImplementedError("F1 internal implementation pending")
+        self._model = base.model
+        self._data = base.data
+        self._base = base.data
+        self._callbacks: list[Callable[[], None]] = []
 
     @property
     def input(self) -> FormInput[F]:
         """Return a detached current input; no environment access occurs."""
-        raise NotImplementedError("F1 internal implementation pending")
+        return FormInput(self._model, self._data)
 
     @property
     def base(self) -> FormInput[F]:
         """Return a detached comparison base supplied by the host."""
-        raise NotImplementedError("F1 internal implementation pending")
+        return FormInput(self._model, self._base)
 
     def write(self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv) -> None:
         """Install one input batch, keeping model-invalid drafts editable.
@@ -226,17 +266,33 @@ class FormState[F: FormModel]:
         previous), then inherit old same-name fields except the discriminator.
         Apply all remaining leaf writes afterwards, so explicitly supplied
         content wins. Required fields without defaults stay absent. Writes use
-        model-field/mapping-key paths; dots within a key have no special meaning.
-        Whole sequences are leaves. Nullable model sections accept None or an
-        object to deactivate/activate the section before child leaf edits.
-        Index patches and structurally unknown or overlapping paths raise
-        ValueError without installing a partial batch.
+        model-field leaf paths. Sequences and typed mappings are whole leaves;
+        replace a mapping to delete, rename or clear its keys. Mapping-key and
+        sequence-index patches raise ValueError. Ordinary model replacement is
+        rejected. A first child-leaf write into an absent non-nullable nested
+        model creates its static defaults object before applying the leaf.
+        Nullable model sections accept None or an object to deactivate/activate;
+        an explicit null section requires object activation before child edits.
+        Structurally unknown or overlapping paths raise ValueError without
+        installing a partial batch.
         Ordinary invalid values/Expr are retained for result to report. Missing
         used library/devices raises field_error naming its consuming path.
         Notify subscribers once after a changed batch is installed, not for
         intermediate branches. No Engine update, revision check or I/O occurs.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._sources import check_sources
+        from ._structure import build_candidate
+
+        candidate = build_candidate(self._model, self._data, batch, env)
+        check_sources(self._model, candidate, env)
+        self._install(candidate)
+
+    def _install(self, candidate: dict[str, JsonValue]) -> None:
+        if candidate == self._data:
+            return
+        self._data = candidate
+        for callback in tuple(self._callbacks):
+            callback()
 
     def result(self, env: FormEnv) -> F | FormErrors:
         """Evaluate/decode input and validate its model, without editing input.
@@ -246,17 +302,49 @@ class FormState[F: FormModel]:
         Return a model or path-directed errors, including a used missing source;
         ordinary model-wide errors use (). Each call uses the supplied env.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._evaluate import result
+
+        return result(self._model, self._data, env)
 
     def changes(self, env: FormEnv) -> tuple[FormChange, ...] | FormErrors:
         """Return changed input leaves and their evaluated values, or errors.
 
         Compare input with base, preserving expression-only changes even when
-        the evaluated value is unchanged. Lists/tuples are whole leaves. Invalid
-        input returns FormErrors rather than a partially valid change batch.
+        the evaluated value is unchanged. Sequences and typed mappings are
+        whole leaves, including empty mappings. Report only leaves present in
+        the current active input, including discriminator changes and nullable
+        null; removed branch fields have no tombstones. Ordinary models are not
+        leaves. Invalid input returns FormErrors, never partial changes.
         This does not reset base or commit to an owner. Uses env on every call.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._evaluate import value_at
+        from ._json import copy_json
+        from ._structure import leaves
+
+        result = self.result(env)
+        if isinstance(result, FormErrors):
+            return result
+        before = leaves(self._model, self._base)
+        changes: list[FormChange] = []
+        for path, value in leaves(self._model, self._data).items():
+            if path in before and value == before[path]:
+                continue
+            evaluated = value_at(result, path)
+            original = (
+                value.get("expr")
+                if isinstance(value, dict)
+                and not isinstance(evaluated, (dict, list, tuple))
+                else None
+            )
+            changes.append(
+                FormChange(
+                    path,
+                    copy_json(value),
+                    evaluated,
+                    original if isinstance(original, str) else None,
+                )
+            )
+        return tuple(changes)
 
     def reset(self, base: FormInput[F]) -> None:
         """Replace input/base with detached base and notify once when changed.
@@ -264,7 +352,15 @@ class FormState[F: FormModel]:
         A different form class raises ValueError. Discard/accepted Apply choose
         when to call this; reset does not evaluate, submit or change revision.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        if base.model is not self._model:
+            raise ValueError("Cannot reset to a different form model class")
+        data = base.data
+        changed = data != self._data or data != self._base
+        self._data = data
+        self._base = base.data
+        if changed:
+            for callback in tuple(self._callbacks):
+                callback()
 
     def subscribe(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Register a plain post-write/reset callback and return unsubscribe.
@@ -273,11 +369,20 @@ class FormState[F: FormModel]:
         callback errors propagate after installation and do not roll it back.
         No Qt signals, lifecycle controller or owner adapter is created.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        self._callbacks.append(callback)
+        active = True
+
+        def unsubscribe() -> None:
+            nonlocal active
+            if active:
+                active = False
+                self._callbacks.remove(callback)
+
+        return unsubscribe
 
     def input_schema(self, env: FormEnv) -> dict[str, JsonValue]:
         """Delegate the form class's input_schema; state is not schema authority."""
-        raise NotImplementedError("F1 internal implementation pending")
+        return self._model.input_schema(env)
 
     def write_compatible(
         self, saved: Mapping[str, JsonValue], env: FormEnv
@@ -285,13 +390,24 @@ class FormState[F: FormModel]:
         """Overlay surviving compatible saved leaves and return dropped paths.
 
         Start with host-provided current default input. Keep valid Expr/complex
-        tags, missing-vs-null and complete sequence leaves. Drop removed paths
+        tags, missing-vs-null and whole sequence/typed-mapping leaves. Drop removed paths
         and type-incompatible leaves, but keep range/cross-field-invalid values
         so result can report them. This is not legacy format support. Branch
-        writes use the same discriminator-first order as write. Source failures
-        retain their consuming path; a changed restoration notifies once.
+        writes use the same discriminator-first order as write. A saved object
+        without a discriminator overlays the current selected branch, retaining
+        its tag and unsaved defaults; an empty object makes no change. If neither
+        saved nor current input selects a branch, drop that object instead of
+        replacing the model section. Source failures retain their consuming
+        path; a changed restoration notifies once.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._json import copy_object
+        from ._sources import check_sources
+        from ._structure import restore
+
+        candidate, dropped = restore(self._model, self._data, copy_object(saved), env)
+        check_sources(self._model, candidate, env)
+        self._install(candidate)
+        return dropped
 
 
 class LinRange(FormModel):
@@ -356,7 +472,25 @@ class ModuleInline(FormModel):
         library/key or invalid module family fails at the consuming field path;
         it never supplies a dummy Spec. Static defaults apply without a prior ref.
         """
-        raise NotImplementedError("F1 internal implementation pending")
+        from ._json import copy_object
+        from ._structure import static_defaults
+
+        data = static_defaults(cls)
+        if previous.get("kind") == "ref" and isinstance(
+            name := previous.get("name"), str
+        ):
+            if env.library is None:
+                raise field_error(
+                    ("module",), "Missing captured library for inline module"
+                )
+            try:
+                spec = env.library.module_spec(name)
+            except (ValueError, KeyError) as exc:
+                raise field_error(
+                    ("module",), f"Cannot read module {name!r}: {exc}"
+                ) from exc
+            data["module"] = copy_object(spec.model_dump(mode="json"))
+        return data
 
 
 type ModuleInput = Annotated[ModuleRef | ModuleInline, Field(discriminator="kind")]

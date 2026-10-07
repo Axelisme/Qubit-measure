@@ -28,10 +28,11 @@ from zcu_tools.gui.event_bus import OriginKind
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.context_types import EntryInfo
     from zcu_tools.gui.session.services.device import DeviceProtocol
-    from zcu_tools.gui.session.types import SessionEnv
+    from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
-    from zcu_tools.resources.context import ModuleLibrary
+    from zcu_tools.resources.entry import ResultEntry
 
 
 _T = TypeVar("_T")
@@ -264,37 +265,33 @@ class ProjectIOPort(Protocol):
 
 @runtime_checkable
 class ContextReadPort(Protocol):
-    """Read-only view of the active context's ModuleLibrary, as a CfgEditor needs.
+    """Fixed parameter capture, without file I/O or writable resource handles."""
 
-    A ``CfgEditorSession`` reads the current ml to seed a session opened
-    ``from_name`` (load an existing entry's shape). Reading only — all ml/md
-    *content writes* go through the app's ``ContextWritePort`` (ADR-0067:
-    ContextService is the single write authority). Symmetric name with
-    ``ContextWritePort``.
-    """
+    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
+        """Copy published sources with fixed supplied names.
 
-    def get_current_ml(self) -> ModuleLibrary: ...
+        roles=None permits direct component/general paths. EMPTY raises
+        FailedPreconditionError(no_context); source faults or invalid captured
+        destinations propagate through the parameter owner.
+        """
+        ...
 
 
 @runtime_checkable
 class ProjectContextPort(Protocol):
-    """Project context commands as used by ``ProjectSettingsService``.
+    """Prepared entry installation, used by ProjectSettingsService.
 
-    ``ProjectSettingsService`` applies a project (one-way command into the
-    context); it depends on this port, not the concrete ``ContextService``.
+    Resources owns name/file validation; the session context owner publishes
+    DRAFT only after preparing all of the entry's required sources/cache.
     """
 
-    def set_project_context(
-        self,
-        md: object,
-        ml: object,
-        chip_name: str,
-        qub_name: str,
-        res_name: str,
-        result_dir: str,
-        database_path: str,
-    ) -> None: ...
-    def setup_project(self, result_dir: str) -> None: ...
+    def install_entry(self, entry: ResultEntry) -> EntryInfo:
+        """Install a resource-validated entry as DRAFT without selecting a point.
+
+        Return owner entry identity/paths. Preparation failure leaves the prior
+        binding installed and propagates its cause; no resource rollback occurs.
+        """
+        ...
 
 
 @runtime_checkable

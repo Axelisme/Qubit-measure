@@ -49,6 +49,149 @@ ContextSourceKind: TypeAlias = Literal["setup", "point", "module_cfg"]
 
 
 @dataclass(frozen=True)
+class EntryRequest:
+    """Entry name: one ResultEntry-validated path segment, not a path or UUID."""
+
+    name: str
+
+
+@dataclass(frozen=True)
+class EntryInfo:
+    """Opened entry UUID, directory name, and absolute owner-supplied roots.
+
+    entry_id is ResultEntry.entry_id. name is its single-segment directory name.
+    result_path and database_path are the exact paths owned by this entry.
+    """
+
+    entry_id: str
+    name: str
+    result_path: Path
+    database_path: Path
+
+
+@dataclass(frozen=True)
+class WorkingPointInfo:
+    """A point label and its general.description, with absent description as ''."""
+
+    label: str
+    description: str
+
+
+@dataclass(frozen=True)
+class PointUseRequest:
+    """Select label in the currently opened entry identified by its UUID."""
+
+    entry_id: str
+    label: str
+
+
+@dataclass(frozen=True)
+class CommandOrigin:
+    """Frontend attribution: gui has no call ID; mcp has a native nonblank ID.
+
+    origin is exactly gui or mcp. call_id is None for gui and nonblank for mcp.
+    Invalid combinations raise ValueError before any resource command.
+    """
+
+    origin: Literal["gui", "mcp"]
+    call_id: str | None
+
+    def __post_init__(self) -> None:
+        if self.origin not in ("gui", "mcp"):
+            raise ValueError("Command origin must be gui or mcp")
+        if self.origin == "gui" and self.call_id is not None:
+            raise ValueError("GUI commands require call_id=None")
+        if self.origin == "mcp" and (
+            not isinstance(self.call_id, str) or not self.call_id.strip()
+        ):
+            raise ValueError("MCP commands require a nonblank call_id")
+
+
+@dataclass(frozen=True)
+class PointCreateRequest:
+    """Create a point in the opened entry, independently of its memory DRAFT.
+
+    entry_id is the opened entry UUID. label is a safe single path segment.
+    description replaces the seed/clone description, including empty text.
+    origin attributes the resource command. clone_from is a same-entry label;
+    None copies setup components and uses an empty library.
+    """
+
+    entry_id: str
+    label: str
+    description: str
+    origin: CommandOrigin
+    clone_from: str | None = None
+
+
+class PointBindingError(RuntimeError):
+    """A point was created but could not be installed; never delete or retry it.
+
+    entry_id and label identify the retained destination. The raising service
+    chains the installation cause; Open/Use is recovery, not repeating New.
+    """
+
+    entry_id: str
+    label: str
+
+    def __init__(self, *, entry_id: str, label: str) -> None:
+        self.entry_id = entry_id
+        self.label = label
+        super().__init__(
+            f"Point {label!r} in entry {entry_id!r} was created but could not be "
+            "installed. Use the same point to recover; do not repeat New."
+        )
+
+
+@dataclass(frozen=True)
+class ComponentOption:
+    """Point component name and its registered kind, in document order."""
+
+    name: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class ComponentFocus:
+    """Cached session focus, detached from consumer roles and selection IDs.
+
+    target is None for EMPTY, EntryDraft for DRAFT, or SavedPoint for ACTIVE.
+    name is the selected component or None for no selection.
+    components lists all current component names/kinds in document order.
+    """
+
+    target: ContextTarget | None
+    name: str | None
+    components: tuple[ComponentOption, ...]
+
+
+@dataclass(frozen=True)
+class ContextSource:
+    """A bound persistent source and its last published health diagnostic.
+
+    document is setup, point, or module_cfg. path is its absolute owner path.
+    fault is None after successful opening/refresh, not a guarantee about disk.
+    """
+
+    document: ContextSourceKind
+    path: Path
+    fault: ContextSourceFault | None
+
+
+@dataclass(frozen=True)
+class ContextSourceBinding:
+    """Internal session source identity and ordered persistent sources.
+
+    binding_id is the positive session-local ID allocated on installation.
+    sources is ordered setup, point, module_cfg, omitting unbound documents.
+    This ID is for source facts/watcher routing, not a read/write target.
+    """
+
+    binding_id: int
+    sources: tuple[ContextSource, ...]
+
+
+@dataclass(frozen=True)
 class ContextSourceFault:
     """Diagnostic for a source: document kind, absolute path, exception name and message."""
 

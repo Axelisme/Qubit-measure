@@ -8,7 +8,7 @@ status: draft
 
 P2 的 plan 與 knobs 需要 sequence、nullable、tagged union、typed mapping、expression 和 library module ref。舊 CfgSchema 的 Spec／Value tree 不直接表示這些輸入。擴充舊工具會把本次 P2 與 Measure 遷移綁在一起。
 
-使用者已依 storage-redesign D195／D197 定稿新工具設計。本稿把定稿的「設計總覽」轉為 package 位置、依賴與 Engine 擴充安排，不重設計互動。Sr-advisor 已按 D198 代裁核准 F0。F2 的 Engine 原文機制已 collect 並通過完整 range review。F1 正在準備公開 declarations、真實 T1TunablesForm caller 與正式 tests；這不表示 core 內部實作或 GUI host 已完成。
+使用者已依 storage-redesign D195／D197 定稿新工具設計，sr-advisor 已按 D198 代裁核准 F0。本稿把定稿的「設計總覽」轉為 package 位置、依賴與 Engine 擴充安排，不重設計互動。Core、editor、具體表單、host 與 Engine 分別持有下列責任，切片的執行進度由 task records 記錄。
 
 定稿來源是 task-local `storage-redesign/spec/form-tool-design.md`。該檔持有 U1–U7、A1–A4、F0–F5 與完整 CfgSchema 能力對應。工具適用於新表單，本次不碰 CfgSchema，不遷移 Measure。舊表單退休由 backlog BL-20261007T155403537614Z-cfgschema-pydantic 另行安排。
 
@@ -30,19 +30,19 @@ GUI／外部組合根顯式注入 workflow 與表單宣告。Framework 不 impor
 
 ## 輸入、值與編輯狀態
 
-Input 是可不完整的 JSON tree。缺 key 表示未填，null 表示明確的 null。Scalar 可直接填值，也可填 `{"expr": "..."}`；complex 使用 `{"__complex__": [re, im]}`。Discriminator 決定 tagged-union 分支。表單 model 的實例只含求值後的普通值。
+Input 是可不完整的 JSON tree。缺 key 表示未填，null 表示明確的 null。Scalar 可直接填值。Numeric／complex 欄位也可填 `{"expr": "..."}`，沿用數值 evaluator，不支援字串求值。Complex 直接值使用 `{"__complex__": [re, im]}`。Discriminator 決定 tagged-union 分支。表單 model 的實例只含求值後的普通值。
 
 FormInput[F] 把輸入與表單型別 F 配對。其內容以具名 JSON 型別表示，不把 BaseModel、driver、array 或 callable 塞入持久輸入。FormState[F] 持有隔離的 input 與 base，不持 Engine revision。Editor 與 host 的 MCP 請求使用同一套資料行為，但 MCP 不寫某個畫面的私有草稿。
 
-- `write` 將一批輸入寫入候選後一次安裝。Model-invalid 中間態仍留在 draft，result 回報錯誤，不以預設值掩蓋它。Nullable 子 model 可寫 null 停用，或寫 object 啟用，再編輯子欄位。
+- `write` 將一批輸入寫入候選後一次安裝。Model-invalid 中間態仍留在 draft，result 回報錯誤，不以預設值掩蓋它。Typed mapping 與 sequence 都是完整 leaf，刪 key、改名與清空都寫入整個 mapping。普通 nested model 只寫 child leaves，不接受整個替換。Absent 非 nullable 子 model 的首次 child write 先建立靜態 defaults，再寫明送欄位；沒有 defaults 的 required key 仍未填。Nullable 子 model 可寫 null 停用，或寫 object 啟用；明確 null 後必須先啟用才能編輯子欄位。
 - `result(env)` 解碼 scalar、求值 expression、檢查 choices，最後呼叫表單 model 驗證。成功回傳合法 model，失敗回傳 FormErrors。
-- `changes(env)` 回傳相對 base 的改動葉節點與其原文、求值後值。List／tuple 是一個完整葉節點，不產生 index patch。
+- `changes(env)` 回傳相對 base 的改動葉節點與其原文、求值後值。List／tuple／typed mapping 是一個完整葉節點，包含空 mapping，不產生 index 或 mapping-key patch。
 - `reset(base)` 以 host 提供的新 base 重設草稿。Discard 與成功 Apply 都由 host 決定何時呼叫，不是工具 policy。
 - 變更通知使用普通 callback，不使用 Qt Signal，也不另設 owner Protocol、auto_apply 選項或發布服務。
 
-Write paths 是 tuple，typed mapping 的 key 可以含點。Host 只把已確認的 model-field leaf path 轉成 Engine dot path。Engine 仍不接受 sequence index 或整個 nested model replacement。FormErrors 以欄位路徑 tuple 對應訊息，list 驗證錯誤保留 Pydantic 的 index 位置。沒有經 `field_error` 指定欄位的 model-wide error 使用空 tuple `()`。GUI 將這類錯誤顯示在表單頂端，MCP 原樣回傳路徑與訊息，不把錯誤塞到某個欄位。
+Write paths 是 model-field tuple，不進入 sequence index 或 mapping key。Mapping 內的 key 可含點，不影響整個欄位的寫入路徑。Host 把已確認的 model-field leaf path 轉成 Engine dot path；mapping leaf 使用該欄位路徑。Engine 仍不接受 sequence index 或整個 nested model replacement。FormErrors 以欄位路徑 tuple 對應訊息，list 驗證錯誤保留 Pydantic 的 index 位置。沒有經 `field_error` 指定欄位的 model-wide error 使用空 tuple `()`。GUI 將這類錯誤顯示在表單頂端，MCP 原樣回傳路徑與訊息，不把錯誤塞到某個欄位。
 
-表單類別使用 Annotated 的 Display 提供標籤、說明、單位與輸入提示。順序依欄位宣告，分組依 nested 子 model；Display 不另設 order／group。collapsed 只用於子 model 欄位。動態合法值由 `choices(env)` 提供，驗證與 input schema 共用結果。`field_error(path, message)` 讓 model_validator 指向具體欄位。Pydantic 擁有型別與 Field 範圍，工具不維護第二套 model 合法性規則。
+表單類別使用 Annotated 的 Display 提供標籤、說明、單位與輸入提示。順序依欄位宣告，分組依 nested 子 model；Display 不另設 order／group。collapsed 只用於子 model 欄位。動態合法值由 `choices(env)` 提供，驗證與 input schema 共用結果。Choices 路徑只指向 model-field leaf，可進入 nullable／tagged-union 子 model，不進入 container key 或 index。同型 nested model 在不同欄位的選項彼此隔離。Numeric／complex leaf 的 input schema 允許 well-formed arithmetic Expr，result 在求值後檢查 membership。`field_error(path, message)` 讓 model_validator 指向具體欄位。Pydantic 擁有型別與 Field 範圍，工具不維護第二套 model 合法性規則。
 
 ## Defaults、分支、range 與 module ref
 
@@ -167,9 +167,9 @@ F1∥F2在F0核准後各用獨立lane。F1只寫form core／tests與指定contra
 
 F1從公開FormState、schema與保存還原驗證U1–U3、U7、A1–A4資料行為。F2從Engine start/update/tunables/execute及journal驗證原文與值原子發布。F3從Qt editor→FormState驗證編輯行為。F4從defaults→result→to_cfg驗證native成品。F5以GUI／MCP共用host入口完成U1–U7與A1–A4，另外完成裝置上下限、refresh與CP-B。
 
-不直接測私有函式、腳本、文件或設定字面內容，不在tests另啟程序驗證Qt-free。Qt-free由import contracts及無QApplication的公開seam選集驗證，測試平行化交給pytest CLI。
+不直接測私有函式、腳本、文件或設定字面內容，不在 tests 另啟程序驗證 Qt-free。Qt-free 由 import contracts 與 source 直接審閱判定。公開 seam 選集驗證資料行為，既有 tests/gui fixture 建立 QApplication 不代表 core 依賴 Qt。測試平行化交給 pytest CLI。
 
-F4／F5仍受4a已接受context型別與D196必要P2 caller blockers限制。149項繼承回歸由workflows tracker逐項持有，沒有waive。Main前全樹Pyright與detectors必須對當時main零回歸，且由使用者核准。不push、不操作硬體或真資料。
+F4／F5仍受4a已接受context型別與D196必要P2 caller blockers限制。繼承回歸的當前數量、證據與 owner 由 workflows tracker 持有，沒有 waive。Main前全樹Pyright與detectors必須對當時main零回歸，且由使用者核准。不push、不操作硬體或真資料。
 
 ## 取捨
 
