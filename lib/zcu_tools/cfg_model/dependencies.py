@@ -51,16 +51,17 @@ class ModuleResolver(Protocol):
     """Read unexpanded Specs from one fixed library snapshot using concrete keys.
 
     Implementations isolate returned values and validate key-family partitions.
-    Missing keys and invalid families raise ValueError with key evidence.
+    Missing keys raise KeyError with key evidence; invalid roots or family
+    partitions raise ValueError. The caller translates both during materialization.
     No focus, role shorthand, asset lookup, or child materialization is performed.
     """
 
     def module_spec(self, path: str) -> ModuleSpec:
-        """Return an isolated module Spec for path; reject missing or non-module keys."""
+        """Copy a module Spec; missing keys raise KeyError, invalid roots ValueError."""
         ...
 
     def waveform_spec(self, path: str) -> WaveformSpec:
-        """Return an isolated waveform Spec for path; reject missing or non-waveform keys."""
+        """Copy a waveform Spec; missing keys raise KeyError, invalid roots ValueError."""
         ...
 
 
