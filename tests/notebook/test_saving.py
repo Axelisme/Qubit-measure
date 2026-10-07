@@ -501,7 +501,7 @@ def test_save_run_rejects_cross_point_roles_before_outputs_and_events(
     source = exp.run(SavingCfg())
     events_before = tuple(ledger.events())
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="same bound point"):
         exp.save_run(accept_point, source=source, roles=roles)
 
     assert not any(entry.database_path.rglob("*"))
