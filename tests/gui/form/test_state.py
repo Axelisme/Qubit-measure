@@ -15,6 +15,7 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
     LinRange,
+    RangeInput,
     field_error,
 )
 from zcu_tools.resources.context import MetaDict
@@ -568,6 +569,54 @@ def test_compatible_restore_cannot_replace_an_unselected_model_object(
     result = state.result(env)
     assert isinstance(result, FormErrors)
     assert ("branch",) in result.messages
+
+
+class NullableRangeAliasForm(FormModel):
+    """Expose the public range alias as a nullable active model section."""
+
+    fluxes: RangeInput | None = Field(default_factory=LinRange)
+
+
+def test_nullable_range_alias_evaluates_expressions_and_canonical_errors() -> None:
+    env = environment()
+    data: dict[str, JsonValue] = {
+        "fluxes": {"kind": "linrange", "start": {"expr": "seed"}, "stop": 5.0, "n": 2}
+    }
+    state = FormState(FormInput(NullableRangeAliasForm, data))
+    result = state.result(env)
+    assert isinstance(result, NullableRangeAliasForm)
+    assert isinstance(result.fluxes, LinRange)
+    assert result.fluxes.start == 4.0
+    assert state.input.data == data
+    invalid: dict[str, JsonValue] = {
+        "fluxes": {"kind": "linrange", "n": {"expr": "1.5"}}
+    }
+    errors = FormState(FormInput(NullableRangeAliasForm, invalid)).result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("fluxes", "n") in errors.messages
+    assert () not in errors.messages
+
+
+def test_nullable_range_alias_edits_and_restores_the_current_branch() -> None:
+    env = environment()
+    state = FormState(NullableRangeAliasForm.default_input(env))
+    state.write(
+        {
+            ("fluxes", "start"): {"expr": "seed"},
+            ("fluxes", "stop"): 5.0,
+            ("fluxes", "n"): 2,
+        },
+        env,
+    )
+    prior = state.input.data["fluxes"]
+    assert isinstance(prior, dict)
+    assert state.write_compatible({"fluxes": {"n": 3}}, env) == ()
+    assert state.input.data["fluxes"] == {**prior, "n": 3}
+    result = state.result(env)
+    assert isinstance(result, NullableRangeAliasForm)
+    assert isinstance(result.fluxes, LinRange)
+    assert result.fluxes.start == 4.0
+    assert result.fluxes.n == 3
 
 
 def test_compatible_restore_preserves_nullable_branch_deactivation() -> None:

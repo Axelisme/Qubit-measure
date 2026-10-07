@@ -47,17 +47,30 @@ def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
 
 
 def discriminator(info: FieldInfo) -> str | None:
-    """Read a string discriminator, including metadata inside named aliases."""
+    """Read a string tag through aliases/nullable wrappers; absent tags return None."""
     if isinstance(info.discriminator, str):
         return info.discriminator
-    annotation = _expand_alias(info.annotation)
-    if get_origin(annotation) is Annotated:
-        for metadata in get_args(annotation)[1:]:
-            if isinstance(metadata, FieldInfo) and isinstance(
-                metadata.discriminator, str
-            ):
-                return metadata.discriminator
-    return None
+    annotation = info.annotation
+    while True:
+        annotation = _expand_alias(annotation)
+        origin = get_origin(annotation)
+        if origin is Annotated:
+            args = get_args(annotation)
+            for metadata in args[1:]:
+                if isinstance(metadata, FieldInfo) and isinstance(
+                    metadata.discriminator, str
+                ):
+                    return metadata.discriminator
+            annotation = args[0]
+            continue
+        if origin in (Union, UnionType):
+            members = tuple(
+                item for item in get_args(annotation) if item is not type(None)
+            )
+            if len(members) == 1:
+                annotation = members[0]
+                continue
+        return None
 
 
 def _expand_alias(annotation: object) -> object:

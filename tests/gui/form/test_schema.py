@@ -418,6 +418,38 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
     assert not validator.is_valid(invalid)
 
 
+def test_nullable_public_range_alias_projects_choices_and_null() -> None:
+    class NullableAliasForm(FormModel):
+        """Nullable exported aliases retain the same nested input contract."""
+
+        fluxes: RangeInput | None = None
+
+        @classmethod
+        def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+            """Constrain only the active range branch's n leaf."""
+            return {("fluxes", "n"): (2,)}
+
+    env = FormEnv(md=MetaDict())
+    validator = Draft202012Validator(NullableAliasForm.input_schema(env))
+    values: tuple[JsonValue, ...] = (
+        None,
+        {"kind": "linrange", "n": 2},
+        {"kind": "linrange", "n": {"expr": "2"}},
+    )
+    for value in values:
+        valid: dict[str, JsonValue] = {"fluxes": value}
+        assert validator.is_valid(valid)
+        assert isinstance(
+            FormState(FormInput(NullableAliasForm, valid)).result(env),
+            NullableAliasForm,
+        )
+    invalid: dict[str, JsonValue] = {"fluxes": {"kind": "linrange", "n": 3}}
+    assert not validator.is_valid(invalid)
+    errors = FormState(FormInput(NullableAliasForm, invalid)).result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("fluxes", "n") in errors.messages
+
+
 def test_whole_container_choices_share_json_value_membership() -> None:
     env = FormEnv(md=MetaDict())
     valid: dict[str, JsonValue] = {
