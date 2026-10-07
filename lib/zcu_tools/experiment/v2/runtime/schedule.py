@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import (
@@ -15,7 +14,7 @@ from collections.abc import (
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from types import TracebackType
-from typing import Any, Generic, Literal, Protocol, Self, TypeAlias, cast, overload
+from typing import Any, Generic, Protocol, Self, TypeAlias, cast, overload
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -23,6 +22,16 @@ from typing_extensions import TypeVar
 
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime._path import get_path, set_target, writable_view
+from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
+from zcu_tools.experiment.v2.runtime.outcome import (
+    RunStatus as RunStatus,
+)
+from zcu_tools.experiment.v2.runtime.outcome import (
+    ScheduleOutcome as ScheduleOutcome,
+)
+from zcu_tools.experiment.v2.runtime.outcome import (
+    exception_reason,
+)
 from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -50,7 +59,6 @@ T_BatchResult = TypeVar("T_BatchResult")
 T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
-RunStatus: TypeAlias = Literal["completed", "stopped", "interrupted", "failed"]
 StopCondition: TypeAlias = Callable[[], bool]
 
 
@@ -102,44 +110,6 @@ def default_decimated_raw2signal_fn(
     raw: Sequence[NDArray[np.float64]],
 ) -> NDArray[np.complex128]:
     return raw[0].dot([1, 1j])
-
-
-class _AcquireCancelFlag:
-    """Program-local stop flag that observes Schedule stop without mutating it."""
-
-    def __init__(self, external: StopSignal) -> None:
-        self._external = external
-        self._local = threading.Event()
-
-    def is_set(self) -> bool:
-        return self._external.is_set() or self._local.is_set()
-
-    def set(self) -> None:
-        self._local.set()
-
-
-@dataclass(frozen=True)
-class ScheduleOutcome:
-    """Immutable completion state and original cause for a Schedule run.
-
-    status is completed, stopped, interrupted, or failed. reason is None for
-    completion, otherwise a human-readable explanation of that status.
-    exception is the original captured cause, or None when none was observed.
-    A stopped outcome may retain an acquire/build Exception caught after stop
-    was requested; its status/reason and StopSignal.error remain cancellation,
-    and no retry follows. The first such cause is retained even if the schedule
-    was already marked stopped. Pure cancellation, including the producer's
-    first-round stopped-partial signal, has no exception. interrupted retains
-    KeyboardInterrupt; failed retains the exhausted failure cause.
-    """
-
-    status: RunStatus = "completed"
-    reason: str | None = None
-    exception: BaseException | None = None
-
-    @property
-    def is_partial(self) -> bool:
-        return self.status != "completed"
 
 
 class SignalBuffer:
@@ -377,14 +347,14 @@ class Schedule(Generic[T_Cfg, T_Env]):
             self._outcome = replace(self._outcome, exception=exception)
 
     def _mark_interrupted(self, exc: BaseException) -> None:
-        reason = _exception_reason(exc)
+        reason = exception_reason(exc)
         if self._set_outcome("interrupted", reason=reason, exception=exc):
             self._stop.set_error("interrupted", reason, exc)
         else:
             self._stop.set()
 
     def _mark_failed(self, exc: BaseException) -> None:
-        reason = _exception_reason(exc)
+        reason = exception_reason(exc)
         if self._set_outcome("failed", reason=reason, exception=exc):
             self._stop.set_error("failed", reason, exc)
         else:
@@ -1129,7 +1099,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
         slot: SignalSlot,
         pbar: BaseProgressBar,
     ) -> T_Raw:
-        acquire_cancel_flag = _AcquireCancelFlag(self._schedule.stop)
+        acquire_cancel_flag = AcquireCancelFlag(self._schedule.stop)
 
         def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
             pbar.set_progress(ir)
@@ -1175,13 +1145,6 @@ def _program_cfg_from(cfg: object) -> ProgramV2Cfg:
             "settings"
         )
     return ProgramV2Cfg.model_validate(data)
-
-
-def _exception_reason(exc: BaseException) -> str:
-    message = str(exc)
-    if message:
-        return f"{type(exc).__name__}: {message}"
-    return type(exc).__name__
 
 
 def _make_nan_array(shape: int | Sequence[int], dtype: DTypeLike) -> NDArray[Any]:
