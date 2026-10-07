@@ -522,6 +522,76 @@ def test_compatible_restore_applies_branch_discriminator_before_saved_leaves() -
     assert result.fluxes == ExplicitList(values=(0.3, 0.4))
 
 
+@pytest.mark.parametrize("kind", ["static", "context"])
+def test_compatible_restore_without_tag_overlays_current_branch_once(kind: str) -> None:
+    env = environment()
+    state = FormState(BranchForm.default_input(env))
+    state.write({("branch", "kind"): kind}, env)
+    before = state.input.data
+    current = before["branch"]
+    assert isinstance(current, dict)
+    notifications: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: notifications.append(state.input.data))
+    assert state.write_compatible({"branch": {}}, env) == ()
+    assert state.input.data == before
+    assert notifications == []
+    branch_only = "static_only" if kind == "static" else "context_only"
+    saved: dict[str, JsonValue] = {
+        "shared": 3.0,
+        branch_only: "bad",
+        "removed": 9,
+    }
+    dropped = state.write_compatible({"branch": saved}, env)
+    assert set(dropped) == {("branch", branch_only), ("branch", "removed")}
+    restored = state.input.data
+    assert restored == {**before, "branch": {**current, "shared": 3.0}}
+    assert notifications == [restored]
+    result = state.result(env)
+    assert isinstance(result, BranchForm)
+    assert result.branch.kind == kind
+    assert result.branch.shared == 3.0
+
+
+@pytest.mark.parametrize("current", [{}, {"kind": "unknown"}])
+@pytest.mark.parametrize("saved", [{}, {"shared": 3.0}])
+def test_compatible_restore_cannot_replace_an_unselected_model_object(
+    current: dict[str, JsonValue], saved: dict[str, JsonValue]
+) -> None:
+    env = environment()
+    state = FormState(FormInput(BranchForm, {"branch": current}))
+    before = state.input.data
+    notifications: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: notifications.append(state.input.data))
+    assert state.write_compatible({"branch": saved}, env) == (("branch",),)
+    assert state.input.data == before
+    assert notifications == []
+    result = state.result(env)
+    assert isinstance(result, FormErrors)
+    assert ("branch",) in result.messages
+
+
+def test_compatible_restore_preserves_nullable_branch_deactivation() -> None:
+    class NullableBranchForm(FormModel):
+        """Nullable tagged objects require a selected branch before overlay."""
+
+        branch: Annotated[
+            StaticBranch | ContextBranch | None, Field(discriminator="kind")
+        ] = Field(default_factory=StaticBranch)
+
+    env = environment()
+    state = FormState(NullableBranchForm.default_input(env))
+    notifications: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: notifications.append(state.input.data))
+    assert state.write_compatible({"branch": None}, env) == ()
+    assert notifications == [{"branch": None}]
+    result = state.result(env)
+    assert isinstance(result, NullableBranchForm)
+    assert result.branch is None
+    assert state.write_compatible({"branch": {}}, env) == (("branch",),)
+    assert state.input.data == {"branch": None}
+    assert notifications == [{"branch": None}]
+
+
 def test_compatible_restore_keeps_well_formed_unresolved_expressions() -> None:
     env = environment()
     state = FormState(DraftForm.default_input(env))

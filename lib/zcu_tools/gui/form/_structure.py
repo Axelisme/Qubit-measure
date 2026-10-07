@@ -338,11 +338,13 @@ def _restore_field(
     path: FormPath,
     dropped: list[FormPath],
 ) -> JsonValue:
+    tag = discriminator(info)
     child = selected(info, saved)
+    if isinstance(saved, dict) and tag is not None and tag not in saved:
+        child = selected(info, current)
     if child is not None and isinstance(saved, dict):
         prior = current if isinstance(current, dict) else {}
-        tag = discriminator(info)
-        if tag is not None and saved.get(tag) != prior.get(tag):
+        if tag is not None and tag in saved and saved[tag] != prior.get(tag):
             try:
                 seed = _branch_defaults(child, env, prior)
             except PydanticCustomError as exc:
@@ -364,6 +366,9 @@ def _restore_field(
                 else static_defaults(child)
             )
         return _restore_model(child, seed, saved, env, path, dropped)
+    if isinstance(saved, dict) and model_types(info.annotation):
+        dropped.append(path)
+        return current
     if _compatible(info, saved):
         return copy_json(saved)
     dropped.append(path)

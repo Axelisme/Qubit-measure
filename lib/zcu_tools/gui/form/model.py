@@ -393,8 +393,12 @@ class FormState[F: FormModel]:
         tags, missing-vs-null and whole sequence/typed-mapping leaves. Drop removed paths
         and type-incompatible leaves, but keep range/cross-field-invalid values
         so result can report them. This is not legacy format support. Branch
-        writes use the same discriminator-first order as write. Source failures
-        retain their consuming path; a changed restoration notifies once.
+        writes use the same discriminator-first order as write. A saved object
+        without a discriminator overlays the current selected branch, retaining
+        its tag and unsaved defaults; an empty object makes no change. If neither
+        saved nor current input selects a branch, drop that object instead of
+        replacing the model section. Source failures retain their consuming
+        path; a changed restoration notifies once.
         """
         from ._json import copy_object
         from ._sources import check_sources
