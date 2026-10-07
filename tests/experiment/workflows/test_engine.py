@@ -102,7 +102,7 @@ def start_replacement(rig: Rig) -> RunStatus:
         plan=Plan(count=1),
         tunables=Tunables(),
         paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity("new", DeviceSnapshot(()), "offline"),
+        identity=RunIdentity("new", DeviceSnapshot({}), "offline"),
     )
 
 
@@ -216,7 +216,7 @@ def test_pause_discards_mutated_copy_and_resume_repeats_deadline(rig: Rig) -> No
         actor=Actor("user", "test"),
     )
     rig.clock.on_wait = None
-    assert rig.engine.resume("run", devices=DeviceSnapshot(())).lifecycle == "running"
+    assert rig.engine.resume("run", devices=DeviceSnapshot({})).lifecycle == "running"
     final = rig.engine.execute("run")
     assert final.lifecycle == "done"
     assert final.call_seq == 4
@@ -254,7 +254,7 @@ def test_next_return_is_committed_before_pending_control(
     assert rig.engine.records("run")[0].call_seq == 1
     assert "step_discarded" not in rig.kinds()
     if control == "pause":
-        rig.engine.resume("run", devices=DeviceSnapshot(()))
+        rig.engine.resume("run", devices=DeviceSnapshot({}))
         assert rig.engine.execute("run").lifecycle == "done"
         assert [record.call_seq for record in rig.engine.records("run")] == [1, 2]
 
@@ -287,7 +287,7 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
             with pytest.raises(InvalidRunState):
                 rig.engine.execute("run")
             with pytest.raises(InvalidRunState):
-                rig.engine.resume("run", devices=DeviceSnapshot(()))
+                rig.engine.resume("run", devices=DeviceSnapshot({}))
             assert rig.engine.stop("run").lifecycle == "stopping"
             assert rig.engine.stop("run").lifecycle == "stopping"
             with pytest.raises(InvalidRunState):
@@ -320,7 +320,7 @@ def test_final_capture_rejects_resume_until_paused_segment_returns(
     def reject_takeover() -> None:
         attempts.append("resume")
         with pytest.raises(InvalidRunState):
-            rig.engine.resume("run", devices=DeviceSnapshot(()))
+            rig.engine.resume("run", devices=DeviceSnapshot({}))
         with pytest.raises(InvalidRunState):
             rig.engine.execute("run")
 
@@ -356,7 +356,7 @@ def test_final_capture_rejects_resume_until_paused_segment_returns(
         expected_revision=0,
         actor=Actor("user", "test"),
     )
-    assert rig.engine.resume("run", devices=DeviceSnapshot(())).lifecycle == "running"
+    assert rig.engine.resume("run", devices=DeviceSnapshot({})).lifecycle == "running"
     resumed = rig.engine.execute("run")
     assert (resumed.lifecycle, resumed.call_seq, resumed.revision) == ("paused", 2, 1)
     assert attempts == ["resume", "resume"]
@@ -461,7 +461,7 @@ def test_final_capture_failure_releases_reservation_and_preserves_producer_cause
         assert isinstance(error, dict) and error["message"] == "producer failed"
     if ending == "pause":
         assert (
-            rig.engine.resume("run", devices=DeviceSnapshot(())).lifecycle == "running"
+            rig.engine.resume("run", devices=DeviceSnapshot({})).lifecycle == "running"
         )
         rig.engine.stop("run")
         assert rig.engine.execute("run").lifecycle == "stopped"
@@ -541,7 +541,7 @@ def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
     with pytest.raises(InvalidRunState):
         rig.start(points)
     with pytest.raises(InvalidRunState):
-        rig.engine.resume("run", devices=DeviceSnapshot(()))
+        rig.engine.resume("run", devices=DeviceSnapshot({}))
     rig.engine.execute("run")
     with pytest.raises(InvalidRunState):
         rig.engine.execute("run")
@@ -568,7 +568,7 @@ def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
         plan=Plan(count=1),
         tunables=Tunables(),
         paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity("new", DeviceSnapshot(()), "offline"),
+        identity=RunIdentity("new", DeviceSnapshot({}), "offline"),
     )
     with pytest.raises(RunMismatch):
         rig.engine.records("run")
@@ -598,7 +598,7 @@ def test_start_revalidates_constructed_model_and_requires_before_creating_paths(
             plan=Plan(),
             tunables=Tunables(),
             paths=rig.paths,
-            identity=RunIdentity("run", DeviceSnapshot(()), "offline"),
+            identity=RunIdentity("run", DeviceSnapshot({}), "offline"),
         )
     assert not rig.paths.metadata_root.exists()
     assert rig.engine.status() is None
@@ -635,7 +635,7 @@ def test_init_failure_is_failed_without_step_or_commit(rig: Rig) -> None:
         plan=Plan(),
         tunables=Tunables(),
         paths=rig.paths,
-        identity=RunIdentity("run", DeviceSnapshot(()), "offline"),
+        identity=RunIdentity("run", DeviceSnapshot({}), "offline"),
     )
     status = rig.engine.execute("run")
     assert status.lifecycle == "failed"

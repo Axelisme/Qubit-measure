@@ -1,6 +1,6 @@
 """Deterministic host ports for public Engine seam tests."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import StringIO
@@ -11,9 +11,10 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from zcu_tools.device import DeviceInfo, DeviceManager
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
-    DeviceSetup,
+    Completed,
     DeviceSnapshot,
     Engine,
     EnginePorts,
@@ -53,7 +54,8 @@ class RecordingDevices:
 
     def __init__(self) -> None:
         self.values: list[tuple[str, float]] = []
-        self.settings: list[tuple[DeviceSetup, ...]] = []
+        self.settings: list[Mapping[str, DeviceInfo]] = []
+        self.manager: DeviceManager | None = None
         self.on_set: Callable[[StopSignal], object] | None = None
         self.on_setup: Callable[[StopSignal], object] | None = None
 
@@ -63,11 +65,15 @@ class RecordingDevices:
             self.on_set(cancel_signal)
 
     def setup(
-        self, settings: tuple[DeviceSetup, ...], cancel_signal: StopSignal
+        self, settings: Mapping[str, DeviceInfo], cancel_signal: StopSignal
     ) -> None:
         self.settings.append(settings)
         if self.on_setup is not None:
             self.on_setup(cancel_signal)
+        if self.manager is not None:
+            self.manager.setup_devices(
+                settings, progress=False, cancel_signal=cancel_signal.event
+            )
 
 
 class RecordingPlots:
@@ -143,7 +149,12 @@ class Cfg:
     """Mutable experiment config and optional native device setup."""
 
     value: int = 1
-    dev: tuple[DeviceSetup, ...] | None = None
+    dev: Mapping[str, DeviceInfo] | None = None
+
+
+def save_integer(source: Completed[Cfg, int], path: Path) -> None:
+    """Write the paired cfg value and integer result to the engine temporary."""
+    path.write_text(f"{source.cfg.value}:{source.result}", encoding="utf-8")
 
 
 @dataclass
@@ -181,6 +192,7 @@ class Rig:
         step: Callable[[WorkflowEnv[int], Plan, Tunables, State], Step[State, int]],
         *,
         plan: Plan | None = None,
+        devices: DeviceSnapshot | None = None,
     ) -> None:
         # A fresh declared wrapper avoids mutating shared module-level callables.
         def invoke(
@@ -201,7 +213,9 @@ class Rig:
             plan=Plan() if plan is None else plan,
             tunables=Tunables(),
             paths=self.paths,
-            identity=RunIdentity("run", DeviceSnapshot(()), "offline"),
+            identity=RunIdentity(
+                "run", DeviceSnapshot({}) if devices is None else devices, "offline"
+            ),
         )
 
     def events(self) -> tuple[dict[str, JsonValue], ...]:

@@ -14,11 +14,9 @@ from zcu_tools.experiment.workflows import (
     Aborted,
     Actor,
     Completed,
-    DeviceSetup,
     DeviceSnapshot,
     Done,
     Failed,
-    JsonParameters,
     Live1D,
     Live2D,
     Live2DRow,
@@ -32,16 +30,12 @@ from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.program.v2.modules import SoftDelay
 
-from ._engine_fakes import Cfg, Plan, Rig, State, Tunables
+from ._engine_fakes import Cfg, Plan, Rig, State, Tunables, save_integer
 
 
 @pytest.fixture
 def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path)
-
-
-def save_integer(source: Completed[Cfg, int], path: Path) -> None:
-    path.write_text(f"{source.cfg.value}:{source.result}", encoding="utf-8")
 
 
 def run_value(run: Run[Cfg]) -> int:
@@ -278,7 +272,7 @@ def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
     assert discarded["run_files"] == ["runs/01-run_value.h5"]
     assert rig.engine.records("run") == ()
     rig.devices.on_set = None
-    rig.engine.resume("run", devices=DeviceSnapshot(()))
+    rig.engine.resume("run", devices=DeviceSnapshot({}))
     assert rig.engine.execute("run").lifecycle == "done"
     assert observed == [1, 1]
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))) == 2
@@ -320,31 +314,6 @@ def test_unlink_failure_keeps_final_but_does_not_deliver_completed(
     assert failed["run_files"] == ["runs/01-run_value.h5"]
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/.*.tmp.h5"))) == 1
-
-
-@pytest.mark.parametrize("setup", [True, False])
-def test_cfg_device_setup_precedes_experiment_and_can_be_explicitly_skipped(
-    rig: Rig, setup: bool
-) -> None:
-    settings = (DeviceSetup("flux", JsonParameters({"value": 0.1})),)
-
-    def acquire(_run: Run[Cfg]) -> int:
-        assert rig.devices.settings == ([settings] if setup else [])
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index:
-            return Done()
-        yield from env.run(
-            acquire, Cfg(dev=settings), save=save_integer, setup_devices=setup
-        )
-        state.index = 1
-        return Next(1, state)
-
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "done"
 
 
 @pytest.mark.parametrize("rethrow", [False, True])
@@ -799,34 +768,6 @@ def test_analysis_error_after_completed_effect_retains_file_but_never_commits(
     assert failed["error"]["type"] == "builtins.ValueError"
     assert "raise ValueError" in str(failed["error"]["traceback"])
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
-
-
-def test_device_setup_error_is_not_recoverable_schedule_failure(rig: Rig) -> None:
-    settings = (DeviceSetup("flux", JsonParameters({"value": 0.1})),)
-    observed: list[int] = []
-
-    def setup(_signal: StopSignal) -> None:
-        rig.engine.pause("run")
-        raise OSError("setup failed")
-
-    def acquire(_run: Run[Cfg]) -> int:
-        observed.append(1)
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        yield from env.run(acquire, Cfg(dev=settings), save=save_integer)
-        return Next(1, state)
-
-    rig.devices.on_setup = setup
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert "setup failed" in str(status.reason)
-    assert observed == []
-    assert "experiment_failed" not in rig.kinds()
-    assert "step_discarded" not in rig.kinds()
 
 
 @pytest.mark.parametrize("source", ["refresh", "ambiguous", "shape", "row"])

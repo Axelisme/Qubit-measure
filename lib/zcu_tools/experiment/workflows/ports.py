@@ -2,55 +2,31 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from pydantic import JsonValue
 from qick import QickConfig
 
+from ...device import DeviceInfo
 from ...progress_bar import BaseProgressBar
 from ..stop_signal import StopSignal
 
 
 @dataclass(frozen=True)
-class JsonParameters:
-    """Driver-owned JSON settings; ``values`` maps parameter names to JSON values.
-
-    The driver adapter defines valid names, units, ranges, and combinations.
-    Workflow execution copies these settings before handing them to the adapter.
-    """
-
-    values: dict[str, JsonValue]
-
-
-@dataclass(frozen=True)
-class DeviceSetup:
-    """One connected device's complete setup.
-
-    ``name`` is the host's connected-device name. ``parameters`` contains opaque
-    driver settings, not workflow tunables or expressions.
-    """
-
-    name: str
-    parameters: JsonParameters
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("DeviceSetup.name must not be empty")
-
-
-@dataclass(frozen=True)
 class DeviceSnapshot:
-    """Provenance at start/resume; ``items`` is the ordered device setup tuple.
+    """Provenance at start/resume, captured by the engine as detached data.
 
+    ``items`` maps connected-device names to native typed DeviceInfo models in
+    setup order; an empty mapping means no devices. Models contain the driver
+    identity, settings, and native units defined by their device owner.
     This snapshot does not assert that hardware stays unchanged afterwards.
     """
 
-    items: tuple[DeviceSetup, ...]
+    items: Mapping[str, DeviceInfo]
 
 
 class DevicePort(Protocol):
@@ -65,11 +41,14 @@ class DevicePort(Protocol):
         ...
 
     def setup(
-        self, settings: tuple[DeviceSetup, ...], cancel_signal: StopSignal
+        self, settings: Mapping[str, DeviceInfo], cancel_signal: StopSignal
     ) -> None:
-        """Apply explicit settings in order; reject unknown settings or I/O errors.
+        """Apply native DeviceInfo models in mapping order, or raise on failure.
 
-        Observe cancellation while operating hardware. The engine does not
+        Keys name connected devices. Reuse the native device owner for name,
+        address, model, and setting validation; retain its original failures.
+        Pass cancel_signal.event to cooperative native setup and return when
+        cancelled. The engine decides whether to discard the step. It does not
         connect devices, repair settings, or retry this operation.
         """
         ...

@@ -38,10 +38,8 @@ from .models import (
 from .ports import (
     Clock,
     DevicePort,
-    DeviceSetup,
     DeviceSnapshot,
     EnginePorts,
-    JsonParameters,
     PlotPort,
     ProgressFactory,
 )

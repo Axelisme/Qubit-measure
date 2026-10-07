@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import is_dataclass
@@ -12,12 +12,13 @@ from numpy.typing import NDArray
 from pydantic import BaseModel
 from qick import QickConfig
 
+from ...device import DeviceInfo
 from ..stop_signal import StopSignal
 from ..v2.runtime import Schedule, SignalBuffer
 from ..v2.runtime.schedule import ScheduleOutcome
 from .display import Live1D, Live2D, Live2DRow
 from .models import MissingCapability
-from .ports import DevicePort, DeviceSetup, PlotPort
+from .ports import DevicePort, PlotPort
 
 
 class Run[Cfg]:
@@ -81,19 +82,22 @@ class Run[Cfg]:
         return self._devices
 
     @property
-    def device_setup(self) -> tuple[DeviceSetup, ...] | None:
-        """Return cfg.dev settings, or None when absent/disabled.
+    def device_setup(self) -> Mapping[str, DeviceInfo] | None:
+        """Return the native cfg.dev mapping, or None when absent/disabled.
 
-        A present dev must be None or a tuple of DeviceSetup. Invalid cfg
-        adaptation raises TypeError before the device adapter is invoked.
+        The mapping belongs to this Run's cfg copy and preserves setup order.
+        Keys must be strings and values must be native typed DeviceInfo models;
+        other inputs raise TypeError before the device adapter is invoked.
+        Driver-specific validation and setup belong to the device owner.
         """
         settings = getattr(self.cfg, "dev", None)
         if settings is None:
             return None
-        if not isinstance(settings, tuple) or not all(
-            isinstance(setting, DeviceSetup) for setting in settings
+        if not isinstance(settings, Mapping) or not all(
+            isinstance(name, str) and isinstance(info, DeviceInfo)
+            for name, info in settings.items()
         ):
-            raise TypeError("cfg.dev must be tuple[DeviceSetup, ...] or None")
+            raise TypeError("cfg.dev must be Mapping[str, DeviceInfo] or None")
         return settings
 
     @property

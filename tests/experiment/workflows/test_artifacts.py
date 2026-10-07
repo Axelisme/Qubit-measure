@@ -61,7 +61,7 @@ def clock() -> ManualClock:
 def metadata(tmp_path: Path, clock: ManualClock) -> RunMetadata:
     return RunMetadata(
         identity=RunIdentity(
-            "id-not-the-directory-slug", DeviceSnapshot(()), "test-host"
+            "id-not-the-directory-slug", DeviceSnapshot({}), "test-host"
         ),
         workflow="storage-contract",
         plan={"targets": [1, 2]},
@@ -211,7 +211,7 @@ def test_journal_round_trips_all_outcomes_in_append_order(
         TunablesChanged(Actor("agent", "協作者"), 0, 1, (ChangedValue("reps", 2, 3),)),
         PauseRequested(clock.now(), 1),
         Paused(1, 1),
-        Resumed(1, 1, DeviceSnapshot(())),
+        Resumed(1, 1, DeviceSnapshot({})),
         StopRequested(clock.now(), 1),
         RunEnded("failed", "original cause", 1, 1),
     )
