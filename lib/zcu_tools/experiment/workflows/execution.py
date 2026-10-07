@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime
 from threading import RLock
@@ -101,7 +102,13 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         self._state: S
 
     def start(
-        self, plan: P, tunables: T, paths: RunPaths, identity: RunIdentity
+        self,
+        plan: P,
+        tunables: T,
+        paths: RunPaths,
+        identity: RunIdentity,
+        *,
+        tunables_originals: Mapping[str, str] | None = None,
     ) -> None:
         """Validate detached inputs/capabilities before creating startup files.
 
@@ -117,7 +124,11 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             )
         )
         self._tunables = TunableValues(
-            self._definition.tunables, tunables, self._lock, self._append_tunables
+            self._definition.tunables,
+            tunables,
+            self._lock,
+            self._append_tunables,
+            originals=tunables_originals,
         )
         self._identity = deepcopy(identity)
         self._started_at = self._ports.clock.now()
@@ -128,6 +139,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 self._plan.model_dump(mode="json", by_alias=False, warnings="error")
             ),
             tunables=self._tunables.snapshot().values,
+            tunables_originals=self._tunables.snapshot().originals,
             requires=self._definition.requires,
             roots=paths,
             started_at=self._started_at,

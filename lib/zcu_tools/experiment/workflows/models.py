@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
-from dataclasses import dataclass
+from collections.abc import Generator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -104,11 +104,14 @@ class TunableChange:
 
     ``path`` is a model-field dot path, never an index or expression. ``value``
     is a JSON leaf or a complete list/tuple replacement in JSON form.
+    ``original`` is opaque expression text without a JSON envelope. None clears
+    a previous original at this path. Engine does not evaluate this text.
     Batch overlap, schema, and revision checks belong to Engine.update_tunables.
     """
 
     path: str
     value: JsonValue
+    original: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,10 +119,14 @@ class TunablesSnapshot:
     """Detached control view: ``revision`` is its version, ``values`` is JSON.
 
     Values contain the complete tunables model, not only the most recent patch.
+    ``originals`` maps legal model-field leaf dot paths to opaque expression
+    text. Only leaves with text appear. Values and originals are detached from
+    the Engine and represent the same revision; neither is a live writable view.
     """
 
     revision: int
     values: JsonValue
+    originals: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
