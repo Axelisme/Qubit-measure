@@ -329,23 +329,43 @@ def test_dry_run_prepares_library_without_destination_or_manifest_writes(
 
 
 @pytest.mark.parametrize(
-    "values",
+    "contents",
     [
-        {"modules": {}},
-        {"waveforms": {}},
-        {"modules": [], "waveforms": {}},
-        {"modules": {}, "waveforms": []},
+        "modules: {}\n",
+        "waveforms: {}\n",
+        "modules: []\nwaveforms: {}\n",
+        "modules: {}\nwaveforms: []\n",
+        "",
+        "null\n",
+        "[]\n",
+        "[entry]\n",
+        "7\n",
+        "legacy\n",
+    ],
+    ids=[
+        "missing-waveforms",
+        "missing-modules",
+        "modules-sequence",
+        "waveforms-sequence",
+        "empty-yaml",
+        "null-yaml",
+        "empty-sequence",
+        "sequence",
+        "numeric-scalar",
+        "text-scalar",
     ],
 )
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_malformed_legacy_envelope_fails_without_claiming_conversion(
     request_data: MigrationRequest,
     library_mapping: MigrationMapping,
-    values: YamlMap,
+    contents: str,
     dry_run: bool,
 ) -> None:
     request = replace(request_data, part="parameters", dry_run=dry_run)
-    source = _library(write_meta(request, "context", {}), values)
+    meta = write_meta(request, "context", {})
+    source = meta.parent / "module_cfg.yaml"
+    source.write_text(contents, encoding="utf-8")
     original = source.read_bytes()
     with pytest.raises(MigrationInputError, match="mapping envelope"):
         _convert(request, library_mapping)
