@@ -24,7 +24,11 @@ if TYPE_CHECKING:
     )
     from .base import PersistableExperiment
     from .cfg_model import ExpCfgModel
-    from .interfaces import RecordExperiment, SynchronousExperiment
+    from .interfaces import (
+        PersistableRecordExperiment,
+        RecordExperiment,
+        SynchronousExperiment,
+    )
     from .native_persistence import (
         PreparedRunData,
         RunSnapshot,
@@ -35,6 +39,15 @@ if TYPE_CHECKING:
         save_run,
     )
     from .records import AnalysisRecord, RunRecord
+    from .run_saving import (
+        ArtifactRef,
+        DataMember,
+        FileMember,
+        OutputResult,
+        SaveArtifact,
+        SaveReport,
+        save_artifacts,
+    )
 
 __all__ = [
     "config",
@@ -52,6 +65,14 @@ __all__ = [
     "load_run_with_metadata",
     "AnalysisRecord",
     "RecordExperiment",
+    "PersistableRecordExperiment",
+    "ArtifactRef",
+    "DataMember",
+    "FileMember",
+    "SaveArtifact",
+    "OutputResult",
+    "SaveReport",
+    "save_artifacts",
     "SynchronousExperiment",
     "PersistableExperiment",
     "Axis",
@@ -84,6 +105,14 @@ _EXPORT_MODULES = {
     "load_run_with_metadata": ".native_persistence",
     "AnalysisRecord": ".records",
     "RecordExperiment": ".interfaces",
+    "PersistableRecordExperiment": ".interfaces",
+    "ArtifactRef": ".run_saving",
+    "DataMember": ".run_saving",
+    "FileMember": ".run_saving",
+    "SaveArtifact": ".run_saving",
+    "OutputResult": ".run_saving",
+    "SaveReport": ".run_saving",
+    "save_artifacts": ".run_saving",
     "SynchronousExperiment": ".interfaces",
     "PersistableExperiment": ".base",
     "Axis": ".axes_spec",

@@ -4,13 +4,14 @@ from pathlib import Path
 
 import pytest
 from filelock import Timeout
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from ruamel.yaml import YAML
 from zcu_tools.format_version import FormatError, VersionError
 from zcu_tools.resources.document_store import (
     ConflictError,
     DocumentChange,
     DocumentStore,
+    DocumentValue,
     LockTimeoutError,
 )
 
@@ -156,6 +157,9 @@ def test_same_field_conflict_rejects_the_whole_transaction(document_path: Path) 
     assert error.path == ("values", "left")
     assert error.original == 1.0
     assert error.current == 20.0
+    assert error.original_value == DocumentValue(present=True, value=1.0)
+    assert error.current_value == DocumentValue(present=True, value=20.0)
+    assert error.proposed_value == DocumentValue(present=True, value=10.0)
     assert str(document_path) in str(error)
     assert make_store(document_path).snapshot().values == {"left": 20.0, "right": 2.0}
     assert first.snapshot().values == {"left": 1.0, "right": 2.0}
@@ -473,6 +477,13 @@ def test_conflicts_distinguish_missing_from_null_and_keep_dot_keys_intact(
     assert caught.value.path == ("values", "Q1.t1")
     assert (caught.value.original is None) is original_null
     assert caught.value.current == 7.0
+    assert caught.value.original_value == DocumentValue(
+        present=original_null, value=None
+    )
+    assert caught.value.current_value == DocumentValue(present=True, value=7.0)
+    assert caught.value.proposed_value == DocumentValue(
+        present=not original_null, value=None
+    )
     assert document_path.read_bytes() == committed
     assert first.snapshot() == original_snapshot
 
@@ -506,9 +517,106 @@ def test_added_leaf_conflicts_with_deleted_or_null_parent(
     assert caught.value.path == ("values", "branch")
     assert caught.value.original == {}
     assert (caught.value.current is None) is parent_null
+    assert caught.value.original_value == DocumentValue(present=True, value={})
+    assert caught.value.current_value == DocumentValue(present=parent_null, value=None)
+    assert caught.value.proposed_value == DocumentValue(
+        present=True, value={"fresh": 1.0}
+    )
     assert document_path.read_bytes() == committed
     assert first.snapshot() == original
     assert second.snapshot().values["other"] == {"leaf": 2.0}
+
+
+@pytest.mark.parametrize(
+    ("proposed_values", "competing_values"),
+    [({"branch": {"leaf": 2.0}}, {}), ({}, {"branch": {"leaf": 3.0}})],
+    ids=["deleted-current", "deleted-proposal"],
+)
+def test_conflict_projection_is_detached_from_error_draft_and_store(
+    document_path: Path,
+    proposed_values: dict[str, dict[str, float] | None],
+    competing_values: dict[str, dict[str, float] | None],
+) -> None:
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\nvalues:\n  branch: {leaf: 1.0}\n",
+        encoding="utf-8",
+    )
+    first = DocumentStore(document_path, BranchDocument, format="synthetic")
+    second = DocumentStore(document_path, BranchDocument, format="synthetic")
+    with ExitStack() as stack:
+        draft = stack.enter_context(first.edit())
+        draft.values = proposed_values
+        with second.edit() as other:
+            other.values = competing_values
+        with pytest.raises(ConflictError) as caught:
+            stack.close()
+
+    error = caught.value
+    assert error.path == ("values", "branch")
+    for projected in (error.original_value, error.current_value, error.proposed_value):
+        if isinstance(projected.value, dict):
+            projected.value["leaf"] = 99.0
+    draft.values = {"branch": {"leaf": 77.0}}
+
+    assert error.original_value == DocumentValue(present=True, value={"leaf": 1.0})
+    assert (error.current_value.present, error.current_value.value) == (
+        "branch" in competing_values,
+        competing_values.get("branch"),
+    )
+    assert (error.proposed_value.present, error.proposed_value.value) == (
+        "branch" in proposed_values,
+        proposed_values.get("branch"),
+    )
+    assert first.snapshot().values == {"branch": {"leaf": 1.0}}
+    assert second.snapshot().values == competing_values
+    assert (
+        DocumentStore(document_path, BranchDocument, format="synthetic")
+        .snapshot()
+        .values
+        == competing_values
+    )
+
+
+def test_conflict_projection_uses_normalized_values_without_rerunning_hooks(
+    document_path: Path,
+) -> None:
+    validations: list[float] = []
+
+    class RoundedDocument(BaseModel):
+        format: str
+        format_version: str
+        value: float
+
+        @field_validator("value")
+        @classmethod
+        def round_value(cls, value: float) -> float:
+            """Record validation and normalize the document value to one decimal."""
+            validations.append(value)
+            return round(value, 1)
+
+    document_path.write_text(
+        "format: synthetic\nformat_version: '1.0'\nvalue: 1.04\n",
+        encoding="utf-8",
+    )
+    first = DocumentStore(document_path, RoundedDocument, format="synthetic")
+    second = DocumentStore(document_path, RoundedDocument, format="synthetic")
+    with ExitStack() as stack:
+        draft = stack.enter_context(first.edit())
+        draft.value = 2.34
+        with second.edit() as other:
+            other.value = 3.56
+        with pytest.raises(ConflictError) as caught:
+            stack.close()
+
+    completed_validations = list(validations)
+    assert caught.value.original_value == DocumentValue(present=True, value=1.0)
+    assert caught.value.current_value == DocumentValue(present=True, value=3.6)
+    # Conflict precedes final model validation; capture canonical draft serialization.
+    assert caught.value.proposed_value == DocumentValue(present=True, value=2.34)
+    assert caught.value.proposed_value == DocumentValue(present=True, value=2.34)
+    assert validations == completed_validations
+    assert first.snapshot().value == 1.0
+    assert second.snapshot().value == 3.6
 
 
 def test_missing_optional_model_field_can_be_explicitly_committed_as_null(
@@ -667,6 +775,9 @@ def test_explicit_null_of_missing_typed_field_conflicts_with_concurrent_value(
     assert caught.value.path == ("description",)
     assert caught.value.original is not None
     assert caught.value.current == "winner"
+    assert caught.value.original_value == DocumentValue(present=False, value=None)
+    assert caught.value.current_value == DocumentValue(present=True, value="winner")
+    assert caught.value.proposed_value == DocumentValue(present=True, value=None)
     assert document_path.read_bytes() == committed
     assert first.snapshot() == original
 

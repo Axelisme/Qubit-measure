@@ -118,16 +118,7 @@ def resolve_names(
     """Resolve declared names from one already validated working-unit snapshot."""
     declarations = _declarations(roles, focus, explicit)
     if focus is None:
-        candidates = [
-            name
-            for name, component in components.items()
-            if any(
-                fnmatchcase(component.kind, pattern)
-                for pattern in role_registry.focus_kinds
-            )
-        ]
-        if len(candidates) == 1:
-            focus = candidates[0]
+        focus = role_registry.default_focus(components)
     resolved: dict[str, str] = {}
     focus_used = False
     for role, spec in declarations.items():

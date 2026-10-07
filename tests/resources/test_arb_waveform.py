@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -36,6 +37,12 @@ def _init_db(tmp_path):
     return root
 
 
+def _save_zero_q_asset(data_key: str = "pulse") -> None:
+    ArbWaveformDatabase.save(
+        data_key, idata=np.array([0.0, 0.4]), time=np.array([0.0, 0.75])
+    )
+
+
 def test_import_data_uses_single_file_layout_and_runtime_get(tmp_path):
     root = _init_db(tmp_path)
 
@@ -55,6 +62,149 @@ def test_import_data_uses_single_file_layout_and_runtime_get(tmp_path):
     assert np.allclose(idata, [0.0, 0.5, 0.0])
     assert qdata is None
     assert np.allclose(time, [0.0, 0.25, 0.75])
+
+
+def test_info_at_binds_explicit_scope_without_switching_repository(
+    tmp_path: Path,
+) -> None:
+    first = _init_db(tmp_path)
+    _save_zero_q_asset()
+    ArbWaveformDatabase.init(tmp_path / "second")
+    ArbWaveformDatabase.save(
+        "pulse", idata=np.array([0.0, 0.8]), time=np.array([0.0, 2.0])
+    )
+
+    bound = ArbWaveformDatabase.info_at(first)
+    assert bound.duration("pulse") == 0.75
+    np.testing.assert_array_equal(bound.samples("pulse").time, [0.0, 0.75])
+    assert ArbWaveformDatabase.bound_info().duration("pulse") == 2.0
+
+
+def test_bound_info_keeps_scope_after_repository_switch(tmp_path: Path) -> None:
+    _init_db(tmp_path)
+    ArbWaveformDatabase.save(
+        "pulse",
+        idata=np.array([0.0, 0.4, 0.0]),
+        qdata=np.array([0.0, 0.3, 0.0]),
+        time=np.array([0.0, 0.25, 0.75]),
+    )
+    bound = ArbWaveformDatabase.bound_info()
+
+    ArbWaveformDatabase.init(tmp_path / "other_assets")
+    ArbWaveformDatabase.save(
+        "pulse", idata=np.array([0.0, 0.8]), time=np.array([0.0, 2.0])
+    )
+
+    assert bound.duration("pulse") == 0.75
+    samples = bound.samples("pulse")
+    np.testing.assert_array_equal(samples.time, [0.0, 0.25, 0.75])
+    np.testing.assert_array_equal(samples.idata, [0.0, 0.4, 0.0])
+    np.testing.assert_array_equal(samples.qdata, [0.0, 0.3, 0.0])
+    assert ArbWaveformDatabase.bound_info().duration("pulse") == 2.0
+    assert ArbWaveformDatabase.bound_info().samples("pulse").qdata is None
+
+
+def test_bound_info_reads_current_bytes_and_isolates_arrays(tmp_path: Path) -> None:
+    root = _init_db(tmp_path)
+    _save_zero_q_asset()
+    bound = ArbWaveformDatabase.bound_info()
+    copied = deepcopy(bound)
+    first = bound.samples("pulse")
+    first.idata[1] = -0.9
+    first.time[1] = 9.0
+    np.testing.assert_array_equal(copied.samples("pulse").idata, [0.0, 0.4])
+    assert copied.duration("pulse") == 0.75
+
+    ArbWaveformDatabase.save(
+        "pulse",
+        idata=np.array([0.0, 0.3]),
+        qdata=np.array([0.0, 0.4]),
+        time=np.array([0.0, 1.5]),
+    )
+    current = bound.samples("pulse")
+    np.testing.assert_array_equal(current.idata, [0.0, 0.3])
+    np.testing.assert_array_equal(current.qdata, [0.0, 0.4])
+    if current.qdata is None:
+        pytest.fail("Nonzero Q samples must not be discarded")
+    current.qdata[1] = -0.8
+    np.testing.assert_array_equal(copied.samples("pulse").qdata, [0.0, 0.4])
+    assert copied.duration("pulse") == 1.5
+    np.testing.assert_array_equal(first.idata, [0.0, -0.9])
+
+    ArbWaveformDatabase.init(tmp_path / "other_assets")
+    (root / "pulse.npz").unlink()
+    with pytest.raises(ArbWaveformError) as exc:
+        copied.samples("pulse")
+    assert exc.value.reason == "data_key_not_found"
+
+
+def test_bound_info_requires_initialized_scope() -> None:
+    with pytest.raises(RuntimeError, match="not initialized"):
+        ArbWaveformDatabase.bound_info()
+
+
+@pytest.mark.parametrize("operation", ["duration", "samples"])
+def test_bound_info_reports_missing_key_in_bound_scope(
+    tmp_path: Path, operation: str
+) -> None:
+    root = _init_db(tmp_path)
+    _save_zero_q_asset("present")
+    bound = ArbWaveformDatabase.bound_info()
+    ArbWaveformDatabase.init(tmp_path / "other_assets")
+    read = bound.duration if operation == "duration" else bound.samples
+    with pytest.raises(ArbWaveformError) as exc:
+        read("missing")
+    assert exc.value.reason == "data_key_not_found"
+    assert exc.value.data == {"data_key": "missing", "available": ["present"]}
+    assert str(root / "missing.npz") in str(exc.value)
+
+
+@pytest.mark.parametrize("operation", ["duration", "samples"])
+def test_bound_info_rejects_invalid_keys(tmp_path: Path, operation: str) -> None:
+    _init_db(tmp_path)
+    bound = ArbWaveformDatabase.bound_info()
+    read = bound.duration if operation == "duration" else bound.samples
+    with pytest.raises(ArbWaveformError) as exc:
+        read("../escape")
+    assert exc.value.reason == "invalid_data_key"
+
+
+@pytest.mark.parametrize("operation", ["duration", "samples"])
+def test_bound_info_propagates_archive_validation(
+    tmp_path: Path, operation: str
+) -> None:
+    root = _init_db(tmp_path)
+    np.savez(
+        root / "invalid.npz",
+        idata=np.array([0.0, 0.4]),
+        qdata=np.array([0.0, 0.0]),
+        time=np.array([0.0, 0.0]),
+    )
+    bound = ArbWaveformDatabase.bound_info()
+    read = bound.duration if operation == "duration" else bound.samples
+    with pytest.raises(ArbWaveformError) as exc:
+        read("invalid")
+    assert exc.value.reason == "time_not_strictly_increasing"
+
+
+@pytest.mark.parametrize("operation", ["duration", "samples"])
+def test_bound_info_propagates_io_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    root = _init_db(tmp_path)
+    _save_zero_q_asset()
+    bound = ArbWaveformDatabase.bound_info()
+
+    def unreadable(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError("asset read denied")
+
+    monkeypatch.setattr(np, "load", unreadable)
+    read = bound.duration if operation == "duration" else bound.samples
+    with pytest.raises(ArbWaveformError) as exc:
+        read("pulse")
+    assert exc.value.reason == "npz_read_failed"
+    assert exc.value.data == {"path": str(root / "pulse.npz")}
+    assert isinstance(exc.value.__cause__, PermissionError)
 
 
 def test_import_data_rejects_invalid_key_before_filesystem(tmp_path):
@@ -115,7 +265,7 @@ def test_create_from_formula_embeds_loadable_recipe_and_preserves_formula_text(
     tmp_path,
 ):
     root = _init_db(tmp_path)
-    recipe = {
+    recipe: dict[str, object] = {
         "segments": [{"duration": 1.0, "formula": " sin(2*pi*t) "}],
         "normalize": "none",
     }
