@@ -1,16 +1,15 @@
-"""Type-guarded helpers for reading SessionEnv.md values."""
+"""Fixed parameter range policies and remaining legacy seed reads."""
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    SweepValue,
-)
+from zcu_tools.gui.cfg import EvalValue, SweepValue
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
+    from zcu_tools.gui.session.parameters import ParameterContext
 
 
 def md_get_float(ctx: SessionEnv, key: str, default: float) -> float:
@@ -26,65 +25,100 @@ def md_has_key(ctx: SessionEnv, key: str) -> bool:
     return value is not sentinel and value is not None
 
 
+def _optional_scalar(parameters: ParameterContext, path: str) -> float | None:
+    result = parameters.lookup(path)
+    if not result.present or result.value is None:
+        return None
+    value = result.value
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"Parameter must be a real scalar: {path!r}")
+    if not isfinite(value):
+        raise ValueError(f"Parameter must be finite: {path!r}")
+    return float(value)
+
+
 def _freq_range(
-    ctx: SessionEnv,
-    center_key: str,
-    width_key: str,
+    parameters: ParameterContext,
+    keys: tuple[str, str],
+    defaults: tuple[float, float],
     expts: int,
     span_factor: float,
-    center_default: float,
-    width_default: float,
 ) -> SweepValue:
-    """A symmetric ``center ± span_factor*width`` SweepValue.
-
-    Each existing md key remains live in the edge expression. Missing keys use
-    numeric fallbacks; without either key the edges are plain scalars.
-    A missing width with a non-positive numeric fallback uses ±30 MHz.
-    """
-    center = md_get_float(ctx, center_key, center_default)
-    width = md_get_float(ctx, width_key, width_default)
+    """Read the fixed scalar paths and build the established live range."""
+    center_key, width_key = keys
+    center_value = _optional_scalar(parameters, center_key)
+    width_value = _optional_scalar(parameters, width_key)
+    center = defaults[0] if center_value is None else center_value
+    width = defaults[1] if width_value is None else width_value
     half_span = span_factor * width if width > 0 else 30.0
-    have_center = md_has_key(ctx, center_key)
-    have_width = md_has_key(ctx, width_key)
-    center_term = center_key if have_center else repr(center)
-    # ``1 * width`` reads as just ``width``; keep the coefficient otherwise.
+    center_term = repr(center) if center_value is None else center_key
     width_term = width_key if span_factor == 1.0 else f"{span_factor} * {width_key}"
-    if not have_width:
+    if width_value is None:
         width_term = repr(half_span)
 
-    def _edge(sign: int) -> float | EvalValue:
-        op = "-" if sign < 0 else "+"
-        if have_center or have_width:
-            return EvalValue(expr=f"{center_term} {op} {width_term}")
-        return center + sign * half_span
-
-    return SweepValue(start=_edge(-1), stop=_edge(+1), expts=expts)
+    if center_value is not None or width_value is not None:
+        start: float | EvalValue = EvalValue(expr=f"{center_term} - {width_term}")
+        stop: float | EvalValue = EvalValue(expr=f"{center_term} + {width_term}")
+    else:
+        start = center - half_span
+        stop = center + half_span
+    return SweepValue(start=start, stop=stop, expts=expts)
 
 
 def proper_res_freq_range(
-    ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
+    parameters: ParameterContext, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
-    """Resonator frequency sweep range: ``r_f ± span_factor*rf_w``."""
-    return _freq_range(ctx, "r_f", "rf_w", expts, span_factor, 6500.0, 500.0)
+    """Build resonator.freq ± span_factor*resonator.kappa in working MHz.
+
+    Existing numeric fields remain live EvalValue terms. Absent/null fields
+    use the original 6500 MHz center and 500 MHz width fallbacks.
+    Present non-real/nonfinite scalars fail.
+    Role, source and library errors propagate without fallback.
+    """
+    return _freq_range(
+        parameters,
+        ("resonator.freq", "resonator.kappa"),
+        (6500.0, 500.0),
+        expts,
+        span_factor,
+    )
 
 
 def proper_qub_freq_range(
-    ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
+    parameters: ParameterContext, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
-    """Qubit frequency sweep range: ``q_f ± span_factor*qf_w``."""
-    return _freq_range(ctx, "q_f", "qf_w", expts, span_factor, 5000.0, 1000.0)
+    """Build qubit.freq ± span_factor*qubit.kappa in working MHz.
 
-
-def proper_flux_range(ctx: SessionEnv, expts: int) -> SweepValue:
-    """Flux sweep range spanning one period around the calibrated flux points.
-
-    Extrapolates 10% past the two fitted positions (flx_half / flx_int):
-    ``start = 1.1*flx_int - 0.1*flx_half``, ``stop = 1.1*flx_half - 0.1*flx_int``.
-    When the md keys are absent, falls back to a fixed ``[-4e-3, 4e-3]`` scan.
+    Existing numeric fields remain live EvalValue terms. Absent/null fields
+    use the original 5000 MHz center and 1000 MHz width fallbacks.
+    Present non-real/nonfinite scalars fail.
+    Role, source and library errors propagate without fallback.
     """
-    if md_has_key(ctx, "flx_half") and md_has_key(ctx, "flx_int"):
-        start: float | EvalValue = EvalValue(expr="1.1 * flx_int - 0.1 * flx_half")
-        stop: float | EvalValue = EvalValue(expr="1.1 * flx_half - 0.1 * flx_int")
+    return _freq_range(
+        parameters,
+        ("qubit.freq", "qubit.kappa"),
+        (5000.0, 1000.0),
+        expts,
+        span_factor,
+    )
+
+
+def proper_flux_range(parameters: ParameterContext, expts: int) -> SweepValue:
+    """Build a scan 10% beyond qubit.flux_int and qubit.flux_half.
+
+    Both present real finite calibrations produce live EvalValue edges.
+    Missing/null calibration falls back to [-4e-3, 4e-3] in the working flux
+    unit. Present invalid calibrations and role/source errors propagate.
+    """
+    flux_half = _optional_scalar(parameters, "qubit.flux_half")
+    flux_int = _optional_scalar(parameters, "qubit.flux_int")
+    if flux_half is not None and flux_int is not None:
+        start: float | EvalValue = EvalValue(
+            expr="1.1 * qubit.flux_int - 0.1 * qubit.flux_half"
+        )
+        stop: float | EvalValue = EvalValue(
+            expr="1.1 * qubit.flux_half - 0.1 * qubit.flux_int"
+        )
     else:
         start = -4e-3
         stop = 4e-3

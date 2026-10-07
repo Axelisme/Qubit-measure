@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
 
+from zcu_tools.gui.session.parameters import ParameterContext as ParameterContext
+from zcu_tools.gui.session.parameters import RoleBinding as RoleBinding
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueLookup
 
 if TYPE_CHECKING:
@@ -86,6 +88,8 @@ class SessionEnv:
     predictor: FluxoniumPredictor | None = None
     readiness: ContextReadiness = ContextReadiness.EMPTY
     values: ValueLookup = field(default_factory=EmptyValueLookup)
+    # Fixed consumer capture, or None when no parameter source is available.
+    parameters: ParameterContext | None = None
 
     # -- readiness predicates (the context answers about itself) -----------
 

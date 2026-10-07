@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
 from zcu_tools.gui.cfg import EvalValue, ScalarLeafInput, SweepValue
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
     ScalarType,
@@ -25,6 +26,7 @@ from zcu_lab.v2._support.measure.ctx_helpers import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
+    from zcu_tools.gui.session.parameters import ParameterContext
 
 T = TypeVar("T", covariant=True)
 
@@ -115,6 +117,14 @@ class SweepDefault:
         )
 
 
+def _parameters(ctx: SessionEnv) -> ParameterContext:
+    if ctx.parameters is None:
+        raise FailedPreconditionError(
+            "No parameter context is available", reason_code="no_context"
+        )
+    return ctx.parameters
+
+
 def res_freq_range(
     *,
     expts: int,
@@ -123,21 +133,25 @@ def res_freq_range(
     """Deferred resonator frequency range using the established measure policy."""
 
     return custom(
-        lambda ctx: proper_res_freq_range(ctx, expts, span_factor=span_factor),
+        lambda ctx: proper_res_freq_range(
+            _parameters(ctx), expts, span_factor=span_factor
+        ),
         description=f"resonator frequency range ({expts} points)",
     )
 
 
 def qub_freq_range(*, expts: int, span_factor: float = 1.5) -> Seed[SweepValue]:
     return custom(
-        lambda ctx: proper_qub_freq_range(ctx, expts, span_factor=span_factor),
+        lambda ctx: proper_qub_freq_range(
+            _parameters(ctx), expts, span_factor=span_factor
+        ),
         description=f"qubit frequency range ({expts} points)",
     )
 
 
 def flux_range(*, expts: int) -> Seed[SweepValue]:
     return custom(
-        lambda ctx: proper_flux_range(ctx, expts),
+        lambda ctx: proper_flux_range(_parameters(ctx), expts),
         description=f"flux range ({expts} points)",
     )
 
