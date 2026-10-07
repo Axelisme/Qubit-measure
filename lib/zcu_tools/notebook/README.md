@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-07，bound point 保存與 SavedRun
+**Last updated:** 2026-10-07，bound point 保存與 Notebook accepted writeback
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -27,6 +27,10 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 `save_run(ctx, source=record, ...)` 是綁定 PointView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口捕捉 cached context 與 acquisition evidence，保存 native、Labber、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
 
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
+
+`SavedRun.accept(values, kind=..., analysis_params=...)` 接受普通點分路徑的工作單位 JSON 值，可用 `(value, stderr)` 帶有限非負的誤差。Role 首段沿保存時固定的映射展開。它先追加同條目的 typed accepted 事件，再由原 bound point 的單次 edit 寫入值與 provenance，成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。
+
+Notebook 不走 GUI WritebackService，也不做 append 前候選驗證。Ledger、point schema、commit 與 I/O 錯誤直接傳播。Point 寫入失敗可留下未引用事件，不提供失敗收據、retry 或恢復流程。
 
 ## 工作家族
 
