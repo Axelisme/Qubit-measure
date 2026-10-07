@@ -30,6 +30,7 @@ from .result_entry import ResultEntry, rename_entry
 from .roles import RoleView, role_registry
 from .save_layout import ArtifactKey, Output, SaveLayout, new_run_id
 from .schema import ComponentSchema
+from .storage import PointStorageBinding, capture_point_storage
 from .views import (
     ComponentView,
     DocumentField,
