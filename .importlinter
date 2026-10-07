@@ -42,6 +42,18 @@ forbidden_modules =
     PySide2
     PySide6
 
+# Pydantic form editor may render the draft, never own host or execution policy.
+[importlinter:contract:form-editor-no-host]
+name = Pydantic form editor does not depend on app or execution policy
+type = forbidden
+source_modules =
+    zcu_tools.gui.widgets.form
+forbidden_modules =
+    zcu_tools.gui.app
+    zcu_tools.gui.remote
+    zcu_tools.experiment
+    zcu_tools.mcp
+
 # Named-workflow core has no frontend or Qt dependency, including external Qt roots.
 [importlinter:contract:workflows-core-no-ui]
 name = C18: named workflow execution does not depend on frontends or Qt

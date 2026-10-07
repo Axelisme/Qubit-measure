@@ -112,7 +112,7 @@ F2 使用以下具名欄位擴充現有 interface，不建立 tunables wrapper�
 
 現有 C8／C9 涵蓋 GUI frontend 到 resources、cfg_model、device 與 experiment 的合法方向。C11維持cfg_model不依賴GUI，C16禁止framework import zcu_lab。C18維持Engine不依賴GUI／Qt。C13維持MCP只走remote／wire contract。
 
-F1 declaration seed 已建立實際 package，並在 .importlinter 加入下列第一項收緊 contract，不增加 ignore_imports。Core 內部實作完成後仍需重跑 gates 與完整 range review。第二項保留為 F3 候選，editor package 尚未建立。Contract 使用固定名稱，避免與平行上游的數字 ID 衝突。
+F1 core 與 F3 editor declaration seed 已建立實際 package。.importlinter 使用下列兩項收緊 contract，不增加 ignore_imports。F1 完整範圍與修正已通過 review；F3 內部實作仍需 gates 與 range review。Contract 使用固定名稱，避免與平行上游的數字 ID 衝突。
 
 ```ini
 [importlinter:contract:form-core-no-ui-policy]
@@ -146,7 +146,7 @@ forbidden_modules =
     zcu_tools.mcp
 ```
 
-第二項由F3在editor package建立時加入。F4同步保護既有runtime workflow definitions不import `zcu_tools.gui`或`zcu_lab.workflows.gui`，與既有C15 user-core政策一致，不將GUI附件放回core。
+第二項已由 F3 在 editor package 建立後加入。F4 同步保護既有 runtime workflow definitions 不 import `zcu_tools.gui` 或 `zcu_lab.workflows.gui`，與既有 C15 user-core 政策一致，不將 GUI 附件放回 core。
 
 新增依賴邊的判讀如下。
 
