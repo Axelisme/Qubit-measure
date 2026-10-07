@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -23,7 +24,9 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
 from zcu_tools.program.v2.sim.readout import resonator_freqs, s21, value_to_flux
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from zcu_lab.v2._support.measure.ctx_helpers import proper_flux_range
 
@@ -366,9 +369,9 @@ class TestSimParamsParamsJsonRoundTrip:
             pi_gain_len=0.4,
         )
 
-        assert p.EJ == fluxdep["params"]["EJ"]
-        assert p.EC == fluxdep["params"]["EC"]
-        assert p.EL == fluxdep["params"]["EL"]
+        assert fluxdep["params"]["EJ"] == p.EJ
+        assert fluxdep["params"]["EC"] == p.EC
+        assert fluxdep["params"]["EL"] == p.EL
         assert p.flux_half == fluxdep["flux_half"]
         assert p.flux_period == fluxdep["flux_period"]
         assert p.bare_rf == dispersive["bare_rf"]
@@ -380,6 +383,20 @@ class TestSimParamsParamsJsonRoundTrip:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def guide_context(tmp_path: Path) -> SessionEnv:
+    """Use a real point-local empty library without changing guide calibration."""
+    entry = ResultEntry.create(
+        "guide", result_root=tmp_path / "results", database_root=tmp_path / "Database"
+    )
+    entry.new_point("working")
+    library = entry.module_library(
+        "working",
+        assets=ArbWaveformDatabase.info_at(entry.database_path / "arb_waveforms"),
+    )
+    return SessionEnv(md=MetaDict(), ml=library, soc=None, soccfg=None)
+
+
 class TestDefaultSimParamFluxPeriod:
     """DEFAULT_SIMPARAM.flux_period must sit within the onetone/twotone guide sweep.
 
@@ -389,9 +406,10 @@ class TestDefaultSimParamFluxPeriod:
     produce a flat colour map.
     """
 
-    def test_default_readout_blobs_are_visible_over_base_noise(self) -> None:
-        guide_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-        guide = proper_flux_range(guide_ctx, expts=2)
+    def test_default_readout_blobs_are_visible_over_base_noise(
+        self, guide_context: SessionEnv
+    ) -> None:
+        guide = proper_flux_range(guide_context, expts=2)
         guide_start, guide_stop = _numeric_sweep_bounds(guide)
         guide_center = 0.5 * (guide_start + guide_stop)
         p = DEFAULT_SIMPARAM
@@ -407,11 +425,12 @@ class TestDefaultSimParamFluxPeriod:
             f"separation={separation_sigma:.3f} sigma"
         )
 
-    def test_guide_sweep_covers_at_least_one_period(self) -> None:
+    def test_guide_sweep_covers_at_least_one_period(
+        self, guide_context: SessionEnv
+    ) -> None:
         # value_to_flux(v) = (v + flux_bias - flux_half) / flux_period + 0.5
         # The guide sweep should span at least one period for visible dispersion.
-        guide_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-        guide = proper_flux_range(guide_ctx, expts=2)
+        guide = proper_flux_range(guide_context, expts=2)
         guide_start, guide_stop = _numeric_sweep_bounds(guide)
         p = DEFAULT_SIMPARAM
         flux_lo = (guide_start + p.flux_bias - p.flux_half) / p.flux_period + 0.5
