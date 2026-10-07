@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-08-26 — table-backed pulse length sweep
+**Last updated:** 2026-10-07 — swept pulse blocking timing
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
@@ -49,6 +49,15 @@ without leaking hardware register choreography into experiment classes.
   to prepare the next point. Its dedicated templates prevent a table update from
   mutating a pulse shared through `PulseRegistry`; the rotated tables restore the
   first point before the next outer repetition.
+
+## Swept pulse blocking timing
+
+`Pulse` aligns a swept blocking duration with QICK's registered waveform
+segments. Generator-cycle quantization and per-loop truncation precede
+processor-clock rounding. Blocking start and each step round upward, so a
+following operation cannot begin before playback ends. Overrun can accumulate
+across points; it is not bounded to one processor tick for a whole sweep.
+Scalar and pre/post-delay timing keep their existing rules.
 
 ## Runtime Pulse Length
 

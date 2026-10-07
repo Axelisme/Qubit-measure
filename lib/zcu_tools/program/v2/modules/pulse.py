@@ -6,12 +6,12 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BeforeValidator
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import QickParam, QickRawParam
 
 from .base import AbsModuleCfg, Module
 from .delay import DelayAuto
 from .dmem import LoadValue
-from .util import round_timestamp
+from .util import get_fclk, round_timestamp
 from .waveform import (
     AbsWaveform,
     ConstWaveformCfg,
@@ -115,15 +115,48 @@ class Pulse(Module):
         )
 
     def total_length(self, prog: ModularProgramV2) -> float | QickParam:
+        """Return blocking duration in us after init has registered this pulse.
+
+        prog must contain this pulse and its declared loops. Swept playback
+        uses QICK's generator-cycle start and truncated per-loop step, then
+        rounds the start and each step upward to processor ticks. Every point
+        therefore blocks through actual playback, with conservative overrun.
+        Scalar timing and pre/post-delay rounding retain their existing rules.
+        No registered waveform or parameter is mutated. QICK errors propagate.
+        """
         if self.cfg is None:
             return 0.0
+        length = self.waveform.length
+        if isinstance(length, QickParam) and length.is_sweep():
+            loops = {name: count for name, count, _, _ in prog.loops}
+            generator_cycles = QickParam(0.0)
+            # Registered segments include quantized flat-top ramps and FIR tails.
+            for name in prog.list_pulse_waveforms(self.pulse_id, exclude_special=False):
+                wave_length = prog.waves[prog.wave2idx[name]].length
+                if isinstance(wave_length, QickRawParam):
+                    # Step a copy so QICK's later compile keeps sole ownership.
+                    raw_length = deepcopy(wave_length)
+                    if raw_length.steps is None:
+                        raw_length.to_steps(loops)
+                    generator_cycles += raw_length / 1.0
+                else:
+                    generator_cycles += wave_length
+            ratio = get_fclk(prog) / get_fclk(prog, gen_ch=self.cfg.ch)
+            spans: dict[str, float] = {}
+            for name, span in generator_cycles.spans.items():
+                intervals = loops[name] - 1
+                step = math.ceil(span / intervals * ratio) if intervals else 0
+                spans[name] = step * intervals
+            length = QickParam(
+                math.ceil(generator_cycles.start * ratio), spans
+            ) / get_fclk(prog)
+        else:
+            length = round_timestamp(prog, length, gen_ch=self.cfg.ch)
         return round_timestamp(
             prog,
-            (
-                round_timestamp(prog, self.cfg.pre_delay)
-                + round_timestamp(prog, self.waveform.length, gen_ch=self.cfg.ch)
-                + round_timestamp(prog, self.cfg.post_delay)
-            ),
+            round_timestamp(prog, self.cfg.pre_delay)
+            + length
+            + round_timestamp(prog, self.cfg.post_delay),
         )
 
     def run(
