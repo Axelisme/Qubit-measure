@@ -1,29 +1,25 @@
-"""ProjectSettingsService — project apply + remembered settings capture/restore.
+"""Explicit entry composition and remembered session settings.
 
-Owns the session-core project settings concern: apply a project (chip/qub/res +
-paths) to the active context, remember the prefill values + the remembered-device
-set, and project them to / from the persistence memento (``PersistedStartup``).
-It is the session half of the persistence split (P-c): the *session* memento
-slice lives here; an app combines it with its own experiment slice (measure:
-``AppPersistedState`` wraps this + ``PersistedSession``).
-
-App-agnostic: depends on the session ports (``ProjectContextPort`` /
-``RememberedDevicePort``) + ``SessionState``; no disk I/O (the app's Caretaker
-owns that), no event bus.
+Entry commands use ResultEntry with injected roots before asking the context
+owner to publish DRAFT. Memento capture/restore only projects preferences and
+remembered devices; it never opens an entry or connects hardware.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from zcu_tools.gui.result_scope import ProjectPaths, ResultScope, ResultScopeManager
+from zcu_tools.gui.owner import OwnerThreadGuard
+from zcu_tools.gui.result_scope import ResultScopeManager
+from zcu_tools.gui.session.context_types import EntryInfo, EntryRequest
 from zcu_tools.gui.session.ports import DeviceMemoryInfo
 from zcu_tools.gui.session.state import DEFAULT_LEFT_PANEL_WIDTH, SessionPreferences
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.entry import ResultEntry
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import ProjectContextPort, RememberedDevicePort
@@ -51,6 +47,7 @@ class PersistedDeviceEntry(BaseModel):
 class PersistedStartup(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    entry_name: str = ""
     chip_name: str = ""
     qub_name: str = ""
     res_name: str = ""
@@ -124,10 +121,7 @@ class SetupPreferences:
     the remembered devices / panel width it carries.
     """
 
-    chip_name: str
-    qub_name: str
-    res_name: str
-    scope_id: str
+    entry_name: str
     ip: str
     port: int
 
@@ -145,13 +139,11 @@ class ConnectionPreferences:
 
 
 class ProjectSettingsService:
-    """Own project apply + remembered-settings capture/restore.
+    """Own entry discovery/open/create and remembered settings on the owner thread.
 
-    Stateless app service: the remembered prefs live in ``State.preferences``,
-    not here. Apply/connect update those prefs at write-time; capture projects
-    them (+ device set from State) into a memento; restore writes them back and
-    registers remembered devices. No disk I/O (the PersistenceCaretaker owns it),
-    no DEVICE_CHANGED subscription (capture re-projects devices at flush time).
+    ResultEntry owns filesystem/name validation. ContextService owns binding
+    publication. Preferences change only after installation succeeds. Memento
+    capture/restore does not open entries; the app caretaker writes that memento.
     """
 
     def __init__(
@@ -159,21 +151,82 @@ class ProjectSettingsService:
         context: ProjectContextPort,
         devices: RememberedDevicePort,
         state: SessionState,
-        result_scopes: ResultScopeManager,
+        *,
+        result_root: str | Path,
+        database_root: str | Path,
     ) -> None:
+        """Use explicit resource roots for owner-thread entry commands.
+
+        context installs prepared entry handles; devices restores remembered
+        device preferences. ResultEntry owns name/path/file validation. roots
+        never default to a singleton or depend on GUI selection.
+        """
+        self._owner = OwnerThreadGuard()
+        self._result_root = Path(result_root)
+        self._database_root = Path(database_root)
+        self._entry_names: tuple[str, ...] | None = None
         self._context = context
         self._devices = devices
         self._state = state
-        self._result_scopes = result_scopes
+
+    def list_entries(self, *, refresh: bool = False) -> tuple[str, ...]:
+        """List entry names through resources, retaining the last successful cache.
+
+        First use or refresh=True reads the explicit result_root; False reuses
+        the published cache. Filesystem errors propagate, not as an empty list.
+        """
+        self._owner.assert_owner()
+        if self._entry_names is None or refresh:
+            names = ResultEntry.list_names(result_root=self._result_root)
+            self._entry_names = names
+        return self._entry_names
+
+    def open_entry(self, request: EntryRequest) -> EntryInfo:
+        """Open a resource-validated entry and install DRAFT without hardware.
+
+        Only successful installation remembers the entry name and updates cache.
+        Resource/installation errors propagate, preserving previous preferences.
+        """
+        self._owner.assert_owner()
+        entry = ResultEntry.open(
+            request.name,
+            result_root=self._result_root,
+            database_root=self._database_root,
+        )
+        return self._install_entry(entry)
+
+    def new_entry(self, request: EntryRequest) -> EntryInfo:
+        """Create and install an entry as DRAFT, without selecting a point.
+
+        Resource errors propagate. Installation failure retains the created
+        entry and raises RuntimeError from its cause, naming Open as recovery.
+        Never retry New or delete resources to imitate rollback.
+        """
+        self._owner.assert_owner()
+        entry = ResultEntry.create(
+            request.name,
+            result_root=self._result_root,
+            database_root=self._database_root,
+        )
+        try:
+            return self._install_entry(entry)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Entry {request.name!r} was created but could not be installed. "
+                f"Open the same entry {request.name!r} to recover; do not repeat New."
+            ) from exc
+
+    def _install_entry(self, entry: ResultEntry) -> EntryInfo:
+        info = self._context.install_entry(entry)
+        self._state.preferences.entry_name = info.name
+        self._entry_names = tuple(sorted(set((*(self._entry_names or ()), info.name))))
+        return info
 
     def get_setup_preferences(self) -> SetupPreferences:
         """The remembered values the setup dialog prefills (not the active project)."""
         prefs = self._state.preferences
         return SetupPreferences(
-            chip_name=prefs.chip_name,
-            qub_name=prefs.qub_name,
-            res_name=prefs.res_name,
-            scope_id=prefs.scope_id,
+            entry_name=prefs.entry_name,
             ip=prefs.ip,
             port=prefs.port,
         )
@@ -181,64 +234,6 @@ class ProjectSettingsService:
     def get_left_panel_width(self) -> int:
         """The remembered left-panel width (seeded by restore, read by new tabs)."""
         return self._state.preferences.left_panel_width
-
-    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
-        return self._result_scopes.list_scopes(refresh=refresh)
-
-    def list_result_chip_names(self) -> tuple[str, ...]:
-        return self._result_scopes.list_chip_names()
-
-    def list_result_qub_names(self, chip_name: str) -> tuple[str, ...]:
-        return self._result_scopes.list_qub_names(chip_name)
-
-    def derive_project_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
-        return self._result_scopes.derive_paths(chip_name, qub_name)
-
-    def apply_project(self, req: ProjectRequest) -> ResolvedProject:
-        scope = self._result_scopes.ensure_scope(
-            chip_name=req.chip_name,
-            qub_name=req.qub_name,
-            scope_id=req.scope_id,
-        )
-        paths = self._result_scopes.derive_paths(req.chip_name, req.qub_name)
-        resolved = ResolvedProject(
-            chip_name=req.chip_name,
-            qub_name=req.qub_name,
-            res_name=req.res_name,
-            result_dir=scope.result_dir,
-            database_path=paths.database_path,
-            params_path=scope.params_path,
-            scope_id=scope.scope_id,
-        )
-        current = self._state.session_env
-        prefs = self._state.preferences
-        if (
-            (current.chip_name, current.qub_name, current.res_name)
-            == (resolved.chip_name, resolved.qub_name, resolved.res_name)
-            and current.result_dir == resolved.result_dir
-            and current.database_path == resolved.database_path
-            and prefs.scope_id == resolved.scope_id
-        ):
-            return resolved
-        self._context.set_project_context(
-            MetaDict(),
-            ModuleLibrary(),
-            resolved.chip_name,
-            resolved.qub_name,
-            resolved.res_name,
-            resolved.result_dir,
-            resolved.database_path,
-        )
-        self._context.setup_project(resolved.result_dir)
-        # Remember the just-applied project as the prefill values (write-time).
-        prefs = self._state.preferences
-        prefs.chip_name = resolved.chip_name
-        prefs.qub_name = resolved.qub_name
-        prefs.res_name = resolved.res_name
-        prefs.scope_id = resolved.scope_id
-        prefs.result_dir = resolved.result_dir
-        prefs.database_path = resolved.database_path
-        return resolved
 
     def remember_connection(self, req: ConnectionPreferences) -> None:
         prefs = self._state.preferences
@@ -258,6 +253,7 @@ class ProjectSettingsService:
         )
         prefs = self._state.preferences
         return PersistedStartup(
+            entry_name=prefs.entry_name,
             chip_name=prefs.chip_name,
             qub_name=prefs.qub_name,
             res_name=prefs.res_name,
@@ -276,6 +272,7 @@ class ProjectSettingsService:
         applies it via the setup dialog) — the instrument never auto-connects."""
         self._state.set_preferences(
             SessionPreferences(
+                entry_name=data.entry_name,
                 chip_name=data.chip_name,
                 qub_name=data.qub_name,
                 res_name=data.res_name,

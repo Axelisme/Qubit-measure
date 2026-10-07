@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.result_scope import ResultScopeManager
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
@@ -36,6 +36,7 @@ from zcu_tools.gui.session.setup_control import SetupControlFacet
 from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 
 if TYPE_CHECKING:
+    from zcu_tools.cfg_model import WaveformAssetInfo
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -46,12 +47,10 @@ if TYPE_CHECKING:
         DeviceRegistryPort,
         DriverFactoryPort,
         ExclusionGate,
-        ProjectIOPort,
     )
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.progress import ProgressService
-    from zcu_tools.gui.session.services.project_settings import ResolvedProject
     from zcu_tools.gui.session.setup_control import SetupControlPort
     from zcu_tools.gui.session.state import SessionState
 
@@ -83,19 +82,19 @@ def build_session_services(
     handles: OperationHandles,
     background: BackgroundExecutor,
     progress: ProgressService,
-    io_manager: ProjectIOPort,
     runner: OperationRunner,
+    bind_assets: Callable[[Path], WaveformAssetInfo],
     project_root: str = "",
     driver_factory: DriverFactoryPort | None = None,
     device_registry: DeviceRegistryPort | None = None,
-    on_project_applied: Callable[[ResolvedProject], None] | None = None,
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
     ``gate`` / ``background`` are the app's concrete exclusion gate and off-main
     executor (injected via their session ports); ``progress`` is the shared
     ProgressService used by operation clients and the device-control facet;
-    ``io_manager`` is the project-IO adapter; ``runner`` is the shared
+    ``bind_assets`` binds each entry's explicit waveform asset directory without
+    a global Database selection. ``runner`` is the shared
     OperationRunner (ADR-0066) used by DeviceService for operation lifecycle;
     ``project_root`` anchors generated result/database paths and result-scope
     discovery;
@@ -118,14 +117,18 @@ def build_session_services(
     predictor = PredictorService(state, bus)
     predictor_control = PredictorControlFacet(bus=bus, predictor=predictor)
     progress_control = ProgressControlFacet(progress)
-    context = ContextService(state, io_manager, bus, values=value_registry)
-    context_control = ContextControlFacet(context=context, device=device)
+    context = ContextService(state, bus, values=value_registry, bind_assets=bind_assets)
+    context_control = ContextControlFacet(context=context)
     device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
     # ProjectSettingsService bridges the two session services it commands through
     # their ports (project context + remembered-device registration) + State prefs.
     settings = ProjectSettingsService(
-        context, device, state, ResultScopeManager(project_root)
+        context,
+        device,
+        state,
+        result_root=Path(project_root) / "result",
+        database_root=Path(project_root) / "Database",
     )
     simulated_environment = SimulatedEnvironmentCoordinator(
         bus, device, soc_connection, predictor, gate, handles
@@ -137,7 +140,6 @@ def build_session_services(
         connection=soc_connection,
         simulated_environment=simulated_environment,
         device=device_control,
-        on_project_applied=on_project_applied,
     )
     return SessionServices(
         soc_connection=soc_connection,
