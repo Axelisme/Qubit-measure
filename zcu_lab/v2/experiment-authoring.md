@@ -1,10 +1,10 @@
 # v2 experiment authoring
 
-**Last updated:** 2026-10-05，使用者實驗測試規則
+**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
 
 `zcu_lab/v2/` 擁有使用 program/v2 的具體實驗。每個實驗的 `core.py` 保存 cfg、Result、run 與分析政策。共同實驗介面、Result 保存映射與 cfg 組裝見[框架 README](../../lib/zcu_tools/experiment/README.md)。本頁保留實驗家族、具體 workflow 與撰寫慣例。
 
-一般實驗以 [runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 的 `SignalBuffer`、`Schedule` 與 `ProgramBuilder` 編排 host loop 與 program acquire。`autofluxdep`、`overnight` 的 executor 使用同一 runtime 的 `ResultTree` 與 `MultiMeasurementExecutor`；runtime 的 buffer、stop、retry 和 lifecycle 機制見其文件。
+一般實驗以 [runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 的 `SignalBuffer`、`Schedule` 與 `ProgramBuilder` 編排 host loop 與 program acquire。Runtime 的 buffer、stop、retry 和 lifecycle 機制見其文件。
 
 ## 使用者實驗的測試
 
@@ -177,7 +177,7 @@ matrix的估計流程。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
 
 Schedule／ProgramBuilder 的 buffer、program cfg、retry 與 partial-result 規則見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)。
-目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback/core.py`、`fake/signal/core.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*`、`mist/*`、`autofluxdep/*` 與 `overnight/*`。
+目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback/core.py`、`fake/signal/core.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*` 與 `mist/*`。
 
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
 `SweepCfg` sweep；`homophasal` 保留同一個 `sweep.freq` 使用者介面，但由已擬合的 resonator
@@ -202,7 +202,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 
-把 sweep 參數綁到 pulse（`modules.xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`；executor leaf 用 `program_step = state.child("raw_signals", cfg=program_cfg)` 建立 program cfg scope 後再改 `program_step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.sweep.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
+把 sweep 參數綁到 pulse（`modules.xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.sweep.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
 
 只有兩類「副本外操作」是有意保留的：
 
@@ -228,32 +228,13 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ---
 
-## Executor 模式（`autofluxdep` / `overnight`）
-
-當要在外層再疊一層「sweep 多個子實驗」的場景（例如掃 flux × {freq, t1, t2echo, ...}），會用 Executor。跨模組的 runtime／workflow 邊界見 ADR-0062。
-
-兩個 Executor 共用同一個基底 `MultiMeasurementExecutor`（`zcu_tools.experiment.v2.runtime.multi_executor`，見 `../../lib/zcu_tools/experiment/v2/runtime/README.md`），由它提供版面排版（`make_ax_layout` / `make_plotter`）、`record_animation` 的 FFMpeg facet、`ResultTree` per-measurement plot update、measurement init/cleanup、per-measurement retry、error/stop partial result、recorder `try/finally` cleanup 與 `last_cfg` / `last_result` / `last_run_outcome`。子類別各自只實作 `run()` 的 cfg/env 前置與 `Schedule` outer loop。
-
-- `FluxDepExecutor`（`autofluxdep/core.py`）：註冊多個 runner-owned `MeasurementBundle` / `MeasurementTask`，caller 以 explicit keyword deps 提供 `soc`、`soccfg`、`ml`、`predictor`；executor 在 run 內組 `FluxDepEnv`，用 root `Schedule.scan("flux", ...)` 掃 flux，並與 `FluxoniumPredictor` 協作，於每個 flux step 更新 typed `FluxDepInfoTracker`、設定 flux device，再交由 base executor 的 batch helper 執行 measurement。
-- `OvernightExecutor`（`overnight/core.py`）：caller 以 explicit keyword deps 提供 `soc`、`soccfg`；executor 在 run 內組 `OvernightEnv`，用 root `Schedule.repeat("Iter", ...)` 在時間軸上重複 measurement batch，並以 `trigger_update(flush=True)` 強制送出 per-measurement liveplot event。
-
-`autofluxdep/_support/env.py` 的 `FluxDepInfoTracker` 為每次 run 建立一份追蹤狀態。每個 flux step 的 `start_step(...)` 重設 `current`，並填入當步的 `flux_value`、`flux_idx`、`cur_m`、`m_ratio`；後續 `update(...)` 把欄位值深拷貝到 `current`。`first` 保留各欄位第一次非 `None` 的更新值；`last` 記錄各欄位最近一次更新值，更新為 `None` 時也會覆蓋舊值。未寫入的欄位初始值為 `None`。
-
-必要欄位用 `require(name, task_name=...)` 從當步 `current` 取值；值為 `None` 時立即拋 `ValueError`，`flux_value`、`flux_idx`、`predict_freq` property 也經由 `require`。可選的 `best_ro_freq`、`best_ro_gain` property 則可回傳 `None`。`update`、`require`、`last_or` 遇到未知欄位名都拋 `AttributeError`。`last_or(name, fallback)` 只在該欄位的 `last` 為 `None` 時回傳明確提供的 fallback，否則回傳 `last`；caller 除將當次測量值當作平滑 fallback，也把 `0` 用作 `qubfreq_success_idx`／`lenrabi_success_idx` 尚無前次成功索引時的 fallback。
-
-兩者的 `retry_time` 是 per-measurement、per-flux/time-step 預算；`record_animation(mp4_path)` 需要 `ffmpeg`。合併圖位於 RunContext.plots 的 `measurement`，typed live handles 與 recorder 均由 host owner 操作，不依賴 ambient plotting backend。Executor 結束 recorder，但不 close Figure；caller 停止 producer 後 finish／release Plots，已保留的 NamedFigures 仍可保存。
-
-executor leaf contract 由 `zcu_tools.experiment.v2.runtime.task` 擁有：`Acquirer`、`TaskPlotter`、`TaskPersister`、`MeasurementBundle`、`ComposedMeasurementBundle` 與 direct-implementation `MeasurementTask`。app-local duplicated ABC 不保留；每個 leaf 取得 `ScheduleStep` 後建立 child-local buffer，再用該 step 的 `ProgramBuilder` 直接執行 QICK acquire。
-
----
-
 父層 `experiment/utils/` 的 comment、device 與 sweep helper 見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
 
 ## v2 工具與實驗輔助
 
 - **`sweep2array(sweep_cfg, name, {"soccfg", "gen_ch", "ro_ch"})`** — 展開 `SweepCfg` 為 numpy array，已套 ZCU 量化（`round_zcu_freq/time/gain/phase`）。Exp 幾乎都靠這個產生 x 軸。
 - **`round_zcu_*`** — 單點版本的量化函式；`round_sweep_dict` 同時處理整個 sweep dict。時間的量化有特殊處理：預先減去 `0.5 * one_cycle` 以匹配 QICK sweep 用 `np.trunc` 的行為。多點 sweep 的 step 若在量化後變成 0，會 fast-fail 並要求放大 span 或減少 expts，避免 GUI/agent 看到低階 `SweepCfg` 一致性錯誤。
-- **`merge_result_list(list_of_results)`** — 把 `list[dict[name, ndarray]]` 遞迴轉成 `dict[name, ndarray]`（外層 list 變成最外層維度）。Executor `ResultTree.measurement_result(name)` 只對單一 measurement 呼叫它，並快取 stacked view；更新某個 measurement 時不重算 unrelated measurement。
+- **`merge_result_list(list_of_results)`** — 把 `list[dict[name, ndarray]]` 遞迴轉成 `dict[name, ndarray]`（外層 list 變成最外層維度）。`ResultTree.measurement_result(name)` 只對單一 measurement 呼叫它，並快取 stacked view；更新某個 measurement 時不重算 unrelated measurement。
 - **`estimate_snr` / `snr_as_signal` / `snr_checker`** — SNR 估計與 early-stop：`estimate_snr` 搭配 `snr_checker` 用於曲線 early-stop；`snr_as_signal(raw, ge_axis, skew_penalty=0.0)` 從 `MomentTracker` 的 g/e IQ moments 計算 pooled-sigma separation SNR。`skew_penalty=0.0` 是純 SNR；提高 `skew_penalty` 會以連續 rational penalty 降低 projected skew 與 g/e shape mismatch 較大的候選點，供 readout optimization 與 JPA optimization 共用。
 
 ---
@@ -277,7 +258,7 @@ executor leaf contract 由 `zcu_tools.experiment.v2.runtime.task` 擁有：`Acqu
 
 ## 外部中斷支援（cancel_flag）
 
-新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動把 acquire-local composite `cancel_flag` 傳給 program acquire；它會觀察 `Schedule.stop` 的 external stop，但 data-driven early stop 只停止目前 program acquire，不會把 `Schedule.outcome` 改成 `stopped`。direct ProgramBuilder path 在 external stop / `KeyboardInterrupt` / acquire error 時會保留目前 buffer partial result，並把狀態寫入 `Schedule.outcome`（`completed` / `stopped` / `interrupted` / `failed`）。executor leaf 使用傳入的 `ScheduleStep`，因此 external stop 與 outer loop 共用同一個 `StopSignal`；executor retry 耗盡或中斷時回傳目前累積的 partial result，並寫入 `last_run_outcome`。外部 stop 若在 current round 未完成時被 acquire loop 觀察到，會丟棄該 partial round、保留先前 completed rounds；first round 尚未完成就 stop 時，runner 保留 NaN partial 並標記 `stopped`，不對空 rounds 平均。`failed` / `interrupted` 仍保留 partial result，但本次 `RunContext.cancel_signal` 會攜帶第一個非取消錯誤 cause，GUI 與 Notebook 在提交成果前呼叫 `raise_if_error()`，不將失敗的 partial data 當成成功；retry 成功會清除 transient failure cause。
+新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動把 acquire-local composite `cancel_flag` 傳給 program acquire；它會觀察 `Schedule.stop` 的 external stop，但 data-driven early stop 只停止目前 program acquire，不會把 `Schedule.outcome` 改成 `stopped`。direct ProgramBuilder path 在 external stop / `KeyboardInterrupt` / acquire error 時會保留目前 buffer partial result，並把狀態寫入 `Schedule.outcome`（`completed` / `stopped` / `interrupted` / `failed`）。外部 stop 若在 current round 未完成時被 acquire loop 觀察到，會丟棄該 partial round、保留先前 completed rounds；first round 尚未完成就 stop 時，runner 保留 NaN partial 並標記 `stopped`，不對空 rounds 平均。`failed` / `interrupted` 仍保留 partial result，但本次 `RunContext.cancel_signal` 會攜帶第一個非取消錯誤 cause，GUI 與 Notebook 在提交成果前呼叫 `raise_if_error()`，不將失敗的 partial data 當成成功；retry 成功會清除 transient failure cause。
 
 - 若使用 SNR early stop，將 `snr_checker(signals_buffer[step], threshold, signal2real_fn)` 傳給 `ProgramBuilder(...).build_and_acquire(stop_condition=...)`；runner 只在 completed round 寫入 buffer 後檢查，命中時呼叫 acquire-local `cancel_flag.set()`，保留目前 round 並讓 `Schedule.outcome` 維持 `completed`。
 - `singleshot/ge/core.py`、`singleshot/check/core.py` 的 raw-shot acquire path 不經 `ProgramBuilder.run_program(...)`，因此在實驗邊界直接傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。
@@ -292,7 +273,6 @@ executor leaf contract 由 `zcu_tools.experiment.v2.runtime.task` 擁有：`Acqu
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `stop_condition=snr_checker(...)`。
 5. 持久化由 `AXES_SPEC` 宣告：每個 `Axis` 帶 `scale`（頻率 `MHZ_TO_HZ`、時間 `US_TO_S`）讓盤上是 SI 單位、記憶體內維持習慣單位，`AXES_SPEC.tag` 取有層次的 on-disk 名字（`"twotone/rabi/len"`），axes 以 inner-first 排列；繼承的 `save` / `load` 自動依 spec 做單位轉換與恒等逆 round-trip，無需自行寫 save/load。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定，batch 本身不做 per-child retry。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
-7. 如果要在 Experiment 外層疊 flux / time sweep，優先讓 Executor 使用 `ResultTree` 作為 `BufferProtocol` result buffer 並傳入 root `Schedule`，外層用 `scan` / `repeat` / `batch`，leaf 用 `state.child(..., cfg=program_cfg).buffer(...)` 建立 result slot 與 program cfg scope；plot update 透過 `ResultUpdateEvent`，不要解析 `ScheduleStep.path`。
 
 Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分類可使用更大 radius。Raw IQ 投影 likelihood 不依賴 radius；derived confusion 與 population 使用圓內且最近中心的互斥區域。GE `consider_other` 僅控制 radius 選擇的 midpoint-other 懲罰模型，回傳校正矩陣維持 isolated-other row。
 

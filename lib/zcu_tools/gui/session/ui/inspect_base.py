@@ -6,8 +6,7 @@ subclasses; this base exposes template-method hooks for the top toolbar and the
 ModuleLibrary button row so the base never learns app-local concerns.
 
 Depends only on ``ContextControlPort`` + the shared event bus, so every
-measurement-session app reuses it (measure adds ml-edit; autofluxdep can use it
-as-is or subclass too).
+measurement-session app can reuse it; measure adds ml-edit in its subclass.
 """
 
 from __future__ import annotations

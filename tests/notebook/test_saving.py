@@ -43,7 +43,7 @@ from zcu_tools.resources.entry.schema import PointDocument
 from tests._native_support import native_metadata
 from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
 from tests.notebook import _interrupt_fakes
-from tests.notebook._interrupt_fakes import InterruptedCore, InterruptedExecutorCore
+from tests.notebook._interrupt_fakes import InterruptedCore
 from tests.resources.entry.fakes import Driver, registry_state, restore_registry
 
 
@@ -120,11 +120,11 @@ def analysis_document() -> AnalysisDocument:
     )
 
 
-@pytest.mark.parametrize("mode", ["software", "program", "program-round", "executor"])
+@pytest.mark.parametrize("mode", ["software", "program", "program-round"])
 def test_interrupted_acquisition_preserves_saveable_partial(
-    point: PointView, mode: Literal["software", "program", "program-round", "executor"]
+    point: PointView, mode: Literal["software", "program", "program-round"]
 ) -> None:
-    core = InterruptedExecutorCore() if mode == "executor" else InterruptedCore(mode)
+    core = InterruptedCore(mode)
     exp = NotebookAdapter(
         soc=object(),
         soccfg=object(),

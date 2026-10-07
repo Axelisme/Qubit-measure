@@ -211,8 +211,8 @@ class Controller(SessionControllerMixin):
     """Façade for the GUI application. Delegates to domain services.
 
     The identical shared controller forwards live in SessionControllerMixin
-    (read through the _*_svc accessors assigned in __init__); only the methods whose
-    body diverges from autofluxdep are kept here (apply_project /
+    (read through the _*_svc accessors assigned in __init__); app-specific methods
+    are kept here (apply_project /
     get_project_root / get_bus, plus everything app-specific). Shared setup,
     context / inspect, and value-md-ml consumers use their own control facets
     instead of this facade.

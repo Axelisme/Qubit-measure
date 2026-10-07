@@ -86,10 +86,7 @@ def _build_measure_catalogs():
         preserved_modules=(
             "zcu_lab.templates",
             "zcu_lab.v2._support.measure",
-            "zcu_lab.v2._support.autofluxdep",
             "zcu_lab.v2._support.singleshot",
-            "zcu_lab.v2.autofluxdep._support",
-            "zcu_lab.v2.overnight._support",
         ),
         catalog_module="zcu_lab.definitions",
     )

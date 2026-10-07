@@ -1,13 +1,11 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-07，完成狀態與 scope lifecycle 測試分工
+**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
 `SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
-acquire；executor 類流程用 `ResultTree` 實作 executor-owned `BufferProtocol`，再交給同一個
-`Schedule` 編排 outer loop，並用 `MultiMeasurementExecutor` 共用 result initialization、
-per-measurement liveplot subscription、recording、retry、cleanup、partial-result outcome
-與 `last_cfg` / `last_result` lifecycle。舊 Task tree runtime 不再保留。
+acquire。`ResultTree` 提供 structured `BufferProtocol`，可交給同一個
+`Schedule` 編排 outer loop。
 
 ---
 
@@ -27,22 +25,22 @@ per-measurement liveplot subscription、recording、retry、cleanup、partial-re
 ### `BufferProtocol`
 
 `BufferProtocol` 是 `Schedule` 對 buffer 的唯一要求：buffer 提供 `data` 以及
-`trigger_update(step, flush=False)`。`SignalBuffer` 實作這個 protocol；executor workflow
-使用 `ResultTree` 作為 structured result buffer。`Schedule` 不直接宣告 result tree /
+`trigger_update(step, flush=False)`。`SignalBuffer` 實作這個 protocol；`ResultTree`
+提供 structured result buffer。`Schedule` 不直接宣告 result tree /
 update callback；child-local `SignalBuffer` 寫入時同步更新 root buffer 的 `data` 中對應
 path，並觸發該 buffer 的 update hook。
 
 ### `ResultTree`
 
-`ResultTree` 是 executor-owned buffer，root data 形狀為
+`ResultTree` 是 structured buffer，root data 形狀為
 `list[dict[measurement_name, Result]]`。它提供：
 
 - `ResultNode` typed handle：`tree.at(i).child("task").child("field")` 可定位 result
   subtree，`set(value, flush=True)` 可直接寫入並觸發 update；若該 update 會送到
-  subscriber，`ResultTree` 必須有 run env（executor 會在建構時傳入），否則 fast-fail。
-- child-local buffer：executor leaf 以 `state.child("raw_signals", cfg=cfg).buffer(...)`
+  subscriber，`ResultTree` 必須有 run env（caller 在建構時傳入），否則 fast-fail。
+- child-local buffer：caller 以 `state.child("raw_signals", cfg=cfg).buffer(...)`
   建立 `SignalBuffer`，buffer 寫入時會回填 ResultTree leaf。
-- per-measurement subscription：executor plotter 訂閱 `tree.measurement_node(name)`，
+- per-measurement subscription：plotter 訂閱 `tree.measurement_node(name)`，
   callback 收 `ResultUpdateEvent`，包含 `measurement_name`、`outer_index`、
   `outer_value`、`env`、`node`、stacked `result` 與 `flush`。
 - root-level `ResultTree.trigger_update(flush=True)` 會對所有已訂閱 measurement 廣播
@@ -125,58 +123,15 @@ with Schedule(cfg, signals_buffer) as sched:
   預設使用 `default_decimated_raw2signal_fn`。
 - `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
 - `progress_label=` 可覆寫 acquire rounds progress bar label；`progress_leave=` 可覆寫
-  root-vs-step 預設 close/retain policy。GUI node helpers 用 label 顯示 node/flux row
-  scoped rounds 進度，並以 non-leaving bar 避免跨 row 累積。
-
----
-
-## Executor Scaffold
-
-`MultiMeasurementExecutor` 服務 `autofluxdep` / `overnight` 這類外層 workflow。跨模組分工見 ADR-0062。
-base executor 擁有 common run lifecycle：建立 default outer result、combined liveplot
-layout、`ResultTree` subscriptions、`Schedule` scope、measurement init/cleanup、
-per-measurement retry、stop/error partial handling，以及 `last_cfg` / `last_result` /
-`last_run_outcome`。它用 caller 的 Plots 建立具名 `measurement` 合併圖；leaf 取得
-explicit Plots／figure name／axes，以 typed handles 更新資料與 markers。每次 result
-事件完成後刷新整圖，若啟用動畫則透過 owner-dispatched recorder 保存 frame。
-Executor 收尾 recorder，不 finish／release caller 的 Plots，也不 close 原生 Figure；
-presentation owner 停止 producer 後完成並釋放呈現。Concrete executor 只提供 cfg/env
-建立與 outer-loop policy。
-
-典型 executor 格式：
-
-```python
-def run_loop(root_sched: Schedule[WorkflowCfg, WorkflowEnv]) -> None:
-    for i, (value, step) in enumerate(root_sched.scan("outer", outer_values)):
-        update_context(i, step, value)
-        self._run_measurement_batch(step, retry_time)
-```
-
-leaf measurement 取得 `ScheduleStep` 後，通常用
-`raw_step = state.child("raw_signals", cfg=program_cfg)` 建立 program-owned cfg scope，再用
-`raw_step.buffer(shape, dtype=...)` 建立與 result tree 綁定的 acquire buffer；接著直接
-呼叫 `raw_step.prog_builder(...).build_and_acquire()`。`autofluxdep` / `overnight`
-的 caller 入口以 explicit keyword deps 提供穩定依賴，executor 在 run 內組完整 typed
-env 給 root `Schedule`。
-
-executor leaf contract 由 `runtime/task.py` 擁有：
-
-- `Acquirer[T_Cfg, T_Env, T_Result]`：`init` / `run` / `cleanup` /
-  `get_default_result`。
-- `TaskPlotter[T_Env, T_Result, T_PlotDict]`：axes、plotter 建立與
-  `ResultUpdateEvent` 更新。
-- `TaskPersister[T_Result, T_SaveAxis]`：save/load mechanics 的 save 端 contract。
-- `MeasurementBundle`：executor 接受的完整 leaf contract。
-- `ComposedMeasurementBundle`：把 acquire / plot / persistence 三段 component 組成 leaf。
-- `MeasurementTask`：單一 class 直接實作完整 bundle 的 convenience base。
+  root-vs-step 預設 close/retain policy。
 
 ---
 
 ## Stop 與 Retry
 
 - `StopSignal` 是唯一 stop token，定義於 `experiment.stop_signal`。Caller 每次 run 建立一個，
-  必須透過 `Schedule(..., stop=context.cancel_signal)` 顯式傳入。Executor 與所有 leaf
-  共用同一個 token；runtime 不查 ambient scope，也不補建隱式 token。
+  必須透過 `Schedule(..., stop=context.cancel_signal)` 顯式傳入。Runtime 不查 ambient
+  scope，也不補建隱式 token。
 - `Schedule` scope 接住一次 `KeyboardInterrupt`，包含 scan/repeat 的 caller loop body，將 shared signal 記為 `interrupted` 並保留 buffer，讓 with 後的 return 組出部分結果。其他例外不改變原有傳播。Scope 外中斷不受保護，Notebook 將正常返回的 interrupted 表示為 stopped；其他 caller 的 `raise_if_error()` 仍拋錯。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   acquire-local composite `cancel_flag` 傳給 program acquire：它讀取 `StopSignal` 的 external
@@ -202,10 +157,6 @@ executor leaf contract 由 `runtime/task.py` 擁有：
   per-child retry。
 - Program build/acquire 在每次 attempt 前與 failed attempt retry 前都重新檢查
   `StopSignal`；stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。
-- `autofluxdep` / `overnight` executor 的外層 retry 由
-  `MultiMeasurementExecutor._run_measurement_with_retries(...)` 提供；retry 預算是
-  per-measurement、per-flux/time-step；retry 耗盡後 executor 回傳 partial result 並
-  把狀態寫入 `last_run_outcome`。
 
 ---
 
@@ -217,6 +168,5 @@ host scan/repeat/batch、ProgramBuilder retry、`ScheduleOutcome` 與 decimated 
 partial/NaN 保存、其他 exception 傳播與 repeat stop。兩個檔案重用同一個 test cfg builder，
 案例仍經公開 Schedule／buffer／StopSignal 接縫驗證，不直接測 outcome 的內部 helper。
 `test_result_tree.py` 覆蓋 ResultTree node set、child buffer、subscription、flush 與
-ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 executor template lifecycle、
-retry/stop partial result 與 composed bundle delegation。單一實驗模組只保留 runtime
+ordinary SignalBuffer regression。單一實驗模組只保留 runtime
 整合型檢查，不再為每個資料型 experiment 建獨立 runner 測試。

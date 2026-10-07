@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-06, resource observations and parameter schema ownership
+**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -105,14 +105,12 @@ Complex 使用一般 direct/eval 路徑。Cfg codec 與 editor 的 complex 值�
 `CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
 Fast Fail duplicate/parent conflict與錯誤default carrier、建立choice binding、對齊locked literal，
 並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、MetaDict、
-ModuleLibrary、logical key或generation policy；measure與autoflux各自保有domain builder，只共用這層
+ModuleLibrary、logical key或generation policy；measure保有domain builder，重用這層
 tree mechanics（ADR-0065；局部 authoring 見 ADR-0012）。
 
 generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。measure adapter facade只暴露
 framework contract、request/result/writeback/analyze params與protocol signature需要的session
-vocabulary，不forward generic cfg names。`zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露
-`NodeCfgSchema`、OverridePlan/policy、module reference spec helpers與其它autoflux-local API；module
-normalization與policy binding留在`cfg.module_adapter`，program shape/spec與raw missing/subset policy由
+vocabulary，不forward generic cfg names。Program shape/spec與raw missing/subset policy由
 `experiment.cfg_editing`擁有（ADR-0065；catalog 細節見其 README）。
 
 `gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
@@ -152,8 +150,7 @@ service-owned draft。
 
 此package不import `gui.app.*`、`experiment.*`、Qt、`resources`、`notebook`或`device`，
 也沒有broad environment object或global resolver registry。scalar option source與reference
-kind都是shared只轉送的opaque string；measure與autofluxdep各自提供
-app-local ports與module shape policy；autofluxdep不經measure lowering/conversion。
+kind都是shared只轉送的opaque string；measure提供app-local ports與module shape policy。
 
 ## Process Runtime (`runtime.py`)
 
@@ -169,8 +166,8 @@ entrypoints and call `launch_gui_runtime(...)` directly.
 
 The runtime seam deliberately stops above remote method/domain/session policy:
 `gui.remote` still owns transport, each app owns dispatch/domain handlers, and
-`gui.session` owns measurement-session primitives. All four standalone GUI
-launchers (`measure`, `autofluxdep`, `fluxdep`, `dispersive`) use this runtime
+`gui.session` owns measurement-session primitives. All three standalone GUI
+launchers (`measure`, `fluxdep`, `dispersive`) use this runtime
 directly; measurement-session apps keep their domain composition in app behavior
 classes and launcher-provided factories.
 
@@ -185,7 +182,7 @@ it does not select a process-wide Matplotlib backend.
 
 `ResultScopeManager` scans `result/**/params.json` under the project root and
 treats each hit as a selectable result scope. Measurement-session setup dialogs
-(measure/autofluxdep) use that scope to apply a project; analysis dialogs
+(measure) use that scope to apply a project; analysis dialogs
 (fluxdep/dispersive) use the same discovery in `widgets.ProjectDialog` as a
 dropdown picker only, leaving typed paths and Browse flows available.
 Measurement-session discovery is snapshot-cached: ordinary dialog reopen/apply
@@ -282,8 +279,7 @@ draft callbacks。detach以stable Python callback解除change/validity subscript
 `CfgFormWidget` accepts an optional field decoration provider keyed by full dotted
 cfg path. The shared renderer applies `hidden`, `enabled`, `tone`, `badge`, and
 `tooltip` metadata without changing the live value model. App-specific semantics
-stay outside the shared layer: for example, autofluxdep uses the same hook to mark
-generated Default cfg fields from its `OverridePlan`。measure則以generic
+stay outside the shared layer。measure以generic
 `TextInputEnhancer` seam安裝app-local value-source completion，shared widget不import session。
 
 Normal `LiteralSpec` rows remain hidden, but a decoration may explicitly unhide a
@@ -364,7 +360,7 @@ state.
 ## Logging (`logging_setup.py`)
 
 `logging_setup.setup_gui_logging` is the single place that decides *how* every
-GUI entry point configures logging. All four `scripts/run_*_gui.py` launchers and
+GUI entry point configures logging. All three `scripts/run_*_gui.py` launchers and
 the measure MCP server (`mcp/measure/server.py:main`) call it instead of each
 rolling their own handler set.
 

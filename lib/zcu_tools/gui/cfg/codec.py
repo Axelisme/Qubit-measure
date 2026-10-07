@@ -2,8 +2,7 @@
 
 ``schema_to_raw`` encodes a live ``CfgSchema`` as a JSON-compatible dict;
 ``raw_to_schema`` rebuilds the value tree against a base spec. The codec owns no
-I/O or app state, and both measure workspace persistence and autofluxdep node
-persistence use the same wire shape.
+I/O or app state. Measure workspace persistence uses this wire shape.
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 
 Subclasses the app-agnostic ``InspectDialogBase`` and keeps its dense measure
 Parameters grid.  The measure Modules tab owns the selected service-backed
-CfgEditor draft; autofluxdep continues to use the base's read-only presentation.
+CfgEditor draft.
 """
 
 from __future__ import annotations
@@ -294,7 +294,7 @@ class _MlCreateDialog(QDialog):
 class InspectDialog(InspectDialogBase):
     """Measure inspector with dense Parameters and embedded ml editing.
 
-    The base owns the autofluxdep-compatible presentation; this subclass
+    The base owns the generic presentation; this subclass
     replaces Parameters and Modules presentation only for measure.
     """
 
@@ -327,8 +327,8 @@ class InspectDialog(InspectDialogBase):
     def _build_md_tab(self) -> QWidget:
         """Build measure's dense inline-editable Parameters property grid.
 
-        The shared base intentionally keeps the autofluxdep presentation and
-        read-only hooks unchanged; only measure opts into this composition.
+        The shared base keeps its generic presentation and read-only hooks
+        unchanged; measure opts into this composition.
         """
         widget = QWidget()
         layout = QVBoxLayout(widget)
