@@ -240,10 +240,15 @@ def _rabi_cfg(
 
 
 def _readout_cfg(
-    plan: CalibrationPlan, tun: CalibrationTunables, f01_mhz: float, pi_length_us: float
+    plan: CalibrationPlan,
+    tun: CalibrationTunables,
+    rabi_cfg: LenRabiCfg,
+    f01_mhz: float,
+    pi_length_us: float,
 ) -> FreqGainCfg:
     cfg = plan.readout.model_copy(deep=True)
     cfg.reps, cfg.rounds = tun.ro_reps, tun.ro_rounds
+    cfg.modules.qub_pulse = rabi_cfg.modules.qub_pulse.model_copy(deep=True)
     cfg.modules.qub_pulse.set_param("freq", f01_mhz)
     cfg.modules.qub_pulse.set_param("length", pi_length_us)
     return cfg
@@ -352,7 +357,7 @@ def calibrate(
     if carry.last is None or carry.n_calibrated % tun.ro_every == 0:
         readout = yield from env.run(
             run_ro_landscape,
-            _readout_cfg(plan, tun, f01, rabi_fit.pi_length_us),
+            _readout_cfg(plan, tun, rabi.cfg, f01, rabi_fit.pi_length_us),
             save=savers.readout,
         )
         if isinstance(readout, Failed):
