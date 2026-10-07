@@ -163,6 +163,7 @@ class RunArtifacts:
                 workflow=metadata.workflow,
                 plan=metadata.plan,
                 tunables=metadata.tunables,
+                tunables_originals=metadata.tunables_originals,
                 requires=metadata.requires,
                 roots=roots,
                 started_at=metadata.started_at,

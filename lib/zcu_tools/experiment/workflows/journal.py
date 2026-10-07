@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from traceback import TracebackException
@@ -21,6 +22,8 @@ class RunMetadata:
     and tunables are complete, validated JSON model projections at revision 0.
     requires lists declared capabilities. roots are absolute run directories.
     started_at is the original timezone-aware UTC start time.
+    tunables_originals contains opaque expression text by leaf dot path at
+    revision zero, detached from the startup caller.
     """
 
     identity: RunIdentity
@@ -30,6 +33,7 @@ class RunMetadata:
     requires: tuple[Capability, ...]
     roots: RunPaths
     started_at: datetime
+    tunables_originals: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -149,11 +153,18 @@ class StepFailed(IterationResult):
 
 @dataclass(frozen=True)
 class ChangedValue:
-    """One applied leaf change: dot path and detached old/new JSON values."""
+    """One applied leaf change with detached values and opaque expression text.
+
+    path is the model-field leaf dot path. old/new are validated JSON values.
+    old_original/new_original are the text before/after publication; None means
+    that version has no original at this path. Text is never evaluated here.
+    """
 
     path: str
     old: JsonValue
     new: JsonValue
+    old_original: str | None = None
+    new_original: str | None = None
 
 
 @dataclass(frozen=True)
