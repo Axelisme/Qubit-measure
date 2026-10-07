@@ -1,9 +1,10 @@
 """Recursive, unvalidated inputs accepted only at cfg factory boundaries."""
 
+from collections.abc import Mapping, Sequence
+
 from qick.asm_v2 import QickParam
 
-from .module import ModuleCfg
-from .waveform import WaveformCfg
+from .base import ConfigBase
 
 type CfgInputValue = (
     None
@@ -13,9 +14,8 @@ type CfgInputValue = (
     | complex
     | str
     | QickParam
-    | ModuleCfg
-    | WaveformCfg
-    | list[CfgInputValue]
-    | dict[str, CfgInputValue]
+    | ConfigBase
+    | Sequence[CfgInputValue]
+    | Mapping[str, CfgInputValue]
 )
-type CfgInputMap = dict[str, CfgInputValue]
+type CfgInputMap = Mapping[str, CfgInputValue]
