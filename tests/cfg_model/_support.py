@@ -35,13 +35,13 @@ class Resolver:
         self.waveforms: dict[str, WaveformSpec] = {}
 
     def module_spec(self, path: str) -> ModuleSpec:
-        """Read a module Spec; absent or wrong-partition keys raise ValueError."""
+        """Read an isolated module Spec; absent keys raise KeyError."""
         if path not in self.modules:
-            raise ValueError(f"Missing module key: {path}")
+            raise KeyError(f"Missing module key: {path}")
         return self.modules[path].model_copy(deep=True)
 
     def waveform_spec(self, path: str) -> WaveformSpec:
-        """Read a waveform Spec; absent or wrong-partition keys raise ValueError."""
+        """Read an isolated waveform Spec; absent keys raise KeyError."""
         if path not in self.waveforms:
-            raise ValueError(f"Missing waveform key: {path}")
+            raise KeyError(f"Missing waveform key: {path}")
         return self.waveforms[path].model_copy(deep=True)
