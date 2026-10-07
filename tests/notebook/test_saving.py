@@ -1,5 +1,6 @@
 """Real Notebook run/save caller over fake acquisition and production storage."""
 
+from collections.abc import Generator, Mapping
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Self
@@ -19,16 +20,65 @@ from zcu_tools.notebook import NotebookAdapter, NotebookExperiment, PartialSaveE
 from zcu_tools.notebook import adapter as adapter_module
 from zcu_tools.notebook import saving as saving_module
 from zcu_tools.plotting.plots import NonPresentingHost
+from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import (
+    AcceptedPayload,
     JsonObject,
+    JsonValue,
     LedgerEvent,
     PointView,
     RecordsLedger,
     ResultEntry,
+    RoleSpec,
+    capture_point_storage,
+    component_registry,
+    role_registry,
+    snapshot,
+    source_path,
 )
+from zcu_tools.resources.entry.schema import PointDocument
 
 from tests._native_support import native_metadata
 from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
+from tests.resources.entry.fakes import Driver, registry_state, restore_registry
+
+
+@pytest.fixture(scope="module", autouse=True)
+def accept_registry() -> Generator[None]:
+    before = registry_state()
+    component_registry.register("notebook/accept-driver", Driver)
+    role_registry.register("notebook_target", RoleSpec("notebook/accept-driver"))
+    registered = registry_state()
+    try:
+        yield
+        assert registry_state() == registered, (
+            "notebook tests polluted shared registries"
+        )
+    finally:
+        restore_registry(before)
+
+
+@pytest.fixture(autouse=True)
+def accept_registry_guard(request: pytest.FixtureRequest) -> Generator[None]:
+    before = registry_state()
+    yield
+    assert registry_state() == before, f"registry polluter: {request.node.nodeid}"
+
+
+@pytest.fixture
+def accept_point(point: PointView) -> PointView:
+    point.add_component("D1", kind="notebook/accept-driver", rate=1000.0)
+    point.add_component("D2", kind="notebook/accept-driver", rate=2000.0)
+    return point
+
+
+@pytest.fixture
+def ledger(point: PointView, tmp_path: Path) -> RecordsLedger:
+    return ResultEntry.open(
+        "entry",
+        result_root=tmp_path / "results",
+        database_root=tmp_path / "Database",
+    ).ledger
 
 
 @pytest.fixture(autouse=True)
@@ -389,3 +439,231 @@ def test_ledger_append_failure_propagates_after_files_are_written(
         / "data.h5"
     )
     assert load_run_data(native).metadata.run_id == exp.acquisition_for(source).run_id
+
+
+@pytest.mark.parametrize("stderr", [0.0, 0.25, None])
+def test_accept_writes_role_values_and_local_accepted_provenance(
+    accept_point: PointView, ledger: RecordsLedger, stderr: float | None
+) -> None:
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    roles = accept_point.resolve(("notebook_target",), notebook_target="D1")
+    saved = exp.save_run(accept_point, source=source, roles=roles)
+    event_id = saved.accept(
+        {
+            "notebook_target.rate": (1250.0, stderr),
+            "general.description": "accepted fit",
+        },
+        kind="frequency",
+        analysis_params={"skip": 2},
+    )
+    event = ledger.get(event_id).event
+    assert event.kind == "accepted"
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id == saved.run_id
+    assert event.payload.analysis_summary == {"skip": 2}
+    assert [(write.path, write.value) for write in event.payload.writes] == [
+        ("D1.rate", 1250.0),
+        ("general.description", "accepted fit"),
+    ]
+    accept_point.refresh()
+    assert accept_point.D1.rate == 1250.0
+    assert accept_point.D2.rate == 2000.0
+    assert accept_point.description == "accepted fit"
+    metadata = accept_point.meta("D1.rate")
+    assert metadata is not None
+    assert (metadata.source, metadata.kind, metadata.run_id, metadata.at) == (
+        event_id,
+        "frequency",
+        saved.run_id,
+        event.at,
+    )
+    assert metadata.stderr == stderr
+    description_source = accept_point.meta("general.description")
+    assert description_source is not None
+    assert description_source.source == event_id
+    assert description_source.stderr is None
+
+
+def test_accept_preserves_json_containers_and_unknown_stderr(
+    point: PointView, ledger: RecordsLedger
+) -> None:
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    saved = exp.save_run(point, source=source)
+    event_id = saved.accept(
+        {"general.ext": ({"series": [1, 2], "optional": None}, None)}, kind="fit"
+    )
+    point.refresh()
+    assert point.general.ext.series == [1, 2]
+    assert point.general.ext.optional is None
+    event = ledger.get(event_id).event
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.analysis_summary == {}
+    assert event.payload.writes[0].value == {"series": [1, 2], "optional": None}
+    metadata = point.meta("general.ext.series")
+    assert metadata is not None
+    assert metadata.source == event_id
+    assert metadata.stderr is None
+
+
+def test_accept_keeps_original_point_roles_and_run_after_later_acquisition(
+    accept_point: PointView, tmp_path: Path, ledger: RecordsLedger
+) -> None:
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    roles = accept_point.resolve(("notebook_target",), notebook_target="D1")
+    saved = exp.save_run(accept_point, source=source, roles=roles)
+    entry = ResultEntry.open(
+        "entry",
+        result_root=tmp_path / "results",
+        database_root=tmp_path / "Database",
+    )
+    other_point = entry.new_point("other", description="untouched")
+    next_source = exp.run(SavingCfg(gain=3.0))
+    next_saved = exp.save_run(other_point, source=next_source)
+    event_id = saved.accept({"notebook_target.rate": 1500.0}, kind="frequency")
+    assert accept_point.D1.rate == 1500.0
+    assert accept_point.D2.rate == 2000.0
+    assert other_point.description == "untouched"
+    event = ledger.get(event_id).event
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id == saved.run_id
+    assert event.payload.run_id != next_saved.run_id
+
+
+@pytest.mark.parametrize(
+    ("values", "kind", "message"),
+    [
+        ({}, "fit", "values"),
+        ({"general.description": "fit"}, "", "kind"),
+        ({"general.description": "fit"}, "   ", "kind"),
+        ({"general.flux_value": float("nan")}, "fit", "strict JSON"),
+        ({"general.flux_value": float("inf")}, "fit", "strict JSON"),
+        ({"general.flux_value": (1.0, -0.1)}, "fit", "stderr"),
+        ({"general.flux_value": (1.0, float("nan"))}, "fit", "stderr"),
+        ({"general.flux_value": (1.0, float("inf"))}, "fit", "stderr"),
+    ],
+)
+def test_accept_rejects_invalid_input_without_point_writes(
+    point: PointView,
+    ledger: RecordsLedger,
+    values: Mapping[str, JsonValue | tuple[JsonValue, float | None]],
+    kind: str,
+    message: str,
+) -> None:
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    saved = exp.save_run(point, source=source)
+    before = ledger.events()
+    before_point = snapshot(point)
+    with pytest.raises(ValueError, match=message):
+        saved.accept(values, kind=kind)
+    assert ledger.events() == before
+    assert point.description == "save-time context"
+    assert snapshot(point) == before_point
+
+
+def test_accept_schema_failure_keeps_event_and_rolls_back_point_edit(
+    accept_point: PointView, ledger: RecordsLedger
+) -> None:
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    saved = exp.save_run(accept_point, source=source)
+    before_source = accept_point.meta("D1.rate")
+    before_point = snapshot(accept_point)
+    with pytest.raises(ValueError, match="rate"):
+        saved.accept(
+            {"general.description": "candidate", "D1.rate": "not a number"},
+            kind="frequency",
+        )
+    event = ledger.events()[-1]
+    assert event.kind == "accepted"
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id == saved.run_id
+    assert event.payload.writes[-1].value == "not a number"
+    accept_point.refresh()
+    assert accept_point.description == "save-time context"
+    assert accept_point.D1.rate == 1000.0
+    assert accept_point.meta("D1.rate") == before_source
+    assert snapshot(accept_point) == before_point
+
+
+def test_accept_commit_validator_error_propagates_and_keeps_event(
+    point: PointView, tmp_path: Path, ledger: RecordsLedger
+) -> None:
+    failure = RuntimeError("point validation rejected the fit")
+
+    def reject_fit(document: PointDocument) -> None:
+        if document.general.description == "candidate":
+            raise failure
+
+    path = source_path(point)
+    binding = capture_point_storage(point)
+    bound = PointView(
+        DocumentStore(
+            path, PointDocument, format="zcu.parameter-container", validate=reject_fit
+        ),
+        path,
+        ledger=tmp_path / "results" / "entry" / "records" / "ledger.jsonl",
+        entry_id=str(binding.entry_id),
+        result_root=tmp_path / "results",
+        database_root=tmp_path / "Database",
+    )
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    saved = exp.save_run(bound, source=source)
+    before_point = snapshot(bound)
+    with pytest.raises(RuntimeError, match="point validation rejected") as caught:
+        saved.accept({"general.description": "candidate"}, kind="fit")
+    assert caught.value is failure
+    assert ledger.events()[-1].kind == "accepted"
+    bound.refresh()
+    assert bound.description == "save-time context"
+    assert snapshot(bound) == before_point
+
+
+def test_accept_ledger_error_propagates_without_point_writes(
+    point: PointView, ledger: RecordsLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    saved = exp.save_run(point, source=source)
+    before = ledger.events()
+    before_point = snapshot(point)
+    original = RecordsLedger.append
+    failure = OSError("accepted ledger unavailable")
+
+    def reject_accepted(
+        self: RecordsLedger, event: LedgerEvent, *, record: JsonObject | None = None
+    ) -> None:
+        if event.kind == "accepted":
+            raise failure
+        original(self, event, record=record)
+
+    monkeypatch.setattr(RecordsLedger, "append", reject_accepted)
+    with pytest.raises(OSError, match="accepted ledger unavailable") as caught:
+        saved.accept({"general.description": "candidate"}, kind="fit")
+    assert caught.value is failure
+    assert ledger.events() == before
+    point.refresh()
+    assert point.description == "save-time context"
+    assert snapshot(point) == before_point
+
+
+def test_accept_rejects_non_json_analysis_parameters(
+    point: PointView, ledger: RecordsLedger
+) -> None:
+    exp = experiment()
+    source = exp.run(SavingCfg())
+    saved = exp.save_run(point, source=source)
+    before = ledger.events()
+    before_point = snapshot(point)
+    with pytest.raises(ValueError, match="strict JSON"):
+        saved.accept(
+            {"general.description": "candidate"},
+            kind="fit",
+            analysis_params={"skip": float("nan")},
+        )
+    assert ledger.events() == before
+    assert snapshot(point) == before_point

@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
+from math import isfinite
 from pathlib import Path
 from typing import Generic, TypeVar
 from uuid import uuid4
@@ -29,13 +30,20 @@ from zcu_tools.experiment.run_saving import (
     save_artifacts,
 )
 from zcu_tools.resources.entry import (
+    AcceptedPayload,
+    AcceptedWrite,
     AcquiredPayload,
     ArtifactKey,
+    JsonObject,
+    JsonValue,
     LedgerEvent,
     PointView,
+    Provenance,
     RoleView,
     SaveLayout,
     capture_point_storage,
+    resolve_path,
+    snapshot,
 )
 
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
@@ -84,6 +92,7 @@ class SavedRun(Generic[CfgT, ResultT]):
         """
         self._data = prepare_run_data(source, spec=spec, comment="")
         self._storage = capture_point_storage(ctx)
+        self._point = ctx
         self._metadata = RunMetadata(
             run_id=acquisition.run_id,
             experiment=spec.tag,
@@ -199,6 +208,76 @@ class SavedRun(Generic[CfgT, ResultT]):
         if any(item.status == "failed" for item in self._report.outputs):
             raise PartialSaveError(self, self._report)
         return self._report
+
+    def accept(
+        self,
+        values: Mapping[str, JsonValue | tuple[JsonValue, float | None]],
+        *,
+        kind: str,
+        analysis_params: JsonObject | None = None,
+    ) -> str:
+        """Append accepted evidence, then commit values to this run's bound point.
+
+        values maps ordinary dotted point paths to working-unit JSON values, or
+        (value, stderr) pairs. stderr is finite and non-negative; None is unknown.
+        Expand role prefixes with the names captured by save_run. kind must be a
+        nonempty string, values nonempty, and analysis_params a strict JSON object
+        or None. Store supplied analysis_params as the event's analysis_summary.
+
+        Append a typed accepted event with this run_id before point.edit/set.
+        Write each value and its provenance in one point edit; do not prevalidate
+        a candidate or promise a cross-file transaction. Return the event id only
+        after successful commit. Input, ledger, schema, custom validation,
+        conflict and I/O errors propagate unchanged. A failed point edit may
+        leave an unreferenced accepted event; there is no retry or recovery.
+        """
+        kind = TypeAdapter(str).validate_python(kind, strict=True)
+        if not kind.strip():
+            raise ValueError("kind must be nonempty")
+        if not values:
+            raise ValueError("values must be nonempty")
+        document = snapshot(self._point)
+        writes: list[tuple[AcceptedWrite, float | None]] = []
+        for path, item in values.items():
+            if isinstance(item, tuple):
+                value, stderr = item
+            else:
+                value, stderr = item, None
+            if stderr is not None:
+                stderr = TypeAdapter(float).validate_python(stderr, strict=True)
+                if not isfinite(stderr) or stderr < 0:
+                    raise ValueError("stderr must be finite and non-negative, or None")
+            actual_path = resolve_path(
+                document, path, roles=self._metadata.snapshot.roles
+            )
+            writes.append((AcceptedWrite(path=actual_path, value=value), stderr))
+        event = LedgerEvent(
+            id=str(uuid4()),
+            kind="accepted",
+            at=datetime.now(UTC).isoformat(),
+            entry_id=str(self._storage.entry_id),
+            origin="notebook",
+            payload=AcceptedPayload(
+                writes=tuple(write for write, _ in writes),
+                analysis_summary=analysis_params if analysis_params is not None else {},
+                run_id=self.run_id,
+            ),
+        )
+        self._storage.ledger.append(event)
+        with self._point.edit() as draft:
+            for write, stderr in writes:
+                draft.set(
+                    write.path,
+                    write.value,
+                    provenance=Provenance(
+                        source=event.id,
+                        kind=kind,
+                        run_id=self.run_id,
+                        at=event.at,
+                        stderr=stderr,
+                    ),
+                )
+        return event.id
 
     def _artifacts(self) -> tuple[SaveArtifact, ...]:
         artifacts = [
