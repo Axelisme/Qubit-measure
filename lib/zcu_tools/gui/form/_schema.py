@@ -180,7 +180,7 @@ def _child_nodes(
     models = model_types(info.annotation)
     if len(models) == 1:
         return ((models[0], _non_null(target)),)
-    variants = target.get("oneOf")
+    variants = _non_null(target).get("oneOf")
     if isinstance(variants, list):
         return tuple(
             (model, variant)

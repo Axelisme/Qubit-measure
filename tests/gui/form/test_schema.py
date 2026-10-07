@@ -70,6 +70,40 @@ class BetaBranch(BaseModel):
     mode: str = "beta"
 
 
+class NullableAlphaBranch(FormModel):
+    """A nullable branch owns its choices and tagged complex input."""
+
+    kind: Literal["alpha"] = "alpha"
+    mode: str = "local-alpha"
+    amplitude: Annotated[complex, Display(unit="V")] = 1 + 2j
+
+    @classmethod
+    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Allow only this branch's local mode."""
+        return {("mode",): ("local-alpha",)}
+
+
+class NullableBetaBranch(FormModel):
+    """The other nullable branch has an independent local mode."""
+
+    kind: Literal["beta"] = "beta"
+    mode: str = "local-beta"
+    amplitude: complex = 1 + 2j
+
+    @classmethod
+    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Allow only this branch's local mode."""
+        return {("mode",): ("local-beta",)}
+
+
+class NullableChoicesForm(FormModel):
+    """Project both locally constrained branches while also permitting null."""
+
+    branch: Annotated[
+        NullableAlphaBranch | NullableBetaBranch | None, Field(discriminator="kind")
+    ] = None
+
+
 class NestedChoicesForm(FormModel):
     """Top-level choices target reused, nullable and tagged nested fields."""
 
@@ -137,6 +171,62 @@ def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated(
         result = FormState(FormInput(NestedChoicesForm, numeric_invalid)).result(env)
         assert isinstance(result, FormErrors)
         assert ("restricted", "level") in result.messages
+
+
+@pytest.mark.parametrize("kind", ["alpha", "beta"])
+def test_nullable_union_projects_branch_choices_and_complex_input(kind: str) -> None:
+    env = FormEnv(md=MetaDict())
+    validator = Draft202012Validator(NullableChoicesForm.input_schema(env))
+    assert validator.is_valid({"branch": None})
+    null_result = FormState(FormInput(NullableChoicesForm, {"branch": None})).result(
+        env
+    )
+    assert isinstance(null_result, NullableChoicesForm)
+    assert null_result.branch is None
+    amplitudes: tuple[dict[str, JsonValue], ...] = (
+        {"__complex__": [1.0, 2.0]},
+        {"expr": "1 + 2j"},
+    )
+    for amplitude in amplitudes:
+        valid: dict[str, JsonValue] = {
+            "branch": {"kind": kind, "mode": f"local-{kind}", "amplitude": amplitude}
+        }
+        assert validator.is_valid(valid)
+        result = FormState(FormInput(NullableChoicesForm, valid)).result(env)
+        assert isinstance(result, NullableChoicesForm)
+        assert result.branch is not None
+        assert result.branch.amplitude == 1 + 2j
+        invalid: dict[str, JsonValue] = {
+            "branch": {"kind": kind, "mode": "other", "amplitude": amplitude}
+        }
+        assert not validator.is_valid(invalid)
+        errors = FormState(FormInput(NullableChoicesForm, invalid)).result(env)
+        assert isinstance(errors, FormErrors)
+        assert ("branch", "mode") in errors.messages
+
+
+def test_nullable_union_rejects_invalid_branch_local_choice_path() -> None:
+    class InvalidAlphaBranch(NullableAlphaBranch):
+        """Declare a nonexistent leaf on one branch only."""
+
+        @classmethod
+        def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+            """Return an intentionally invalid branch-local declaration."""
+            return {("missing",): ("value",)}
+
+    class InvalidNullableForm(FormModel):
+        """The invalid branch must be checked even when the default is null."""
+
+        branch: Annotated[
+            InvalidAlphaBranch | NullableBetaBranch | None, Field(discriminator="kind")
+        ] = None
+
+    env = FormEnv(md=MetaDict())
+    with pytest.raises(ValueError, match="path|field|leaf"):
+        InvalidNullableForm.input_schema(env)
+    active = FormState(FormInput(InvalidNullableForm, {"branch": {"kind": "alpha"}}))
+    with pytest.raises(ValueError, match="path|field|leaf"):
+        active.result(env)
 
 
 @pytest.mark.parametrize("path", [("samples", 0), ("offsets", "rack.left")])
