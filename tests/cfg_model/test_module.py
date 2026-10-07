@@ -77,7 +77,7 @@ def test_pulsecfg_set_param_unknown_rejected():
 
 
 def _direct_dict(**kw: CfgInputValue) -> CfgInputMap:
-    base: CfgInputMap = {
+    base: dict[str, CfgInputValue] = {
         "type": "readout/direct",
         "ro_ch": 0,
         "ro_length": 1.0,
@@ -88,7 +88,7 @@ def _direct_dict(**kw: CfgInputValue) -> CfgInputMap:
 
 
 def _pulse_dict(**kw: CfgInputValue) -> CfgInputMap:
-    d: CfgInputMap = {
+    d: dict[str, CfgInputValue] = {
         "type": "readout/pulse",
         "pulse_cfg": {
             "type": "pulse",

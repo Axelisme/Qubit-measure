@@ -13,8 +13,15 @@ from zcu_tools.gui.session.events import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.result_scope import ResultScope
     from zcu_tools.gui.session.context_control import ContextControlPort
+    from zcu_tools.gui.session.context_types import (
+        EntryInfo,
+        EntryRequest,
+        PointCreateRequest,
+        PointUseRequest,
+        SavedPoint,
+        WorkingPointInfo,
+    )
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.services.connection import (
         ConnectRequest,
@@ -23,9 +30,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import DeviceEntry
     from zcu_tools.gui.session.services.project_settings import (
         ConnectionPreferences,
-        ProjectRequest,
         ProjectSettingsService,
-        ResolvedProject,
         SetupPreferences,
     )
     from zcu_tools.gui.session.services.simulated_environment import (
@@ -40,19 +45,33 @@ class SetupControlPort(Protocol):
 
     def get_bus(self) -> BaseEventBus: ...
     def get_setup_preferences(self) -> SetupPreferences: ...
-    def list_result_scopes(
-        self, *, refresh: bool = False
-    ) -> tuple[ResultScope, ...]: ...
-    def apply_project(self, req: ProjectRequest) -> bool: ...
+    def list_entries(self, *, refresh: bool = False) -> tuple[str, ...]:
+        """List cached entry names; True explicitly refreshes via resources."""
+        ...
 
-    def use_context(self, label: str) -> None: ...
-    def new_context(
-        self,
-        bind_device: str | None = None,
-        clone_from: str | None = None,
-    ) -> None: ...
-    def get_context_labels(self) -> list[str]: ...
-    def get_active_context_label(self) -> str | None: ...
+    def open_entry(self, request: EntryRequest) -> EntryInfo:
+        """Open through resources and publish DRAFT; errors preserve the binding."""
+        ...
+
+    def new_entry(self, request: EntryRequest) -> EntryInfo:
+        """Create/publish DRAFT; post-creation failure retains the entry for Open."""
+        ...
+
+    def get_entry_info(self) -> EntryInfo | None:
+        """Read cached opened entry identity/paths, or None."""
+        ...
+
+    def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
+        """Read cached point descriptions; True explicitly refreshes through owner."""
+        ...
+
+    def use_point(self, request: PointUseRequest) -> SavedPoint:
+        """Prepare/select a point in the opened entry; failure preserves binding."""
+        ...
+
+    def new_point(self, request: PointCreateRequest) -> SavedPoint:
+        """Create from setup/clone then select; PointBindingError retains destination."""
+        ...
 
     def start_connect(self, req: ConnectRequest) -> int: ...
     def start_simulated_environment(
@@ -70,10 +89,10 @@ class SetupControlPort(Protocol):
     def get_device_unit(self, name: str) -> str: ...
 
 
-class SetupControlFacet:
+class SetupControlFacet(SetupControlPort):
     """Composition facade over the services used by SetupDialog."""
 
-    def __init__(  # noqa: PLR0913 — composition of the setup owners
+    def __init__(
         self,
         *,
         bus: BaseEventBus,
@@ -82,7 +101,6 @@ class SetupControlFacet:
         connection: SoCConnectionService,
         simulated_environment: SimulatedEnvironmentCoordinator,
         device: DeviceControlPort,
-        on_project_applied: Callable[[ResolvedProject], None] | None = None,
     ) -> None:
         self._bus = bus
         self._settings = settings
@@ -90,7 +108,6 @@ class SetupControlFacet:
         self._connection = connection
         self._simulated_environment = simulated_environment
         self._device = device
-        self._on_project_applied = on_project_applied
         self._connection_outcome_subscriptions = EventSubscriptions()
 
     def get_bus(self) -> BaseEventBus:
@@ -99,30 +116,26 @@ class SetupControlFacet:
     def get_setup_preferences(self) -> SetupPreferences:
         return self._settings.get_setup_preferences()
 
-    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
-        return self._settings.list_result_scopes(refresh=refresh)
+    def list_entries(self, *, refresh: bool = False) -> tuple[str, ...]:
+        return self._settings.list_entries(refresh=refresh)
 
-    def apply_project(self, req: ProjectRequest) -> bool:
-        resolved = self._settings.apply_project(req)
-        if self._on_project_applied is not None:
-            self._on_project_applied(resolved)
-        return True
+    def open_entry(self, request: EntryRequest) -> EntryInfo:
+        return self._settings.open_entry(request)
 
-    def use_context(self, label: str) -> None:
-        self._context.use_context(label)
+    def new_entry(self, request: EntryRequest) -> EntryInfo:
+        return self._settings.new_entry(request)
 
-    def new_context(
-        self,
-        bind_device: str | None = None,
-        clone_from: str | None = None,
-    ) -> None:
-        self._context.new_context(bind_device=bind_device, clone_from=clone_from)
+    def get_entry_info(self) -> EntryInfo | None:
+        return self._context.get_entry_info()
 
-    def get_context_labels(self) -> list[str]:
-        return self._context.get_context_labels()
+    def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
+        return self._context.list_points(refresh=refresh)
 
-    def get_active_context_label(self) -> str | None:
-        return self._context.get_active_context_label()
+    def use_point(self, request: PointUseRequest) -> SavedPoint:
+        return self._context.use_point(request)
+
+    def new_point(self, request: PointCreateRequest) -> SavedPoint:
+        return self._context.new_point(request)
 
     def start_connect(self, req: ConnectRequest) -> int:
         return self._connection.start_connect(req)

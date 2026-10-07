@@ -371,9 +371,9 @@ class TestSimParamsParamsJsonRoundTrip:
             pi_gain_len=0.4,
         )
 
-        assert p.EJ == fluxdep["params"]["EJ"]
-        assert p.EC == fluxdep["params"]["EC"]
-        assert p.EL == fluxdep["params"]["EL"]
+        assert fluxdep["params"]["EJ"] == p.EJ
+        assert fluxdep["params"]["EC"] == p.EC
+        assert fluxdep["params"]["EL"] == p.EL
         assert p.flux_half == fluxdep["flux_half"]
         assert p.flux_period == fluxdep["flux_period"]
         assert p.bare_rf == dispersive["bare_rf"]
