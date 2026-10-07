@@ -130,6 +130,19 @@ def _path_root(path: str) -> tuple[str, Literal["module", "waveform"], tuple[str
     return root, kind, tuple(parts[3:])
 
 
+def library_key_kind(path: str) -> Literal["module", "waveform"]:
+    """Validate a concrete library root and return its module/waveform family.
+
+    path is exactly component.partition.name. pulses/readout/reset are module
+    partitions; waveforms is the waveform partition. Empty segments, leaf paths
+    and unknown partitions raise ValueError. No document, lookup or I/O is used.
+    """
+    _, kind, suffix = _path_root(path)
+    if suffix:
+        raise ValueError(f"Expected a library root, not a leaf: {path!r}")
+    return kind
+
+
 def _validate_names(document: ModuleLibraryDocument) -> None:
     for component, library in document.components.items():
         if not component or "." in component:
@@ -494,7 +507,7 @@ class LibraryEdit:
         self,
         document: ModuleLibraryDocument,
         *,
-        assets: WaveformAssetInfo,
+        assets: WaveformAssetInfo | None,
         ledger: Path,
         entry_id: str,
     ) -> None:
@@ -615,11 +628,17 @@ class ModuleLibrary:
     """
 
     def __init__(
-        self, path: Path, *, assets: WaveformAssetInfo, ledger: Path, entry_id: str
+        self,
+        path: Path,
+        *,
+        assets: WaveformAssetInfo | None = None,
+        ledger: Path,
+        entry_id: str,
     ) -> None:
         """Open existing YAML with this entry's source scope, without creation.
 
-        path is the point-local module_cfg.yaml; assets is its fixed capability.
+        path is the point-local module_cfg.yaml; assets is its fixed capability,
+        or None for Spec-only operations. Materializing Arb requires a provider.
         ledger names the entry's records/ledger.jsonl; entry_id is its UUID.
         Header/schema/source/I/O errors propagate. Opening does not read assets.
         """
