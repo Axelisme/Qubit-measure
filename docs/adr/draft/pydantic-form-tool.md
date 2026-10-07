@@ -40,7 +40,7 @@ FormInput[F] 把輸入與表單型別 F 配對。其內容以具名 JSON 型別�
 - `reset(base)` 以 host 提供的新 base 重設草稿。Discard 與成功 Apply 都由 host 決定何時呼叫，不是工具 policy。
 - 變更通知使用普通 callback，不使用 Qt Signal，也不另設 owner Protocol、auto_apply 選項或發布服務。
 
-Write paths 是 tuple，typed mapping 的 key 可以含點。Host 只把已確認的 model-field leaf path 轉成 Engine dot path。Engine 仍不接受 sequence index 或整個 nested model replacement。FormErrors 以欄位路徑 tuple 對應訊息，list 驗證錯誤保留 Pydantic 的 index 位置，不把 model-wide error 隨意塞到某個欄位。
+Write paths 是 tuple，typed mapping 的 key 可以含點。Host 只把已確認的 model-field leaf path 轉成 Engine dot path。Engine 仍不接受 sequence index 或整個 nested model replacement。FormErrors 以欄位路徑 tuple 對應訊息，list 驗證錯誤保留 Pydantic 的 index 位置。沒有經 `field_error` 指定欄位的 model-wide error 使用空 tuple `()`。GUI 將這類錯誤顯示在表單頂端，MCP 原樣回傳路徑與訊息，不把錯誤塞到某個欄位。
 
 表單類別使用 Annotated 的 Display 提供標籤、說明、單位與輸入提示。版面上的順序、分組與摺疊由類別宣告。動態合法值由 `choices(env)` 提供，驗證與 input schema 共用結果。`field_error(path, message)` 讓 model_validator 指向具體欄位。Pydantic 擁有型別與 Field 範圍，工具不維護第二套 model 合法性規則。
 
@@ -153,6 +153,7 @@ forbidden_modules =
 | --- | --- |
 | gui.form → gui.session.expression、gui.cfg.codec | Qt-free leaf重用；form-core contract限制不能轉成services／UI／app dependency。C9保持top-level無循環。 |
 | gui.form → resources.context、device型別 | C8/C9合法frontend到capability，C10/C11/C12保護callee方向。只讀captured資料，不控制硬體。 |
+| gui.form → cfg_model | Module ref 切 inline 時取得的 Spec 屬於 cfg_model。C8／C9 涵蓋此 frontend 到共享核心的方向，C11 保護 cfg_model 不反向依賴 GUI。 |
 | gui.widgets.form → gui.form、既有primitive owner | form-editor contract隔離host，form-core contract防止反向editor import。 |
 | zcu_lab.workflows.gui → gui.form、experiment／cfg_model／native workflow models | 外部GUI附件消費framework與native型別；C16禁止反向，F4新增runtime-core禁GUI contract。C8不直接涵蓋外部附件，理由是D75的具體實驗frontend位置。 |
 | workflows app → gui.form／widgets.form、Engine／shared session | C8/C9 frontend組合方向，C18禁止Engine反向GUI。具體workflow與表單由外部組合根注入，不豁免C16。 |
