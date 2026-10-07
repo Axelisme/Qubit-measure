@@ -1,0 +1,97 @@
+"""Run one current workflow callback on a simulated board, without saving.
+
+Provide --sim with current SimParams JSON and --cfg with the selected callback's
+current native cfg JSON (dev must be None; this host has no device adapter).
+This is the acquisition-only host, not the complete T1 fluxdep workflow.
+No instruments are connected and no old-format alias/fallback is supported.
+"""
+
+import argparse
+import json
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Literal
+
+from qick import QickConfig
+from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.workflows import Run
+from zcu_tools.program.v2.mocksoc import make_mock_soc
+from zcu_tools.program.v2.sim import SimParams
+
+from zcu_lab.v2.twotone.freq.core import FreqCfg
+from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg
+from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainCfg
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
+from zcu_lab.workflows.acquire import (
+    FrequencyAcquisition,
+    RabiAcquisition,
+    ReadoutAcquisition,
+    T1Acquisition,
+    run_len_rabi,
+    run_qubit_freq,
+    run_ro_landscape,
+    run_t1,
+)
+
+
+class _Arguments(argparse.Namespace):
+    experiment: Literal["qubit_freq", "len_rabi", "ro_landscape", "t1"]
+    cfg: Path
+    sim: Path
+
+
+def _execute[
+    C,
+    R: FrequencyAcquisition | RabiAcquisition | ReadoutAcquisition | T1Acquisition,
+](experiment: Callable[[Run[C]], R], cfg: C, soc: object, soccfg: QickConfig) -> None:
+    run = Run(cfg, StopSignal(), soc=soc, soccfg=soccfg)
+    settings = run.device_setup
+    if settings is not None:
+        run.devices.setup(settings, run.cancel_signal)
+    result = experiment(run)
+    run.cancel_signal.raise_if_error()
+    print(
+        json.dumps(
+            {
+                "run_id": result.evidence.run_id,
+                "completion": result.evidence.completion,
+                "started_at": result.evidence.started_at.isoformat(),
+                "finished_at": result.evidence.finished_at.isoformat(),
+                "shape": list(result.signals.shape),
+            }
+        )
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Parse current cfg/simulator JSON files, acquire, and print a JSON summary.
+
+    argv uses the process arguments when None. File, validation and acquisition
+    errors propagate. This acquisition-only caller never creates output files
+    or connects hardware; argparse rejects unknown experiment names.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "experiment", choices=("qubit_freq", "len_rabi", "ro_landscape", "t1")
+    )
+    parser.add_argument("--cfg", type=Path, required=True)
+    parser.add_argument("--sim", type=Path, required=True)
+    args = parser.parse_args(argv, namespace=_Arguments())
+    soc, soccfg = make_mock_soc(
+        sim=SimParams.model_validate_json(args.sim.read_text(encoding="utf-8"))
+    )
+    cfg_json = args.cfg.read_text(encoding="utf-8")
+    if args.experiment == "qubit_freq":
+        _execute(run_qubit_freq, FreqCfg.model_validate_json(cfg_json), soc, soccfg)
+    elif args.experiment == "len_rabi":
+        _execute(run_len_rabi, LenRabiCfg.model_validate_json(cfg_json), soc, soccfg)
+    elif args.experiment == "ro_landscape":
+        _execute(
+            run_ro_landscape, FreqGainCfg.model_validate_json(cfg_json), soc, soccfg
+        )
+    else:
+        _execute(run_t1, T1Cfg.model_validate_json(cfg_json), soc, soccfg)
+
+
+if __name__ == "__main__":
+    main()
