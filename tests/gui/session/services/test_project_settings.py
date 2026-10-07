@@ -88,6 +88,30 @@ def test_entry_commands_publish_draft_through_real_context_owner(
     assert settings.list_entries() == ("entry",)
 
 
+@pytest.mark.parametrize("command", ["open", "new"])
+def test_first_discovery_is_complete_when_entry_command_runs_before_listing(
+    tmp_path: Path,
+    entry_services: tuple[
+        ProjectSettingsService, ContextService, SessionState, RememberedDevices
+    ],
+    command: str,
+) -> None:
+    settings, _, _, _ = entry_services
+    for name in ("A", "B"):
+        ResultEntry.create(
+            name, result_root=tmp_path / "result", database_root=tmp_path / "Database"
+        )
+    if command == "open":
+        settings.open_entry(EntryRequest("A"))
+        expected = ("A", "B")
+    else:
+        settings.new_entry(EntryRequest("C"))
+        expected = ("A", "B", "C")
+    assert settings.list_entries() == expected
+    settings.new_entry(EntryRequest("D"))
+    assert settings.list_entries() == (*expected, "D")
+
+
 def test_open_entry_then_use_point_publishes_active_target(
     tmp_path: Path,
     entry_services: tuple[

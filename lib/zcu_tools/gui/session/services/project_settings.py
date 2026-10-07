@@ -219,7 +219,8 @@ class ProjectSettingsService:
     def _install_entry(self, entry: ResultEntry) -> EntryInfo:
         info = self._context.install_entry(entry)
         self._state.preferences.entry_name = info.name
-        self._entry_names = tuple(sorted(set((*(self._entry_names or ()), info.name))))
+        if self._entry_names is not None:
+            self._entry_names = tuple(sorted(set((*self._entry_names, info.name))))
         return info
 
     def get_setup_preferences(self) -> SetupPreferences:

@@ -1,5 +1,6 @@
 """Entry/point publication and fixed reads through the public session owner."""
 
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -9,17 +10,29 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     ComponentFocus,
+    ContextSourceBinding,
     EntryDraft,
+    EntryInfo,
     PointBindingError,
     PointCreateRequest,
     PointUseRequest,
     SavedPoint,
 )
+from zcu_tools.gui.session.events import (
+    ComponentFocusChangedPayload,
+    ContextSwitchedPayload,
+)
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, RoleSpec, source_path
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.resources.entry.fakes import (
+    register_fakes,
+    registry_state,
+    restore_registry,
+)
 
 
 class Assets:
@@ -34,6 +47,37 @@ class Assets:
         if self.fail:
             raise OSError("synthetic asset binding failure")
         return ArbWaveformDatabase.info_at(path)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def registered_entry_models() -> Generator[None]:
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        yield
+        assert registry_state() == installed, (
+            "session context module polluted registries"
+        )
+    finally:
+        restore_registry(before)
+
+
+@pytest.fixture(autouse=True)
+def registry_guard(request: pytest.FixtureRequest) -> Generator[None]:
+    before = registry_state()
+    yield
+    assert registry_state() == before, f"registry polluter: {request.node.nodeid}"
+
+
+@pytest.fixture
+def rich_entry(tmp_path: Path) -> ResultEntry:
+    entry = _entry(tmp_path)
+    for name, rate, sense in (("Q1", 4300.0, "R1"), ("Q2", 5100.0, "R2")):
+        entry.setup.add_component(name, kind="fake/drive/a", rate=rate, sense=sense)
+    for name in ("R1", "R2"):
+        entry.setup.add_component(name, kind="fake/sensor", rate=6500.0)
+    return entry
 
 
 @pytest.fixture
@@ -248,3 +292,206 @@ def test_clear_context_returns_empty_without_deleting_entry(
     assert context.get_entry_info() is None
     assert context.list_points() == ()
     assert entry.list_points() == ["working"]
+
+
+def test_cross_entry_clone_rejects_before_destination_or_ledger_changes(
+    context: ContextService, tmp_path: Path
+) -> None:
+    entry = _entry(tmp_path)
+    other = _entry(tmp_path, "other")
+    other.new_point("source")
+    context.install_entry(entry)
+    before = context.read_context().target
+    before_events = entry.ledger.events()
+    other_events = other.ledger.events()
+
+    with pytest.raises(ValueError, match="name"):
+        context.new_point(_new_request(entry, "destination", clone="other/source"))
+
+    assert entry.list_points() == []
+    assert other.list_points() == ["source"]
+    assert entry.ledger.events() == before_events
+    assert other.ledger.events() == other_events
+    assert context.read_context().target == before
+
+
+@pytest.mark.parametrize("explicit", [{}, {"driver": "Q2"}])
+def test_service_roles_and_reads_preserve_fixed_nonempty_names_without_source_io(
+    context: ContextService, rich_entry: ResultEntry, explicit: dict[str, str]
+) -> None:
+    first = rich_entry.new_point("first")
+    second = rich_entry.new_point("second")
+    with second.edit() as edit:
+        edit.set("Q1.rate", 4700.0)
+    ledger_before = rich_entry.ledger.events()
+    context.install_entry(rich_entry)
+    context.use_point(PointUseRequest(rich_entry.entry_id, "first"))
+    declarations = {
+        "driver": RoleSpec("fake/drive/*"),
+        "sense": RoleSpec("fake/sensor", "driver.sense"),
+    }
+    binding = context.capture_roles(declarations, focus="Q1", explicit=explicit)
+    names = (
+        {"driver": "Q2", "sense": "R2"} if explicit else {"driver": "Q1", "sense": "R1"}
+    )
+    assert dict(binding.names) == names
+    assert binding.focus == "Q1"
+    capture = context.read_context(roles=binding)
+    assert capture.roles == binding
+    assert capture.resolve_path("driver.rate") == f"{names['driver']}.rate"
+    assert capture.value("driver.rate") == (5100.0 if explicit else 4300.0)
+
+    context.set_component_focus("Q2")
+    assert context.read_context(roles=binding).roles == binding
+    context.use_point(PointUseRequest(rich_entry.entry_id, "second"))
+    source_path(first).unlink()
+    source_path(second).unlink()
+    assert capture.target == SavedPoint(entry_id=rich_entry.entry_id, point="first")
+    assert capture.value("driver.rate") == (5100.0 if explicit else 4300.0)
+    current = context.read_context(roles=binding)
+    assert current.roles == binding
+    assert current.value("driver.rate") == (5100.0 if explicit else 4700.0)
+    fresh = context.capture_roles(declarations, focus="Q2", explicit={})
+    assert dict(fresh.names) == {"driver": "Q2", "sense": "R2"}
+    assert rich_entry.ledger.events() == ledger_before
+
+
+def test_publication_facts_observe_installed_state_and_one_context_bump(
+    rich_entry: ResultEntry,
+) -> None:
+    rich_entry.new_point("first")
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    assets = Assets()
+    context = ContextService(state, bus, bind_assets=assets.bind)
+    observations: list[
+        tuple[
+            str,
+            int,
+            SessionEnv,
+            EntryInfo | None,
+            ComponentFocus,
+            ContextSourceBinding | None,
+        ]
+    ] = []
+
+    def switched(payload: ContextSwitchedPayload) -> None:
+        observations.append(
+            (
+                "context",
+                state.version.get("context"),
+                state.session_env,
+                context.get_entry_info(),
+                context.get_component_focus(),
+                payload.sources,
+            )
+        )
+
+    def focused(payload: ComponentFocusChangedPayload) -> None:
+        observations.append(
+            (
+                "focus",
+                state.version.get("context"),
+                state.session_env,
+                context.get_entry_info(),
+                payload.focus,
+                context.get_source_binding(),
+            )
+        )
+
+    switch_subscription = bus.subscribe(ContextSwitchedPayload, switched)
+    focus_subscription = bus.subscribe(ComponentFocusChangedPayload, focused)
+    try:
+        assert state.version.get("context") == 0 and observations == []
+        info = context.install_entry(rich_entry)
+        context.use_point(PointUseRequest(rich_entry.entry_id, "first"))
+        context.set_component_focus("Q1")
+        context.set_component_focus("Q1")
+        assert state.version.get("context") == 2
+        context.new_point(_new_request(rich_entry, "second"))
+        assert state.version.get("context") == 3
+        context.clear_context()
+        assert [(kind, version) for kind, version, *_ in observations] == [
+            ("context", 1),
+            ("focus", 1),
+            ("context", 2),
+            ("focus", 2),
+            ("focus", 2),
+            ("context", 3),
+            ("focus", 3),
+            ("context", 4),
+            ("focus", 4),
+        ]
+        for kind, version, env, entry_info, focus, sources in observations:
+            if version == 4:
+                assert env.readiness is ContextReadiness.EMPTY
+                assert env.parameters is None and entry_info is None and sources is None
+                assert focus == ComponentFocus(None, None, ())
+                continue
+            assert entry_info == info
+            assert env.parameters is not None
+            expected = (
+                EntryDraft(entry_id=info.entry_id)
+                if version == 1
+                else SavedPoint(
+                    entry_id=info.entry_id, point="first" if version == 2 else "second"
+                )
+            )
+            assert env.parameters.target == expected and focus.target == expected
+            assert sources is not None and sources.sources
+            assert env.result_dir == str(info.result_path)
+            assert env.database_path == str(info.database_path)
+            assert env.active_label == (
+                "" if version == 1 else "first" if version == 2 else "second"
+            )
+            if version == 1:
+                assert (
+                    env.readiness is ContextReadiness.DRAFT and focus.components == ()
+                )
+            else:
+                assert env.readiness is ContextReadiness.ACTIVE
+                assert {option.name for option in focus.components} == {
+                    "Q1",
+                    "Q2",
+                    "R1",
+                    "R2",
+                }
+            if kind == "focus" and focus.name is not None:
+                assert version == 2 and focus.name == "Q1"
+            else:
+                assert focus.name is None
+    finally:
+        switch_subscription.unsubscribe()
+        focus_subscription.unsubscribe()
+
+
+def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
+    rich_entry: ResultEntry, tmp_path: Path
+) -> None:
+    rich_entry.new_point("first")
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    assets = Assets()
+    context = ContextService(state, bus, bind_assets=assets.bind)
+    events: list[ContextSwitchedPayload | ComponentFocusChangedPayload] = []
+    switched = bus.subscribe(ContextSwitchedPayload, events.append)
+    focused = bus.subscribe(ComponentFocusChangedPayload, events.append)
+    try:
+        context.install_entry(rich_entry)
+        target = context.use_point(PointUseRequest(rich_entry.entry_id, "first"))
+        version = state.version.get("context")
+        events.clear()
+        with pytest.raises(FileNotFoundError):
+            context.use_point(PointUseRequest(rich_entry.entry_id, "missing"))
+        assets.fail = True
+        with pytest.raises(OSError, match="asset binding"):
+            context.install_entry(_entry(tmp_path, "other"))
+        with pytest.raises(PointBindingError):
+            context.new_point(_new_request(rich_entry, "retained"))
+        assert events == []
+        assert state.version.get("context") == version
+        assert context.read_context().target == target
+        assert rich_entry.list_points() == ["first", "retained"]
+    finally:
+        switched.unsubscribe()
+        focused.unsubscribe()

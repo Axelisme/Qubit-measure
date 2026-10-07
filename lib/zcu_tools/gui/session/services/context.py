@@ -197,9 +197,14 @@ class ContextService:
         """
         self._owner.assert_owner()
         entry = self._require_entry(request.entry_id)
+        clone = (
+            entry.use_point(request.clone_from)
+            if request.clone_from is not None
+            else None
+        )
         point = entry.new_point(
             request.label,
-            clone_from=request.clone_from,
+            clone_from=clone,
             description=request.description,
             origin=request.origin.origin,
             call_id=request.origin.call_id,
