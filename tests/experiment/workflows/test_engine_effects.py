@@ -8,6 +8,7 @@ from typing import Never
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 from zcu_tools.experiment.workflows import (
     Aborted,
@@ -69,12 +70,19 @@ def start_effect(
     return observed
 
 
-def test_cfg_at_experiment_return_is_saved_before_typed_response(rig: Rig) -> None:
-    original = Cfg()
-    observed: list[Completed[Cfg, int] | Failed] = []
-    saved: list[Completed[Cfg, int]] = []
+class ModelCfg(BaseModel):
+    value: int = 1
 
-    def acquire(run: Run[Cfg]) -> int:
+
+@pytest.mark.parametrize("make_cfg", [Cfg, ModelCfg], ids=["dataclass", "pydantic"])
+def test_cfg_at_experiment_return_is_saved_before_typed_response(
+    rig: Rig, make_cfg: Callable[..., Cfg | ModelCfg]
+) -> None:
+    original = make_cfg()
+    observed: list[Completed[Cfg | ModelCfg, int] | Failed] = []
+    saved: list[Completed[Cfg | ModelCfg, int]] = []
+
+    def acquire(run: Run[Cfg | ModelCfg]) -> int:
         buffer = run.buffer((1,), axes=(np.array([0.0]),))
         with run.schedule(buffer) as first:
             first.cfg.value = 10
@@ -84,9 +92,9 @@ def test_cfg_at_experiment_return_is_saved_before_typed_response(rig: Rig) -> No
         run.cfg.value = 30
         return 9
 
-    def save(source: Completed[Cfg, int], path: Path) -> None:
+    def save(source: Completed[Cfg | ModelCfg, int], path: Path) -> None:
         saved.append(source)
-        save_integer(source, path)
+        path.write_text(f"{source.cfg.value}:{source.result}", encoding="utf-8")
 
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
@@ -103,9 +111,9 @@ def test_cfg_at_experiment_return_is_saved_before_typed_response(rig: Rig) -> No
     rig.start(step)
     assert rig.engine.execute("run").lifecycle == "done"
     assert isinstance(observed[0], Completed)
-    assert observed[0].cfg == Cfg(value=30)
+    assert observed[0].cfg == make_cfg(value=30)
     assert saved[0] is observed[0]
-    assert original == Cfg()
+    assert original == make_cfg()
     assert rig.engine.records("run")[0].run_files == ("runs/01-acquire.h5",)
     final = rig.paths.data_root / "iter/000001/runs/01-acquire.h5"
     assert final.read_text(encoding="utf-8") == "30:9"

@@ -9,6 +9,7 @@ from dataclasses import is_dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from qick import QickConfig
 
 from ..stop_signal import StopSignal
@@ -22,8 +23,10 @@ from .ports import DevicePort, DeviceSetup, PlotPort
 class Run[Cfg]:
     """One experiment's cfg copy, native capabilities, and cancellation signal.
 
-    cfg is a deepcopy of the supplied dataclass and may be modified by the
-    experiment. cancel_signal is the engine-owned StopSignal; do not clear it.
+    cfg must be a dataclass instance or a Pydantic BaseModel instance, not a
+    class. Run deepcopies it; the experiment may modify this isolated copy.
+    Invalid cfg inputs raise TypeError. cancel_signal is the engine-owned
+    StopSignal; do not clear it.
     soc/soccfg/devices raise MissingCapability when their ports are absent.
     outcome retains the first non-completed Schedule result. Constructor
     soc/soccfg/devices arguments are native handles or None, never copied or
@@ -39,8 +42,12 @@ class Run[Cfg]:
         soccfg: QickConfig | None = None,
         devices: DevicePort | None = None,
     ) -> None:
-        if isinstance(cfg, type) or not is_dataclass(cfg):
-            raise TypeError("Experiment cfg must be a dataclass instance")
+        if isinstance(cfg, type) or not (
+            is_dataclass(cfg) or isinstance(cfg, BaseModel)
+        ):
+            raise TypeError(
+                "Experiment cfg must be a dataclass or Pydantic BaseModel instance"
+            )
         self.cfg: Cfg = deepcopy(cfg)
         self.cancel_signal = cancel_signal
         self._soc = soc

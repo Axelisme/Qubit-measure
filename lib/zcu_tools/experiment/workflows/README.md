@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-07，期 0同步 Engine
+**Last updated:** 2026-10-07，Run 支援 Pydantic cfg
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -14,7 +14,7 @@
 
 `InitEnv` 只提供原始 UTC start 與 detached context。`WorkflowEnv` 的 typed helpers 使用 `yield from`，把 request 與回應的型別交接留在核心。環境共用 engine-owned 顯示資源；缺少 context capability 時存取立即 raise。
 
-`Run` 為 experiment 複製 dataclass cfg，將同一個 StopSignal 與明確 env 接入既有 Schedule。Schedule 的局部 cfg 不倒灌回 Run，後一個 completed outcome 不覆蓋前一個非 completed。Run 保留 live callback 的原始 failure cause，Engine 依來源區分可恢復的 Schedule Failed、宿主 Stop 與核心失敗。即使 experiment 重拋本次 signal.error，來源也不改變。
+`Run` 為 experiment 複製 dataclass 或 Pydantic model instance cfg，將同一個 StopSignal 與明確 env 接入既有 Schedule。型別本身與無結構輸入在入口失敗。cfg.dev 仍使用既有 DeviceSetup tuple／None 契約；支援 Pydantic 不代表已支援 native device mapping。Schedule 的局部 cfg 不倒灌回 Run，後一個 completed outcome 不覆蓋前一個非 completed。Run 保留 live callback 的原始 failure cause，Engine 依來源區分可恢復的 Schedule Failed、宿主 Stop 與核心失敗。即使 experiment 重拋本次 signal.error，來源也不改變。
 
 Record encoder 將摘要投影成 detached JSON。非有限數字變成 null，曲線陣列與過大 record 會警告。只有摘要序列化可降級為 repr；deepcopy、必要 journal 欄位與檔案 I/O 不能借用此降級規則。
 

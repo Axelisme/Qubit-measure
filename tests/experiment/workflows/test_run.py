@@ -1,10 +1,12 @@
 """Experiment Run integrates cfg, buffers, signals, and Schedule at its seam."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from pydantic import BaseModel, Field
 from qick import QickConfig
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import SignalBuffer
@@ -17,8 +19,16 @@ class Cfg:
     nested: list[float] = field(default_factory=lambda: [2.0])
 
 
-def test_run_cfg_and_schedule_cfg_are_independent_copies() -> None:
-    original = Cfg()
+class ModelCfg(BaseModel):
+    value: float = 1.0
+    nested: list[float] = Field(default_factory=lambda: [2.0])
+
+
+@pytest.mark.parametrize("make_cfg", [Cfg, ModelCfg], ids=["dataclass", "pydantic"])
+def test_run_cfg_and_schedule_cfg_are_independent_copies(
+    make_cfg: Callable[..., Cfg | ModelCfg],
+) -> None:
+    original = make_cfg()
     signal = StopSignal()
     run = Run(original, signal)
     buffer = run.buffer((2,), axes=(np.array([0.0, 1.0]),))
@@ -31,8 +41,8 @@ def test_run_cfg_and_schedule_cfg_are_independent_copies() -> None:
         schedule.cfg.nested.append(4.0)
         buffer.set(np.array([1.0 + 2.0j, 3.0 + 4.0j]))
 
-    assert original == Cfg()
-    assert run.cfg == Cfg(value=1.0, nested=[2.0, 3.0])
+    assert original == make_cfg()
+    assert run.cfg == make_cfg(value=1.0, nested=[2.0, 3.0])
     assert run.outcome.status == "completed"
     np.testing.assert_array_equal(buffer.array, [1.0 + 2.0j, 3.0 + 4.0j])
 
@@ -161,9 +171,10 @@ def test_cancel_signal_is_explicit_and_produces_stopped_outcome() -> None:
     assert run.outcome.status == "stopped"
 
 
-def test_non_dataclass_cfg_is_rejected() -> None:
-    with pytest.raises(TypeError, match="dataclass instance"):
-        Run(1.0, StopSignal())
+@pytest.mark.parametrize("cfg", [1.0, Cfg, ModelCfg])
+def test_cfg_requires_a_dataclass_or_pydantic_instance(cfg: object) -> None:
+    with pytest.raises(TypeError, match="dataclass or Pydantic BaseModel instance"):
+        Run(cfg, StopSignal())
 
 
 def test_external_buffer_is_rejected() -> None:
