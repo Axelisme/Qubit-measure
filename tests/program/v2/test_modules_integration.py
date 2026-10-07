@@ -11,7 +11,8 @@ from typing import Literal
 
 import numpy as np
 import pytest
-from qick.asm_v2 import Label, WriteReg
+from qick.asm_v2 import Label, QickParam, WriteReg
+from zcu_tools.program.v2 import SweepCfg, sweep2param
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -180,6 +181,37 @@ class TestPulseIntegration:
     def test_pulse_const_waveform_compiles(self):
         prog = _make_prog(modules=[Pulse("p", _pulse_cfg())])
         assert prog.binprog is not None
+
+    def test_blocking_length_sweep_tracks_registered_pulse_duration(self) -> None:
+        # The generated calibration grid is resolvable by the generator clock.
+        grid = SweepCfg(start=0.04, stop=1.2, expts=9, step=1.16 / 8)
+        pulse = Pulse(
+            "drive",
+            PulseCfg(
+                waveform=ConstWaveformCfg(length=sweep2param("length", grid)),
+                ch=GEN_CH,
+                nqz=GEN_NQZ,
+                freq=GEN_FREQ,
+                gain=GEN_GAIN,
+            ),
+            pulse_id="drive",
+        )
+        prog = _make_prog(
+            modules=[pulse, Readout("readout", _direct_ro_cfg())],
+            sweep=[("length", grid)],
+        )
+        actual = np.asarray(
+            prog.get_pulse_param("drive", "total_length", as_array=True),
+            dtype=np.float64,
+        )
+        blocking = pulse.total_length(prog)
+        assert isinstance(blocking, QickParam)
+        timestamps = np.asarray(blocking.to_array(prog.loop_dict), dtype=np.float64)
+        assert actual.shape == timestamps.shape == (grid.expts,)
+        # Readout must follow actual playback, with at most one processor tick.
+        delta = timestamps - actual
+        assert np.all(delta >= -1e-12)
+        assert np.all(delta <= prog.cycles2us(1) + 1e-12)
 
     def test_pulse_none_cfg_compiles(self):
         prog = _make_prog(modules=[Pulse("p", None)])
