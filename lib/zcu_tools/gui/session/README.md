@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-05, operation cancellation channel
+**Last updated:** 2026-10-08, fixed parameter captures and entry/point binding
 
 # gui/session/ — 量測 session core（measure + autofluxdep 共用）
 
@@ -7,12 +7,13 @@ app保留帶領域context的錯誤文字與unsupported-target轉譯。
 
 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。measure 與 autofluxdep 共用這層。
 
-`ContextService.apply_ml_writes` 在無檔案路徑的 md/ml 候選完成全部準備；後項可讀前項候選結果，但不修改 live store。成功後一次安裝內容、增加 context 版本並通知，再執行既有同步／存檔。儲存失敗記錄並回報「已套用，但儲存失敗」，不回滾、不重試，也不追蹤額外未保存狀態。
+`ContextService` 私下持有 `ResultEntry` 與 point/library handles。開啟 entry 發布空的記憶體 DRAFT，選取或建立 point 後發布 ACTIVE。它先完成資源與 asset capability 準備，再替換 session binding。準備失敗保留原 binding；point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。
 
 ## Context、session environment 與 Run snapshot
 
-- **具名 Experiment Context** 是實驗工作的具名 scope 與參數資源，由 [`resources.context`](../../resources/context/README.md) 管理；切換實驗語義時使用新的 context。關閉 session 不會刪除這個 scope。
-- **SessionEnv** 是目前 session 提供的 live environment facade，不是具名 context。本層的 `SessionState.session_env` 持有它；在 guard 允許切換 context 時，session environment 反映新的 active context 與目前可用的能力。它不是另一個 service/controller，也不接管各 service 的寫入責任。
+- **Entry 與 point** 的持久資源由 [`resources.entry`](../../resources/entry/README.md) 管理，module library 由 [`resources.context`](../../resources/context/README.md) 管理。Session 不重建文件版面，也不在清除選取時刪除資源。
+- **ParameterContext** 是隔離的 point/library 讀取投影。`EntryDraft` 與 `SavedPoint` 明確標識來源 entry 與目的地，捕捉的 roles 不因焦點或 point 切換重解析。資料 getter 不 refresh 或讀 YAML。
+- **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，DRAFT／ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC、predictor 與 cached value sources 保持各自 owner。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。
 
 ## 結構
@@ -34,8 +35,8 @@ session/
 ├── device_control.py   — DeviceControlPort + DeviceControlFacet：device lifecycle/query/progress/event-subscription 的窄 control facet（DeviceService + ProgressService + BaseEventBus），供 shared DeviceDialog、PredictorDialog 與 main remote device handler 使用；cached numeric device-value query 只讀 State，不做 live hardware read；`poll_device_info()` 是可能更新 cache 的 live refresh，`try_poll_device_info() -> bool` 讓 guarded app / UI 明確取得 refresh 是否送出；不含 context `get_current_md`
 ├── predictor_control.py — PredictorControlPort + PredictorControlFacet：predictor load/set_model_params/clear/query/compute/event-subscription 的窄 control facet（PredictorService + BaseEventBus），供 shared PredictorDialog、main predictor panel 與 remote predictor handler 使用
 ├── progress_control.py — ProgressControlPort + ProgressControlFacet：owner-keyed progress subscribe/query 的窄 control facet（ProgressService），供 app-local run UI 使用；operation-id progress 查詢仍留在 app controller/remote operation handler
-├── context_control.py  — ContextControlPort + ContextControlFacet：context switching / md/ml / value-source / bind-device new-context 的窄 control facet（ContextService + DeviceService），供 shared InspectDialogBase、main remote context/value handlers、app-local md providers 使用；md create/rename 以單一 service mutation 暴露
-├── setup_control.py    — SetupControlPort + SetupControlFacet：SetupDialog 專用 composition facade（ProjectSettingsService + ContextControlPort + SoCConnectionService + DeviceControlPort + BaseEventBus + optional project-applied hook）；setup dialog 不再依賴 app Controller
+├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、focus 與 value-source 的窄 facade，轉送 ContextService
+├── setup_control.py    — SetupControlPort + SetupControlFacet：entry open/new、point use/new 與 cached setup preferences 的 facade，並保留獨立 SoC/device commands；不依賴 app Controller
 ├── controller_mixin.py — SessionControllerMixin：兩 app 逐字相同的 app-local/compatibility forwards（讀 4 個 abstract service accessor `_soc_svc`/`_ctx_svc`/`_dev_svc`/`_settings_svc`，以 annotation-only 宣告型別由 concrete Controller 供應同名 attr，**不**用 @property 以免 data-descriptor `__set__` 撞既有 `self._x_svc=` 賦值）。shared setup/context/inspect/device/predictor/progress UI 改走各自 ControlPort；app 各自只留 body 真正分歧的 override：`get_project_root`（讀 app `_project_root`）、`get_bus`（回 app EventBus subtype）。專案套用不經此 mixin：setup dialog 走 `SetupControlPort`，measure 的 remote `project.apply` 走 measure Controller 的 `apply_project`（回 resolved dict/WIRE-48）。import-clean（service/request 型別全 TYPE_CHECKING-only），列入 test_shared_layer 守
 ├── expression.py       — simpleeval 共用數值求值引擎，封裝函式／算子白名單、AST／數值大小限制及 MetaDict 名稱查詢。`evaluate_scalar_expr` 保留 int/float/complex，`evaluate_numeric_expr` 在 real-only 邊界拒絕 complex；`**` 為冪次，`^` 沿用原生 XOR。函式為 sin/cos/tan/sqrt/exp/log/log10/abs，常數 pi/e；math 函式不自動轉 cmath。引用到的保留名稱若與來源衝突則拒絕。EvalRef 是 apply-time resolve marker，不持久化。
 ├── value_lookup.py     — read-only value source lookup（`ValueLookup`/`ValueRegistry`/owner-scoped replace/unregister/`ValueRef` resolve-once helpers）；純 session leaf，provider 來源由 service binder 負責，使用端只見 lookup
@@ -50,16 +51,16 @@ session/
 ├── services/
 │   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經typed `ConnectionFinishedPayload`，無Qt）
 │   ├── predictor.py    — PredictorService（predictor load/set_model_params〔typed EJ/EC/EL→FluxoniumPredictor，走 install_predictor in-memory seam〕/clear/install + calibrate_flux_bias〔用當前 predictor 由單點 transition 頻率反推並安裝 flux_bias〕+ predict_freq + 批次曲線計算 predict_freq_curve/predict_matrix_element_curve〔委派 simulate `FluxoniumPrediction` engine 的 affine/array paths〕；get_predictor_info 含 EJ/EC/EL；純函式 read_fluxdep_fit_params〔經 resources.qubit_params.QubitParams 讀 params.json→typed model query〕；純計算，無 Qt signal/runner/gate，擁有 session_env.predictor 寫 seam，見本目錄服務分工）
-│   ├── context.py      — ContextService（context-switch + md ops + ml del/rename/atomic schema replacement + 單一寫入 primitive apply_ml_writes，CfgSchema lowering 經 callback 注入；md create/rename 與 ModuleLibrary Name+cfg replacement 先驗證再落地；MdValueError/MlEntryValidationError）
+│   ├── context.py      — ContextService：owner-thread entry/point binding、固定 read/role capture、focus、source facts 與目前 entry 的 ledger capability
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳；connect/disconnect終局用`DeviceOperationFinishedPayload`，setup重用`DeviceSetupFinishedPayload`，無Qt）；`_mode_dependent_unit(dev)` module-level helper 集中 YOKOGS200 voltage/current→V/A 判斷（`get_device_unit` + `get_device_unit_strict` 共用，消除逐字重複）；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/connect/disconnect skip，setup/ramp 允許 current-value refresh；單次讀失敗吞掉，不寫 State 於 worker）
-│   ├── project_settings.py — ProjectSettingsService + ProjectRequest/ResolvedProject/ConnectionPreferences/SetupPreferences + PersistedStartup/PersistedDeviceEntry memento；`get_setup_preferences()` 只回 Setup 預填用的窄 `SetupPreferences`，memento（磁碟 slice 沿用 `startup` 名稱與 JSON key）保存 result scope id / chip-qubit-res / connection prefill / remembered devices / left panel width 並由 `capture_settings`/`restore_settings` 投影；委派 `gui/result_scope.py` 做 result-scope discovery / generated path，params.json identity migration 由 `resources.qubit_params.QubitParams` 擁有
+│   ├── project_settings.py — ProjectSettingsService：以明確 result/Database roots 呼叫 ResultEntry.open/create，再交 ContextService.install_entry；記住的 entry/connection/device preferences 不證明來源已開啟
 │   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，壞 listener 會 detach，不阻斷其他 listener 或 terminal cleanup）
 │   ├── shutdown.py     — ShutdownCoordinator（Qt-free cancel-all + poll state machine，吃 OperationHandles，ADR-0066；QTimer driver 在 adapters/）
 │   ├── io_manager.py   — IOManager（ContextManager 包裝，實作 ProjectIOPort；**共用**；把 project `result_dir` 映射到 `result_dir/exps` 作為 context root）
 │   ├── simulated_environment.py — Use Simulate Env coordinator：經 DeviceService 斷開真實裝置，註冊／初始化 FakeDevice，再綁定 MockSoc 並由 SoC owner 發布；保留既有 predictor
 │   ├── predictor_from_sim.py — build_predictor_from_simparams(SimParams)→FluxoniumPredictor（純函式；橋接兩個彼此獨立的 lib leaf，放 session 層避免在 program/simulate 間造新跨依賴；測試共用）
 │   ├── value_sources.py — ValueSourceBinder：訂閱 Context/Predictor/Device event，把 live SessionState 投影註冊進 `ValueRegistry`；provider 只讀 cached state（device value 只看 `DeviceState.info`，不 poll hardware），並用 owner-level replace/unregister 維護 lifecycle
-│   └── build.py        — SessionServices bundle（soc_connection/predictor/predictor_control/progress_control/context/context_control/device/device_control/setup_control/settings）+ build_session_services(state,bus,gate,handles,background,progress,io_manager,runner,driver_factory?,device_registry?,on_project_applied?)
+│   └── build.py        — SessionServices bundle 與 build_session_services：組裝 owning services/facets，從 project_root 注入 result/Database roots，明確注入 entry-scoped asset binder
 └── ui/                 — 共用 dialog（setup 吃 SetupControlPort；inspect 吃 ContextControlPort；device 吃 DeviceControlPort + md_provider；predictor 吃 PredictorControlPort）
     ├── progress_bar.py   — LightweightProgressBar（native-free QWidget；`setValue` 只更新狀態並排程 repaint，避免高頻 progress 卡在 `QProgressBar.setValue`）
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件；高頻 render 只對變更過的 maximum/format/value 寫入 LightweightProgressBar；可注入 profiling callback 拆量 derive / value writes）
