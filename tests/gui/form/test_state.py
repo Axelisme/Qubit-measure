@@ -151,9 +151,33 @@ def test_static_defaults_leave_required_keys_absent_and_keep_nullable_null() -> 
     assert isinstance(FormState(nullable).result(env), NullableForm)
 
 
+def test_absent_non_nullable_nested_model_accepts_child_leaf_writes() -> None:
+    env = environment()
+    state = FormState(PlainForm.default_input(env))
+    state.write({("section", "level"): 5.0}, env)
+    assert state.input.data == {"section": {"level": 5.0}}
+    incomplete = state.result(env)
+    assert isinstance(incomplete, FormErrors)
+    assert ("section", "required") in incomplete.messages
+    state.write({("section", "required"): 3.0}, env)
+    complete = state.result(env)
+    assert isinstance(complete, PlainForm)
+    assert complete.section == PlainSection(level=5.0, required=3.0)
+
+    defaults = FormState(PlainForm.default_input(env))
+    defaults.write({("section", "required"): 3.0}, env)
+    assert defaults.input.data == {"section": {"level": 2.0, "required": 3.0}}
+    result = defaults.result(env)
+    assert isinstance(result, PlainForm)
+    assert result.section == PlainSection(level=2.0, required=3.0)
+
+
 def test_nullable_section_activation_child_edit_and_deactivation() -> None:
     env = environment()
     state = FormState(NullableForm.default_input(env))
+    with pytest.raises(ValueError, match="section|object|null|path"):
+        state.write({("section", "stop"): 5.0}, env)
+    assert state.input.data == {"section": None}
     state.write({("section",): {"start": 2.0, "stop": 4.0}}, env)
     active = state.result(env)
     assert isinstance(active, NullableForm)
@@ -206,7 +230,7 @@ def test_write_changes_and_reset_preserve_input_value_and_whole_sequence() -> No
     batch: dict[FormWritePath, JsonValue] = {
         ("amount",): {"expr": "seed / 2"},
         ("samples",): [2.0, 3.0],
-        ("offsets", "rack.left"): {"expr": "seed"},
+        ("offsets",): {"rack.left": {"expr": "seed"}, "expr": 1.0},
     }
     state.write(batch, env)
     batch[("samples",)] = []
@@ -214,14 +238,26 @@ def test_write_changes_and_reset_preserve_input_value_and_whole_sequence() -> No
     changes = state.changes(env)
     assert not isinstance(changes, FormErrors)
     by_path = {change.path: change for change in changes}
-    assert set(by_path) == {("amount",), ("samples",), ("offsets", "rack.left")}
+    assert set(by_path) == {("amount",), ("samples",), ("offsets",)}
     assert by_path[("amount",)].input == {"expr": "seed / 2"}
     assert by_path[("amount",)].value == 2.0
     assert by_path[("amount",)].original == "seed / 2"
     assert by_path[("samples",)].input == [2.0, 3.0]
     assert by_path[("samples",)].value == (2.0, 3.0)
     assert by_path[("samples",)].original is None
-    assert by_path[("offsets", "rack.left")].value == 4.0
+    assert by_path[("offsets",)].input == {
+        "rack.left": {"expr": "seed"},
+        "expr": 1.0,
+    }
+    assert by_path[("offsets",)].value == {"rack.left": 4.0, "expr": 1.0}
+    assert by_path[("offsets",)].original is None
+    detached_mapping = by_path[("offsets",)].input
+    assert isinstance(detached_mapping, dict)
+    detached_mapping.clear()
+    assert state.input.data["offsets"] == {
+        "rack.left": {"expr": "seed"},
+        "expr": 1.0,
+    }
     assert state.base.data == base.data
     assert len(observed) == 1
     assert observed[0] == state.input.data
@@ -319,6 +355,74 @@ def test_structural_write_failure_does_not_publish_a_partial_batch(
     assert state.input.data == before
     assert state.base.data == before
     assert notifications == []
+
+
+def test_mapping_replacement_is_a_leaf_but_key_and_model_patches_are_rejected() -> None:
+    env = environment()
+    mapping = FormState(
+        FormInput(DraftForm, {"offsets": {"rack.left": 3.0, "remove": 1.0}})
+    )
+    before = mapping.input.data
+    with pytest.raises(ValueError, match="leaf|mapping|replacement|path"):
+        mapping.write({("amount",): 4.0, ("offsets", "rack.left"): 5.0}, env)
+    assert mapping.input.data == before
+
+    mapping.write({("offsets",): {"renamed": 3.0}}, env)
+    result = mapping.result(env)
+    assert isinstance(result, DraftForm)
+    assert result.offsets == {"renamed": 3.0}
+    changes = mapping.changes(env)
+    assert not isinstance(changes, FormErrors)
+    assert len(changes) == 1
+    assert changes[0].path == ("offsets",)
+    assert changes[0].input == {"renamed": 3.0}
+    assert changes[0].value == {"renamed": 3.0}
+    assert changes[0].original is None
+
+    mapping.write({("offsets",): {}}, env)
+    cleared = mapping.result(env)
+    assert isinstance(cleared, DraftForm)
+    assert cleared.offsets == {}
+    changes = mapping.changes(env)
+    assert not isinstance(changes, FormErrors)
+    assert len(changes) == 1
+    assert changes[0].path == ("offsets",)
+    assert changes[0].input == {}
+    assert changes[0].value == {}
+
+    model = FormState(BoundsForm.default_input(env))
+    before_model = model.input.data
+    with pytest.raises(ValueError, match="leaf|model|replacement|path"):
+        model.write({("bounds",): {"start": 2.0, "stop": 4.0}}, env)
+    assert model.input.data == before_model
+
+
+def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
+    env = environment()
+    branch = FormState(BranchForm.default_input(env))
+    branch.write({("branch", "kind"): "context"}, env)
+    changes = branch.changes(env)
+    assert not isinstance(changes, FormErrors)
+    by_path = {change.path: change for change in changes}
+    assert set(by_path) == {
+        ("branch", "kind"),
+        ("branch", "context_only"),
+        ("branch", "required"),
+    }
+    assert by_path[("branch", "kind")].value == "context"
+    assert by_path[("branch", "required")].value == 7.0
+
+    nullable = FormState(
+        FormInput(NullableForm, {"section": {"start": 2.0, "stop": 4.0}})
+    )
+    nullable.write({("section",): None}, env)
+    changes = nullable.changes(env)
+    assert not isinstance(changes, FormErrors)
+    assert len(changes) == 1
+    assert changes[0].path == ("section",)
+    assert changes[0].input is None
+    assert changes[0].value is None
+    assert changes[0].original is None
 
 
 def test_discriminator_first_factory_inheritance_and_explicit_content_order() -> None:
