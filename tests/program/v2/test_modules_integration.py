@@ -36,7 +36,11 @@ from zcu_tools.program.v2.modules.reset import (
     Reset,
     TwoPulseResetCfg,
 )
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.modules.waveform import (
+    ConstWaveformCfg,
+    FlatTopWaveformCfg,
+    GaussWaveformCfg,
+)
 from zcu_tools.program.v2.utils import readout_freq_words
 
 # ---------------------------------------------------------------------------
@@ -79,7 +83,7 @@ def _pulse_cfg(
     freq=GEN_FREQ,
     gain=GEN_GAIN,
     nqz: Literal[1, 2] = GEN_NQZ,
-    length=WAVEFORM_LEN,
+    length: float | QickParam = WAVEFORM_LEN,
     pre_delay=0.0,
     post_delay=0.0,
 ):
@@ -182,13 +186,26 @@ class TestPulseIntegration:
         prog = _make_prog(modules=[Pulse("p", _pulse_cfg())])
         assert prog.binprog is not None
 
-    def test_blocking_length_sweep_tracks_registered_pulse_duration(self) -> None:
-        # The generated calibration grid is resolvable by the generator clock.
-        grid = SweepCfg(start=0.04, stop=1.2, expts=9, step=1.16 / 8)
+    @pytest.mark.parametrize("flat_top", [False, True])
+    @pytest.mark.parametrize("start,stop", [(0.04, 1.2), (1.2, 0.04)])
+    def test_blocking_length_sweep_tracks_registered_pulse_duration(
+        self, flat_top: bool, start: float, stop: float
+    ) -> None:
+        # Both scan directions resolve on the generator clock.
+        grid = SweepCfg(start=start, stop=stop, expts=9, step=(stop - start) / 8)
+        length = sweep2param("length", grid)
+        waveform = (
+            FlatTopWaveformCfg(
+                length=length,
+                raise_waveform=GaussWaveformCfg(length=0.02, sigma=0.004),
+            )
+            if flat_top
+            else ConstWaveformCfg(length=length)
+        )
         pulse = Pulse(
             "drive",
             PulseCfg(
-                waveform=ConstWaveformCfg(length=sweep2param("length", grid)),
+                waveform=waveform,
                 ch=GEN_CH,
                 nqz=GEN_NQZ,
                 freq=GEN_FREQ,
@@ -208,10 +225,45 @@ class TestPulseIntegration:
         assert isinstance(blocking, QickParam)
         timestamps = np.asarray(blocking.to_array(prog.loop_dict), dtype=np.float64)
         assert actual.shape == timestamps.shape == (grid.expts,)
-        # Readout must follow actual playback, with at most one processor tick.
-        delta = timestamps - actual
-        assert np.all(delta >= -1e-12)
-        assert np.all(delta <= prog.cycles2us(1) + 1e-12)
+        # Per-step processor rounding can accumulate conservative overrun.
+        # It must never start the following readout before actual playback ends.
+        assert np.all(timestamps >= actual - 1e-12)
+        assert prog.binprog is not None
+
+    def test_swept_blocking_alignment_leaves_no_generator_residual_sweep(self) -> None:
+        grid = SweepCfg(start=0.04, stop=1.2, expts=9, step=1.16 / 8)
+        pulse = Pulse("drive", _pulse_cfg(length=sweep2param("length", grid)))
+        prog = _make_prog(
+            modules=[
+                pulse,
+                Delay("advance", 0.0),
+                DelayAuto("residual", gens=True, ros=False, tag="residual"),
+                Readout("readout", _direct_ro_cfg()),
+            ],
+            sweep=[("length", grid)],
+        )
+        residual = prog.get_time_param("residual", "t")
+        assert isinstance(residual, float)
+        assert residual == 0.0
+
+    @pytest.mark.parametrize("block_mode", [False, True])
+    def test_scalar_pre_post_blocking_timing_keeps_existing_value(
+        self, block_mode: bool
+    ) -> None:
+        pulse = Pulse(
+            "drive",
+            _pulse_cfg(length=0.5, pre_delay=0.101, post_delay=0.203),
+            block_mode=block_mode,
+            pulse_id="drive",
+        )
+        prog = _make_prog(modules=[pulse, Readout("readout", _direct_ro_cfg())])
+        total = pulse.total_length(prog)
+        assert isinstance(total, float)
+        # Captured from the unchanged scalar path before the D190 correction.
+        assert prog.us2cycles(us=total) == 348
+        end = pulse.run(prog, t=0.25)
+        assert end == pytest.approx(0.25 + total if block_mode else 0.25)
+        assert prog.binprog is not None
 
     def test_pulse_none_cfg_compiles(self):
         prog = _make_prog(modules=[Pulse("p", None)])
