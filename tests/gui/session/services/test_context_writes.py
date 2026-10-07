@@ -20,7 +20,11 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
     SavedPoint,
 )
-from zcu_tools.gui.session.events import MdChangedPayload, MlChangedPayload
+from zcu_tools.gui.session.events import (
+    ContextSwitchedPayload,
+    MdChangedPayload,
+    MlChangedPayload,
+)
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -305,6 +309,48 @@ def test_current_write_notifies_after_installation_without_switching_binding(
     assert payload.content_changed and payload.fault is None
     assert value == pytest.approx(0.2) and installed_version == version + 1
     assert session.control.get_source_binding() == binding
+
+
+@pytest.mark.parametrize("selected", ["point", "draft"])
+def test_detached_description_write_updates_cache_without_changing_selected_source(
+    session: _Session, selected: Literal["point", "draft"]
+) -> None:
+    first = _select(session, "a")
+    if selected == "point":
+        _select(session, "b")
+    else:
+        session.service.install_entry(session.entry)
+    before = session.control.read_context()
+    version = session.state.version.get("context")
+    binding = session.control.get_source_binding()
+    focus = session.control.get_component_focus()
+    descriptions = {
+        info.label: info.description for info in session.control.list_points()
+    }
+    events: list[object] = []
+    for event in (MdChangedPayload, MlChangedPayload, ContextSwitchedPayload):
+        session.bus.subscribe(event, events.append)
+
+    session.control.set_parameter(
+        first, "general.description", "changed while detached"
+    )
+
+    after_descriptions = {
+        info.label: info.description for info in session.control.list_points()
+    }
+    assert after_descriptions == {**descriptions, "a": "changed while detached"}
+    assert (
+        snapshot(session.entry.use_point("a")).general.description
+        == "changed while detached"
+    )
+    after = session.control.read_context()
+    assert after.target == before.target
+    assert after.document() == before.document()
+    assert after.library.document() == before.library.document()
+    assert session.state.version.get("context") == version
+    assert session.control.get_source_binding() == binding
+    assert session.control.get_component_focus() == focus
+    assert events == []
 
 
 def test_description_write_updates_cached_point_description(session: _Session) -> None:
