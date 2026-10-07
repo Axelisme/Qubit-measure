@@ -1,10 +1,13 @@
 """Observable contracts for injected module/waveform materialization."""
 
+from types import MappingProxyType
+
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
     CfgInputMap,
+    CfgInputValue,
     CfgValidationContext,
     ConstWaveformCfg,
     DirectReadoutCfg,
@@ -120,6 +123,74 @@ def test_inline_flat_top_materializes_isolated_ramp_without_dependencies():
     assert cfg.raise_waveform.length == 0.5
     cfg.raise_waveform.set_param("length", 1.0)
     assert raw["raise_waveform"] == {"style": "gauss", "length": 0.5, "sigma": 0.1}
+
+
+@pytest.mark.parametrize("readonly_root", [False, True])
+def test_waveform_factory_materializes_readonly_mappings_without_aliases(
+    readonly_root: bool,
+):
+    ramp: dict[str, CfgInputValue] = {
+        "style": "gauss",
+        "length": 0.5,
+        "sigma": 0.1,
+    }
+    fields: dict[str, CfgInputValue] = {
+        "style": "flat_top",
+        "length": 2.0,
+        "raise_waveform": MappingProxyType(ramp),
+    }
+    raw: CfgInputMap = MappingProxyType(fields) if readonly_root else fields
+
+    cfg = WaveformCfgFactory.from_raw(raw)
+
+    assert isinstance(cfg, FlatTopWaveformCfg)
+    assert cfg.length == 2.0
+    assert cfg.raise_waveform.length == 0.5
+    ramp["length"] = 0.75
+    fields["length"] = 3.0
+    assert cfg.length == 2.0
+    assert cfg.raise_waveform.length == 0.5
+    cfg.raise_waveform.set_param("length", 1.0)
+    fresh = WaveformCfgFactory.from_raw(raw)
+    assert isinstance(fresh, FlatTopWaveformCfg)
+    assert fresh.length == 3.0
+    assert fresh.raise_waveform.length == 0.75
+    assert ramp["length"] == 0.75
+
+
+@pytest.mark.parametrize("readonly_root", [False, True])
+def test_module_factory_materializes_readonly_mappings_without_aliases(
+    readonly_root: bool,
+):
+    waveform: dict[str, CfgInputValue] = {"style": "const", "length": 0.5}
+    fields: dict[str, CfgInputValue] = {
+        "type": "pulse",
+        "ch": 2,
+        "nqz": 1,
+        "freq": 4000.0,
+        "gain": 0.2,
+        "waveform": MappingProxyType(waveform),
+    }
+    raw: CfgInputMap = MappingProxyType(fields) if readonly_root else fields
+
+    cfg = ModuleCfgFactory.from_raw(raw)
+
+    assert isinstance(cfg, PulseCfg)
+    assert cfg.freq == 4000.0
+    assert cfg.gain == 0.2
+    assert cfg.waveform.length == 0.5
+    fields["gain"] = 0.25
+    waveform["length"] = 0.75
+    assert cfg.gain == 0.2
+    assert cfg.waveform.length == 0.5
+    cfg.set_param("freq", 4500.0)
+    cfg.waveform.set_param("length", 1.0)
+    fresh = ModuleCfgFactory.from_raw(raw)
+    assert isinstance(fresh, PulseCfg)
+    assert fresh.freq == 4000.0
+    assert fresh.gain == 0.25
+    assert fresh.waveform.length == 0.75
+    assert waveform["length"] == 0.75
 
 
 def test_arb_materialization_binds_current_asset_reads_without_serializing_provider():
