@@ -12,7 +12,7 @@ from .labber import (
 )
 from .labber_schema import cast_labber_values, validate_labber_payload
 from .labber_writer import write_labber
-from .migration import load_legacy_labber_payload, migrate_native_run_v1
+from .migration import load_legacy_labber_payload
 from .models import (
     Axis,
     DataVariable,
@@ -73,7 +73,6 @@ __all__ = [
     "save_run_data",
     "load_run_data",
     "load_legacy_labber_payload",
-    "migrate_native_run_v1",
     "validate_experiment_payload",
     "validate_cfg_snapshot",
     "Axis",
