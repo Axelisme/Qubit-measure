@@ -44,10 +44,10 @@ class KeyRule:
 class ModuleRule:
     """One flat-library key with an explicit family, destination and slot reference.
 
-    old_name is the literal source library key. target_path is the future library
-    key (component.partition.name), not a published cfg. reference_path is a
-    component module-slot path or None. Rule order chooses the first present
-    candidate per slot; other candidates retain their own destinations. reason
+    old_name is the literal source library key. target_path is the proposed concrete
+    key (component.partition.name). Publication requires successful Spec conversion.
+    reference_path is a component module-slot path or None. Rule order chooses the
+    first present candidate per slot; other candidates retain their own destinations. reason
     explains this declaration. kind selects the source modules or waveforms
     partition; waveform rules must not supply a module-slot reference_path.
     """
@@ -197,9 +197,12 @@ class KeyMappingItem:
     """Report location of one key decision.
 
     old_file is an absolute source file; old_key is its literal legacy key.
-    new_file and new_path are the absolute target file and dotted target path,
-    or None when removed/pending. action selects the explicit rule operation;
-    reason explains conversion, deferral or removal without evaluating values.
+    new_file is the absolute target file, or None when no destination handle is
+    acquired (including library dry-run/root rows) or the key is removed/pending.
+    new_path is the proposed dotted target path, or None without a declared target.
+    A library dry-run may have new_path with new_file=None; this alone is not pending.
+    action selects the explicit rule operation. reason explains conversion, deferral
+    or removal without evaluating values.
     library_kind is module/waveform for a library entry, or None for meta keys.
     Same-name library keys in different source partitions remain distinct.
     """

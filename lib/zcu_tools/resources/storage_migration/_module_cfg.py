@@ -22,6 +22,7 @@ from zcu_tools.resources.context.library import (
 )
 from zcu_tools.resources.entry import ResultEntry
 
+from .errors import MigrationInputError
 from .evidence import has_legacy_expression
 from .models import (
     FileMigrationItem,
@@ -197,6 +198,8 @@ def convert_module_cfg(
     a no-op. label is the validated point label, or None for root metadata with
     no point destination. entry is the matching handle, or None only in dry-run.
     mapping supplies explicit module/waveform source keys and canonical targets.
+    The legacy envelope requires modules and waveforms mappings; malformed
+    envelopes raise MigrationInputError and retain a module-step failure diagnostic.
     Root entries remain located pending with new_file=None and do not set slots.
     Child slots retain first-present module-rule priority. Unsupported expressions,
     Specs and unmapped child references remain located pending without evaluation.
@@ -219,6 +222,12 @@ def convert_module_cfg(
         source_hash = session.baseline(source)
         with source.open("r", encoding="utf-8") as stream:
             values = _JSON.validate_python(YAML(typ="safe").load(stream), strict=True)
+        if not isinstance(values.get("modules"), dict) or not isinstance(
+            values.get("waveforms"), dict
+        ):
+            raise MigrationInputError(
+                f"{source}: expected waveforms/modules mapping envelope"
+            )
         if label is None or session.dry_run:
             # No destination handle has been acquired; point dry-runs still
             # validate candidates and retain their canonical key decisions.

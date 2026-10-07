@@ -28,7 +28,7 @@ uv run --directory <worktree> --no-sync -- python tools/migrate_storage.py \
 
 `result-root` 是舊小資料根，來源為其下的 `<source-chip>/<source-qubit>`。`database-root` 同時是舊重資料根與新 Database 根。`results-root` 是新的小資料根，與舊 `result-root` 分開。
 
-Dry-run 只讀來源，將 report 印到 stdout。它會以具體 cfg model 檢查已知 pair 的可轉換性，但不建立條目或 manifest，不搬移 Labber，也不執行 native validation。Report 有 pending 時仍可能 exit 0。逐項檢視 `key_mappings` 與 `pending`，確認新路徑與單位的證據，不能把 exit 0 當成全部資料已遷移。
+Dry-run 只讀來源，將 report 印到 stdout。它會以具體 cfg model 檢查已知 pair 的可轉換性，也會驗證 point-local module／waveform 的 typed Spec 與引用。它不建立條目或 manifest，不搬移 Labber，也不執行 native validation。Library 的 `key_mappings` rows 以 `library_kind` 區分 module 與 waveform，保留 canonical `new_path`。Dry-run 未取得目的 handle，所以這些 rows 的 `new_file=None` 不代表轉換失敗。Report 有 pending 時仍可能 exit 0。逐項檢視 `key_mappings` 與 `pending`，確認新路徑與單位的證據，不能把 exit 0 當成全部資料已遷移。
 
 工具保留未知值與 expression 的原文。Expression 不會 evaluate。Flux 單位必須有明確證據，`cur_A` 的名稱不是單位證據。缺 cfg identity、實驗 schema、歷史 snapshot、量測時間或 completion 的 run 保留來源，列待處理。
 
@@ -64,9 +64,11 @@ FreqGainCfg 的來源仍使用歷史 tag `twotone/ge/ro_optimize/freq`。離線 
 
 - Parameters 建立 setup 與自足 point，不使用讀時疊層。`params.json` 原樣保存，不推導 Q1.params。
 - Data 先發布 native，再用正常 reader 與具體 typed loader 驗證。成功後才複製 Labber、核對 hash、刪除該來源檔。
-- Module cfg 在本工具本次交付中只有 header-only seed。Report 保留舊模組到 library 路徑的對照，標明由後續 owner 轉換。不要把 string reference 或 pending mapping 當成已發布的 cfg。
+- Parameters 同時轉換 child point 的 legacy module cfg。來源必須含 `modules` 與 `waveforms` mappings，缺少或錯誤的 section 會失敗。Mapping 明示來源 family 與目的 key，不依名稱猜 module 或 waveform。工具透過正式 Spec 與 library owner 提交 point-local `module_cfg.yaml`，不建立 root library。Root entries、未支援 expression／Spec、缺 mapping 或 child reference 不能轉換時保留 located pending。Arb asset key 不改寫，也不搬 asset。
 
-Report 的 part 是已執行部分的聯集。`all` 不代表 pending 已解決。完成 parameters 後，可以經 ResultEntry 公開 edit 修改 setup／point；data resume 驗證當前文件，不還原舊參數。逐檔發布的 params.json、副本、Labber、native 則受 manifest hash 保護，修改它們會報衝突。
+Report 的 part 是已執行部分的聯集。`all` 不代表 pending 已解決。Library 的 converted file 表示單檔 Spec 已提交，不保證每個 legacy entry 已轉換、asset 已存在或全部模組已可 materialize。不能只看文件存在或 module-slot 字串。核對每個 pending 的來源與定位，並用公開 library seam 檢查成功項目的 Spec、引用和工作單位。
+
+完成 parameters 後，可以經 ResultEntry 公開 edit 修改 setup／point；data resume 驗證當前文件，不還原舊參數。逐檔發布的 params.json、副本、Labber、native 與已記錄完成的 module library 則受 manifest hash 保護，修改它們會報衝突。
 
 完成本節時，每個已確定的 run 能由正常 `load_run_data` 與其具體 experiment 的 `load_run` 讀回，report 的成功與待處理清單一致。
 
@@ -79,6 +81,7 @@ Report 的 part 是已執行部分的聯集。`all` 不代表 pending 已解決�
 3. Native writer 或 validation 失敗時，Labber 來源仍在。Resume 先恢復 native，再搬移來源。已 validated 的 native 也必須再核對 hash。
 4. Labber 已複製但來源未刪時，工具核對兩端再刪來源。來源已刪但 manifest 尚未更新時，工具依 published 記錄與目的 hash 確認完成。Source_removed 只查目的，不重讀或 resolve 舊位置。舊位置被新普通檔或 symlink 重用時，resume 不讀取或刪除它。
 5. Report 更新中斷時，工具從 manifest 重建累積 report。可新增尚未 planned source 的 evidence；已 planned 的證據不得替換，也不能改寫已 source_removed 的 run。
+6. 已記錄完成的 module library 只核對來源 baseline 與目的 hash，不重做或覆寫。Library 單檔提交與 manifest 不是跨檔原子。Library 已寫入但未記錄完成的窗口沒有專門 recovery。發生時先停下，取得清理授權後刪目的地重跑，不把中間文件當作可續跑的 legacy 來源。
 
 骨架已建立、初始 manifest 尚未發布時，來源未動，但工具不能自動接管殘留條目。停下來記錄目錄與 hash，取得明確清理授權後再重試。碰到目的 hash、身分或 mapping revision 衝突也先停下，不刪 manifest、不改版本來強行續跑。
 

@@ -318,11 +318,49 @@ def test_dry_run_prepares_library_without_destination_or_manifest_writes(
     original = source.read_bytes()
     report = _convert(request, library_mapping)
     assert report.pending == ()
-    assert len([item for item in report.key_mappings if item.old_file == source]) == 5
+    rows = [item for item in report.key_mappings if item.old_file == source]
+    assert len(rows) == 5
+    assert all(item.new_file is None for item in rows)
+    assert all(item.new_path is not None and item.action == "module" for item in rows)
     assert not request.results_root.exists()
     assert not (request.database_root / request.name).exists()
     assert not manifest_path(request).exists()
     assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"modules": {}},
+        {"waveforms": {}},
+        {"modules": [], "waveforms": {}},
+        {"modules": {}, "waveforms": []},
+    ],
+)
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_malformed_legacy_envelope_fails_without_claiming_conversion(
+    request_data: MigrationRequest,
+    library_mapping: MigrationMapping,
+    values: YamlMap,
+    dry_run: bool,
+) -> None:
+    request = replace(request_data, part="parameters", dry_run=dry_run)
+    source = _library(write_meta(request, "context", {}), values)
+    original = source.read_bytes()
+    with pytest.raises(MigrationInputError, match="mapping envelope"):
+        _convert(request, library_mapping)
+    assert source.read_bytes() == original
+    if dry_run:
+        assert not request.results_root.exists()
+    else:
+        state = _manifest(request)
+        assert not state.parameters_complete
+        assert state.module_files == ()
+        assert state.report.converted_files == ()
+        assert any(
+            item.source == source and item.operation == "module_cfg"
+            for item in state.report.failures
+        )
 
 
 def test_library_io_failure_is_reported_and_never_changes_sources(
