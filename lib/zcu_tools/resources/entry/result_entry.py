@@ -422,11 +422,14 @@ class ResultEntry:
             database_root=self._database_path.parent,
         )
 
-    def module_library(self, label: str, *, assets: WaveformAssetInfo) -> ModuleLibrary:
-        """Open a point-local library with this entry's ledger and asset capability.
+    def module_library(
+        self, label: str, *, assets: WaveformAssetInfo | None = None
+    ) -> ModuleLibrary:
+        """Open a point-local library with this entry's ledger and optional assets.
 
         label follows use_point's safe single-segment rules. Only module_cfg.yaml
         is loaded; the point and assets are not read and no active point is selected.
+        Omit assets for Spec-only reads/edits; materializing Arb requires a provider.
         The existing library must have a valid header, schema and local provenance.
         Invalid labels raise ValueError; missing files and validation/I/O errors
         propagate. Opening creates no missing document.

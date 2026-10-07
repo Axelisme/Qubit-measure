@@ -37,6 +37,7 @@ from .module import (
     TwoPulseResetCfg,
     TwoPulseResetSpec,
 )
+from .references import remap_module_references, remap_waveform_references
 from .waveform import (
     AbsWaveformCfg,
     ArbWaveformCfg,
@@ -64,6 +65,8 @@ __all__ = [
     "WaveformCfgFactory",
     "module_spec_from_raw",
     "waveform_spec_from_raw",
+    "remap_module_references",
+    "remap_waveform_references",
     "AbsModuleCfg",
     "AbsReadoutCfg",
     "AbsResetCfg",

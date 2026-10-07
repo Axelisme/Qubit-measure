@@ -7,6 +7,7 @@ from .errors import MigrationInputError
 from .models import (
     MigrationFileState,
     MigrationManifest,
+    ModuleFilePublication,
 )
 from .paths import contained_path, source_identity, source_removed, validate_segment
 from .state import MigrationSession, file_hash
@@ -132,6 +133,38 @@ def _validate_assignments(manifest: MigrationManifest) -> None:
             )
 
 
+def _validate_module_publication(
+    publication: ModuleFilePublication, manifest: MigrationManifest
+) -> None:
+    source_root = manifest.report.source.result_path
+    source = publication.source
+    if (
+        not source.is_absolute()
+        or contained_path(source, source_root) != source
+        or source.parent.parent != source_root
+        or source.name != "module_cfg.yaml"
+    ):
+        raise MigrationInputError("manifest: invalid point-local module source")
+    validate_segment(source.parent.name, "context label")
+    destination_root = manifest.report.destination.result_path
+    expected = destination_root / "points" / source.parent.name / "module_cfg.yaml"
+    if (
+        publication.destination != expected
+        or contained_path(publication.destination, destination_root) != expected
+    ):
+        raise MigrationInputError("manifest: invalid point-local module destination")
+    if (
+        manifest.source_hashes.get(str(source)) != publication.source_hash
+        or re.fullmatch(r"[0-9a-f]{64}", publication.source_hash) is None
+        or re.fullmatch(r"[0-9a-f]{64}", publication.destination_hash) is None
+    ):
+        raise MigrationInputError("manifest: module baseline/hash disagrees")
+    if file_hash(publication.destination) != publication.destination_hash:
+        raise MigrationInputError(
+            f"{publication.destination}: module destination hash changed"
+        )
+
+
 def validate_owned_state(session: MigrationSession) -> None:
     """Check a loaded session's owned files, assignments and immutable source baselines.
 
@@ -152,4 +185,15 @@ def validate_owned_state(session: MigrationSession) -> None:
             state.phase == "prepared" and state.destination.exists()
         ):
             session.verify_destination(state)
+    module_sources: set[Path] = set()
+    module_destinations: set[Path] = set()
+    for publication in manifest.module_files:
+        if (
+            publication.source in module_sources
+            or publication.destination in module_destinations
+        ):
+            raise MigrationInputError("manifest: duplicate module publication")
+        module_sources.add(publication.source)
+        module_destinations.add(publication.destination)
+        _validate_module_publication(publication, manifest)
     _validate_baselines(manifest)
