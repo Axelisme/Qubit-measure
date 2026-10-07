@@ -6,6 +6,7 @@ import math
 import tempfile
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -233,6 +234,24 @@ class MeasureMcpSession:
         self._versions: dict[str, int] = {}
         self._launched = False
         self._png_directory: tempfile.TemporaryDirectory[str] | None = None
+
+    def tool_call_scope(self, call_id: str) -> AbstractContextManager[None]:
+        """Bind a native MCP tool ID to this session and execution context.
+
+        Nonblank strings are preserved exactly. Blank IDs raise ValueError.
+        Nested scopes restore their predecessor even when the handler raises.
+        Other sessions and independent contexts retain their own scope.
+        Scope is synchronous; continuations must capture the ID explicitly.
+        """
+        raise NotImplementedError("native MCP call scope is not implemented")
+
+    def current_call_id(self) -> str:
+        """Return this session/context's active native MCP ID.
+
+        Raise RuntimeError outside tool_call_scope. Never synthesize an ID or
+        borrow another session/context's latest call.
+        """
+        raise NotImplementedError("native MCP call scope is not implemented")
 
     def new_png_path(self) -> Path:
         """Reserve a fresh session-owned path; the GUI writes the image."""
