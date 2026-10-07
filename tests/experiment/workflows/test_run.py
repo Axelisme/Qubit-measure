@@ -6,8 +6,10 @@ from dataclasses import dataclass, field
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from pydantic import BaseModel, Field
+from pydantic import Field
 from qick import QickConfig
+from zcu_tools.device import DeviceInfo, FakeDeviceInfo
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import SignalBuffer
 from zcu_tools.experiment.workflows import MissingCapability, Run
@@ -17,9 +19,10 @@ from zcu_tools.experiment.workflows import MissingCapability, Run
 class Cfg:
     value: float = 1.0
     nested: list[float] = field(default_factory=lambda: [2.0])
+    dev: object = None
 
 
-class ModelCfg(BaseModel):
+class ModelCfg(ExpCfgModel):
     value: float = 1.0
     nested: list[float] = Field(default_factory=lambda: [2.0])
 
@@ -45,6 +48,47 @@ def test_run_cfg_and_schedule_cfg_are_independent_copies(
     assert run.cfg == make_cfg(value=1.0, nested=[2.0, 3.0])
     assert run.outcome.status == "completed"
     np.testing.assert_array_equal(buffer.array, [1.0 + 2.0j, 3.0 + 4.0j])
+
+
+@pytest.mark.parametrize("make_cfg", [Cfg, ModelCfg], ids=["dataclass", "native-model"])
+def test_device_setup_preserves_native_models_order_and_copy_isolation(
+    make_cfg: Callable[..., Cfg | ModelCfg],
+) -> None:
+    first = FakeDeviceInfo(address="none", value=0.1)
+    settings: dict[str, DeviceInfo] = {
+        "z": first,
+        "a": FakeDeviceInfo(address="none", value=0.2),
+    }
+    run = Run(make_cfg(dev=settings), StopSignal())
+    first.value = 0.9
+    settings.clear()
+
+    copied = run.device_setup
+    assert copied is not None
+    assert list(copied) == ["z", "a"]
+    info = copied["z"]
+    assert isinstance(info, FakeDeviceInfo)
+    assert info is not first
+    assert info.value == 0.1
+
+
+@pytest.mark.parametrize("cfg", [Cfg(), ModelCfg()])
+def test_device_setup_none_means_disabled(cfg: Cfg | ModelCfg) -> None:
+    assert Run(cfg, StopSignal()).device_setup is None
+
+
+def test_empty_device_mapping_is_not_disabled() -> None:
+    assert Run(ModelCfg(dev={}), StopSignal()).device_setup == {}
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [(), [], "flux", {1: FakeDeviceInfo(address="none")}, {"flux": {"value": 0.1}}],
+)
+def test_device_setup_rejects_non_native_inputs(settings: object) -> None:
+    run = Run(Cfg(dev=settings), StopSignal())
+    with pytest.raises(TypeError, match="Mapping"):
+        _ = run.device_setup
 
 
 def test_absent_capabilities_fail_at_access() -> None:

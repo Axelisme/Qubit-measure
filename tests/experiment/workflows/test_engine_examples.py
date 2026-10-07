@@ -54,7 +54,7 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
         plan=plan,
         tunables=tunables,
         paths=RunPaths(root / "metadata", root / "data"),
-        identity=RunIdentity("example", DeviceSnapshot(()), "offline"),
+        identity=RunIdentity("example", DeviceSnapshot({}), "offline"),
     )
     status = engine.execute("example")
     assert status.lifecycle == "done", status.reason

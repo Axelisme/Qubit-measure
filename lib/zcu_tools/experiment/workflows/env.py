@@ -143,8 +143,9 @@ class WorkflowEnv[C](InitEnv[C]):
 
         experiment must have an ASCII letter/digit/underscore function name;
         anonymous or unnamed callables raise ValueError at effect entry.
-        cfg must be a deepcopy-able dataclass. save must write and close the
-        exact temporary path; the engine publishes it before returning Completed.
+        cfg must be a deepcopy-able dataclass or Pydantic BaseModel instance.
+        save must write and close the exact temporary path; the engine publishes
+        it before returning Completed.
         live optionally projects a unique buffer. setup_devices=False skips
         automatic cfg.dev setup. Outer, live, saver, and deepcopy errors
         propagate; Schedule failures return Failed without data or a run file.
