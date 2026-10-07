@@ -37,7 +37,7 @@ def copy_object(value: object) -> dict[str, JsonValue]:
 
 
 def default_json(value: object) -> JsonValue:
-    """Encode ordinary defaults, including nested models, tuples and complex values."""
+    """Encode an ordinary value as finite JSON, including models, tuples and complex."""
     if isinstance(value, BaseModel):
         return default_json(value.model_dump(mode="python"))
     if isinstance(value, complex):

@@ -10,6 +10,7 @@ from pydantic_core import PydanticCustomError
 from zcu_tools.gui.cfg.codec import decode_complex
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 
+from ._json import default_json
 from ._sources import check_sources, error_path
 from ._structure import alternatives, discriminator, selected, unwrap
 from .model import FormEnv, FormErrors, FormModel, FormPath, FormValue
@@ -190,19 +191,6 @@ def _active_leaf(value: BaseModel, path: FormPath) -> bool:
     return True
 
 
-def _choice_values(
-    current: object, options: tuple[JsonValue, ...]
-) -> tuple[FormValue, ...]:
-    return tuple(
-        decode_complex(value)
-        if isinstance(current, complex)
-        and isinstance(value, dict)
-        and "__complex__" in value
-        else _ordinary(value)
-        for value in options
-    )
-
-
 def result[F: FormModel](
     model: type[F], data: dict[str, JsonValue], env: FormEnv
 ) -> F | FormErrors:
@@ -235,7 +223,7 @@ def result[F: FormModel](
     for path, values in options.items():
         if not _active_leaf(validated, path):
             continue
-        current = _read(validated, path)
-        if current not in _choice_values(current, values):
+        current = default_json(_read(validated, path))
+        if current not in values:
             errors[path] = "Value is not among current choices"
     return FormErrors(errors) if errors else validated
