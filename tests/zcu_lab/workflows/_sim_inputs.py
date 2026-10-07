@@ -36,6 +36,7 @@ class Inputs:
     soc/soccfg form one physical simulator. freq/rabi/readout/t1 contain native
     cfg for their respective callbacks, calibrated to that simulator's qubit
     and ground-state resonator at reduced flux 1.0. They have no device setup.
+    flux_value is the corresponding absolute native device value, not reduced flux.
     """
 
     soc: MockQickSoc
@@ -44,6 +45,7 @@ class Inputs:
     rabi: LenRabiCfg
     readout: FreqGainCfg
     t1: T1Cfg
+    flux_value: float
 
 
 def make_inputs() -> Inputs:
@@ -137,6 +139,7 @@ def make_inputs() -> Inputs:
             modules=T1ModuleCfg(pi_pulse=pi_pulse, readout=readout),
             sweep=T1SweepCfg(length=SweepCfg(start=0.0, stop=80.0, expts=21, step=4.0)),
         ),
+        float(predictor.flux_to_value(1.0)),
     )
 
 

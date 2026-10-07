@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-07，完整 T1 離線 workflow 宿主
 
 這裡是使用者入口；repo 品質檢查在 [tools/README.md](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
@@ -23,6 +23,11 @@
 - `download_result.py`：工作站有 Google Drive client 依賴與 credentials 的環境。輸入 entry 名稱與 `GOOGLE_DRIVE_PARENT_FOLDER_ID`，從 Drive 遞迴下載到 repo `results/<name>/`。本地不存在會建目錄，遠端較新會覆寫本地檔案並設定 mtime。OAuth token 讀取或更新目前工作目錄的 `token.json`，可能啟動認證流程。此腳本會存取網路及使用者資料。
 - `upload_result.py`：同上，但需要 Drive 寫入權限。從 repo `results/<name>/` 建立或更新 Drive 對應 entry 的檔案與目錄。明確選用 `--prune-remote` 時，還會刪除遠端缺少本地對應的檔案。OAuth token 存於目前工作目錄的 `token.json`。此腳本會存取網路與修改使用者的 Drive 資料。
 - `sync.py`：**用途待確認**。觀察到 `md2nb` 在 `notebook_md/` 到 `notebook/` 間同步，`nb2md` 反向同步；使用 Jupytext、Git 與工作站環境。會建立或覆寫對應檔案，`md2nb` 不同步時可互動詢問，`nb2md` 直接覆寫。未確認此流程是否仍為正式的 notebook 發布程序。
+
+## 離線 workflow
+
+- `run_workflow_sim.py`：以現行 native cfg／SimParams JSON 跑單次 acquisition，不保存，也不代替完整 workflow。
+- `run_t1_fluxdep_sim.py`：以現行 T1Plan／T1Tunables／Calibrated／SimParams JSON 跑完整 T1 fluxdep。入口只建立一個 FakeDevice，其 native 值逐 acquisition 驅動模擬板。使用者明確指定隔離的 Result／Database entry paths；entry owner 計算 workflow roots，Engine 保存 journal、原生 acquisitions 與摘要 PNG。已存在的 run roots 拒絕覆寫，不連接硬體。
 
 ## 模擬資料庫產生
 
