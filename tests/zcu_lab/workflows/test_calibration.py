@@ -215,6 +215,38 @@ def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
         assert (tmp_path / "data" / records[0].iteration_dir / run_file).is_file()
 
 
+def test_readout_scan_uses_the_calibrated_rabi_drive(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    rig = Rig(inputs, tmp_path)
+    readout_drive = rig.plan.readout.modules.qub_pulse.model_copy(deep=True)
+    readout_drive.gain = 0.5
+    readout_drive.phase = 37.0
+    readout_drive.set_param("length", 0.7)
+    rig.plan.readout.modules.qub_pulse = readout_drive
+    original = rig.plan.model_copy(deep=True)
+    rig.start(CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125))
+
+    status = rig.engine.execute("calibration")
+
+    assert status.lifecycle == "done", status.reason
+    assert len(rig.readouts) == 1
+    readout_cfg = rig.readouts[0].cfg
+    rabi_drive = rig.rabis[0].cfg.modules.qub_pulse
+    assert readout_cfg.modules.qub_pulse.gain == rabi_drive.gain
+    assert readout_cfg.modules.qub_pulse.phase == rabi_drive.phase
+    result = rig.results[0]
+    assert isinstance(result, Calibrated), result
+    expected_drive = original.rabi.modules.qub_pulse.model_copy(deep=True)
+    expected_drive.set_param("freq", result.f01_mhz)
+    expected_drive.set_param("length", result.pi_length_us)
+    assert readout_cfg.modules.qub_pulse == expected_drive
+    assert readout_cfg.modules.readout == original.readout.modules.readout
+    assert readout_cfg.modules.reset == original.readout.modules.reset
+    assert readout_cfg.sweep == original.readout.sweep
+    assert rig.plan == original
+
+
 def test_readout_cadence_counts_only_successes_and_preserves_prior_readout(
     inputs: Inputs,
     tmp_path: Path,

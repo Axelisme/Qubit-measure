@@ -218,9 +218,19 @@ def t1_fluxdep(
 
     flux = state.remaining.pop(0)
     yield from env.set_device(plan.flux_dev, flux)
+    point_plan = plan.model_copy(deep=True)
+    # Native setup must retain this point's flux rather than the template value.
+    for cfg in (
+        point_plan.calibration.frequency,
+        point_plan.calibration.rabi,
+        point_plan.calibration.readout,
+        point_plan.t1,
+    ):
+        if cfg.dev is not None and plan.flux_dev in cfg.dev:
+            cfg.dev[plan.flux_dev].set_flux(flux)
     cal = yield from calibrate(
         env,
-        plan.calibration,
+        point_plan.calibration,
         tun.cal,
         flux,
         state.cal,
@@ -241,7 +251,7 @@ def t1_fluxdep(
     (line,) = ax.plot([], [])
     outcome = yield from env.run(
         run_t1,
-        t1_cfg(plan, tun, cal, guess),
+        t1_cfg(point_plan, tun, cal, guess),
         save=partial(save_t1, snapshot=plan.snapshot),
         live=Live1D(line, y=lambda signals: signals.real),
     )

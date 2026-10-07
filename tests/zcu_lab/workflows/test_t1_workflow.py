@@ -1,6 +1,7 @@
 """Native T1 declaration through Engine, simulator, publication and typed loading."""
 
 import json
+from itertools import groupby
 from pathlib import Path
 from time import perf_counter
 
@@ -8,6 +9,7 @@ import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.datafile import load_run_data
+from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import (
     Actor,
@@ -188,6 +190,94 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
 @pytest.mark.filterwarnings(
     "ignore:fit_func failed; returning init_p fallback:RuntimeWarning"
 )
+def test_native_device_setup_preserves_each_acquisition_setpoint(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    flux_device, bias_device = FakeDevice(fast_mode=True), FakeDevice(fast_mode=True)
+    manager = DeviceManager()
+    manager.register_device("bias", bias_device)
+    manager.register_device("flux", flux_device)
+    devices = RecordingDevices()
+    devices.manager = manager
+    devices.on_set = lambda _signal: flux_device.set_value(devices.values[-1][1])
+    fluxes = tuple(inputs.flux_value + offset for offset in (0.0, 0.01, 0.02))
+    plan = make_plan(inputs).model_copy(update={"fluxes": fluxes})
+    bias_info = FakeDeviceInfo(address="none", output="on", value=0.12, rampstep=0.04)
+    flux_info = FakeDeviceInfo(
+        address="none", output="on", value=fluxes[0], rampstep=0.025
+    )
+    for cfg in (
+        plan.calibration.frequency,
+        plan.calibration.rabi,
+        plan.calibration.readout,
+        plan.t1,
+    ):
+        cfg.dev = {"bias": bias_info.model_copy(), "flux": flux_info.model_copy()}
+    original = plan.model_copy(deep=True)
+    knobs = tunables()
+    knobs.cal.ro_every = 1
+    engine = Engine(
+        EnginePorts(
+            RecordingPlots(),
+            RecordingBar,
+            ManualClock(),
+            context=seed_from_inputs(inputs),
+            soc=inputs.soc,
+            soccfg=inputs.soccfg,
+            devices=devices,
+        )
+    )
+    engine.start(
+        t1_fluxdep,
+        plan=plan,
+        tunables=knobs,
+        paths=RunPaths(tmp_path / "metadata", tmp_path / "data"),
+        identity=RunIdentity(
+            "native-setup", DeviceSnapshot(manager.get_all_info()), "offline"
+        ),
+    )
+    acquired_fluxes: list[float] = []
+
+    def read_flux() -> float:
+        value = flux_device.get_value()
+        acquired_fluxes.append(value)
+        return value
+
+    inputs.soc.set_flux_source(read_flux)
+    try:
+        status = engine.execute("native-setup")
+    finally:
+        inputs.soc.set_flux_source(None)
+        manager.close_all_devices()
+
+    assert status.lifecycle == "done", status.reason
+    assert [value for value, _group in groupby(acquired_fluxes)] == list(fluxes)
+    assert devices.values == [("flux", value) for value in fluxes]
+    records = engine.records("native-setup")
+    assert len(records) == len(fluxes)
+    assert len(devices.settings) == 4 * len(fluxes)
+    for index, (record, flux) in enumerate(zip(records, fluxes, strict=True)):
+        point = record.encoded_record.value
+        assert isinstance(point, dict)
+        assert point["flux"] == flux
+        assert point["reason"] is None
+        assert len(record.run_files) == 4
+        for settings in devices.settings[index * 4 : (index + 1) * 4]:
+            assert tuple(settings) == ("bias", "flux")
+            assert settings["bias"] == bias_info
+            assert settings["flux"] == flux_info.with_updates(value=flux)
+        source, _metadata = load_run_with_metadata(
+            tmp_path / "data" / record.iteration_dir / record.run_files[-1],
+            spec=T1Exp().persistence_spec(),
+        )
+        assert source.cfg is not None
+        assert source.cfg.dev == {
+            "bias": bias_info,
+            "flux": flux_info.with_updates(value=flux),
+        }
+    assert plan == original
+
+
 def test_failed_calibration_commits_reason_and_never_runs_t1(
     inputs: Inputs, tmp_path: Path
 ) -> None:
