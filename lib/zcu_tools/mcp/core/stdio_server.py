@@ -293,7 +293,19 @@ def _call_tool(
         return _not_found(rid, name)
     try:
         handler: Callable[[dict[str, Any]], Any] = tool["handler"]
-        res = handler(arguments)
+        if hooks.tool_call_scope is None:
+            res = handler(arguments)
+        else:
+            if isinstance(rid, str) and rid.strip():
+                call_id = rid
+            elif isinstance(rid, int) and not isinstance(rid, bool):
+                call_id = str(rid)
+            else:
+                raise ValueError(
+                    "Native MCP tool ID must be a nonblank string or integer"
+                )
+            with hooks.tool_call_scope(call_id):
+                res = handler(arguments)
         # Compact separators (no indent, no spaces) keep the tool reply
         # token-light. ensure_ascii stays default (True): the outer JSON-RPC
         # envelope re-escapes non-ASCII anyway, so turning it off buys nothing.
