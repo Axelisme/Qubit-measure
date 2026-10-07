@@ -436,8 +436,21 @@ class LibrarySnapshot:
                 )
         return LibrarySnapshot(candidate, assets=self._assets)
 
-    def replaced_module(self, path: str, value: ModuleSpec) -> LibrarySnapshot:
-        """Copy and set a validated module Spec with manual leaf sources; wrong path/family raises ValueError."""
+    def replaced_module(
+        self,
+        path: str,
+        value: ModuleSpec,
+        *,
+        provenance: Provenance | None = None,
+    ) -> LibrarySnapshot:
+        """Return an isolated module replacement with manual or explicit sources.
+
+        path is a concrete library root; wrong path/family/source raises ValueError.
+        Explicit Provenance preserves source/kind/run_id/at/stderr and clears
+        clone origin on accepted leaves. This pure candidate does not read a
+        ledger; the writing entry owner validates local evidence before install.
+        No materialization, asset access, file changes or mutation of this snapshot.
+        """
         candidate = self.document()
         _put_module(candidate, path, value)
         projection = LibrarySnapshot(candidate, assets=self._assets)
@@ -449,8 +462,20 @@ class LibrarySnapshot:
         )
         return LibrarySnapshot(candidate, assets=self._assets)
 
-    def replaced_waveform(self, path: str, value: WaveformSpec) -> LibrarySnapshot:
-        """Copy and set a validated envelope Spec with manual leaf sources; wrong path/kind raises ValueError."""
+    def replaced_waveform(
+        self,
+        path: str,
+        value: WaveformSpec,
+        *,
+        provenance: Provenance | None = None,
+    ) -> LibrarySnapshot:
+        """Return an isolated waveform replacement with manual or explicit sources.
+
+        path is a concrete waveforms root; wrong path/kind/source raises ValueError.
+        Explicit Provenance preserves source/kind/run_id/at/stderr and clears
+        clone origin on accepted leaves. The writing entry validates local
+        evidence separately. No ledger/YAML I/O, materialization or mutation.
+        """
         candidate = self.document()
         _put_waveform(candidate, path, value)
         projection = LibrarySnapshot(candidate, assets=self._assets)

@@ -52,13 +52,19 @@ from zcu_tools.resources.entry.schema import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.cfg_model import WaveformAssetInfo
+    from zcu_tools.cfg_model import ModuleSpec, WaveformAssetInfo, WaveformSpec
+    from zcu_tools.format_version import YamlValue
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.session.context_types import PointCreateRequest, PointUseRequest
+    from zcu_tools.gui.session.context_types import (
+        ContextTarget,
+        PointCreateRequest,
+        PointUseRequest,
+    )
     from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.resources.entry import PointView, ResultEntry, RoleSpec, SetupView
     from zcu_tools.resources.entry.ledger import RecordsLedger
+    from zcu_tools.resources.entry.provenance import Provenance
 
 
 class ContextService:
@@ -275,6 +281,58 @@ class ContextService:
             parameters.document().components, declarations, focus, explicit
         )
         return RoleBinding(focus, declarations, names)
+
+    def set_parameter(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: YamlValue,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        """Write one concrete component/general path in working units.
+
+        Use the captured target, not the current selection. SavedPoint writes
+        one point file in the opened entry; a nonselected point stays unselected.
+        EntryDraft requires that entry's current memory-only DRAFT and writes
+        no point file. Omitted source records manual provenance; explicit source
+        is validated against this entry's ledger. Success publishes only when
+        writing the selected target, after resource commit/validation.
+        Cross-entry, stale DRAFT, path/schema/source, conflict and I/O failures
+        propagate without publishing a candidate. No retry or batch receipt.
+        """
+        raise NotImplementedError
+
+    def set_module(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: ModuleSpec,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        """Write a validated ModuleSpec at a concrete library root.
+
+        Target/publication/source/error rules match set_parameter. SavedPoint
+        uses one library transaction; DRAFT replaces an isolated memory library.
+        No lowering, materialization, accepted event production or batch receipt.
+        """
+        raise NotImplementedError
+
+    def set_waveform(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: WaveformSpec,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        """Write a WaveformSpec at a concrete waveforms root.
+
+        Target/publication/source/error rules match set_module. Owner rejects
+        invalid roots/families/sources before installing any candidate.
+        """
+        raise NotImplementedError
 
     def entry_ledger(self, entry_id: str) -> RecordsLedger:
         """Return only the currently opened entry's ledger; never append an event.

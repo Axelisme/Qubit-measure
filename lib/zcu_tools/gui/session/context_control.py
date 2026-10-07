@@ -5,9 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
+    from zcu_tools.format_version import YamlValue
     from zcu_tools.gui.session.context_types import (
         ComponentFocus,
         ContextSourceBinding,
+        ContextTarget,
         EntryInfo,
         PointCreateRequest,
         PointUseRequest,
@@ -17,6 +20,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.gui.session.types import ParameterContext, RoleBinding
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
+    from zcu_tools.resources.entry.provenance import Provenance
 
 
 class ContextControlPort(Protocol):
@@ -31,6 +35,45 @@ class ContextControlPort(Protocol):
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         """Capture published values; EMPTY/source/role errors propagate."""
+        ...
+
+    def set_parameter(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: YamlValue,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        """Write a concrete point/general path using the captured target.
+
+        Runs on the owner thread. Omitted source is manual; explicit Provenance
+        uses this entry's ledger. Cross-entry/stale-DRAFT/schema/source/conflict/
+        I/O failures propagate. Nonselected SavedPoint writes do not select it;
+        DRAFT is memory-only. Success follows resource validation/commit.
+        """
+        ...
+
+    def set_module(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: ModuleSpec,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        """Write a Spec at a concrete module root; same target/source failures."""
+        ...
+
+    def set_waveform(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: WaveformSpec,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        """Write a Spec at a waveform root; same target/source failures."""
         ...
 
     def get_entry_info(self) -> EntryInfo | None:
@@ -81,6 +124,36 @@ class ContextControlFacet(ContextControlPort):
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         return self._context.read_context(roles=roles)
+
+    def set_parameter(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: YamlValue,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        self._context.set_parameter(target, path, value, source=source)
+
+    def set_module(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: ModuleSpec,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        self._context.set_module(target, path, value, source=source)
+
+    def set_waveform(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: WaveformSpec,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        self._context.set_waveform(target, path, value, source=source)
 
     def get_entry_info(self) -> EntryInfo | None:
         return self._context.get_entry_info()
