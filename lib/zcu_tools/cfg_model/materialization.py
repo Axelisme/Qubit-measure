@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Literal
 
@@ -39,7 +40,7 @@ def _isolated_raw(value: object) -> object:
     """Copy input fields, stripping prior validation and private dependency bindings."""
     if isinstance(value, ConfigBase):
         return _isolated_raw(dict(value))
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {key: _isolated_raw(child) for key, child in value.items()}
     if isinstance(value, list):
         return [_isolated_raw(child) for child in value]
@@ -72,7 +73,7 @@ def _persistent_raw(value: object) -> object:
             raise ValueError("Not a persistent Spec: bound ArbWaveformCfg")
         # Pydantic iteration keeps child objects, unlike recursive model_dump.
         return _persistent_raw(dict(value))
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         if not all(isinstance(key, str) for key in value):
             raise ValueError("Not a persistent value: mapping keys must be strings")
         return {key: _persistent_raw(child) for key, child in value.items()}
