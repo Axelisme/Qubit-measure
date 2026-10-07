@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-05，registry-wide 契約與使用者測試處置
+**Last updated:** 2026-10-07，cfg factory 的 explicit validation context
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -423,15 +423,15 @@ Program v2 的 compile regression 先找 `test_modules_integration.py` 中同一
 
 ## Cfg 解析測試的 import 注意事項
 
-`ModuleCfgFactory` / `WaveformCfgFactory` 目前是 `TypeAdapter(...).validate_python(...)` 的 thin wrapper；分派由 `ModuleCfg` / `WaveformCfg` 的 Union TypeAlias 決定。測試檔仍建議從 package 入口 import，避免直接碰 leaf base class：
+`ModuleCfgFactory`／`WaveformCfgFactory` 由 `cfg_model` 擁有，按 Spec 與成品 cfg 的 union 驗證並遞迴展開引用。測試從 schema owner 的 package 入口 import，避免直接碰 leaf base class：
 
 ```python
-from zcu_tools.program.v2.modules import ModuleCfgFactory   # ✅ 使用 package 入口
-# 不要單獨：from zcu_tools.program.v2.modules.base import AbsModuleCfg
+from zcu_tools.cfg_model import ModuleCfgFactory   # 使用 schema owner 的 package 入口
+# 不要從 program runtime 或 schema leaf 匯入 factory
 
 cfg = ModuleCfgFactory.from_raw({"type": "readout/direct", "ro_ch": 0, ...})
 ```
 
-呼叫 `ModuleCfgFactory.from_raw(raw, ml=...)` 進行解析與 context 傳遞。
+呼叫 `ModuleCfgFactory.from_raw(raw, context=...)` 進行解析。`CfgValidationContext` 明示固定的 module resolver 與 asset capability；dependency-free inline cfg 可省略 context。
 
 **測試一個非 `Literal` 的 cfg（負面測試）**：若要在測試裡定義 `class UnknownCfg(AbsReadoutCfg): type: str = "unknown"` 來驗證 factory 錯誤路徑，重點是它不在 `ModuleCfg` Union 裡，因此 `ModuleCfgFactory.from_raw()` 不會 dispatch 到它。
