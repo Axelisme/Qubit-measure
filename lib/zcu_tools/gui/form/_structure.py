@@ -186,6 +186,8 @@ def _switch(
     if tag_key is None or path[-1] != tag_key:
         return False
     old = parent.get(key)
+    if key in parent and old is None:
+        raise ValueError(f"Activate null section before child write: {path!r}")
     if isinstance(old, dict) and old.get(tag_key) == value:
         return True
     branch = next(

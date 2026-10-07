@@ -108,6 +108,14 @@ class BranchForm(FormModel):
     )
 
 
+class NullableBranchForm(FormModel):
+    """Nullable tagged objects require activation before child editing."""
+
+    branch: Annotated[
+        StaticBranch | ContextBranch | None, Field(discriminator="kind")
+    ] = Field(default_factory=StaticBranch)
+
+
 class PlainForm(FormModel):
     """Use a nested BaseModel without replacing its owner."""
 
@@ -619,14 +627,31 @@ def test_nullable_range_alias_edits_and_restores_the_current_branch() -> None:
     assert result.fluxes.n == 3
 
 
+def test_null_tagged_section_rejects_discriminator_child_write_until_activation() -> (
+    None
+):
+    env = environment()
+    state = FormState(NullableBranchForm.default_input(env))
+    state.write({("branch",): None}, env)
+    before = state.input.data
+    base = state.base.data
+    notifications: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: notifications.append(state.input.data))
+    with pytest.raises(ValueError, match="null|activat"):
+        state.write({("branch", "kind"): "context"}, env)
+    assert state.input.data == before
+    assert state.base.data == base
+    assert notifications == []
+    state.write({("branch",): {"kind": "static"}}, env)
+    state.write({("branch", "kind"): "context"}, env)
+    result = state.result(env)
+    assert isinstance(result, NullableBranchForm)
+    assert isinstance(result.branch, ContextBranch)
+    assert result.branch.kind == "context"
+    assert len(notifications) == 2
+
+
 def test_compatible_restore_preserves_nullable_branch_deactivation() -> None:
-    class NullableBranchForm(FormModel):
-        """Nullable tagged objects require a selected branch before overlay."""
-
-        branch: Annotated[
-            StaticBranch | ContextBranch | None, Field(discriminator="kind")
-        ] = Field(default_factory=StaticBranch)
-
     env = environment()
     state = FormState(NullableBranchForm.default_input(env))
     notifications: list[dict[str, JsonValue]] = []
