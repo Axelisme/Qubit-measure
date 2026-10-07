@@ -46,7 +46,7 @@ class FrequencyFit:
 
 @dataclass(frozen=True)
 class RabiFit:
-    """Nondecaying, zero-phase Rabi fit using signed amplitude.
+    """Nondecaying Rabi fit with native phase estimation.
 
     pi_length_us/error_us are the fitted pi-pulse duration and its propagated
     standard error. observed/fitted are float64 vectors aligned with
@@ -107,17 +107,19 @@ def analyze_qubit_freq(result: FreqResult) -> FrequencyFit:
 
 
 def analyze_len_rabi(result: LenRabiResult) -> RabiFit:
-    """Fit the complete canonical length-Rabi trace, with zero phase and no decay.
+    """Fit the complete canonical length-Rabi trace, with free phase and no decay.
 
     result uses microsecond coordinates and complex128 signals of matching
-    1-D shape. Reuse the native real-axis rotation, allowing signed amplitude.
+    1-D shape. Reuse the native real-axis rotation and phase-aware pi estimate.
+    Estimating phase avoids a fixed-phase optimizer local minimum on native
+    traces whose first sample is nonzero.
     Return the pi duration, propagated uncertainty and residual curves.
     Do not skip/mask data, mutate result or acquire, plot, save, or accept a fit.
     Native projection/fitting errors and optimizer warnings propagate.
     """
     observed = rabi_signal2real(result.signals)
     pi_length, error, _pi2, _pi2_error, _freq, _freq_error, fitted, _optimizer = (
-        fit_rabi(result.lengths, observed, decay=False, init_phase=0.0)
+        fit_rabi(result.lengths, observed, decay=False, init_phase=None)
     )
     # This calibration consumes pi only; the native helper also reports pi/2 and frequency.
     quality = compute_fit_quality(observed, fitted, {}, None)
