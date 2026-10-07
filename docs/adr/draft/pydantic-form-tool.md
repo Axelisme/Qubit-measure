@@ -8,7 +8,7 @@ status: draft
 
 P2 的 plan 與 knobs 需要 sequence、nullable、tagged union、typed mapping、expression 和 library module ref。舊 CfgSchema 的 Spec／Value tree 不直接表示這些輸入。擴充舊工具會把本次 P2 與 Measure 遷移綁在一起。
 
-使用者已依 storage-redesign D195／D197 定稿新工具設計。本稿把定稿的「設計總覽」轉為 package 位置、依賴與 Engine 擴充安排，不重設計互動。Sr-advisor 已按 D198 代裁核准 F0。F2 的 Engine 原文機制已 collect 並通過完整 range review。F1 正在準備公開 declarations、真實 T1TunablesForm caller 與正式 tests；這不表示 core 內部實作或 GUI host 已完成。
+使用者已依 storage-redesign D195／D197 定稿新工具設計，sr-advisor 已按 D198 代裁核准 F0。本稿把定稿的「設計總覽」轉為 package 位置、依賴與 Engine 擴充安排，不重設計互動。Core、editor、具體表單、host 與 Engine 分別持有下列責任，切片的執行進度由 task records 記錄。
 
 定稿來源是 task-local `storage-redesign/spec/form-tool-design.md`。該檔持有 U1–U7、A1–A4、F0–F5 與完整 CfgSchema 能力對應。工具適用於新表單，本次不碰 CfgSchema，不遷移 Measure。舊表單退休由 backlog BL-20261007T155403537614Z-cfgschema-pydantic 另行安排。
 
@@ -167,9 +167,9 @@ F1∥F2在F0核准後各用獨立lane。F1只寫form core／tests與指定contra
 
 F1從公開FormState、schema與保存還原驗證U1–U3、U7、A1–A4資料行為。F2從Engine start/update/tunables/execute及journal驗證原文與值原子發布。F3從Qt editor→FormState驗證編輯行為。F4從defaults→result→to_cfg驗證native成品。F5以GUI／MCP共用host入口完成U1–U7與A1–A4，另外完成裝置上下限、refresh與CP-B。
 
-不直接測私有函式、腳本、文件或設定字面內容，不在tests另啟程序驗證Qt-free。Qt-free由import contracts及無QApplication的公開seam選集驗證，測試平行化交給pytest CLI。
+不直接測私有函式、腳本、文件或設定字面內容，不在 tests 另啟程序驗證 Qt-free。Qt-free 由 import contracts 與 source 直接審閱判定。公開 seam 選集驗證資料行為，既有 tests/gui fixture 建立 QApplication 不代表 core 依賴 Qt。測試平行化交給 pytest CLI。
 
-F4／F5仍受4a已接受context型別與D196必要P2 caller blockers限制。149項繼承回歸由workflows tracker逐項持有，沒有waive。Main前全樹Pyright與detectors必須對當時main零回歸，且由使用者核准。不push、不操作硬體或真資料。
+F4／F5仍受4a已接受context型別與D196必要P2 caller blockers限制。繼承回歸的當前數量、證據與 owner 由 workflows tracker 持有，沒有 waive。Main前全樹Pyright與detectors必須對當時main零回歸，且由使用者核准。不push、不操作硬體或真資料。
 
 ## 取捨
 
