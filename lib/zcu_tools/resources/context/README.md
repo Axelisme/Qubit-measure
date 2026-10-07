@@ -1,171 +1,32 @@
 # `zcu_tools.resources.context` — named experiment work contexts
 
-**Last updated:** 2026-10-02 — explicit CfgEnv
+**Last updated:** 2026-10-07，ModuleLibrary 的文件 owner 與隔離快照
 
-Context 是綁定特定參數資源的具名實驗工作 scope；同一 context 預期具有相同的環境與實驗語意。儀器值只是命名便利，名稱可以是任意合法字串。Context 不會自動監控實驗環境。
+本 package 管理實驗工作 scope 的參數資源。`MetaDict` 與 `ContextManager` 保留既有具名 context 的責任。`ModuleLibrary` 使用 point-local typed 文件，不再使用 flat modules／waveforms 或 SyncFile。
 
----
+## Module library
 
-## 記憶體內容與檔案同步
+`library.py` 擁有 `module_cfg.yaml` 的文件、查詢、編輯與來源。文件格式是 `zcu.module-library` 1.0。Header-only 文件表示合法空 library。
 
-`MetaDict.snapshot()` 與 `ModuleLibrary.snapshot()` 只複製目前記憶體，產出無檔案路徑的候選，不呼叫 mtime sync。`clone()` 仍沿用檔案同步行為，不能當作已發布記憶體的純快照。
+- `ModuleLibraryDocument.components` 依元件存放 pulses、readout、reset 與 waveforms。實際 key 是 `Q1.pulses.pi` 這類三段路徑，不是角色或隱藏 namespace。
+- 文件存 `ModuleSpec`／`WaveformSpec`。Spec 保留 inline child 或具體 key 引用，不存 provider、asset bytes 或 runtime object。
+- `LibrarySnapshot` 是不讀檔的隔離投影，也是 core factory 的 `ModuleResolver`。Spec 查詢不展開引用。成品查詢以固定 snapshot 與顯式 asset capability materialize cfg。
+- `entry_value` 提供未 materialize 的工作單位 Spec mapping。`entry_state` 同時提供相對 leaf 的原始來源，供固定 proposal 比對，不補缺失來源。
+- Snapshot replacement、delete 與 rename 都返回新候選，不更新原值或文件。純 rename 搬移 Spec、reference 字串與全部來源，不求值 child、不掃描其他引用或 cascade。
+- `ModuleLibrary.edit()` 使用 `DocumentStore.edit()`。Body 內的 `LibraryEdit.snapshot()` 反映前項寫入。Body、schema、source、conflict 或 I/O 失敗不發布候選。
+- 值與來源同檔提交。普通 replacement 記 manual 並清除 clone origin。明確來源沿 `entry.provenance` 驗證本條目 ledger 事件與附檔，不另設 producer。
+- `snapshot()` 只複製已發布記憶體。`refresh()` 顯式重載；`subscribe()` 在 publication 後通知。Handle 不自動監看、mtime sync 或建立缺失文件。
 
-`content.replace_context_contents()` 在權限檢查與深複製全部成功後，透過 stores 的 `swap_contents()` 安裝候選。它保留 live store 的物件身份與路徑，不讀寫檔案。Caller 在同一 owner sequence 更新版本與通知，再依政策保存；本模組不提供跨檔交易或自動重試。
+舊 flat 文件必須由顯式 migration 產生新文件。Runtime 不提供 alias bridge。`ContextManager` 的舊 library 呼叫不能當作新 ModuleLibrary 的入口。Library read projection與MetaDict各有自己的snapshot／write owner，不提供雙store memory交換或readonly flat library façade。
 
-## `MetaDict`（`metadict.py`）
+## MetaDict
 
-以 JSON 儲存實驗參數的 dict-like 物件，所有欄位可透過屬性語法存取。
+`metadict.py` 保留既有 JSON-backed、dict-like 參數管理。普通屬性操作與批次 `update` 沿 SyncFile 同步；`snapshot` 只複製已發布記憶體，`clone` 保留檔案同步語意。
 
-```python
-md = MetaDict("experiment/meta_info.json")
-md.qubit_freq = 5.0e9     # 自動 sync + 寫回
-print(md.qubit_freq)      # 自動 sync + 讀取
-```
+MetaDict 驗證受保護名稱，避免 key 被 class attribute 遮蔽。Complex 與形似 legacy complex 的字串沿原序列化政策處理。`replace_contents` 是完整替換入口；`swap_contents` 只交換記憶體。它們不提供跨檔交易。
 
-**型別特殊處理**：
+## Context manager 與 cfg materialization
 
-- 寫入時先呼叫 `format_obj()`（utils）把 model / array / scalar 轉成 JSON-friendly Python value，再把 `complex` 寫成標記物件 `{"__complex__": [real, imag]}`。
-- 載入時只把標記物件還原為 `complex`；舊檔案中無標記且形如 complex 的字串會以 deprecation warning 還原，供舊 `meta_info.json` 過渡。
-- 使用者字串維持字串語意；若字串本身形如舊 complex literal，dump 時會加上 `{"__metadict_string__": value}` escape marker，避免下一次載入被 legacy parser 誤判。
+`manager.py` 擁有既有具名 context 目錄、label 與 MetaDict 的組合，不讀儀器或建立 device snapshot。其 library 呼叫仍須改接 point-local owner。
 
-**受保護的屬性**（不進入 `_data`）：`_` 開頭的名稱，以及 `MetaDict` / `SyncFile` class 或 MRO 上已存在的名稱，例如 `dump`、`load`、`sync`、`has_persistence`、`clone`、`items`、`keys`、`get`、`update`。對 protected name 寫入或載入 protected key 會 fail-fast，避免 `_data` 內存在被 class attribute 遮蔽、永遠讀不到的 shadow key。
-
-**批次寫入**：`update(values, **kwargs)` 在一次 auto-sync write transaction 中更新多個 key；單一屬性賦值仍會立即同步，批次修改應優先使用 `update()`。
-
-`validate_data_key()` 擁有資料 key 的型別與 protected-name 驗證。`replace_contents()` 用一次寫入替換完整 mapping，寫入失敗還原記憶體；它不保證回滾已部分寫入的檔案。ContextService 的 create／rename 使用這個公開入口，不直接修改 store 私有資料。這與只交換記憶體的 `swap_contents()` 不同，後者讓 Apply owner 先發布，再依政策保存。
-
-**`clone(dst_path, readonly)`**：複製整個 MetaDict 到新路徑（要求目標不存在）。
-
-## `ModuleLibrary`（`library.py`）
-
-以 YAML 儲存波形（`WaveformCfg`）與模組（`ModuleCfg`）設定的管理器。
-
-```yaml
-# module_cfg.yaml
-waveforms:
-  pi_pulse:
-    style: gauss
-    length: 0.05
-    sigma: 0.01
-modules:
-  readout:
-    type: readout/pulse
-    pulse_cfg: ...
-    ro_cfg: ...
-```
-
-**主要方法**：
-
-| 方法 | 說明 |
-|------|------|
-| `get_waveform(name, override_cfg, type)` | 取得波形設定（deepcopy），可 override 特定欄位 |
-| `get_module(name, override_cfg, type)` | 取得模組設定（deepcopy），可 override 特定欄位 |
-| `register_waveform(**wav_kwargs)` | 新增/覆蓋波形設定並寫回 |
-| `register_module(**mod_kwargs)` | 新增/覆蓋模組設定並寫回 |
-| `update_module(name, override_cfg)` | 部分更新既有模組設定 |
-
-**Experiment cfg materialization 邊界**：
-
-`ModuleLibrary` 是 YAML-backed store：它擁有 waveform/module 的持久化、lookup、register/update/delete 與 mtime sync，不擁有 live device snapshot，也不擁有 experiment cfg materialization 流程。
-
-把 concrete raw experiment cfg 轉成 typed `ExpCfgModel` 的核心邏輯位於 `zcu_tools.experiment.cfg_assembler`：
-
-1. `assemble_experiment_cfg(raw_cfg, cfg_model, *, ml, device_snapshot, overrides=None)` 是 stateless materializer。
-2. `raw_cfg` 已是 concrete dict；GUI 的 `CfgSchema` / `EvalValue` / md lowering 在 adapter 層完成，不進 assembler。
-3. GUI caller 傳入固定的 ml 與 device snapshot；assembler 不讀硬體。
-4. Notebook 使用 `make_cfg(raw_cfg, cfg_model, CfgEnv(md, ml, device_manager))`。每次呼叫取得指定 manager 的當次裝置資訊，不執行 setup；讀取失敗直接傳播。
-5. ModuleLibrary 只管理 module／waveform store，不再提供缺少 device owner 的 make_cfg 轉接。
-
-**Cfg 解析 API**（統一走 Factory wrapper）：
-
-```python
-# library.py 內 store 解析點（_load / register_* / update_*）統一使用：
-WaveformCfgFactory.from_raw(raw, ml=self)
-ModuleCfgFactory.from_raw(raw, ml=self)
-```
-
-兩個 Factory 都是薄封裝：`from_raw(raw, ml=...)` 內部直接呼叫 `TypeAdapter(...).validate_python(..., context={"ml": ml})`。`ModuleCfg` / `WaveformCfg` 的分派表由各自 TypeAlias 的 `Union[...]` 決定，不再使用 runtime registry。
-
-**為什麼叫 `from_raw` 而不是 `validate`？** Pydantic v2 的 `BaseModel` 已有 deprecated 的 `validate()` classmethod；如果我們在 cfg 上覆寫同名方法會被 pyright 標記為 deprecated。`from_raw` 既避免衝突，語意也更清楚（從「raw 任意輸入」轉成具體 typed cfg）。
-
-**`ModuleDumper`**（自訂 YAML Dumper）：
-
-- 縮排層級減少時插入空白行（增加可讀性）。
-- dict 的 value 依型別排序：str > int > float > bool > other > list > dict（避免 nested dict 佔用視覺空間）。
-
-## `ContextManager`（`manager.py`）
-
-將 `ModuleLibrary` + `MetaDict` 綁定到 **具名 context**（常以電流/電壓命名的資料夾）。
-
-```
-exp_dir/
-    0113_10_1.234mA/
-        module_cfg.yaml
-        meta_info.json
-    0113_11_5.678mA/
-        module_cfg.yaml
-        meta_info.json
-```
-
-**主要方法**：
-
-| 方法 | 說明 |
-|------|------|
-| `list_contexts()` | 回傳所有已存在的 flux 上下文標籤（排序後）|
-| `new_flux(value, clone_from, label, unit)` | 建立新 flux 上下文（資料夾不能已存在）|
-| `use_flux(label, readonly)` | 載入既有 flux 上下文 |
-| `label` | 目前啟用的上下文標籤（property）|
-| `flux_dir` | 目前上下文資料夾的 Path |
-
-**`new_flux()` 的 `clone_from` 參數**：
-
-- `str` — 從同 exp_dir 下的另一個 flux 標籤複製設定。
-- `(ModuleLibrary, MetaDict)` tuple — 直接從記憶體中的物件複製。
-- `None` — 建立空的設定（新量測點從零開始）。
-
-**`new_flux()` 的 `unit` 參數**：`Literal["A", "V", "K", "none"]`，預設 `"none"`。
-
-**自動標籤（`_auto_label()`）**：
-
-- 格式：`MMDDH[_<value>]`（例如 `0113_10_1.234mA`，無 value 時僅日期時段）。
-- `unit="none"` 時 value 以 fixed-point + SI 前綴格式化（例如 `1.230m`），使用 u/m/空/k/M/G/T 前綴，不附加物理單位字串。
-- 若標籤已存在，自動附加 `_2`、`_3`...。
-- 單位換算：超過閾值時自動選擇合適的前綴（mA/A、mV/V、mK/K）。
-
-## 使用模式（典型 notebook 開頭）
-
-```python
-from zcu_tools.resources.context import ContextManager
-
-em = ContextManager("Database/chipA/qubitQ1")
-
-# 新測量點
-ml, md = em.new_flux(value=1.23e-3, unit="A")
-md.qubit_freq = 5.0e9
-ml.register_module(readout={...})
-
-# 或載入既有測量點
-ml, md = em.use_flux("0113_10_1.234mA")
-from zcu_tools.experiment.cfg_assembler import make_cfg
-
-cfg = make_cfg(
-    {"reps": 1000, "rounds": 10},
-    SomeExpCfgModel,  # SomeExpCfgModel = 你的 ExpCfgModel 子類
-    ml=ml,
-)
-
-from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
-
-params = QubitParams.for_result_dir("result/chipA/qubitQ1")
-params.ensure_project(ParamsProject("chipA", "qubitQ1"))
-params.set_fluxdep_fit(
-    FluxDepFit(
-        EJ=4.0,
-        EC=1.0,
-        EL=0.5,
-        flux_half=0.5,
-        flux_int=1.0,
-        flux_period=2.0,
-    )
-)
-```
+Experiment cfg materialization 屬於 `zcu_tools.experiment.cfg_assembler`，不是 ModuleLibrary 的責任。Caller 提供固定 library projection 與 device snapshot。GUI 的 schema／expression lowering 由 adapter owner 完成。Notebook 的顯式 `CfgEnv` 選定參數與 device manager，讀取失敗直接傳播。

@@ -16,8 +16,11 @@ from zcu_tools.resources.entry import (
     RoleResolutionError,
     RoleSpec,
     component_registry,
+    resolve_path,
     role_registry,
+    snapshot,
 )
+from zcu_tools.resources.entry.schema import PointDocument
 
 
 @contextmanager
@@ -38,6 +41,94 @@ def make_point(tmp_path: Path) -> PointView:
     entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
     entry.setup.add_component("Q2", kind="fake/drive/a", rate=5100.0, sense="R2")
     return entry.new_point("working")
+
+
+@pytest.fixture
+def document(tmp_path: Path) -> PointDocument:
+    return snapshot(make_point(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("driver.rate", "Q1.rate"),
+        ("driver", "Q1"),
+        ("driver.pulse.not_created", "Q1.pulse.not_created"),
+        ("Q1.unknown.value", "Q1.unknown.value"),
+        ("Q2", "Q2"),
+        ("general.ext.temperature", "general.ext.temperature"),
+        ("general", "general"),
+    ],
+)
+def test_resolve_path_expands_only_the_captured_namespace(
+    document: PointDocument, path: str, expected: str
+) -> None:
+    roles = {"driver": "Q1"}
+    assert resolve_path(document, path, roles=roles) == expected
+    assert roles == {"driver": "Q1"}
+
+
+@pytest.mark.parametrize(
+    ("path", "roles", "reserved", "namespaces"),
+    [
+        ("Q1.rate", {"Q1": "Q2"}, (), ("role", "component")),
+        ("description.value", {"description": "Q1"}, (), ("role", "general")),
+        ("ext.value", {}, (), ("component", "general")),
+        ("pi.rate", {}, ("pi",), ("component", "reserved")),
+        ("driver.rate", {"driver": "Q1"}, ("driver",), ("role", "reserved")),
+        ("general.ext", {"general": "Q1"}, (), ("role", "general")),
+        (
+            "ext.value",
+            {"ext": "Q1"},
+            ("ext",),
+            ("role", "component", "general", "reserved"),
+        ),
+    ],
+)
+def test_resolve_path_rejects_ambiguous_namespaces(
+    document: PointDocument,
+    path: str,
+    roles: dict[str, str],
+    reserved: tuple[str, ...],
+    namespaces: tuple[str, ...],
+) -> None:
+    document.components["ext"] = document.components["Q1"].model_copy(deep=True)
+    document.components["pi"] = document.components["Q1"].model_copy(deep=True)
+    with pytest.raises(RoleResolutionError) as error:
+        resolve_path(document, path, roles=roles, reserved_names=reserved)
+    assert error.value.role == path.split(".")[0]
+    for namespace in namespaces:
+        assert namespace in error.value.reason
+
+
+@pytest.mark.parametrize(
+    ("path", "roles", "reserved", "reason"),
+    [
+        ("missing.rate", {}, (), "Unknown"),
+        ("created_at", {}, (), "general"),
+        ("sin", {}, ("sin",), "reserved"),
+        ("driver.rate", {"driver": "missing"}, (), "missing"),
+    ],
+)
+def test_resolve_path_rejects_unavailable_namespaces_or_targets(
+    document: PointDocument,
+    path: str,
+    roles: dict[str, str],
+    reserved: tuple[str, ...],
+    reason: str,
+) -> None:
+    with pytest.raises(RoleResolutionError) as error:
+        resolve_path(document, path, roles=roles, reserved_names=reserved)
+    assert error.value.role == path.split(".")[0]
+    assert reason in error.value.reason
+
+
+@pytest.mark.parametrize("path", ["", ".driver", "driver.", "driver..rate"])
+def test_resolve_path_rejects_empty_paths_or_segments(
+    document: PointDocument, path: str
+) -> None:
+    with pytest.raises(ValueError, match="nonempty dotted path"):
+        resolve_path(document, path, roles={"driver": "Q1"})
 
 
 class PairLinks(BaseModel):

@@ -80,7 +80,7 @@ def test_waveform_to_wav_kwargs_and_create_methods():
 
 
 def test_arb_waveform_make_iqdata_and_create(monkeypatch):
-    class FakeSoccfg(dict):
+    class FakeSoccfg(dict[str, object]):
         def get_maxv(self, ch):
             assert ch == 0
             return 8.0
@@ -122,7 +122,7 @@ def test_arb_waveform_make_iqdata_and_create(monkeypatch):
 
 
 def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
-    class FakeSoccfg(dict):
+    class FakeSoccfg(dict[str, object]):
         def get_maxv(self, ch):
             return 4.0
 
@@ -148,7 +148,7 @@ def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
 
 
 def test_arb_waveform_make_iqdata_uses_full_data_duration(monkeypatch):
-    class FakeSoccfg(dict):
+    class FakeSoccfg(dict[str, object]):
         def get_maxv(self, ch):
             return 1.0
 

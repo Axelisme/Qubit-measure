@@ -64,6 +64,22 @@ def test_import_data_uses_single_file_layout_and_runtime_get(tmp_path):
     assert np.allclose(time, [0.0, 0.25, 0.75])
 
 
+def test_info_at_binds_explicit_scope_without_switching_repository(
+    tmp_path: Path,
+) -> None:
+    first = _init_db(tmp_path)
+    _save_zero_q_asset()
+    ArbWaveformDatabase.init(tmp_path / "second")
+    ArbWaveformDatabase.save(
+        "pulse", idata=np.array([0.0, 0.8]), time=np.array([0.0, 2.0])
+    )
+
+    bound = ArbWaveformDatabase.info_at(first)
+    assert bound.duration("pulse") == 0.75
+    np.testing.assert_array_equal(bound.samples("pulse").time, [0.0, 0.75])
+    assert ArbWaveformDatabase.bound_info().duration("pulse") == 2.0
+
+
 def test_bound_info_keeps_scope_after_repository_switch(tmp_path: Path) -> None:
     _init_db(tmp_path)
     ArbWaveformDatabase.save(
@@ -249,7 +265,7 @@ def test_create_from_formula_embeds_loadable_recipe_and_preserves_formula_text(
     tmp_path,
 ):
     root = _init_db(tmp_path)
-    recipe = {
+    recipe: dict[str, object] = {
         "segments": [{"duration": 1.0, "formula": " sin(2*pi*t) "}],
         "normalize": "none",
     }

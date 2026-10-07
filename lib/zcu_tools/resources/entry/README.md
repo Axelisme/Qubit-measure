@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-06，SaveLayout 路徑政策
+**Last updated:** 2026-10-07，logical document field projection
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -8,19 +8,29 @@
 
 ## 文件與 seed
 
-Setup 是元件範本。Point 自帶 kind、元件、來源與 general。`new_point` 複製建立當下 setup 的 components 與 provenance，使用新的 created_at，並建立只有標頭的 module_cfg。General 不從 setup 繼承。Setup 與 point 的修改、引用與快照互不影響。
+Setup 是元件範本。Point 自帶 kind、元件、來源與 general。`new_point` 複製建立當下 setup 的 components 與 provenance，使用新的 created_at，並建立只有標頭的 module_cfg。General 不從 setup 繼承。New point 的 description=None 保留 seed／clone 描述，字串明確設定描述，包括空字串。設定在本次建立與失敗清理範圍內完成。Setup 與 point 的修改、引用與快照互不影響。
 
 `SetupView` 與 `PointView` 各綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 需逐筆交易，不承諾整批 all-or-nothing。
 
+Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(document, path)` 提供隔離的 typed 讀取、綁定文件位置與 logical YAML 值，不讀檔或執行 model hooks。Snapshot 也接受 EditView，複製尚未提交的 draft。Document_value 只讀實際元件或 general 路徑，不展開角色，區分 explicit null 與缺值。`document_meta(document, path)` 投影本文件的來源。`resolve_path(document, path, roles=..., reserved_names=...)` 只展開已捕捉角色的首段，不檢查後續 leaf 或 library key。Role、component、general 欄位和 expression 保留名稱碰撞時明確報錯，general 欄位必須使用 general namespace。這些能力不加成 view method，保留 snapshot、path 等合法元件名稱。
+
+`document_fields(document)` 列舉 logical data 的隔離 DocumentField。Models／mapping 展開為葉列，list、null 與空 mapping 是單列。Segments 保留 literal keys；有空字串或點號的 row 沒有 editable_path，不以另一條 dotted path 冒充它。Rows 保留完整 provenance 和 cloned_from，不執行 serializers/model hooks、不讀檔或顯示 opaque forward-minor 資料。
+
+`manual_update(document, path, value, stderr=...)` 複製完整記憶體 point，重用 view 的欄位驗證與 manual 來源規則，不建立 store、讀檔或查 ledger。`accept_source(edit, path, provenance=...)` 在已準備的 draft 值上附加本地來源，處理 container leaves 並清除 clone 標記，不重跑值的 validator 或 model hook。來源驗證失敗不改 draft。兩個能力都以 package function 提供，不保留新的元件名稱。
+
+PointView 的公開 constructor 必須提供 result_root 與 database_root，加上 source、entry_id，在建構時一次捕捉完整來源身分。直接建構的 view 與 ResultEntry 回傳的 view 使用相同 clone 規則，不依靠事後補登記。
+
 `new_point(clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result／Database roots 的 PointView。Clone 重讀已發布的 point 與 module_cfg，不用 view 的舊快照，也不讀目的 setup。目的 point 保留來源的其他 general 資料，更新 created_at。每筆來源記錄標示本次直接來源工作點。成功重新接受欄位會清除該路徑與子欄位的 cloned_from，即使值相同。
 
-跨條目 clone 把每個不同的非 manual source 匯入為本地 import 事件。事件保存原行文字，附檔複製到目的 records，來源表只改 source 與 cloned_from。Manual 不產生 import；同條目 clone 不改 source。來源條目移走後，本地引用仍可查回。Clone 不複製 data 或圖片，不承諾 point 與 module_cfg 的跨檔 snapshot。失敗清理本次 point，已追加的 import 可以保留。
+`module_library(label, assets=...)` 開啟該 point 的 typed library，綁定本條目 ledger 與 asset capability。它不讀 point、不選 active point，也不建立缺失文件。Library handle 與 clone 共用 library owner 的文件及來源驗證。
+
+跨條目 clone 取 point 與 library 的來源聯集，把每個不同的非 manual source 匯入為一筆本地 import 事件。Library-only 事件也匯入，共用事件只產生一筆 import。兩份來源表共用本地 ID mapping，並更新直接 cloned_from。事件保存原行文字，附檔複製到目的 records，來源表只改 source 與 cloned_from。Manual 不產生 import；同條目 clone 不改 source。來源條目移走後，本地引用仍可查回。Clone 不複製 data 或圖片，不承諾 point 與 module_cfg 的跨檔 snapshot。失敗清理本次 point，已追加的 import 可以保留。
 
 ## 元件與定義
 
 框架不保存具體 kind 或內建角色清單。`component_registry` 是空的共用 ComponentRegistry，`role_registry` 指向它的 roles。Caller 顯式註冊 model、RoleSpec、shorthand 與預設焦點的 kind patterns。Lib 不 import 定義模組，依賴方向由 ADR-0063 與 import contracts 固定。Import 本身不註冊，重複 bootstrap 報錯。
 
-Registry 只做 kind 查表與 ComponentSchema 子類檢查。重複 kind 報 ValueError，非法 model 報 TypeError，未知 kind 報 UnknownKindError 並附相近名稱。失敗不占用名稱，unregister 後可明確替換。
+Registry 只做 kind 查表與 ComponentSchema 子類檢查。重複 kind 報 ValueError，非法 model 報 TypeError，未知 kind 報 UnknownKindError 並附相近名稱。失敗不占用名稱，unregister 後可明確替換。`kinds()` 回傳隔離的註冊順序 tuple，不驗證 model 或執行 factory。
 
 ComponentSchema 只要求字串 kind。原 model 決定必填欄位、型別、extra 策略、defaults、field validators、model validators 與 post-init hooks。Ext、wiring 與 module 都不是框架特例。Forbid model 的錯字由 Pydantic 拒絕，allow model 的額外欄位可讀寫及 set／meta。沒有值且 default 為 None 的欄位讀取報 AttributeError。
 
@@ -68,10 +78,10 @@ List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。
 
 `PointView.resolve` 只使用 bound point 的快照。Sequence 取 role registry 的 RoleSpec，Mapping 可覆寫 kind pattern 與 via。未傳角色表時使用 caller 設定的有序 shorthand，沒有設定就報錯。
 
-解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色；只有一個元件符合 caller 的 focus kind patterns 時才作預設焦點。
+解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色；RoleRegistry.default_focus 集中選取符合 focus kind patterns 的唯一候選，roles resolver 與 session focus 共用它。
 
 未知角色、多餘 explicit、缺元件、kind 不符、缺引用或多個候選以 RoleResolutionError 回報。RoleView 固定解析當下的名稱映射，元件值仍跟隨 PointView，回傳映射不可修改。
 
 `rename_entry` 移動兩個目錄，不改檔案內容。第二次移動失敗時復原第一次。復原也失敗時，RenameRecoveryError 回報兩個路徑與原始 I/O 原因，不承諾跨檔掉電保證。
 
-本模組尚未接線到 ContextService、notebook runtime、GUI 或 MCP 的參數操作。Ledger producer 與 accept／writeback 服務由後續切片提供。
+Entry／point 提供隔離的 publication 與 read binding。ResultEntry.list_names 只列含 setup.yaml 的直屬目錄，不解析文件或尋找 legacy 參數。ContextService、Notebook runtime、完整 GUI／MCP 參數操作、Ledger producer 與 accept／writeback 仍由後續切片接線。
