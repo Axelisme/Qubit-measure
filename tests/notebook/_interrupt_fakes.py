@@ -50,6 +50,35 @@ class PartialProgram:
         raise NotImplementedError
 
 
+class RoundInterruptedProgram:
+    """Emit one completed-round partial, then interrupt the same acquire.
+
+    cfg_model declares two rounds. The completed first round contains one
+    measured voltage and two unmeasured NaNs; acquire never normally returns.
+    """
+
+    def __init__(self) -> None:
+        self.cfg_model = ProgramV2Cfg(rounds=2)
+
+    def acquire(
+        self,
+        soc: object,
+        *,
+        round_hook: Callable[[int, NDArray[np.complex128], CancelFlagProtocol], object],
+        cancel_flag: CancelFlagProtocol,
+        progress: bool = False,
+        **kwargs: object,
+    ) -> NDArray[np.complex128]:
+        """Deliver the partial through the caller's hook, then interrupt."""
+        partial = np.array([1.0, np.nan, np.nan], dtype=np.complex128)
+        round_hook(1, partial, cancel_flag)
+        raise KeyboardInterrupt("acquire stopped after completed round")
+
+    def acquire_decimated(self, soc: object, **kwargs: object) -> object:
+        """Reject decimated acquisition, which this contract test does not use."""
+        raise NotImplementedError
+
+
 def identity_signal(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
     """Keep synthetic program signals in working volts."""
     return raw
@@ -58,11 +87,13 @@ def identity_signal(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
 class InterruptedCore(SavingCore):
     """Saveable three-point scan interrupted in its body or program acquire.
 
-    mode selects software-body, program acquisition, or pre-Schedule device
-    setup. context retains the latest RunContext for public signal observation.
+    mode selects software-body, scalar program, completed-round program, or
+    pre-Schedule device setup. context retains the latest RunContext for public signal observation.
     """
 
-    def __init__(self, mode: Literal["software", "program", "setup"]) -> None:
+    def __init__(
+        self, mode: Literal["software", "program", "program-round", "setup"]
+    ) -> None:
         self.mode = mode
         self.context: RunContext | None = None
 
@@ -75,18 +106,23 @@ class InterruptedCore(SavingCore):
             setup_devices(config, context.devices, cancel_signal=context.cancel_signal)
         buffer = SignalBuffer(3)
         with Schedule(config, buffer, stop=context.cancel_signal) as sched:
-            for index, step in sched.scan("point", range(3)):
-                if self.mode == "software" and index == 1:
-                    raise KeyboardInterrupt("scan body stopped")
-                if self.mode == "program":
-                    step.prog_builder(
-                        context.soc, context.soccfg, cfg=ProgramV2Cfg()
-                    ).run_program(
-                        PartialProgram(float(index + 1), interrupt=index == 1),
-                        raw2signal_fn=identity_signal,
-                    )
-                else:
-                    buffer[step].set(np.array(index + 1, dtype=np.complex128))
+            if self.mode == "program-round":
+                sched.prog_builder(
+                    context.soc, context.soccfg, cfg=ProgramV2Cfg()
+                ).run_program(RoundInterruptedProgram(), raw2signal_fn=identity_signal)
+            else:
+                for index, step in sched.scan("point", range(3)):
+                    if self.mode == "software" and index == 1:
+                        raise KeyboardInterrupt("scan body stopped")
+                    if self.mode == "program":
+                        step.prog_builder(
+                            context.soc, context.soccfg, cfg=ProgramV2Cfg()
+                        ).run_program(
+                            PartialProgram(float(index + 1), interrupt=index == 1),
+                            raw2signal_fn=identity_signal,
+                        )
+                    else:
+                        buffer[step].set(np.array(index + 1, dtype=np.complex128))
         return SavingResult(
             frequency=np.array([1000.0, 1001.0, 1002.0]),
             signal=np.asarray(buffer.data, dtype=np.complex128),

@@ -3,7 +3,7 @@
 from collections.abc import Generator, Mapping
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 from unittest.mock import Mock
 
 import numpy as np
@@ -120,15 +120,11 @@ def analysis_document() -> AnalysisDocument:
     )
 
 
-@pytest.mark.parametrize("mode", ["software", "program", "executor"])
+@pytest.mark.parametrize("mode", ["software", "program", "program-round", "executor"])
 def test_interrupted_acquisition_preserves_saveable_partial(
-    point: PointView, mode: str
+    point: PointView, mode: Literal["software", "program", "program-round", "executor"]
 ) -> None:
-    core = (
-        InterruptedExecutorCore()
-        if mode == "executor"
-        else InterruptedCore("software" if mode == "software" else "program")
-    )
+    core = InterruptedExecutorCore() if mode == "executor" else InterruptedCore(mode)
     exp = NotebookAdapter(
         soc=object(),
         soccfg=object(),
