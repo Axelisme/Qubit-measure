@@ -7,11 +7,23 @@ from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry.registry import ComponentRegistry, RoleSpec
 from zcu_tools.resources.entry.schema import ComponentSchema
 
-Frequency = Annotated[float | None, Field(strict=True, allow_inf_nan=False)]
-Duration = Annotated[float | None, Field(strict=True, allow_inf_nan=False)]
-Energy = Annotated[float | None, Field(strict=True, allow_inf_nan=False)]
+Frequency = Annotated[
+    float | None,
+    Field(strict=True, allow_inf_nan=False, json_schema_extra={"unit": "MHz"}),
+]
+Duration = Annotated[
+    float | None,
+    Field(strict=True, allow_inf_nan=False, json_schema_extra={"unit": "us"}),
+]
+Energy = Annotated[
+    float | None,
+    Field(strict=True, allow_inf_nan=False, json_schema_extra={"unit": "GHz"}),
+]
 Flux = Annotated[float | None, Field(strict=True, allow_inf_nan=False)]
-PumpPower = Annotated[float | None, Field(strict=True, allow_inf_nan=False)]
+PumpPower = Annotated[
+    float | None,
+    Field(strict=True, allow_inf_nan=False, json_schema_extra={"unit": "dBm"}),
+]
 
 
 class WiringSchema(BaseModel):

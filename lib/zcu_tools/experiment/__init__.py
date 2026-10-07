@@ -3,6 +3,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from . import config
+    from .acquisition import (
+        AcquisitionEvidence,
+        capture_software_provenance,
+        new_run_id,
+    )
     from .axes_spec import (
         IDENTITY,
         MHZ_TO_HZ,
@@ -20,17 +25,31 @@ if TYPE_CHECKING:
     from .base import PersistableExperiment
     from .cfg_model import ExpCfgModel
     from .interfaces import RecordExperiment, SynchronousExperiment
-    from .native_persistence import RunSnapshot, load_run, native_schemas, save_run
+    from .native_persistence import (
+        PreparedRunData,
+        RunSnapshot,
+        load_run,
+        load_run_with_metadata,
+        native_schemas,
+        prepare_run_data,
+        save_run,
+    )
     from .records import AnalysisRecord, RunRecord
 
 __all__ = [
     "config",
+    "AcquisitionEvidence",
+    "capture_software_provenance",
+    "new_run_id",
     "ExpCfgModel",
     "RunRecord",
     "RunSnapshot",
     "save_run",
     "load_run",
     "native_schemas",
+    "PreparedRunData",
+    "prepare_run_data",
+    "load_run_with_metadata",
     "AnalysisRecord",
     "RecordExperiment",
     "SynchronousExperiment",
@@ -51,12 +70,18 @@ __all__ = [
 
 _EXPORT_MODULES = {
     "config": ".config",
+    "AcquisitionEvidence": ".acquisition",
+    "capture_software_provenance": ".acquisition",
+    "new_run_id": ".acquisition",
     "ExpCfgModel": ".cfg_model",
     "RunRecord": ".records",
     "RunSnapshot": ".native_persistence",
     "save_run": ".native_persistence",
     "load_run": ".native_persistence",
     "native_schemas": ".native_persistence",
+    "PreparedRunData": ".native_persistence",
+    "prepare_run_data": ".native_persistence",
+    "load_run_with_metadata": ".native_persistence",
     "AnalysisRecord": ".records",
     "RecordExperiment": ".interfaces",
     "SynchronousExperiment": ".interfaces",

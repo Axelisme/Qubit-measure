@@ -1,12 +1,12 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-06，Cfg snapshot validation
+**Last updated:** 2026-10-06，Native 2.0 簡單 context 與明確遷移
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
 facade。caller 優先從 package root import model 與 function。
 
-- `save_run_data`／`load_run_data` 處理版本化 `zcu.experiment-data` HDF5。
+- `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.0。
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
   不同 variables 可以使用不同網格。`VariableSchema` 與
   `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
@@ -16,6 +16,10 @@ facade。caller 優先從 package root import model 與 function。
 - `RunMetadata`、`RunSnapshot`、`CfgSnapshot` 是 caller 傳入的歷史資料，writer
   不擷取 live context。Native saving 使用 caller 的 exact path，先寫同目錄 temp，
   關檔後發布；`replace=True` 原子替換，失敗清理 temp 並保留原 destination。
+- `RunSnapshot` 只記 entry UUID、當時名稱、工作點、描述與角色對應，不記引用參數。
+  `/cfg` 保存完整 cfg 值，量測時間與 completion 由 caller 提供。
+- `migrate_native_run_v1` 是明確的離線 1.x→2.0 入口。它寫新檔、保留來源與其他未知內容，
+  只移除舊 context.params，不覆寫或就地轉換。Normal loader 不接受 major 1。
 - Native loading 預設只投影已知內容。明示 `preserve_unknown=True` 才取得
   `NativeExtensions` detached HDF5 image。Generic caller 把 image 傳回 writer，
   保留同 major minor 的未知 JSON／HDF5 內容與不改形 rewrite 的 references。

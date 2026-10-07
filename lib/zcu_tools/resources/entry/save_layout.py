@@ -111,8 +111,10 @@ class SaveLayout:
 
         Data returns canonical data_h5 then a new Labber filename. Multiple data
         artifacts share the run's data.h5. Figure returns run PNG then point/global
-        PNG copy. Analysis returns one run JSON. Filename tokens escape percent
-        then underscore, preserving member identity. A symlink escaping either
+        PNG copy. Analysis returns analysis/<member_name>.json; section/name do
+        not affect that destination. Producers supply their pane as member_name.
+        Figure filename tokens escape percent then underscore, preserving
+        member identity. A symlink escaping either
         entry root raises ValueError; filesystem lookup errors propagate.
         """
         run = Path("runs") / self._run_id
@@ -134,19 +136,20 @@ class SaveLayout:
 
         # ArtifactKey validates this non-data invariant at construction.
         assert key.member_name is not None
-        filename = "_".join(
-            _encode(token) for token in (key.section, key.name, key.member_name)
-        )
         if key.member == "analysis":
             return (
                 Output(
                     "json",
                     _checked_path(
-                        self._database_path, run / "analysis" / f"{filename}.json"
+                        self._database_path,
+                        run / "analysis" / f"{key.member_name}.json",
                     ),
                 ),
             )
 
+        filename = "_".join(
+            _encode(token) for token in (key.section, key.name, key.member_name)
+        )
         figure = _checked_path(self._database_path, run / "figures" / f"{filename}.png")
         copy_folder = (
             Path("figures")

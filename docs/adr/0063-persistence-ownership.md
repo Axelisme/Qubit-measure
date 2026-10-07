@@ -20,6 +20,18 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；`SampleTable` 只存 schema-free CSV。
 - Waveform asset 擁有播放 arrays、reference time axis 和 duration。ModuleLibrary waveform cfg 只保存 asset key，不另存可覆寫的播放長度。program 在完整 asset duration 取樣到硬體 timing；調整時間內容須改 asset 或 recipe，而不是在 cfg 伸縮或任意裁切。
 
+### Run 輸出位置與 writer 權責
+
+`resources.entry.ResultEntry` 提供條目的不可變身分，以及 exact Result／Database paths 與 scoped ledger。小資料在 `results/<name>/`，量測輸出在 `Database/<name>/`。`SaveLayout` 根據這些 paths、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
+
+新 run 保存契約把資料夾綁定一次 acquisition。第一次 Save 才建立 `Database/<name>/runs/<run_id>/`。再次 Save 使用同一 run_id，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result 的 point／全域副本，對等 paths 使用同一份 bytes。Labber 每次 Save 都在 `Database/<name>/Labber/YYYY/MM/Data_MMDD/` 取新檔名，一個 run 可以對應多個 Labber 檔。只量測不存檔時，acquired 事件不建立 run 資料夾。保存不改 acquisition 的開始、結束或完成狀態。
+
+`experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。上層保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
+
+RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。Labber 成功後，保存編排才更新最近成功的 labber_path；本次失敗保留此前連結。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
+
+SaveLayout、native／Labber writers 與 typed preparation 已提供上述路徑及格式能力。GUI 與 notebook 的 canonical 新 run 保存接線尚未完成，analysis JSON encoder 與共用 batch saver 也尚未交付。這些保存契約不代表目前 GUI Save 或 NotebookExperiment.save 已走新路徑。正式接線沿 entry／point 的公開 capability，不新增舊容器或私有 origin bridge。
+
 ### 資料表示與完整性
 
 參數容器的 YAML、快照與視圖使用同一個工作單位數字，來源表的 stderr 也不換算。元件 model 擁有型別、extra 策略與驗證。這條規則不改 Experiment Data File 的單位契約；datafile 的格式責任仍由 datafile 擁有。
@@ -38,7 +50,7 @@ Memento read／decode 失敗可回 fresh default，並回報 restore outcome；r
 
 Autofluxdep artifact 建立失敗不啟動 run；canonical row write／flush／journal 失敗會使 run 失敗，並保留此前已 flush 的證據。Terminal export／report 失敗要顯示，但不把成功量測 row 改標為 measurement failure。Stop 仍嘗試 finalize；取消請求不保證 finalize 成功，也不表示 rollback。單檔 replace、HDF5 flush 和 journal append 不是跨檔交易或掉電持久保證；不可從 manifest 的 accepted 標記推導任意 crash 後可安全 resume。跨檔失敗窗口的讀取、修復和 resume 規則尚未驗證。
 
-Experiment saver 寫 caller 指定的 exact path，若檔案已存在則拒絕；需要 unique filename 或覆蓋政策時，由 GUI／runner／notebook 在呼叫 saver 前決定 final path。Run identity 由 run-scoped metadata 記錄，不由可讀 slug 或檔名猜測；manifest 連結 metadata root 和 heavy-data root，不把 exports 當另一份原始權威。
+Experiment writer 寫 caller 指定的 exact path。Labber 拒絕既有目的地；native 預設也拒絕，只有明確 replace=True 才用同目錄 temp、關檔後 atomic replace，失敗清 temp 並保留舊目的地。SaveLayout 的 Labber suffix 只避讓當時已存在的檔案，不是跨程序 filename reservation；collision 由上層回報該輸出失敗，不隱藏 retry。單檔 replace 與 ledger append 不是跨檔交易，也不保證掉電恢復。Run identity 由 run-scoped metadata 記錄，不由可讀 slug 或檔名猜測。Workflow manifest 連結 metadata root 和 heavy-data root，不把 exports 當另一份原始權威。
 
 Normal runtime 只接受各自契約指定的格式，不猜測 legacy shape／unit；版本必須與 artifact kind 一起判斷，合法 streaming v1 不因數字小於 one-shot v2 而視為同類 legacy。Experiment 的舊 converter 和 GUI fallback 已退休。SampleTable legacy 資料只能由 caller 明確呼叫 pure DataFrame conversion；此函式不自動改寫 CSV。QubitParams 的 project identity migration 由其 owner 管理，不因本 ADR 授權寫入使用者資料，也不建立跨資料類型的共用 migration layer。
 
