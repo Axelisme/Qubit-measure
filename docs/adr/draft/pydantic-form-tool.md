@@ -8,7 +8,7 @@ status: draft
 
 P2 的 plan 與 knobs 需要 sequence、nullable、tagged union、typed mapping、expression 和 library module ref。舊 CfgSchema 的 Spec／Value tree 不直接表示這些輸入。擴充舊工具會把本次 P2 與 Measure 遷移綁在一起。
 
-使用者已依 storage-redesign D195／D197 定稿新工具設計。本稿把定稿的「設計總覽」轉為 package 位置、依賴與 Engine 擴充安排，不重設計互動。F0 先由 sr-advisor 審閱，再由使用者核准。核准前不進 F1／F2，本稿也不宣稱新工具或 import contracts 已落地。
+使用者已依 storage-redesign D195／D197 定稿新工具設計。本稿把定稿的「設計總覽」轉為 package 位置、依賴與 Engine 擴充安排，不重設計互動。Sr-advisor 已按 D198 代裁核准 F0。F2 的 Engine 原文機制已 collect 並通過完整 range review。F1 正在準備公開 declarations、真實 T1TunablesForm caller 與正式 tests；這不表示 core 內部實作或 GUI host 已完成。
 
 定稿來源是 task-local `storage-redesign/spec/form-tool-design.md`。該檔持有 U1–U7、A1–A4、F0–F5 與完整 CfgSchema 能力對應。工具適用於新表單，本次不碰 CfgSchema，不遷移 Measure。舊表單退休由 backlog BL-20261007T155403537614Z-cfgschema-pydantic 另行安排。
 
@@ -34,7 +34,7 @@ Input 是可不完整的 JSON tree。缺 key 表示未填，null 表示明確的
 
 FormInput[F] 把輸入與表單型別 F 配對。其內容以具名 JSON 型別表示，不把 BaseModel、driver、array 或 callable 塞入持久輸入。FormState[F] 持有隔離的 input 與 base，不持 Engine revision。Editor 與 host 的 MCP 請求使用同一套資料行為，但 MCP 不寫某個畫面的私有草稿。
 
-- `write` 將一批輸入寫入候選後一次安裝。Model-invalid 中間態仍留在 draft，result 回報錯誤，不以預設值掩蓋它。
+- `write` 將一批輸入寫入候選後一次安裝。Model-invalid 中間態仍留在 draft，result 回報錯誤，不以預設值掩蓋它。Nullable 子 model 可寫 null 停用，或寫 object 啟用，再編輯子欄位。
 - `result(env)` 解碼 scalar、求值 expression、檢查 choices，最後呼叫表單 model 驗證。成功回傳合法 model，失敗回傳 FormErrors。
 - `changes(env)` 回傳相對 base 的改動葉節點與其原文、求值後值。List／tuple 是一個完整葉節點，不產生 index patch。
 - `reset(base)` 以 host 提供的新 base 重設草稿。Discard 與成功 Apply 都由 host 決定何時呼叫，不是工具 policy。
@@ -42,17 +42,17 @@ FormInput[F] 把輸入與表單型別 F 配對。其內容以具名 JSON 型別�
 
 Write paths 是 tuple，typed mapping 的 key 可以含點。Host 只把已確認的 model-field leaf path 轉成 Engine dot path。Engine 仍不接受 sequence index 或整個 nested model replacement。FormErrors 以欄位路徑 tuple 對應訊息，list 驗證錯誤保留 Pydantic 的 index 位置。沒有經 `field_error` 指定欄位的 model-wide error 使用空 tuple `()`。GUI 將這類錯誤顯示在表單頂端，MCP 原樣回傳路徑與訊息，不把錯誤塞到某個欄位。
 
-表單類別使用 Annotated 的 Display 提供標籤、說明、單位與輸入提示。版面上的順序、分組與摺疊由類別宣告。動態合法值由 `choices(env)` 提供，驗證與 input schema 共用結果。`field_error(path, message)` 讓 model_validator 指向具體欄位。Pydantic 擁有型別與 Field 範圍，工具不維護第二套 model 合法性規則。
+表單類別使用 Annotated 的 Display 提供標籤、說明、單位與輸入提示。順序依欄位宣告，分組依 nested 子 model；Display 不另設 order／group。collapsed 只用於子 model 欄位。動態合法值由 `choices(env)` 提供，驗證與 input schema 共用結果。`field_error(path, message)` 讓 model_validator 指向具體欄位。Pydantic 擁有型別與 Field 範圍，工具不維護第二套 model 合法性規則。
 
 ## Defaults、分支、range 與 module ref
 
 頂層表單類別以 `default_input(env)` 明寫預設值，可包含 expression。部分 MCP 輸入與還原都先建立 defaults，再寫入一批，沒有另一套合併來源政策。
 
-`input_schema(env)` 描述輸入而非僅描述合法 model，包含 expression／complex tag、Display 說明與當次 choices。保存使用輸入 JSON。`write_compatible` 只沿用仍存在且型別相容的葉節點，回報丟棄的路徑；保留的跨欄位錯誤仍可見，不以 defaults 蓋掉錯誤。保存位置與時機歸 host，P2 只保存一份上次輸入。
+`FormModel.input_schema(env)` 是不需建立 FormState 的 classmethod，描述輸入而非僅描述合法 model，包含 expression／complex tag、Display 說明與當次 choices。FormState 的同名入口只委派。保存使用輸入 JSON。`write_compatible` 只沿用仍存在且型別相容的葉節點，回報丟棄的路徑；保留的跨欄位錯誤仍可見，不以 defaults 蓋掉錯誤。保存位置與時機歸 host，P2 只保存一份上次輸入。
 
-切換分支時，先呼叫新分支的 `defaults(env, previous)`。沒有此方法時使用靜態預設，仍缺的欄位保持未填。接著沿用舊分支同名欄位。Discriminator 使用新分支的值，不從舊分支帶回。沒有 branch-factory registry 或 Display 路徑對照表。
+Batch write 先套用 discriminator 改動，再寫其餘 leaf，明送內容優先。切換分支時，先呼叫新分支的 `defaults(env, previous)`。沒有此方法時使用靜態預設，仍缺的欄位保持未填。接著沿用舊分支同名欄位。Discriminator 使用新分支的值，不從舊分支帶回。沒有 branch-factory registry 或 Display 路徑對照表。
 
-Module ref 與 inline 是以 kind 區分的通用子 model。Ref 保存實際 library key，inline 保存對應 module 的內容。Ref 切 inline 時，分支 factory 從 fixed library 取得隔離的 Spec，以它為起點，再沿用同名輸入。切換後內容脫鉤，不跟隨後續 library 改動。缺 key、錯 family、materialization 或 asset 錯誤由 library／cfg_model owner 明確失敗，不在表單降級為 missing 或 default。
+Module ref 與 inline 是以 kind 區分的通用子 model。Ref wire 是 `{kind: ref, name: actual_key}`，inline wire 是 `{kind: inline, module: {...}}`，module 保留對應 Spec，不將它的欄位攤平到 kind 層。Ref 切 inline 時，分支 factory 從 fixed library 取得隔離的 Spec，以它為起點，再沿用同名輸入。切換後內容脫鉤，不跟隨後續 library 改動。缺 key、錯 family、materialization 或 asset 錯誤由 library／cfg_model owner 明確失敗，不在表單降級為 missing 或 default。
 
 Ref 的查詢與 materialization 分工保持 ADR-0063。表單及其 defaults 使用 LibrarySnapshot 的公開讀取；to_cfg 使用公開 factory 與固定 validation context。工具不重新組裝 library 文件或解析 cfg_model 的內部格式。
 
@@ -64,6 +64,7 @@ P2 fluxes 使用 LinRange(start, stop, n) 或 ExplicitList(values)。輸入保�
 
 | 抽象 | 現在需要它的行為或使用者 |
 | --- | --- |
+| FormModel | T1TunablesForm 與 nested CalibrationTunablesForm 共用 typed default_input／choices／defaults hooks。它集中 Pydantic 靜態預設與缺 key 語意，避免 getattr、cast、Protocol 或 registry；一般 nested BaseModel 不需改寫。D200 已審閱此現存理由。 |
 | FormInput[F] | GUI 草稿、MCP 部分輸入與上次輸入保存都需要區分未填、null、expression 原文與普通值。它集中 JSON 編碼及表單型別配對，不增加另一份 Spec tree。 |
 | FormState[F] | Editor 與 GUI host／MCP 共用 write、result、changes、reset。它隱藏分支切換、batch draft 安裝及 base 差異，不讓每個 caller 重做。 |
 | FormEnv | Defaults、choices、expression 與驗證都使用同一 captured source。具名 frozen dataclass 說明 md、library、devices 的用途。只有 workflow host 建立它，不另造 Protocol。 |
@@ -78,7 +79,7 @@ P2 fluxes 使用 LinRange(start, stop, n) 或 ExplicitList(values)。輸入保�
 
 ## FormEnv、evaluator 與 complex codec 重用
 
-FormEnv 的 md 是 expression/defaults 的唯讀輸入，library 是固定的 LibrarySnapshot，devices 是 captured native DeviceInfo 的只讀 mapping。Host 建立 env，工具不 load YAML、refresh 或 poll device。Frozen dataclass 不等於凍結 driver，也不承諾凍結 waveform asset bytes。
+FormEnv 的 md 是必要的 expression/defaults 唯讀輸入，library 是固定的 LibrarySnapshot 或 None，devices 是 captured native DeviceInfo 的只讀 mapping 或空 mapping。只有 md 是 knobs caller 必需；F4 才接 4a accepted library／devices source。使用 ModuleRef 而 library 缺席時，default_input／write／result 以指名消費欄位路徑的錯誤 Fast Fail，不當未填或預設；需要 devices 而缺席時同理。Host 建立 env，工具不 load YAML、refresh 或 poll device。Frozen dataclass 不等於凍結 driver，也不承諾凍結 waveform asset bytes。
 
 F1 按定稿先使用 MetaDict 與既有 LibrarySnapshot 讀取介面。MetaDict.snapshot 的公開契約是複製 current memory 且不做 I/O；它不是新的 immutable context 型別。工具只讀 host 提供的副本，不把 snapshot 擴解為型別上的不可變保證。
 
@@ -111,7 +112,7 @@ F2 使用以下具名欄位擴充現有 interface，不建立 tunables wrapper�
 
 現有 C8／C9 涵蓋 GUI frontend 到 resources、cfg_model、device 與 experiment 的合法方向。C11維持cfg_model不依賴GUI，C16禁止framework import zcu_lab。C18維持Engine不依賴GUI／Qt。C13維持MCP只走remote／wire contract。
 
-F1建立實際 package 時同步加入下列收緊contract，不增加ignore_imports。F0只保留可直接轉成.importlinter的候選，因package尚未建立，本稿不宣稱contracts已執行或ADR已生效。Contract識別名稱是固定名稱，數字ID在套用前核對最新.importlinter避免與平行上游衝突。
+F1 declaration seed 已建立實際 package，並在 .importlinter 加入下列第一項收緊 contract，不增加 ignore_imports。Core 內部實作完成後仍需重跑 gates 與完整 range review。第二項保留為 F3 候選，editor package 尚未建立。Contract 使用固定名稱，避免與平行上游的數字 ID 衝突。
 
 ```ini
 [importlinter:contract:form-core-no-ui-policy]
