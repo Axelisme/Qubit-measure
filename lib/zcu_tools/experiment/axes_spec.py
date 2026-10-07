@@ -13,20 +13,29 @@ Axes are declared **inner-first** to match ``labber_io``'s native convention
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from zcu_tools.datafile import (
+    AxisSchema,
     DataVariable,
+    ExperimentPayload,
     GroupedLabberData,
     LabberMetadata,
     LabberPayload,
+    VariableSchema,
+    cast_labber_values,
+    format_ext,
     load_grouped_labber_data,
     save_grouped_labber_data,
+    validate_labber_payload,
+    write_labber,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
@@ -68,25 +77,48 @@ class Axis:
 
 @dataclass(frozen=True)
 class ZSpec:
-    """The log (z) channel of an experiment Result."""
+    """Result channel: field_name selects the array; label/unit describe disk.
+
+    dtype is the reconstructed memory dtype. scale maps memory values to SI
+    disk values (disk = memory * scale), and must be finite and nonzero.
+    """
 
     field_name: str
     label: str
     unit: str
     dtype: type = np.complex128
+    scale: float = IDENTITY
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.scale) or self.scale == 0.0:
+            raise ValueError("ZSpec scale must be finite and non-zero")
 
 
 @dataclass(frozen=True)
 class AxesSpec(Generic[T_Result, T_Config]):
-    """The full per-experiment persistence declaration (see module docstring)."""
+    """Map a Result dataclass and cfg model to one stable variable identity.
+
+    axes are inner-first memory-field/label/unit/scale declarations; z selects
+    the signal field and its memory dtype/unit conversion. result_type rebuilds
+    Result; cfg_type validates cfg. tag is the persisted experiment identity.
+    data_variable is the explicit native group key, defaulting to data, never
+    inferred from a label. cfg_schema_version is declaration-owned major.minor,
+    defaulting to 1.0. Invalid Result fields fail at declaration time. Existing
+    save/load remain Labber; native save_run/load_run consume this same spec.
+    """
 
     axes: tuple[Axis, ...]  # inner-first
     z: ZSpec
     result_type: type[T_Result]
     cfg_type: type[T_Config]
     tag: str  # on-disk hierarchical tag, e.g. 'twotone/freq'
+    data_variable: DataVariable = DataVariable(
+        "data"
+    )  # stable single-variable identity
+    cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
 
     def __post_init__(self) -> None:
+        _validate_cfg_schema_version(self.cfg_schema_version)
         # Fast-Fail at declaration time: the spec must reference real Result fields.
         if not is_dataclass(self.result_type):
             raise TypeError(f"result_type {self.result_type!r} must be a dataclass")
@@ -240,6 +272,32 @@ class VariableSpec:
                 f"(has {sorted(result_fields)})"
             )
 
+    def native_schema(self) -> VariableSchema:
+        """Return this mapping's SI disk labels, units and numeric dtypes.
+
+        NumPy scalar multiplication determines disk dtype after memory casting.
+        Generated arange axes keep their declared integer dtype without scaling.
+        This declaration does not inspect Result values or modify arrays.
+        """
+        return VariableSchema(
+            variable=self.data_variable,
+            axes=tuple(
+                AxisSchema(
+                    name=axis.label,
+                    unit=axis.unit,
+                    dtype=(
+                        np.dtype(axis.dtype)
+                        if axis.generated == "arange"
+                        else (np.empty(0, dtype=axis.dtype) * axis.scale).dtype
+                    ),
+                )
+                for axis in self.axes
+            ),
+            signal_name=self.z.label,
+            signal_unit=self.z.unit,
+            signal_dtype=(np.empty(0, dtype=self.z.dtype) * self.z.scale).dtype,
+        )
+
     def payload_from_result(self, result: object, *, context: str) -> LabberPayload:
         """Map declared Result arrays into disk units; context labels validation errors.
 
@@ -274,35 +332,17 @@ class VariableSpec:
         context labels ValueError for invalid labels, units, arrays or generated
         indices. Return loaded arrays for this mapping\'s variable identity.
         """
-        if len(payload.axes) != len(self.axes):
-            raise ValueError(
-                f"{context} has {len(payload.axes)} axes; expected {len(self.axes)}"
-            )
+        validate_labber_payload(payload, schema=self.native_schema(), context=context)
 
         loaded_axes: list[np.ndarray] = []
         for index, (loaded_axis, expected_axis) in enumerate(
             zip(payload.axes, self.axes, strict=True)
         ):
-            if loaded_axis.name != expected_axis.label:
-                raise ValueError(
-                    f"{context} axis {index} label is {loaded_axis.name!r}; "
-                    f"expected {expected_axis.label!r}"
-                )
-            if loaded_axis.unit != expected_axis.unit:
-                raise ValueError(
-                    f"{context} axis {index} unit is {loaded_axis.unit!r}; "
-                    f"expected {expected_axis.unit!r}"
-                )
-
             axis_values = _cast_memory_values(
                 np.asarray(loaded_axis.values) / expected_axis.scale,
                 expected_axis.dtype,
                 context=f"{context} axis {index}",
             )
-            if axis_values.ndim != 1:
-                raise ValueError(
-                    f"{context} axis {index} is {axis_values.ndim}D; expected 1D"
-                )
             if expected_axis.generated == "arange":
                 expected_values = np.arange(
                     axis_values.shape[0], dtype=axis_values.dtype
@@ -311,23 +351,11 @@ class VariableSpec:
                     raise ValueError(f"{context} axis {index} must equal arange(N)")
             loaded_axes.append(axis_values)
 
-        if payload.data.name != self.z.label:
-            raise ValueError(
-                f"{context} z channel label is {payload.data.name!r}; "
-                f"expected {self.z.label!r}"
-            )
-        if payload.data.unit != self.z.unit:
-            raise ValueError(
-                f"{context} z channel unit is {payload.data.unit!r}; "
-                f"expected {self.z.unit!r}"
-            )
-
         z_values = _cast_memory_values(
             np.asarray(payload.z) / self.z.scale,
             self.z.dtype,
             context=f"{context} z channel",
         )
-        self._validate_shape(z_values, loaded_axes, context)
         return LoadedVariableData(
             variable=self.data_variable,
             axes=tuple(loaded_axes),
@@ -400,7 +428,9 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     tag is the default file tag. result_builder rebuilds result_type from loaded
     memory-unit arrays; result_validator, when supplied, checks results on save
     and load. Invalid declarations raise ValueError; non-dataclass types or wrong
-    builder return types raise TypeError. Variables require a common grid on save.
+    builder return types raise TypeError. cfg_schema_version is the declaration's
+    major.minor cfg version, defaulting to 1.0. Existing Labber save/load require
+    a common grid; native persistence permits different grids for each variable.
     """
 
     variables: tuple[VariableSpec, ...]
@@ -409,8 +439,10 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     tag: str
     result_builder: Callable[[GroupedLoadData[T_Config]], T_Result]
     result_validator: Callable[[T_Result], None] | None = None
+    cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
 
     def __post_init__(self) -> None:
+        _validate_cfg_schema_version(self.cfg_schema_version)
         if not self.variables:
             raise ValueError("GroupedAxesSpec requires at least one variable")
         if not is_dataclass(self.result_type):
@@ -466,18 +498,45 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         comment: str | None = None,
         tag: str | None = None,
     ) -> None:
+        """Map this explicit record to one common-grid Labber export.
+
+        source.cfg must be present. destination follows the existing Labber
+        extension normalization. comment is optional user text; tag overrides
+        this declaration's tag. Invalid cfg JSON or data raises ValueError;
+        existing files raise FileExistsError and I/O errors propagate. No native
+        file is written and no directory/name reservation is performed.
+        """
         if source.cfg is None:
             raise ValueError("Cannot save a RunRecord without cfg")
-        from zcu_tools.experiment.utils import make_comment
+        from zcu_tools.experiment.utils import make_labber_cfg_snapshot
 
-        self.save_grouped_result(
-            str(destination),
-            source.result,
-            comment=make_comment(source.cfg, comment),
-            tag=tag,
+        payload = ExperimentPayload(
+            variables={
+                DataVariable(variable): signal
+                for variable, signal in self.payloads_from_result(source.result).items()
+            },
+            metadata=LabberMetadata(tags=tag or self.tag),
+            representation="grouped",
+        )
+        write_labber(
+            Path(format_ext(str(destination))),
+            payload,
+            cfg=make_labber_cfg_snapshot(
+                source.cfg, schema_version=self.cfg_schema_version
+            ),
+            comment=comment,
         )
 
     def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
+        """Read canonical grouped Labber at an exact local path into a record.
+
+        Required variables, axes, units or shape mismatches raise ValueError;
+        I/O errors propagate. Missing cfg or non-envelope comment text returns
+        cfg=None with valid Result data. Recognized envelopes with invalid
+        cfg/comment/timestamp field types raise ValueError. A valid envelope
+        whose cfg object fails cfg_type validation warns and retains Result data
+        with cfg=None. This entry does not guess native or legacy layouts.
+        """
         grouped = load_grouped_labber_data(
             str(source),
             required_variables=self.required_variables,
@@ -545,22 +604,18 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         )
 
 
-def _cast_memory_values(values: Any, dtype: type, *, context: str) -> np.ndarray:
-    target_dtype = np.dtype(dtype)
-    array = np.asarray(values)
-    if target_dtype.kind != "c" and np.iscomplexobj(array):
-        if np.any(np.imag(array) != 0.0):
-            raise ValueError(
-                f"{context} contains non-zero imaginary component; "
-                f"cannot load as {target_dtype}"
-            )
-        array = np.real(array)
+def _validate_cfg_schema_version(version: str) -> None:
+    if re.fullmatch(r"[0-9]+\.[0-9]+", version) is None:
+        raise ValueError(f"cfg_schema_version must be major.minor, got {version!r}")
 
+
+def _cast_memory_values(values: ArrayLike, dtype: type, *, context: str) -> np.ndarray:
+    target_dtype = np.dtype(dtype)
     if target_dtype.kind in {"i", "u"}:
-        real_array = np.asarray(array, dtype=np.float64)
+        # Integer coordinates use the typed mapping's existing rounding contract.
+        real_array = cast_labber_values(values, np.dtype(np.float64), context=context)
         rounded = np.round(real_array)
         if not np.allclose(real_array, rounded):
             raise ValueError(f"{context} values must be integers")
         return rounded.astype(target_dtype)
-
-    return np.asarray(array, dtype=target_dtype)
+    return cast_labber_values(values, target_dtype, context=context)
