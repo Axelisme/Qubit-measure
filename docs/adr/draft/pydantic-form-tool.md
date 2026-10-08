@@ -79,9 +79,9 @@ P2 fluxes 使用 LinRange(start, stop, n) 或 ExplicitList(values)。輸入保�
 
 ## FormEnv、evaluator 與 complex codec 重用
 
-FormEnv 的 md 是必要的 expression/defaults 唯讀輸入，library 是固定的 LibrarySnapshot 或 None，devices 是 captured native DeviceInfo 的只讀 mapping 或空 mapping。只有 md 是 knobs caller 必需；F4 才接 4a accepted library／devices source。使用 ModuleRef 而 library 缺席時，default_input／write／result 以指名消費欄位路徑的錯誤 Fast Fail，不當未填或預設；需要 devices 而缺席時同理。Host 建立 env，工具不 load YAML、refresh 或 poll device。Frozen dataclass 不等於凍結 driver，也不承諾凍結 waveform asset bytes。
+FormEnv 的 parameters 是 host 捕捉的 ParameterContext 或 None，library 是固定的 LibrarySnapshot 或 None，devices 是 captured native DeviceInfo 的只讀 mapping 或空 mapping。純數學 expression 與 ordinary input 不需要 parameters；point／library expression 直接使用原生路徑。F4 消費已 accepted 的 4a context／expression ports。使用 ModuleRef 而 library 缺席時，default_input／write／result 以指名消費欄位路徑的錯誤 Fast Fail，不當未填或預設；需要 devices 而缺席時同理。Host 建立 env，工具不 load YAML、refresh 或 poll device。Frozen dataclass 不等於凍結 driver，也不承諾凍結 waveform asset bytes。
 
-F1 按定稿先使用 MetaDict 與既有 LibrarySnapshot 讀取介面。MetaDict.snapshot 的公開契約是複製 current memory 且不做 I/O；它不是新的 immutable context 型別。工具只讀 host 提供的副本，不把 snapshot 擴解為型別上的不可變保證。
+ParameterContext owner 在 capture 邊界隔離 point／roles。FormEnv 只借用這份 capture，不轉成 flat MetaDict，不再次複製。T1 暫定 lifetime 讀 general.ext.guess_us；這是 point 的公開 extension namespace。存在但無效或明確 null 的 leaf 保留 expression，求值錯誤落在 guess_us，不以 20 us 掩蓋。
 
 Workflow host 在 run 開始時捕捉來源，之後對同一份來源求值。Measure 日後可以換 env，工具的 result(env)／changes(env) 每次使用傳入的 env，何時重算與發布仍歸 host。本次不接 Measure。
 

@@ -1,25 +1,47 @@
 """The shipped T1 form consumes the generic public input/state contract."""
 
+import pytest
 from jsonschema import Draft202012Validator
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
-from zcu_tools.resources.context import MetaDict
+from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.t1 import T1Tunables
 
 
-def environment(guess_us: float | None = 25.0) -> FormEnv:
-    """Capture only memory MetaDict, leaving library/devices unused."""
-    md = MetaDict()
-    if guess_us is not None:
-        md.update({"guess_us": guess_us})
-    return FormEnv(md=md.snapshot())
+def environment(
+    guess_us: float | str | None = 25.0, *, present: bool = True
+) -> FormEnv:
+    """Capture the lifetime guess in a real point's extension namespace."""
+    return FormEnv(
+        parameters=ParameterContext(
+            point=PointDocument(
+                format="zcu.parameter-container",
+                format_version="1.0",
+                general=PointGeneral(
+                    created_at="2026-10-08T00:00:00Z",
+                    ext={"guess_us": guess_us} if present else {},
+                ),
+            ),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library",
+                    format_version="1.0",
+                )
+            ),
+            target=EntryDraft(entry_id="entry"),
+            roles=None,
+        )
+    )
 
 
 def test_defaults_expression_state_changes_and_native_conversion() -> None:
     env = environment()
     base = T1TunablesForm.default_input(env)
-    assert base.data["guess_us"] == {"expr": "guess_us"}
+    assert base.data["guess_us"] == {"expr": "general.ext.guess_us"}
     state = FormState(base)
     defaults = state.result(env)
     assert isinstance(defaults, T1TunablesForm)
@@ -27,8 +49,8 @@ def test_defaults_expression_state_changes_and_native_conversion() -> None:
     assert defaults.to_cfg() == expected_defaults
     state.write(
         {
-            ("guess_us",): {"expr": "guess_us * 1.2"},
-            ("cal", "span_mhz"): {"expr": "guess_us * 2"},
+            ("guess_us",): {"expr": "general.ext.guess_us * 1.2"},
+            ("cal", "span_mhz"): {"expr": "general.ext.guess_us * 2"},
             ("cal", "qf_widen"): [1.0, 3.0],
             ("reps",): 200,
         },
@@ -52,24 +74,32 @@ def test_defaults_expression_state_changes_and_native_conversion() -> None:
         ("reps",),
     }
     assert by_path[("guess_us",)].value == native.guess_us
-    assert by_path[("guess_us",)].original == "guess_us * 1.2"
-    assert by_path[("cal", "span_mhz")].original == "guess_us * 2"
+    assert by_path[("guess_us",)].original == "general.ext.guess_us * 1.2"
+    assert by_path[("cal", "span_mhz")].original == "general.ext.guess_us * 2"
     assert by_path[("cal", "qf_widen")].original is None
-    assert base.data["guess_us"] == {"expr": "guess_us"}
+    assert base.data["guess_us"] == {"expr": "general.ext.guess_us"}
 
     native.cal.span_mhz = 70.0
     assert form.cal.span_mhz == 50.0
 
 
-def test_context_fallback_and_invalid_referenced_value_are_distinct() -> None:
-    absent = environment(None)
+@pytest.mark.parametrize("value", [-5.0, None, "not a lifetime"])
+def test_context_fallback_and_invalid_referenced_value_are_distinct(
+    value: float | str | None,
+) -> None:
+    absent = environment(present=False)
     fallback = FormState(T1TunablesForm.default_input(absent)).result(absent)
     assert isinstance(fallback, T1TunablesForm)
     assert fallback.to_cfg() == T1Tunables()
 
-    invalid = environment(-5.0)
+    no_capture = FormEnv()
+    ordinary = FormState(T1TunablesForm.default_input(no_capture)).result(no_capture)
+    assert isinstance(ordinary, T1TunablesForm)
+    assert ordinary.to_cfg() == T1Tunables()
+
+    invalid = environment(value)
     base = T1TunablesForm.default_input(invalid)
-    assert base.data["guess_us"] == {"expr": "guess_us"}
+    assert base.data["guess_us"] == {"expr": "general.ext.guess_us"}
     result = FormState(base).result(invalid)
     assert isinstance(result, FormErrors)
     assert ("guess_us",) in result.messages
@@ -78,18 +108,20 @@ def test_context_fallback_and_invalid_referenced_value_are_distinct() -> None:
 def test_integer_expression_validation_and_direct_same_value_clear_original() -> None:
     env = environment()
     state = FormState(T1TunablesForm.default_input(env))
-    state.write({("reps",): {"expr": "guess_us / 10"}}, env)
+    state.write({("reps",): {"expr": "general.ext.guess_us / 10"}}, env)
     invalid = state.result(env)
     assert isinstance(invalid, FormErrors)
     assert ("reps",) in invalid.messages
-    state.write({("reps",): {"expr": "guess_us / 5"}, ("guess_us",): 25.0}, env)
+    state.write(
+        {("reps",): {"expr": "general.ext.guess_us / 5"}, ("guess_us",): 25.0}, env
+    )
     result = state.result(env)
     assert isinstance(result, T1TunablesForm)
     assert result.to_cfg().reps == 5
     changes = state.changes(env)
     assert not isinstance(changes, FormErrors)
     by_path = {change.path: change for change in changes}
-    assert by_path[("reps",)].original == "guess_us / 5"
+    assert by_path[("reps",)].original == "general.ext.guess_us / 5"
     assert by_path[("guess_us",)].value == 25.0
     assert by_path[("guess_us",)].original is None
 
@@ -115,7 +147,10 @@ def test_nested_rabi_error_is_directed_and_invalid_draft_can_be_repaired() -> No
 def test_save_restore_preserves_expressions_and_reports_incompatible_leaves() -> None:
     env = environment()
     state = FormState(T1TunablesForm.default_input(env))
-    state.write({("guess_us",): {"expr": "guess_us * 2"}, ("cal", "ro_every"): 7}, env)
+    state.write(
+        {("guess_us",): {"expr": "general.ext.guess_us * 2"}, ("cal", "ro_every"): 7},
+        env,
+    )
     saved = FormInput.from_json(T1TunablesForm, state.input.to_json())
     restored = FormState(T1TunablesForm.default_input(env))
     assert restored.write_compatible(saved.data, env) == ()
@@ -123,7 +158,7 @@ def test_save_restore_preserves_expressions_and_reports_incompatible_leaves() ->
     assert isinstance(result, T1TunablesForm)
     assert result.to_cfg().guess_us == 50.0
     assert result.to_cfg().cal.ro_every == 7
-    assert restored.input.data["guess_us"] == {"expr": "guess_us * 2"}
+    assert restored.input.data["guess_us"] == {"expr": "general.ext.guess_us * 2"}
 
     dropped = restored.write_compatible(
         {"reps": "wrong type", "removed": 1, "cal": {"rabi_start_factor": 8.0}}, env
@@ -137,7 +172,7 @@ def test_save_restore_preserves_expressions_and_reports_incompatible_leaves() ->
 def test_t1_schema_accepts_partial_agent_input_and_rejects_bad_scalar_shape() -> None:
     env = environment()
     validator = Draft202012Validator(T1TunablesForm.input_schema(env))
-    assert validator.is_valid({"guess_us": {"expr": "guess_us * 1.5"}})
+    assert validator.is_valid({"guess_us": {"expr": "general.ext.guess_us * 1.5"}})
     assert validator.is_valid({"cal": {"qf_widen": [1.0, 3.0]}, "reps": 200})
     assert not validator.is_valid({"reps": 0})
     assert not validator.is_valid({"guess_us": {"expr": False}})

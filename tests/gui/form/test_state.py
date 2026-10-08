@@ -18,7 +18,10 @@ from zcu_tools.gui.form import (
     RangeInput,
     field_error,
 )
-from zcu_tools.resources.context import MetaDict
+from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 
 class PlainSection(BaseModel):
@@ -84,7 +87,11 @@ class ContextBranch(FormModel):
         return {
             "kind": "context",
             "shared": 9.0,
-            "context_only": env.md.get("seed", 3.0),
+            "context_only": (
+                env.parameters.value("general.ext.seed")
+                if env.parameters is not None
+                else 3.0
+            ),
             "required": previous.get("static_only", 0),
         }
 
@@ -136,18 +143,46 @@ class ChoiceForm(FormModel):
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Permit beta only in the supplied captured context."""
-        if env.md.get("empty_choices"):
+        if env.parameters is not None and env.parameters.value(
+            "general.ext.empty_choices"
+        ):
             return {("mode",): ()}
         return {
-            ("mode",): ("alpha", "beta") if env.md.get("allow_beta") else ("alpha",)
+            ("mode",): ("alpha", "beta")
+            if env.parameters is not None
+            and env.parameters.value("general.ext.allow_beta")
+            else ("alpha",)
         }
 
 
-def environment(seed: float = 4.0) -> FormEnv:
-    """Make isolated memory-only sources for this test's calls."""
-    md = MetaDict()
-    md.update({"seed": seed})
-    return FormEnv(md=md.snapshot())
+def environment(
+    seed: float = 4.0, *, allow_beta: bool = False, empty_choices: bool = False
+) -> FormEnv:
+    """Capture a real point; context flags drive branch defaults and choices."""
+    return FormEnv(
+        parameters=ParameterContext(
+            point=PointDocument(
+                format="zcu.parameter-container",
+                format_version="1.0",
+                general=PointGeneral(
+                    created_at="2026-10-08T00:00:00Z",
+                    ext={
+                        "seed": seed,
+                        "allow_beta": allow_beta,
+                        "empty_choices": empty_choices,
+                    },
+                ),
+            ),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library",
+                    format_version="1.0",
+                )
+            ),
+            target=EntryDraft(entry_id="entry"),
+            roles=None,
+        )
+    )
 
 
 def test_static_defaults_leave_required_keys_absent_and_keep_nullable_null() -> None:
@@ -207,16 +242,17 @@ def test_result_evaluates_input_against_each_env_without_replacing_original() ->
         FormInput(
             DraftForm,
             {
-                "amount": {"expr": "seed * 2"},
+                "amount": {"expr": "general.ext.seed * 2"},
                 "optional": None,
                 "amplitude": {"__complex__": [1.0, -2.0]},
-                "samples": [1.0, {"expr": "seed"}],
-                "offsets": {"rack.left": {"expr": "seed + 1"}},
+                "samples": [1.0, {"expr": "general.ext.seed"}],
+                "offsets": {"rack.left": {"expr": "general.ext.seed + 1"}},
             },
         )
     )
     first_env = environment(4.0)
-    before_md = dict(first_env.md.items())
+    assert first_env.parameters is not None
+    before_point = first_env.parameters.document()
     first = state.result(first_env)
     second = state.result(environment(6.0))
     assert isinstance(first, DraftForm)
@@ -226,8 +262,8 @@ def test_result_evaluates_input_against_each_env_without_replacing_original() ->
     assert first.amplitude == 1 - 2j
     assert first.samples == (1.0, 4.0)
     assert first.offsets == {"rack.left": 5.0}
-    assert state.input.data["amount"] == {"expr": "seed * 2"}
-    assert dict(first_env.md.items()) == before_md
+    assert state.input.data["amount"] == {"expr": "general.ext.seed * 2"}
+    assert first_env.parameters.document() == before_point
 
 
 def test_write_changes_and_reset_preserve_input_value_and_whole_sequence() -> None:
@@ -237,9 +273,9 @@ def test_write_changes_and_reset_preserve_input_value_and_whole_sequence() -> No
     observed: list[dict[str, JsonValue]] = []
     unsubscribe = state.subscribe(lambda: observed.append(state.input.data))
     batch: dict[FormWritePath, JsonValue] = {
-        ("amount",): {"expr": "seed / 2"},
+        ("amount",): {"expr": "general.ext.seed / 2"},
         ("samples",): [2.0, 3.0],
-        ("offsets",): {"rack.left": {"expr": "seed"}, "expr": 1.0},
+        ("offsets",): {"rack.left": {"expr": "general.ext.seed"}, "expr": 1.0},
     }
     state.write(batch, env)
     batch[("samples",)] = []
@@ -248,14 +284,14 @@ def test_write_changes_and_reset_preserve_input_value_and_whole_sequence() -> No
     assert not isinstance(changes, FormErrors)
     by_path = {change.path: change for change in changes}
     assert set(by_path) == {("amount",), ("samples",), ("offsets",)}
-    assert by_path[("amount",)].input == {"expr": "seed / 2"}
+    assert by_path[("amount",)].input == {"expr": "general.ext.seed / 2"}
     assert by_path[("amount",)].value == 2.0
-    assert by_path[("amount",)].original == "seed / 2"
+    assert by_path[("amount",)].original == "general.ext.seed / 2"
     assert by_path[("samples",)].input == [2.0, 3.0]
     assert by_path[("samples",)].value == (2.0, 3.0)
     assert by_path[("samples",)].original is None
     assert by_path[("offsets",)].input == {
-        "rack.left": {"expr": "seed"},
+        "rack.left": {"expr": "general.ext.seed"},
         "expr": 1.0,
     }
     assert by_path[("offsets",)].value == {"rack.left": 4.0, "expr": 1.0}
@@ -264,18 +300,18 @@ def test_write_changes_and_reset_preserve_input_value_and_whole_sequence() -> No
     assert isinstance(detached_mapping, dict)
     detached_mapping.clear()
     assert state.input.data["offsets"] == {
-        "rack.left": {"expr": "seed"},
+        "rack.left": {"expr": "general.ext.seed"},
         "expr": 1.0,
     }
     assert state.base.data == base.data
     assert len(observed) == 1
     assert observed[0] == state.input.data
-    state.write({("amount",): {"expr": "seed / 2"}}, env)
+    state.write({("amount",): {"expr": "general.ext.seed / 2"}}, env)
     assert len(observed) == 1
 
     exposed = state.input.data
     exposed["amount"] = 1000.0
-    assert state.input.data["amount"] == {"expr": "seed / 2"}
+    assert state.input.data["amount"] == {"expr": "general.ext.seed / 2"}
     state.reset(base)
     assert state.changes(env) == ()
     assert state.input.data == base.data
@@ -491,10 +527,8 @@ def test_range_input_persists_as_range_and_switches_to_whole_explicit_list() -> 
 
 
 def test_dynamic_choices_revalidate_with_the_supplied_context() -> None:
-    allowed_md = MetaDict()
-    allowed_md.update({"allow_beta": True})
-    allowed = FormEnv(md=allowed_md.snapshot())
-    denied = FormEnv(md=MetaDict())
+    allowed = environment(allow_beta=True)
+    denied = environment()
     state = FormState(ChoiceForm.default_input(allowed))
     state.write({("mode",): "beta"}, allowed)
     assert isinstance(state.result(allowed), ChoiceForm)
@@ -505,9 +539,7 @@ def test_dynamic_choices_revalidate_with_the_supplied_context() -> None:
 
 
 def test_empty_dynamic_choices_reject_every_present_value() -> None:
-    md = MetaDict()
-    md.update({"empty_choices": True})
-    env = FormEnv(md=md.snapshot())
+    env = environment(empty_choices=True)
     state = FormState(FormInput(ChoiceForm, {"mode": "alpha"}))
     result = state.result(env)
     assert isinstance(result, FormErrors)
@@ -588,7 +620,12 @@ class NullableRangeAliasForm(FormModel):
 def test_nullable_range_alias_evaluates_expressions_and_canonical_errors() -> None:
     env = environment()
     data: dict[str, JsonValue] = {
-        "fluxes": {"kind": "linrange", "start": {"expr": "seed"}, "stop": 5.0, "n": 2}
+        "fluxes": {
+            "kind": "linrange",
+            "start": {"expr": "general.ext.seed"},
+            "stop": 5.0,
+            "n": 2,
+        }
     }
     state = FormState(FormInput(NullableRangeAliasForm, data))
     result = state.result(env)
@@ -610,7 +647,7 @@ def test_nullable_range_alias_edits_and_restores_the_current_branch() -> None:
     state = FormState(NullableRangeAliasForm.default_input(env))
     state.write(
         {
-            ("fluxes", "start"): {"expr": "seed"},
+            ("fluxes", "start"): {"expr": "general.ext.seed"},
             ("fluxes", "stop"): 5.0,
             ("fluxes", "n"): 2,
         },
@@ -695,7 +732,7 @@ def test_compatible_restore_drops_types_not_range_or_cross_field_errors() -> Non
             "samples": [1.0, "bad"],
             "optional": None,
             "amplitude": {"__complex__": [2.0, 3.0]},
-            "offsets": {"rack.left": {"expr": "seed"}},
+            "offsets": {"rack.left": {"expr": "general.ext.seed"}},
         },
         env,
     )
@@ -757,7 +794,7 @@ def test_preview_re_evaluates_other_leaves_and_omits_failed_whole_container() ->
         FormInput(
             DraftForm,
             {
-                "amount": {"expr": "seed"},
+                "amount": {"expr": "general.ext.seed"},
                 "optional": None,
                 "samples": [{"expr": "absent_name"}],
             },
@@ -789,3 +826,19 @@ def test_preview_keeps_model_invalid_values_and_returns_detached_containers() ->
     offsets["left"] = 100.0
     assert state.input.data["offsets"] == {"left": 3.0}
     assert state.preview(env).values[("offsets",)] == {"left": 3.0}
+
+
+def test_source_free_math_and_missing_capture_have_distinct_results() -> None:
+    env = FormEnv()
+    state = FormState(FormInput(DraftForm, {"amount": {"expr": "2 * 3"}}))
+    ordinary = state.result(env)
+    assert isinstance(ordinary, DraftForm)
+    assert ordinary.amount == 6.0
+    state.write({("amount",): {"expr": "general.ext.seed"}}, env)
+    missing = state.result(env)
+    assert isinstance(missing, FormErrors)
+    assert set(missing.messages) == {("amount",)}
+    preview = state.preview(env)
+    assert preview.errors == missing
+    assert ("amount",) not in preview.values
+    assert state.input.data["amount"] == {"expr": "general.ext.seed"}

@@ -16,7 +16,7 @@ from pydantic_core import PydanticCustomError
 
 from zcu_tools.cfg_model import ModuleSpec
 from zcu_tools.device import DeviceInfo
-from zcu_tools.resources.context import MetaDict
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
 
 type FormPath = tuple[str | int, ...]
@@ -58,7 +58,8 @@ class Display:
 class FormEnv:
     """Captured sources borrowed read-only by defaults, choices and evaluation.
 
-    md is a host-provided MetaDict memory snapshot, not a live file store.
+    parameters is the host's fixed ParameterContext, or None for source-free
+    input and arithmetic. Parameter expressions use native point/library paths.
     library is the fixed LibrarySnapshot, or None when unused. devices maps
     host device names to captured native DeviceInfo, or is empty when unused.
     The frozen shell does not make these borrowed objects deeply immutable.
@@ -66,7 +67,7 @@ class FormEnv:
     fails with its field path, rather than being treated as an unfilled value.
     """
 
-    md: MetaDict
+    parameters: ParameterContext | None = None
     library: LibrarySnapshot | None = None
     devices: Mapping[str, DeviceInfo] = field(default_factory=dict)
 
@@ -316,7 +317,7 @@ class FormState[F: FormModel]:
     def result(self, env: FormEnv) -> F | FormErrors:
         """Evaluate/decode input and validate its model, without editing input.
 
-        Reuse the scalar evaluator with env.md and the existing complex codec.
+        Reuse the scalar evaluator with env.parameters and the existing complex codec.
         Validate dynamic choices and Pydantic types/ranges/cross-field rules.
         Return a model or path-directed errors, including a used missing source;
         ordinary model-wide errors use (). Each call uses the supplied env.

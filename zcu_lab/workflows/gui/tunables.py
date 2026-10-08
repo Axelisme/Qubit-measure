@@ -107,7 +107,7 @@ class T1TunablesForm(FormModel):
     """User-facing T1 and calibration knobs; instances hold ordinary values only.
 
     cal owns calibration knobs. Other fields control T1 generation/acceptance as
-    described in their Fields. defaults read only the captured MetaDict; these
+    described in their Fields. defaults read only captured parameters; these
     knobs need neither library nor device infos. Submission belongs to the host.
     """
 
@@ -124,7 +124,10 @@ class T1TunablesForm(FormModel):
         default=10, ge=1, description="T1 averaging rounds"
     )
     guess_us: Annotated[
-        float, Display(label="Initial lifetime", unit="us", placeholder="guess_us")
+        float,
+        Display(
+            label="Initial lifetime", unit="us", placeholder="general.ext.guess_us"
+        ),
     ] = Field(default=20.0, gt=0, description="Initial lifetime in us")
     sweep_factor: float = Field(
         default=5.0, gt=0, description="Sweep end divided by lifetime guess"
@@ -143,16 +146,20 @@ class T1TunablesForm(FormModel):
     def default_input(cls, env: FormEnv) -> FormInput[Self]:
         """Build native-equivalent defaults, retaining a captured guess expression.
 
-        When md has a guess_us key, use {expr: guess_us} rather than copying its
-        value. Otherwise retain the provisional ordinary 20 us default. Invalid
-        referenced values remain visible through result errors, not a fallback.
-        This only reads host-captured md; it never uses library/devices or I/O.
+        When parameters contain general.ext.guess_us (even explicit null),
+        retain that path as an expression rather than copying its value. With
+        no capture or an absent leaf, keep the provisional ordinary 20 us.
+        Invalid referenced values remain result errors, not a fallback. Reads
+        use the fixed point only, never materialization, devices or I/O.
+        Unavailable captured sources propagate their source error.
         """
         base = FormInput.from_json(cls, cls().model_dump_json())
         data = base.data
-        meta_names = env.md.keys()
-        if "guess_us" in meta_names:
-            data["guess_us"] = {"expr": "guess_us"}
+        if (
+            env.parameters is not None
+            and env.parameters.lookup_point("general.ext.guess_us").present
+        ):
+            data["guess_us"] = {"expr": "general.ext.guess_us"}
         return FormInput(cls, data)
 
     def to_cfg(self) -> T1Tunables:

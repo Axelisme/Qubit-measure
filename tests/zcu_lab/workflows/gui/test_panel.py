@@ -5,7 +5,10 @@ from collections.abc import Iterator
 import pytest
 from qtpy.QtWidgets import QApplication, QLineEdit
 from zcu_tools.gui.form import FormEnv, FormErrors
-from zcu_tools.resources.context import MetaDict
+from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from zcu_lab.workflows.gui.panel import T1TunablesPanel
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
@@ -33,10 +36,26 @@ def panels(qapp: QApplication) -> Iterator[list[T1TunablesPanel]]:
 
 
 def environment(guess_us: float) -> FormEnv:
-    """Make a captured numeric lifetime guess without library or devices."""
-    md = MetaDict()
-    md.update({"guess_us": guess_us})
-    return FormEnv(md)
+    """Capture the lifetime guess in a real point's extension namespace."""
+    return FormEnv(
+        parameters=ParameterContext(
+            point=PointDocument(
+                format="zcu.parameter-container",
+                format_version="1.0",
+                general=PointGeneral(
+                    created_at="2026-10-08T00:00:00Z", ext={"guess_us": guess_us}
+                ),
+            ),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library",
+                    format_version="1.0",
+                )
+            ),
+            target=EntryDraft(entry_id="entry"),
+            roles=None,
+        )
+    )
 
 
 def test_t1_panel_builds_a_draft_with_the_host_captured_expression(
@@ -45,7 +64,7 @@ def test_t1_panel_builds_a_draft_with_the_host_captured_expression(
     env = environment(30.0)
     panel = T1TunablesPanel(env)
     panels.append(panel)
-    assert panel.state.input.data["guess_us"] == {"expr": "guess_us"}
+    assert panel.state.input.data["guess_us"] == {"expr": "general.ext.guess_us"}
     result = panel.state.result(env)
     assert isinstance(result, T1TunablesForm)
     assert result.guess_us == 30.0
