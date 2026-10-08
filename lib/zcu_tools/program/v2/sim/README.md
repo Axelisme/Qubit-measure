@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-10-02 — explicit flux source
+**Last updated:** 2026-10-08 — hardware-clock time quantization
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -225,6 +225,14 @@ Each soc keeps its own copied parameters and source binding.
   phase-coherent phase, with time measured from the start of the shot. Hardware
   DDS phase follows absolute tProc time, so the model matches hardware only when
   every carrier offset times the shot period is a whole number of cycles.
+- **Hardware-clock times.** With a `soccfg`, lowering quantizes scalar and swept
+  durations through QICK before evolving the qubit. Waveform lengths use the
+  pulse generator clock, readout windows use the ADC output clock, and pulse
+  pre/post delays, delay modules, and trigger offsets use the tProcessor clock.
+  Sweeps use QICK's rounded start and truncated per-loop increments, matching the
+  experiment axis rather than the requested endpoints. Lowering rebuilds time
+  parameters so compilation does not need to mutate them first. Without a
+  `soccfg`, direct uncompiled lowering keeps requested times.
 - **Waveform envelopes.** Const, gauss/drag, cosine, flat_top, and `ArbWaveform`
   pulses all lower through the same scalar envelope path. `ArbWaveform` assets are
   represented as `abs(I+jQ)` because the current TLS Bloch/readout model has one
@@ -338,9 +346,11 @@ Each soc keeps its own copied parameters and source binding.
 
 ## Mock soccfg gotchas (when driving real experiments)
 
-- The mock soccfg's const / flat_top pulse-length *register* grid is too coarse
-  for a hard length sweep to compile (`len_rabi` const/flat_top raises a
-  resolution error); drive length-Rabi with a gauss pulse (soft-sweep path).
+- Hard const / flat_top length sweeps compile when their steps resolve on the
+  generator clock. Native pulse blocking follows quantized playback, including
+  per-loop truncation, before rounding up to tProcessor ticks. Non-aligned
+  requested endpoints therefore need not match the experiment's actual axis.
+  Gauss length sweeps use the soft-sweep path and recompile each scalar length.
 - **Folding is a `f mod f_dds` analyzer-axis effect only, not a physics
   constraint.** `SimEngine` works in *true (absolute) frequencies* throughout —
   `f_qubit` (from `predict_freq`) and the drive / readout tones are never folded
