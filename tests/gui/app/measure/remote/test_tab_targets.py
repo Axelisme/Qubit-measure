@@ -144,6 +144,17 @@ def test_invalid_target_is_rejected_before_creation(
     assert application.state.list_tab_ids() == []
 
 
+@pytest.mark.parametrize("target", ["", " "])
+def test_direct_tab_target_rejects_empty_names(
+    application: TargetApplication, target: str
+) -> None:
+    from zcu_tools.gui.expected_error import InvalidInputError
+
+    with pytest.raises(InvalidInputError):
+        application.controller.tab_control.new_tab("targeted", target=target)
+    assert application.state.list_tab_ids() == []
+
+
 def test_roleless_adapter_does_not_silently_ignore_explicit_target(
     application: TargetApplication,
 ) -> None:
