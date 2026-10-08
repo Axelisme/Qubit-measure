@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -21,16 +22,29 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import (
     EvalValue,
+    ReferenceValue,
     SweepValue,
+    make_custom_reference_key,
+    make_default_value,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import custom, scaled_md
+from zcu_lab.v2._support.measure.seeds import (
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainAnalyzeOptions,
@@ -44,17 +58,63 @@ RoOptFreqGainRunResult: TypeAlias = RunRecord[FreqGainCfg, FreqGainResult]
 
 def _best_ro_freq_range(ctx: SessionEnv) -> SweepValue:
     """Center this experiment's frequency scan on its latest trusted optimum."""
-    center_key = "best_ro_freq" if md_has_key(ctx, "best_ro_freq") else "r_f"
-    center = md_get_float(ctx, center_key, 6500.0)
-    width = md_get_float(ctx, "rf_w", 500.0)
-    if md_has_key(ctx, center_key) and md_has_key(ctx, "rf_w"):
-        start: float | EvalValue = EvalValue(expr=f"{center_key} - 0.5 * rf_w")
-        stop: float | EvalValue = EvalValue(expr=f"{center_key} + 0.5 * rf_w")
+    parameters = ctx.parameters
+    if parameters is None:
+        return SweepValue(start=6250.0, stop=6750.0, expts=31)
+    center_path = "qubit.ext.best_ro_freq"
+    center_value = parameters.lookup(center_path).value
+    if center_value is None:
+        center_path = "resonator.freq"
+        center_value = parameters.lookup(center_path).value
+    width_value = parameters.lookup("resonator.kappa").value
+    for path, value in [(center_path, center_value), ("resonator.kappa", width_value)]:
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, (int, float))
+        ):
+            raise TypeError(f"{path} must be a real number")
+    center = float(center_value) if isinstance(center_value, (int, float)) else 6500.0
+    width = float(width_value) if isinstance(width_value, (int, float)) else 500.0
+    if center_value is not None and width_value is not None:
+        start: float | EvalValue = EvalValue(
+            expr=f"{center_path} - 0.5 * resonator.kappa"
+        )
+        stop: float | EvalValue = EvalValue(
+            expr=f"{center_path} + 0.5 * resonator.kappa"
+        )
     else:
         half_span = 0.5 * width if width > 0.0 else 30.0
         start = center - half_span
         stop = center + half_span
     return SweepValue(start=start, stop=stop, expts=31)
+
+
+def _blank_pi_pulse(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.1)
+    value.with_field("waveform.length", 5.1)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field("ro_cfg.trig_offset", 0.55)
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -121,21 +181,42 @@ class RoOptFreqGainAdapter(
         ),
     )
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Capture the qubit and its referenced resonator when opening a tab."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
-            .reset(optional=True)
-            .pulse("qub_pulse", role_id="pi_pulse")
-            .readout(
-                pulse_only=True,
-                locked={
-                    "pulse_cfg.freq": 0.0,
-                    "ro_cfg.ro_freq": 0.0,
-                    "pulse_cfg.gain": 0.0,
-                },
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("qubit.module.reset", fallback=None),
             )
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .field(
+                "modules.qub_pulse",
+                spec=make_pulse_module_spec(),
+                default=module_seed(
+                    "qubit.module.x180",
+                    fallback=custom(_blank_pi_pulse, description="inline pi pulse"),
+                ),
+            )
+            .field(
+                "modules.readout",
+                spec=make_pulse_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0)
+                .lock_literal("pulse_cfg.gain", 0.0),
+                default=module_seed(
+                    "qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
+            .relax_delay(scaled_path_seed("qubit.t1", factor=5.0, fallback_value=100.0))
             .sweep(
                 "freq",
                 label="Readout freq (MHz)",
@@ -158,7 +239,7 @@ class RoOptFreqGainAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: dict[str, object],
+        raw_cfg: Mapping[str, ExperimentCfgValue],
         *,
         context: RunContext,
     ) -> RoOptFreqGainRunResult:

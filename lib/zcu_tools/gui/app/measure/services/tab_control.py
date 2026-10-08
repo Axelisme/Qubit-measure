@@ -21,7 +21,14 @@ if TYPE_CHECKING:
 class TabControlPort(Protocol):
     """App-facing tab resource surface for driving adapters."""
 
-    def new_tab(self, adapter_name: str) -> str: ...
+    def new_tab(self, adapter_name: str, *, target: str | None = None) -> str:
+        """Create/activate with target bound to the first role, or current focus.
+
+        InvalidInputError rejects empty/roleless targets; RoleResolutionError
+        rejects unresolved components before any tab is registered.
+        """
+        ...
+
     def open_tab_from_file(
         self, adapter_name: str, data_path: str
     ) -> LoadTabResultOutcome:
@@ -63,9 +70,10 @@ class TabControlFacet:
         self._load_tab_result = load_tab_result
         self._access = access if access is not None else ExperimentAccess()
 
-    def new_tab(self, adapter_name: str) -> str:
+    def new_tab(self, adapter_name: str, *, target: str | None = None) -> str:
+        """Create/activate with fixed target roles; see TabControlPort.new_tab."""
         self._access.require_available()
-        return self._workspace.new_tab(adapter_name)
+        return self._workspace.new_tab(adapter_name, target=target)
 
     def open_tab_from_file(
         self, adapter_name: str, data_path: str

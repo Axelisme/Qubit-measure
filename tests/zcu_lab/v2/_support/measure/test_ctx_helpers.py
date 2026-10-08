@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -13,17 +12,14 @@ from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.resources.context import MetaDict
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import (
     ComponentSchema,
-    ResultEntry,
     RoleResolutionError,
     RoleSpec,
     component_registry,
 )
 from zcu_tools.resources.entry.schema import PointDocument
-from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from zcu_lab.v2._support.measure.ctx_helpers import (
     proper_flux_range,
@@ -216,20 +212,10 @@ def test_present_invalid_flux_scalar_does_not_use_fallback(
 
 
 def test_range_seed_uses_the_fixed_parameter_capture(
-    range_factory: RangeFactory, tmp_path: Path
+    range_factory: RangeFactory,
 ) -> None:
-    entry = ResultEntry.create(
-        "seed", result_root=tmp_path / "results", database_root=tmp_path / "Database"
-    )
-    entry.new_point("working")
-    library = entry.module_library(
-        "working",
-        assets=ArbWaveformDatabase.info_at(entry.database_path / "arb_waveforms"),
-    )
     context = range_factory({"R1": {"freq": 5500.0, "kappa": 10.0}})
-    environment = SessionEnv(
-        md=MetaDict(), ml=library, soc=None, soccfg=None, parameters=context
-    )
+    environment = SessionEnv(soc=None, soccfg=None, parameters=context)
     sweep = res_freq_range(expts=21).resolve(environment)
     assert isinstance(sweep.start, EvalValue)
     assert sweep.start.expr == "resonator.freq - 1.5 * resonator.kappa"

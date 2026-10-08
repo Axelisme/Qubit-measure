@@ -119,6 +119,7 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
 
 class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
     exp_cls = T1Exp
+    experiment_tag: ClassVar[str | None] = T1Exp().persistence_spec().tag
     ExpCfg_cls: ClassVar[Any] = T1Cfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

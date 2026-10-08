@@ -110,6 +110,10 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     """
 
     exp_cls: ClassVar[type[Any]]
+    # Native acquisition evidence is explicit, not inferred from filename policy.
+    # Concrete adapters set the tag from their experiment's persistence spec.
+    # See ExpAdapterProtocol.run for the associated RunRecord envelope contract.
+    experiment_tag: ClassVar[str | None] = None
     # Most registered adapters use the canonical PersistableExperiment loader;
     # concrete no-load adapters declare ``load_data=False`` explicitly.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)

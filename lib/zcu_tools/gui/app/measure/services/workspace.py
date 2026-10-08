@@ -37,8 +37,12 @@ class WorkspaceService:
         self._tabs = tabs
         self._bus = bus
 
-    def new_tab(self, adapter_name: str) -> str:
-        tab_id = self._tabs.new_tab(adapter_name)
+    def new_tab(self, adapter_name: str, *, target: str | None = None) -> str:
+        """Create, activate and announce a tab using the optional fixed role target.
+
+        target follows TabService.new_tab; capture failure publishes no tab fact.
+        """
+        tab_id = self._tabs.new_tab(adapter_name, target=target)
         self._state.set_active_tab(tab_id)
         self._bus.emit(
             TabAddedPayload(tab_id=tab_id, adapter_name=adapter_name),

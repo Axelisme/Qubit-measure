@@ -54,6 +54,7 @@ from zcu_tools.resources.entry.schema import (
     PointGeneral,
     SetupDocument,
 )
+from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point_storage
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformAssetInfo, WaveformSpec
@@ -218,7 +219,6 @@ class ContextService:
             clone_from=clone,
             description=request.description,
             origin=request.origin.origin,
-            call_id=request.origin.call_id,
         )
         try:
             parameters, library, sources, info = self._prepare_point(
@@ -309,6 +309,7 @@ class ContextService:
                 library=parameters.library,
                 target=parameters.target,
                 roles=None,
+                storage=parameters.storage,
             ),
             parameter=True,
         )
@@ -346,7 +347,18 @@ class ContextService:
             target=parameters.target,
             roles=roles,
             source_faults=parameters.source_faults,
+            storage=parameters.storage,
         )
+
+    def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
+        """Return historical storage for a fixed capture on the owner sequence.
+
+        Current entry, point and focus are not read. Source faults propagate;
+        draft/unbound captures raise FailedPreconditionError(storage_unavailable).
+        No refresh, file write, output reservation or ledger append occurs.
+        """
+        self._owner.assert_owner()
+        return parameters.capture_storage()
 
     def read_target(
         self, target: ContextTarget, *, roles: RoleBinding | None = None
@@ -371,6 +383,7 @@ class ContextService:
             library=library.snapshot(),
             target=target,
             roles=roles,
+            storage=capture_point_storage(point),
         )
 
     def capture_roles(
@@ -441,6 +454,13 @@ class ContextService:
                 library=parameters.library,
                 target=target,
                 roles=None,
+                storage=(
+                    replace(
+                        parameters.storage, description=document.general.description
+                    )
+                    if parameters.storage is not None
+                    else None
+                ),
             ),
             parameter=True,
         )
@@ -474,7 +494,11 @@ class ContextService:
             library = handle.snapshot()
         self._publish_write(
             ParameterContext(
-                point=parameters.document(), library=library, target=target, roles=None
+                point=parameters.document(),
+                library=library,
+                target=target,
+                roles=None,
+                storage=parameters.storage,
             ),
             parameter=False,
         )
@@ -509,7 +533,11 @@ class ContextService:
             library = handle.snapshot()
         self._publish_write(
             ParameterContext(
-                point=parameters.document(), library=library, target=target, roles=None
+                point=parameters.document(),
+                library=library,
+                target=target,
+                roles=None,
+                storage=parameters.storage,
             ),
             parameter=False,
         )
@@ -566,6 +594,7 @@ class ContextService:
                 library=library,
                 target=parameters.target,
                 roles=None,
+                storage=selected.storage,
             ),
             parameter=False,
         )
@@ -603,7 +632,8 @@ class ContextService:
         """Return only the currently opened entry's ledger; never append an event.
 
         No entry raises no_entry; a different UUID raises entry_not_open.
-        The live capability is not part of ParameterContext or wire data.
+        Use capture_storage(parameters).ledger for a tab's historical origin.
+        Ledger capabilities are not serialized into wire data.
         """
         self._owner.assert_owner()
         return self._require_entry(entry_id).ledger
@@ -696,6 +726,7 @@ class ContextService:
             library=library.snapshot(),
             target=SavedPoint(entry_id=entry.entry_id, point=label),
             roles=None,
+            storage=capture_point_storage(point),
         )
         sources = (
             ContextSource("setup", source_path(self._setup), None),
