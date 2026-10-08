@@ -265,15 +265,28 @@ def compare_ignores(before: str, after: str) -> tuple[IgnoreRegression, ...]:
     if before == after:
         return ()
     old_sites = _sites(before)
+    new_sites = _sites(after)
+    old_lines = before.split("\n")
+    new_lines = after.split("\n")
+    old_ignore_lines = Counter(
+        old_lines[comment.line - 1].strip() for comment, _ in old_sites.comments
+    )
+    new_ignore_lines = Counter(
+        new_lines[comment.line - 1].strip() for comment, _ in new_sites.comments
+    )
     previous = {anchor: comment for comment, anchor in old_sites.comments if anchor}
     found: list[IgnoreRegression] = []
-    for comment, anchor in _sites(after).comments:
+    for comment, anchor in new_sites.comments:
         if anchor is None or not old_sites.parsed:
             reason: IgnoreReason | None = "unproven-position"
         elif anchor not in previous:
             reason = "new-position"
         else:
             reason = _change_reason(previous[anchor], comment)
+        if reason == "unproven-position":
+            raw_line = new_lines[comment.line - 1].strip()
+            if old_ignore_lines[raw_line] >= new_ignore_lines[raw_line]:
+                continue
         if reason is not None:
             found.append(IgnoreRegression(comment.line, comment.kind, reason))
     return tuple(found)
