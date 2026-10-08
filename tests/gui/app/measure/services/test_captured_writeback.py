@@ -14,6 +14,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     MetaDictWriteback,
     ModuleWriteback,
+    PostAnalyzeRequest,
+    PostWritebackRequest,
     WaveformWriteback,
     WritebackItem,
     WritebackRequest,
@@ -25,6 +27,7 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
+from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.writeback import (
     WritebackDraft,
     WritebackEdit,
@@ -227,6 +230,135 @@ def test_analysis_draft_uses_start_run_identity(
             assert len(seen_analyze) == 1
             assert seen_analyze[0].parameters is captured
         writeback.teardown_draft(draft)
+
+
+@pytest.mark.parametrize("save_before_accept", [False, True], ids=["unsaved", "saved"])
+@pytest.mark.parametrize(
+    "source",
+    ["run", "load", "without_metadata", "context_free", "without_primary_draft"],
+)
+def test_post_analysis_draft_retains_primary_identity(
+    tmp_path: Path,
+    qapp: QApplication,
+    source: str,
+    save_before_accept: bool,
+    monkeypatch,
+) -> None:
+    with native_save_session(tmp_path, qapp) as native:
+        tab = native.state.get_tab("tab")
+        original_capture = tab.run.parameters
+        if source == "load":
+            native.state.update_tab_loaded_result(
+                "tab",
+                tab.run.result,
+                "historical.h5",
+                metadata=native.metadata,
+                parameters=original_capture,
+            )
+        elif source in ("without_metadata", "context_free"):
+            tab.run.metadata = None
+            if source == "context_free":
+                tab.run.parameters = None
+        captured = tab.run.parameters
+        expected = native.metadata.run_id if source in ("run", "load") else None
+        control = ContextControlFacet(context=native.context)
+        editor = CfgEditorService(
+            MagicMock(), control, MagicMock(), MagicMock(), native.bus
+        )
+        writeback = WritebackService(
+            editor, write_port=control, entry_ledger=native.context.entry_ledger
+        )
+        primary_draft = (
+            None
+            if source == "without_primary_draft"
+            else writeback.create_draft([], parameters=captured, run_id=expected)
+        )
+        primary_result = PaneSummary()
+        native.state.update_tab_analyze(
+            "tab", primary_result, None, writeback_draft=primary_draft
+        )
+        if save_before_accept:
+            # Save is independent of whether Primary has a native identity.
+            tab.run.metadata = native.metadata
+            native.save()
+        seen_requests: list[PostAnalyzeRequest[object, PaneSummary, object]] = []
+        seen_proposals: list[
+            PostWritebackRequest[object, PaneSummary, PaneSummary]
+        ] = []
+
+        def post_analyze(
+            request: PostAnalyzeRequest[object, PaneSummary, object], *, plots: Plots
+        ) -> PaneSummary:
+            del plots
+            seen_requests.append(request)
+            return PaneSummary()
+
+        def proposals(
+            request: PostWritebackRequest[object, PaneSummary, PaneSummary],
+        ) -> list[WritebackItem]:
+            seen_proposals.append(request)
+            return (
+                []
+                if captured is None
+                else [
+                    MetaDictWriteback("general.flux_value", "Flux", proposed_value=3.0)
+                ]
+            )
+
+        monkeypatch.setattr(tab.adapter, "post_analyze", post_analyze)
+        monkeypatch.setattr(tab.adapter, "get_post_writeback_items", proposals)
+        runner = OperationRunner(
+            None, native.handles, None, native.background, native.bus
+        )
+        service = PostAnalyzeService(
+            native.state, runner, native.bus, native.handles, writeback
+        )
+        # A later live Run id must not replace the Primary draft's identity.
+        tab.run.metadata = replace(native.metadata, run_id="not-primary-source")
+        native.entry.new_point("later-point")
+        control.use_point(PointUseRequest("later-point"))
+        tab.parameters = control.read_context()
+        assert tab.parameters is not captured
+        service.start_post_analyze("tab", object(), plots=Plots(NonPresentingHost()))
+        # Terminal delivery must use the operation-start identity and context.
+        tab.analysis.writeback_draft = None
+        tab.run.metadata = replace(native.metadata, run_id="terminal-live-run")
+        tab.run.parameters = tab.parameters
+        assert native.background.quiesce()
+        draft = tab.post_analysis.writeback_draft
+        assert isinstance(draft, WritebackDraft)
+        assert draft.run_id == expected
+        assert draft.parameters is captured
+        assert [request.parameters is captured for request in seen_requests] == [True]
+        assert [proposal.ctx.parameters is captured for proposal in seen_proposals] == [
+            True
+        ]
+        writeback.teardown_draft(draft)
+        if primary_draft is not None:
+            writeback.teardown_draft(primary_draft)
+
+
+def test_post_rejects_incompatible_primary_draft_before_submission(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    with native_save_session(tmp_path, qapp) as native:
+        native.state.update_tab_analyze(
+            "tab", PaneSummary(), None, writeback_draft=object()
+        )
+        runner = OperationRunner(
+            None, native.handles, None, native.background, native.bus
+        )
+        service = PostAnalyzeService(
+            native.state, runner, native.bus, native.handles, MagicMock()
+        )
+        plots = Plots(NonPresentingHost())
+        try:
+            with pytest.raises(TypeError, match="Primary writeback draft"):
+                service.start_post_analyze("tab", object(), plots=plots)
+            assert not native.state.get_tab("tab").is_analyzing
+        finally:
+            assert native.background.quiesce()
+            plots.finish()
 
 
 def test_writeback_lowers_waveform_expression_from_creation_capture(

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09, result source and accepted Run identity
+**Last updated:** 2026-10-09, result source and Primary/Post accepted identity
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -376,8 +376,10 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
    the Writeback service remains stage-free. Primary FIT and interactive
    operations capture the source `RunMetadata.run_id` at start and pass it to
-   the opaque draft. Accepted ledger events and destination provenance use
-   that identity whether or not Save occurred. The identity does not imply a
+   the opaque draft. Post captures the Primary draft's identity at operation
+   start and passes it to its new draft. A missing Primary identity stays None,
+   even if live Run metadata or Save has an id. Accepted ledger events and
+   destination provenance use that identity whether or not Save occurred. The identity does not imply a
    saved file; consult saved events for persistence. Native Load retains the
    original identity, and analysis without native metadata uses `None`.
 

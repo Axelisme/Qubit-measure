@@ -73,11 +73,17 @@ class PostAnalyzeService(_StagedAnalyzeService):
         *,
         plots: Plots,
     ) -> int:
-        """Begin a post-analysis for ``tab_id``. Returns the operation token.
+        """Begin Post analysis of the selected Primary result; return its token.
 
-        Gates on: the tab is not busy, and a primary analyze result exists (post-
-        analysis depends on it). The worker reads run_result + analyze_result +
-        params off the tab and calls ``adapter.post_analyze``.
+        tab_id selects an idle tab with a Primary result. Adapter-specific
+        post_analyze_params_instance and the owned plots supply operation inputs.
+        Capture Run/Load parameters and the Primary WritebackDraft.run_id at
+        start. The new Post draft retains that identity, including None when the
+        Primary draft has none or no draft exists; never infer it from live Run
+        metadata or Save state. Later tab/session edits do not replace inputs.
+        Busy/missing Primary raises FailedPreconditionError. A present Primary
+        draft must be WritebackDraft, otherwise raise TypeError before submission.
+        Submission failures propagate after unpublished plot cleanup.
         """
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
