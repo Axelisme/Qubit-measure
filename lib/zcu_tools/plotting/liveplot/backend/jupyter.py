@@ -24,22 +24,6 @@ def instant_plot(fig: Figure) -> None:
             "Warning: The matplotlib backend should be set to 'widget' for live plotting."
         )
 
-    # # Hook set_size_inches when live canvas resizing must track figure resizing.
-    # original_set_size_inches = fig.set_size_inches
-
-    # def patched_set_size_inches(*args, **kwargs):
-    #     original_set_size_inches(*args, **kwargs)
-    #     try:
-    #         figsize = fig.get_size_inches()
-    #         canvas.layout.width = f"{int(figsize[0] * fig.dpi)}px"  # type: ignore
-    #         canvas.layout.height = f"{int(figsize[1] * fig.dpi)}px"  # type: ignore
-    #         canvas._handle_message(canvas, {"type": "refresh"}, [])  # type: ignore
-    #         canvas._handle_message(canvas, {"type": "draw"}, [])  # type: ignore
-    #     except Exception as e:
-    #         warnings.warn(f"Failed to update canvas size: {e}")
-
-    # fig.set_size_inches = patched_set_size_inches  # type: ignore
-
     figsize = fig.get_size_inches()
 
     canvas.toolbar_visible = False  # type: ignore
@@ -70,7 +54,7 @@ def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None
     # Readjust the figure size in case it has been changed by the user.
     # All frames must have the same size to save the movie correctly.
     # instant_plot-owned canvases keep their displayed size; do not resize here.
-    # writer.fig.set_size_inches(writer._w, writer._h)
+    # Do not resize the instant_plot canvas to the writer's frame size here.
 
     # Save the figure data to the sink, using the frame format and dpi.
     writer.fig.savefig(
