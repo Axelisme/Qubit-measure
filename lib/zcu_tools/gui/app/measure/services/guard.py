@@ -196,7 +196,7 @@ class GuardService:
                 entry_name=storage.entry_name,
                 point=storage.point,
                 description=storage.description,
-                roles=dict(storage.roles),
+                roles=storage.roles,
             )
         logger.debug("acquire_run_permit: tab_id=%r", tab_id)
         return RunPermit(
