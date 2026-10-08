@@ -1,6 +1,6 @@
 """The production workflow clock preserves UTC and native cancellation."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from threading import Event, Thread
 
 import pytest
@@ -21,6 +21,17 @@ def test_now_is_current_utc_wall_time() -> None:
 def test_past_target_returns_without_cancelling() -> None:
     signal = StopSignal()
     UtcClock().wait_until(datetime(2000, 1, 1, tzinfo=UTC), signal)
+    assert not signal.is_set()
+
+
+def test_future_deadline_in_another_timezone_returns_without_cancelling() -> None:
+    clock = UtcClock()
+    signal = StopSignal()
+    target = (clock.now() + timedelta(milliseconds=20)).astimezone(
+        timezone(timedelta(hours=5, minutes=30))
+    )
+    clock.wait_until(target, signal)
+    assert clock.now() >= target
     assert not signal.is_set()
 
 
