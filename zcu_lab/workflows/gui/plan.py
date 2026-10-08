@@ -29,7 +29,9 @@ from zcu_tools.gui.form import (
     ModuleRef,
     RangeInput,
 )
+from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
+from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.workflows.t1 import T1Plan
 
@@ -50,15 +52,53 @@ class T1PlanForm(FormModel):
     points >= 5 controls runtime T1 delay resolution. qub_pulse selects the
     shared pulse drive; readout selects a pulse-backed readout because native
     readout landscape acquisition requires gain control. Both use ModuleInput
-    wire envelopes and the fixed host library, never a live lookup. Required
+    wire envelopes and the fixed host library, never a live lookup. pi_length_us
+    is the required initial Rabi-range estimate, not an accepted calibration;
+    host seed composition must consume it separately from the native plan. Required
     selections stay unfilled until supplied. Runtime owns every cfg and grid.
     """
 
     flux_dev: str = Field(min_length=1, description="Host flux device name")
     fluxes: RangeInput = Field(description="Ordered absolute device setpoints")
+    pi_length_us: float = Field(
+        gt=0,
+        description="Initial pi-duration estimate in us at the selected drive gain",
+    )
     points: int = Field(default=51, ge=5, description="Uniform T1 delay samples")
     qub_pulse: ModuleInput = Field(description="Shared spectroscopy/Rabi/pi drive")
     readout: ModuleInput = Field(description="Shared pulse-backed readout")
+
+    @classmethod
+    def defaults(
+        cls, env: FormEnv, previous: Mapping[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        """Prefill the required pi estimate from the fixed x180 module capture.
+
+        On initial input only, retain qubit.module.x180.waveform.length as an
+        expression if readable and non-null. No capture, absent/null values or
+        unreadable paths leave the field unfilled for explicit user input. Other
+        modules and simulator constants are never consulted. Invalid readable
+        values produce ordinary field validation errors, not a fallback.
+        No live selection, YAML refresh or device access occurs.
+        """
+        data = super().defaults(env, previous)
+        if previous or env.parameters is None:
+            return data
+        path = "qubit.module.x180.waveform.length"
+        try:
+            value = env.parameters.lookup(path)
+        except (
+            AttributeError,
+            ValueError,
+            TypeError,
+            RoleResolutionError,
+            ContextSourceUnavailableError,
+        ):
+            # An unreadable optional default stays required, per the Start contract.
+            return data
+        if value.present and value.value is not None:
+            data["pi_length_us"] = {"expr": path}
+        return data
 
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:

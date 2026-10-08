@@ -20,6 +20,7 @@ def inline_input(inputs: Inputs) -> FormInput[T1PlanForm]:
             "flux_dev": "flux",
             "fluxes": {"kind": "list", "values": [1.0, 1.1]},
             "points": 21,
+            "pi_length_us": 0.4,
             "qub_pulse": {
                 "kind": "inline",
                 "module": inputs.rabi.modules.qub_pulse.model_dump(mode="json"),

@@ -117,6 +117,7 @@ def test_plan_panel_previews_native_plan_and_blocks_incomplete_text(
     try:
         missing = panel.preview(template.snapshot)
         assert isinstance(missing, FormErrors)
+        assert ("pi_length_us",) in missing.messages
         panel.state.reset(inline_input(inputs))
         panel.editor.refresh(env)
         preview = panel.preview(template.snapshot)
