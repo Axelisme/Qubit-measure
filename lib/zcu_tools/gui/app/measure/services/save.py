@@ -389,6 +389,7 @@ class SaveService:
             data_path=data_path,
             parameters=tab.parameters,
             storage=tab.save_context.capture_storage(),
+            metadata=tab.run.metadata,
             comment=comment,
         )
 

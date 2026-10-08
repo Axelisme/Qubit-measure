@@ -82,6 +82,9 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     # adapter overriding it) must annotate this as ``ClassVar`` too, or pyright
     # rejects the Protocol conformance.
     capabilities: ClassVar[AdapterCapabilities]
+    # Declaring persistence spec tag for acquisition metadata; None means this
+    # adapter does not produce native run evidence. Never infer it from a name.
+    experiment_tag: ClassVar[str | None]
 
     @classmethod
     def guide(cls) -> AdapterGuide:

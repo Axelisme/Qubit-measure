@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.gui.cfg.resource import CfgResource
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
@@ -67,9 +68,18 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult")
 # WritebackService remains the owner of the opaque draft itself.
 @dataclass
 class RunPaneState(Generic[T_Result]):
+    """One result and its historical acquisition evidence.
+
+    result is the adapter-owned record or None. source_path identifies loaded
+    data, not an acquisition destination. source_operation_id identifies the
+    publishing GUI operation. metadata is evidence from Run, or None when no
+    native evidence was acquired; Load must not manufacture new run timing.
+    """
+
     result: T_Result | None = None
     source_path: str | None = None
     source_operation_id: int | None = None
+    metadata: RunMetadata | None = None
 
 
 @dataclass
@@ -453,14 +463,30 @@ class State(SessionState):
         return self._replace_run_pane(tab_id, RunPaneState())
 
     def update_tab_result(
-        self, tab_id: str, result: object, *, source_operation_id: int | None = None
+        self,
+        tab_id: str,
+        result: object,
+        *,
+        source_operation_id: int | None = None,
+        metadata: RunMetadata | None = None,
     ) -> RetiredPaneResources:
+        """Replace result/evidence together and invalidate dependent panes.
+
+        metadata must describe this result, never the current session. Omit it
+        for non-acquisition replacement. Returns detached resources for cleanup;
+        unknown tabs raise KeyError, and off-owner calls fail before mutation.
+        """
         self._assert_owner()
         logger.debug(
             "update_tab_result: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
         return self._replace_run_pane(
-            tab_id, RunPaneState(result=result, source_operation_id=source_operation_id)
+            tab_id,
+            RunPaneState(
+                result=result,
+                source_operation_id=source_operation_id,
+                metadata=metadata,
+            ),
         )
 
     def update_tab_loaded_result(

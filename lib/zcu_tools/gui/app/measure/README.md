@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08，cfg 即時送出與固定 capture
+**Last updated:** 2026-10-08，cfg 固定 capture 與 Run metadata
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -9,6 +9,12 @@ framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/bas
 
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
 lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
+
+Run permit 固定 tab 的歷史 entry／point／roles 與 adapter 的 persistence tag。
+`RunService` 在 adapter 呼叫邊界記錄 UTC 時間、run ID 與 software provenance，
+再由 State 一次發布結果與 `RunPaneState.metadata`。Save request 取用這份歷史
+metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。未宣告 native evidence
+或沒有 saved origin 時 metadata 為 None；新 Run 清舊 evidence，Load 不製造新的量測歷史。
 
 ## 局部設計與閱讀入口
 
