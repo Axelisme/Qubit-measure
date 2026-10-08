@@ -11,6 +11,7 @@ Tests drive terminal paths by capturing bg.last_on_done / on_error.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock
@@ -49,10 +50,10 @@ from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._completion_helpers import on_analyze_failed
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui.session.ui._parameter_fakes import make_parameters
 from zcu_lab.v2._support.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
@@ -73,8 +74,7 @@ def _plots() -> Plots:
 
 def _make_state(tab_id: str = "tab1") -> State:
     ctx = SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
+        parameters=None,
         soc=MagicMock(),
         soccfg=MagicMock(),
         result_dir="/tmp",
@@ -86,7 +86,7 @@ def _make_state(tab_id: str = "tab1") -> State:
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     # Provide a fake run_result so the tab is not empty
-    state.update_tab_result(tab_id, object())
+    state.update_tab_loaded_result(tab_id, object(), "memory")
     return state
 
 
@@ -140,13 +140,47 @@ def _make_two_tab_state() -> State:
         "tab2",
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
-    state.update_tab_result("tab2", object())
+    state.update_tab_loaded_result("tab2", object(), "memory")
     return state
 
 
 # ---------------------------------------------------------------------------
 # start_analyze — normal path
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("context_free", [False, True])
+def test_fit_uses_tab_capture_for_request_and_writeback_after_context_switch(
+    qapp, context_free: bool
+):
+    state = _make_state()
+    captured = None if context_free else make_parameters({"rate": 1.0})
+    tab = state.get_tab("tab1")
+    tab.parameters = captured
+    state.set_context(
+        replace(state.session_env, parameters=make_parameters({"rate": 2.0}))
+    )
+    writeback = MagicMock()
+    service, background = _make_service(state, EventBus(), writeback=writeback)
+    service.start_analyze(AnalyzePermit("tab1"), object(), plots=_plots())
+    state.set_context(
+        replace(state.session_env, parameters=make_parameters({"rate": 3.0}))
+    )
+
+    assert background.last_work is not None
+    result = background.last_work()
+    assert isinstance(tab.adapter, MagicMock)
+    request = tab.adapter.analyze.call_args.args[0]
+    assert isinstance(request, AnalyzeRequest)
+    assert request.parameters is captured
+    if request.parameters is not None:
+        assert request.parameters.value("general.ext.rate") == 1.0
+    assert background.last_on_done is not None
+    background.last_on_done(result)
+    proposal = tab.adapter.get_writeback_items.call_args.args[0]
+    assert proposal.ctx.parameters is captured
+    assert writeback.create_draft.call_args.kwargs["parameters"] is captured
+    assert tab.analysis.result is result
 
 
 def test_start_analyze_submits_to_bg(qapp):
@@ -277,7 +311,7 @@ def _start_onetone_plugin(
     assert isinstance(adapter, OneToneFluxDepAdapter)
     ctx = state.session_env
     plugin = adapter.make_interactive_plugin(
-        AnalyzeRequest(source, FluxPickParams(), ctx.md, ctx.ml, ctx.predictor),
+        AnalyzeRequest(source, FluxPickParams(), ctx.parameters, ctx.predictor),
         plots=plots,
     )
     service, _bg = _make_service(
@@ -544,6 +578,11 @@ def test_on_analyze_finished_emits_interaction_event(qapp):
 
 def test_framework_session_drives_committed_result_and_one_terminal_operation(qapp):
     state = _make_state()
+    captured = make_parameters({"rate": 1.0})
+    state.get_tab("tab1").parameters = captured
+    state.set_context(
+        replace(state.session_env, parameters=make_parameters({"rate": 2.0}))
+    )
     handles = OperationHandles()
     svc, bg = _make_service(state, EventBus(), handles=handles)
 
@@ -571,8 +610,14 @@ def test_framework_session_drives_committed_result_and_one_terminal_operation(qa
     Action[int, int](lambda current, position: position).execute(active.session, 3)
     assert active.session.snapshot() == 3
     assert bg.submit_count == 0
+    state.set_context(
+        replace(state.session_env, parameters=make_parameters({"rate": 3.0}))
+    )
 
     svc.finish_plugin("tab1")
+    adapter = state.get_tab("tab1").adapter
+    assert isinstance(adapter, MagicMock)
+    assert adapter.get_writeback_items.call_args.args[0].ctx.parameters is captured
     result = state.get_tab("tab1").analysis.result
     assert result is not None
     assert result.position == 3
