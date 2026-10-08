@@ -1,6 +1,6 @@
 """UTC wall-clock adapter shared by GUI and offline workflow hosts."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from zcu_tools.experiment.stop_signal import StopSignal
 
@@ -14,7 +14,7 @@ class UtcClock:
 
     def now(self) -> datetime:
         """Return the current timezone-aware UTC wall time without side effects."""
-        raise NotImplementedError
+        return datetime.now(UTC)
 
     def wait_until(self, target: datetime, cancel_signal: StopSignal) -> None:
         """Block until an aware target or the run's cancellation event is set.
@@ -25,4 +25,6 @@ class UtcClock:
         A naive target raises TypeError; datetime arithmetic errors propagate.
         Do not change the signal or read hardware. This call blocks its caller.
         """
-        raise NotImplementedError
+        remaining = (target - self.now()).total_seconds()
+        if remaining > 0:
+            cancel_signal.event.wait(remaining)
