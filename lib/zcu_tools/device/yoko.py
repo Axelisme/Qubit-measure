@@ -20,6 +20,8 @@ DEFAULT_RAMPSTEP = {
     "voltage": 1e-3,
     "current": 1e-6,
 }
+MAX_VOLTAGE = 20.0  # V, absolute output limit
+MAX_CURRENT = 20e-3  # A, absolute output limit
 
 
 STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
@@ -27,7 +29,7 @@ MODE_MAPS_INV = {v: k for k, v in MODE_MAPS.items()}
 
 
 class YOKOGS200Info(BaseDeviceInfo):
-    """Validated GS200 setup and readback, with sample-specific output limits.
+    """Validated GS200 setup and readback within fixed output limits.
 
     Value and rampstep use V in voltage mode and A in current mode. Invalid
     numeric values, non-positive steps/limits, and values or steps outside the
@@ -51,19 +53,6 @@ class YOKOGS200Info(BaseDeviceInfo):
         allow_inf_nan=False,
         description="Positive ramp increment in V or A; defaults to 1e-3 V or 1e-6 A.",
     )
-    max_voltage: float = Field(
-        default=20.0,
-        gt=0,
-        allow_inf_nan=False,
-        description="Maximum absolute output voltage in V.",
-    )
-    max_current: float = Field(
-        default=20e-3,
-        gt=0,
-        allow_inf_nan=False,
-        description="Maximum absolute output current in A.",
-    )
-
     max_voltage_rampstep: float = Field(
         default=1e-2,
         gt=0,
@@ -90,7 +79,7 @@ class YOKOGS200Info(BaseDeviceInfo):
 
     @model_validator(mode="after")
     def _validate_output_limit(self) -> Self:
-        limit = self.max_voltage if self.mode == "voltage" else self.max_current
+        limit = MAX_VOLTAGE if self.mode == "voltage" else MAX_CURRENT
         if abs(self.value) > limit:
             raise ValueError(f"value exceeds {self.mode} output limit {limit}")
         step_limit = (
@@ -135,8 +124,6 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
         defaults = YOKOGS200Info(address=address, mode=mode)
         self._rampstep = defaults.rampstep
-        self._max_voltage = defaults.max_voltage
-        self._max_current = defaults.max_current
         self._max_voltage_rampstep = defaults.max_voltage_rampstep
         self._max_current_rampstep = defaults.max_current_rampstep
         self._rampinterval = 0.01
@@ -175,9 +162,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     # ==========================================================================#
 
     def _check_voltage(self, voltage: float) -> None:
-        if not math.isfinite(voltage) or abs(voltage) > self._max_voltage:
+        if not math.isfinite(voltage) or abs(voltage) > MAX_VOLTAGE:
             raise RuntimeError(
-                f"Voltage must be finite and not over {self._max_voltage:g}V in magnitude"
+                f"Voltage must be finite and not over {MAX_VOLTAGE:g}V in magnitude"
             )
 
     def _set_voltage_direct(self, voltage: float) -> None:
@@ -229,9 +216,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         return self.get_voltage()
 
     def _check_current(self, current: float) -> None:
-        if not math.isfinite(current) or abs(current) > self._max_current:
+        if not math.isfinite(current) or abs(current) > MAX_CURRENT:
             raise RuntimeError(
-                f"Current must be finite and not over {self._max_current:g}A in magnitude"
+                f"Current must be finite and not over {MAX_CURRENT:g}A in magnitude"
             )
 
     def _set_current_direct(self, current: float) -> None:
@@ -375,8 +362,6 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             )
 
         self._rampstep = cfg.rampstep
-        self._max_voltage = cfg.max_voltage
-        self._max_current = cfg.max_current
         self._max_voltage_rampstep = cfg.max_voltage_rampstep
         self._max_current_rampstep = cfg.max_current_rampstep
 
@@ -395,8 +380,6 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             mode=self.get_mode(),
             value=self._get_level(),
             rampstep=self._rampstep,
-            max_voltage=self._max_voltage,
-            max_current=self._max_current,
             max_voltage_rampstep=self._max_voltage_rampstep,
             max_current_rampstep=self._max_current_rampstep,
         )

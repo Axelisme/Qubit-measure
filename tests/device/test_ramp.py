@@ -195,21 +195,14 @@ def test_yoko_voltage_safety_raises_without_level_write() -> None:
     assert session.level_writes == []
 
 
-@pytest.mark.parametrize("mode, limit", [("voltage", 0.1), ("current", 1e-4)])
-def test_yoko_setup_limits_apply_to_subsequent_setters(
+@pytest.mark.parametrize("mode, limit", [("voltage", 20.0), ("current", 20e-3)])
+def test_yoko_setters_reject_values_over_fixed_output_limit(
     mode: Literal["voltage", "current"],
     limit: float,
 ) -> None:
     dev, session = _make_yoko(mode=mode)
-    cfg = YOKOGS200Info(
-        address=dev.address,
-        output="on",
-        mode=mode,
-        max_voltage=0.1,
-        max_current=1e-4,
-    )
+    cfg = YOKOGS200Info(address=dev.address, output="on", mode=mode)
     dev.setup(cfg, progress=False)
-    assert dev.get_info() == cfg
     session.level_writes.clear()
     setter = dev.set_voltage if mode == "voltage" else dev.set_current
     for value in (-1.1 * limit, 1.1 * limit):

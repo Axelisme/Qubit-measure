@@ -170,7 +170,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 ### `YOKOGS200`（`yoko.py:34`）— DC 電流／電壓源
 
-**Info 欄位**：`output ∈ {on, off} = "off"`、`mode ∈ {voltage, current} = "voltage"`、`value: float = 0.0`。`rampstep` 依 mode 預設為 1e-3 V 或 1e-6 A，必須為正且有限。`max_voltage_rampstep` 與 `max_current_rampstep` 是正且有限的步長上限，預設 1e-2 V 與 1e-5 A。`max_voltage` 與 `max_current` 是正且有限的輸出絕對值上限，預設 20 V 與 20 mA。
+**Info 欄位**：`output ∈ {on, off} = "off"`、`mode ∈ {voltage, current} = "voltage"`、`value: float = 0.0`。`rampstep` 依 mode 預設為 1e-3 V 或 1e-6 A，必須為正且有限。`max_voltage_rampstep` 與 `max_current_rampstep` 是正且有限的步長上限，預設 1e-2 V 與 1e-5 A。輸出絕對值上限固定為 module 常數 `MAX_VOLTAGE`＝20 V 與 `MAX_CURRENT`＝20 mA，不可由 setup 設定。
 
 **SCPI 對應**：
 

@@ -70,29 +70,15 @@ def test_yoko_rejects_invalid_rampstep_at_model_boundary(step: float) -> None:
         info.with_updates(rampstep=step)
 
 
-@pytest.mark.parametrize("mode, limit", [("voltage", 0.5), ("current", 2e-3)])
+@pytest.mark.parametrize("mode, limit", [("voltage", 20.0), ("current", 20e-3)])
 @pytest.mark.parametrize("sign", [-1, 1])
-def test_yoko_enforces_configured_output_limits(
+def test_yoko_enforces_fixed_output_limits(
     mode: Literal["current", "voltage"], limit: float, sign: int
 ) -> None:
-    info = YOKOGS200Info(
-        address="GPIB::1",
-        mode=mode,
-        max_voltage=0.5,
-        max_current=2e-3,
-        value=sign * limit,
-    )
+    info = YOKOGS200Info(address="GPIB::1", mode=mode, value=sign * limit)
     with pytest.raises(ValidationError, match="output limit"):
         info.with_updates(value=sign * limit * 1.01)
     assert YOKOGS200Info.model_validate_json(info.to_json()) == info
-
-
-@pytest.mark.parametrize("invalid", [0.0, -1.0, float("inf"), float("nan")])
-def test_yoko_rejects_invalid_output_limits(invalid: float) -> None:
-    with pytest.raises(ValidationError, match="max_voltage"):
-        YOKOGS200Info(address="GPIB::1", max_voltage=invalid)
-    with pytest.raises(ValidationError, match="max_current"):
-        YOKOGS200Info(address="GPIB::1", max_current=invalid)
 
 
 @pytest.mark.parametrize("mode", ["voltage", "current"])
@@ -146,11 +132,11 @@ def test_yoko_rejects_invalid_rampstep_limits(invalid: float) -> None:
 
 
 def test_yoko_set_flux_rejects_out_of_range_without_changing_level() -> None:
-    info = YOKOGS200Info(address="GPIB::1", mode="current", max_current=1e-4)
-    info.set_flux(5e-5)
+    info = YOKOGS200Info(address="GPIB::1", mode="current")
+    info.set_flux(5e-3)
     with pytest.raises(ValidationError, match="output limit"):
-        info.set_flux(2e-4)
-    assert info.value == pytest.approx(5e-5)
+        info.set_flux(2.1e-2)
+    assert info.value == pytest.approx(5e-3)
 
 
 @pytest.mark.parametrize("value", [float("inf"), float("nan")])
