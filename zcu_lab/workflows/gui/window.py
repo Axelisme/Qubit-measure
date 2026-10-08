@@ -207,7 +207,7 @@ class T1WorkflowWindow(QWidget):
             t1_fluxdep,
             plan=plan,
             tunables=tunables_form.to_cfg(),
-            paths=RunPaths(roots.database, roots.result),
+            paths=RunPaths(metadata_root=roots.result, data_root=roots.database),
             identity=RunIdentity(
                 run_id,
                 DeviceSnapshot(env.devices),

@@ -78,7 +78,15 @@ def finish(
 
 
 def declare(rig: Rig):
-    return workflow("example", plan=Plan, tunables=Tunables, init=rig.init)(finish)
+    def invoke(
+        env: WorkflowEnv[int],
+        plan: Plan,
+        tun: Tunables,
+        state: State,
+    ) -> Step[State, int]:
+        return finish(env, plan, tun, state)
+
+    return workflow("example", plan=Plan, tunables=Tunables, init=rig.init)(invoke)
 
 
 def test_submit_is_pending_until_worker_accepts_and_owner_releases_lease(
@@ -208,9 +216,14 @@ def test_stop_during_start_is_settled_before_init_and_step(tmp_path: Path) -> No
     harness, rig = StartHarness(), Rig(tmp_path)
     controller = create_controller(harness, rig, lambda _status, _error: None)
 
+    requested = False
+
     class StoppingClock(ManualClock):
         def now(self):
-            controller.stop()
+            nonlocal requested
+            if not requested:
+                requested = True
+                controller.stop()
             return super().now()
 
     ports = EnginePorts(rig.plots, rig.progress, StoppingClock(), context=7)

@@ -172,7 +172,7 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
     harness.background.deliver()
     assert not harness.gate.snapshot()
     assert (entry.result_path / "workflows/captured").is_dir()
-    assert (entry.database_path / "workflows/captured/manifest.json").is_file()
+    assert (entry.result_path / "workflows/captured/manifest.json").is_file()
     assert window.tuning_panel is not None
     assert window.tuning_panel.host.accepted_input.data["guess_us"] == {
         "expr": "general.ext.guess_us"
@@ -212,7 +212,7 @@ def test_real_t1_gui_caller_runs_native_offline_acquisitions(
 ) -> None:
     window, harness, entry = attachment
     window.plan_panel.state.write(
-        {("fluxes",): {"kind": "list", "values": [1.0]}}, FormEnv()
+        {("fluxes", "kind"): "list", ("fluxes", "values"): [1.0]}, FormEnv()
     )
     window.tunables_panel.state.reset(
         FormInput(
@@ -238,7 +238,7 @@ def test_real_t1_gui_caller_runs_native_offline_acquisitions(
     assert len(record.run_files) >= 4
     for relative in record.run_files:
         assert (
-            entry.result_path / "workflows/native" / record.iteration_dir / relative
+            entry.database_path / "workflows/native" / record.iteration_dir / relative
         ).is_file()
     assert window.tuning_panel is not None and not window.tuning_panel.isEnabled()
     assert not harness.gate.snapshot()
