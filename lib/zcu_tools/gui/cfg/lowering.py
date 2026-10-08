@@ -94,7 +94,15 @@ def validate_finished_cfg(
     *,
     resolve_reference: ReferenceResolver | None,
 ) -> None:
-    """Validate the static contract at a finished-cfg boundary."""
+    """Validate structure, literals and direct values in authored cfg input.
+
+    Linked, non-overridden references with empty sections may await catalog
+    shape without resolving their keys. Custom, populated and overridden
+    references still require a valid shape and payload. Raise RuntimeError for
+    invalid input; reference resolver failures propagate. This static check
+    does not certify executability: lower_finished_cfg resolves every enabled
+    reference and rejects missing shapes or incomplete payloads.
+    """
     _validate_static_section(
         schema.spec,
         schema.value,

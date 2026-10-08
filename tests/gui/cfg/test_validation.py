@@ -33,6 +33,73 @@ def _missing_expression(expr: str) -> float:
     raise RuntimeError(f"Missing parameter: {expr!r}")
 
 
+@pytest.mark.parametrize("kind", ["module", "waveform"])
+def test_linked_empty_input_can_await_shape_but_cannot_lower(kind: str) -> None:
+    schema = _schema(
+        {
+            "ref": ReferenceSpec(
+                kind=kind,
+                allowed=[
+                    CfgSectionSpec(
+                        label="Shape", fields={"count": ScalarSpec("Count", int)}
+                    )
+                ],
+            )
+        },
+        {"ref": ReferenceValue("driver.module.pi", CfgSectionValue())},
+    )
+
+    # Static input admission must not read an unavailable reference source.
+    def unavailable(kind: str, key: str, /) -> str | None:
+        raise LookupError(f"Source unavailable: {kind}:{key}")
+
+    validate_finished_cfg(schema, resolve_reference=unavailable)
+    with pytest.raises(LookupError, match="Source unavailable"):
+        lower_finished_cfg(
+            schema, resolve_expression=None, resolve_reference=unavailable
+        )
+    with pytest.raises(RuntimeError, match="Unknown .* reference"):
+        lower_finished_cfg(
+            schema, resolve_expression=None, resolve_reference=lambda kind, key: None
+        )
+    with pytest.raises(RuntimeError, match="count.*missing"):
+        lower_finished_cfg(
+            schema, resolve_expression=None, resolve_reference=lambda kind, key: "Shape"
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ReferenceValue("<Custom:Shape>", CfgSectionValue()),
+        ReferenceValue("driver.module.pi", CfgSectionValue(), is_overridden=True),
+        ReferenceValue(
+            "driver.module.pi", CfgSectionValue(fields={"count": DirectValue(1.5)})
+        ),
+        ReferenceValue("<Custom:Shape", CfgSectionValue()),
+        ReferenceValue("driver.module.pi", CfgSectionValue(), error="source fault"),
+    ],
+)
+def test_static_reference_input_exemption_does_not_mask_faults(
+    value: ReferenceValue,
+) -> None:
+    schema = _schema(
+        {
+            "ref": ReferenceSpec(
+                kind="module",
+                allowed=[
+                    CfgSectionSpec(
+                        label="Shape", fields={"count": ScalarSpec("Count", int)}
+                    )
+                ],
+            )
+        },
+        {"ref": value},
+    )
+    with pytest.raises(RuntimeError):
+        validate_finished_cfg(schema, resolve_reference=lambda kind, key: "Shape")
+
+
 def test_complex_live_value_cannot_lower_to_real_scalar() -> None:
     schema = _schema(
         {"frequency": ScalarSpec("Frequency", float)},
