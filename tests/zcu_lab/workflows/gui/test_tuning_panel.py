@@ -1,16 +1,15 @@
-"""T1's shipped Qt caller shares input and revision policy with JSON edits."""
+"""T1's Qt caller submits the same current input as external JSON edits."""
 
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from qtpy.QtWidgets import QApplication, QLabel, QLineEdit
+from qtpy.QtWidgets import QApplication, QLineEdit
 from zcu_tools.experiment.workflows import (
     Actor,
     DeviceSnapshot,
     Engine,
     EnginePorts,
-    RevisionConflict,
     RunIdentity,
     RunPaths,
 )
@@ -86,11 +85,7 @@ def test_gui_apply_and_json_edits_share_native_t1_revision(
     assert isinstance(native_values, dict)
     assert native_values["guess_us"] == 30.0
     assert widget.host.accepted_input.data["guess_us"] == {"expr": "10 * 3"}
-    remote = widget.apply_external(
-        {("reps",): 200},
-        expected_revision=1,
-        actor=Actor("agent", "rpc"),
-    )
+    remote = widget.apply_external({("reps",): 200}, actor=Actor("agent", "rpc"))
     assert not isinstance(remote, FormErrors)
     assert remote.revision == 2
     assert widget.panel.state.input.data["reps"] == 200
@@ -117,30 +112,24 @@ def test_incomplete_gui_text_blocks_apply_and_discard_restores_control(
     assert float(restored.text()) == result.sweep_factor
 
 
-def test_agent_edit_warns_and_preserves_draft_until_explicit_discard(
+def test_external_edit_submits_pending_parsed_gui_values_in_the_same_batch(
     tuning: tuple[T1TuningPanel, Engine[Calibrated]],
 ) -> None:
     widget, engine = tuning
     widget.panel.state.write({("guess_us",): 31.0}, FormEnv())
-    widget.apply_external(
-        {("guess_us",): 42.0},
-        expected_revision=0,
-        actor=Actor("agent", "rpc"),
-    )
-    assert widget.panel.state.input.data["guess_us"] == 31.0
-    assert widget.host.has_conflict
-    message = widget.findChild(QLabel, "workflow.tuning.message")
-    assert isinstance(message, QLabel)
-    assert message.text()
-    with pytest.raises(RevisionConflict):
-        widget.apply()
+    applied = widget.apply_external({("reps",): 200}, actor=Actor("agent", "rpc"))
+    assert not isinstance(applied, FormErrors)
+    values = engine.tunables("tuning").values
+    assert isinstance(values, dict)
+    assert (values["guess_us"], values["reps"]) == (31.0, 200)
+    assert widget.panel.state.input.data == widget.panel.state.base.data
+    widget.panel.state.write({("guess_us",): 50.0}, FormEnv())
     widget.discard()
-    assert widget.panel.state.input.data["guess_us"] == 42.0
-    assert engine.tunables("tuning").revision == widget.host.revision == 1
-    assert not widget.host.has_conflict
+    assert widget.panel.state.input.data["guess_us"] == 31.0
+    assert engine.tunables("tuning").revision == 1
 
 
-def test_remote_edit_preserves_unparseable_gui_text_and_marks_conflict(
+def test_successful_external_edit_replaces_unparseable_view_text(
     tuning: tuple[T1TuningPanel, Engine[Calibrated]],
 ) -> None:
     widget, engine = tuning
@@ -148,31 +137,29 @@ def test_remote_edit_preserves_unparseable_gui_text_and_marks_conflict(
     assert isinstance(control, QLineEdit)
     control.setText("-")
     applied = widget.apply_external(
-        {("sweep_factor",): 8.0}, expected_revision=0, actor=Actor("agent", "rpc")
+        {("sweep_factor",): 8.0}, actor=Actor("agent", "rpc")
     )
     assert not isinstance(applied, FormErrors)
     assert engine.tunables("tuning").revision == 1
-    assert widget.host.revision == 0
-    assert widget.host.has_conflict
-    assert control.text() == "-"
-    widget.discard()
     assert widget.panel.editor.local_parse_errors() is None
     restored = widget.panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
     assert isinstance(restored, QLineEdit)
     assert float(restored.text()) == 8.0
 
 
-def test_invalid_native_t1_form_batch_does_not_publish_other_valid_leaves(
+def test_invalid_native_t1_batch_retains_input_without_partial_publication(
     tuning: tuple[T1TuningPanel, Engine[Calibrated]],
 ) -> None:
     widget, engine = tuning
     before = engine.tunables("tuning")
     blocked = widget.apply_external(
-        {("reps",): 200, ("guess_us",): -1.0},
-        expected_revision=0,
-        actor=Actor("agent", "rpc"),
+        {("reps",): 200, ("guess_us",): -1.0}, actor=Actor("agent", "rpc")
     )
     assert isinstance(blocked, FormErrors)
     assert ("guess_us",) in blocked.messages
     assert engine.tunables("tuning") == before
+    assert widget.panel.state.input.data["reps"] == 200
+    assert widget.panel.state.input.data["guess_us"] == -1.0
+    assert widget.panel.state.base.data == widget.host.accepted_input.data
+    widget.discard()
     assert widget.panel.state.input.data == widget.host.accepted_input.data

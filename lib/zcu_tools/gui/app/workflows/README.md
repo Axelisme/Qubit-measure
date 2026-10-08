@@ -1,7 +1,9 @@
 # gui/app/workflows — Workflow form submission
 
-**Last updated:** 2026-10-08，tunables submission seed
+**Last updated:** 2026-10-08，control-identity transition seed
 
-TunablesHost owns the accepted expression input, GUI draft base revision and submission policy for one native run. GUI and JSON callers use the same FormState/Engine seam. Engine still owns numeric validation, revision and journal publication. A stale Apply retains draft and fails without retry. External edits preserve an edited or locally unparseable GUI draft until explicit Discard.
+TunablesHost owns accepted expression input and Apply/Discard for one native run. GUI and external edits submit complete current ordinary values through the same FormState/Engine seam. External edits use the same parsed GUI draft, without a GUI revision conflict guard. Engine owns numeric validation, revision, step capture and journal publication.
 
-Concrete workflow attachments remain in zcu_lab and are supplied by the composition root. The T1 tuning attachment embeds the existing T1TunablesPanel. This seed does not implement app startup, Start capture, hardware limits, worker leases, RPC transport, PNG or source reload.
+Control identity will reject non-holder writes after it lands. This transition does not check holder and does not introduce a workflows-specific holder mechanism.
+
+Concrete attachments stay in zcu_lab and are injected by the composition root. T1TuningPanel embeds the existing T1TunablesPanel. This seed does not implement startup, Start capture, hardware limits, worker leases, RPC transport, PNG or source reload.

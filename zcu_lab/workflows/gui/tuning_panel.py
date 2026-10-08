@@ -22,7 +22,8 @@ class T1TuningPanel(QWidget):
     accepted input used for Start. This panel does not Start, capture sources,
     own worker/lease lifecycle or save input files. GUI and JSON callers share
     host. accepted_input is available on host for the app's persistence policy.
-    panel is the existing concrete T1 editor attachment; host owns revisions.
+    panel is the existing T1 attachment; Engine owns numeric revisions.
+    This transitional caller does not implement or check holder identity.
     """
 
     panel: T1TunablesPanel
@@ -60,13 +61,12 @@ class T1TuningPanel(QWidget):
         layout.addWidget(discard_button)
 
     def apply(self) -> TunablesSnapshot | FormErrors:
-        """Submit the GUI draft with its original base revision as a user.
+        """Submit current complete input as a user, without a GUI version guard.
 
         Incomplete text/model errors return FormErrors without Engine edits.
-        Native failures and RevisionConflict propagate; draft is retained.
+        Native failures propagate without retry; draft/base are retained.
         """
         return self.host.apply(
-            expected_revision=self.host.revision,
             actor=Actor("user", "gui"),
             local_errors=self.panel.editor.local_parse_errors(),
         )
@@ -75,25 +75,19 @@ class T1TuningPanel(QWidget):
         self,
         batch: Mapping[FormWritePath, JsonValue],
         *,
-        expected_revision: int,
         actor: Actor,
     ) -> TunablesSnapshot | FormErrors:
-        """Apply GUI-RPC input edits without overwriting an edited GUI draft.
+        """Write GUI-RPC edits and submit complete current input.
 
-        Caller supplies the observed revision and user/agent identity; validation
-        errors return FormErrors and native failures propagate without retry.
-        No socket or direct MCP-to-Engine path is introduced here.
+        Parsed GUI draft participates. Invalid input stays in the draft and
+        returns FormErrors; native failures propagate without retry. Success
+        clears local unparseable text and shows the accepted input. No socket,
+        direct MCP-to-Engine path or transitional holder check is introduced.
         """
-        result = self.host.apply_external(
-            batch,
-            expected_revision=expected_revision,
-            actor=actor,
-            local_errors=self.panel.editor.local_parse_errors(),
-        )
-        if self.host.has_conflict:
-            self._message.setText(
-                "Tunables changed externally. Apply is stale; discard or revise."
-            )
+        result = self.host.apply_external(batch, actor=actor)
+        if not isinstance(result, FormErrors):
+            self.panel.editor.discard_local_text()
+            self._message.setText(f"Applied revision {result.revision}")
         return result
 
     def discard(self) -> None:

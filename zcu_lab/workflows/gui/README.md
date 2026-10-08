@@ -12,4 +12,4 @@ T1TunablesPanel 用 host 提供的 env 建立 state，嵌入通用 FormEditor，
 
 FormState 處理 draft、驗證與 input 差異。to_cfg 只把合法普通值轉成 native T1Tunables。Expression 留在 FormInput，Engine journal 只記普通值。Host 決定何時提交；表單不更新 owner revision，也不操作設備。
 
-T1TuningPanel 為已接受的 native T1 run 嵌入 T1TunablesPanel。它的 GUI Apply 與外部 JSON edit 共用 gui/app/workflows 的 TunablesHost。Host 保存 expression input／draft base revision，Engine 保存普通值。這個 caller 不 Start、capture、安排 worker 或保存 input 檔案。
+T1TuningPanel 為已接受的 native T1 run 嵌入 T1TunablesPanel。它的 GUI Apply 與外部 JSON edit 共用 gui/app/workflows 的 TunablesHost。Host 保存已接受的expression input並提供Apply／Discard。GUI與外部edit提交當下完整普通值，不持GUI draft revision守衛。Engine保存數值revision，過渡期不檢查holder。這個 caller 不 Start、capture、安排 worker 或保存 input 檔案。
