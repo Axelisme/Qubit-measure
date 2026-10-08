@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-06, shared resource observation ownership
+**Last updated:** 2026-10-08, version handshake
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -120,101 +120,17 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION`：GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION`：GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION`：MCP bridge code revision. It is displayed by the bridge, not
-  owned here.
+- `WIRE_VERSION = 85`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 117`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION = 111`: MCP bridge code revision. The bridge displays this value.
 
-Current measure-gui values are `WIRE_VERSION = 84`, `GUI_VERSION = 116`, and
-`MCP_VERSION = 109`, defined in `zcu_tools.mcp.measure.server`. WIRE 84 declares
-shared string enums in interactive command schemas. GUI 116 obtains flux-line
-roles from the domain type. MCP 109 checks flux units and requires explicit
-native opt-in for FakeDevice. WIRE 83 adds
-analysis-result `invalid` paths and reasons. GUI 115 replaces nonfinite analysis
-summary numbers with null. MCP 108 retains those facts in analysis executions.
-MCP 107 provides recipe-first tools and public RPC; MCP 106 adds Two-tone and
-Rabi recipes. WIRE 82 adds
-`unit` to `device.snapshot` and optional `run_operation_id` to `tab.get_figure`.
-The Run token only accepts the Run pane and cannot accompany an analysis
-`operation_id`. GUI 114 rejects a replaced Run before rendering and preserves
-available calibration expressions when only center or linewidth is known.
-MCP 105 adds Onetone spectrum, flux and power recipes, including raw-only power
-completion and a Run-bound temporary preview. MCP 104 delivers
-recipe interaction handoffs and checks post-Run result provenance. MCP 103 adds
-Lookback recipes and execution controls. WIRE 81 adds optional
-`operation_id` to `tab.writeback_preview`. GUI 113 rejects a replaced analysis
-before reading its writeback draft; omission still reads the current pane.
-WIRE 80 adds Run
-`source_operation_id` to snapshot result state and optional `run_operation_id` to
-`tab.save_data` and `tab.analyze`. GUI 112 commits Run provenance and rejects a
-superseded source before draft edits, pane following, or operation admission.
-WIRE 79 adds
-`tab.interact(include_figure=false)` for a receipt without PNG rendering. GUI 111
-preserves command validation and the original operation in that receipt. MCP 102
-owns session-local analysis executions, ordered named-image autosave, execution
-queries and cancellation, and worker cleanup before PNG removal. WIRE 78 combines
-operation-bound result inputs and figure reads with named image saving. GUI 110
-commits provenance and captured inputs with named plots; a replaced operation
-cannot change image paths or export. MCP 101 includes public RPC access, whole-draft
-acceptance, PNG delivery and fail-closed session binding. WIRE 77 adds
-`analysis_error` to load outcomes; failed analysis preparation preserves the loaded
-result and the new tab from `tab.open_file`. GUI 109 publishes committed result facts
-independently of analysis preparation and reports its failure separately. WIRE 76
-separates waveform save from preview; GUI 108 treats asset persistence as save success.
-WIRE 75 uses explicit
-cfg refs across connections instead of a per-connection cfg seen guard. GUI 107
-retains tab, SoC, device and authentication guards. WIRE 74 requires
-`expected` on `tab.run_start`, using the common cfg_ref codec. GUI 106 runs only the
-specified Valid publication. MCP 98 forwards that expectation once without
-hidden reads, refresh or retry. WIRE 73 replaces
-`tab.set_cfg` with atomic `tab.edit_cfg` and returns cfg_ref in tab snapshots.
-GUI 105 uses one persistent tab cfg resource across Qt, remote, Load and Run.
-MCP 97 forwards explicit cfg_ref expectations without hidden reads or retries.
-WIRE 72 renames the
-project wire method `startup.apply` to `project.apply` with the same params and
-result. GUI 104 opens one Setup dialog identity for launch and toolbar; MCP 96
-makes the `project` tool apply through `project.apply`. MCP 95 finalizes
-shared-state workflow and interactive concurrency guidance. WIRE 71 exposes
-shared interactive plugin commands and terminal replies. GUI 103 owns interactive
-sessions and command view follow; MCP 94 adds the fixed `tab_interact` tool.
-WIRE 70 exposes
-shared artifact status, batch save operations and guarded close/shutdown replies.
-GUI 102 tracks ordered saves and actual output paths; MCP 93 adds save, close and
-graceful shutdown tools. WIRE 69 adds
-complete writeback previews and identity-preserving batch results. GUI 101 applies
-explicit items through shared drafts and follows their pane; MCP 92 forwards the
-writeback tool to that owner. WIRE 68 exposes analysis parameters and invalidation
-facts; GUI 100 owns analysis validation and explicit pane following; MCP 91 adds
-run/analyze tools with bounded waits. WIRE 67 adds
-aggregate cfg edits and `context.ml_edit`; GUI 99 owns sequential library
-commits through the shared draft model and preserves batch error categories.
-MCP 90 exposes cfg/library tools and reports partial commits. WIRE 66 moves
-seen guards into the GUI, removes wire expectations and write receipts, exposes
-operation state in snapshots, and adds `tab.open_file`. GUI 98 owns new-tab
-loading and failure cleanup; MCP 89 forwards once without version bookkeeping.
-WIRE 65 adds State-cached device fields to snapshots during setup. WIRE 64 exposes
-predictor calibration; GUI 96 routes it through the shared predictor port.
-GUI 93 removes
-Run's context-content dependency after freezing cfg and device inputs; tab cfg,
-tab existence, SoC, devices and hardware exclusion remain protected. WIRE 63
-carries complete cached cfg observations; GUI 92 bounds response encoding failures.
-WIRE 62 adds
-`context.snapshot`, conditional full-read policy and certified resource creation
-to the live catalog. GUI 90 declares those policies; MCP 82 consumes them.
-GUI 89 reports
-an already failed operation as `operation_failed` on cancel, rather than
-`finished`; MCP 81 likewise reports failure when the short cancellation wait
-observes a failed outcome. GUI 88 made domain cancel RPCs internal in the MCP
-catalog and bounded `notify.await` to 600 seconds. GUI 87 corrected no-project
-RPC guidance. WIRE 61 adds
-`__agent_write_versions` to replies for catalog-declared writes: each changed
-resource carries its versions before and after that handler on the owner thread.
-WIRE 60 adds `rpc.catalog.reveals_without` for partial reads; MCP samples the
-resource version before a full read and records it only after success.
+The first two constants live in this package's `wire_version.py`.
+`MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.
 
 Only wire-contract changes bump `WIRE_VERSION`. GUI-internal changes that need a
 reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
-`MCP_VERSION`.
+`MCP_VERSION`. A GUI wire-contract change bumps both `WIRE_VERSION` and
+`GUI_VERSION`.
 
 ## Resource-Version Guard
 

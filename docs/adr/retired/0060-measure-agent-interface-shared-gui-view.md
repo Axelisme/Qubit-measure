@@ -352,6 +352,36 @@ tab_close("t1")
 
 本介面不提供：工作點（flux 點）的組合操作與跨工作點表格、predictor 的曲線與 matrix element、由 run cfg 直接建立 library 項目、衍生值寫入、run 歷史與比較、樣品表（SampleTable）寫入、狀態變更通知、冪等重試鍵。
 
+## Wire 與 GUI 版本沿革
+
+本節整理 measure `wire_version.py` 註解與 remote README 的版本紀錄。
+它只保留介面分界的變化，不作為現行契約。現行分界見 [[0068]]。
+
+| Wire 版本 | 當時的變化 |
+| --- | --- |
+| 39–49 | 刪除重複 method，cfg、run、save、writeback 移到 `tab.*`；context 與 editor method 改名。回覆改用具名欄位，啟動操作回傳 handle，cfg setter 只接受 canonical path。加入 waveform、value source 與 result-scope 查詢。 |
+| 50–54 | EventBus push 加入 seq/origin，hardware-gate 查詢公開 exclusion presence。One-tone 分析加入 amplitude slope、electrical delay 與 phase curvature 控制。 |
+| 55–56 | Figure、writeback 與 image save 使用 subtab locator。Load 回覆公開 cfg backfill 是否套用，回填失敗保留已載入的結果。 |
+| 57–62 | `rpc.catalog` 公開 GUI-owned method policy。Operation 公開 active/cancel/await。MCP 曾追蹤成功寫入 baseline、部分讀取與 owner-thread write receipts；context snapshot 與 catalog 補上完整讀取資訊。 |
+| 63–65 | Cfg 讀取回傳完整 cached observation。Predictor 加入單點校正。Device snapshot 在 setup 期間回傳 State-cached field specifications。 |
+| 66 | GUI 接管 per-connection seen guard，wire 移除 expectations/receipts。Snapshot 公開 operation state，`tab.open_file` 承接新 tab 載入與 cfg backfill。 |
+| 67–73 | 加入 aggregate cfg 編輯、順序 library commit、分析參數與 invalidation 回覆、完整 writeback preview、artifact batch save、interactive plugin command 與 `project.apply`。Tab cfg 改用 persistent resource 與 atomic edit。 |
+| 74–75 | Run 要求 caller 的 explicit cfg ref；cfg ref 可跨連線使用，不再要求 per-connection cfg seen。非 cfg guards 保留。 |
+| 76–79 | Waveform 保存與 preview 分開。Load 公開 analysis preparation failure。Result input、figure read 與 named image save 可綁定 operation；interactive command 可省略 PNG。 |
+| 80–84 | Run source token 與 analysis operation 綁定後續操作，拒絕被取代的結果。Device snapshot 公開 unit；analysis summary 將非有限值換成 null 並列 invalid paths；interactive schema 使用 domain string enum。 |
+
+GUI revision 記錄了對應的 application 變化。60–79 包含 value-source completion、
+project migration、hardware-gate attribution、Qt-free completion、one-tone 校正、
+JPA adapters 與 pane-qualified results。80–98 包含 live catalog、opaque cancellation
+handles、bounded wait/reply/outbound queue、cached device fields 與 GUI-owned observations。
+99–107 包含 cfg/library commit、analysis/writeback/artifact/interactive owners、
+Setup dialog identity 及 explicit Run cfg refs。110–116 包含 named plots、
+operation provenance、figure-free receipts、writeback source 檢查、部分校正保存、
+非有限分析結果投影與 domain enum。
+
+以上紀錄不涵蓋每一個版本號。Wire 85、GUI 117 的常數值沒有隨附變更說明，
+本節不推定其變更內容。
+
 ## Consequences
 
 - agent 的每個判斷點對應一個 tool，使用者在 GUI 上看到與 agent 相同的狀態與畫面。
