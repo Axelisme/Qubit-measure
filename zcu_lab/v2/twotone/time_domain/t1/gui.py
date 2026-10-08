@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -18,13 +19,31 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import (
+    SweepDefault,
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1Analysis,
     T1AnalyzeOptions,
@@ -69,6 +88,35 @@ class T1AnalyzeResult:
         }
 
 
+def _blank_pi_pulse(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.1)
+    value.with_field("waveform.length", 5.1)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field("ro_cfg.trig_offset", 0.55)
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
+
+
 class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
     exp_cls = T1Exp
     ExpCfg_cls: ClassVar[Any] = T1Cfg
@@ -81,46 +129,68 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
             "has been calibrated (amplitude/length Rabi)."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional, seeding defaults): 't1' — "
-            "prior T1 estimate (us); the delay sweep spans up to 5*t1 and "
-            "relax_delay defaults to 5*t1 (both fallback ~100 us). The pi "
-            "pulse pulls 'q_f' (~2000–6000 MHz) and 'qub_ch'. Readout pulls "
-            "'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and 'timeFly' for the "
-            "readout trigger offset (~0–1 us)."
+            "Requires a qubit and its referenced resonator. Defaults read "
+            "qubit.t1 (us), qubit.freq (MHz), qubit.wiring.L01.ch, "
+            "resonator.freq (MHz), and resonator.wiring.ch/ro_ch from the "
+            "tab's fixed capture. Missing T1 seeds relax_delay at 100 us "
+            "and the delay sweep stop at 500 us."
         ),
         expects_ml=(
-            "Needs a qubit pi-pulse module — references a calibrated library "
-            "pi pulse ('pi_amp' / 'pi_len') when present, else a blank inline "
-            "pulse — and a readout module (calibrated 'readout_dpm' / "
-            "'readout_rf' / 'readout' / 'res_readout', else a blank "
-            "pulse-readout referencing 'ro_waveform' when present). Optional "
-            "reset references a library reset ('reset_bath' / 'reset_10' / "
-            "'reset_120') when present, else stays disabled."
+            "Uses qubit.module.x180 and qubit.module.readout from the fixed "
+            "capture. Unset or dangling slots seed inline pulse/readout "
+            "defaults. Optional qubit.module.reset stays disabled when absent. "
+            "Inline readout trigger offset defaults to 0.55 us; verify wiring "
+            "and timing before running."
         ),
         typical_writeback=(
-            "Proposes the fitted T1 relaxation time into MetaDict 't1' (us). "
-            "No ModuleLibrary writeback."
+            "Proposes fitted qubit.t1 and its standard error (us) to the "
+            "captured qubit and working point. No module writeback."
         ),
         recommended=(
             "Analysis defaults to a single-exponential fit; enable "
             "dual-exponential only when the decay clearly shows two timescales "
             "(a fast component on top of the slow relaxation). A delay sweep "
             "reaching ~5*T1 lets the decay flatten so the fit is "
-            "well-constrained; with no prior 't1' it spans 0–100 us. "
+            "well-constrained; with no prior qubit.t1 it spans 0–500 us. "
             "Set 'uniform=False' to cluster more points on the exponential "
             "decay while keeping the configured start/stop window."
         ),
     )
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Capture the qubit and its referenced resonator when opening a tab."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
-            .reset("reset", optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("qubit.module.reset", fallback=None),
+            )
+            .field(
+                "modules.pi_pulse",
+                spec=make_pulse_module_spec(),
+                default=module_seed(
+                    "qubit.module.x180",
+                    fallback=custom(_blank_pi_pulse, description="inline pi pulse"),
+                ),
+            )
+            .field(
+                "modules.readout",
+                spec=make_readout_module_spec(),
+                default=module_seed(
+                    "qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
             .relax_delay(
-                scaled_md("t1", factor=5.0, fallback_value=100.0),
+                scaled_path_seed("qubit.t1", factor=5.0, fallback_value=100.0),
             )
             .sweep(
                 "length",
@@ -128,7 +198,7 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
                 default=SweepDefault(
                     start=0.0,
                     # The fallback is the fully scaled 5 * 100 us window.
-                    stop=scaled_md("t1", factor=5.0, fallback_value=500.0),
+                    stop=scaled_path_seed("qubit.t1", factor=5.0, fallback_value=500.0),
                     expts=101,
                 ),
             )
@@ -143,7 +213,11 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> T1RunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = T1Exp().run(cfg, context=context)
@@ -168,9 +242,10 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                target_name="t1",
+                target_name="qubit.t1",
                 description="T1 relaxation time (us)",
                 proposed_value=result.t1,
+                stderr=result.t1_err,
             ),
         ]
 

@@ -7,7 +7,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
-from zcu_tools.gui.cfg import EvalValue, ScalarLeafInput, SweepValue
+from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.cfg import EvalValue, ReferenceValue, ScalarLeafInput, SweepValue
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
@@ -99,6 +100,42 @@ def path_seed(
         return fallback
 
     return Seed(resolve, description=f"parameter:{path}")
+
+
+def module_seed(
+    path: str, *, fallback: Seed[ReferenceValue] | None
+) -> Seed[ReferenceValue | None]:
+    """Mount a captured module slot/root, or an explicit fresh fallback.
+
+    path is a role/component module slot or a concrete library root. Missing,
+    null and dangling slots use fallback (None disables an optional module).
+    Missing direct roots also use fallback. Invalid paths, unavailable captures,
+    malformed modules and asset/materialization failures propagate. A mounted
+    reference retains path so later lowering resolves it on the same capture.
+    """
+    if not path.strip():
+        raise ValueError("module seed path must not be empty")
+
+    def resolve(ctx: SessionEnv) -> ReferenceValue | None:
+        parameters = ctx.parameters
+        if parameters is not None:
+            try:
+                key = parameters.library_key(path)
+            except AttributeError:
+                # The path owner defines unset and dangling module slots.
+                key = None
+            if key is not None:
+                try:
+                    parameters.library.module_spec(key)
+                except KeyError:
+                    # A valid direct root can name a not-yet-created entry.
+                    pass
+                else:
+                    _, value = module_cfg_to_value(parameters.library.get_module(key))
+                    return ReferenceValue(chosen_key=path, value=value)
+        return fallback.resolve(ctx) if fallback is not None else None
+
+    return Seed(resolve, description=f"module:{path}")
 
 
 def scaled_path_seed(
@@ -239,6 +276,7 @@ __all__ = [
     "flux_range",
     "literal",
     "md",
+    "module_seed",
     "path_seed",
     "qub_freq_range",
     "scaled_path_seed",
