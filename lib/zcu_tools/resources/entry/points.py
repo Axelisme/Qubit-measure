@@ -129,13 +129,17 @@ class PointView:
 
         Explicit choices precede one matching focus, then RoleSpec.via or a
         role-name string field on already resolved components.
-        None uses the caller-registered notebook shorthand. Errors identify the
-        role, focus, kind and reason. The returned name mapping stays fixed while
+        None uses the caller-registered notebook shorthand. Automatic inference
+        with zero/multiple choices omits the role; its use then raises
+        RoleResolutionError. Explicit invalid choices and dangling/wrong-kind
+        targets fail here. Errors identify role, focus, kind and reason. The returned name mapping stays fixed while
         values follow this bound point's working-unit snapshot and edits. Its
         constructor origin also binds the returned roles to this entry/point.
         """
         names = resolve_names(self._store.snapshot().components, roles, focus, explicit)
-        return RoleView(names, self.__getattr__, origin=point_origin(self))
+        return RoleView(
+            names, self.__getattr__, origin=point_origin(self), roles=roles, focus=focus
+        )
 
     def meta(self, path: str) -> Provenance | None:
         """Return an independent cached source in working units, or None."""

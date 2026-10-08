@@ -488,6 +488,15 @@ class CenteredSweepValue:
 
 @dataclass
 class ReferenceValue:
+    """Reference input or publication for a custom shape or source key.
+
+    chosen_key is a canonical custom key or a catalog/role path. value is its
+    section payload; an empty linked section can await catalog resolution.
+    is_overridden preserves edited content instead of following this source.
+    resolved_label names the published shape, or None when unresolved. error
+    is a publication diagnostic, or None.
+    """
+
     chosen_key: str
     value: CfgSectionValue
     # True when chosen_key names a library entry but the user has edited value

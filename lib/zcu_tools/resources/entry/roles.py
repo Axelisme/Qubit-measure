@@ -19,6 +19,10 @@ class RoleView:
 
     Obtain this view through PointView.resolve. Component values follow that
     point; resolved names and constructor origin never follow another selection.
+    Declared but unbound roles raise RoleResolutionError on getattr and hasattr;
+    this ValueError is not treated as a missing attribute. Unknown attributes
+    still raise AttributeError. Introspection tools must handle declared-role
+    read failures instead of treating them as absent attributes.
     """
 
     __slots__ = ("_components", "_component", "__dict__")
@@ -29,15 +33,22 @@ class RoleView:
         component: Callable[[str], ComponentView],
         *,
         origin: PointOrigin,
+        roles: Mapping[str, RoleSpec] | Sequence[str] | None,
+        focus: str | None,
     ) -> None:
         """Copy resolved names and bind the owning point's constructor identity.
 
         components maps declared role names to concrete component names.
         component reads/edits that same point; unknown names raise AttributeError.
         origin is its immutable PointOrigin, not an inferred callback identity.
-        PointView.resolve supplies all three from one bound point.
+        roles is the same ordered declaration passed to PointView.resolve;
+        None uses the registered notebook shorthand. focus is that call\'s
+        component name or None. These fix unbound-role error context without
+        rerunning inference. PointView.resolve supplies all inputs.
         """
         self._origin = origin
+        self._declarations = _declarations(roles, focus, {})
+        self._focus = focus
         self._components = MappingProxyType(dict(components))
         self._component = component
 
@@ -47,9 +58,21 @@ class RoleView:
         return self._components
 
     def __getattr__(self, role: str) -> ComponentView:
+        """Read a bound role; declared unbound roles raise RoleResolutionError.
+
+        Unknown attributes raise AttributeError. hasattr for a declared unbound
+        role propagates RoleResolutionError because it is a ValueError.
+        """
         try:
             name = self._components[role]
         except KeyError as cause:
+            if role in self._declarations:
+                raise RoleResolutionError(
+                    role,
+                    self._focus,
+                    self._declarations[role].kind,
+                    "Role is not bound",
+                ) from cause
             raise AttributeError(f"Unknown resolved role {role!r}") from cause
         return self._component(name)
 
@@ -118,13 +141,32 @@ def _declarations(
     return declarations
 
 
+def _validate_target(
+    components: Mapping[str, ComponentSchema],
+    name: str,
+    role: str,
+    spec: RoleSpec,
+    focus: str | None,
+) -> None:
+    """Reject unknown or wrong-kind targets before binding or ambiguity omission."""
+    if name not in components:
+        raise RoleResolutionError(role, focus, spec.kind, f"Unknown component {name!r}")
+    if not fnmatchcase(components[name].kind, spec.kind):
+        raise RoleResolutionError(
+            role,
+            focus,
+            spec.kind,
+            f"Component {name!r} has kind {components[name].kind!r}",
+        )
+
+
 def _derived_name(
     components: Mapping[str, ComponentSchema],
     resolved: Mapping[str, str],
     role: str,
     spec: RoleSpec,
     focus: str | None,
-) -> str:
+) -> str | None:
     if spec.via is not None:
         source_role, separator, path = spec.via.partition(".")
         target = (
@@ -139,13 +181,10 @@ def _derived_name(
             for name in resolved.values()
             if (target := _reference_target(components[name], role)) is not None
         }
+    for target in sorted(candidates):
+        _validate_target(components, target, role, spec, focus)
     if len(candidates) != 1:
-        reason = (
-            f"Ambiguous references: {sorted(candidates)}"
-            if candidates
-            else f"No component choice via {spec.via!r} or same-name reference"
-        )
-        raise RoleResolutionError(role, focus, spec.kind, reason)
+        return None
     return candidates.pop()
 
 
@@ -155,7 +194,16 @@ def resolve_names(
     focus: str | None,
     explicit: Mapping[str, str],
 ) -> dict[str, str]:
-    """Resolve declared names from one already validated working-unit snapshot."""
+    """Infer fixed role aliases from one validated component snapshot.
+
+    roles is an ordered registered declaration mapping/sequence; None uses the
+    notebook shorthand. explicit maps declared roles to concrete names and wins
+    over focus/via inference. focus is a concrete name or None for the registry
+    default. Automatic zero/multiple candidates omit the role; missing via
+    source roles omit their dependents. Return only bound aliases. Unknown
+    declarations/explicit choices and dangling/wrong-kind targets raise
+    RoleResolutionError. No source reads or working-unit mutation occur.
+    """
     declarations = _declarations(roles, focus, explicit)
     if focus is None:
         focus = role_registry.default_focus(components)
@@ -176,17 +224,9 @@ def resolve_names(
             focus_used = True
         else:
             name = _derived_name(components, resolved, role, spec, focus)
-        if name not in components:
-            raise RoleResolutionError(
-                role, focus, spec.kind, f"Unknown component {name!r}"
-            )
-        if not fnmatchcase(components[name].kind, spec.kind):
-            raise RoleResolutionError(
-                role,
-                focus,
-                spec.kind,
-                f"Component {name!r} has kind {components[name].kind!r}",
-            )
+            if name is None:
+                continue
+        _validate_target(components, name, role, spec, focus)
         resolved[role] = name
     return resolved
 

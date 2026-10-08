@@ -243,16 +243,24 @@ def _reference_keys(
 def _resolve_reference(
     parameters: ParameterContext, kind: str, key: str
 ) -> ResolvedReference | None:
+    if kind not in ("module", "waveform"):
+        raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
+    roles = parameters.roles
+    prefix = key.split(".", 1)[0]
+    if roles is not None and prefix in roles.declarations and prefix not in roles.names:
+        return None
     library = parameters.library
-    root = parameters.library_key(key)
+    try:
+        root = parameters.library_key(key)
+    except AttributeError:
+        # The path owner defines unset and dangling module slots.
+        return None
     if kind == "module":
         if root not in library.module_keys():
             return None
         spec, value = module_cfg_to_value(library.get_module(root))
-    elif kind == "waveform":
+    else:
         if root not in library.waveform_keys():
             return None
         spec, value = waveform_cfg_to_value(library.get_waveform(root))
-    else:
-        raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
     return ResolvedReference(label=spec.label, value=value)
