@@ -4,7 +4,20 @@ from collections.abc import Mapping
 
 import numpy as np
 from pydantic import Field, JsonValue
-from zcu_tools.cfg_model import ModuleCfgFactory, PulseReadoutSpec, PulseSpec
+from zcu_tools.cfg_model import (
+    ArbWaveformCfg,
+    FlatTopWaveformCfg,
+    ModuleCfgFactory,
+    PulseReadoutSpec,
+    PulseSpec,
+    WaveformCfg,
+)
+from zcu_tools.cfg_model import (
+    PulseCfg as MaterializedPulseCfg,
+)
+from zcu_tools.cfg_model import (
+    PulseReadoutCfg as MaterializedPulseReadoutCfg,
+)
 from zcu_tools.datafile.native_models import RunSnapshot
 from zcu_tools.gui.form import (
     ExplicitList,
@@ -19,6 +32,15 @@ from zcu_tools.gui.form import (
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
 from zcu_lab.workflows.t1 import T1Plan
+
+
+def _reject_arb_assets(waveform: WaveformCfg) -> None:
+    """Reject assets before native conversion loses the captured binding."""
+    if isinstance(waveform, ArbWaveformCfg) or (
+        isinstance(waveform, FlatTopWaveformCfg)
+        and isinstance(waveform.raise_waveform, ArbWaveformCfg)
+    ):
+        raise ValueError("Arb assets are currently unsupported by T1 calibration")
 
 
 class T1PlanForm(FormModel):
@@ -66,7 +88,9 @@ class T1PlanForm(FormModel):
         env supplies the captured library and validation/assets context; pure
         inline modules can omit the library. snapshot is fixed historical
         entry/point/roles supplied by the host. Return consuming-field errors
-        for missing refs, wrong families or materialization failure. Keep
+        for missing refs, wrong families or materialization failure. Arb assets
+        are currently unsupported, including flat_top arb ramps; return the
+        consuming module field error rather than using global asset scope. Keep
         descending/repeated/list order and a single range point. No acquisition
         cfg, tunables, timing/grid generation, capture, submission or extra copy
         layer is involved; Engine owns plan isolation.
@@ -82,6 +106,8 @@ class T1PlanForm(FormModel):
                 else self.qub_pulse.module,
                 context=context,
             )
+            if isinstance(drive, MaterializedPulseCfg):
+                _reject_arb_assets(drive.waveform)
             qub_pulse = PulseCfg.model_validate(drive.model_dump(mode="python"))
         except ValueError as exc:
             errors[("qub_pulse",)] = str(exc)
@@ -92,6 +118,8 @@ class T1PlanForm(FormModel):
                 else self.readout.module,
                 context=context,
             )
+            if isinstance(ro, MaterializedPulseReadoutCfg):
+                _reject_arb_assets(ro.pulse_cfg.waveform)
             readout = PulseReadoutCfg.model_validate(ro.model_dump(mode="python"))
         except ValueError as exc:
             errors[("readout",)] = str(exc)

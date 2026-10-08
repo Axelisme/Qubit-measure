@@ -1,11 +1,14 @@
 """Reference conversion and runtime T1 generation at public form seams."""
 
+import numpy as np
 import pytest
 from pydantic import JsonValue
-from zcu_tools.cfg_model import PulseSpec
+from zcu_tools.cfg_model import PulseSpec, WaveformSamples
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
 from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 
+from tests.program.v2.support.waveform_assets import InMemoryWaveformAsset
 from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan, seed_from_inputs
 from zcu_lab.workflows.gui.plan import T1PlanForm
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables, t1_cfg
@@ -117,3 +120,42 @@ def test_bad_module_selections_block_plan_with_consuming_paths(
     assert isinstance(result, FormErrors)
     field = "readout" if failure == "wrong_readout_family" else "qub_pulse"
     assert any(path and path[0] == field for path in result.messages)
+
+
+@pytest.mark.parametrize("selection", ["drive", "readout", "readout_ramp"])
+def test_asset_backed_selection_is_rejected_at_consuming_field(
+    inputs: Inputs, selection: str
+) -> None:
+    env = FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0"),
+            assets=InMemoryWaveformAsset(
+                "present",
+                WaveformSamples(
+                    time=np.array([0.0, 0.05]),
+                    idata=np.array([0.0, 1.0]),
+                    qdata=None,
+                ),
+            ),
+        )
+    )
+    data = inline_input(inputs).data
+    waveform = {"style": "arb", "data": "present"}
+    field = "qub_pulse" if selection == "drive" else "readout"
+    if selection == "drive":
+        raw = inputs.rabi.modules.qub_pulse.model_dump(mode="json")
+        raw["waveform"] = waveform
+    else:
+        raw = inputs.readout.modules.readout.model_dump(mode="json")
+        raw["pulse_cfg"]["waveform"] = (
+            {"style": "flat_top", "length": 1.0, "raise_waveform": waveform}
+            if selection == "readout_ramp"
+            else waveform
+        )
+    data[field] = {"kind": "inline", "module": raw}
+    form = FormState(FormInput(T1PlanForm, data)).result(env)
+    assert isinstance(form, T1PlanForm), form
+    result = form.to_cfg(env, make_plan(inputs).snapshot)
+    assert isinstance(result, FormErrors)
+    assert (field,) in result.messages
+    assert "arb asset" in result.messages[(field,)].lower()
