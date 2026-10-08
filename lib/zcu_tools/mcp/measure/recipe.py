@@ -1151,9 +1151,7 @@ class RecipeTab:
             "gui_calibration" if start is None else "explicit"
         )
 
-    def _flux_unit(
-        self, snapshot: dict[str, object], requested: str | None, *, explicit: bool
-    ) -> str:
+    def _flux_unit(self, snapshot: dict[str, object], requested: str) -> str:
         unit = snapshot["unit"]
         info_value = snapshot.get("info")
         info = _cfg_object(info_value) if info_value is not None else {}
@@ -1173,54 +1171,36 @@ class RecipeTab:
                 "Fake flux requires confirmed native coordinates",
                 reason="invalid_device",
             )
-        if requested is not None and (requested != unit or requested == "native"):
+        if not isinstance(unit, str) or not unit.strip() or unit in ("none", "native"):
+            raise GuiRpcError(
+                "Flux device has no physical unit", reason="invalid_device"
+            )
+        if requested != unit:
             raise GuiRpcError(
                 "Flux unit does not match the device coordinate",
                 reason="invalid_device",
             )
-        if not isinstance(unit, str) or not unit.strip() or unit in ("none", "native"):
-            if explicit:
-                raise GuiRpcError(
-                    "Flux device has no physical unit", reason="invalid_device"
-                )
-            raise RecipeNeedsParameters(
-                (MissingParameter("flux_device", "Flux device has no physical unit"),)
-            )
         return unit
 
-    def use_flux_device(
-        self, name: str | None = None, *, unit: str | None = None
-    ) -> None:
-        """Select explicit name or device.flux.name; assert unit without conversion.
+    def use_flux_device(self, name: str, *, unit: str) -> None:
+        """Select a registered flux device and assert units without conversion.
 
-        Missing default source raises RecipeNeedsParameters. Unknown devices and
-        unit mismatches fail as invalid_device. native is allowed only for a
-        confirmed FakeDevice with original unit none and explicit unit="native".
+        name and unit must be non-empty strings; null or blanks raise ValueError.
+        No GUI-observed default is selected. Unknown devices and mismatched units
+        fail as invalid_device. Physical units must match the device snapshot;
+        native requires confirmed FakeDevice type and snapshot unit none.
+        Selection edits dev.flux_dev only after validation and records the unit
+        for the subsequent Run snapshot. This method never connects a device.
         """
-        if name is not None and (not name or not name.strip()):
+        if not name or not name.strip():
             raise ValueError("flux device name must be non-empty")
-        if unit is not None and (not unit or not unit.strip()):
+        if not unit or not unit.strip():
             raise ValueError("flux unit must be non-empty")
         self._node("dev.flux_dev")
-        device: object = name
-        if name is None:
-            values = self._binding.tools.send_gui_rpc("value.list", {})["values"]
-            if any(_cfg_object(value)["key"] == "device.flux.name" for value in values):
-                device = self._binding.tools.send_gui_rpc(
-                    "value.read", {"key": "device.flux.name"}
-                )["value"]
-        if not isinstance(device, str) or not device.strip():
-            raise RecipeNeedsParameters(
-                (MissingParameter("flux_device", "No registered flux device source"),)
-            )
-        observed = self._binding.tools.send_gui_rpc("device.snapshot", {"name": device})
-        resolved_unit = self._flux_unit(
-            _cfg_object(observed["snapshot"]), unit, explicit=name is not None
-        )
-        self.set("dev.flux_dev", device)
-        self._binding.origins["dev.flux_dev"] = (
-            "device.flux.name" if name is None else "explicit"
-        )
+        observed = self._binding.tools.send_gui_rpc("device.snapshot", {"name": name})
+        resolved_unit = self._flux_unit(_cfg_object(observed["snapshot"]), unit)
+        self.set("dev.flux_dev", name)
+        self._binding.origins["dev.flux_dev"] = "explicit"
         self._binding.flux_unit = resolved_unit
 
     def set_sweep(
