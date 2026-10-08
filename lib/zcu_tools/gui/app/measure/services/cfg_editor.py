@@ -412,6 +412,7 @@ class CfgEditorService:
             item_kind=item_kind,
             source_name=from_name,
             source_ml=source_ml,
+            parameters=self._read.read_context(),
             gc=gc,
             owner_key=owner_key,
         )
@@ -440,7 +441,12 @@ class CfgEditorService:
         if owner_key is not None:
             self._teardown_owner(owner_key)
         return self._make_session(
-            seed.spec, seed.value, item_kind=None, gc=gc, owner_key=owner_key
+            seed.spec,
+            seed.value,
+            item_kind=None,
+            parameters=parameters,
+            gc=gc,
+            owner_key=owner_key,
         )
 
     def _make_session(
@@ -449,13 +455,14 @@ class CfgEditorService:
         value,
         *,
         item_kind: str | None,
+        parameters: ParameterContext | None,
         source_name: str | None = None,
         source_ml: ModuleLibrary | None = None,
         gc: bool,
         owner_key: str | None,
     ) -> tuple[str, tuple[SettableTarget, ...]]:
         draft = self._bindings.new_draft(
-            CfgSchema(spec=spec, value=value), parameters=self._read.read_context()
+            CfgSchema(spec=spec, value=value), parameters=parameters
         )
         editor_id = self._new_id(owner_key)
         session = CfgEditorSession(

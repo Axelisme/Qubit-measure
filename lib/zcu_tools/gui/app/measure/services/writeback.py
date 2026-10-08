@@ -5,8 +5,15 @@ import logging
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
+from zcu_tools.cfg_model import (
+    ModuleSpec,
+    WaveformSpec,
+    module_spec_from_raw,
+    waveform_spec_from_raw,
+)
 from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
@@ -21,15 +28,20 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry.ledger import RecordsLedger
+from zcu_tools.resources.entry.ledger_models import (
+    AcceptedPayload,
+    AcceptedWrite,
+    LedgerEvent,
+)
+from zcu_tools.resources.entry.provenance import Provenance
 
-from .ports import CfgEdit, CfgEditorPort, ContextWrites
+from .ports import CfgEdit, CfgEditorPort
 
 logger = logging.getLogger(__name__)
+_GUI_ORIGIN = CommandOrigin("gui", None)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.cfg.binding import CfgDraft
-
-    from .ports import ContextWritePort
 
 # Kind prefixes are deliberately draft-local. Two independent drafts can both
 # expose ``md-1`` without sharing any editor session or mutable item state.
@@ -114,7 +126,7 @@ class WritebackDraft:
     the same draft is shared by the UI and remote editing surfaces.
     """
 
-    __slots__ = ("_service", "_identity", "_entries", "_closed")
+    __slots__ = ("_service", "_identity", "_entries", "_closed", "_parameters")
 
     def __init__(
         self,
@@ -126,7 +138,17 @@ class WritebackDraft:
         self._service = service
         self._identity = identity
         self._entries = entries
+        self._parameters = parameters
         self._closed = False
+
+    @property
+    def parameters(self) -> ParameterContext | None:
+        """Fixed creation capture, or None for a context-free empty draft.
+
+        This read-only source owns role bindings, library values and the write
+        target. Later selection changes never replace it.
+        """
+        return self._parameters
 
     @property
     def items(self) -> tuple[WritebackItem, ...]:
@@ -162,9 +184,9 @@ class WritebackDraft:
         self,
         *,
         item_ids: tuple[str, ...] | None = None,
-        origin: CommandOrigin = CommandOrigin("gui", None),
+        origin: CommandOrigin = _GUI_ORIGIN,
     ) -> dict[str, Any]:
-        return self._service.apply_draft(self, item_ids=item_ids)
+        return self._service.apply_draft(self, item_ids=item_ids, origin=origin)
 
     def teardown(self) -> None:
         self._service.teardown_draft(self)
@@ -229,10 +251,6 @@ class WritebackService:
         """
         identity = uuid.uuid4().hex
         entries: list[_DraftEntry] = []
-        # Snapshot the destination context once at draft creation (read-only,
-        # S2). Summaries are stored in the service-owned _DraftEntry, not on
-        # the public WritebackItem (adapter contract unchanged).
-        ctx = self._snapshot_context()
         try:
             for raw_item in items:
                 item = self._copy_item(raw_item)
@@ -241,13 +259,14 @@ class WritebackService:
                 item.selected = True
                 entry = _DraftEntry(item)
                 # Baseline capture — display-only, app/service-owned.
-                self._capture_baseline(entry, ctx)
+                self._capture_baseline(entry, parameters)
                 entries.append(entry)
                 if isinstance(item, (ModuleWriteback, WaveformWriteback)):
                     if item.edit_schema is None:
                         continue
                     editor_id, _ = self._cfg_editor.open_seeded(
                         item.edit_schema,
+                        parameters=parameters,
                         gc=False,
                         owner_key=f"writeback:{identity}:{item.session_id}",
                     )
@@ -264,7 +283,7 @@ class WritebackService:
             # observable error and no draft is returned.
             self._teardown_entries(entries)
             raise
-        return WritebackDraft(self, identity, entries)
+        return WritebackDraft(self, identity, entries, parameters)
 
     def preview_draft(self, draft: WritebackDraft) -> list[WritebackItem]:
         self._require_draft(draft)
@@ -382,7 +401,7 @@ class WritebackService:
         draft: WritebackDraft,
         *,
         item_ids: tuple[str, ...] | None = None,
-        origin: CommandOrigin = CommandOrigin("gui", None),
+        origin: CommandOrigin = _GUI_ORIGIN,
     ) -> dict[str, Any]:
         """Lower against the draft capture, append accepted, then set in order.
 
@@ -395,58 +414,79 @@ class WritebackService:
         Unknown/duplicate IDs or concrete destinations fail before any write.
         """
         self._require_draft(draft)
-        applied_ids: list[str] = []
-        md: dict[str, Any] = {}
-        ml_modules: dict[str, CfgSchema] = {}
-        ml_waveforms: dict[str, CfgSchema] = {}
-
         selected_entries = _entries_to_apply(draft._entries, item_ids)
-        destinations: set[tuple[str, str]] = set()
+        written: dict[str, list[str]] = {"md": [], "ml_modules": [], "ml_waveforms": []}
+        if not selected_entries:
+            return {"applied_ids": [], "written": written}
+        parameters = draft.parameters
+        if parameters is None:
+            raise FailedPreconditionError("Writeback requires a captured context.")
+        ledger = self._entry_ledger(parameters.target.entry_id)
+        destinations: set[str] = set()
+        writes: list[AcceptedWrite] = []
+        modules: dict[str, ModuleSpec] = {}
+        waveforms: dict[str, WaveformSpec] = {}
         for entry in selected_entries:
             item = entry.item
             if isinstance(item, MetaDictWriteback):
-                destination_kind = "md"
-            elif isinstance(item, ModuleWriteback):
-                destination_kind = "ml_modules"
-            elif isinstance(item, WaveformWriteback):
-                destination_kind = "ml_waveforms"
+                path = parameters.resolve_path(item.target_name)
+                write = AcceptedWrite.model_validate(
+                    {"path": path, "value": item.proposed_value}
+                )
+                written["md"].append(path)
             else:
-                raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
-            destination = (destination_kind, item.target_name)
-            if destination in destinations:
-                raise InvalidInputError(
-                    f"duplicate {destination_kind} writeback destination: "
-                    f"{item.target_name!r}"
+                path = parameters.library_key(item.target_name)
+                raw = schema_to_raw_dict(self._entry_schema(entry), parameters)
+                if isinstance(item, ModuleWriteback):
+                    spec = module_spec_from_raw(raw)
+                    modules[path] = spec
+                    written["ml_modules"].append(path)
+                else:
+                    spec = waveform_spec_from_raw(raw)
+                    waveforms[path] = spec
+                    written["ml_waveforms"].append(path)
+                write = AcceptedWrite.model_validate(
+                    {"path": path, "value": spec.model_dump(mode="json")}
                 )
-            destinations.add(destination)
+            if path in destinations:
+                raise InvalidInputError(f"duplicate writeback destination: {path!r}")
+            destinations.add(path)
+            writes.append(write)
 
-        for entry in selected_entries:
+        event = LedgerEvent(
+            id=str(uuid.uuid4()),
+            kind="accepted",
+            at=datetime.now(timezone.utc).isoformat(),
+            entry_id=parameters.target.entry_id,
+            origin=origin.origin,
+            call_id=origin.call_id,
+            payload=AcceptedPayload(writes=tuple(writes), analysis_summary={}),
+        )
+        ledger.append(event)
+        source = Provenance(
+            source=event.id,
+            kind=event.kind,
+            run_id=None,
+            at=event.at,
+            stderr=None,
+        )
+        applied_ids: list[str] = []
+        for entry, write in zip(selected_entries, writes, strict=True):
             item = entry.item
             if isinstance(item, MetaDictWriteback):
-                md[item.target_name] = item.proposed_value
-            elif isinstance(item, ModuleWriteback):
-                ml_modules[item.target_name] = self._entry_schema(entry)
-            elif isinstance(item, WaveformWriteback):
-                ml_waveforms[item.target_name] = self._entry_schema(entry)
-            applied_ids.append(item.session_id)
-
-        written = {
-            "md": list(md),
-            "ml_modules": list(ml_modules),
-            "ml_waveforms": list(ml_waveforms),
-        }
-        if md or ml_modules or ml_waveforms:
-            self._write.apply_writes(
-                ContextWrites(
-                    md=md,
-                    ml_modules=ml_modules,
-                    ml_waveforms=ml_waveforms,
+                self._write.set_parameter(
+                    parameters.target, write.path, write.value, source=source
                 )
-            )
-            applied_id_set = set(applied_ids)
-            for entry in draft._entries:
-                if entry.item.session_id in applied_id_set:
-                    entry.applied = True
+            elif isinstance(item, ModuleWriteback):
+                self._write.set_module(
+                    parameters.target, write.path, modules[write.path], source=source
+                )
+            else:
+                self._write.set_waveform(
+                    parameters.target, write.path, waveforms[write.path], source=source
+                )
+            entry.applied = True
+            applied_ids.append(item.session_id)
         return {"applied_ids": applied_ids, "written": written}
 
     def write_draft(
@@ -543,8 +583,6 @@ class WritebackService:
             raise InvalidInputError("writeback proposal must not expose editor_id")
         copied.session_id = ""
         copied.selected = True
-        if isinstance(copied, MetaDictWriteback):
-            copied.proposed_value = copy.deepcopy(copied.proposed_value)
         return copied
 
     @staticmethod
@@ -570,7 +608,12 @@ class WritebackService:
     def _entry_schema(self, entry: _DraftEntry) -> CfgSchema:
         if entry.editor_id is not None:
             return self._cfg_editor.get_draft(entry.editor_id).snapshot()
-        schema = getattr(entry.item, "edit_schema", None)
+        item = entry.item
+        schema = (
+            item.edit_schema
+            if isinstance(item, (ModuleWriteback, WaveformWriteback))
+            else None
+        )
         if schema is None:
             raise FailedPreconditionError(
                 f"writeback '{entry.item.session_id}' has no editable schema"
@@ -580,25 +623,6 @@ class WritebackService:
     # ------------------------------------------------------------------
     # S2 — display-only baseline capture (read-only, single owner)
     # ------------------------------------------------------------------
-
-    def _snapshot_context(self) -> Any | None:
-        """Best-effort read of the live destination SessionEnv.
-
-        In production ``_write`` is the Controller, which exposes
-        ``get_session_env``. In tests it is a MagicMock, so we probe
-        defensively and return None when unavailable — the draft remains
-        usable with fallback summaries.
-        """
-        for attr in ("get_session_env",):
-            if hasattr(self._write, attr):
-                try:
-                    getter = getattr(self._write, attr)
-                    ctx = getter() if callable(getter) else getter
-                    if ctx is not None and hasattr(ctx, "md") and hasattr(ctx, "ml"):
-                        return ctx
-                except Exception:
-                    continue
-        return None
 
     @staticmethod
     def _format_value_summary(value: Any) -> str:
@@ -628,58 +652,35 @@ class WritebackService:
         text = repr(value)
         return text if len(text) <= 48 else f"{text[:45]}..."
 
-    def _capture_baseline(self, entry: _DraftEntry, ctx: Any | None) -> None:
-        """Populate entry.current_summary / entry.proposed_summary.
-
-        Stored in service-owned _DraftEntry, not on public WritebackItem.
-        When ``ctx`` is unavailable (tests or early init), fall back to a
-        neutral placeholder so the draft remains displayable. The summaries are
-        display-only and never alter persistence/wire/MCP/adapter contracts.
-        """
+    def _capture_baseline(
+        self, entry: _DraftEntry, parameters: ParameterContext | None
+    ) -> None:
+        """Capture display-only summaries from the creation context."""
         item = entry.item
-        try:
-            if isinstance(item, MetaDictWriteback):
-                # Current from live md
-                has_current = False
-                current: Any = None
-                if ctx is not None:
-                    try:
-                        has_current = item.target_name in ctx.md.keys()  # type: ignore[attr-defined]
-                        current = ctx.md.get(item.target_name, None)  # type: ignore[attr-defined]
-                    except Exception:
-                        has_current = False
-                        current = None
-                if has_current:
-                    entry.current_summary = self._format_value_summary(current)
-                else:
-                    entry.current_summary = "—"
-                entry.proposed_summary = self._format_value_summary(item.proposed_value)
-            elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
-                exists = False
-                if ctx is not None:
-                    try:
-                        if isinstance(item, ModuleWriteback):
-                            exists = item.target_name in ctx.ml.modules  # type: ignore[attr-defined]
-                        else:
-                            exists = item.target_name in ctx.ml.waveforms  # type: ignore[attr-defined]
-                    except Exception:
-                        exists = False
-                entry.current_summary = "present" if exists else "— not present"
-                action = "update" if exists else "create"
-                role = getattr(item, "role_id", None)
-                if role:
-                    entry.proposed_summary = f"{action} {role}"
-                else:
-                    entry.proposed_summary = f"{action} → {item.target_name}"
-            else:
-                entry.current_summary = None
-                entry.proposed_summary = None
-        except Exception:
-            logger.debug(
-                "baseline capture failed for %r", item.target_name, exc_info=True
+        if isinstance(item, MetaDictWriteback):
+            current = (
+                None if parameters is None else parameters.lookup(item.target_name)
             )
-            entry.current_summary = None
-            entry.proposed_summary = None
+            entry.current_summary = self._format_value_summary(
+                current.value if current is not None and current.present else None
+            )
+            entry.proposed_summary = self._format_value_summary(item.proposed_value)
+        elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
+            exists = False
+            if parameters is not None:
+                path = parameters.library_key(item.target_name)
+                keys = (
+                    parameters.library.module_keys()
+                    if isinstance(item, ModuleWriteback)
+                    else parameters.library.waveform_keys()
+                )
+                exists = path in keys
+            entry.current_summary = "present" if exists else "— not present"
+            action = "update" if exists else "create"
+            role = item.role_id
+            entry.proposed_summary = (
+                f"{action} {role}" if role else f"{action} → {item.target_name}"
+            )
 
     # App-local Qt presentation projection (S2) — not wire/persistence.
     def get_summaries(
