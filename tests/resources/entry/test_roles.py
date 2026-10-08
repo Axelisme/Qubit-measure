@@ -577,19 +577,41 @@ def test_via_reads_collision_extra_target_and_follows_reload(
         component_registry.unregister("fake/drive/colliding")
 
 
+@pytest.mark.parametrize("invalid", ["missing", "Q1"], ids=["dangling", "wrong-kind"])
+def test_partial_inference_rejects_invalid_candidates_before_omitting_ambiguity(
+    tmp_path: Path,
+    invalid: str,
+) -> None:
+    point = make_point(tmp_path)
+    point.Q2.sense = invalid
+    with pytest.raises(RoleResolutionError) as error:
+        point.resolve(["control", "target", "sense"], control="Q1", target="Q2")
+    assert error.value.role == "sense"
+    assert error.value.required_kind == "fake/sensor"
+    assert invalid in error.value.reason
+    assert (
+        "Unknown component" if invalid == "missing" else "has kind"
+    ) in error.value.reason
+
+
 @pytest.mark.parametrize("reference", [None, "Q2", "missing"])
 def test_missing_or_wrong_kind_reference_reports_required_role(
     tmp_path: Path, reference: str | None
 ) -> None:
     point = make_point(tmp_path)
     point.Q1.sense = reference
+    if reference is None:
+        partial = point.resolve(["driver", "sense"], focus="Q1")
+        assert partial.components == {"driver": "Q1"}
+        with pytest.raises(RoleResolutionError, match="sense.*not bound"):
+            _ = partial.sense.rate
+        return
     with pytest.raises(RoleResolutionError) as error:
         point.resolve(["driver", "sense"], focus="Q1")
     assert error.value.role == "sense"
     assert error.value.focus == "Q1"
     assert error.value.required_kind == "fake/sensor"
-    if reference is not None:
-        assert reference in error.value.reason
+    assert reference in error.value.reason
 
 
 def test_kind_pattern_matches_whole_kind_not_just_prefix(tmp_path: Path) -> None:
@@ -599,6 +621,8 @@ def test_kind_pattern_matches_whole_kind_not_just_prefix(tmp_path: Path) -> None
     ).components == {
         "driver": "Q1",
     }
-    with pytest.raises(RoleResolutionError) as error:
-        point.resolve({"driver": RoleSpec("fake/drive/a/*")}, focus="Q1")
+    partial = point.resolve({"driver": RoleSpec("fake/drive/a/*")}, focus="Q1")
+    assert partial.components == {}
+    with pytest.raises(RoleResolutionError, match="driver.*not bound") as error:
+        _ = partial.driver.rate
     assert error.value.required_kind == "fake/drive/a/*"
