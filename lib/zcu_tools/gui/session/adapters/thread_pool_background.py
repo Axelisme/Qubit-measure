@@ -122,16 +122,25 @@ class ThreadPoolBackgroundExecutor:
         terminal_callback: Callable[[], None]
         try:
             result = future.result()
-        except Exception as exc:  # noqa: BLE001 - delivered to owner callback
+        except Exception as exc:  # delivered to owner callback
             logger.error("background worker failed", exc_info=exc)
-            terminal_callback = lambda error=exc: on_error(error)
+            error = exc
+
+            def deliver_error() -> None:
+                on_error(error)
+
+            terminal_callback = deliver_error
         else:
-            terminal_callback = lambda value=result: on_done(value)
+
+            def deliver_result() -> None:
+                on_done(result)
+
+            terminal_callback = deliver_result
 
         def deliver_and_ack() -> None:
             try:
                 terminal_callback()
-            except Exception:  # noqa: BLE001 - owner callback boundary
+            except Exception:  # owner callback boundary
                 logger.exception("background terminal callback failed")
             finally:
                 self._mark_delivery_done(future)
@@ -139,7 +148,7 @@ class ThreadPoolBackgroundExecutor:
         dispatch_failed = False
         try:
             self._owner.post(deliver_and_ack)
-        except Exception:  # noqa: BLE001 - scheduler boundary
+        except Exception:  # scheduler boundary
             logger.exception("owner scheduler rejected background delivery")
             dispatch_failed = True
 
