@@ -46,11 +46,16 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     finish_early saves usable data. Accepted answer triggers explicit current-draft
     writeback; skipped does not write.
     """
+    if (
+        not flux_device
+        or not flux_device.strip()
+        or not flux_unit
+        or not flux_unit.strip()
+    ):
+        raise ValueError("flux_device and flux_unit must be non-empty strings")
     for name, value in (
         ("reuse_tab_id", reuse_tab_id),
         ("readout_ref", readout_ref),
-        ("flux_device", flux_device),
-        ("flux_unit", flux_unit),
     ):
         if value is not None and not value.strip():
             raise ValueError(f"{name} must be a non-empty string or null")
@@ -70,10 +75,7 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
-    try:
-        tab.use_flux_device(flux_device, unit=flux_unit)
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
+    tab.use_flux_device(flux_device, unit=flux_unit)
     try:
         tab.set_flux_sweep(
             "sweep.flux",
