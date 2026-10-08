@@ -57,7 +57,7 @@ class BranchEliminationPass(AbsChunkListPass):
 
     def process(
         self, chunks: ChunkList, ctx: PipeLineContext
-    ) -> tuple[ChunkList, bool]:  # noqa: ARG002
+    ) -> tuple[ChunkList, bool]:
         changed = False
         for i, chunk in enumerate(chunks):
             if isinstance(chunk, BasicBlockNode):
