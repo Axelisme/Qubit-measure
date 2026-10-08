@@ -181,7 +181,11 @@ type RaiseWaveformSpec = RaiseWaveformCfg
 
 
 class _FlatTopFields(ConfigBase):
-    """Shared flat-top knobs: style selects flat_top, length is the flat span in µs."""
+    """Shared flat-top knobs; style selects flat_top.
+
+    length is the total duration in µs, including the rising and falling ramps.
+    The flat span is length - raise_waveform.length.
+    """
 
     style: Literal["flat_top"] = "flat_top"
     length: float | QickParam
@@ -202,7 +206,10 @@ class FlatTopWaveformCfg(_FlatTopFields, AbsWaveformCfg):
     raise_waveform: RaiseWaveformCfg
 
     def set_param(self, name: str, value: float | QickParam) -> None:
-        """Set the flat length in µs, accepting sweeps; other names raise ValueError."""
+        """Set total length in µs, including rise and fall; sweeps are accepted.
+
+        The flat span is length - raise_waveform.length. Other names raise ValueError.
+        """
         if name == "length":
             self.length = value
         else:

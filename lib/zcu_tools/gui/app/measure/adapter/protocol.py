@@ -72,9 +72,10 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     inherit and which satisfies this Protocol structurally.
 
     Keeping the framework side generic-free is deliberate: the GUI handles
-    every adapter as an opaque ``ExpAdapterProtocol`` and never narrows run /
-    analyze / writeback result types (they cross Qt ``Signal(object)``
-    boundaries as plain objects). The cross-method type linkage that pyright
+    every adapter as an opaque ``ExpAdapterProtocol``. Analyze/writeback
+    results remain opaque. Native acquisition evidence checks only the RunRecord
+    envelope described by run(), not its concrete cfg/result types. Results
+    cross Qt ``Signal(object)`` boundaries as plain objects. The cross-method type linkage that pyright
     checks lives entirely inside a single concrete adapter via the generic
     ``BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]``.
     """
@@ -84,7 +85,9 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     # rejects the Protocol conformance.
     capabilities: ClassVar[AdapterCapabilities]
     # Declaring persistence spec tag for acquisition metadata; None means this
-    # adapter does not produce native run evidence. Never infer it from a name.
+    # adapter does not produce native run evidence. Declaring a tag opts into
+    # run()'s RunRecord envelope contract when the tab has a saved origin.
+    # Never infer it from a name.
     experiment_tag: ClassVar[str | None]
 
     @classmethod
@@ -130,7 +133,17 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         *,
         context: RunContext,
     ) -> Any:
-        """Execute detached resolved inputs; never resolve from live context."""
+        """Execute detached resolved inputs; never resolve from live context.
+
+        req provides accepted device/SoC inputs; raw_cfg contains the accepted
+        lowered cfg, and context owns this acquisition's plots and stop signal.
+        With experiment_tag set and a saved tab origin, return RunRecord(cfg,
+        result) for native evidence. A bare result then raises TypeError at the
+        Run publication boundary and publishes neither result nor metadata.
+        Without the tag or saved origin, the framework does not manufacture
+        acquisition metadata and retains the adapter's opaque result contract.
+        Acquisition errors propagate to the operation's failed outcome.
+        """
         ...
 
     def load(self, req: LoadDataRequest) -> Any:

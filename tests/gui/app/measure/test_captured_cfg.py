@@ -179,7 +179,7 @@ def test_tab_creation_and_guard_keep_the_capture_after_focus_changes(
         cfg_resolution=lambda parameters: bindings.snapshot(
             (), captured_values={}, parameters=parameters
         ),
-        captured_parameters=lambda _roles: host.current,
+        captured_parameters=lambda _roles, _target: host.current,
     )
     one = service.new_tab("capture")
     host.current = second
@@ -208,7 +208,9 @@ def test_role_capture_failure_does_not_register_a_tab() -> None:
         "qubit": RoleSpec("capture/driver")
     }
 
-    def unavailable(_roles: Mapping[str, RoleSpec]) -> ParameterContext | None:
+    def unavailable(
+        _roles: Mapping[str, RoleSpec], _target: str | None
+    ) -> ParameterContext | None:
         raise ValueError("role target is unavailable")
 
     service = TabService(

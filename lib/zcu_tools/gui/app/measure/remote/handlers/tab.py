@@ -13,6 +13,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgStaleError,
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.resources.entry.errors import RoleResolutionError
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -27,7 +28,27 @@ def h_tab_new(
     name = str(params["adapter_name"])
     if name not in adapter.ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    tab_id = adapter.tab_control.new_tab(name)
+    target = params.get("target")
+    if target is not None and (not isinstance(target, str) or not target.strip()):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "target must be a non-empty component name",
+            reason="invalid_target",
+        )
+    try:
+        tab_id = adapter.tab_control.new_tab(name, target=target)
+    except RoleResolutionError as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason="role_resolution_failed",
+            data={
+                "role": exc.role,
+                "focus": exc.focus,
+                "required_kind": exc.required_kind,
+                "detail": exc.reason,
+            },
+        ) from exc
     return {"tab_id": tab_id}
 
 

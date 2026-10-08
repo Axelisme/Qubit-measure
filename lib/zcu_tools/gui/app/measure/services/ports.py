@@ -242,8 +242,15 @@ class TabLifecyclePort(Protocol):
     """
 
     def new_tab(
-        self, adapter_name: str, from_dict: TabSnapshot | None = None
-    ) -> str: ...
+        self,
+        adapter_name: str,
+        from_dict: TabSnapshot | None = None,
+        *,
+        target: str | None = None,
+    ) -> str:
+        """Create a fixed-capture tab; target binds its first declared role."""
+        ...
+
     def close_tab(self, tab_id: str) -> None: ...
     def make_default_cfg(self, adapter_name: str) -> CfgSchema: ...
 
