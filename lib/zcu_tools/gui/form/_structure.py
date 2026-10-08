@@ -5,6 +5,7 @@ which paths can be edited. Sequences never expose writable child paths.
 """
 
 from collections.abc import Mapping
+from enum import Enum
 from types import UnionType
 from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origin
 
@@ -84,6 +85,28 @@ def _tag(model: type[BaseModel], key: str) -> tuple[object, ...]:
     if info is None or get_origin(info.annotation) is not Literal:
         return ()
     return get_args(info.annotation)
+
+
+def schema_branch_model(info: FieldInfo, tags: list[JsonValue]) -> type[BaseModel]:
+    """Match emitted intrinsic JSON tags to info's declared union model.
+
+    info must declare a discriminator field name for a model union. tags are its emitted
+    x-form-discriminator-values, not dynamic choice enums. Match both JSON type
+    and value. Raise ValueError for a missing discriminator or unmatched tags;
+    declared non-JSON/non-finite tags also fail through the shared JSON codec.
+    """
+    key = discriminator(info)
+    if key is None:
+        raise ValueError("Schema branch requires a string discriminator")
+    for model in model_types(info.annotation):
+        for tag in _tag(model, key):
+            value = default_json(tag.value if isinstance(tag, Enum) else tag)
+            if any(
+                type(candidate) is type(value) and candidate == value
+                for candidate in tags
+            ):
+                return model
+    raise ValueError("Tagged schema branch does not match a declared model")
 
 
 def selected(info: FieldInfo, value: JsonValue) -> type[BaseModel] | None:

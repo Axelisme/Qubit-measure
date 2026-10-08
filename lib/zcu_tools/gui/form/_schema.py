@@ -11,7 +11,7 @@ from pydantic_core import PydanticOmit, core_schema
 
 from ._json import copy_object, default_json
 from ._sources import local_choices
-from ._structure import alternatives, model_types
+from ._structure import alternatives, discriminator, model_types, schema_branch_model
 from .model import Display, FormEnv, FormModel, FormPath
 
 
@@ -212,6 +212,16 @@ def _child_nodes(
         return ((models[0], node),)
     variants = node.get("oneOf")
     if isinstance(variants, list):
+        if discriminator(info) is not None:
+            children: list[tuple[type[BaseModel], dict[str, JsonValue]]] = []
+            for variant in variants:
+                if not isinstance(variant, dict):
+                    raise ValueError("Tagged schema branch must be an object")
+                tags = variant.get("x-form-discriminator-values")
+                if not isinstance(tags, list):
+                    raise ValueError("Tagged schema branch lacks intrinsic identities")
+                children.append((schema_branch_model(info, tags), variant))
+            return tuple(children)
         return tuple(
             (model, variant)
             for model, variant in zip(models, variants, strict=False)
