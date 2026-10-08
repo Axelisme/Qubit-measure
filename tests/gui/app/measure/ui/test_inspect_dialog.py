@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QApplication, QLineEdit  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui import inspect_dialog
 from zcu_tools.gui.app.measure.ui.inspect_dialog import (
