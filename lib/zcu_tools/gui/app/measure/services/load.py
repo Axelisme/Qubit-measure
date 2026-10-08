@@ -87,8 +87,7 @@ class LoadService:
                 "This tab does not support loading data files.",
                 reason_code="unsupported_load",
             )
-        ctx = self._state.session_env
-        request = LoadDataRequest(data_path=data_path, md=ctx.md, ml=ctx.ml)
+        request = LoadDataRequest(data_path=data_path, parameters=tab.parameters)
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
             result = tab.adapter.load(request)
