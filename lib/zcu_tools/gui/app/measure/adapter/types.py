@@ -16,11 +16,13 @@ from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import CfgValidationContext
+    from zcu_tools.datafile import RunMetadata
     from zcu_tools.device import DeviceInfo
     from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.context import ModuleLibrary
     from zcu_tools.resources.context.metadict import MetaDict
+    from zcu_tools.resources.entry.storage import PointStorageBinding
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 
@@ -245,14 +247,20 @@ class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]
 
 @dataclass(frozen=True)
 class SaveDataRequest(Generic[T_Result]):
+    """Worker inputs captured from one tab, not the current session selection.
+
+    run_result is the pane-owned result; data_path is the reserved output file.
+    parameters is the tab's fixed role capture, None for context-free adapters.
+    storage retains its original entry/point roots, description, roles and ledger
+    capability. metadata is this result's historical Run evidence, or None
+    when no evidence was acquired. comment is the user's annotation.
+    """
+
     run_result: T_Result
     data_path: str
-    md: MetaDict
-    ml: ModuleLibrary
-    chip_name: str
-    qub_name: str
-    res_name: str
-    active_label: str
+    parameters: ParameterContext | None
+    storage: PointStorageBinding
+    metadata: RunMetadata | None = None
     comment: str = ""
 
 

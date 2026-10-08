@@ -54,7 +54,7 @@ def app() -> App:
         writeback,
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: None,
+        captured_parameters=lambda _roles, _target: None,
     )
     workspace = WorkspaceService(state, tabs, bus)
     loader = Loader()

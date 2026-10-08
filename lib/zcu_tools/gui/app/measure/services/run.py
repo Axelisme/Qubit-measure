@@ -4,10 +4,14 @@ import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.device.base import BaseDevice
+from zcu_tools.experiment.acquisition import capture_software_provenance, new_run_id
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -38,19 +42,24 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import ExclusionGate
     from zcu_tools.plotting.plots import Plots
 
-    from ..state import RetiredPaneResources
-    from .ports import RunStatePort, WritebackLifecyclePort
+    from ..state import RetiredPaneResources, State
+    from .ports import WritebackLifecyclePort
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class _RunOperation:
-    """Inputs captured for one terminal callback, separate from the next run."""
+    """One run owns its inputs and worker-produced evidence.
+
+    The worker sets metadata after acquisition returns. Terminal reads it only
+    after worker completion; the next operation never shares this object.
+    """
 
     tab_id: str
     plots: Plots
     stop_event: threading.Event
     stop_signal: StopSignal
     cancel_requested: threading.Event
+    metadata: RunMetadata | None = None
 
 
 class RunService:
@@ -63,7 +72,7 @@ class RunService:
 
     def __init__(  # noqa: PLR0913 - explicit operation owners and borrowed driver source
         self,
-        state: RunStatePort,
+        state: State,
         runner: OperationRunner,
         bus: EventBus,
         handles: OperationHandles,
@@ -140,7 +149,10 @@ class RunService:
             if self._active_token is None:
                 raise RuntimeError("Run result has no active operation")
             retired = self._state.update_tab_result(
-                op.tab_id, result, source_operation_id=self._active_token
+                op.tab_id,
+                result,
+                source_operation_id=self._active_token,
+                metadata=op.metadata,
             )
         except Exception as error:  # noqa: BLE001 - settle host/State failures on the owner loop
             self._run_failed(op, error, settle)
@@ -248,16 +260,45 @@ class RunService:
             cancel_requested.set()
             stop_event.set()
 
-        def work(factory: Any) -> Any:
+        operation = _RunOperation(
+            tab_id, plots, stop_event, stop_signal, cancel_requested
+        )
+
+        def work(factory: Any) -> object:
+            # Provenance uses only software/host and the cached SoC config.
+            snapshot, experiment_tag = permit.snapshot, permit.experiment_tag
+            provenance = (
+                capture_software_provenance(context=context)
+                if snapshot is not None and experiment_tag is not None
+                else None
+            )
+            started_at = datetime.now(UTC)
             # Progress alone is ambient; execution dependencies are run-owned.
             with progress_ambient(factory):
                 result = adapter.run(request, raw_cfg, context=context)
                 stop_signal.raise_if_error()
-                return result
+            # Completion records acquisition progress, not later operation cancellation.
+            completion = "stopped" if stop_event.is_set() else "complete"
+            finished_at = datetime.now(UTC)
+            if (
+                snapshot is not None
+                and experiment_tag is not None
+                and provenance is not None
+            ):
+                if not isinstance(result, RunRecord):
+                    raise TypeError("Native acquisition must return a RunRecord")
+                operation.metadata = RunMetadata(
+                    run_id=new_run_id(started_at),
+                    experiment=experiment_tag,
+                    started_at=started_at.isoformat(),
+                    finished_at=finished_at.isoformat(),
+                    completion=completion,
+                    labber_path=None,
+                    snapshot=snapshot,
+                    provenance=provenance,
+                )
+            return result
 
-        operation = _RunOperation(
-            tab_id, plots, stop_event, stop_signal, cancel_requested
-        )
         spec = OperationSpec(
             exclusion=ExclusionRequest(
                 kind=OperationKind.RUN,

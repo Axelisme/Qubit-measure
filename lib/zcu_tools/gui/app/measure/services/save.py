@@ -380,16 +380,16 @@ class SaveService:
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
-        ctx = self._state.session_env
+        if tab.save_context is None:
+            raise FailedPreconditionError(
+                "Tab has no captured save context", reason_code="storage_unavailable"
+            )
         return SaveDataRequest(
             run_result=tab.run.result,
             data_path=data_path,
-            md=ctx.md,
-            ml=ctx.ml,
-            chip_name=ctx.chip_name,
-            qub_name=ctx.qub_name,
-            res_name=ctx.res_name,
-            active_label=ctx.active_label,
+            parameters=tab.parameters,
+            storage=tab.save_context.capture_storage(),
+            metadata=tab.run.metadata,
             comment=comment,
         )
 
