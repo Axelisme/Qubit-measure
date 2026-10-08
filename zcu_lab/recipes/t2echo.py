@@ -34,6 +34,7 @@ def _validate_inputs(
 def t2echo(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     session: RecipeSession,
     *,
+    target: str | None = None,
     reuse_tab_id: str | None = None,
     readout_ref: str | None = None,
     use_reset: str | None = None,
@@ -46,6 +47,9 @@ def t2echo(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     rounds: int | None = None,
 ) -> RecipeGenerator:
     """Save one Echo total-delay sweep and yield Primary before asking to write.
+
+    target binds the new tab's primary role without changing GUI focus.
+    Omission uses focus. Do not pass target when reusing an existing tab.
 
     session is driver-supplied. reuse_tab_id resets that idle twotone/t2echo tab.
     readout_ref/pi_ref/pi2_ref select calibrated library modules; None retains
@@ -73,7 +77,7 @@ def t2echo(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         points,
     )
 
-    tab = session.open_tab("twotone/t2echo", reuse=reuse_tab_id)
+    tab = session.open_tab("twotone/t2echo", target=target, reuse=reuse_tab_id)
     if use_reset is None:
         tab.disable_library("modules.reset")
     else:
@@ -131,6 +135,7 @@ DEFINITION = RecipeDefinition(
         "type": "object",
         "additionalProperties": False,
         "properties": {
+            "target": {"type": ["string", "null"], "minLength": 1},
             **{
                 name: {"type": ["string", "null"], "minLength": 1}
                 for name in (

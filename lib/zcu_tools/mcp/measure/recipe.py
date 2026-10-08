@@ -657,11 +657,18 @@ class RecipeSession:
             operation = self._run
         return operation.snapshot() if operation is not None else None
 
-    def open_tab(self, adapter: str, *, reuse: str | None = None) -> RecipeTab:
+    def open_tab(
+        self, adapter: str, *, target: str | None = None, reuse: str | None = None
+    ) -> RecipeTab:
         """Open adapter's tab, or validate/reset the named reusable tab.
 
-        adapter is a non-empty public GUI adapter ID. reuse=None creates a fresh
-        tab; otherwise reuse is a non-empty GUI locator. Busy, mismatched adapters
+        adapter is a non-empty public GUI adapter ID. target is a concrete
+        component for the adapter's first declared role; omission uses GUI focus.
+        reuse=None creates a fresh tab; otherwise reuse is a non-empty GUI locator.
+        Explicit target with reuse raises ValueError before any GUI request,
+        with the message '重用 tab 時不要傳 target'. Reuse never retargets capture.
+        Parameter and library reads use the named tab's fixed capture, not live
+        context.snapshot. Source/role failures propagate without fallback. Busy, mismatched adapters
         and invalid locators fail without creating a fallback. Observe context
         sources once and capture the cfg ref for edits and Run. GUI/connection
         errors propagate; invalid names raise ValueError before any GUI request.

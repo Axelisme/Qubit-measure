@@ -5,11 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.app.measure.remote.handlers.tab import h_tab_new
+from zcu_tools.gui.app.measure.remote.handlers.tab import (
+    h_tab_new,
+    h_tab_parameter_read,
+)
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg import (
     CfgSchema,
@@ -21,10 +25,19 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import EntryRequest
-from zcu_tools.resources.entry import RoleSpec
+from zcu_tools.resources.entry import RoleSpec, component_registry
 
-from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
+from tests.resources.entry.fakes import (
+    Driver,
+    register_fakes,
+    registry_state,
+    restore_registry,
+)
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
+
+
+class LibraryDriver(Driver):
+    module: dict[str, str]
 
 
 class TargetAdapter(T1Adapter):
@@ -79,6 +92,7 @@ def application(qapp, tmp_path: Path) -> Generator[TargetApplication]:
     before = registry_state()
     try:
         register_fakes()
+        component_registry.register("fake/drive/library", LibraryDriver)
         installed = registry_state()
         registry = Registry()
         registry.register("targeted", TargetAdapter)
@@ -93,6 +107,22 @@ def application(qapp, tmp_path: Path) -> Generator[TargetApplication]:
         context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
         context.add_component("Q2", "fake/drive/a", {"rate": 20.0, "source": "Q1"})
         context.add_component("S1", "fake/sensor", {"rate": 30.0})
+        context.add_component(
+            "QL",
+            "fake/drive/library",
+            {"rate": 40.0, "module": {"pi": "driver.pulses.pi"}},
+        )
+        context.set_module(
+            context.read_context().target,
+            "QL.pulses.pi",
+            PulseSpec(
+                ch=0,
+                nqz=1,
+                freq=100.0,
+                gain=0.25,
+                waveform=ConstWaveformCfg(length=0.05),
+            ),
+        )
         context.set_component_focus("Q1")
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), controller.owner_scheduler
@@ -157,6 +187,91 @@ def test_explicit_target_does_not_hide_missing_same_kind_peer_reference(
     assert application.state.list_tab_ids() == []
     assert application.state.active_tab_id is None
     assert application.controller.context_control.get_component_focus().name == "Q1"
+
+
+def test_parameter_read_uses_fixed_tab_roles_and_distinguishes_missing_null(
+    application: TargetApplication,
+) -> None:
+    tab_id = h_tab_new(
+        application.remote, {"adapter_name": "targeted", "target": "Q2"}
+    )["tab_id"]
+    assert isinstance(tab_id, str)
+    context = application.controller.context_control
+    context.set_parameter(context.read_context().target, "Q2.rate", 25.0)
+    context.set_component_focus("Q1")
+    sources = h_tab_parameter_read(
+        application.remote,
+        {
+            "tab_id": tab_id,
+            "paths": ["driver.rate", "driver.energy_a", "driver.not_supplied"],
+            "module_refs": [],
+        },
+    )
+    assert sources == {
+        "values": {"driver.rate": 20.0, "driver.energy_a": None},
+        "modules": {},
+    }
+    assert context.get_component_focus().name == "Q1"
+
+
+def test_parameter_read_resolves_library_role_slots_in_original_capture(
+    application: TargetApplication,
+) -> None:
+    tab_id = h_tab_new(
+        application.remote, {"adapter_name": "targeted", "target": "QL"}
+    )["tab_id"]
+    context = application.controller.context_control
+    context.set_parameter(
+        context.read_context().target, "QL.module.pi", "QL.pulses.missing"
+    )
+    context.set_module(
+        context.read_context().target,
+        "QL.pulses.later",
+        PulseSpec(
+            ch=0,
+            nqz=1,
+            freq=200.0,
+            gain=0.25,
+            waveform=ConstWaveformCfg(length=0.05),
+        ),
+    )
+    sources = h_tab_parameter_read(
+        application.remote,
+        {
+            "tab_id": tab_id,
+            "paths": [],
+            "module_refs": [
+                "driver.module.pi",
+                "driver.pulses.pi",
+                "QL.pulses.pi",
+                "driver.pulses.later",
+                "<Custom:pulse>",
+            ],
+        },
+    )
+    assert sources == {
+        "values": {},
+        "modules": {
+            "driver.module.pi": "QL.pulses.pi",
+            "driver.pulses.pi": "QL.pulses.pi",
+            "QL.pulses.pi": "QL.pulses.pi",
+            "driver.pulses.later": None,
+            "<Custom:pulse>": None,
+        },
+    }
+
+
+def test_parameter_read_rejects_unbound_role_instead_of_live_focus_fallback(
+    application: TargetApplication,
+) -> None:
+    from zcu_tools.resources.entry.errors import RoleResolutionError
+
+    tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
+    with pytest.raises(RoleResolutionError):
+        h_tab_parameter_read(
+            application.remote,
+            {"tab_id": tab_id, "paths": ["qubit.freq"], "module_refs": []},
+        )
 
 
 def test_omitted_target_captures_focus_and_later_focus_only_affects_new_tabs(

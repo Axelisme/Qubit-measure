@@ -186,6 +186,7 @@ class TabService:
                 post_analysis_images=post_image_paths,
             ),
             artifacts=self._state.get_artifact_snapshots(tab_id),
+            parameters=tab.parameters,
         )
 
     def new_tab(

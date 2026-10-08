@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.services.ports import TabPathsSnapshot
 from zcu_tools.gui.cfg.edit_codec import decode_edits, decode_ref, encode_ref
 from zcu_tools.gui.cfg.resource import (
@@ -209,6 +210,35 @@ def _save_paths_wire(paths: TabPathsSnapshot | None) -> dict[str, object] | None
             name: path.path for name, path in paths.post_analysis_images.items()
         },
     }
+
+
+class TabParameterRead(TypedDict):
+    """Requested values and module references from one fixed tab capture.
+
+    values maps requested logical paths to YAML values. Absent leaves are
+    omitted; explicit null is retained. modules maps each requested reference
+    to its existing canonical library root, or None for custom/missing roots.
+    Neither mapping reads current point/focus or refreshes the live context guard.
+    """
+
+    values: dict[str, YamlValue]
+    modules: dict[str, str | None]
+
+
+def h_tab_parameter_read(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> TabParameterRead:
+    """Read paths and module_refs through the named tab's ParameterContext.
+
+    tab_id is an existing GUI tab. paths and module_refs are arrays of non-empty
+    strings, including captured role prefixes. Query only these requested data.
+    Missing leaves and explicit null follow TabParameterRead. Module lookup uses
+    the parameter owner's role/slot resolution and library membership. Unknown
+    roles, malformed paths, unavailable sources and owner I/O errors propagate.
+    A source-free tab accepts empty arrays only; otherwise precondition_failed.
+    This read does not refresh any live-context or operation observation guard.
+    """
+    raise NotImplementedError("Fixed tab parameter read is not wired yet")
 
 
 def h_tab_get_cfg(
