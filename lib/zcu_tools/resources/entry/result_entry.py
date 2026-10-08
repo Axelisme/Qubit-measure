@@ -214,7 +214,6 @@ class ResultEntry:
         clone_from: str | PointView | None = None,
         description: str | None = None,
         origin: Origin = "notebook",
-        call_id: str | None = None,
     ) -> PointView:
         """Create an independent complete point and return its validated view.
 
@@ -224,8 +223,8 @@ class ResultEntry:
         PointView using the same resolved result/database roots. Reload published
         point and module_cfg, renew creation time and mark the direct clone origin.
         Cross-entry nonmanual sources become local import events with copied JSON
-        attachments; same-entry source IDs remain unchanged. origin/call_id name
-        the import operation: MCP needs a nonempty ID, other origins require None.
+        attachments; same-entry source IDs remain unchanged. origin identifies
+        the importing frontend as gui, notebook or mcp.
         description=None preserves seed/clone metadata; a string explicitly sets it,
         including empty text, within this creation/cleanup scope.
         No source files, data or images change. Failure removes only the new point;

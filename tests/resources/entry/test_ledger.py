@@ -116,7 +116,6 @@ def test_all_event_kinds_round_trip_in_append_order(
         at=_AT,
         entry_id=entry.entry_id,
         origin="mcp",
-        call_id="call-1",
         payload=AnalyzedPayload(
             analysis_kind="fit",
             run_ids=("run-1",),
@@ -273,8 +272,6 @@ def test_constructor_requires_records_directory_and_uuid(tmp_path: Path) -> None
         {"kind": "unknown"},
         {"at": "2026-10-06T02:00:00"},
         {"at": "2026-10-06T02:00:00+01:00"},
-        {"origin": "mcp", "call_id": None},
-        {"origin": "gui", "call_id": "extra"},
         {"unexpected": True},
         {"kind": "saved"},
     ],
@@ -286,9 +283,7 @@ def test_event_model_rejects_invalid_header_origin_and_payload_pair(
     entry, _records = entry_records
     data = _accepted(entry.entry_id).model_dump(mode="json")
     data.update(change)
-    with pytest.raises(
-        ValueError, match="format|id|origin|kind|at|call_id|unexpected|payload"
-    ):
+    with pytest.raises(ValueError, match="format|id|origin|kind|at|unexpected|payload"):
         LedgerEvent.model_validate(data)
 
 

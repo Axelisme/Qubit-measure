@@ -172,18 +172,12 @@ class StdioLoopHooks:
     - ``on_error`` is called from within each ``except`` block with a
       preformatted context message (measure-gui passes ``logger.exception``) so
       the active exception is logged with its traceback.
-    - ``tool_call_scope`` wraps a synchronous tool handler with its native
-      JSON-RPC ID: strings are preserved and integers become decimal strings.
-      With this hook, bool, blank strings and absent/null/other ID types are
-      rejected before the handler. Scope exits on success and exception.
-      Without this hook, the existing dispatch behavior is unchanged.
     """
 
     on_start: Callable[[], None] | None = None
     on_cleanup: Callable[[], None] | None = None
     on_each_reply: Callable[[], list[dict[str, Any]]] | None = None
     on_error: Callable[[str], None] | None = None
-    tool_call_scope: Callable[[str], AbstractContextManager[None]] | None = None
 
 
 def run_stdio_loop(

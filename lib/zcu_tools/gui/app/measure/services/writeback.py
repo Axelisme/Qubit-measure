@@ -37,7 +37,7 @@ from zcu_tools.resources.entry.provenance import Provenance
 from .ports import CfgEdit, CfgEditorPort
 
 logger = logging.getLogger(__name__)
-_GUI_ORIGIN = CommandOrigin("gui", None)
+_GUI_ORIGIN = CommandOrigin("gui")
 
 if TYPE_CHECKING:
     from zcu_tools.gui.cfg.binding import CfgDraft

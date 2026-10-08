@@ -160,13 +160,12 @@ def save_artifacts(
     metadata: RunMetadata,
     ledger: RecordsLedger,
     origin: Origin,
-    call_id: str | None,
 ) -> SaveReport:
     """Rewrite every selected output, isolate failures, then append one saved event.
 
     metadata supplies fixed run/context/acquisition evidence; layout supplies
     exact entry destinations and ledger belongs to that entry. origin is gui,
-    notebook or mcp; only mcp requires a nonempty call_id. Validate members,
+    notebook or mcp. Validate members,
     but do not preflight path/content conflicts or establish a transaction.
     Encode each FileMember once through Figure.savefig or the analysis encoder.
     Encoding failure marks all destinations of that member failed and still
