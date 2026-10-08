@@ -68,6 +68,7 @@ def test_echo_fit_excludes_first_sample_before_projection() -> None:
     signals[0] = 1000.0 - 500.0j
     result = T2EchoResult(times, signals, true_activate_detune=0.0)
     original = result.signals.copy()
+    original_times = result.times.copy()
 
     fit = analyze_t2echo(result)
 
@@ -81,7 +82,11 @@ def test_echo_fit_excludes_first_sample_before_projection() -> None:
     assert fit.quality.relative_parameter_errors == {}
     np.testing.assert_allclose(fit.observed, fit.fitted, atol=1e-5)
     np.testing.assert_array_equal(result.signals, original)
-    np.testing.assert_array_equal(result.times, times)
+    expected_observed = np.hypot(1.0, 0.4) * (
+        0.1 + 0.9 * np.exp(-original_times[1:] / 20.0)
+    )
+    np.testing.assert_allclose(fit.observed, expected_observed)
+    np.testing.assert_array_equal(result.times, original_times)
 
 
 def test_echo_analysis_accepts_four_retained_samples_without_promising_accuracy() -> (
