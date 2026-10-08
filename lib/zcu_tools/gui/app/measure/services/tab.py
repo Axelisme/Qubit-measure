@@ -313,7 +313,7 @@ class TabService:
         try:
             instance = tab.adapter.get_analyze_params(
                 tab.run.result,
-                replace(self._state.session_env, parameters=tab.parameters),
+                replace(self._state.session_env, parameters=tab.run.parameters),
             )
         except Exception as exc:
             logger.exception("Analysis preparation failed for tab %s", tab_id)
@@ -338,7 +338,7 @@ class TabService:
             )
         instance = tab.adapter.get_post_analyze_params(
             tab.analysis.result,
-            replace(self._state.session_env, parameters=tab.parameters),
+            replace(self._state.session_env, parameters=tab.run.parameters),
         )
         self._state.update_tab_post_analyze_param_instance(tab_id, instance)
         return instance
