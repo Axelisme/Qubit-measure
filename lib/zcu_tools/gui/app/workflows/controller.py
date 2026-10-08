@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from threading import RLock
@@ -34,6 +35,9 @@ from zcu_tools.gui.session.services.progress import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_runner import OperationRunner
+
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowController[C]:
@@ -167,18 +171,24 @@ class WorkflowController[C]:
             self.stop()
 
         try:
-            return self._runner.begin(
-                OperationSpec(
-                    exclusion=ExclusionRequest("run", self._owner_id, "workflow run"),
-                    owner_id=self._owner_id,
-                    wants_progress=False,
-                    cancel_hook=cancel,
-                    work=work,
-                    run_in_pool=False,
-                    on_terminal=self._segment_finished,
-                    on_opened=opened,
+            self._admitting = True
+            try:
+                return self._runner.begin(
+                    OperationSpec(
+                        exclusion=ExclusionRequest(
+                            "run", self._owner_id, "workflow run"
+                        ),
+                        owner_id=self._owner_id,
+                        wants_progress=False,
+                        cancel_hook=cancel,
+                        work=work,
+                        run_in_pool=False,
+                        on_terminal=self._segment_finished,
+                        on_opened=opened,
+                    )
                 )
-            )
+            finally:
+                self._admitting = False
         except Exception:
             try:
                 self._discard_progress()
@@ -193,7 +203,10 @@ class WorkflowController[C]:
         self._progress_token = None
         self._factory = None
         if token is not None:
-            self._progress.discard_operation(token)
+            try:
+                self._progress.discard_operation(token)
+            except Exception:
+                logger.exception("Failed to discard workflow run progress")
 
     def _segment_finished(self, bg: BgResult, settle: SettleFn) -> None:
         """Report a returned producer before releasing its segment resources."""
@@ -266,7 +279,11 @@ class WorkflowController[C]:
             status = None if engine is None else engine.status()
             if engine is None or status is None:
                 raise RuntimeError("Resume requires an accepted paused workflow run")
-            if status.lifecycle != "paused" or self._operation_id is not None:
+            if (
+                status.lifecycle != "paused"
+                or self._admitting
+                or self._operation_id is not None
+            ):
                 raise InvalidRunState("resume", status.lifecycle)
 
         captured: DeviceSnapshot | None = None
@@ -292,20 +309,35 @@ class WorkflowController[C]:
             self.stop()
 
         try:
-            return self._runner.begin(
-                OperationSpec(
-                    exclusion=ExclusionRequest("run", self._owner_id, "workflow run"),
-                    owner_id=self._owner_id,
-                    wants_progress=False,
-                    cancel_hook=cancel,
-                    work=work,
-                    run_in_pool=False,
-                    on_terminal=self._segment_finished,
-                    on_opened=opened,
+            self._admitting = True
+            try:
+                return self._runner.begin(
+                    OperationSpec(
+                        exclusion=ExclusionRequest(
+                            "run", self._owner_id, "workflow run"
+                        ),
+                        owner_id=self._owner_id,
+                        wants_progress=False,
+                        cancel_hook=cancel,
+                        work=work,
+                        run_in_pool=False,
+                        on_terminal=self._segment_finished,
+                        on_opened=opened,
+                    )
                 )
-            )
+            finally:
+                self._admitting = False
         except Exception:
             self._operation_id = None
+            stopped = engine.status()
+            if stopped is not None and stopped.lifecycle == "stopped":
+                # begin unwound the lease; no producer can deliver this terminal.
+                try:
+                    self._on_finished(stopped, None)
+                except Exception:
+                    logger.exception("Workflow admission terminal callback failed")
+                finally:
+                    self._discard_progress()
             raise
 
     def stop(self) -> RunStatus | None:
@@ -328,7 +360,11 @@ class WorkflowController[C]:
             if status is None:
                 raise RuntimeError("accepted engine has no run status")
             stopped = self._engine.stop(status.run_id)
-        if status.lifecycle == "paused" and self._operation_id is None:
+        if (
+            status.lifecycle == "paused"
+            and not self._admitting
+            and self._operation_id is None
+        ):
             try:
                 self._on_finished(stopped, None)
             finally:
