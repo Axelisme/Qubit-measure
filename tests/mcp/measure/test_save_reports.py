@@ -282,12 +282,14 @@ def test_interaction_delivers_committed_state_and_inline_png(tmp_path, clients):
         }
 
     client = analysis_client(tmp_path, clients, respond)
+    client.context.session.bind()
+    before = len(client.transport.sent)
     reply = client.call("tab_interact", {"tab": "t"})
     assert reply.data["state"] == state
     assert reply.data["commands"] == [{"name": "done"}]
     assert reply.data["preview_active"] is True
     assert reply.images == (PngImage(PNG),)
-    assert client.transport.sent == [("tab.interact", {"tab_id": "t"})]
+    assert client.transport.sent[before:] == [("tab.interact", {"tab_id": "t"})]
 
 
 @pytest.mark.parametrize(
