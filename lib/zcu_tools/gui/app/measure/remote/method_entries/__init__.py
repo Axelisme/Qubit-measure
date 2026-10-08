@@ -11,6 +11,7 @@ from .context import METHODS as CONTEXT_METHODS
 from .editor import METHODS as EDITOR_METHODS
 from .notify import METHODS as NOTIFY_METHODS
 from .operation import METHODS as OPERATION_METHODS
+from .point import METHODS as POINT_METHODS
 from .predictor import METHODS as PREDICTOR_METHODS
 from .run_save import METHODS as RUN_SAVE_METHODS
 from .state_project import METHODS as STATE_PROJECT_METHODS
@@ -24,6 +25,7 @@ METHOD_ENTRIES: tuple[RemoteMethodEntry, ...] = (
     *RUN_SAVE_METHODS,
     *ANALYSIS_METHODS,
     *CONTEXT_METHODS,
+    *POINT_METHODS,
     *STATE_PROJECT_METHODS,
     *ARB_WAVEFORM_METHODS,
     *CONNECTION_DEVICE_METHODS,
