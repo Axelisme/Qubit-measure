@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from simpleeval import simple_eval
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.cfg import EvalValue, SweepValue
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import (
+    ContextSourceFault,
+    ContextSourceUnavailableError,
+    EntryDraft,
+)
 from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -22,6 +27,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.schema import PointDocument
 
 from zcu_lab.v2._support.measure.ctx_helpers import (
+    optional_parameter_float,
     proper_flux_range,
     proper_qub_freq_range,
     proper_res_freq_range,
@@ -83,6 +89,61 @@ def range_factory() -> Generator[RangeFactory]:
         component_registry.unregister("range/drive")
         component_registry.unregister("range/sensor")
         assert component_registry.kinds() == before
+
+
+@pytest.mark.parametrize("value", [None, 2, 2.5])
+def test_optional_parameter_float_reads_null_or_finite_working_value(
+    range_factory: RangeFactory, value: YamlValue
+) -> None:
+    capture = range_factory({"R1": {"freq": value}})
+    actual = optional_parameter_float(capture, "resonator.freq")
+    assert actual == value
+    if value is not None:
+        assert isinstance(actual, float)
+    assert optional_parameter_float(capture, "resonator.unset") is None
+
+
+@pytest.mark.parametrize("value", [True, "2.5", [2.5], {"value": 2.5}])
+def test_optional_parameter_float_rejects_present_non_real_values(
+    range_factory: RangeFactory, value: YamlValue
+) -> None:
+    capture = range_factory({"R1": {"freq": value}})
+    with pytest.raises(TypeError, match="real scalar"):
+        optional_parameter_float(capture, "resonator.freq")
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_optional_parameter_float_rejects_present_nonfinite_values(
+    range_factory: RangeFactory, value: float
+) -> None:
+    capture = range_factory({"R1": {"freq": value}})
+    with pytest.raises(ValueError, match="finite"):
+        optional_parameter_float(capture, "resonator.freq")
+
+
+def test_optional_parameter_float_keeps_capture_and_propagates_source_fault(
+    range_factory: RangeFactory,
+) -> None:
+    capture = range_factory({"R1": {"freq": 2.5}})
+    other = range_factory({"R1": {"freq": 7.5}})
+    assert optional_parameter_float(other, "resonator.freq") == 7.5
+    assert optional_parameter_float(capture, "resonator.freq") == 2.5
+    unavailable = ParameterContext(
+        point=capture.document(),
+        library=capture.library,
+        target=capture.target,
+        roles=capture.roles,
+        source_faults=(
+            ContextSourceFault(
+                document="point",
+                path=Path("/contract/point.yaml"),
+                error_type="ValueError",
+                message="broken source",
+            ),
+        ),
+    )
+    with pytest.raises(ContextSourceUnavailableError):
+        optional_parameter_float(unavailable, "resonator.freq")
 
 
 def test_res_freq_range_uses_eval_value_when_parameters_present(
