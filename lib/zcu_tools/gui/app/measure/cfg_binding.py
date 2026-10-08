@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from typing import Protocol, cast
+from typing import Protocol
 
-from zcu_tools.experiment.cfg_editing import ProgramCfgKind, program_shape_for_input
+from zcu_tools.experiment.cfg_editing import program_shape_for_input
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
     DirectValue,
 )
 from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
@@ -32,15 +30,13 @@ from zcu_tools.gui.session.value_lookup import (
     ValueTypeError,
     name_from_type,
 )
-from zcu_tools.resources.context import ModuleLibrary
+from zcu_tools.resources.context.library import LibrarySnapshot
 
 from .arb_waveform import ArbWaveformKeys
 from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 
 _DEVICES_SOURCE = "devices"
 _ARB_WAVEFORMS_SOURCE = "arb_waveforms"
-
-_ReferenceConverter = Callable[[object], tuple[CfgSectionSpec, CfgSectionValue]]
 
 
 class MeasureCfgBindingHost(Protocol):
@@ -77,19 +73,15 @@ class MeasureCfgBindings:
         Bare capture names use the same metadata snapshot as dynamic expressions.
         No live provider is retained by the returned resolution.
         """
-        md, ml = snapshot_context_contents(
-            self._host.get_current_md(), self._host.get_current_ml()
-        )
-        references = _SnapshotReferences(ml)
+        references = _SnapshotReferences(parameters)
         options = {
             _DEVICES_SOURCE: tuple(self._host.list_device_names()),
             _ARB_WAVEFORMS_SOURCE: tuple(self._host.arb_waveforms.list_data_keys()),
         }
         captures = deepcopy(dict(captured_values))
-        metadata = dict(md.items())
 
         def evaluate(expression: str) -> int | float | complex:
-            return evaluate_scalar_expr(expression, md)
+            return evaluate_scalar_expr(expression, parameters)
 
         def provide_options(source_id: str) -> Sequence[object]:
             if source_id not in options:
@@ -99,10 +91,12 @@ class MeasureCfgBindings:
             return options[source_id]
 
         def read_capture(name: str) -> object:
-            if "." not in name and name in metadata:
-                return deepcopy(metadata[name])
-            if "." in name and name in captures:
+            if name in captures:
                 return deepcopy(captures[name])
+            if parameters is not None:
+                captured = parameters.lookup(name)
+                if captured.present:
+                    return captured.value
             raise CfgPreconditionError(
                 CfgPreconditionReason.CAPTURE_UNAVAILABLE,
                 f"Capture source {name!r} is unavailable",
@@ -145,7 +139,9 @@ class MeasureCfgBindings:
                 for device in state.list_devices()
             ),
         )
-        return self.snapshot(basis, captured_values=captured_values)
+        return self.snapshot(
+            basis, captured_values=captured_values, parameters=parameters
+        )
 
     def new_draft(
         self, schema: CfgSchema, *, parameters: ParameterContext | None
@@ -157,13 +153,15 @@ class MeasureCfgBindings:
         """
         return CfgDraft(
             schema,
-            evaluate_expression=self.evaluate_expression,
+            evaluate_expression=lambda expression: evaluate_scalar_expr(
+                expression, parameters
+            ),
             provide_options=self.provide_options,
-            references=self,
+            references=_SnapshotReferences(parameters),
         )
 
     def evaluate_expression(self, expression: str) -> int | float | complex:
-        return evaluate_scalar_expr(expression, self._host.get_current_md())
+        return evaluate_scalar_expr(expression, self._host.read_context())
 
     def provide_options(self, source_id: str) -> Sequence[object]:
         if source_id == _DEVICES_SOURCE:
@@ -173,10 +171,10 @@ class MeasureCfgBindings:
         raise RuntimeError(f"Unsupported measure cfg option source {source_id!r}")
 
     def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
-        return _reference_keys(self._host.get_current_ml(), kind, allowed_labels)
+        return _reference_keys(self._host.read_context().library, kind, allowed_labels)
 
     def resolve(self, kind: str, key: str) -> ResolvedReference | None:
-        return _resolve_reference(self._host.get_current_ml(), kind, key)
+        return _resolve_reference(self._host.read_context(), kind, key)
 
     def resolve_value_ref(self, ref: ValueRef, target_type: type) -> DirectValue:
         try:
@@ -198,48 +196,63 @@ class MeasureCfgBindings:
 
 
 class _SnapshotReferences:
-    def __init__(self, library: ModuleLibrary) -> None:
-        self._library = library
+    def __init__(self, parameters: ParameterContext | None) -> None:
+        self._parameters = parameters
 
     def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
-        return _reference_keys(self._library, kind, allowed_labels)
+        if self._parameters is None:
+            return ()
+        return _reference_keys(self._parameters.library, kind, allowed_labels)
 
     def resolve(self, kind: str, key: str) -> ResolvedReference | None:
-        return _resolve_reference(self._library, kind, key)
-
-
-def _reference_store(
-    library: ModuleLibrary, kind: str
-) -> tuple[Mapping[str, object], ProgramCfgKind]:
-    if kind == "module":
-        return library.modules, "module"
-    if kind == "waveform":
-        return library.waveforms, "waveform"
-    raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
+        if self._parameters is None:
+            return None
+        return _resolve_reference(self._parameters, kind, key)
 
 
 def _reference_keys(
-    library: ModuleLibrary, kind: str, allowed_labels: frozenset[str]
+    library: LibrarySnapshot, kind: str, allowed_labels: frozenset[str]
 ) -> tuple[str, ...]:
-    store, catalog_kind = _reference_store(library, kind)
-    return tuple(
-        sorted(
-            key
-            for key, value in store.items()
-            if program_shape_for_input(catalog_kind, value).label in allowed_labels
+    if kind == "module":
+        keys = library.module_keys()
+        return tuple(
+            sorted(
+                key
+                for key in keys
+                if program_shape_for_input(
+                    "module", library.entry_value(key, kind="module")
+                ).label
+                in allowed_labels
+            )
         )
-    )
+    if kind == "waveform":
+        keys = library.waveform_keys()
+        return tuple(
+            sorted(
+                key
+                for key in keys
+                if program_shape_for_input(
+                    "waveform", library.entry_value(key, kind="waveform")
+                ).label
+                in allowed_labels
+            )
+        )
+    raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
 
 
 def _resolve_reference(
-    library: ModuleLibrary, kind: str, key: str
+    parameters: ParameterContext, kind: str, key: str
 ) -> ResolvedReference | None:
-    store, _ = _reference_store(library, kind)
-    if key not in store:
-        return None
-    converter = cast(
-        _ReferenceConverter,
-        module_cfg_to_value if kind == "module" else waveform_cfg_to_value,
-    )
-    spec, value = converter(deepcopy(store[key]))
+    library = parameters.library
+    root = parameters.library_key(key)
+    if kind == "module":
+        if root not in library.module_keys():
+            return None
+        spec, value = module_cfg_to_value(library.get_module(root))
+    elif kind == "waveform":
+        if root not in library.waveform_keys():
+            return None
+        spec, value = waveform_cfg_to_value(library.get_waveform(root))
+    else:
+        raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
     return ResolvedReference(label=spec.label, value=value)

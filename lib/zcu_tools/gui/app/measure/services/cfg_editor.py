@@ -447,7 +447,9 @@ class CfgEditorService:
         gc: bool,
         owner_key: str | None,
     ) -> tuple[str, tuple[SettableTarget, ...]]:
-        draft = self._bindings.new_draft(CfgSchema(spec=spec, value=value))
+        draft = self._bindings.new_draft(
+            CfgSchema(spec=spec, value=value), parameters=self._read.read_context()
+        )
         editor_id = self._new_id(owner_key)
         session = CfgEditorSession(
             editor_id=editor_id,

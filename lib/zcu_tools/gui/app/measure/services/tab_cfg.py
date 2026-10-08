@@ -56,7 +56,7 @@ class TabCfgResources:
         resource = CfgResource(
             defaults,
             initial=initial,
-            resolution=self._resolution,
+            resolution=resolution,
             mutation_allowed=lambda: self._mutation_allowed(tab_id),
             notification_active=lambda: CfgResource.notifications_active(
                 tuple(self._resources.values())
@@ -83,9 +83,7 @@ class TabCfgResources:
         del self._resources[tab_id]
 
     def refresh_all(self) -> tuple[CfgObservation, ...]:
-        return CfgResource.refresh_group(
-            tuple(self._resources.values()), resolution=self._resolution
-        )
+        return CfgResource.refresh_group(tuple(self._resources.values()))
 
     def _require_not_notifying(self) -> None:
         if CfgResource.notifications_active(tuple(self._resources.values())):

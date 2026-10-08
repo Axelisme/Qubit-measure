@@ -531,6 +531,14 @@ class CfgResource:
             logging.getLogger(__name__).exception("Cfg resolution failed")
             return None, self._unavailable_observation(exc, source)
 
+    def _prepare_own_source_refresh(self) -> tuple[CfgDraft | None, CfgObservation]:
+        try:
+            source = self._resolution()
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Cfg source snapshot failed")
+            return None, self._unavailable_observation(exc, None)
+        return self._prepare_refresh(source)
+
     def _install_refresh(
         self, candidate: CfgDraft | None, observation: CfgObservation
     ) -> None:
@@ -563,16 +571,19 @@ class CfgResource:
             resource._check_command(resource._observation.ref.revision, editing=False)
         source: CfgResolution | None = None
         failure: Exception | None = None
-        try:
-            source = resolution()
-        except Exception as exc:
-            failure = exc
-            logging.getLogger(__name__).exception("Cfg source snapshot failed")
+        if resolution is not None:
+            try:
+                source = resolution()
+            except Exception as exc:
+                failure = exc
+                logging.getLogger(__name__).exception("Cfg source snapshot failed")
         prepared: list[tuple[CfgResource, CfgDraft | None, CfgObservation]] = []
         for resource in members:
             candidate: CfgDraft | None = None
             if failure is not None:
                 observation = resource._unavailable_observation(failure, None)
+            elif resolution is None:
+                candidate, observation = resource._prepare_own_source_refresh()
             else:
                 assert source is not None
                 candidate, observation = resource._prepare_refresh(source)
