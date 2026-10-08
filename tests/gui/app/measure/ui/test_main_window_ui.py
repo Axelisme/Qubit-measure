@@ -54,6 +54,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgResource,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
@@ -294,6 +295,33 @@ def test_role_rebind_ui_owner_fact_updates_complete_title_and_keeps_run_marker(
     assert combo is not None and combo.currentData() == "Q2"
     ctrl.tab_control.set_role.assert_not_called()
     ctrl.tab_control.reset_role.assert_not_called()
+
+
+def test_role_rebind_ui_rejection_restores_committed_capture_without_retry(
+    qapp,
+    focus_captures: tuple[ParameterContext, ParameterContext],
+) -> None:
+    ctrl = _mock_ctrl()
+    q1, _q2 = focus_captures
+    snapshot = replace(
+        _snapshot("a", supports_analysis=False, analyze_params=None), parameters=q1
+    )
+    ctrl.tab_control.get_tab_snapshot.return_value = snapshot
+    failure = FailedPreconditionError("Tab is busy")
+    ctrl.tab_control.set_role.side_effect = failure
+    dialogs = RecordingDialogPresenter()
+    assert snapshot.capabilities is not None
+    widget = ExpTabWidget("a", ctrl, snapshot.capabilities, dialog_presenter=dialogs)
+    widget.attach(snapshot, _RecordingTabActions())
+    selector = widget.findChild(QComboBox, "role-qubit")
+    assert selector is not None and selector.currentData() == "Q1"
+    index = selector.findData("Q2")
+    selector.setCurrentIndex(index)
+    selector.activated.emit(index)
+    assert selector.currentData() == "Q1"
+    ctrl.tab_control.set_role.assert_called_once_with("a", "qubit", "Q2")
+    assert len(dialogs.calls) == 1 and dialogs.calls[0].message == str(failure)
+    widget.detach()
 
 
 def test_main_window_focus_selection_projects_owner_without_rebinding_tabs(qapp):

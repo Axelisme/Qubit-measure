@@ -1150,6 +1150,7 @@ class ExpTabWidget(QWidget):
             self._ctrl.tab_control.set_role(self.tab_id, role, component)
         except Exception as exc:
             logger.exception("Role selection failed: tab=%s role=%s", self.tab_id, role)
+            self.refresh_roles(self._ctrl.tab_control.get_tab_snapshot(self.tab_id))
             self._dialog_presenter.critical(self, "Role selection failed", str(exc))
 
     def _on_role_reset(self, role: str) -> None:
@@ -1157,6 +1158,7 @@ class ExpTabWidget(QWidget):
             self._ctrl.tab_control.reset_role(self.tab_id, role)
         except Exception as exc:
             logger.exception("Role reset failed: tab=%s role=%s", self.tab_id, role)
+            self.refresh_roles(self._ctrl.tab_control.get_tab_snapshot(self.tab_id))
             self._dialog_presenter.critical(self, "Role reset failed", str(exc))
 
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
