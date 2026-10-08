@@ -14,7 +14,6 @@ There is no hardware connection, resume, retry or old-format fallback.
 import argparse
 import json
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -28,6 +27,7 @@ from zcu_tools.experiment.workflows import (
     RunIdentity,
     RunPaths,
 )
+from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.sim import SimParams
@@ -36,19 +36,6 @@ from zcu_tools.resources.entry import new_run_id, workflow_roots
 
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables, t1_fluxdep
-
-
-class _Clock:
-    """Adapt UTC wall time and cancellable waits to the Engine clock port."""
-
-    def now(self) -> datetime:
-        """Return the current timezone-aware UTC instant."""
-        return datetime.now(UTC)
-
-    def wait_until(self, target: datetime, cancel_signal: StopSignal) -> None:
-        """Wait for an aware target or cancellation; past targets return now."""
-        seconds = max(0.0, (target - self.now()).total_seconds())
-        cancel_signal.event.wait(seconds)
 
 
 class _Devices:
@@ -136,7 +123,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             EnginePorts(
                 plots,
                 TQDMProgressBar,
-                _Clock(),
+                UtcClock(),
                 context=seed,
                 soc=soc,
                 soccfg=soccfg,
