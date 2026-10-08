@@ -128,6 +128,69 @@ def _const_pulse(
     return cfg.build("p")
 
 
+@pytest.mark.parametrize("swept", [False, True])
+@pytest.mark.parametrize("pulse_readout", [False, True])
+def test_times_use_their_channel_clocks(swept: bool, pulse_readout: bool) -> None:
+    """Lowering quantizes all time fields without changing their source parameters."""
+    soccfg = make_mock_soccfg(n_readouts=2)
+    soccfg["tprocs"][0]["f_time"] = 100.0
+    soccfg["gens"][1]["f_fabric"] = 50.0
+    soccfg["readouts"][1]["f_output"] = 25.0
+    value = QickParam(0.173, {"time": 1.15}) if swept else 0.173
+    sweep = [("other", 2), ("time", 4)]
+    counts = {"other": 2, "time": 4}
+    requested = (
+        np.asarray(value.to_array(counts, all_loops=True)).copy()
+        if isinstance(value, QickParam)
+        else value
+    )
+    pulse_cfg = PulseCfg(
+        ch=1,
+        nqz=1,
+        gain=1.0,
+        freq=4000.0,
+        waveform=ConstWaveformCfg(length=value),
+        pre_delay=value,
+        post_delay=value,
+    )
+    ro_cfg = DirectReadoutCfg(
+        ro_ch=1, ro_freq=7200.0, ro_length=value, trig_offset=value
+    )
+    readout = (
+        PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
+        if pulse_readout
+        else ro_cfg.build("ro")
+    )
+    lp = lower_point(
+        [
+            pulse_cfg.build("drive"),
+            Delay("delay", value),
+            DelayAuto("auto", value),
+            SoftDelay("soft", value),
+            readout,
+        ],
+        sweep,
+        _SIM,
+        _F_QUBIT_GHZ,
+        {"other": 1, "time": 2},
+        soccfg.cycles2us,
+        soccfg=soccfg,
+    )
+    # Rounded start plus two truncated increments: tProc 17+2*38,
+    # generator 9+2*19, readout 4+2*9 cycles. Scalar uses only the start.
+    tproc_us, gen_us, ro_us = (0.93, 0.94, 0.88) if swept else (0.17, 0.18, 0.16)
+    assert [segment.t for segment in lp.segments] == pytest.approx(
+        [tproc_us, gen_us, tproc_us, tproc_us, tproc_us, tproc_us]
+    )
+    assert lp.readout.ro_length_us == pytest.approx(ro_us)
+    assert lp.readout.trig_offset_us == pytest.approx(tproc_us)
+    if pulse_readout:
+        assert lp.readout.pulse_length_us == pytest.approx(gen_us)
+        assert lp.readout.pulse_pre_delay_us == pytest.approx(tproc_us)
+    if isinstance(value, QickParam):
+        np.testing.assert_array_equal(value.to_array(counts, all_loops=True), requested)
+
+
 class TestConstPulseSegment:
     """A const pulse maps to exactly one drive segment with hand-checked values."""
 

@@ -231,17 +231,7 @@ def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
 ) -> None:
     rig = Rig(inputs, tmp_path)
     original = rig.plan.model_copy(deep=True)
-    # Align clocks while sim/lowering.py::_resolve_scalar uses unquantized lengths.
-    channel = rig.plan.qub_pulse.ch
-    start = inputs.soccfg.cycles2us(24, gen_ch=channel)
-    stop = inputs.soccfg.cycles2us(24 + 50 * 8, gen_ch=channel)
-    rig.start(
-        CalibrationTunables(
-            span_mhz=2.0,
-            rabi_start_factor=start / rig.seed.pi_length_us,
-            rabi_stop_factor=stop / rig.seed.pi_length_us,
-        )
-    )
+    rig.start(CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125))
     status = rig.engine.execute("calibration")
     assert status.lifecycle == "done", status.reason
     assert len(rig.results) == 1
