@@ -340,8 +340,8 @@ class Plots(FigureCollection):
     """One producer's plotting lifetime, shared by frontend adapters.
 
     Stop the producer before finish. Host calls are synchronous and preserve
-    that producer's order. General figures stay unpresented until finish, while
-    live figures present immediately. Finishing fixes membership and stops typed
+    that producer's order. General figures stay unpresented until finish unless
+    drawn. Live factories and the first successful draw present immediately. Finishing fixes membership and stops typed
     updates; it does not declare analysis success. Release presentation separately
     after finishing. Neither finish nor release destroys retained Figure objects.
     """
@@ -390,13 +390,16 @@ class Plots(FigureCollection):
         """Draw on an existing named figure, then refresh on the host owner.
 
         Execution is synchronous on the host owner thread and blocks the calling
-        worker thread until callback and refresh return. With a GUI host it
+        worker thread until callback, presentation and refresh return.
+        The first successful draw presents the figure and makes it live; later
+        draws refresh the same presentation. Untouched general figures still
+        wait until finish to present. With a GUI host it
         occupies the GUI thread; heavy drawing can freeze the interface.
         The callback may freely modify axes shared with live templates, but must
         not retain artists for later worker-side mutation. Calling cla() in the
         callback removes same-axes template artists; their next update raises
         RuntimeError. Callback exceptions propagate back to the caller without
-        rollback or refresh. Unknown names raise KeyError; finished plots raise
+        rollback, presentation or refresh. Unknown names raise KeyError; finished plots raise
         RuntimeError. Host errors also propagate.
         """
         self._ensure_active()
@@ -405,6 +408,7 @@ class Plots(FigureCollection):
         def draw_frame() -> None:
             self._ensure_active()
             callback(figure)
+            self._present_live(figure)
             self._host.refresh(figure)
 
         self._host.call(draw_frame)

@@ -18,9 +18,9 @@ canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換�
 `(len(xs), len(ys))` 實數資料契約；uniform 與 nonuniform 座標共用具名 Figure。單熱圖可指定 `clim=(min, max)`，固定色階跨 update 保留，未指定時沿資料自動縮放。
 `liveplot_1d` 的 `configure_axes` callback 在 host owner 初始化 artists 後、呈現前執行一次，供實驗設定原生 ticks／style。Callback 不得保留 active axes 供 worker 後續修改；設定失敗直接傳遞例外，不呈現未完成圖。
 1D／2D factories 可接同一具名 Figure 的既有 axes，支援 workflow 合併圖。外部、移除或已被其他 handle 使用的 axes 會被拒絕；同圖只呈現一次。Heatmap 的 `mark_point` 與 scan-line 的 `mark_line` 由 host owner 更新 reference marker，不把 active artists 交回 worker。`refresh(name)` 在批次 typed update 後刷新整圖。
-`draw(name, callback)` 將具名 Figure 交给 callback，透過同步 host call 在 owner thread 任意繪圖，再 refresh。Worker 等 callback 完成，不保留 artists 供之後直接修改。自由繪圖與 liveplot 模板可共用 axes；模板的 artist 被清除或移除，或整個 axes 離開 Figure 時，下一次 update 明確 raise。同名圖可透過 draw 清除並重建 axes，再以 factory 的 axes 參數接上新模板；原模板不恢復。`save(name, path)` 在同一 owner 存原生 Figure，不執行繪圖 callback 或 refresh，finish 前後皆可用。模板仍是常用捷徑，不限制自由繪圖。
+`draw(name, callback)` 將具名 Figure 交给 callback，透過同步 host call 在 owner thread 任意繪圖，成功後首次 present 並標為 live 圖，再 refresh；後續 draw 共用同一 presentation。Callback 失敗不 present／refresh，不 rollback。未 draw 的一般圖仍 finish 才 present。Worker 等 callback 完成，不保留 artists 供之後直接修改。自由繪圖與 liveplot 模板可共用 axes；模板的 artist 被清除或移除，或整個 axes 離開 Figure 時，下一次 update 明確 raise。同名圖可透過 draw 清除並重建 axes，再以 factory 的 axes 參數接上新模板；原模板不恢復。`save(name, path)` 在同一 owner 存原生 Figure，不執行繪圖 callback 或 refresh，finish 前後皆可用。模板仍是常用捷徑，不限制自由繪圖。
 `record_animation(name, path)` 以 FFmpeg 保存 live figure；recorder 的 setup、grab_frame、finish 均在 host owner 執行。Caller 在 producer 停止後結束 recorder，Plots.finish 也收尾尚未結束的 recorder。錄影不取得 Figure 所有權，不依賴 ambient backend，writer 錯誤不代表操作成功。
-一般圖在 `finish()` 時呈現，liveplot 立即呈現；update 先驗證與複製資料，
+未 draw 的一般圖在 `finish()` 時呈現，liveplot 與首次成功 draw 立即呈現；update 先驗證與複製資料，
 再同步送到 host owner 修改 artists。不呈現 host 仍建圖、更新 artists 並支援
 原生 savefig。匯入明確 plots 不初始化 pyplot 或 Notebook display；非呈現操作
 只需基本依賴，不決定 GUI backend。Caller 停止 producer 後才 finish；完成後

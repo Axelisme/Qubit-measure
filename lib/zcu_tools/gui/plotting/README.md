@@ -1,6 +1,6 @@
 # GUI plotting
 
-**Last updated:** 2026-10-06, shared PNG rendering
+**Last updated:** 2026-10-09, 任意 draw 的即時呈現
 
 此目錄提供 explicit Matplotlib／Qt 接入，不決定各 app 的 figure 接受或保存政策。
 根 package 延遲載入 Qt 與 Matplotlib 匯出。Runtime 在 QApplication 建立後初始化
@@ -9,7 +9,7 @@ host、shutdown guard 與 mathtext lock／prewarm，不切換 process-wide backe
 ## Figures 與 presentation
 
 Caller 透過 Plots 持有具名原生 Figure，並注入 QtPlotHost。Host 使用 owner scheduler
-執行 live artist 更新與 presentation。普通圖完成後才呈現，診斷失敗不必丟棄計算結果。
+執行 live artist 更新與 presentation。普通圖首次成功 draw 後即呈現，後續 draw 共用同一 canvas；未 draw 的圖仍完成後才呈現。Callback 失敗不呈現或 refresh，也不 rollback，診斷結果仍保留。
 Qt canvas 與 Figure 的生命週期分開。Release 釋放 presentation，保留原圖及 Agg canvas，
 caller 仍可修改 artists 或 savefig。
 
