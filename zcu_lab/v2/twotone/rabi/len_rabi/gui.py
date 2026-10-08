@@ -102,7 +102,7 @@ class LenRabiAnalyzeResult(AnalyzeResultBase):
     pi_len_err: float
     pi2_len: float
     pi2_len_err: float
-    # Rabi oscillation frequency in MHz (1/us), preserved for writeback as 'rabi_f'.
+    # Rabi oscillation frequency in MHz (1/us), proposed at qubit.ext.rabi_freq.
     rabi_f: float
     rabi_f_err: float
     fit_quality: dict[str, dict[str, object]] | None = None
@@ -128,32 +128,30 @@ class LenRabiAdapter(
             "(the pulse gain stays fixed)."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
-            "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
-            "'qub_ch' — qubit-drive channel; 'pi_len' — prior pi-pulse length, "
-            "the length sweep spans up to 4*pi_len (fallback 0.3 us). Readout "
-            "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
-            "'timeFly' for the readout trigger offset (~0–1 us)."
+            "Uses the tab's captured qubit and resonator roles. Length sweep "
+            "stop is 4 * qubit.module.x180.waveform.length (fallback 0.3 us); "
+            "relax delay is 5 * qubit.t1 (fallback 30.5 us). Fresh drive uses "
+            "qubit.freq (fallback 4000 MHz) and wiring.L01.ch (fallback 0). "
+            "Fresh readout uses resonator.freq (fallback 6000 MHz) and "
+            "wiring.ch/wiring.ro_ch (fallback 0), with trigger offset 0.55 us."
         ),
         expects_ml=(
-            "Needs a qubit drive-pulse module — prefers calibrated library "
-            "pi pulses ('pi_len' / 'pi_amp') and falls back to a blank inline "
-            "pulse — and a readout module that references a calibrated library "
-            "readout ('readout_dpm' / 'readout_rf' / 'readout' / "
-            "'res_readout') when present, else a blank pulse-readout that "
-            "references the 'ro_waveform' waveform when one exists. Optional "
-            "reset references a library reset ('reset_bath' / 'reset_10' / "
-            "'reset_120') when present, else stays disabled."
+            "Mounts captured qubit.module.x180/readout/reset slots. Missing "
+            "or dangling drive/readout slots use fresh inline pulses; reset "
+            "stays disabled. The length sweep owns waveform.length, locked "
+            "at 1 us in the cfg. Inline drive gain is 0.3; inline readout "
+            "gain is 0.1, const length 1 us and ADC window 0.9 us. No named "
+            "waveform is adopted."
         ),
         typical_writeback=(
-            "Proposes MetaDict scalars 'pi_len', 'pi2_len' (fitted lengths), "
-            "and 'rabi_f' (Rabi oscillation frequency in MHz). Also proposes "
-            "ModuleLibrary modules 'pi_len' and 'pi2_len' — length-calibrated "
-            "pi-pulse modules produced by this adapter — with waveform length "
-            "overridden to the fitted pi / pi/2 value. amp_rabi produces the "
-            "separate 'pi_amp'/'pi2_amp' gain-calibrated modules and seeds its "
-            "gain sweep from the 'pi_len' scalar written here. Module items are "
-            "skipped when no source cfg is available (e.g. loaded from file)."
+            "Proposes qubit.ext.rabi_freq in MHz from the fit. With a source "
+            "cfg, copies the drive pulse into captured qubit.pulses.pi_amp "
+            "and pi2_amp, replacing waveform.length with fitted pi and pi/2 "
+            "lengths. Separately proposes qubit.module.x180/x90 pointing to "
+            "those resolved keys, even when already bound to them, plus "
+            "qubit.ext.pi_product = source gain * fitted pi length (a.u. * us). "
+            "Every item is independently selectable. Without cfg only "
+            "rabi_freq remains. No separate length scalars or live defaults."
         ),
         recommended=(
             "Phase defaults to fixed 0/180 degrees; enable Fit phase offset "
@@ -268,6 +266,19 @@ class LenRabiAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[LenRabiRunResult, LenRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose independent calibrations from the source and captured roles.
+
+        req pairs the source RunRecord, fitted lengths/frequency and captured
+        ctx.parameters. Always propose qubit.ext.rabi_freq in MHz. With cfg,
+        add qubit.pulses.pi_amp/pi2_amp pulse proposals with fitted lengths,
+        independent x180/x90 slot proposals containing their resolved keys,
+        and qubit.ext.pi_product = source gain * pi_len (a.u. * us).
+        Same-key slots are still proposed. Without cfg return only rabi_freq.
+        Only waveform lengths change; source cfg is not mutated. Missing
+        capture, role resolution, non-scalar source gain and unsupported
+        waveform-length conversion fail explicitly. No hardware, live
+        calibration reads or writes occur.
+        """
         result = req.analyze_result
         items: list[WritebackItem] = [
             MetaDictWriteback(

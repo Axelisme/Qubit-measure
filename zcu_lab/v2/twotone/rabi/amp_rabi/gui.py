@@ -66,9 +66,7 @@ class AmpRabiAnalyzeParams:
 
 @dataclass
 class AmpRabiAnalyzeResult(AnalyzeResultBase):
-    # Summary keys are the GAIN scalars (pi_gain / pi2_gain) to match the glossary
-    # (single_qubit.md) and the MetaDict writeback target; the 'pi_amp'/'pi2_amp'
-    # names belong to the pi-pulse MODULES, not these scalars.
+    # Fitted gains stay in this analysis result and the proposed pulse modules.
     pi_gain: float
     pi_gain_err: float
     pi2_gain: float
@@ -174,12 +172,14 @@ class AmpRabiAdapter(
             "Inline readout uses a const waveform, not a named waveform."
         ),
         typical_writeback=(
-            "Proposes MetaDict scalars 'pi_gain' and 'pi2_gain' (fitted "
-            "gains). Also proposes ModuleLibrary modules 'pi_amp' and "
-            "'pi2_amp' — copies of the qubit drive module with gain "
-            "overridden to the fitted pi / pi/2 value. Module items are "
-            "skipped when no source cfg is available (e.g. loaded from "
-            "file)."
+            "Copies the source drive pulse into captured qubit.pulses.pi_amp "
+            "and pi2_amp, replacing gain with the fitted pi and pi/2 gains. "
+            "Separately proposes qubit.module.x180 and x90 pointing to those "
+            "resolved library keys, even when already bound to the same keys. "
+            "Also proposes qubit.ext.pi_product as fitted pi gain times the "
+            "source pulse length (a.u. * us). Every item is independently "
+            "selectable; none is proposed without a source cfg. Does not "
+            "write separate gain scalars or read current calibration."
         ),
         recommended=(
             "Analysis takes a 'Skip points' count (default 0) to drop leading "
@@ -289,6 +289,17 @@ class AmpRabiAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[AmpRabiRunResult, AmpRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose five independent calibrations from the captured source.
+
+        req pairs the source RunRecord, fitted gains and captured ctx.parameters.
+        With a cfg, return pulse-module proposals at qubit.pulses.pi_amp/pi2_amp,
+        separate x180/x90 slot proposals containing their resolved library keys,
+        and qubit.ext.pi_product = pi_gain * source waveform.length (a.u. * us).
+        Same-key slots are still proposed. Without cfg return no items.
+        Only module gains change; source cfg is not mutated. Missing capture,
+        role resolution, non-scalar source length and conversion/asset faults
+        fail explicitly. No hardware, live calibration reads or writes occur.
+        """
         result = req.analyze_result
         items: list[WritebackItem] = [
             # Scalar gains write back as 'pi_gain'/'pi2_gain' per the naming
