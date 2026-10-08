@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.state import (
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.resource import CfgObservation, CfgResolution
 from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.entry import RoleSpec
 
 from ..adapter import AnalysisMode, WritebackItem
 from .plot_lifecycle import release_retired_plots
@@ -73,7 +74,16 @@ class TabService:
         writeback: WritebackLifecyclePort,
         cfg_resources: TabCfgResources,
         cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
+        captured_parameters: Callable[
+            [Mapping[str, RoleSpec]], ParameterContext | None
+        ],
     ) -> None:
+        """Inject fixed cfg sources and the current role capture operation.
+
+        captured_parameters resolves declared roles through the context owner;
+        empty declarations return None. Missing context/roles propagate before
+        tab registration. cfg_resolution retains the supplied capture on refresh.
+        """
         self._state = state
         self._registry = registry
         # The tab lifecycle previews pane drafts and tears them down on close via
@@ -81,6 +91,7 @@ class TabService:
         self._writeback = writeback
         self._cfg_resources = cfg_resources
         self._cfg_resolution = cfg_resolution
+        self._captured_parameters = captured_parameters
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
