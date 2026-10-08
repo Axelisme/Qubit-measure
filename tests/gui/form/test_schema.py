@@ -1,11 +1,12 @@
 """Input schema is a dynamic public contract, not documentation text."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Annotated, Literal
 
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, Field, JsonValue
+from pydantic.json_schema import SkipJsonSchema
 from zcu_tools.gui.form import (
     Display,
     FormEnv,
@@ -730,6 +731,51 @@ def test_discriminator_identity_keeps_numeric_and_string_tags_distinct() -> None
         assert isinstance(result, TypedTagCollisionForm)
         assert result.branch.kind == tag
         assert type(result.branch.kind) is type(tag)
+
+
+class OmittedChoiceForm(FormModel):
+    """Omitting one schema branch must leave normal typed aliases editable."""
+
+    branch: Annotated[
+        NumericAliasBranch | SkipJsonSchema[NumericOtherBranch],
+        Field(discriminator="kind"),
+    ]
+
+
+class InvalidJsonChoiceBranch(NumericOtherBranch):
+    """A callable choice cannot be emitted as a native JSON Schema branch."""
+
+    callback: Callable[[], None]
+
+
+class InvalidJsonChoiceForm(FormModel):
+    """Native schema generation skips the invalid choice, not the entire field."""
+
+    branch: Annotated[
+        NumericAliasBranch | InvalidJsonChoiceBranch, Field(discriminator="kind")
+    ]
+
+
+@pytest.mark.parametrize("model", [OmittedChoiceForm, InvalidJsonChoiceForm])
+def test_skipped_discriminator_choice_keeps_normal_field_and_identity(
+    model: type[OmittedChoiceForm | InvalidJsonChoiceForm],
+) -> None:
+    env = FormEnv(md=MetaDict())
+    schema = model.input_schema(env)
+    fields = schema_object(schema["properties"])
+    branch = schema_object(fields["branch"])
+    assert identity_values(branch) == [[1, 2]]
+    for tag in (1, 2):
+        data: dict[str, JsonValue] = {"branch": {"kind": tag, "amount": 7.0}}
+        assert Draft202012Validator(schema).is_valid(data)
+        state = FormState(FormInput(model, data))
+        result = state.result(env)
+        assert isinstance(result, (OmittedChoiceForm, InvalidJsonChoiceForm))
+        assert isinstance(result.branch, NumericAliasBranch)
+        assert result.branch.kind == tag
+        assert type(result.branch.kind) is int
+        assert result.branch.amount == 7.0
+        assert state.input.data == data
 
 
 def test_whole_container_choices_share_json_value_membership() -> None:
