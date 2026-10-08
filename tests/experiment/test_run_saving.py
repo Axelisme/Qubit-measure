@@ -2,11 +2,13 @@
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
+from matplotlib.figure import Figure
 from zcu_tools.datafile import (
     AnalysisDocument,
     RunMetadata,
@@ -225,6 +227,94 @@ def test_encoding_failure_isolates_the_member_and_records_other_outputs(
     assert len(
         [item for item in event.payload.outputs if item.status == "failed"]
     ) == len(failed)
+
+
+def test_injected_figure_encoder_runs_once_and_shares_png_bytes(tmp_path: Path) -> None:
+    metadata, layout, ledger = storage(tmp_path)
+    selected = artifacts()
+    figure = next(
+        member.content
+        for artifact in selected
+        for member in artifact.members
+        if isinstance(member, FileMember) and isinstance(member.content, Figure)
+    )
+    calls: list[Figure] = []
+    encoded: list[bytes] = []
+
+    def encode(candidate: Figure) -> bytes:
+        calls.append(candidate)
+        with BytesIO() as stream:
+            candidate.savefig(stream, format="png", dpi=37)
+            content = stream.getvalue()
+        encoded.append(content)
+        return content
+
+    try:
+        report = save_artifacts(
+            selected,
+            layout=layout,
+            metadata=metadata,
+            ledger=ledger,
+            origin="gui",
+            call_id=None,
+            figure_encoder=encode,
+        )
+        assert calls == [figure]
+        pngs = [
+            item.output.path for item in report.outputs if item.output.format == "png"
+        ]
+        assert len(pngs) == 2
+        assert all(path.read_bytes() == encoded[0] for path in pngs)
+        assert all(item.status == "saved" for item in report.outputs)
+    finally:
+        figure.clear()
+
+
+def test_injected_encoder_failure_leaves_data_and_json_saved(tmp_path: Path) -> None:
+    metadata, layout, ledger = storage(tmp_path)
+    selected = artifacts()
+    figure = next(
+        member.content
+        for artifact in selected
+        for member in artifact.members
+        if isinstance(member, FileMember) and isinstance(member.content, Figure)
+    )
+    calls: list[Figure] = []
+
+    def encode(candidate: Figure) -> bytes:
+        calls.append(candidate)
+        raise RuntimeError("renderer unavailable")
+
+    try:
+        report = save_artifacts(
+            selected,
+            layout=layout,
+            metadata=metadata,
+            ledger=ledger,
+            origin="gui",
+            call_id=None,
+            figure_encoder=encode,
+        )
+        assert calls == [figure]
+        failed = [item for item in report.outputs if item.status == "failed"]
+        assert len(failed) == 2
+        assert all(item.output.format == "png" for item in failed)
+        assert all(
+            item.error and "renderer unavailable" in item.error for item in failed
+        )
+        successful = [item for item in report.outputs if item.status == "saved"]
+        assert {"data_h5", "labber", "json"} <= {
+            item.output.format for item in successful
+        }
+        assert all(item.output.path.is_file() for item in successful)
+        event = ledger.events()[0]
+        assert isinstance(event.payload, SavedPayload)
+        assert (
+            len([item for item in event.payload.outputs if item.status == "failed"])
+            == 2
+        )
+    finally:
+        figure.clear()
 
 
 def test_member_contract_rejects_invalid_identity_before_output_attempts() -> None:

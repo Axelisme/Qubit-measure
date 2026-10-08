@@ -1,6 +1,7 @@
 """One-call artifact persistence through exact format and ledger owners."""
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from io import BytesIO
@@ -161,6 +162,7 @@ def save_artifacts(
     ledger: RecordsLedger,
     origin: Origin,
     call_id: str | None,
+    figure_encoder: Callable[[Figure], bytes] | None = None,
 ) -> SaveReport:
     """Rewrite every selected output, isolate failures, then append one saved event.
 
@@ -168,7 +170,10 @@ def save_artifacts(
     exact entry destinations and ledger belongs to that entry. origin is gui,
     notebook or mcp; only mcp requires a nonempty call_id. Validate members,
     but do not preflight path/content conflicts or establish a transaction.
-    Encode each FileMember once through Figure.savefig or the analysis encoder.
+    Encode each FileMember once. figure_encoder receives each native Figure and
+    returns PNG bytes; None uses Figure.savefig. The callback runs synchronously
+    on the calling thread, so a live GUI Figure requires owner-thread marshalling
+    by the caller. AnalysisDocument always uses the datafile analysis encoder.
     Encoding failure marks all destinations of that member failed and still
     attempts other members. Do not encode in the caller or accept bytes aliases.
     Attempt Labber before native for each data member, retaining the previous
