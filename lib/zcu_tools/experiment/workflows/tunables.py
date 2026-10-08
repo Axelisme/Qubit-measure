@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from math import isfinite
@@ -35,11 +35,9 @@ class TunableValues[T: BaseModel]:
     model_type is the workflow-declared pydantic type. values is revalidated
     from its fields and detached at construction, creating revision zero.
     control_lock is the Engine's shared RLock. append must append/flush one
-    TunablesChanged event or raise. originals maps legal leaf dot paths to
-    opaque text at revision zero, or None for no originals. It is copied after
-    validating paths and text; invalid input raises ValueError before I/O.
-    The same lock serializes capture, update, and append, so both model values
-    and originals are published only after their journal line.
+    TunablesChanged event or raise. The same lock serializes capture, update,
+    and append, so model values and revision are published only after their
+    journal line.
 
     This package-internal seam hides schema paths, whole-model validation,
     detached JSON projections, and atomic revision publication. Engine retains
@@ -52,13 +50,8 @@ class TunableValues[T: BaseModel]:
         values: T,
         control_lock: RLock,
         append: Callable[[TunablesChanged], None],
-        *,
-        originals: Mapping[str, str] | None = None,
     ) -> None:
         self._model_type = model_type
-        self._originals = _copy_originals(
-            model_type, () if originals is None else originals.items()
-        )
         self._values = deepcopy(
             model_type.model_validate(
                 values.model_dump(mode="python"), by_name=True, by_alias=False
@@ -85,11 +78,9 @@ class TunableValues[T: BaseModel]:
             return CapturedTunables(self._revision, deepcopy(self._values))
 
     def snapshot(self) -> TunablesSnapshot:
-        """Return detached JSON values and opaque originals at one revision."""
+        """Return detached JSON values at one revision."""
         with self._lock:
-            return TunablesSnapshot(
-                self._revision, _model_json(self._values), dict(self._originals)
-            )
+            return TunablesSnapshot(self._revision, _model_json(self._values))
 
     def update(
         self,
@@ -114,9 +105,7 @@ class TunableValues[T: BaseModel]:
         The complete candidate is validated, including cross-field rules.
         append errors propagate with their original cause and publish nothing.
         A successful batch increments revision once, including same-value edits.
-        Each original is opaque str or None. None clears prior text at that
-        path; other paths retain their text. Non-text originals raise ValueError.
-        Values and originals are both installed only after append succeeds.
+        Values and revision are installed only after append succeeds.
         """
         with self._lock:
             if type(expected_revision) is not int or expected_revision < 0:
@@ -126,14 +115,9 @@ class TunableValues[T: BaseModel]:
             _check_batch(changes)
             before = _model_json(self._values)
             candidate = deepcopy(before)
-            candidate_originals = dict(self._originals)
             for change in changes:
                 validate_tunable_path(self._model_type, change.path)
                 _replace_leaf(candidate, change)
-                if change.original is None:
-                    candidate_originals.pop(change.path, None)
-                else:
-                    candidate_originals[change.path] = _original_text(change.original)
             # Reject nonfinite values before JSON encoding can replace them with null.
             _check_finite(candidate, (), self._model_type.__name__)
             # JSON arrays remain valid inputs for model-declared strict tuples.
@@ -146,35 +130,14 @@ class TunableValues[T: BaseModel]:
                     change.path,
                     deepcopy(_leaf_value(before, change.path)),
                     deepcopy(_leaf_value(after, change.path)),
-                    self._originals.get(change.path),
-                    candidate_originals.get(change.path),
                 )
                 for change in changes
             )
             event = TunablesChanged(actor, self._revision, self._revision + 1, applied)
             self._append(event)
             self._values = model
-            self._originals = candidate_originals
             self._revision += 1
-            return TunablesSnapshot(self._revision, after, dict(self._originals))
-
-
-def _original_text(original: object) -> str:
-    if not isinstance(original, str):
-        raise ValueError("Tunable originals must be str text")
-    return original
-
-
-def _copy_originals(
-    model_type: type[BaseModel], originals: Iterable[tuple[object, object]]
-) -> dict[str, str]:
-    copied: dict[str, str] = {}
-    for path, original in originals:
-        if not isinstance(path, str):
-            raise ValueError("Original paths must be model field strings")
-        validate_tunable_path(model_type, path)
-        copied[path] = _original_text(original)
-    return copied
+            return TunablesSnapshot(self._revision, after)
 
 
 def _check_batch(changes: tuple[TunableChange, ...]) -> None:

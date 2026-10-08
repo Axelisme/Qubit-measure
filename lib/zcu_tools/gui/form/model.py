@@ -362,20 +362,7 @@ class FormState[F: FormModel]:
             if path in before and value == before[path]:
                 continue
             evaluated = value_at(result, path)
-            original = (
-                value.get("expr")
-                if isinstance(value, dict)
-                and not isinstance(evaluated, (dict, list, tuple))
-                else None
-            )
-            changes.append(
-                FormChange(
-                    path,
-                    copy_json(value),
-                    evaluated,
-                    original if isinstance(original, str) else None,
-                )
-            )
+            changes.append(FormChange(path, copy_json(value), evaluated))
         return tuple(changes)
 
     def reset(self, base: FormInput[F]) -> None:

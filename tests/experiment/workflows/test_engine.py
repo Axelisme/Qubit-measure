@@ -179,7 +179,7 @@ def test_revision_is_captured_once_and_nested_inputs_are_detached(rig: Rig) -> N
     ]
     assert rig.kinds().index("tunables_changed") < rig.kinds().index("step_committed")
     event = next(event for event in rig.events() if event["kind"] == "tunables_changed")
-    assert event["revision"] == 1
+    assert (event["revision_before"], event["revision_after"]) == (0, 1)
     changes = event["changes"]
     assert isinstance(changes, list)
     assert len(changes) == 1
