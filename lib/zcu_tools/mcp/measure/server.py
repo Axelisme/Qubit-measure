@@ -82,7 +82,7 @@ are guidance, not modes or permissions. For detailed setup, cfg, save,
 writeback or diagnosis, use rpc_list(domain?), rpc_describe(method), then
 rpc_call(method, params). Every listed public method remains callable even
 when a recipe or shared tool covers it. Raw RPC does not aggregate tool
-results, decode PNG replies, or run the canonical analysis-image save pipeline.
+results, decode PNG replies, or run the analysis artifact save pipeline.
 
 For authorized setup, simulation_initialize uses the GUI coordinator and may
 switch away from real devices. It does not launch a GUI or connect real hardware.
@@ -105,16 +105,18 @@ Use global status for GUI operations, non-terminal executions and terminal count
 Keep known execution IDs for later queries; global status does not embed history.
 status(execution) returns the shared execution summary without reconnecting.
 Read actual conditions, Primary/Post estimates, details and warnings, and every
-writeback candidate with its destination. run_id is currently null. A Run or
+writeback candidate with its destination. run_id is the confirmed identity from
+the captured Save report, or null before any persistent output succeeds. A Run or
 analysis step marked unknown may have started even without a returned handle.
 Use status(execution, detail="full") for captured native detail without new RPCs
-or guard observations. Summary previews.run/primary/post are full path lists for
-session-only PNGs, not persistent saved artifacts. Each stage deduplicates paths
-in first-seen order. Artifacts group sections, names and member path/status lists.
-Reserved destinations are not saved files; later failures retain confirmed saved
-prefixes. Status never attaches images; wait(op) observes
-only the GUI operation; wait(execution) includes downstream reads, saves and
-preview delivery. Failed outcomes are data. A wait timeout stops waiting,
+or guard observations. Artifacts preserve producer sections, names, every member
+and all output paths, formats, statuses and errors. Synchronous tab.save_data and
+tab.save_artifacts return the complete current report, not a Save handle. No Save
+await or snapshot reread is needed. Reserved destinations are not saved files.
+A resave replaces the selected artifacts with that attempt, not a saved prefix.
+Status never attaches images; wait(op) observes only the GUI operation;
+wait(execution) includes downstream reads, saves and current image delivery.
+Failed outcomes are data. A wait timeout stops waiting,
 not the operation or its continuation. Operation handles belong to one GUI
 connection generation; execution IDs belong to this MCP server session and
 are not durable recovery tokens. After GUI reconnect, discover current handles
@@ -150,17 +152,16 @@ Send payload={command,args} for one action. This method has no seen guard;
 later owner-loop commits win. Reads preserve focus; commands follow Analysis.
 done joins the original completion. For a recipe-owned analysis it waits for
 that recipe's next result or question; standalone analysis retains its execution.
-preview_active is a local preview, not committed state. Preview PNG paths belong
-to this MCP session. Execution summaries reference them in previews and omit the
-repeated interaction.figure; full preserves figure, preview and interaction.
-Full saved_images names confirmed persistent outputs.
+preview_active is a local interactive preview, not committed state. Current tool
+replies may attach in-memory image content without session PNG files. To see a
+figure later, use tab.get_figure for the GUI's current image; it is not guaranteed
+to be the earlier image. Persistent outputs are recorded only in artifacts.
 Recipes do not automatically close tabs. Use tab_close explicitly; busy cannot
 be bypassed with discard_unsaved. app.shutdown via RPC requests graceful exit;
 its reply is not proof that the responding process has exited.
 
-The server disconnects and joins its workers before removing temporary PNGs
-on exit. It does not close the GUI or promise to stop hardware. There are no
-subscribed MCP events: read snapshots or wait instead. Follow run-measure-gui
+The server disconnects and joins its workers on exit. It does not close the GUI
+or promise to stop hardware. There are no subscribed MCP events: read snapshots or wait instead. Follow run-measure-gui
 for hardware safety, task policy and measurement workflow.
 """
 
