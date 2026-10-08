@@ -122,7 +122,7 @@ def line(editor: FormEditor[SampleForm], path: str) -> QLineEdit:
     return widget
 
 
-def combo(editor: FormEditor[SampleForm], name: str) -> QComboBox:
+def combo[F: FormModel](editor: FormEditor[F], name: str) -> QComboBox:
     """Find a documented combo control by its complete object name."""
     widget = editor.findChild(QComboBox, name)
     assert isinstance(widget, QComboBox)
@@ -693,3 +693,155 @@ def test_multi_tag_discriminator_displays_and_switches_active_branch(
             editor.findChild(QLineEdit, "form.input.branch.a_only"), QLineEdit
         )
         assert editor.findChild(QLineEdit, "form.input.branch.b_only") is None
+
+
+class SingleChoiceTagBranch(FormModel):
+    """A single intrinsic tag must not become another branch's choice."""
+
+    kind: Literal["a"] = "a"
+    shared: float = 1.0
+    a_only: float = 3.0
+
+
+class SingleDiscriminatorChoicesForm(FormModel):
+    """Dynamic selector choices restrict tags, not active branch identity."""
+
+    branch: Annotated[
+        SingleChoiceTagBranch | SingleTagBranch, Field(discriminator="kind")
+    ]
+
+    @classmethod
+    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Permit only a, or no tags, from the captured context."""
+        return {("branch", "kind"): () if env.md.get("empty_tags") else ("a",)}
+
+
+class MultiDiscriminatorChoicesForm(FormModel):
+    """A dynamic enum may hide aliases without losing the intrinsic identity."""
+
+    branch: Annotated[MultiTagBranch | SingleTagBranch, Field(discriminator="kind")]
+
+    @classmethod
+    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Permit only a, or no tags, from the captured context."""
+        return {("branch", "kind"): () if env.md.get("empty_tags") else ("a",)}
+
+
+@pytest.mark.parametrize(
+    "form_type", (SingleDiscriminatorChoicesForm, MultiDiscriminatorChoicesForm)
+)
+def test_discriminator_choices_refresh_keeps_intrinsic_active_branch(
+    views: list[QWidget],
+    form_type: type[SingleDiscriminatorChoicesForm]
+    | type[MultiDiscriminatorChoicesForm],
+) -> None:
+    env = environment()
+    empty = environment()
+    empty.md.update({"empty_tags": True})
+    state = FormState(
+        FormInput(form_type, {"branch": {"kind": "a", "shared": 6.0, "a_only": 7.0}})
+    )
+    editor = FormEditor(state, env)
+    views.append(editor)
+    notices: list[int] = []
+    state.subscribe(lambda: notices.append(1))
+    before = state.input.data
+    for captured, count in ((env, 1), (empty, 0), (env, 1)):
+        editor.refresh(captured)
+        selector = combo(editor, "form.input.branch.kind")
+        assert selector.count() == count
+        assert selector.currentData() == ("a" if count else None)
+        control = editor.findChild(QLineEdit, "form.input.branch.a_only")
+        assert isinstance(control, QLineEdit)
+        assert control.text() == "7.0"
+        assert editor.findChild(QLineEdit, "form.input.branch.b_only") is None
+        assert state.input.data == before
+        assert notices == []
+        result = state.result(captured)
+        if count:
+            assert isinstance(
+                result, (SingleDiscriminatorChoicesForm, MultiDiscriminatorChoicesForm)
+            )
+            assert isinstance(result.branch, (SingleChoiceTagBranch, MultiTagBranch))
+            assert result.branch.kind == "a"
+            assert result.branch.a_only == 7.0
+            assert editor.errors() is None
+        else:
+            assert isinstance(result, FormErrors)
+            assert ("branch", "kind") in result.messages
+            error = editor.findChild(QLabel, "form.error.branch.kind")
+            assert isinstance(error, QLabel)
+            assert error.text()
+            assert isinstance(editor.errors(), FormErrors)
+
+
+class NumericMultiTagBranch(FormModel):
+    """Two numeric tags select one branch with ordinary shared values."""
+
+    kind: Literal[1, 2] = 1
+    shared: float = 1.0
+    a_only: float = 3.0
+
+
+class NumericSingleTagBranch(FormModel):
+    """Another numeric branch inherits only same-name input."""
+
+    kind: Literal[3] = 3
+    shared: float = 9.0
+    b_only: float = 4.0
+
+
+class NumericDiscriminatorForm(FormModel):
+    """Numeric discriminator controls write typed tags, never expressions."""
+
+    branch: Annotated[
+        NumericMultiTagBranch | NumericSingleTagBranch, Field(discriminator="kind")
+    ]
+
+
+@pytest.mark.parametrize("initial_tag", (1, 2, 3))
+def test_numeric_discriminator_preserves_typed_tags_and_switches_active_fields(
+    views: list[QWidget], initial_tag: int
+) -> None:
+    env = environment()
+    state = FormState(
+        FormInput(
+            NumericDiscriminatorForm, {"branch": {"kind": initial_tag, "shared": 6.0}}
+        )
+    )
+    editor = FormEditor(state, env)
+    views.append(editor)
+    selector = combo(editor, "form.input.branch.kind")
+    assert selector.currentData() == initial_tag
+    tags = [selector.itemData(index) for index in range(selector.count())]
+    assert tags == [1, 2, 3]
+    assert all(type(tag) is int for tag in tags)
+    assert editor.findChild(QComboBox, "form.mode.branch.kind") is None
+    active = "b_only" if initial_tag == 3 else "a_only"
+    assert isinstance(
+        editor.findChild(QLineEdit, f"form.input.branch.{active}"), QLineEdit
+    )
+    selector.setCurrentIndex(selector.findData(3))
+    result = state.result(env)
+    assert isinstance(result, NumericDiscriminatorForm)
+    assert isinstance(result.branch, NumericSingleTagBranch)
+    assert result.branch.kind == 3
+    assert result.branch.shared == 6.0
+    assert editor.findChild(QLineEdit, "form.input.branch.a_only") is None
+    assert isinstance(
+        editor.findChild(QLineEdit, "form.input.branch.b_only"), QLineEdit
+    )
+    for tag in (2, 1):
+        selector = combo(editor, "form.input.branch.kind")
+        selector.setCurrentIndex(selector.findData(tag))
+        result = state.result(env)
+        assert isinstance(result, NumericDiscriminatorForm)
+        assert isinstance(result.branch, NumericMultiTagBranch)
+        assert result.branch.kind == tag
+        assert type(result.branch.kind) is int
+        assert result.branch.shared == 6.0
+        assert isinstance(
+            editor.findChild(QLineEdit, "form.input.branch.a_only"), QLineEdit
+        )
+        assert editor.findChild(QLineEdit, "form.input.branch.b_only") is None
+        assert editor.findChild(QComboBox, "form.mode.branch.kind") is None
