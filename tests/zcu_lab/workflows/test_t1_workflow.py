@@ -27,6 +27,9 @@ from tests.experiment.workflows._engine_fakes import (
     RecordingDevices,
     RecordingPlots,
 )
+from zcu_lab.v2.twotone.freq.core import FreqExp
+from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
+from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainExp
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.workflows.calibration import Calibrated, CalibrationTunables
 from zcu_lab.workflows.t1 import T1Tunables, t1_fluxdep
@@ -128,6 +131,45 @@ def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
     assert manifest["lifecycle"] == "done"
 
 
+def test_calibration_relax_uses_initial_guess_then_latest_accepted_t1(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    tun = tunables()
+    tun.guess_us = 12.0
+    tun.cal.ro_every = 1
+    devices = RecordingDevices()
+    engine = start_t1(inputs, tmp_path, tun, devices, RecordingPlots())
+    status = engine.execute("workflow")
+    assert status.lifecycle == "done", status.reason
+    records = engine.records("workflow")
+    assert len(records) == 2
+    estimate = tun.guess_us
+    for record in records:
+        assert len(record.run_files) == 4
+        root = tmp_path / "data" / record.iteration_dir
+        frequency, _ = load_run_with_metadata(
+            root / record.run_files[0], spec=FreqExp().persistence_spec()
+        )
+        rabi, _ = load_run_with_metadata(
+            root / record.run_files[1], spec=LenRabiExp().persistence_spec()
+        )
+        readout, _ = load_run_with_metadata(
+            root / record.run_files[2], spec=FreqGainExp().persistence_spec()
+        )
+        assert frequency.cfg is not None
+        assert rabi.cfg is not None and readout.cfg is not None
+        assert frequency.cfg.relax_delay == 1.0
+        assert rabi.cfg.relax_delay == pytest.approx(5 * estimate)
+        assert readout.cfg.relax_delay == pytest.approx(5 * estimate)
+        point = record.encoded_record.value
+        assert isinstance(point, dict) and point["reason"] is None
+        lifetime = point["lifetime_us"]
+        assert isinstance(lifetime, float)
+        assert lifetime == pytest.approx(20.0, rel=0.2)
+        estimate = lifetime
+    assert devices.values == [("flux", 1.0), ("flux", 1.1)]
+
+
 def test_flux_bound_native_t1_acquires_each_committed_setpoint(
     inputs: Inputs, tmp_path: Path
 ) -> None:
@@ -222,6 +264,12 @@ def test_rejected_t1_fit_keeps_raw_data_but_not_lifetime_history(
         assert isinstance(point, dict)
         assert point["lifetime_us"] is None and point["error_us"] is None
         assert point["reason"] == "T1 fit rejected"
+        rabi, _ = load_run_with_metadata(
+            tmp_path / "data" / record.iteration_dir / record.run_files[1],
+            spec=LenRabiExp().persistence_spec(),
+        )
+        assert rabi.cfg is not None
+        assert rabi.cfg.relax_delay == 5 * tun.guess_us
         path = tmp_path / "data" / record.iteration_dir / record.run_files[-1]
         source, _metadata = load_run_with_metadata(
             path, spec=T1Exp().persistence_spec()

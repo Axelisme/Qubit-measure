@@ -1,6 +1,6 @@
 # `zcu_lab.workflows` — 使用者 workflow
 
-**Last updated:** 2026-10-08，原生零 detune T2echo acquisition／analysis
+**Last updated:** 2026-10-08，workflow-owned calibration timing
 
 本 package 擁有具體 workflow 的校準、cfg 組裝、分析、record 與 state。通用迭代、取消、提交與保存路徑由 `zcu_tools.experiment.workflows` 負責。宿主建立 catalog，再明確注入框架；import 不啟動 run。
 
@@ -10,9 +10,9 @@
 
 `analysis` 提供純資料的 frequency、length-Rabi、T1 與零 detune T2echo fits。Echo 沿 native analysis 排除首點，要求明確零 activated detune 與 finite retained trace；simulator CLI 只在 echo 完整 acquisition 後報告 lifetime／uncertainty。它重用 native signal projections 與 fitting helpers，保留原生單位、estimate、uncertainty 與 residual 診斷，不操作硬體、不畫圖、不保存或決定 calibration 接受度。Fit residual 不是 readout SNR，兩者由 workflow policy 分開判斷。Length-Rabi 使用既有 native free-phase/no-decay 路線；phase 固定為零會在已觀察的 simulator trace 陷入 optimizer fallback。
 
-`calibration` 以完整 native templates 執行 frequency、length-Rabi 與按 cadence 的 readout landscape。它擁有接受度與純資料 carry，全部成功才更新校準歷史。Scalar seed 可作深度唯讀 context，mutable native cfg 放在 engine 會複製的 plan，不以 frozen 外殼宣稱深度唯讀。三個 saver 以具名參數物件明確注入，不放進 context 或建立 registry。接受度、cadence 與 Rabi range 的預設值是暫定 tunables，待使用者在 CP-B／CP-C 確認，不是已驗證的物理預設。
+`calibration` 從固定的 qub_pulse／readout modules 組裝 native cfg，執行 frequency、length-Rabi 與按 cadence 的 readout landscape。它擁有接受度與純資料 carry，全部成功才更新校準歷史。Caller 明確傳入正 finite 的 T1 estimate（µs）。Frequency relax_delay 為1µs，Rabi／readout為5倍estimate；initial_delay／dev沿native cfg預設，不依賴Measure adapters或host timing capture。Context只有四個校準scalar，mutable modules放在engine會複製的plan。三個 saver 以具名參數物件明確注入，不放進 context 或建立 registry。接受度、cadence 與 Rabi range 的預設值是暫定 tunables，待使用者在 CP-B／CP-C 確認，不是已驗證的物理預設。
 
-`t1` 宣告 `T1_fluxdep`，逐 setpoint 執行完整 calibration 與 native T1。Plan 持有固定 setpoints、native templates 與 caller 捕捉的歷史 RunSnapshot，context 只含 scalar seed。Pi drive 使用量出 pi duration 的 Rabi waveform／gain。Delay grid 與 relax delay 由 lifetime history 的 EWMA guess 生成。校準失敗與 fit 不接受提交具名 reason，只有接受的 lifetime 加入 history。Pause／stop 由 Engine 丟棄當前步驟，已發布的 acquisition 保留。
+`t1` 宣告 `T1_fluxdep`，逐 setpoint 執行完整 calibration 與 native T1。Plan 持有固定 setpoints、兩個選定的modules與caller捕捉的歷史RunSnapshot，context只含scalar seed。Pi drive 使用量出 pi duration 的 Rabi waveform／gain。T1的delay grid與relax delay由lifetime history的EWMA guess生成。Calibration使用首點guess_us，後續使用最新accepted lifetime；拒絕fit不加入history。校準失敗與 fit 不接受提交具名 reason，只有接受的 lifetime 加入 history。Pause／stop 由 Engine 丟棄當前步驟，已發布的 acquisition 保留。
 
 `saving` 的四個具體 writer 使用各 experiment 的既有 persistence declaration 與 native `save_run`。Writer 接 Engine 的 exact path，不決定 entry layout，也不捕捉 live context。Acquisition evidence 提供 run_id、時間、completion 與 software provenance；caller 的 RunSnapshot 提供當時的 entry／point／roles。保存不以 workflow run_id 或保存時間覆寫 acquisition facts。
 

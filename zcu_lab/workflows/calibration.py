@@ -317,6 +317,7 @@ def calibrate(
     flux: float,
     carry: CalCarry,
     *,
+    t1_estimate_us: float,
     savers: CalibrationSavers,
 ) -> Generator[Effect, None, Calibrated | CalibrationFailed]:
     """Acquire native calibration stages and update carry only on full success.
@@ -326,17 +327,18 @@ def calibrate(
     pulse-backed module. Routing/waveform/gain come from these fixed selections.
     tun controls grids, averaging and acceptance. flux must be finite and labels accepted frequency history.
     carry is the current step's mutable copy, seeded with a valid Calibrated.
+    t1_estimate_us is the workflow's positive finite T1 estimate in µs;
+    invalid estimates raise ValueError before any acquisition.
     savers groups three explicit writers, avoiding callable context/registry;
     each writer
     writes/closes its exact Engine temporary path before Completed is returned.
 
-    Each stage builds its native cfg from the two selected modules, captured
-    defaults and this call's tunables/history. Frequency/Rabi resolutions are
-    fixed at 101/51; readout scans a fixed 10 MHz/51-point frequency window
-    around the current accepted center. Calibration defaults are not available
-    until the three Measure adapters' role-path source is received; that
-    missing acquisition path raises NotImplementedError rather than using
-    fabricated timing/device values.
+    Each stage builds its native cfg from the selected modules and this call's
+    tunables/history. Frequency relax_delay is 1 µs; Rabi/readout relax_delay
+    is 5 * t1_estimate_us. initial_delay and dev use native cfg defaults;
+    the caller sets flux through env.set_device, not cfg.dev. Frequency/Rabi
+    resolutions are fixed at 101/51; readout scans a fixed 10 MHz/51-point
+    frequency window around the current accepted center.
 
     Frequency uses EWMA(alpha=0.5) history and the declared widening sequence.
     Reject nonpositive/nonfinite center/FWHM, negative/nonfinite error, excessive

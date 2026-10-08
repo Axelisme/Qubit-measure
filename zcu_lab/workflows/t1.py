@@ -202,6 +202,8 @@ def t1_fluxdep(
     Engine supplies detached state and captured tunables. Calibration updates
     carry only on full success. Failed calibration/acquisition or rejected T1
     fit commits a point with its reason, without accepted lifetime history.
+    Calibration relax timing uses the latest accepted lifetime, or guess_us
+    before any accepted T1. T1 acquisition keeps its lifetime-history EWMA.
     Accepted T1 appends lifetime/error and saves its decay plot. The final step
     saves a summary built from committed lifetime history and returns Done.
     Pause/stop discards the current step through Engine. Native adapter, fitting,
@@ -228,6 +230,7 @@ def t1_fluxdep(
         tun.cal,
         flux,
         state.cal,
+        t1_estimate_us=(state.t1_by_flux[-1][1] if state.t1_by_flux else tun.guess_us),
         savers=CalibrationSavers(
             partial(save_frequency, snapshot=plan.snapshot),
             partial(save_rabi, snapshot=plan.snapshot),

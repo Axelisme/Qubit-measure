@@ -129,7 +129,13 @@ class Rig:
         self.readouts.append(source)
         path.write_text(source.result.evidence.run_id, encoding="utf-8")
 
-    def start(self, tun: CalibrationTunables, *, count: int = 1) -> None:
+    def start(
+        self,
+        tun: CalibrationTunables,
+        *,
+        count: int = 1,
+        t1_estimate_us: float = 20.0,
+    ) -> None:
         def init(env: InitEnv[Calibrated], _plan: T1Plan) -> State:
             return State(CalCarry(env.context))
 
@@ -157,6 +163,7 @@ class Rig:
                 tun,
                 float(state.index),
                 state.carry,
+                t1_estimate_us=t1_estimate_us,
                 savers=CalibrationSavers(
                     self.save_frequency, self.save_rabi, self.save_readout
                 ),
@@ -175,16 +182,47 @@ class Rig:
         )
 
 
-def test_unavailable_calibration_defaults_fail_before_acquisition(
-    inputs: Inputs, tmp_path: Path
+@pytest.mark.parametrize(
+    "estimate", [0.0, -1.0, float("nan"), float("inf"), -float("inf")]
+)
+def test_invalid_t1_estimate_fails_before_any_acquisition(
+    inputs: Inputs, tmp_path: Path, estimate: float
 ) -> None:
     rig = Rig(inputs, tmp_path)
-    rig.start(CalibrationTunables())
+    rig.start(CalibrationTunables(), t1_estimate_us=estimate)
     status = rig.engine.execute("calibration")
     assert status.lifecycle == "failed"
-    assert status.reason is not None and "adapter defaults" in status.reason
+    assert status.reason is not None and "T1 estimate" in status.reason
     assert not rig.frequencies and not rig.rabis and not rig.readouts
     assert not rig.engine.records("calibration")
+
+
+@pytest.mark.parametrize("estimate", [12.0, 35.0])
+def test_native_calibration_timing_uses_workflow_estimate(
+    inputs: Inputs, tmp_path: Path, estimate: float
+) -> None:
+    rig = Rig(inputs, tmp_path)
+    rig.start(
+        CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125),
+        t1_estimate_us=estimate,
+    )
+    status = rig.engine.execute("calibration")
+    assert status.lifecycle == "done", status.reason
+    frequency, rabi, readout = (
+        rig.frequencies[0].cfg,
+        rig.rabis[0].cfg,
+        rig.readouts[0].cfg,
+    )
+    assert frequency.relax_delay == 1.0
+    assert rabi.relax_delay == readout.relax_delay == 5 * estimate
+    native_defaults = (
+        FreqCfg(reps=frequency.reps, modules=frequency.modules, sweep=frequency.sweep),
+        LenRabiCfg(reps=rabi.reps, modules=rabi.modules, sweep=rabi.sweep),
+        FreqGainCfg(reps=readout.reps, modules=readout.modules, sweep=readout.sweep),
+    )
+    for cfg, default in zip((frequency, rabi, readout), native_defaults, strict=True):
+        assert cfg.initial_delay == default.initial_delay
+        assert cfg.dev == default.dev
 
 
 def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
