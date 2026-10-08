@@ -501,9 +501,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         cfg = self.build_exp_cfg(raw_cfg, req)
         return cast(T_Result, self.exp_cls().run(cfg, context=context))
 
-    def load(
-        self, req: LoadDataRequest
-    ) -> tuple[RunRecord[T_Cfg, object], RunMetadata]:
+    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
         """Read req.data_path as an exact native file using this core's spec.
 
         Return the typed cfg/Result record and its full historical metadata.

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
 
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -188,7 +189,13 @@ class FakeFreqAdapter(
         result = FakeFreqExp(self._model_type, self._params).run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
-    def load(self, req: LoadDataRequest) -> FakeFreqRunResult:
+    def load(self, req: LoadDataRequest) -> tuple[FakeFreqRunResult, RunMetadata]:
+        """Read an exact native file with the configured core persistence spec.
+
+        Return typed cfg/Result and original full history, without recapture or
+        Labber fallback. Invalid native data raises ValueError; I/O errors
+        propagate. The tab parameter capture does not replace file history.
+        """
         return FakeFreqExp(self._model_type, self._params).load(Path(req.data_path))
 
     def analyze(

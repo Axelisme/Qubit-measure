@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 from unittest.mock import MagicMock
@@ -8,8 +8,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import load_run_data
+from zcu_tools.datafile import load_run_data, save_run_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.native_persistence import prepare_run_data
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -22,13 +23,25 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.program.v2.modules.readout import DirectReadoutCfg
+from zcu_tools.program.v2.sweep import SweepCfg
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
     native_save_session,
 )
 from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
+from zcu_lab.v2.fake.freq.core import (
+    FakeFreqCfg,
+    FakeFreqExp,
+    FakeFreqModuleCfg,
+    FakeFreqSweepCfg,
+    TransmissionSimParams,
+)
+from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
+from zcu_lab.v2.onetone.freq.core import FreqResult
 
 
 class _Cfg(ExpCfgModel):
@@ -102,10 +115,46 @@ def test_base_adapter_load_reads_native_record_and_full_history(
 
         record, metadata = AnalysisSavingAdapter().load(_request(str(path)))
 
+        assert isinstance(record, RunRecord)
         assert isinstance(record.cfg, SavingCfg)
         assert isinstance(record.result, SavingResult)
         np.testing.assert_array_equal(record.result.frequency, [1000, 1001, 1002])
         assert metadata == load_run_data(path).metadata
+
+
+def test_configured_shipped_adapter_loads_native_record_and_history(
+    tmp_path: Path,
+) -> None:
+    params = TransmissionSimParams()
+    core = FakeFreqExp("t", params)
+    cfg = FakeFreqCfg(
+        sweep=FakeFreqSweepCfg(
+            freq=SweepCfg(start=6000.0, stop=6002.0, expts=3, step=1.0)
+        ),
+        modules=FakeFreqModuleCfg(
+            readout=DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=6000.0)
+        ),
+    )
+    result = FreqResult(
+        freqs=np.array([6000.0, 6001.0, 6002.0]),
+        signals=np.array([1 + 2j, 3 - 4j, 5 + 6j]),
+    )
+    prepared = prepare_run_data(
+        RunRecord(cfg=cfg, result=result), spec=core.persistence_spec(), comment=""
+    )
+    history = replace(historical_metadata(), experiment=core.persistence_spec().tag)
+    path = tmp_path / "data.h5"
+    save_run_data(path, prepared.payload, history, cfg=prepared.cfg)
+
+    record, metadata = FakeFreqAdapter("t", params).load(_request(str(path)))
+
+    assert isinstance(record, RunRecord)
+    assert isinstance(record.cfg, FakeFreqCfg)
+    assert isinstance(record.result, FreqResult)
+    assert record.cfg == cfg
+    np.testing.assert_array_equal(record.result.freqs, result.freqs)
+    np.testing.assert_array_equal(record.result.signals, result.signals)
+    assert metadata == load_run_data(path).metadata == history
 
 
 @pytest.mark.parametrize("adapter_cls", [_NeedsArgsAdapter, _NoLoadAdapter])

@@ -16,6 +16,7 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
 from zcu_tools.gui.cfg.edit_codec import encode_ref
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.resources.entry import AcquiredPayload
 
 from tests.gui.app.measure._native_save_support import (
@@ -78,12 +79,14 @@ def native_save_rpc(
             qapp.processEvents()
 
 
+@pytest.mark.parametrize("draft_capture", [False, True])
 @pytest.mark.parametrize("analysis_failure", [False, True])
 def test_native_load_rpc_retains_history_on_analysis_partial_failure(
     tmp_path: Path,
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
     analysis_failure: bool,
+    draft_capture: bool,
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
         session.save()
@@ -92,6 +95,13 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
         )
         stored = load_run_data(path)
         events = session.entry.ledger.events()
+        tab = session.state.get_tab("tab")
+        if draft_capture:
+            session.context.install_entry(session.entry)
+            captured = ContextControlFacet(context=session.context).read_context()
+            assert captured.storage is None
+            tab.parameters = captured
+            tab.save_context = captured
         if analysis_failure:
 
             def unavailable(
@@ -104,7 +114,10 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
             )
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
 
-        session.state.set_context(replace(session.state.session_env, parameters=None))
+        if not draft_capture:
+            session.state.set_context(
+                replace(session.state.session_env, parameters=None)
+            )
         reply = call(sock, "tab.load_data", {"tab_id": "tab", "data_path": str(path)})
 
         assert reply["ok"] is True, reply
@@ -118,6 +131,10 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.post_analysis.result is None
+        if draft_capture:
+            assert tab.save_context is not None
+            assert tab.save_context.storage is None
+            assert tab.artifacts.snapshot() == ()
         assert session.entry.ledger.events() == events
 
 

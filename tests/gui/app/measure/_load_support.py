@@ -1,5 +1,7 @@
 """Native history for tests that isolate cfg projection or presentation."""
 
+from uuid import UUID
+
 from zcu_tools.datafile import RunMetadata, RunSnapshot, SoftwareProvenance
 
 
@@ -13,7 +15,7 @@ def historical_metadata() -> RunMetadata:
         completion="complete",
         labber_path=None,
         snapshot=RunSnapshot(
-            entry_id="00000000-0000-4000-8000-000000000001",
+            entry_id=UUID("00000000-0000-4000-8000-000000000001"),
             entry_name="historical",
             point="original-point",
             description="",

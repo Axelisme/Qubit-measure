@@ -18,7 +18,10 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
-from tests.gui.app.measure._native_save_support import native_save_session
+from tests.gui.app.measure._native_save_support import (
+    declare_panes,
+    native_save_session,
+)
 
 
 @pytest.mark.parametrize("completion", ["complete", "partial", "stopped"])
@@ -139,6 +142,56 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
         }
         assert after == before
         assert tab.run.confirmed_run_id is None
+
+
+@pytest.mark.parametrize("save_all", [False, True])
+def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
+    tmp_path: Path, qapp: QApplication, save_all: bool
+) -> None:
+    with native_save_session(tmp_path, qapp) as session:
+        session.save()
+        declare_panes(session)
+        path = (
+            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+        )
+        stored = load_run_data(path)
+        session.context.install_entry(session.entry)
+        control = ContextControlFacet(context=session.context)
+        draft = control.read_context()
+        assert draft.storage is None
+        tab = session.state.get_tab("tab")
+        tab.parameters = draft
+        tab.save_context = draft
+        before = {
+            p.relative_to(tmp_path): p.read_bytes()
+            for p in tmp_path.rglob("*")
+            if p.is_file()
+        }
+        events = session.entry.ledger.events()
+        service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
+
+        outcome = service.load_result(LoadPermit("tab"), str(path))
+
+        assert outcome.result_type == "RunRecord"
+        assert isinstance(tab.run.result, RunRecord)
+        assert tab.run.metadata == stored.metadata
+        assert tab.run.source_path == str(path)
+        assert tab.run.confirmed_run_id is None
+        assert tab.save_context is draft
+        assert tab.analysis.result is None
+        assert tab.post_analysis.result is None
+        assert tab.artifacts.snapshot() == ()
+        # A valid active focus cannot fill this tab's missing captured destination.
+        control.use_point(PointUseRequest("p"))
+        save = session.save_artifacts if save_all else session.save
+        with pytest.raises(FailedPreconditionError):
+            save()
+        assert session.entry.ledger.events() == events
+        assert {
+            p.relative_to(tmp_path): p.read_bytes()
+            for p in tmp_path.rglob("*")
+            if p.is_file()
+        } == before
 
 
 def test_native_experiment_mismatch_keeps_previous_result_and_history(
