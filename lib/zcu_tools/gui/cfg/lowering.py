@@ -501,8 +501,18 @@ def _lower_section(
                 )
             case ReferenceSpec():
                 assert isinstance(node_value, ReferenceValue)
+                chosen_spec = _select_reference_spec(
+                    node_spec, node_value, resolve_reference
+                )
+                # Pending input admission must not fill execution payload gaps.
+                _validate_static_section(
+                    chosen_spec,
+                    node_value.value,
+                    resolve_reference=resolve_reference,
+                    path=[*path, key],
+                )
                 result[key] = _lower_section(
-                    _select_reference_spec(node_spec, node_value, resolve_reference),
+                    chosen_spec,
                     node_value.value,
                     resolve_expression=resolve_expression,
                     resolve_reference=resolve_reference,
