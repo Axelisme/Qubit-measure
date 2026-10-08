@@ -804,6 +804,102 @@ class RetainedChoiceWithChoices(NumericAliasBranch):
         return {("amount",): (9.0,) if env.md.get("nine_only", False) else (7.0,)}
 
 
+type AliasTags = Literal[1, 2]
+
+
+class AliasTagChoice(RetainedChoiceWithChoices):
+    """A named Literal tag keeps the numeric branch's local choices."""
+
+    kind: AliasTags = 1
+
+
+class UnionTagChoice(RetainedChoiceWithChoices):
+    """A union of Literals identifies the same branch with both numeric tags."""
+
+    kind: Literal[1] | Literal[2] = 1
+
+
+class AliasTagForm(FormModel):
+    """Native named tag aliases remain usable by schema and state."""
+
+    branch: Annotated[
+        AliasTagChoice | StringNumericTagBranch, Field(discriminator="kind")
+    ]
+
+
+class UnionTagForm(FormModel):
+    """Native unions of Literal tags remain usable by schema and state."""
+
+    branch: Annotated[
+        UnionTagChoice | StringNumericTagBranch, Field(discriminator="kind")
+    ]
+
+
+@pytest.mark.parametrize("model", [AliasTagForm, UnionTagForm])
+def test_literal_tag_declaration_keeps_schema_and_result_agreement(
+    model: type[AliasTagForm | UnionTagForm],
+) -> None:
+    env = FormEnv(md=MetaDict())
+    state = FormState(FormInput(model, {"branch": {"kind": 2, "amount": 7.0}}))
+    before = state.input.data
+    for empty, nine_only in (
+        (False, False),
+        (True, False),
+        (False, True),
+        (False, False),
+    ):
+        env.md.update({"empty_amounts": empty, "nine_only": nine_only})
+        schema = model.input_schema(env)
+        fields = schema_object(schema["properties"])
+        identities = identity_values(schema_object(fields["branch"]))
+        assert identities == [[1, 2], ["1"]]
+        numeric_tags = identities[0]
+        string_tags = identities[1]
+        assert isinstance(numeric_tags, list) and isinstance(string_tags, list)
+        assert all(type(tag) is int for tag in numeric_tags)
+        assert all(type(tag) is str for tag in string_tags)
+        validator = Draft202012Validator(schema)
+        allowed = 9.0 if nine_only else 7.0
+        for tag in (1, 2):
+            for amount in (7.0, 9.0):
+                data: dict[str, JsonValue] = {"branch": {"kind": tag, "amount": amount}}
+                accepted = not empty and amount == allowed
+                assert validator.is_valid(data) is accepted
+                candidate = FormState(FormInput(model, data))
+                result = candidate.result(env)
+                if accepted:
+                    assert isinstance(result, model)
+                    assert isinstance(result.branch, (AliasTagChoice, UnionTagChoice))
+                    assert result.branch.kind == tag
+                    assert type(result.branch.kind) is int
+                    assert result.branch.amount == amount
+                else:
+                    assert isinstance(result, FormErrors)
+                    assert ("branch", "amount") in result.messages
+                assert candidate.input.data == data
+        string_data: dict[str, JsonValue] = {"branch": {"kind": "1", "text_only": 4.0}}
+        assert validator.is_valid(string_data)
+        string_state = FormState(FormInput(model, string_data))
+        string_result = string_state.result(env)
+        assert isinstance(string_result, model)
+        assert isinstance(string_result.branch, StringNumericTagBranch)
+        assert string_result.branch.kind == "1"
+        assert type(string_result.branch.kind) is str
+        assert string_result.branch.text_only == 4.0
+        assert string_state.input.data == string_data
+        current = state.result(env)
+        if empty or nine_only:
+            assert isinstance(current, FormErrors)
+            assert ("branch", "amount") in current.messages
+        else:
+            assert isinstance(current, model)
+            assert isinstance(current.branch, (AliasTagChoice, UnionTagChoice))
+            assert current.branch.kind == 2
+            assert type(current.branch.kind) is int
+            assert current.branch.amount == 7.0
+        assert state.input.data == before
+
+
 class SkipFirstOwnerForm(FormModel):
     """Skipping the first choice must retain both following model owners."""
 
