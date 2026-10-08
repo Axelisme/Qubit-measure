@@ -527,11 +527,9 @@ class RoundHookMixin(TypedAcquireMixin):
             round_count = len(self.rounds_buf)
             acquire_type = acquire_params["type"]
             if acquire_type == "accumulated":
-                # avg_d = self._summarize_accumulated(self.rounds_buf)
                 avg_d = self._inc_summarize_accumulated(self.rounds_buf)
                 round_hook(round_count, avg_d, self._round_hook_cancel_flag())
             elif acquire_type == "decimated":
-                # dec_d = self._summarize_decimated(self.rounds_buf)
                 dec_d = self._inc_summarize_decimated(self.rounds_buf)
                 round_hook(round_count, dec_d, self._round_hook_cancel_flag())
             else:
