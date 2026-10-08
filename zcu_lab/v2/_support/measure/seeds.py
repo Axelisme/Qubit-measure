@@ -88,9 +88,12 @@ def path_seed(
 ) -> Seed[ScalarLeafInput]:
     """Use a non-null role/component calibration, else explicit fallback.
 
-    Resolve only at fresh defaults. Absent/explicit null means uncalibrated.
-    Empty paths raise ValueError; source/role faults propagate rather than becoming
-    fallback. A malformed non-null value still fails expression lowering.
+    Resolve only at fresh defaults. A declared unbound role stores an EvalValue
+    without lookup or fallback; cfg evaluation reports the missing role. Refresh
+    evaluates the expression; reset reruns defaults and can use fallback after
+    binding. Absent/explicit null on a bound path means uncalibrated.
+    Empty paths raise ValueError; other source/role faults propagate rather than
+    becoming fallback. A malformed non-null value still fails expression lowering.
     expr overrides the captured expression.
     """
     if not path.strip():
@@ -98,6 +101,14 @@ def path_seed(
 
     def resolve(ctx: SessionEnv) -> ScalarLeafInput:
         if ctx.parameters is not None:
+            roles = ctx.parameters.roles
+            prefix = path.split(".", 1)[0]
+            if (
+                roles is not None
+                and prefix in roles.declarations
+                and prefix not in roles.names
+            ):
+                return EvalValue(expr=expr if expr is not None else path)
             calibration = ctx.parameters.lookup(path)
             if calibration.present and calibration.value is not None:
                 return EvalValue(expr=expr if expr is not None else path)
@@ -147,8 +158,11 @@ def scaled_path_seed(
 ) -> Seed[float | EvalValue]:
     """Seed factor * path, or the already scaled fallback when absent/null.
 
-    Explicit null and unset/dangling module slots mean uncalibrated. Empty paths raise
-    ValueError. Capture, role and materialization faults propagate; no rebind.
+    A declared unbound role stores factor * path as EvalValue without lookup or
+    fallback. Refresh evaluates it; reset reruns defaults and can use fallback
+    after binding. Explicit null and unset/dangling bound module slots mean
+    uncalibrated. Empty paths raise ValueError. Other capture, role and
+    materialization faults propagate; no rebind.
     """
     if not path.strip():
         raise ValueError("scaled parameter seed path must not be empty")
@@ -156,6 +170,14 @@ def scaled_path_seed(
     def resolve(ctx: SessionEnv) -> float | EvalValue:
         if ctx.parameters is None:
             return fallback_value
+        roles = ctx.parameters.roles
+        prefix = path.split(".", 1)[0]
+        if (
+            roles is not None
+            and prefix in roles.declarations
+            and prefix not in roles.names
+        ):
+            return EvalValue(expr=f"{factor} * {path}")
         try:
             calibration = ctx.parameters.lookup(path)
         except AttributeError:
