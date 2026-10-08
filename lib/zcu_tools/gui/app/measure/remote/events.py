@@ -30,7 +30,8 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
 )
 from zcu_tools.gui.event_bus import BasePayload
-from zcu_tools.gui.remote.events import EventSerializer, WirePayload, wire_event_name
+from zcu_tools.gui.remote.events import EventSerializer, WirePayload
+from zcu_tools.gui.remote.events import wire_event_name as wire_event_name
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,

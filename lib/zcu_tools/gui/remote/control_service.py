@@ -56,7 +56,7 @@ def _store_expected_error(
     """Store generic expected projection, containing projection bugs as controller errors."""
     try:
         holder["remote_error"] = remote_error_from_expected(exc)
-    except Exception as projection_exc:  # noqa: BLE001 — projection safety boundary
+    except Exception as projection_exc:  # projection safety boundary
         logger.exception(
             "%s expected-error projection raised: %s", origin, projection_exc
         )
@@ -532,7 +532,7 @@ class RemoteControlServiceBase:
                         holder["remote_error"] = exc
                     except ExpectedError as exc:
                         _store_expected_error(holder, exc, origin="handler")
-                    except Exception as exc:  # noqa: BLE001 — Controller error envelope
+                    except Exception as exc:  # Controller error envelope
                         logger.exception("handler raised: %s", exc)
                         holder["controller_error"] = exc
                     finally:
@@ -576,7 +576,7 @@ class RemoteControlServiceBase:
             holder["remote_error"] = exc
         except ExpectedError as exc:
             _store_expected_error(holder, exc, origin="off-main handler")
-        except Exception as exc:  # noqa: BLE001 — Controller error envelope
+        except Exception as exc:  # Controller error envelope
             logger.exception("off-main handler raised: %s", exc)
             holder["controller_error"] = exc
 

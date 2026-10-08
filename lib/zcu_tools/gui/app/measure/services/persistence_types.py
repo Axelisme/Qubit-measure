@@ -18,13 +18,13 @@ from pydantic import BaseModel, ConfigDict
 
 from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.services.project_settings import (
-    PersistedDeviceEntry as PersistedDeviceEntry,  # noqa: F401  (re-export)
+    PersistedDeviceEntry as PersistedDeviceEntry,
 )
 from zcu_tools.gui.session.services.project_settings import (
     PersistedStartup,
 )
 from zcu_tools.gui.session.state import (
-    DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,  # noqa: F401  (re-export)
+    DEFAULT_LEFT_PANEL_WIDTH as DEFAULT_LEFT_PANEL_WIDTH,
 )
 
 # Single top-level version for the whole app-state snapshot (Phase 126 merged the

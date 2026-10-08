@@ -87,7 +87,7 @@ class InteractiveMplWidget(QWidget):
 
     # --- overridable mouse handlers (default no-op) ----------------------
 
-    def on_press(self, event: MouseEvent) -> None:  # noqa: D401
+    def on_press(self, event: MouseEvent) -> None:
         """Mouse button pressed inside an axes. Override in subclass."""
 
     def on_move(self, event: MouseEvent) -> None:
