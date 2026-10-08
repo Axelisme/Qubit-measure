@@ -107,14 +107,11 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         paths: RunPaths,
         identity: RunIdentity,
     ) -> None:
-        """Validate detached inputs/capabilities before creating startup files.
+        """Validate detached inputs before creating startup files.
 
-        Missing requirements and invalid model/path/provenance inputs propagate.
+        Invalid model/path/provenance inputs propagate.
         init is not called. Partial I/O artifacts are retained on failure.
         """
-        for capability in self._definition.requires:
-            if getattr(self._ports, capability) is None:
-                raise MissingCapability(capability)
         self._plan = deepcopy(
             self._definition.plan.model_validate(
                 plan.model_dump(mode="python"), by_name=True, by_alias=False
@@ -135,7 +132,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 self._plan.model_dump(mode="json", by_alias=False, warnings="error")
             ),
             tunables=self._tunables.snapshot().values,
-            requires=self._definition.requires,
             roots=paths,
             started_at=self._started_at,
         )
@@ -216,7 +212,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 )
             )
         env = WorkflowEnv(
-            self._started_at, self._ports.context, iteration.files_dir, self._displays
+            self._started_at, self._ports, iteration.files_dir, self._displays
         )
         generator = self._definition.step(
             env, deepcopy(self._plan), captured.model, deepcopy(self._state)
