@@ -132,7 +132,14 @@ class WritebackDraft:
     the same draft is shared by the UI and remote editing surfaces.
     """
 
-    __slots__ = ("_service", "_identity", "_entries", "_closed", "_parameters")
+    __slots__ = (
+        "_service",
+        "_identity",
+        "_entries",
+        "_closed",
+        "_parameters",
+        "_run_id",
+    )
 
     def __init__(
         self,
@@ -146,6 +153,7 @@ class WritebackDraft:
         self._identity = identity
         self._entries = entries
         self._parameters = parameters
+        self._run_id = run_id
         self._closed = False
 
     @property
@@ -164,7 +172,7 @@ class WritebackDraft:
         Save does not change this value. It identifies a Run, not whether that
         Run has a saved file; native Load retains the file's original identity.
         """
-        raise NotImplementedError("Run identity capture is not implemented")
+        return self._run_id
 
     @property
     def items(self) -> tuple[WritebackItem, ...]:
@@ -304,7 +312,7 @@ class WritebackService:
             # observable error and no draft is returned.
             self._teardown_entries(entries)
             raise
-        return WritebackDraft(self, identity, entries, parameters)
+        return WritebackDraft(self, identity, entries, parameters, run_id=run_id)
 
     def preview_draft(self, draft: WritebackDraft) -> list[WritebackItem]:
         self._require_draft(draft)
@@ -486,7 +494,9 @@ class WritebackService:
             at=datetime.now(timezone.utc).isoformat(),
             entry_id=parameters.target.entry_id,
             origin=origin.origin,
-            payload=AcceptedPayload(writes=tuple(writes), analysis_summary={}),
+            payload=AcceptedPayload(
+                writes=tuple(writes), analysis_summary={}, run_id=draft.run_id
+            ),
         )
         ledger.append(event)
         applied_ids: list[str] = []
@@ -495,7 +505,7 @@ class WritebackService:
             source = Provenance(
                 source=event.id,
                 kind=event.kind,
-                run_id=None,
+                run_id=draft.run_id,
                 at=event.at,
                 stderr=item.stderr,
             )
