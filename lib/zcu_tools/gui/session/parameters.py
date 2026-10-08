@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fnmatch import fnmatchcase
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.expected_error import InvalidInputError
-from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.context_types import (
+    ContextSourceUnavailableError,
+    SavedPoint,
+)
 from zcu_tools.resources.document_store import DocumentValue
 from zcu_tools.resources.entry import (
     RoleResolutionError,
@@ -18,6 +22,7 @@ from zcu_tools.resources.entry import (
     resolve_path,
 )
 from zcu_tools.resources.entry.roles import resolve_names
+from zcu_tools.resources.entry.storage import PointStorageBinding
 
 _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 
@@ -67,20 +72,31 @@ class ParameterContext:
         target: ContextTarget,
         roles: RoleBinding | None,
         source_faults: tuple[ContextSourceFault, ...] = (),
+        storage: PointStorageBinding | None = None,
     ) -> None:
         """Detach input data and retain the immutable library projection.
 
         RoleResolutionError reports missing/wrong-kind captured destinations.
         A setup diagnostic is outside this capture contract and raises
-        ValueError. No session selection generation is accepted or compared.
+        ValueError. storage optionally retains a resource-owned saved-point
+        capability with matching target identity; omit it for drafts or synthetic
+        captures. Mismatched storage origins also raise ValueError.
+        No session selection generation is accepted or compared.
         """
         if any(fault.document == "setup" for fault in source_faults):
             raise ValueError("Parameter captures accept only point/module_cfg faults")
+        if storage is not None and (
+            not isinstance(target, SavedPoint)
+            or str(storage.entry_id) != target.entry_id
+            or storage.point != target.point
+        ):
+            raise ValueError("Storage origin must match the saved-point target")
         self._point = point.model_copy(deep=True)
         self._library = library
         self._target = target.model_copy(deep=True)
         self._roles = deepcopy(roles)
         self._source_faults = deepcopy(source_faults)
+        self._storage = storage
         if self._roles is not None and not self._source_faults:
             for role, spec in self._roles.declarations.items():
                 name = self._roles.names.get(role)
@@ -104,6 +120,34 @@ class ParameterContext:
     def roles(self) -> RoleBinding | None:
         """Return a detached fixed binding; None means direct paths only."""
         return deepcopy(self._roles)
+
+    @property
+    def storage(self) -> PointStorageBinding | None:
+        """Return the fixed origin capability, or None for draft/unbound captures.
+
+        Its roots, ledger and description belong to capture time. This projection
+        adds this consumer's fixed role names without consulting session focus.
+        No file I/O, refresh or ledger append occurs.
+        """
+        if self._storage is None:
+            return None
+        names = {} if self._roles is None else dict(self._roles.names)
+        return replace(self._storage, roles=MappingProxyType(names))
+
+    def capture_storage(self) -> PointStorageBinding:
+        """Return storage at this capture's origin, never the current selection.
+
+        Necessary source faults raise ContextSourceUnavailableError. Drafts and
+        captures without an origin capability raise FailedPreconditionError with
+        reason_code storage_unavailable. This performs no I/O or ledger append.
+        """
+        self._ensure_readable()
+        storage = self.storage
+        if storage is None:
+            raise FailedPreconditionError(
+                "Capture has no saved-point storage", reason_code="storage_unavailable"
+            )
+        return storage
 
     @property
     def source_faults(self) -> tuple[ContextSourceFault, ...]:
@@ -146,6 +190,7 @@ class ParameterContext:
             library=self._library,
             target=self._target,
             roles=RoleBinding(focus, declarations, names),
+            storage=self._storage,
         )
 
     def resolve_path(self, path: str) -> str:
