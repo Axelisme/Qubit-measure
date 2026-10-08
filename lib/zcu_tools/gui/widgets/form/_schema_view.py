@@ -64,7 +64,24 @@ def _text(schema: dict[str, JsonValue], key: str) -> str:
 
 
 def _variants(schema: dict[str, JsonValue]) -> tuple[dict[str, JsonValue], ...]:
-    return _objects(schema.get("anyOf")) or (schema,)
+    # Nullable numeric fields wrap another numeric/Expr anyOf. Flatten only
+    # alternatives, not model properties/container items; retain outer metadata.
+    branches = _objects(schema.get("anyOf"))
+    if not branches:
+        return (schema,)
+    metadata = {key: value for key, value in schema.items() if key != "anyOf"}
+    return tuple(
+        variant for branch in branches for variant in _variants({**metadata, **branch})
+    )
+
+
+def _options(schema: dict[str, JsonValue]) -> tuple[JsonValue, ...] | None:
+    if schema.get("not") == {}:
+        return ()
+    values = schema.get("enum")
+    if isinstance(values, list):
+        return tuple(values)
+    return (schema["const"],) if "const" in schema else None
 
 
 def _kind(variants: tuple[dict[str, JsonValue], ...]) -> _Kind:
@@ -103,10 +120,10 @@ def _branch(
     selected: dict[str, JsonValue] = {}
     for branch in _objects(schema.get("oneOf")):
         selector = _properties(branch).get(key)
-        if isinstance(selector, dict) and "const" in selector:
-            tag = selector["const"]
-            options.append(tag)
-            if raw.get(key) == tag:
+        if isinstance(selector, dict):
+            tags = _options(selector) or ()
+            options.extend(tags)
+            if raw.get(key) in tags:
                 selected = branch
     return selected, key, tuple(options)
 
@@ -129,9 +146,7 @@ def _field(
     metadata = {**direct, **schema}
     raw = data.get(path[-1])
     kind = _kind(variants)
-    options = direct.get("enum", schema.get("enum"))
-    if options is None and "const" in direct:
-        options = [direct["const"]]
+    options = _options(direct)
     nullable = any(node.get("type") == "null" for node in variants)
     present = path[-1] in data
     field = FieldView(
@@ -145,7 +160,7 @@ def _field(
         nullable=nullable,
         active=not nullable or (present and raw is not None),
         expression=any("expr" in _properties(node) for node in variants),
-        options=tuple(options) if isinstance(options, list) else None,
+        options=options,
         raw=raw if present else direct.get("default"),
         present=present,
         value=preview.values.get(path),
