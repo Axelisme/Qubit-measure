@@ -78,13 +78,13 @@ def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
 ) -> None:
     devices, plots = RecordingDevices(), RecordingPlots()
     before = inputs.t1.model_dump(mode="python")
-    engine = start_t1(inputs, tmp_path, tunables(), devices, plots)
+    tun = tunables()
+    engine = start_t1(inputs, tmp_path, tun, devices, plots)
     status = engine.execute("workflow")
     assert status.lifecycle == "done", status.reason
     assert devices.values == [("flux", 1.0), ("flux", 1.1)]
     records = engine.records("workflow")
     assert len(records) == 2
-    assert [len(record.run_files) for record in records] == [4, 3]
     run_ids: set[str] = set()
     for index, record in enumerate(records):
         assert record.encoded_record.mode == "json"
@@ -95,19 +95,31 @@ def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
         assert point["reason"] is None
         lifetime = point["lifetime_us"]
         assert isinstance(lifetime, float) and lifetime == pytest.approx(20.0, rel=0.2)
+        experiments: list[str] = []
         for filename in record.run_files:
             path = tmp_path / "data" / record.iteration_dir / filename
             saved = load_run_data(path)
             assert saved.metadata.completion == "complete"
             assert saved.metadata.snapshot == make_snapshot()
             run_ids.add(saved.metadata.run_id)
+            experiments.append(saved.metadata.experiment)
+        frequency_tag = FreqExp().persistence_spec().tag
+        frequency_count = experiments.count(frequency_tag)
+        assert 1 <= frequency_count <= len(tun.cal.qf_widen)
+        expected = [frequency_tag] * frequency_count + [
+            LenRabiExp().persistence_spec().tag
+        ]
+        if index % tun.cal.ro_every == 0:
+            expected.append(FreqGainExp().persistence_spec().tag)
+        expected.append(T1Exp().persistence_spec().tag)
+        assert experiments == expected
         path = tmp_path / "data" / record.iteration_dir / record.run_files[-1]
         source, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
         assert source.cfg is not None and source.cfg.rounds == 2
         assert source.result.times.shape == source.result.signals.shape == (21,)
         assert np.isfinite(source.result.signals).all()
         assert metadata.run_id != "workflow"
-    assert len(run_ids) == 7
+    assert len(run_ids) == sum(len(record.run_files) for record in records)
     assert inputs.t1.model_dump(mode="python") == before
     events = [
         json.loads(line)
@@ -267,10 +279,14 @@ def test_rejected_t1_fit_keeps_raw_data_but_not_lifetime_history(
         assert isinstance(point, dict)
         assert point["lifetime_us"] is None and point["error_us"] is None
         assert point["reason"] == "T1 fit rejected"
-        rabi, _ = load_run_with_metadata(
-            tmp_path / "data" / record.iteration_dir / record.run_files[1],
-            spec=LenRabiExp().persistence_spec(),
-        )
+        rabi_paths: list[Path] = []
+        rabi_spec = LenRabiExp().persistence_spec()
+        for filename in record.run_files:
+            path = tmp_path / "data" / record.iteration_dir / filename
+            if load_run_data(path).metadata.experiment == rabi_spec.tag:
+                rabi_paths.append(path)
+        assert len(rabi_paths) == 1
+        rabi, _ = load_run_with_metadata(rabi_paths[0], spec=rabi_spec)
         assert rabi.cfg is not None
         assert rabi.cfg.relax_delay == 5 * tun.guess_us
         path = tmp_path / "data" / record.iteration_dir / record.run_files[-1]
