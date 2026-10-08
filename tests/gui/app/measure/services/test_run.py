@@ -25,6 +25,7 @@ import pytest
 from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
 from zcu_tools.device import BaseDevice, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import ExpCfgModel
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
@@ -73,6 +74,8 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
 from zcu_lab.v2.fake.stub.core import FakeResult, FakeRunResult
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
+from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 
 
 def _empty_schema() -> CfgSchema:
@@ -166,7 +169,7 @@ class _FakeBg:
                 result = self.last_work()
                 assert self.last_on_done is not None
                 self.last_on_done(result)
-            except (RuntimeError, ValueError) as exc:
+            except (RuntimeError, ValueError, TypeError) as exc:
                 assert self.last_on_error is not None
                 self.last_on_error(exc)
 
@@ -872,3 +875,137 @@ def test_load_replaces_result_without_manufacturing_acquisition_metadata(
     assert state.get_tab(tab_id).run.result is loaded
     assert state.get_tab(tab_id).run.source_path == "old-data.h5"
     assert state.get_tab(tab_id).run.metadata is None
+
+
+def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # This producer seam substitutes the public cfg assembly/acquisition
+    # collaborators. It does not claim the pending assembler/core integration.
+    state, tab_id, _mock_adapter = _make_state()
+    adapter = T1Adapter()
+    pulse = {
+        "type": "pulse",
+        "waveform": {"style": "const", "length": 0.1},
+        "ch": 0,
+        "nqz": 2,
+        "freq": 4400.0,
+        "gain": 0.2,
+    }
+    cfg = T1Cfg.model_validate(
+        {
+            "modules": {
+                "pi_pulse": pulse,
+                "readout": {
+                    "type": "readout/pulse",
+                    "pulse_cfg": pulse,
+                    "ro_cfg": {
+                        "ro_ch": 0,
+                        "ro_freq": 4400.0,
+                        "ro_length": 1.0,
+                        "trig_offset": 0.5,
+                        "gen_ch": 0,
+                    },
+                },
+            },
+            "sweep": {"length": {"start": 0.0, "stop": 1.0, "expts": 2, "step": 1.0}},
+        }
+    )
+    result = T1Result(
+        times=np.array([0.0, 1.0]), signals=np.array([1.0 + 0j, 0.5 + 0j])
+    )
+
+    def assemble(
+        self: T1Adapter, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> T1Cfg:
+        return cfg
+
+    def acquire(self: T1Exp, config: T1Cfg, *, context: RunContext) -> T1Result:
+        assert config is cfg
+        assert not context.cancel_signal.is_set()
+        return result
+
+    monkeypatch.setattr(T1Adapter, "build_exp_cfg", assemble)
+    monkeypatch.setattr(T1Exp, "run", acquire)
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+        MagicMock(return_value=_provenance()),
+    )
+    tab = state.get_tab(tab_id)
+    tab.adapter = adapter
+    permit = RunPermit(
+        tab_id=tab_id,
+        adapter_name="twotone/t1",
+        adapter=adapter,
+        request=RunRequest(soc=None, soccfg=None, device_snapshot={}, cfg_context=None),
+        accepted_cfg=tab.cfg.accept(tab.cfg.observe().ref.revision),
+        snapshot=_run_snapshot(),
+        experiment_tag=adapter.experiment_tag,
+    )
+    service, _gate, background, handles = _make_run_service(state)
+    token = service.start_run(permit, plots=_plots())
+    background.run_work()
+    record = state.get_tab(tab_id).run.result
+    metadata = state.get_tab(tab_id).run.metadata
+    assert isinstance(record, RunRecord)
+    assert isinstance(record.cfg, T1Cfg)
+    assert record.cfg == cfg
+    assert record.result is result
+    assert metadata is not None
+    assert metadata.experiment == T1Exp().persistence_spec().tag
+    assert metadata.completion == "complete"
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "finished"
+
+
+def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state, tab_id, adapter = _make_state()
+    adapter.run.return_value = RunRecord(
+        cfg=ExpCfgModel(), result=FakeResult(np.array([1.0]))
+    )
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+        MagicMock(return_value=_provenance()),
+    )
+    permit = replace(
+        _make_permit(state, tab_id, adapter),
+        snapshot=_run_snapshot(),
+        experiment_tag="test/native",
+    )
+    service, _gate, background, handles = _make_run_service(state)
+    token = service.start_run(permit, plots=_plots())
+    assert background.last_work is not None
+    acquired = background.last_work()
+    assert service.cancel_run()
+    assert background.last_on_done is not None
+    background.last_on_done(acquired)
+    metadata = state.get_tab(tab_id).run.metadata
+    assert metadata is not None and metadata.completion == "complete"
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "cancelled"
+
+
+def test_native_run_rejects_an_unpaired_result_without_publishing_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state, tab_id, adapter = _make_state()
+    adapter.run.return_value = object()
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+        MagicMock(return_value=_provenance()),
+    )
+    permit = replace(
+        _make_permit(state, tab_id, adapter),
+        snapshot=_run_snapshot(),
+        experiment_tag="test/native",
+    )
+    service, _gate, background, handles = _make_run_service(state)
+    token = service.start_run(permit, plots=_plots())
+    background.run_work()
+    assert state.get_tab(tab_id).run.result is None
+    assert state.get_tab(tab_id).run.metadata is None
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error == "Native acquisition must return a RunRecord"
