@@ -174,27 +174,27 @@ class SaveService:
                         ),
                     )
                 )
+                continue
+            if ref.section == "analysis":
+                pane = tab.analysis
+                pane_name = "analysis"
+            elif ref.section == "post_analysis":
+                pane = tab.post_analysis
+                pane_name = "post_analysis"
             else:
-                if ref.section == "analysis":
-                    pane = tab.analysis
-                    pane_name = "analysis"
-                elif ref.section == "post_analysis":
-                    pane = tab.post_analysis
-                    pane_name = "post_analysis"
+                raise ValueError(f"Unsupported pane section {ref.section!r}")
+            members: list[FileMember] = []
+            for key in artifact.members:
+                if key.member == "figure":
+                    if pane.plots is None or key.member_name is None:
+                        raise ValueError("Declared figure has no pane content")
+                    content = pane.plots[key.member_name]
                 else:
-                    raise ValueError(f"Unsupported pane section {ref.section!r}")
-                members: list[FileMember] = []
-                for key in artifact.members:
-                    if key.member == "figure":
-                        if pane.plots is None or key.member_name is None:
-                            raise ValueError("Declared figure has no pane content")
-                        content = pane.plots[key.member_name]
-                    else:
-                        content = tab.adapter.capture_analysis_document(
-                            pane.result, pane.result_params, pane=pane_name
-                        )
-                    members.append(FileMember(key, content))
-                captured.append(SaveArtifact(ref, tuple(members)))
+                    content = tab.adapter.capture_analysis_document(
+                        pane.result, pane.result_params, pane=pane_name
+                    )
+                members.append(FileMember(key, content))
+            captured.append(SaveArtifact(ref, tuple(members)))
         return _SavePlan(tuple(captured), layout, metadata, storage, origin, annotation)
 
     def _save(
