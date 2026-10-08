@@ -46,7 +46,7 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 from zcu_tools.resources.entry import snapshot, source_path
-from zcu_tools.resources.entry.roles import resolve_names
+from zcu_tools.resources.entry.roles import resolve_names, role_registry
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -271,7 +271,9 @@ class ContextService:
         current DRAFT in memory or ACTIVE point in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point publishes one parameter change and updates
-        focus options. Setup edits never change existing points or their captures.
+        focus options. If no focus is selected, the registry's sole candidate is
+        selected; existing focus is retained. Setup edits never change existing
+        points or their captures.
         No entry/context, schema, conflict and I/O errors propagate.
         """
         self._owner.assert_owner()
@@ -298,6 +300,9 @@ class ContextService:
             document = snapshot(self._point)
         self._focus = replace(
             self._focus,
+            name=self._focus.name
+            if self._focus.name is not None
+            else role_registry.default_focus(document.components),
             components=tuple(
                 ComponentOption(component_name, component.kind)
                 for component_name, component in document.components.items()
@@ -765,15 +770,14 @@ class ContextService:
         *,
         active_label: str,
     ) -> None:
+        components = parameters.document().components if parameters is not None else {}
         self._focus = ComponentFocus(
             target=parameters.target if parameters is not None else None,
-            name=None,
+            name=role_registry.default_focus(components),
             components=tuple(
                 ComponentOption(name, component.kind)
-                for name, component in parameters.document().components.items()
-            )
-            if parameters is not None
-            else (),
+                for name, component in components.items()
+            ),
         )
         if parameters is None:
             self._source_binding = None
