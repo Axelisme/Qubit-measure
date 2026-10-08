@@ -56,7 +56,7 @@ NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，�
 
 ## TwoTone pulse calibration records
 
-`AcStarkExp`、`AcStarkRamseyExp`、`CKP_Exp` 的 run 使用 RunContext，回傳純 Result。AcStark 的 earlystop_snr 與 Ramsey 的 acquisition detune 歸 typed cfg。Analyze 接 explicit source 和 typed options，接受 cfg=None。AcStark 回傳 ac_coeff；Ramsey 只發布 fit 圖，分析 detune 仍可獨立指定；CKP 回傳 chi／kappa／res_freq。兩種 AcStark 使用 measurement 2D with line，CKP 分別發布 measurement_ground／measurement_excited 熱圖；三者的分析圖都具名 fit。Caller 擁有 finish／release，NotebookAdapter 管理 Notebook 的 records 與呈現。
+`AcStarkExp`、`AcStarkRamseyExp`、`CKP_Exp` 的 run 使用 RunContext，回傳純 Result。AcStark 的 earlystop_snr 與 Ramsey 的 acquisition detune 歸 typed cfg。Analyze 接 explicit source 和 typed options，接受 cfg=None。AcStark 回傳 ac_coeff；Ramsey 只發布 fit 圖，分析 detune 仍可獨立指定；CKP 回傳 chi／kappa／res_freq。兩種 AcStark 使用 measurement 2D with line，CKP 在同一張 measurement 圖並排 ground／excited 熱圖；三者的分析圖都具名 fit。Caller 擁有 finish／release，NotebookAdapter 管理 Notebook 的 records 與呈現。
 
 ## Twotone sequence records
 
@@ -247,6 +247,23 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 ---
 
 ## Twotone RB 測量策略
+
+`twotone/irb` 是獨立的 paired reference/interleaved 實驗，固定存
+`(round, seed, arm, depth)` IQ；arm 0 是 reference，arm 1 是 interleaved。
+GUI target 預設 X90，支援 X90、X180、Y90、Y180，沿用校準的 X90/X180 pulse。
+兩組使用相同 random Clifford seed，target 在每個 random Clifford 後實際插入，
+不合併相鄰 gate；各自計算完整 inverse，沿用連續 virtual-Z frame。
+共享序列與 program 建構分別在 `twotone/rb/sequence.py` 與 `program.py`。
+IRB 外層由軟體遍歷 round、seed、arm，每個 seed/arm 的 program 快取重用，
+program 固定 rounds=1，depth/reps 在硬體完成。Arm 先後順序隨 round/seed 交替。
+原 `twotone/rb` 的二維存檔與每個 program 內完成 rounds 的行為維持不變。
+
+IRB analysis 只選完整 round/seed 配對，先平均同 seed 的 rounds，再等權平均 seeds。
+兩組共用 IQ 投影軸，各自 fit `A*p**depth+B`；target error 為
+`(1-p_interleaved/p_reference)/2`。95% interval 以整條配對 seed 曲線 bootstrap，
+不包含 gate-dependent/coherent noise 的系統性誤差。負 error 不 clamp。
+中止時未完成的 slot 維持 NaN，原始資料保存；不足兩個 paired seeds 或四個
+distinct depths 時分析明確失敗。
 
 - RB 量測採「每個 seed 一個 program」的結構：在 program 內用 sweep index 遍歷 depth，而不是在 host 端對 `(seed, depth)` 重複建立程式。
 - recovery gate 是累積 Clifford 的**完整 group inverse**（24 種），不是只把態送回 +Z 的 state-restoring gate：module load 時從 `CLIFFORD_GROUP` 的 6-state permutation（對 24 元 quotient group faithful）程式化生成 `CAYLEY` / `INVERSE_INDEX` 查表，順序約定 `CAYLEY[i][j]` = 先作用 C_j 再 C_i、累積寫 `acc = CAYLEY[next][acc]`，兩處註解互相錨定，改其中一邊必須同步。

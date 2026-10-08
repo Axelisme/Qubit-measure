@@ -169,17 +169,21 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
+        figure, _ = context.plots.subplots("measurement", ncols=2, figsize=(10, 4))
+        ax_ground, ax_excited = figure.axes
         ground = context.plots.liveplot_2d(
-            "measurement_ground",
+            "measurement",
             "Resonator Drive Frequency (MHz)",
             "Qubit Probe Frequency (MHz)",
             title="Ground State",
+            axes=ax_ground,
         )
         excited = context.plots.liveplot_2d(
-            "measurement_excited",
+            "measurement",
             "Resonator Drive Frequency (MHz)",
             "Qubit Probe Frequency (MHz)",
             title="Excited State",
+            axes=ax_excited,
         )
 
         def plot_fn(data: NDArray[np.complex128]) -> None:

@@ -337,16 +337,22 @@ def _make_range_input(name: str) -> QLineEdit:
     return entry
 
 
+def _show_text(entry: QLineEdit, text: str) -> None:
+    """Keep cursor and selection when a field's own input is published back."""
+    if entry.text() != text:
+        entry.setText(text)
+
+
 def _render_range_input(
     entry: QLineEdit, label: QLabel, name: str, value: int | float | DirectValue
 ) -> None:
     if isinstance(value, DirectValue):
-        entry.setText(_direct_input_text(value))
+        _show_text(entry, _direct_input_text(value))
         resolved = "?" if value.value is None else str(value.value)
         label.setText(f"{name} = {resolved}" if value.raw is not None else name)
         entry.setToolTip(value.error or "")
     else:
-        entry.setText(str(value))
+        _show_text(entry, str(value))
         label.setText(name)
         entry.setToolTip("")
 
@@ -489,7 +495,7 @@ class ScalarInputWidget(QWidget):
             assert inp is not None
             if isinstance(val, EvalValue):
                 assert isinstance(inp, QLineEdit)
-                inp.setText(val.expr)
+                _show_text(inp, val.expr)
                 self._sync_eval_ghost(val)
                 return
 
@@ -506,7 +512,7 @@ class ScalarInputWidget(QWidget):
             elif isinstance(inp, QCheckBox):
                 inp.setChecked(bool(raw))
             elif isinstance(inp, QLineEdit):
-                inp.setText(_direct_input_text(val))
+                _show_text(inp, _direct_input_text(val))
         finally:
             self._updating = False
 

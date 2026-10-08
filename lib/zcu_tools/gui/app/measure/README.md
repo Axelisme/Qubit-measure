@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08，固定來源的 library editor
+**Last updated:** 2026-10-08，cfg 即時送出與固定 capture
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -447,14 +447,10 @@ bar. Active and running tabs are identified by tab id, not visual index.
 ## Config Model
 
 Measure Config uses `ResourceCfgFormWidget` and a State-owned cfg resource.
-The form keeps text input local and captures its first publication ref. Run
-submits that input once, then starts only with a Valid returned publication ref.
-Invalid, Stale, Unavailable or failed submission never runs the previous values.
-Pending input can repair an Invalid publication, but cannot bypass busy,
-context or SoC gates. External updates preserve local text, focus and selection.
-Discard uses the latest delivered publication. Reapply asks for confirmation of
-the differences and submits against the revision shown in that confirmation.
-Library editors and writeback keep their existing `CfgDraft` binding behavior.
+The form submits every input change at once, so it always shows the published
+cfg. Run starts with the shown publication ref and only when it is Valid; an
+Invalid input never runs the previous values. Input that repairs an Invalid
+publication still cannot bypass busy, context or SoC gates. Library editors and writeback keep their existing `CfgDraft` binding behavior.
 
 `Session.cfg` 只引用該 tab 的 `CfgResource`，不保存另一份 live schema。
 CfgResource 擁有 input、resolution、revision、publication 與 acceptance。
@@ -467,24 +463,24 @@ Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布
 並依序操作 draft binding target。這個 draft batch 保留 fail-fast/non-atomic 行為，
 每筆成功 edit 各自 bump version。它不適用於 tab cfg resource 的原子 batch。
 
-Shared `CfgSchema` pairs two trees. The resource owns these inputs; the form
-renders publications and keeps only unsubmitted input locally:
+Shared `CfgSchema` pairs two trees. The resource owns these inputs, and the form
+renders each publication after submitting an input change:
 
 - Spec tree: static shape, labels, variants, literal locks, optional/ref rules.
 - Value tree: authored inputs, including expressions and reference identities.
 
 Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
-remains valid. Run does not reread `MetaDict` or `ModuleLibrary`.
+remains valid. Run uses the tab's fixed `ParameterContext`, not live point or focus.
 `schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
 fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
 
 generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
-`zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter只把current
-`MetaDict` expression evaluator、measure-owned module/waveform resolver與`SweepCfg`
-factory組成三個窄ports；adapter package不import或forward shared cfg public names，也不保留
-第二份algorithm或model/inheritance/codec implementation（ADR-0065）。
+`zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter提供固定
+`ParameterContext`的expression evaluator與module/waveform resolver。shared lowering
+回傳純range資料，experiment cfg建立時才驗證為`SweepCfg`。adapter package不import或
+forward shared cfg public names，也不保留第二份algorithm或model/inheritance/codec implementation（ADR-0065）。
 
 Module與waveform field在shared model都使用`ReferenceSpec(kind=...)` / `ReferenceValue`。
 measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="waveform"`，
@@ -492,8 +488,9 @@ measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="wa
 資源，lookup 直接回傳 resource-bound editing，不轉送命令。建立失敗不留下關聯，retire
 先撤銷舊 handle，再移除關聯。Widget detach 只停止觀察，不改資源 lifetime。
 
-`MeasureCfgBindings.snapshot_from_state` 複製 metadata、library 與 options，並記錄 context、
-device set、每個 device 及 value cache 的 source basis。Bare capture 使用同一 metadata。
+`MeasureCfgBindings.snapshot_from_state` 使用呼叫者提供的固定 `ParameterContext`，
+擷取 options 與已發布的 values，並記錄 context、device set 及每個 device 的 source basis。
+Bare capture 從同一 `ParameterContext` 解析。
 Dotted capture 只讀 `ValueSourceBinder` 已發布的 detached cache，不查 live provider 或硬體。
 Source 更新先準備及安裝所有 tab 的新 publication，再通知任何 subscriber。
 來源故障發布 Unavailable，不保留舊 Valid。通知期間拒絕 cfg mutation、acceptance 和 tab lifetime mutation。
