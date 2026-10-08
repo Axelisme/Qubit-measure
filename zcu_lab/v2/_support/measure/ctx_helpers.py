@@ -25,7 +25,16 @@ def md_has_key(ctx: SessionEnv, key: str) -> bool:
     return value is not sentinel and value is not None
 
 
-def _optional_scalar(parameters: ParameterContext, path: str) -> float | None:
+def optional_parameter_float(parameters: ParameterContext, path: str) -> float | None:
+    """Read a finite real scalar from one fixed parameter capture.
+
+    path is a direct component/general path or a captured role path accepted by
+    ParameterContext.lookup. Return None only for an absent leaf or explicit
+    null; otherwise return a float in the parameter's working units.
+    Bool/non-real values raise TypeError; nonfinite numbers raise ValueError.
+    Invalid paths, missing roles, unavailable sources and library errors
+    propagate from the capture without fallback, refresh or file I/O.
+    """
     result = parameters.lookup(path)
     if not result.present or result.value is None:
         return None
@@ -46,8 +55,8 @@ def _freq_range(
 ) -> SweepValue:
     """Read the fixed scalar paths and build the established live range."""
     center_key, width_key = keys
-    center_value = _optional_scalar(parameters, center_key)
-    width_value = _optional_scalar(parameters, width_key)
+    center_value = optional_parameter_float(parameters, center_key)
+    width_value = optional_parameter_float(parameters, width_key)
     center = defaults[0] if center_value is None else center_value
     width = defaults[1] if width_value is None else width_value
     half_span = span_factor * width if width > 0 else 30.0
@@ -110,8 +119,8 @@ def proper_flux_range(parameters: ParameterContext, expts: int) -> SweepValue:
     Missing/null calibration falls back to [-4e-3, 4e-3] in the working flux
     unit. Present invalid calibrations and role/source errors propagate.
     """
-    flux_half = _optional_scalar(parameters, "qubit.flux_half")
-    flux_int = _optional_scalar(parameters, "qubit.flux_int")
+    flux_half = optional_parameter_float(parameters, "qubit.flux_half")
+    flux_int = optional_parameter_float(parameters, "qubit.flux_int")
     if flux_half is not None and flux_int is not None:
         start: float | EvalValue = EvalValue(
             expr="1.1 * qubit.flux_int - 0.1 * qubit.flux_half"
