@@ -138,6 +138,46 @@ def test_bound_info_reads_current_bytes_and_isolates_arrays(tmp_path: Path) -> N
     assert exc.value.reason == "data_key_not_found"
 
 
+def test_bound_path_keeps_scope_and_checks_existence_without_decoding(
+    tmp_path: Path,
+) -> None:
+    root = _init_db(tmp_path)
+    (root / "opaque.npz").write_bytes(b"not an archive")
+    bound = ArbWaveformDatabase.bound_info()
+    ArbWaveformDatabase.init(tmp_path / "other")
+    assert bound.path_for("opaque") == (root / "opaque.npz").resolve()
+    with pytest.raises(ArbWaveformError) as error:
+        bound.samples("opaque")
+    assert error.value.reason == "npz_read_failed"
+
+
+@pytest.mark.parametrize(
+    ("key", "reason"),
+    [("absent", "data_key_not_found"), ("../escape", "invalid_data_key")],
+)
+def test_bound_path_rejects_missing_and_invalid_keys(
+    tmp_path: Path, key: str, reason: str
+) -> None:
+    _init_db(tmp_path)
+    bound = ArbWaveformDatabase.bound_info()
+    with pytest.raises(ArbWaveformError) as error:
+        bound.path_for(key)
+    assert error.value.reason == reason
+
+
+def test_repository_rejects_formula_semantics_not_just_json(tmp_path: Path) -> None:
+    root = _init_db(tmp_path)
+    np.savez(
+        root / "invalid_formula.npz",
+        time=[0, 1],
+        idata=[0, 0.5],
+        qdata=[0, 0],
+        recipe_json=np.array('{"future_recipe": true}'),
+    )
+    with pytest.raises(ArbWaveformError):
+        ArbWaveformDatabase.load("invalid_formula")
+
+
 def test_bound_info_requires_initialized_scope() -> None:
     with pytest.raises(RuntimeError, match="not initialized"):
         ArbWaveformDatabase.bound_info()

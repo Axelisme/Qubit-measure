@@ -18,7 +18,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
 - 新參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。這些能力尚未接線到現行 MetaDict、ModuleLibrary、GUI 或 MCP，也不提供 ledger producer。
 - SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；`SampleTable` 只存 schema-free CSV。
-- Waveform asset 擁有播放 arrays、reference time axis 和 duration。ModuleLibrary waveform cfg 只保存 asset key，不另存可覆寫的播放長度。program 在完整 asset duration 取樣到硬體 timing；調整時間內容須改 asset 或 recipe，而不是在 cfg 伸縮或任意裁切。
+- Waveform asset 擁有播放 arrays、reference time axis 和 duration。Core waveform_format 驗證 samples 與編解碼 NPZ，只驗 recipe JSON 語法。Resources 管理 formula 語意、命名與實體 I/O。ModuleLibrary Spec 只保存 asset key。Native arb cfg 保存 key 與必填本機絕對 path，不另存播放長度或 provider。Program/sim 讀 path 的 samples，在完整 asset duration 取樣，不解讀 formula，也不查 global DB。
 
 ### Run 輸出位置與 writer 權責
 
@@ -62,7 +62,7 @@ QubitParams 的 caller 以 typed 語意方法讀寫；更新一個 section 保�
 
 SampleTable v2 明示 `dev_value` 的 A／V base unit，flux 與 row frame 由獨立欄位表示。Flux 解析依 explicit、row-frame、fallback-frame 順序，並標明每列來源；fallback frame 必須與該列 unit 一致。自描述 unit 不保證缺少 flux／frame 的列能不靠外部輸入算出 flux。分析用 correction／alignment 不默默寫回原始樣品資料，也不自動修正 explicit flux。Autofluxdep export 用 run 建立時的 unit snapshot，不以 export 當下的 live device state 重讀舊結果。
 
-Asset repository 的 rename／delete 只處理資產，不掃描或改寫 ModuleLibrary 的 nested references。舊 key 可能因此成為 dangling reference；使用端解析缺失資產時明確失敗，由 caller／使用者修正引用。這避免 repository 反向理解 experiment cfg，也避免跨 owner 批次寫入。凍結 cfg key 不等於凍結該 key 所指的 asset bytes；本決策不引入 asset versioning、copy-on-run 或自動引用遷移。
+Asset repository 的 rename／delete 只處理資產，不掃描或改寫 ModuleLibrary 的 nested references。舊 key 可能因此成為 dangling reference；使用端解析缺失資產時明確失敗，由 caller／使用者修正引用。這避免 repository 反向理解 experiment cfg，也避免跨 owner 批次寫入。Capture-bound assets.path_for 驗 key 與檔存在，不載入 samples。Native cfg 的 path 以本機絕對路徑與 POSIX separators 序列化。Data.h5 不附帶 NPZ。移動 asset 或跨 OS 後，caller 須明確重定位 path；讀量測 arrays 不需要重播。覆寫同 path 會改變之後播放的 bytes。本決策不引入 asset versioning、copy-on-run、packaging 或自動引用遷移。
 
 ## 後果
 

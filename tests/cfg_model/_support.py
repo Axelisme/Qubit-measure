@@ -1,7 +1,10 @@
 """Typed in-process dependencies for waveform and materialization contracts."""
 
+from pathlib import Path
+
 import numpy as np
-from zcu_tools.cfg_model import ModuleSpec, WaveformSamples, WaveformSpec
+from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
+from zcu_tools.core.waveform_format import WaveformSamples
 
 
 class AssetInfo:
@@ -17,6 +20,10 @@ class AssetInfo:
         if data_key != self._data_key:
             raise ValueError(f"Missing asset: {data_key}")
         return self.current_duration
+
+    def path_for(self, data_key: str) -> Path:
+        """Reject native conversion: these in-memory samples have no file."""
+        raise ValueError("In-memory assets have no playback path")
 
     def samples(self, data_key: str) -> WaveformSamples:
         """Read isolated I data and a current reference axis; Q is zero."""

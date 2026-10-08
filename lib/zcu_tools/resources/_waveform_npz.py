@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any
 
 import numpy as np
-from numpy.typing import NDArray
 
-from ._waveform_data import ArbWaveformData, ArbWaveformError, validate_payload
+from zcu_tools.core.waveform_format import (
+    WaveformFile,
+    WaveformFormatError,
+    WaveformSamples,
+    decode_npz,
+    encode_npz,
+)
+
+from ._waveform_data import ArbWaveformData, ArbWaveformError
 from ._waveform_formula import FormulaRecipe
-
-_NPZ_KEYS = frozenset({"idata", "qdata", "time", "recipe_json"})
 
 
 def load_npz(path: Path) -> ArbWaveformData:
@@ -22,41 +26,34 @@ def load_npz(path: Path) -> ArbWaveformData:
     archive and I/O failures to npz_read_failed while preserving their cause.
     """
     try:
-        with np.load(path, allow_pickle=False) as archive:
-            keys = set(archive.files)
-            extra = keys - _NPZ_KEYS
-            if extra:
-                raise ArbWaveformError(
-                    f"{path} contains unsupported key(s): {sorted(extra)}",
-                    reason="unknown_npz_key",
-                    data={"path": str(path), "unknown_keys": sorted(extra)},
-                )
-            missing = {"idata", "qdata", "time"} - keys
-            if missing:
-                raise ArbWaveformError(
-                    f"{path} is missing required key(s): {sorted(missing)}",
-                    reason="missing_npz_key",
-                    data={"path": str(path), "missing_keys": sorted(missing)},
-                )
-            recipe = None
-            if "recipe_json" in keys:
-                recipe = FormulaRecipe.from_json(
-                    _read_recipe_json(archive["recipe_json"])
-                )
-            return validate_payload(
-                idata=archive["idata"],
-                qdata=archive["qdata"],
-                time=archive["time"],
-                recipe=recipe,
-            )
-    except ArbWaveformError:
-        raise
-    except Exception as exc:
+        payload = path.read_bytes()
+    except OSError as exc:
         raise ArbWaveformError(
             f"Failed to read arbitrary waveform asset {path}: {exc}",
             reason="npz_read_failed",
             data={"path": str(path)},
         ) from exc
+    try:
+        decoded = decode_npz(payload)
+    except WaveformFormatError as exc:
+        diagnostics: dict[str, object] = dict(exc.data)
+        if exc.reason in {"npz_read_failed", "unknown_npz_key", "missing_npz_key"}:
+            diagnostics["path"] = str(path)
+        # Keep underlying I/O errors directly visible at the repository boundary.
+        cause = exc.__cause__ if isinstance(exc.__cause__, OSError) else exc
+        raise ArbWaveformError(str(exc), reason=exc.reason, data=diagnostics) from cause
+    recipe = (
+        None
+        if decoded.recipe_json is None
+        else FormulaRecipe.from_json(decoded.recipe_json)
+    )
+    samples = decoded.samples
+    return ArbWaveformData(
+        idata=samples.idata,
+        qdata=np.zeros_like(samples.idata) if samples.qdata is None else samples.qdata,
+        time=samples.time,
+        recipe=recipe,
+    )
 
 
 def write_npz(path: Path, data: ArbWaveformData) -> None:
@@ -65,6 +62,19 @@ def write_npz(path: Path, data: ArbWaveformData) -> None:
     Create the parent directory and use a same-directory temporary file. On
     write failure remove that temporary file and propagate the original error.
     """
+    try:
+        payload = encode_npz(
+            WaveformFile(
+                samples=WaveformSamples(
+                    time=data.time, idata=data.idata, qdata=data.qdata
+                ),
+                recipe_json=None if data.recipe is None else data.recipe.to_json(),
+            )
+        )
+    except WaveformFormatError as exc:
+        raise ArbWaveformError(
+            str(exc), reason=exc.reason, data=dict(exc.data)
+        ) from exc
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_name: str | None = None
     try:
@@ -76,37 +86,9 @@ def write_npz(path: Path, data: ArbWaveformData) -> None:
             delete=False,
         ) as tmp:
             tmp_name = tmp.name
-            if data.recipe is None:
-                np.savez(tmp, idata=data.idata, qdata=data.qdata, time=data.time)
-            else:
-                np.savez(
-                    tmp,
-                    idata=data.idata,
-                    qdata=data.qdata,
-                    time=data.time,
-                    recipe_json=np.array(data.recipe.to_json()),
-                )
+            tmp.write(payload)
         Path(tmp_name).replace(path)
     except Exception:
         if tmp_name is not None:
             Path(tmp_name).unlink(missing_ok=True)
         raise
-
-
-def _read_recipe_json(raw: NDArray[Any]) -> str:
-    if raw.shape != ():
-        raise ArbWaveformError(
-            "recipe_json must be a scalar JSON string",
-            reason="invalid_recipe_json",
-            data={"path": "recipe_json"},
-        )
-    value = raw.item()
-    if isinstance(value, bytes):
-        value = value.decode("utf-8")
-    if not isinstance(value, str):
-        raise ArbWaveformError(
-            "recipe_json must be a scalar JSON string",
-            reason="invalid_recipe_json",
-            data={"path": "recipe_json"},
-        )
-    return value
