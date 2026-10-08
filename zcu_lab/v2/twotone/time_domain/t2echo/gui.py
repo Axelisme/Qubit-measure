@@ -20,6 +20,11 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import RoleSpec
 
@@ -33,7 +38,19 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import (
+    SweepDefault,
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoAnalyzeOptions,
     T2EchoCfg,
@@ -61,6 +78,42 @@ class T2EchoAnalyzeResult(AnalyzeResultBase):
     t2e: float
     t2e_err: float
     fit_quality: dict[str, dict[str, object]] | None = None
+
+
+def _blank_pulse(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.1)
+    value.with_field("waveform.length", 5.1)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field(
+        "ro_cfg.trig_offset",
+        path_seed(
+            "resonator.ext.time_of_fly",
+            expr="resonator.ext.time_of_fly + 0.05",
+            fallback=0.55,
+        ).resolve(ctx),
+    )
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 class T2EchoAdapter(
@@ -138,19 +191,44 @@ class T2EchoAdapter(
         """
         return (
             MeasureCfgBuilder()
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .pulse("pi2_pulse", role_id="pi2_pulse")
-            .readout()
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("qubit.module.reset", fallback=None),
+            )
+            .field(
+                "modules.pi_pulse",
+                spec=make_pulse_module_spec(),
+                default=module_seed(
+                    "qubit.module.x180",
+                    fallback=custom(_blank_pulse, description="inline pi pulse"),
+                ),
+            )
+            .field(
+                "modules.pi2_pulse",
+                spec=make_pulse_module_spec(),
+                default=module_seed(
+                    "qubit.module.x90",
+                    fallback=custom(_blank_pulse, description="inline pi/2 pulse"),
+                ),
+            )
+            .field(
+                "modules.readout",
+                spec=make_readout_module_spec(),
+                default=module_seed(
+                    "qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
             .relax_delay(
-                scaled_md("t1", factor=5.0, fallback_value=100.0),
+                scaled_path_seed("qubit.t1", factor=5.0, fallback_value=100.0),
             )
             .sweep(
                 "length",
                 label="Total delay (us)",
                 default=SweepDefault(
                     start=0.0,
-                    stop=scaled_md("t2e", factor=1.5, fallback_value=20.0),
+                    stop=scaled_path_seed("qubit.t2e", factor=1.5, fallback_value=20.0),
                     expts=101,
                 ),
             )
@@ -211,7 +289,7 @@ class T2EchoAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                target_name="t2e",
+                target_name="qubit.t2e",
                 description="T2 Echo time (us)",
                 proposed_value=result.t2e,
             ),
