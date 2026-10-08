@@ -54,7 +54,7 @@ EDelayMode: TypeAlias = Literal["auto", "calibrated", "manual"]
 EDelaySource: TypeAlias = Literal["global", "calibrated", "manual"]
 
 _SAMPLING_MODE_CHOICES: list[SamplingMode] = ["linear", "homophasal"]
-_EDELAY_MD_KEY = "res_edelay_calibration"
+_EDELAY_PARAMETER_PATH = "resonator.ext.edelay"
 _EDELAY_CALIBRATION_FIELDS = frozenset({"edelay", "res_ch", "ro_ch"})
 _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
 
@@ -149,27 +149,27 @@ class OneToneFreqAdapter(
             "resonator search has placed you near the right frequency."
         ),
         expects_md=(
-            "Reads from the MetaDict: 'r_f' seeds the default sweep centre; "
-            "'rf_w' seeds the default span; 'res_probe_len' seeds the readout "
-            "window; 'res_ch' / 'ro_ch' seed drive / readout channels; "
-            "'timeFly' seeds the trigger offset. Homophasal sampling also "
-            "requires explicit cfg calibration values for 'r_f', 'rf_w', and "
-            "'theta0', supplied directly or as expressions. Analysis optionally "
-            "uses a route-matched 'res_edelay_calibration' value."
+            "Uses the tab's captured resonator parameters: freq and kappa "
+            "seed the sweep; ext.default_probe_length and ext.time_of_fly "
+            "seed readout timing; wiring.ch and wiring.ro_ch seed channels. "
+            "Homophasal sampling requires explicit cfg calibration values "
+            "for r_f, rf_w, and theta0, supplied directly or as expressions. "
+            "Analysis optionally reads the route-matched resonator.ext.edelay "
+            "prior from the same fixed capture."
         ),
         expects_ml=(
-            "Needs a pulse-readout module, and references a ModuleLibrary "
-            "waveform named 'ro_waveform' when one exists (optional)."
+            "Starts with a fresh inline pulse readout and a const waveform. "
+            "It does not adopt a calibrated library module or named waveform."
         ),
         typical_writeback=(
-            "Proposes the fitted resonator frequency, linewidth, and phase "
-            "offset into MetaDict 'r_f' / 'rf_w' / 'theta0'. When the run "
-            "result includes a pulse-readout cfg snapshot, it also proposes "
-            "ModuleLibrary 'readout_rf' from that readout template, changing "
-            "only pulse/readout frequency to the fitted 'r_f' while preserving "
-            "gain, lengths, channels, and trigger timing. A route-qualified "
-            "electrical-delay calibration is proposed only when its absolute "
-            "branch is identifiable or a trusted prior/manual seed was used."
+            "Proposes fitted values to resonator.freq, resonator.kappa, and "
+            "resonator.ext.theta0 through the captured role binding. With a "
+            "pulse-readout run snapshot, it also proposes "
+            "resonator.readout.readout_rf from that template, changing only "
+            "pulse/readout frequency while preserving gain, lengths, channels, "
+            "and trigger timing. The compound resonator.ext.edelay proposal "
+            "keeps delay and route together; it requires an identifiable "
+            "absolute branch or a trusted prior/manual seed."
         ),
         recommended=(
             "Analysis defaults to the hanger-model fit ('hm') with "
@@ -226,7 +226,7 @@ class OneToneFreqAdapter(
         if route is None:
             return None
         get = getattr(md_obj, "get")
-        raw = get(_EDELAY_MD_KEY)
+        raw = get(_EDELAY_PARAMETER_PATH)
         if not isinstance(raw, Mapping) or set(raw) != _EDELAY_CALIBRATION_FIELDS:
             return None
         prior = cls._finite_real(raw["edelay"])
@@ -258,7 +258,7 @@ class OneToneFreqAdapter(
             if prior is None:
                 raise ValueError(
                     "calibrated edelay mode requires a finite route-matched "
-                    "res_edelay_calibration prior"
+                    "resonator.ext.edelay prior"
                 )
             return prior, "calibrated"
         if params.edelay_mode == "auto":
@@ -418,17 +418,17 @@ class OneToneFreqAdapter(
             )
         items: list[WritebackItem] = [
             MetaDictWriteback(
-                target_name="r_f",
+                target_name="resonator.freq",
                 description="Resonator frequency (MHz)",
                 proposed_value=result.freq,
             ),
             MetaDictWriteback(
-                target_name="rf_w",
+                target_name="resonator.kappa",
                 description="Resonator linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,
             ),
             MetaDictWriteback(
-                target_name="theta0",
+                target_name="resonator.ext.theta0",
                 description="Resonator circle phase offset (rad)",
                 proposed_value=float(theta0),
             ),
@@ -444,7 +444,7 @@ class OneToneFreqAdapter(
             res_ch, ro_ch = route
             items.append(
                 MetaDictWriteback(
-                    target_name=_EDELAY_MD_KEY,
+                    target_name=_EDELAY_PARAMETER_PATH,
                     description="Route-qualified resonator electrical-delay calibration",
                     proposed_value={
                         "edelay": edelay,
@@ -456,7 +456,7 @@ class OneToneFreqAdapter(
         items.extend(
             pulse_readout_module_writeback_items(
                 req.run_result.cfg,
-                target="readout_rf",
+                target="resonator.readout.readout_rf",
                 desc="Readout at fitted resonator frequency",
                 field_updates=(
                     ("pulse_cfg.freq", float(result.freq)),
