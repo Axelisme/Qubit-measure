@@ -1,6 +1,6 @@
 """Concrete Qt startup uses one fixed native capture and no hardware."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 
@@ -235,11 +235,13 @@ def test_close_pending_start_requests_stop_without_destroying_producer_host(
 
 @pytest.mark.parametrize("action", ["stop", "close"])
 @pytest.mark.parametrize("previous_start", [False, True])
+@pytest.mark.parametrize("notification", ["progress", "gate"])
 def test_admission_notification_can_cancel_current_start(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
     action: str,
     previous_start: bool,
+    notification: str,
 ) -> None:
     window, harness, entry = attachment
     calls: list[str] = []
@@ -272,7 +274,16 @@ def test_admission_notification_can_cancel_current_start(
         else:
             window.stop()
 
-    detach = harness.progress.attach_by_owner("t1-workflow", cancel_on_notification)
+    def cancel_on_register(payload: GateChangedPayload) -> None:
+        if payload.active:
+            cancel_on_notification()
+
+    detach: Callable[[], None]
+    if notification == "progress":
+        detach = harness.progress.attach_by_owner("t1-workflow", cancel_on_notification)
+    else:
+        subscription = harness.bus.subscribe(GateChangedPayload, cancel_on_register)
+        detach = subscription.unsubscribe
     try:
         token = window.start("notification")
     finally:
@@ -427,7 +438,9 @@ def test_resume_register_stop_or_close_keeps_window_locked_until_delivery(
     monkeypatch.setattr(window_module, "t1_fluxdep", step)
     assert isinstance(window.start("register-window"), int)
     harness.complete_segment()
-    observations: list[bool] = []
+    active_controller = window.controller
+    assert active_controller is not None
+    observations: list[tuple[bool, bool]] = []
     close_results: list[bool] = []
 
     def stop_on_register(payload: GateChangedPayload) -> None:
@@ -436,14 +449,17 @@ def test_resume_register_stop_or_close_keeps_window_locked_until_delivery(
                 close_results.append(window.close())
             else:
                 window.stop()
-            observations.append(window.plan_panel.isEnabled())
+            observations.append(
+                (window.plan_panel.isEnabled(), active_controller.has_pending_segment)
+            )
 
     subscription = harness.bus.subscribe(GateChangedPayload, stop_on_register)
     try:
         window.resume()
     finally:
         subscription.unsubscribe()
-    assert observations == [False]
+    assert observations == [(False, True)]
+    assert not active_controller.has_pending_segment
     assert close_results == ([False] if action == "close" else [])
     assert not window.plan_panel.isEnabled() and harness.gate.snapshot()
     harness.background.execute()
@@ -516,6 +532,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     assert resume is not None and not resume.isEnabled()
     assert harness.progress.bars_for_owner("t1-workflow") == ()
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
+    assert not controller.has_pending_segment
     assert harness.background.work is None and attempts == ["step"]
     assert window.close()
 

@@ -161,7 +161,10 @@ class T1WorkflowWindow(QWidget):
         if self.controller is None:
             return
         status = self.controller.status()
-        if self.controller.operation_id is not None:
+        if (
+            self.controller.has_pending_segment
+            or self.controller.operation_id is not None
+        ):
             raise InvalidRunState("start", "running")
         if status is not None and status.lifecycle in {
             "running",
@@ -382,7 +385,10 @@ class T1WorkflowWindow(QWidget):
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         """Keep producer/canvas alive during Stop; release only after terminal."""
-        if self.controller is not None and self.controller.operation_id is not None:
+        if self.controller is not None and (
+            self.controller.has_pending_segment
+            or self.controller.operation_id is not None
+        ):
             self.stop()
             if a0 is not None:
                 a0.ignore()

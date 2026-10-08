@@ -78,6 +78,7 @@ class WorkflowController[C]:
         self._lock = RLock()
         self._stop_signal = StopSignal()
         self._started = False
+        self._admitting = False
         self._operation_id: int | None = None
         self._progress_token: int | None = None
         self._factory: BoundProgressFactory | None = None
@@ -91,8 +92,25 @@ class WorkflowController[C]:
 
     @property
     def operation_id(self) -> int | None:
-        """Return the pending runner token, or None after terminal delivery."""
+        """Return the pending runner token, or None before opening/after delivery.
+
+        Registration can notify before its token is available. During that gap,
+        has_pending_segment is True even though this property is None.
+        """
         return self._operation_id
+
+    @property
+    def has_pending_segment(self) -> bool:
+        """Read whether synchronous Start/Resume segment admission is in flight.
+
+        True from immediately before Runner.begin until it returns or raises,
+        including lease registration notifications before on_opened supplies a
+        token. False afterward; operation_id separately identifies an opened
+        segment until owner terminal delivery. Stop/Start/close must treat either
+        this property or a non-None operation_id as pending segment work.
+        This is observed state, not a configurable policy or an operation ID.
+        """
+        return self._admitting
 
     def start[P: BaseModel, T: BaseModel, S, R](
         self,
@@ -234,7 +252,11 @@ class WorkflowController[C]:
         on the owner thread to capture current cached native device provenance.
         Engine.resume and execute run on the worker with the original progress
         factory, state and inputs. No init or Start is repeated. Capture, lease or
-        submission failure propagates, leaves the run paused and retains progress;
+        submission failure propagates. Without synchronous Stop it leaves the run
+        paused and retains progress. If Stop already terminated the native run
+        and no producer was submitted, synchronous unwind reports that terminal
+        once and discards progress, then reraises the original failure. It does
+        not invent a RunStatus or restore stopped to paused.
         Native failed status retains Engine's reason; exceptions escaping the
         worker reach on_finished unchanged. Either failure discards progress.
         Stop while this segment is pending prevents its step from restarting.
@@ -291,8 +313,10 @@ class WorkflowController[C]:
 
         Before acceptance this cancels pending startup and returns None. After
         acceptance it delegates to Engine.stop and returns its native status.
-        An active segment keeps its lease until worker terminal delivery. An
-        already-delivered paused run stops synchronously, reports on_finished and
+        An active segment, including registration before its token is available,
+        keeps its lease until worker terminal delivery or synchronous admission
+        unwind when no producer exists. An already-delivered paused run with no
+        admission in flight stops synchronously, reports on_finished and
         discards its retained progress. Native failures propagate; no hardware
         rollback or cleanup occurs.
         """

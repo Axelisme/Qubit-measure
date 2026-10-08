@@ -656,13 +656,17 @@ def test_resume_register_stop_waits_for_owner_terminal_delivery(
     harness.complete_segment()
     paused = controller.status()
     assert paused is not None and paused.lifecycle == "paused"
-    notifications: list[tuple[int, bool]] = []
+    notifications: list[tuple[int, bool, bool]] = []
 
     def stop_on_register(payload: GateChangedPayload) -> None:
         if payload.active:
             controller.stop()
             notifications.append(
-                (len(finished), bool(harness.progress.bars_for_owner("example")))
+                (
+                    len(finished),
+                    bool(harness.progress.bars_for_owner("example")),
+                    controller.has_pending_segment,
+                )
             )
 
     subscription = harness.bus.subscribe(GateChangedPayload, stop_on_register)
@@ -670,7 +674,8 @@ def test_resume_register_stop_waits_for_owner_terminal_delivery(
         resumed = controller.resume(devices=lambda: DeviceSnapshot({}))
     finally:
         subscription.unsubscribe()
-    assert notifications == [(1, True)]
+    assert notifications == [(1, True, True)]
+    assert not controller.has_pending_segment
     assert len(finished) == 1 and harness.gate.snapshot()
     harness.background.execute()
     assert len(finished) == 1 and harness.gate.snapshot()
@@ -734,6 +739,7 @@ def test_resume_stop_rejection_finishes_without_a_producer(
     assert len(finished) == 2 and finished[-1] == (status, None)
     assert progress_calls == ([token], [token])
     assert not harness.progress.bars_for_owner("example")
+    assert not controller.has_pending_segment
     assert controller.operation_id is None and harness.handles.live_count() == 0
     assert not harness.gate.snapshot() and harness.background.work is None
     assert attempts == ["step"]
