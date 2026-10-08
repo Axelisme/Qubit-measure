@@ -45,7 +45,6 @@ class EstimateReply(TypedDict):
     value: Any
     stderr: Any
     unit: str | None
-    quality: Any
 
 
 def project_control(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -400,8 +399,13 @@ def project_execution(
     recipes supplies the owning session declarations for analysis-only estimates.
     definition selects one recipe's actual/estimate fields; None means standalone
     analysis. Conflicting present estimate keys raise ValueError. detail selects
-    the operator summary or a detached full native capture. Summary interaction
+    the operator summary or a detached full native capture. Each analysis pane
+    exposes params, declared scalar estimates, unchanged native summary and
+    unchanged native invalid entries. No fit_quality interpretation occurs.
+    artifacts preserves each captured native Save report's section/member/output
+    evidence, and run_id comes from the latest captured report. Summary interaction
     comes from analysis_stage; full retains both stages. No identity is inferred.
+    Queries perform no RPC, image read, filesystem check or guard refresh.
     """
     if detail == "full":
         return deepcopy(snapshot)

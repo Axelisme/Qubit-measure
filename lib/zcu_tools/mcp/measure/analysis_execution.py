@@ -11,6 +11,7 @@ from typing import Any, Literal, TypedDict
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.operation_wait import await_operation
+from zcu_tools.mcp.measure.raw_save import SaveReport
 from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError, MeasureMcpSession
 
 AnalysisStage = Literal["primary", "post"]
@@ -39,12 +40,6 @@ class AnalysisResult:
     params: dict[str, Any]
     operation_state: dict[str, Any]
     invalid: list[InvalidAnalysisValue]
-
-
-@dataclass(frozen=True)
-class SavedImage:
-    figure_name: str
-    image_path: str
 
 
 @dataclass(frozen=True)
@@ -94,10 +89,9 @@ class ExecutionSnapshot:
     result: Captured native analysis result, or None before result_read.
     interaction: Latest interaction handoff, or None if none was delivered.
     save_status: not_started, not_available, saving, saved, incomplete or unknown.
-    saved_images: Confirmed persistent image paths; failures retain this prefix.
-    remaining_images: Unsaved owner image names, or None before result_read.
-    unconfirmed_image: Admitted save with unknown outcome, or None.
-    figure: Session preview path, or None if unavailable/not delivered.
+    save_report: Latest complete synchronous native Save report, or None before
+        a reply; it contains all outputs, including reserved/failed paths.
+        There is no image-by-image successful prefix or session PNG path.
     writeback: Completed operation's preview, or None before writeback_read.
         Interactive handoff does not capture; done joins this completion.
         A failed read retains result/save/preview facts and reports error.
@@ -118,10 +112,7 @@ class ExecutionSnapshot:
     result: AnalysisResult | None = None
     interaction: dict[str, Any] | None = None
     save_status: SaveStatus = "not_started"
-    saved_images: list[SavedImage] = field(default_factory=list)
-    remaining_images: list[str] | None = None
-    unconfirmed_image: str | None = None
-    figure: str | None = None
+    save_report: SaveReport | None = None
     writeback: AnalysisWriteback | None = None
     error: ExecutionError | None = None
 

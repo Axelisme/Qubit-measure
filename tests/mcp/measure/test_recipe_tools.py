@@ -3,8 +3,6 @@
 from contextlib import closing
 from copy import deepcopy
 from dataclasses import replace
-from pathlib import Path
-from threading import Event
 
 import pytest
 from zcu_tools.mcp.measure.assembly import build_measure_tools
@@ -329,32 +327,6 @@ def test_question_blocks_new_recipe_and_nonrun_finish_early(tmp_path):
         client.call("cancel", {"execution": key})
         result = client.call("wait", {"execution": key, "timeout": 2})
         assert result.data["status"] == "cancelled"
-
-
-def test_session_close_drains_generator_finally_before_removing_previews(tmp_path):
-    observed: list[bool] = []
-    finally_ran = Event()
-    preview: list[str] = []
-
-    def sample(session: RecipeSession) -> RecipeGenerator:
-        try:
-            run, _ = yield session.open_tab("lookback").run()
-            assert isinstance(run, RecipeRun)
-            _, _ = yield run.analyze("primary")
-            _, _ = yield run.propose_writeback()
-        finally:
-            observed.append(bool(preview) and Path(preview[0]).is_file())
-            finally_ran.set()
-
-    client = make_client(tmp_path, WritebackGui(), recipes=(definition(sample),))
-    question = client.call("sample", {})
-    preview.extend(question.data["previews"]["primary"])
-    client.context.session.close()
-    assert finally_ran.is_set() and observed == [True]
-    assert all(not Path(path).exists() for path in preview)
-    with pytest.raises(GuiRpcError) as error:
-        client.call("sample", {})
-    assert error.value.reason == "session_closed"
 
 
 def test_injected_guide_and_estimates_share_the_owning_registry(tmp_path):

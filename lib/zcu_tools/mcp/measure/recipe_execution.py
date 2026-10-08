@@ -25,7 +25,7 @@ from zcu_tools.mcp.measure.analysis_execution import (
     ExecutionSnapshot,
     GuiCancel,
 )
-from zcu_tools.mcp.measure.raw_save import RawSaveReceipt
+from zcu_tools.mcp.measure.raw_save import SaveReport
 from zcu_tools.mcp.measure.recipe import (
     AnalysisStage,
     AnalyzeOperation,
@@ -38,7 +38,6 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
     RecipeWritebackPreview,
     RunOperation,
-    RunPreview,
     StepStatus,
     WritebackDecision,
     WritebackQuestion,
@@ -94,13 +93,13 @@ class RecipeSnapshot:
     phase is the active yield, preparing between yields, or terminal.
     cancel_requested is one unconsumed stop intent, not a native outcome.
     finish_early_requested records the active Run's early-stop intent.
-    run_op is the last Run handle; op is the current operation/save handle.
+    run_op is the last Run handle; op is the current Run/Analyze handle.
     actual is the last Run's fixed conditions, or None before capture.
     missing contains needs_parameters prompts, empty for other outcomes.
     run_outcome/result_state retain original native completion and provenance.
     run_start retains not_started/unknown/running receipt and rejection reason.
-    raw_save retains the latest save and confirmed prefix.
-    preview is the captured session Run image, or None when unavailable.
+    raw_save is the latest native Save report, or None before its reply.
+    Inline image bytes are delivered separately; no preview path is captured.
     analysis_mode identifies captured stages, not requested future steps.
     analysis/post_analysis retain each stage's latest completion/start capture.
     writeback/post_writeback are those stages' captured proposals, or None.
@@ -124,9 +123,8 @@ class RecipeSnapshot:
     run_outcome: Mapping[str, object] | None = None
     run_start: AnalysisStart = field(default_factory=AnalysisStart)
     result_state: Mapping[str, object] | None = None
-    raw_save: RawSaveReceipt = field(default_factory=RawSaveReceipt)
+    raw_save: SaveReport | None = None
     analysis_mode: Literal["primary", "primary_post", "none"] = "none"
-    preview: RunPreview | None = None
     analysis: ExecutionSnapshot | None = None
     writeback: AnalysisWriteback | None = None
     post_analysis: ExecutionSnapshot | None = None
@@ -221,21 +219,7 @@ class RecipeExecution:
                         run_outcome=run.outcome,
                         result_state=run.result_state,
                         raw_save=run.raw_save,
-                        preview=run.preview,
-                        op=run.save_op if self._active is None else progress.op,
                     )
-                    if (
-                        run.raw_save.status in ("saving", "failed", "unknown")
-                        and self._active is None
-                        and progress.phase == "preparing"
-                    ):
-                        progress = replace(progress, phase="raw_save")
-                    if (
-                        run.preview_status != "not_started"
-                        and self._active is None
-                        and progress.phase == "preparing"
-                    ):
-                        progress = replace(progress, phase="preview")
                     for stage, capture in run.analyses.items():
                         progress = self._retain_analysis(progress, stage, capture)
                 analysis = session.analysis_snapshot()
@@ -308,7 +292,7 @@ class RecipeExecution:
             if not images and self._session is not None:
                 run = self._session.run_snapshot()
                 if run is not None:
-                    images = run.preview_images
+                    images = run.images
             current_analysis = (
                 progress.post_analysis
                 if progress.analysis_stage == "post"

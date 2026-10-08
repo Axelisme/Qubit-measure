@@ -205,64 +205,6 @@ def test_analysis_only_rejects_conflicting_estimate_declarations(
 
 
 @pytest.mark.parametrize("stage", ["primary", "post"])
-def test_analysis_only_uses_unambiguous_native_quality_without_live_reads(
-    tmp_path, clients, stage
-):
-    identical = replace(T1_DEFINITION, name="identical-t1")
-    native_issue = {
-        "path": "summary.fit_quality.fit.relative_parameter_errors.decay_time",
-        "reason": "covariance_unavailable",
-    }
-    quality = {
-        "fit": {
-            "r2": -0.25,
-            "normalized_residual_rms": 0.31,
-            "relative_parameter_errors": {"decay_time": None},
-            "invalid": [native_issue],
-        }
-    }
-
-    def respond(method, params):
-        if method in {"tab.analyze", "tab.post_analyze"}:
-            return _start_reply({}, [])
-        if method == "operation.await":
-            return {"reason": "completed", "status": "finished"}
-        if method in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
-            pane = "analysis" if stage == "primary" else "post_analysis"
-            result = _result_reply(pane, [], {})
-            result["summary"] = {"t1": 25.0, "t1_err": None, "fit_quality": quality}
-            return result
-        raise AssertionError(method)
-
-    client = _client(tmp_path, clients, respond, recipes=(T1_DEFINITION, identical))
-    initial = client.call("tab_analyze", {"tab": "t", "stage": stage})
-    assert initial.data["status"] == "finished", initial.data
-    execution = initial.data["execution"]
-    before = len(client.transport.sent)
-    summary = client.call("status", {"execution": execution})
-    full = client.call("status", {"execution": execution, "detail": "full"})
-    waited = client.call("wait", {"execution": execution, "timeout": 0}).data
-    assert initial.data == summary
-    assert {k: v for k, v in waited.items() if k != "elapsed_s"} == summary
-    assert len(client.transport.sent) == before
-    assert full["result"]["summary"]["fit_quality"] == quality
-    estimate = summary["analysis"][stage]["estimates"]["t1"]
-    assert estimate["value"] == 25.0
-    assert estimate["unit"] == "us"
-    assert estimate["quality"]["fit"]["r2"] == -0.25
-    assert estimate["quality"]["fit"]["normalized_residual_rms"] == 0.31
-    issue = {
-        "path": f"analysis.{stage}.estimates.t1.quality.fit.relative_parameter_errors.decay_time",
-        "reason": "covariance_unavailable",
-    }
-    assert estimate["quality"]["fit"]["invalid"] == [issue]
-    assert summary["invalid"] == [issue]
-    assert summary["analysis"][stage]["details"] == {}
-    json.dumps(summary, allow_nan=False)
-    json.dumps(full, allow_nan=False)
-
-
-@pytest.mark.parametrize("stage", ["primary", "post"])
 @pytest.mark.parametrize("outcome", ["finished", "failed", "partial"])
 def test_analysis_initial_wait_and_status_share_the_same_summary(
     tmp_path, clients, stage, outcome

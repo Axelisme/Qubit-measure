@@ -148,7 +148,33 @@ class LookbackGui:
             return {"operation_id": 71}
         if method == "tab.save_data":
             assert params == {"tab_id": "t", "run_operation_id": 71}
-            return {"operation_id": 82, "data_path": "/actual/raw.h5"}
+            self.raw_saved = True
+            return {
+                "run_id": "run-a",
+                "artifacts": {
+                    "raw": {
+                        "data": {
+                            "status": "Saved",
+                            "members": {
+                                "data": [
+                                    {
+                                        "format": "data_h5",
+                                        "path": "/runs/run-a/data.h5",
+                                        "status": "saved",
+                                        "error": None,
+                                    },
+                                    {
+                                        "format": "labber",
+                                        "path": "/labber/raw.hdf5",
+                                        "status": "saved",
+                                        "error": None,
+                                    },
+                                ]
+                            },
+                        }
+                    }
+                },
+            }
         if method == "operation.await":
             assert 0 < params["timeout"] <= 0.25
             assert params["operation_id"] in (71, 82, 93)
@@ -175,10 +201,40 @@ class LookbackGui:
                 "params": {"threshold": 0.5},
                 "operation_state": {"analysis_state": {"figure_names": ["trace"]}},
             }
-        if method == "tab.save_image":
-            assert params["operation_id"] == 93
-            assert params["figure_name"] == "trace"
-            return {"image_path": "/actual/trace.png"}
+        if method == "tab.save_artifacts":
+            assert params == {
+                "tab_id": "t",
+                "artifacts": [{"section": "analysis", "name": "results"}],
+                "operation_id": 93,
+            }
+            return {
+                "run_id": "run-a",
+                "artifacts": {
+                    "analysis": {
+                        "results": {
+                            "status": "Saved",
+                            "members": {
+                                "analysis:primary": [
+                                    {
+                                        "format": "json",
+                                        "path": "/runs/run-a/analysis/results.json",
+                                        "status": "saved",
+                                        "error": None,
+                                    }
+                                ],
+                                "figure:trace": [
+                                    {
+                                        "format": "png",
+                                        "path": "/runs/run-a/analysis/trace.png",
+                                        "status": "saved",
+                                        "error": None,
+                                    }
+                                ],
+                            },
+                        }
+                    }
+                },
+            }
         if method == "tab.get_figure":
             assert params["operation_id"] == 93
             return {"png_b64": base64.b64encode(PNG).decode()}

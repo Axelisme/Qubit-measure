@@ -25,7 +25,7 @@ def handoff_interaction(
 
     ctx supplies the fixed GUI binding; execution owns the admitted analysis.
     before_send optionally checks caller lifetime just before native dispatch.
-    Cancelled executions reject this read at that boundary. Query, PNG and path
+    Cancelled executions reject this read at that boundary. Query and PNG
     failures become delivery_error on the same owner, not a failed native outcome.
     Non-interactive executions need no handoff and perform no GUI request.
     """
@@ -66,6 +66,10 @@ def interact(
     Recipes supply their original analysis handle and phase admission. A reply
     for another operation cannot replace that execution's handoff. Done joins
     the existing completion owner; PNG failure preserves the accepted receipt.
+    Native figure bytes are consumed into ToolReply.images only, without a JSON
+    figure path, session temporary file or persistent identity. Other native
+    committed state/commands/info fields are preserved. Later live reads may
+    show a different image. There is no retry or hidden guard refresh.
     """
     done = params.get("payload", {}).get("command") == "done"
     if done:

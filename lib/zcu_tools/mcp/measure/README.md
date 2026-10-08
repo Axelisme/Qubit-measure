@@ -38,7 +38,7 @@ Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` �
 
 Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與 confirmed run_id。Author handle 使用這份保存契約。
 
-Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExecution`，在 recipe 的 worker 完成分析、圖像與候選 capture。Recipe-local close 和 session close 都能停止接續。寫回提問只篩選已捕捉的 stable names，不重讀 GUI 或寫入。`recipe_execution.py` 擁有 generator、單一 recipe admission、一次性取消、captured question 與 typed snapshot。它以同一 worker 完成 author handles；analysis 共用 driver 的本地 condition 交付進度。Session 與 tool table 使用必填的同一份注入 definitions。Guide 與 analysis-only estimates 也讀 owning registry。單一 recipe 包含 interactive 與 awaiting_answer；terminal 之後才放行下一個呼叫。
+Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExecution`，在 recipe 的 worker 完成分析、圖像與候選 capture。Recipe-local close 和 session close 都能停止接續。寫回提問只篩選已捕捉的 stable names，不重讀 GUI 或寫入。`recipe_execution.py` 擁有 generator、單一 recipe admission、一次性取消、captured question 與 typed snapshot。它以同一 worker 完成 author handles；analysis 共用 driver 的本地 condition 交付進度。Session 與 tool table 使用必填的同一份注入 definitions。Guide 與 analysis-only scalar estimates 也讀 owning registry。單一 recipe 包含 interactive 與 awaiting_answer；terminal 之後才放行下一個呼叫。
 
 ## 分析、互動與寫回
 
@@ -55,11 +55,11 @@ Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(executi
 
 Framework 原樣傳遞 native analysis summary 與 invalid 路徑，不特別解讀 fit_quality、不重算品質或設定寫回門檻。有擬合的 summary 附 fit_quality 是實驗定義者的約定，見 zcu_lab README。
 
-Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的 scalar value_key，完全相同的 name/error_key/unit 宣告可合併。Present key 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取。其他結果留在 details，full 保留原 summary。
+Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的 scalar value_key，完全相同的 name/error_key/unit 宣告可合併。Present key 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取。每個 pane 保留完整原生 summary 與 invalid；scalar estimates 不抽掉 summary 的欄位，framework 不投影 quality。
 
 `tab_interact` 省略 payload 時讀 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。`done` 接住原 analysis operation，然後加入其 execution 的完成讀取與保存。此 method 不加 seen guard，較晚的 owner-loop commit 生效。沒有來源鎖或自動重試。
 
-Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post estimates 和 details、warnings、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 取同次 Save report 的 confirmed 身分，尚未確認持久輸出時為 null。Execution ID 仍是 session-local。
+Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post scalar estimates、原生 summary 與 invalid、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 取同次 Save report 的 confirmed 身分，尚未確認持久輸出時為 null。Execution ID 仍是 session-local。
 
 `status(execution, detail="full")` 保留該 execution 已捕捉的 native 資料，包括完整 cfg publication、raw expressions、source_basis、analysis results 與 writeback proposals。查詢不新增 RPC 或 guard 觀察。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
 

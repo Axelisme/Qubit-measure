@@ -261,7 +261,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read execution summary or explicit full detail; global status indexes active executions. Summary previews.run/primary/post are full path lists for session-only PNGs, not persistent saved artifacts. Queries do not refresh guards or attach images.",
+            "description": "Read execution summary or explicit full detail; global status indexes active executions. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -280,7 +280,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "wait": {
             "handler": partial(_wait_tool, ctx),
-            "description": "Wait for one operation or execution; timeout does not cancel. Execution summaries include previews.run/primary/post as full session-only PNG path lists. Confirmed persistent outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
+            "description": "Wait for one operation or execution; timeout does not cancel. Execution replies may attach in-memory image content without session files. Complete native Save outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

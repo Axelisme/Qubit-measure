@@ -37,9 +37,6 @@ from ._analyze_support import (
     call_stdio as _call_stdio,
 )
 from ._analyze_support import (
-    hold_wire_reply as _hold_wire_reply,
-)
-from ._analyze_support import (
     sent_methods as _methods,
 )
 from ._analyze_support import (
@@ -820,87 +817,6 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
     assert completed["save_status"] == "not_started"
     assert "tab.save_image" not in _methods(client)
     assert "tab.get_figure" not in _methods(client)
-
-
-@pytest.mark.parametrize("cancel_first", [False, True])
-def test_close_drains_pending_save_and_cancel_before_png_cleanup(
-    tmp_path, clients, monkeypatch, cancel_first
-):
-    intent = Event()
-    read_internal = GuiConnection.read_internal
-
-    def read(connection, method, params, **kwargs):
-        if method == "operation.cancel":
-            intent.set()
-        return read_internal(connection, method, params, **kwargs)
-
-    monkeypatch.setattr(GuiConnection, "read_internal", read)
-
-    client = _client(tmp_path, clients)
-    client.transport.replies.update(
-        {
-            method: {"ok": True, "result": result}
-            for method, result in {
-                "tab.analyze": {
-                    "operation_id": 71,
-                    "interactive": False,
-                    "params": {},
-                    "invalidated_on_success": [],
-                },
-                "operation.await": {"reason": "completed", "status": "finished"},
-                "tab.get_analyze_result": _result_reply("analysis", ["fit"], {}),
-            }.items()
-        }
-    )
-    session = client.context.session
-    image = session.write_png(_PNG)
-    saving = _hold_wire_reply(client, monkeypatch, "tab.save_image")
-    cleanup_pngs = session.cleanup_pngs
-    cleanup_states = []
-
-    def cleanup():
-        cleanup_states.extend(session.executions.snapshots())
-        assert image.exists()
-        cleanup_pngs()
-
-    request = None
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        try:
-            started = _data(
-                _call_full_execution_stdio(
-                    monkeypatch, client, "tab_analyze", {"tab": "t"}
-                )
-            )
-            assert saving.wait(2)
-            if cancel_first:
-                request = pool.submit(
-                    client.call, "cancel", {"execution": started["execution"]}
-                )
-                assert intent.wait(2)
-            with monkeypatch.context() as patch:
-                patch.setattr(session, "cleanup_pngs", cleanup)
-                pool.submit(session.close).result(timeout=2)
-            if cancel_first:
-                assert request is not None
-                cancelled = request.result(timeout=2)
-                assert cancelled.is_error is True
-                assert cancelled.data["gui_cancel"]["status"] == "failed"
-                assert cancelled.data["cancel_requested"] is True
-        finally:
-            client.context.bridge.disconnect()
-    assert len(cleanup_states) == 1
-    assert cleanup_states[0].status == "failed"
-    assert cleanup_states[0].phase == "terminal"
-    assert not image.parent.exists()
-    completed = client.call(
-        "status", {"execution": started["execution"], "detail": "full"}
-    )
-    assert completed["status"] == "failed"
-    assert completed["save_status"] == "unknown"
-    assert completed["unconfirmed_image"] == "fit"
-    assert completed["error"]["phase"] == "image_save"
-    assert completed["cancel_requested"] is cancel_first
-    assert "operation.cancel" not in _methods(client)
 
 
 @pytest.mark.parametrize("interactive", [False, True])
