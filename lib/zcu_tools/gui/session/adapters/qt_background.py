@@ -67,7 +67,7 @@ class _PoolRunnable(QRunnable):
     def run(self) -> None:  # pragma: no cover - exercised via QThreadPool
         try:
             result = self._thunk()
-        except Exception as exc:  # noqa: BLE001 - forwarded to on_error on main
+        except Exception as exc:  # forwarded to on_error on main
             # Log here (worker thread) where the real traceback is live: the
             # exception is otherwise only carried as a value to on_error, so the
             # stack would evaporate. ERROR with exc_info captures it.
@@ -95,7 +95,7 @@ class _OpWorker(QThread):
     def run(self) -> None:
         try:
             self._result = self._thunk()
-        except Exception as exc:  # noqa: BLE001 - forwarded to on_error on main
+        except Exception as exc:  # forwarded to on_error on main
             # Log here (worker thread) where the real traceback is live: _emit
             # only re-emits the stored exception as a value, losing the stack.
             logger.error("background dedicated worker failed", exc_info=exc)
