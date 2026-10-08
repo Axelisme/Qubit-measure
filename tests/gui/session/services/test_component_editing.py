@@ -4,6 +4,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
@@ -51,7 +52,7 @@ def test_add_draft_component_and_invalid_required_fields_are_atomic(component_se
     control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     assert control.read_context().value("Q1.rate") == 4300.0
     assert entry.list_points() == []
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError, match="reference"):
         control.add_component("Invalid", "test/required", {})
     assert "Invalid" not in control.inspect_document().components
 
