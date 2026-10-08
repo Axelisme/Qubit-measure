@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
+**Last updated:** 2026-10-08，固定來源的 library editor
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -461,7 +461,7 @@ CfgResource 擁有 input、resolution、revision、publication 與 acceptance。
 Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
 發布 Invalid；拒絕不留下成功前綴。Observe、snapshot 和 Run acceptance 不重新讀取來源。
 `TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
-`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。
+`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。Library editor 保存開啟時的 ParameterContext，並透過 `apply_library_change` 在原 target 提交結構操作。同一 entry 的 point 切換不會改寫目的地；跨 entry 或失效的 DRAFT 拒絕寫入。失敗保留可編輯的 session。
 
 獨立 library／inspect／writeback 的 CfgEditor 在 app seam 解碼 `ValueRef`，
 並依序操作 draft binding target。這個 draft batch 保留 fail-fast/non-atomic 行為，
@@ -475,8 +475,8 @@ renders publications and keeps only unsubmitted input locally:
 
 Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
 remains valid. Run does not reread `MetaDict` or `ModuleLibrary`.
-`schema_to_raw_dict(schema, md, ml)` remains the live lowering boundary for
-non-Run draft consumers. `CfgSchema` stores shared spec/value data and `CfgDraft`
+`schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
+fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
 

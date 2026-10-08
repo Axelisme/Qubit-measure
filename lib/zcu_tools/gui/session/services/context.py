@@ -18,6 +18,7 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceBinding,
     EntryDraft,
     EntryInfo,
+    LibraryChange,
     PointBindingError,
     SavedPoint,
     WorkingPointInfo,
@@ -57,6 +58,7 @@ from zcu_tools.resources.entry.schema import (
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformAssetInfo, WaveformSpec
     from zcu_tools.format_version import YamlMap, YamlValue
+    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_types import (
         ContextTarget,
@@ -510,6 +512,91 @@ class ContextService:
                 point=parameters.document(), library=library, target=target, roles=None
             ),
             parameter=False,
+        )
+
+    def apply_library_change(
+        self,
+        parameters: ParameterContext,
+        change: LibraryChange,
+        *,
+        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
+        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+    ) -> None:
+        """Apply one structure command to the captured target, lowering before writes.
+
+        parameters supplies fixed expression/reference data and the destination.
+        change uses concrete library roots; it never resolves current focus.
+        App callbacks lower only put/replace schemas, without writing resources.
+        Rename moves Spec and sources; delete does not cascade references.
+        Replace checks source/destination and commits relocation plus value in
+        one library transaction. Draft is memory-only and must remain selected.
+        Same-entry nonselected SavedPoint writes do not select or publish.
+        Cross-entry/stale draft/lowering/schema/source/conflict/I/O failures
+        propagate, leaving this command uncommitted and publishing no events.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(parameters.target)
+        selected = self._published_parameters()
+        if isinstance(parameters.target, EntryDraft):
+            library = self._library_change_candidate(
+                selected.library,
+                parameters,
+                change,
+                lower_module=lower_module,
+                lower_waveform=lower_waveform,
+            )
+            entry.validate_library(library.document())
+        else:
+            handle = self._write_library(entry, parameters.target, selected)
+            with handle.edit() as draft:
+                candidate = self._library_change_candidate(
+                    draft.snapshot(),
+                    parameters,
+                    change,
+                    lower_module=lower_module,
+                    lower_waveform=lower_waveform,
+                )
+                draft.replace_contents(candidate)
+            if parameters.target != selected.target:
+                return
+            library = handle.snapshot()
+        self._publish_write(
+            ParameterContext(
+                point=selected.document(),
+                library=library,
+                target=parameters.target,
+                roles=None,
+            ),
+            parameter=False,
+        )
+
+    def _library_change_candidate(
+        self,
+        library: LibrarySnapshot,
+        parameters: ParameterContext,
+        change: LibraryChange,
+        *,
+        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
+        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+    ) -> LibrarySnapshot:
+        """Prepare one isolated structure change using the resource owner's operations."""
+        destination = change.new_path if change.new_path is not None else change.path
+        if change.action == "delete":
+            return library.deleted(change.path, kind=change.kind)
+        if change.action == "rename":
+            return library.renamed(change.path, destination, kind=change.kind)
+        if change.schema is None:
+            raise InvalidInputError("Library put/replace requires a schema")
+        if change.action == "replace":
+            library.entry_value(change.path, kind=change.kind)
+            if destination != change.path:
+                library = library.renamed(change.path, destination, kind=change.kind)
+        if change.kind == "module":
+            return library.replaced_module(
+                destination, lower_module(change.schema, parameters)
+            )
+        return library.replaced_waveform(
+            destination, lower_waveform(change.schema, parameters)
         )
 
     def entry_ledger(self, entry_id: str) -> RecordsLedger:

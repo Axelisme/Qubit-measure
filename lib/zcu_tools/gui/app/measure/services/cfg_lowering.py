@@ -1,52 +1,38 @@
-"""CfgSchema lowering — the experiment-coupled half of context ml writes (ADR-0067).
-
-The session ``ContextService`` owns the ml/md write *sequence* (register +
-persistence, then bump + emit on success; no rollback on partial failure) but is free of the experiment cfg-tree. Lowering a
-``CfgSchema`` into a concrete module/waveform cfg is experiment-coupled, so it
-lives here, measure-side, and is handed to ``ContextService.apply_ml_writes`` as
-the ``lower_module`` / ``lower_waveform`` callbacks. The Controller (the
-``ContextWritePort`` façade) wires them in.
-
-``MlEntryValidationError`` is raised here on a bad entry; it is defined in the
-session ``context`` module (the context-domain error) and re-imported so the
-existing ``except MlEntryValidationError`` sites stay valid.
-"""
+"""App schema-to-Spec conversion for fixed-capture library structure commands."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from zcu_tools.cfg_model import module_spec_from_raw, waveform_spec_from_raw
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.session.services.context import MlEntryValidationError
+from zcu_tools.gui.expected_error import InvalidInputError
 
 if TYPE_CHECKING:
+    from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
     from zcu_tools.gui.cfg import CfgSchema
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
+    from zcu_tools.gui.session.types import ParameterContext
 
 
-def lower_module(schema: CfgSchema, ml: ModuleLibrary, md: MetaDict) -> object:
-    """Lower a Module ``CfgSchema`` (against live md/ml) into a module cfg.
+def lower_module(schema: CfgSchema, parameters: ParameterContext) -> ModuleSpec:
+    """Lower with fixed roles/values into a stored ModuleSpec.
 
-    Raises MlEntryValidationError on validation / construction failure.
+    Keep the existing finished-schema policy: linked children lower to captured
+    inline data; this command does not introduce a new reference codec.
+
+    Invalid finished schema, unavailable references/expressions and malformed
+    module input raise InvalidInputError before any resource write. Unexpected
+    source/I/O failures propagate. No live selection is consulted.
     """
-    from zcu_tools.program.v2 import ModuleCfgFactory
-
-    raw = schema_to_raw_dict(schema, md, ml)
     try:
-        return ModuleCfgFactory.from_raw(raw, ml=ml)
-    except Exception as exc:  # noqa: BLE001 — surface as an expected validation error
-        raise MlEntryValidationError(f"Invalid module configuration: {exc}") from exc
+        return module_spec_from_raw(schema_to_raw_dict(schema, parameters))
+    except (ValueError, RuntimeError) as exc:
+        raise InvalidInputError(f"Invalid module configuration: {exc}") from exc
 
 
-def lower_waveform(schema: CfgSchema, ml: ModuleLibrary, md: MetaDict) -> object:
-    """Lower a Waveform ``CfgSchema`` (against live md/ml) into a waveform cfg.
-
-    Raises MlEntryValidationError on validation / construction failure.
-    """
-    from zcu_tools.program.v2 import WaveformCfgFactory
-
-    raw = schema_to_raw_dict(schema, md, ml)
+def lower_waveform(schema: CfgSchema, parameters: ParameterContext) -> WaveformSpec:
+    """Lower a fixed-capture waveform schema to Spec with lower_module's failures."""
     try:
-        return WaveformCfgFactory.from_raw(raw, ml=ml)
-    except Exception as exc:  # noqa: BLE001 — surface as an expected validation error
-        raise MlEntryValidationError(f"Invalid waveform configuration: {exc}") from exc
+        return waveform_spec_from_raw(schema_to_raw_dict(schema, parameters))
+    except (ValueError, RuntimeError) as exc:
+        raise InvalidInputError(f"Invalid waveform configuration: {exc}") from exc

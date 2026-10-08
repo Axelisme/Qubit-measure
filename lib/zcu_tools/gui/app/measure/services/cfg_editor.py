@@ -33,10 +33,9 @@ on the wire as the cfg-form tagged form ``{"__kind": "eval", "expr": ...}``.
 The field resolves the expression when it is set and on expression refresh and
 stores the result; lowering at ``commit`` outputs that stored ``resolved``
 number, because ModuleLibrary stores concrete numbers, never md references.
-Lowering still re-evaluates every expression against the current MetaDict
-first, coerces it to the field type, and aborts if either step fails; a differing result only logs drift, and the
-fresh evaluation is output only when no stored result exists. ``value_ref`` tags are different: they are
-resolved once at ``set_field`` time and stored only as ``DirectValue`` snapshots.
+Lowering uses the session's fixed ParameterContext, never a newly selected
+point or focus. ValueRef tags resolve once at set_field time and remain
+DirectValue snapshots.
 
 All methods run on the Qt main thread (the cfg draft and ModuleLibrary live
 there); the remote service marshals handler calls accordingly.
@@ -49,7 +48,7 @@ import logging
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from zcu_tools.gui.app.measure.cfg_binding import (
     MeasureCfgBindingHost,
@@ -79,6 +78,7 @@ from zcu_tools.gui.expected_error import (
     FailedPreconditionError,
     InvalidInputError,
 )
+from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
@@ -90,8 +90,9 @@ from .ports import (
 )
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.cfg import CfgSectionSpec, CfgSectionValue
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-    from zcu_tools.resources.context import ModuleLibrary
+    from zcu_tools.resources.context.library import LibrarySnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -167,12 +168,12 @@ class CfgEditorSession:
     gc: bool
     # the ml entry kind being built ("module"/"waveform"); commit uses it. None
     # for a seeded session (inspect / writeback draft) that is teardown-only.
-    item_kind: str | None = None
-    # Existing ml-entry sessions retain their source name and ModuleLibrary
-    # identity so replacement cannot apply a draft to a different live context.
-    # Seeded sessions have no replacement source.
+    item_kind: Literal["module", "waveform"] | None = None
+    # Creation capture fixes expression/reference data and the write destination.
+    # Seeded sessions may omit it and cannot perform library structure writes.
+    parameters: ParameterContext | None = None
+    # Concrete source root for replacement; absent for seeded sessions.
     source_name: str | None = None
-    source_ml: ModuleLibrary | None = None
     # the owner's key (a tab uses its tab_id; an inspect/writeback widget uses its
     # own key), so the owner can look its editor_id back up.
     owner_key: str | None = None
@@ -301,7 +302,7 @@ class CfgEditorSession:
         """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
 
         ADR-0067: the session's job ends at the CfgSchema snapshot. The app
-        supplies lowering against the live md; ContextService owns registration,
+        supplies lowering against the fixed capture; ContextService owns registration,
         versioning, and event publication. ``commit`` applies only to
         ml-entry sessions (those carrying an ``item_kind``); a seeded session
         (tab cfg / writeback draft) is teardown-only and rejects commit.
@@ -329,10 +330,10 @@ class CfgEditorService:
     registers itself); ``versions`` bumps / forgets the ``editor:<id>`` resource
     version (a registry-level concern since the id is Repository-assigned): bump on
     every edit (so commit's guard sees concurrent edits), drop on teardown (so a
-    stale dependency on a gone session reads version 0). Existing-entry
-    ``open(from_name=...)`` sessions also retain the exact source
-    ``ModuleLibrary`` identity; ``replace`` fast-fails after a context switch so
-    a dirty draft cannot write into a same-named entry in another context.
+    stale dependency on a gone session reads version 0). Library sessions retain
+    their creation ParameterContext: expressions and writes use its fixed
+    roles, values and target. Switching same-entry points does not retarget;
+    crossing entries or leaving a memory DRAFT makes the write fail.
 
     These drafts belong to library, inspect and writeback flows. Tab cfg is
     owned independently by CfgResource and is never mirrored here.
@@ -398,21 +399,21 @@ class CfgEditorService:
         (UI dialogs that build a real ml entry). ``item_kind`` is required and is
         the commit discriminator.
         """
-        if item_kind not in _ITEM_KINDS:
+        if item_kind != "module" and item_kind != "waveform":
             raise CfgEditorError(
                 f"item_kind must be one of {_ITEM_KINDS}, got {item_kind!r}"
             )
+        parameters = self._read.read_context()
+        spec, value = self._initial_schema(
+            item_kind, from_name, library=parameters.library
+        )
         if owner_key is not None:
             self._teardown_owner(owner_key)
-        source_ml = self._read.get_current_ml()
-        spec, value = self._initial_schema(item_kind, from_name, ml=source_ml)
         return self._make_session(
-            spec,
-            value,
+            CfgSchema(spec=spec, value=value),
             item_kind=item_kind,
             source_name=from_name,
-            source_ml=source_ml,
-            parameters=self._read.read_context(),
+            parameters=parameters,
             gc=gc,
             owner_key=owner_key,
         )
@@ -441,8 +442,7 @@ class CfgEditorService:
         if owner_key is not None:
             self._teardown_owner(owner_key)
         return self._make_session(
-            seed.spec,
-            seed.value,
+            seed,
             item_kind=None,
             parameters=parameters,
             gc=gc,
@@ -451,19 +451,15 @@ class CfgEditorService:
 
     def _make_session(
         self,
-        spec,
-        value,
+        schema: CfgSchema,
         *,
-        item_kind: str | None,
+        item_kind: Literal["module", "waveform"] | None,
         parameters: ParameterContext | None,
         source_name: str | None = None,
-        source_ml: ModuleLibrary | None = None,
         gc: bool,
         owner_key: str | None,
     ) -> tuple[str, tuple[SettableTarget, ...]]:
-        draft = self._bindings.new_draft(
-            CfgSchema(spec=spec, value=value), parameters=parameters
-        )
+        draft = self._bindings.new_draft(schema, parameters=parameters)
         editor_id = self._new_id(owner_key)
         session = CfgEditorSession(
             editor_id=editor_id,
@@ -472,7 +468,7 @@ class CfgEditorService:
             gc=gc,
             item_kind=item_kind,
             source_name=source_name,
-            source_ml=source_ml,
+            parameters=parameters,
             owner_key=owner_key,
             seq=next(self._seq),
         )
@@ -529,38 +525,45 @@ class CfgEditorService:
         *,
         save_as: str | None = None,
     ) -> CfgEditResult:
-        """Commit edits in order, retaining the successful prefix on failure."""
+        """Edit the captured library in order, retaining successful writes on failure.
+
+        Open captures the selected point once. save_as creates a new destination
+        and rejects an existing root before any edit; otherwise overwrite name.
+        Each edit lowers with that capture and commits one structure command.
+        Expected edit/write failure returns the successful prefix count. Other
+        failures propagate. The internal editor is always torn down.
+        """
         if not edits:
             raise CfgEditorError("library edits must not be empty")
-        if item_kind not in _ITEM_KINDS:
-            raise CfgEditorError(
-                f"item_kind must be one of {_ITEM_KINDS}, got {item_kind!r}"
-            )
-        if save_as is not None:
-            ml = self._read.get_current_ml()
-            store = ml.modules if item_kind == "module" else ml.waveforms
-            if save_as in store:
-                raise CfgEditorError(
-                    f"{item_kind} destination already exists: {save_as!r}"
-                )
-
-        # This draft is internal to the application, not an agent session. Keep
-        # it across writes so later edits see the shape created by earlier ones.
         editor_id, _ = self.open(item_kind, from_name=name, gc=False)
         try:
             session = self._require(editor_id)
+            parameters = session.parameters
+            kind = session.item_kind
+            if parameters is None or kind is None:
+                raise CfgEditorError("library session requires a parameter capture")
+            if save_as is not None:
+                keys = (
+                    parameters.library.module_keys()
+                    if kind == "module"
+                    else parameters.library.waveform_keys()
+                )
+                if save_as in keys:
+                    raise CfgEditorError(
+                        f"{kind} destination already exists: {save_as!r}"
+                    )
             destination = save_as if save_as is not None else name
-            write = (
-                self._write.set_ml_module_from_schema
-                if item_kind == "module"
-                else self._write.set_ml_waveform_from_schema
-            )
             for applied, edit in enumerate(edits):
                 try:
                     session.set_agent_fields((edit,))
                     if not session.draft.is_valid():
                         raise CfgEditorError(f"invalid cfg draft after {edit.path!r}")
-                    write(destination, session.commit_schema())
+                    self._write.apply_library_change(
+                        parameters,
+                        LibraryChange(
+                            kind, "put", destination, schema=session.commit_schema()
+                        ),
+                    )
                 except ExpectedError as exc:
                     return CfgEditResult(
                         valid=False,
@@ -572,50 +575,48 @@ class CfgEditorService:
             self.teardown(editor_id, reason="library_edit_finished")
 
     def commit(self, editor_id: str, name: str) -> None:
-        # ADR-0067: the aggregate yields its un-lowered CfgSchema; the app
-        # supplies lowering and ContextService owns registration. The Repository owns
-        # teardown only — after a successful write, so a validation failure
-        # (raised by the write port) leaves the draft intact for the agent to fix.
+        """Put the complete draft at a concrete root in its captured destination.
+
+        Lowering/write failure retains the editor. Success tears it down.
+        Seeded sessions cannot commit; cross-entry or stale-DRAFT errors propagate.
+        A same-entry point switch does not retarget the command.
+        """
         session = self._require(editor_id)
         schema = session.commit_schema()
-        if session.item_kind == "module":
-            self._write.set_ml_module_from_schema(name, schema)
-        else:
-            self._write.set_ml_waveform_from_schema(name, schema)
+        kind = session.item_kind
+        parameters = session.parameters
+        if kind is None or parameters is None:
+            raise CfgEditorError("library session requires a parameter capture")
+        self._write.apply_library_change(
+            parameters, LibraryChange(kind, "put", name, schema=schema)
+        )
         self._remove(editor_id, teardown=True, reason="committed")
 
     def replace(self, editor_id: str, old_name: str, new_name: str) -> None:
-        """Replace one existing ml entry with the session's complete draft.
+        """Atomically replace/relocate the originally opened library root.
 
-        Unlike :meth:`commit`, this preserves replacement semantics for a UI
-        editor: the ContextWritePort validates ``old_name``/``new_name`` and
-        lowers the draft before one atomic ModuleLibrary content mutation. The
-        session's source ModuleLibrary identity is checked first, so a context
-        switch fast-fails without writing. The session is removed only after that
-        write succeeds, so every expected failure leaves the draft available for
-        correction or discard.
+        The fixed creation capture supplies lowering data and target. The source
+        must match old_name; resource owners reject missing source or occupied
+        different destination. Same-entry point switches do not retarget.
+        Lowering, target, schema, conflict or I/O failure retains the editor.
+        Success tears it down after one library transaction.
         """
         session = self._require(editor_id)
-        if session.source_name is None or session.source_ml is None:
+        parameters = session.parameters
+        kind = session.item_kind
+        if session.source_name is None or parameters is None or kind is None:
             raise CfgEditorError(
-                f"{editor_id!r} is not an existing ml-entry session; replacement "
-                "requires the original name and source context"
-            )
-        if self._read.get_current_ml() is not session.source_ml:
-            raise CfgEditorError(
-                f"{editor_id!r} belongs to a different ModuleLibrary context; "
-                "discard or revert the draft before applying"
+                f"{editor_id!r} is not an existing library-entry session"
             )
         if old_name != session.source_name:
             raise CfgEditorError(
                 f"replacement source {old_name!r} does not match the session's "
                 f"original name {session.source_name!r}"
             )
-        schema = session.commit_schema()
-        if session.item_kind == "module":
-            self._write.replace_ml_module_from_schema(old_name, new_name, schema)
-        else:
-            self._write.replace_ml_waveform_from_schema(old_name, new_name, schema)
+        self._write.apply_library_change(
+            parameters,
+            LibraryChange(kind, "replace", old_name, new_name, session.commit_schema()),
+        )
         self._remove(editor_id, teardown=True, reason="committed")
 
     def discard(self, editor_id: str) -> None:
@@ -764,18 +765,19 @@ class CfgEditorService:
 
     def _initial_schema(
         self,
-        item_kind: str,
+        item_kind: Literal["module", "waveform"],
         from_name: str,
         *,
-        ml: ModuleLibrary,
-    ):
+        library: LibrarySnapshot,
+    ) -> tuple[CfgSectionSpec, CfgSectionValue]:
+        keys = (
+            library.module_keys() if item_kind == "module" else library.waveform_keys()
+        )
+        if from_name not in keys:
+            raise CfgEditorError(f"unknown {item_kind}: {from_name!r}")
         if item_kind == "module":
-            if from_name not in ml.modules:
-                raise CfgEditorError(f"unknown module: {from_name!r}")
-            return module_cfg_to_value(ml.modules[from_name])
-        if from_name not in ml.waveforms:
-            raise CfgEditorError(f"unknown waveform: {from_name!r}")
-        return waveform_cfg_to_value(ml.waveforms[from_name])
+            return module_cfg_to_value(library.get_module(from_name))
+        return waveform_cfg_to_value(library.get_waveform(from_name))
 
 
 def _agent_sweep_actual(value: object) -> dict[str, object]:

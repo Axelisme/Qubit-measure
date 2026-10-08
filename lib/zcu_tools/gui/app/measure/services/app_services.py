@@ -28,6 +28,7 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import RoleSpec
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from .analyze import AnalyzeService
 from .arb_waveform import ArbWaveformService
@@ -58,7 +59,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.services.io_manager import IOManager
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .cfg_editor import CfgEditorHost
@@ -124,7 +124,6 @@ def build_app_services(
     state: State,
     bus: EventBus,
     registry: Registry,
-    io_manager: IOManager,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
     notify_info: Callable[[str], None],
@@ -157,8 +156,8 @@ def build_app_services(
         handles=handles,
         background=background,
         progress=progress,
-        io_manager=io_manager,
         runner=runner,
+        bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
     )
     context = session.context
