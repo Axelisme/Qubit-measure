@@ -141,7 +141,7 @@ def test_main_window_focus_selection_projects_owner_without_rebinding_tabs(qapp)
         ComponentOption("R1", "resonator"),
     )
     focus = ComponentFocus(target, "Q1", options)
-    facet = ctrl.context_control.return_value
+    facet = ctrl.context_control
     facet.get_component_focus.return_value = focus
     window = MainWindow(ctrl)
     combo = window.findChild(QComboBox, "component_focus")
@@ -198,7 +198,7 @@ def test_main_window_titles_keep_captured_roles_after_focus_and_activity(
         assert f"qubit={qubit}" in tabs.tabText(index)
         assert f"resonator={resonator}" in tabs.tabToolTip(index)
     selected = ComponentFocus(EntryDraft(entry_id="entry"), "Q2", ())
-    ctrl.context_control.return_value.get_component_focus.return_value = selected
+    ctrl.context_control.get_component_focus.return_value = selected
     bus.emit(ComponentFocusChangedPayload(focus=selected))
     window.refresh_run_lock("a")
     assert "qubit=Q1" in tabs.tabText(0)
@@ -234,7 +234,7 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     ctrl.get_active_context_label.return_value = None
     ctrl.has_draft_context.return_value = False
     ctrl.has_project.return_value = False
-    ctrl.context_control.return_value.get_component_focus.return_value = ComponentFocus(
+    ctrl.context_control.get_component_focus.return_value = ComponentFocus(
         None, None, ()
     )
     ctrl.get_session_env.return_value = SessionEnv(
