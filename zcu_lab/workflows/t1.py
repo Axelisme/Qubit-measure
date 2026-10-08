@@ -9,16 +9,14 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from functools import partial
-from pathlib import Path
 
-from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
     Done,
     Failed,
     InitEnv,
-    Live1D,
     Next,
     Step,
     WorkflowEnv,
@@ -175,13 +173,6 @@ class T1Point:
     reason: str | None
 
 
-def _save_plot(ax: Axes, destination: Path) -> None:
-    figure = ax.get_figure(root=True)
-    if figure is None:
-        raise ValueError("Cannot save axes without a root figure")
-    figure.savefig(destination)
-
-
 @workflow(
     "T1_fluxdep",
     plan=T1Plan,
@@ -212,14 +203,21 @@ def t1_fluxdep(
     _ = env.context
     index = len(plan.fluxes) - len(state.remaining)
     env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
-    summary = env.axes("t1/vs_flux")
-    summary.cla()
-    if state.t1_by_flux:
-        fluxes, lifetimes = zip(*state.t1_by_flux, strict=True)
-        summary.scatter(fluxes, lifetimes)
-    summary.set(xlabel="flux setpoint", ylabel="T1 (us)")
+    summary_name = "t1/vs_flux"
+    if summary_name not in env.plots:
+        env.plots.subplots(summary_name)
+
+    def summary(figure: Figure) -> None:
+        figure.clear()
+        ax = figure.subplots()
+        if state.t1_by_flux:
+            fluxes, lifetimes = zip(*state.t1_by_flux, strict=True)
+            ax.scatter(fluxes, lifetimes)
+        ax.set(xlabel="flux setpoint", ylabel="T1 (us)")
+
+    env.plots.draw(summary_name, summary)
     if not state.remaining:
-        _save_plot(summary, env.iter_dir / "summary.png")
+        env.plots.save(summary_name, env.iter_dir / "summary.png")
         return Done()
 
     flux = state.remaining.pop(0)
@@ -244,14 +242,22 @@ def t1_fluxdep(
     guess = tun.guess_us
     for _, lifetime in state.t1_by_flux:
         guess = 0.5 * lifetime + 0.5 * guess
-    ax = env.axes("t1/decay")
-    ax.cla()
-    (line,) = ax.plot([], [])
+    name = "t1/decay"
+    axes = None
+    if name in env.plots:
+
+        def rebuild(figure: Figure) -> None:
+            figure.clear()
+            figure.subplots()
+
+        env.plots.draw(name, rebuild)
+        axes = env.plots[name].axes[0]
+    decay_plot = env.plots.liveplot_1d(name, "Time (us)", "Signal", axes=axes)
     outcome = yield from env.run(
         run_t1,
         t1_cfg(plan, tun, cal, guess),
         save=partial(save_t1, snapshot=plan.snapshot),
-        live=Live1D(line, y=lambda signals: signals.real),
+        live=lambda axes, samples: decay_plot.update(axes[0], samples.real),
     )
     if isinstance(outcome, Failed):
         return Next(T1Point(index, flux, cal, None, None, outcome.reason), state)
@@ -267,8 +273,13 @@ def t1_fluxdep(
         and residual < tun.max_fit_residual
     ):
         return Next(T1Point(index, flux, cal, None, None, "T1 fit rejected"), state)
-    ax.plot(outcome.result.times, fit.fitted, label="fit")
-    ax.set_title(f"T1 = {fit.lifetime_us:.2f} us")
-    _save_plot(ax, env.iter_dir / "decay.png")
+
+    def overlay(figure: Figure) -> None:
+        ax = figure.axes[0]
+        ax.plot(outcome.result.times, fit.fitted, label="fit")
+        ax.set_title(f"T1 = {fit.lifetime_us:.2f} us")
+
+    env.plots.draw(name, overlay)
+    env.plots.save(name, env.iter_dir / "decay.png")
     state.t1_by_flux.append((flux, fit.lifetime_us))
     return Next(T1Point(index, flux, cal, fit.lifetime_us, fit.error_us, None), state)

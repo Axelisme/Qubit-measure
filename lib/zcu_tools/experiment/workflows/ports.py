@@ -7,11 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 from qick import QickConfig
 
 from ...device import DeviceInfo
+from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from ..stop_signal import StopSignal
 
@@ -58,22 +57,6 @@ class DevicePort(Protocol):
         ...
 
 
-class PlotPort(Protocol):
-    """Figure capability called only on the engine execution thread."""
-
-    def axes(self, name: str) -> Axes:
-        """Return stable axes for a nonempty name; the host chooses the layout."""
-        ...
-
-    def refresh(self, figure: Figure) -> None:
-        """Capture a detached snapshot before returning, or raise on failure.
-
-        Do not let frontend code mutate engine-owned artists. GUI scheduling and
-        snapshot throttling belong to the host, not to the engine state machine.
-        """
-        ...
-
-
 class Clock(Protocol):
     """Wall-clock timing with cooperative cancellation, shared by host adapters."""
 
@@ -98,7 +81,9 @@ type ProgressFactory = Callable[..., BaseProgressBar]
 class EnginePorts[C]:
     """Capabilities owned and injected by the host.
 
-    ``plots`` snapshots engine figures. ``progress`` accepts the existing
+    ``plots`` is the host-owned Plots whose commands synchronously dispatch
+    artists to its PlotHost owner. The host stops execution before finish/release.
+    ``progress`` accepts the existing
     make_pbar arguments and returns BaseProgressBar, including runtime bars.
     Do not use make_pbar itself as this factory; use a concrete backend factory.
     ``clock`` implements aware UTC time and interruptible waits.
@@ -108,7 +93,7 @@ class EnginePorts[C]:
     adapter, or None. The engine never connects or disconnects these handles.
     """
 
-    plots: PlotPort
+    plots: Plots
     progress: ProgressFactory
     clock: Clock
     context: C | None = None

@@ -15,6 +15,7 @@ from zcu_tools.experiment.workflows import (
     RunPaths,
     WorkflowStep,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from zcu_lab.workflows.v0 import (
     CalTunables,
@@ -32,14 +33,17 @@ from ._engine_fakes import (
     ManualClock,
     RecordingBar,
     RecordingDevices,
-    RecordingPlots,
 )
 
 
 def execute_example[P: BaseModel, T: BaseModel, S, R](
     root: Path, step: WorkflowStep[P, T, S, R, DemoContext], plan: P, tunables: T
 ) -> tuple[tuple[CommittedRecord, ...], ManualClock, RecordingDevices]:
-    clock, devices, plots = ManualClock(), RecordingDevices(), RecordingPlots()
+    clock, devices, plots = (
+        ManualClock(),
+        RecordingDevices(),
+        Plots(NonPresentingHost()),
+    )
     engine = Engine(
         EnginePorts(
             plots,
@@ -85,7 +89,11 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
 def test_demo_workflows_check_ports_before_effects(
     tmp_path: Path, name: str, port: str
 ) -> None:
-    clock, devices, plots = ManualClock(), RecordingDevices(), RecordingPlots()
+    clock, devices, plots = (
+        ManualClock(),
+        RecordingDevices(),
+        Plots(NonPresentingHost()),
+    )
     ports = EnginePorts(
         plots,
         RecordingBar,
@@ -134,7 +142,7 @@ def test_demo_workflows_check_ports_before_effects(
     assert f"Missing workflow capability: {port}" in str(status.reason)
     assert devices.values == []
     assert clock.targets == []
-    assert plots.snapshots == []
+    assert len(plots) == 0
     assert engine.records("example") == ()
     assert not tuple(paths.data_root.glob("iter/*/runs/*.h5"))
 

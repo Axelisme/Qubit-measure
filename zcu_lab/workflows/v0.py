@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import numpy as np
-from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field
 from zcu_tools.experiment.workflows import (
@@ -26,7 +26,6 @@ from zcu_tools.experiment.workflows import (
     Effect,
     Failed,
     InitEnv,
-    Live1D,
     Next,
     Run,
     Step,
@@ -316,23 +315,21 @@ def smooth_last(values: list[float], default: float, *, alpha: float = 0.5) -> f
     return estimate
 
 
-def save_plot(ax: Axes, destination: Path) -> None:
-    """Save the axes' root figure to the exact destination, propagating I/O errors."""
-    figure = ax.get_figure(root=True)
-    if figure is None:
-        raise ValueError("Cannot save axes without a root figure")
-    figure.savefig(destination)
-
-
 def redraw(
     env: WorkflowEnv[DemoContext], name: str, points: list[tuple[float, float]]
 ) -> None:
     """Rebuild a scatter plot from committed workflow data."""
-    ax = env.axes(name)
-    ax.cla()
-    if points:
-        x, y = zip(*points, strict=True)
-        ax.scatter(x, y)
+    if name not in env.plots:
+        env.plots.subplots(name)
+
+    def draw(figure: Figure) -> None:
+        figure.clear()
+        ax = figure.subplots()
+        if points:
+            x, y = zip(*points, strict=True)
+            ax.scatter(x, y)
+
+    env.plots.draw(name, draw)
 
 
 def calibrate(
@@ -348,19 +345,33 @@ def calibrate(
     prior = carry.last if carry.last is not None else carry.seed
     hint = smooth_last([v for _, v in carry.f01_by_flux], prior.f01_mhz)
     stages = env.pbar("calibration", total=3)
-    ax = env.axes("calibration/qubit_freq")
     stages.set_progress(0)
     f01 = None
     for widen in tun.qf_widen:
-        ax.cla()
-        ax.axvline(hint, linestyle="--", label="expected")
-        ax.axvline(prior.f01_mhz, linestyle=":", label="previous")
-        (line,) = ax.plot([], [])
+        name = "calibration/qubit_freq"
+        if name not in env.plots:
+            env.plots.subplots(name)
+
+        def rebuild(figure: Figure) -> None:
+            figure.clear()
+            ax = figure.subplots()
+            ax.axvline(hint, linestyle="--", label="expected")
+            ax.axvline(prior.f01_mhz, linestyle=":", label="previous")
+
+        env.plots.draw(name, rebuild)
+        frequency_plot = env.plots.liveplot_1d(
+            name,
+            "Frequency (MHz)",
+            "Signal",
+            axes=env.plots[name].axes[0],
+        )
         outcome = yield from env.run(
             run_qubit_freq,
             CalCfg("qubit_freq", hint, tun.span_mhz * widen, 101, tun.qf_reps),
             save=save_cal,
-            live=Live1D(line, y=lambda signals: signals.real),
+            live=lambda axes, samples, plot=frequency_plot: plot.update(
+                axes[0], samples.real
+            ),
         )
         if isinstance(outcome, Failed):
             continue
@@ -479,14 +490,22 @@ def t2echo_fluxdep(
         tun.t2echo.reps,
         tun.t2echo.rounds,
     )
-    ax = env.axes("t2echo/decay")
-    ax.cla()
-    (line,) = ax.plot([], [])
+    name = "t2echo/decay"
+    axes = None
+    if name in env.plots:
+
+        def rebuild(figure: Figure) -> None:
+            figure.clear()
+            figure.subplots()
+
+        env.plots.draw(name, rebuild)
+        axes = env.plots[name].axes[0]
+    decay_plot = env.plots.liveplot_1d(name, "Time (us)", "Signal", axes=axes)
     outcome = yield from env.run(
         run_t2echo,
         cfg,
         save=save_decay,
-        live=Live1D(line, y=lambda signals: signals.real),
+        live=lambda axes, samples: decay_plot.update(axes[0], samples.real),
     )
     if isinstance(outcome, Failed):
         return Next(T2EchoPoint(index, flux, cal, None, outcome.reason), state)

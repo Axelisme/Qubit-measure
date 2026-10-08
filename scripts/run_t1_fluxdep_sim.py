@@ -17,9 +17,6 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from matplotlib.axes import Axes
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
 from pydantic import TypeAdapter
 from zcu_tools.device import DeviceInfo, DeviceManager, FakeDevice
 from zcu_tools.experiment.acquisition import capture_software_provenance
@@ -31,6 +28,7 @@ from zcu_tools.experiment.workflows import (
     RunIdentity,
     RunPaths,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
@@ -51,21 +49,6 @@ class _Clock:
         """Wait for an aware target or cancellation; past targets return now."""
         seconds = max(0.0, (target - self.now()).total_seconds())
         cancel_signal.event.wait(seconds)
-
-
-class _Plots:
-    """Render Engine-owned figures with Agg, without pyplot or GUI state."""
-
-    def axes(self, name: str) -> Axes:
-        """Create one named figure's axes, with a headless rendering canvas."""
-        figure = Figure()
-        figure.set_label(name)
-        FigureCanvasAgg(figure)
-        return figure.subplots()
-
-    def refresh(self, figure: Figure) -> None:
-        """Render the supplied Engine-owned figure; rendering errors propagate."""
-        figure.canvas.draw()
 
 
 class _Devices:
@@ -146,11 +129,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     flux.set_output("on")
     manager = DeviceManager()
     manager.register_device(plan.flux_dev, flux)
+    plots = Plots(NonPresentingHost())
     try:
         soc.set_flux_source(flux.get_value)
         engine = Engine(
             EnginePorts(
-                _Plots(),
+                plots,
                 TQDMProgressBar,
                 _Clock(),
                 context=seed,
@@ -176,6 +160,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     finally:
         soc.set_flux_source(None)
         manager.close_all_devices()
+        plots.finish(present=False)
+        plots.release()
     print(
         json.dumps(
             {

@@ -26,13 +26,13 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.modules import PulseReadoutCfg
 
 from tests.experiment.workflows._engine_fakes import (
     ManualClock,
     RecordingBar,
     RecordingDevices,
-    RecordingPlots,
 )
 from zcu_lab.v2.twotone.freq.core import FreqCfg
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg
@@ -99,7 +99,7 @@ class Rig:
         self.plan = make_plan(self.inputs)
         self.engine = Engine(
             EnginePorts(
-                RecordingPlots(),
+                Plots(NonPresentingHost()),
                 RecordingBar,
                 ManualClock(),
                 context=self.seed,

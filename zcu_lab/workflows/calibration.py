@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import numpy as np
+from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.experiment.workflows import (
     Completed,
     Effect,
     Failed,
-    Live1D,
     WorkflowEnv,
 )
 from zcu_tools.program.v2 import SweepCfg
@@ -288,6 +288,76 @@ def _validate_calibration_inputs(flux: float, t1_estimate_us: float) -> None:
         raise ValueError("Calibration flux must be finite")
 
 
+def _calibrate_frequency(
+    env: WorkflowEnv[Calibrated],
+    qub_pulse: PulseCfg,
+    readout: PulseReadoutCfg,
+    tun: CalibrationTunables,
+    carry: CalCarry,
+    save: FrequencySaver,
+) -> Generator[Effect, None, float | None]:
+    """Acquire the widening sequence and return the accepted frequency in MHz.
+
+    Use carry's prior calibration and EWMA history as the center. Each attempt
+    publishes through save and redraws its own live plot. Schedule rejection or
+    exhausted fit gates returns None; fitting, callback and saver errors propagate.
+    Do not change carry. Calibrate validates flux and timing before this stage.
+    """
+    prior = carry.seed if carry.last is None else carry.last
+    hint = prior.f01_mhz
+    for _, frequency in carry.f01_by_flux:
+        hint = 0.5 * frequency + 0.5 * hint
+    f01 = None
+    for widen in tun.qf_widen:
+        name = "calibration/qubit_freq"
+        if name not in env.plots:
+            env.plots.subplots(name)
+
+        def rebuild(figure: Figure) -> None:
+            figure.clear()
+            ax = figure.subplots()
+            ax.axvline(hint, linestyle="--", label="expected")
+            ax.axvline(prior.f01_mhz, linestyle=":", label="previous")
+
+        env.plots.draw(name, rebuild)
+        frequency_plot = env.plots.liveplot_1d(
+            name,
+            "Frequency (MHz)",
+            "Signal",
+            num_lines=2,
+            axes=env.plots[name].axes[0],
+        )
+        outcome = yield from env.run(
+            run_qubit_freq,
+            _frequency_cfg(qub_pulse, readout, tun, prior, widen, hint),
+            save=save,
+            live=lambda axes, samples, plot=frequency_plot: plot.update(
+                axes[0], np.stack((np.abs(samples), np.full_like(samples.real, np.nan)))
+            ),
+        )
+        if isinstance(outcome, Failed):
+            continue
+        fit = analyze_qubit_freq(outcome.result)
+        residual = fit.quality.normalized_residual_rms
+        if (
+            math.isfinite(fit.frequency_mhz)
+            and fit.frequency_mhz > 0
+            and math.isfinite(fit.width_mhz)
+            and fit.width_mhz > 0
+            and math.isfinite(fit.error_mhz)
+            and fit.error_mhz >= 0
+            and fit.error_mhz / fit.width_mhz < tun.max_frequency_rel_err
+            and residual is not None
+            and residual < tun.max_fit_residual
+        ):
+            f01 = fit.frequency_mhz
+            frequency_plot.update(
+                outcome.result.freqs, np.stack((fit.observed, fit.fitted))
+            )
+            break
+    return f01
+
+
 def calibrate(
     env: WorkflowEnv[Calibrated],
     qub_pulse: PulseCfg,
@@ -333,42 +403,11 @@ def calibrate(
     """
     _validate_calibration_inputs(flux, t1_estimate_us)
     prior = carry.seed if carry.last is None else carry.last
-    hint = prior.f01_mhz
-    for _, frequency in carry.f01_by_flux:
-        hint = 0.5 * frequency + 0.5 * hint
     stages = env.pbar("calibration", total=3)
     stages.set_progress(0)
-    f01 = None
-    for widen in tun.qf_widen:
-        ax = env.axes("calibration/qubit_freq")
-        ax.cla()
-        ax.axvline(hint, linestyle="--", label="expected")
-        ax.axvline(prior.f01_mhz, linestyle=":", label="previous")
-        (line,) = ax.plot([], [])
-        outcome = yield from env.run(
-            run_qubit_freq,
-            _frequency_cfg(qub_pulse, readout, tun, prior, widen, hint),
-            save=savers.frequency,
-            live=Live1D(line, y=lambda signals: np.abs(signals)),
-        )
-        if isinstance(outcome, Failed):
-            continue
-        fit = analyze_qubit_freq(outcome.result)
-        residual = fit.quality.normalized_residual_rms
-        if (
-            math.isfinite(fit.frequency_mhz)
-            and fit.frequency_mhz > 0
-            and math.isfinite(fit.width_mhz)
-            and fit.width_mhz > 0
-            and math.isfinite(fit.error_mhz)
-            and fit.error_mhz >= 0
-            and fit.error_mhz / fit.width_mhz < tun.max_frequency_rel_err
-            and residual is not None
-            and residual < tun.max_fit_residual
-        ):
-            f01 = fit.frequency_mhz
-            ax.plot(outcome.result.freqs, fit.fitted, label="fit")
-            break
+    f01 = yield from _calibrate_frequency(
+        env, qub_pulse, readout, tun, carry, savers.frequency
+    )
     if f01 is None:
         return CalibrationFailed("frequency", "No accepted frequency fit")
 
@@ -392,10 +431,17 @@ def calibrate(
         and residual < tun.max_fit_residual
     ):
         return CalibrationFailed("rabi", "Rabi fit rejected")
-    ax = env.axes("calibration/len_rabi")
-    ax.cla()
-    ax.plot(rabi.result.lengths, rabi_fit.observed, label="observed")
-    ax.plot(rabi.result.lengths, rabi_fit.fitted, label="fit")
+    rabi_name = "calibration/len_rabi"
+    if rabi_name not in env.plots:
+        env.plots.subplots(rabi_name)
+
+    def draw_rabi(figure: Figure) -> None:
+        figure.clear()
+        ax = figure.subplots()
+        ax.plot(rabi.result.lengths, rabi_fit.observed, label="observed")
+        ax.plot(rabi.result.lengths, rabi_fit.fitted, label="fit")
+
+    env.plots.draw(rabi_name, draw_rabi)
 
     stages.set_progress(2)
     ro_freq, ro_gain = prior.readout_freq_mhz, prior.readout_gain

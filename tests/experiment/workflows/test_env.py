@@ -7,9 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-from numpy.typing import NDArray
 from qick import QickConfig
 from zcu_tools.experiment.workflows import (
     EnginePorts,
@@ -18,30 +15,12 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
 )
 from zcu_tools.experiment.workflows.env import Displays
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 
 from ._engine_fakes import ManualClock, RecordingDevices
 
 START = datetime(2026, 10, 6, tzinfo=UTC)
-
-
-class RecordingPlots:
-    """Plot seam recording detached line data for each refresh."""
-
-    def __init__(self) -> None:
-        self.snapshots: list[tuple[NDArray[np.float64], ...]] = []
-
-    def axes(self, name: str) -> Axes:
-        return Figure().subplots()
-
-    def refresh(self, figure: Figure) -> None:
-        self.snapshots.append(
-            tuple(
-                np.asarray(line.get_ydata(), dtype=np.float64).copy()
-                for axes in figure.axes
-                for line in axes.lines
-            )
-        )
 
 
 class RecordingBar(TQDMProgressBar):
@@ -57,15 +36,18 @@ class RecordingBar(TQDMProgressBar):
 
 
 @pytest.fixture
-def ports() -> EnginePorts[str]:
-    return EnginePorts(
-        RecordingPlots(), RecordingBar, ManualClock(), context="snapshot"
-    )
+def ports() -> Generator[EnginePorts[str], None, None]:
+    plots = Plots(NonPresentingHost())
+    try:
+        yield EnginePorts(plots, RecordingBar, ManualClock(), context="snapshot")
+    finally:
+        plots.finish(present=False)
+        plots.release()
 
 
 @pytest.fixture
 def displays(ports: EnginePorts[str]) -> Generator[Displays, None, None]:
-    owner = Displays(ports.plots, ports.progress)
+    owner = Displays(ports.progress)
     try:
         yield owner
     finally:
@@ -166,37 +148,16 @@ def test_anonymous_experiment_is_rejected_before_suspension(
         next(request)
 
 
-def test_axes_are_stable_across_step_environments(
-    env: WorkflowEnv[str],
-    displays: Displays,
-    tmp_path: Path,
-    ports: EnginePorts[str],
+def test_plots_are_shared_across_step_environments(
+    env: WorkflowEnv[str], displays: Displays, tmp_path: Path, ports: EnginePorts[str]
 ) -> None:
-    axes = env.axes("main")
-    (line,) = axes.plot([0.0, 1.0], [2.0, 3.0])
+    viewer = env.plots.liveplot_1d("main", "x", "y")
     next_step = WorkflowEnv(START, ports, tmp_path / "next", displays)
-    assert next_step.axes("main") is axes
+    assert env.plots is next_step.plots is ports.plots
+    viewer.update(np.array([0.0, 1.0]), np.array([2.0, 3.0]))
     np.testing.assert_array_equal(
-        next_step.axes("main").lines[0].get_ydata(), [2.0, 3.0]
+        next_step.plots["main"].axes[0].lines[0].get_ydata(), [2.0, 3.0]
     )
-    assert env.axes("other") is not axes
-    assert line.axes is axes
-
-
-def test_display_refresh_publishes_current_figure_data(
-    tmp_path: Path,
-    ports: EnginePorts[str],
-) -> None:
-    plots = RecordingPlots()
-    owner = Displays(plots, RecordingBar)
-    env = WorkflowEnv(START, ports, tmp_path, owner)
-    axes = env.axes("main")
-    (line,) = axes.plot([0.0, 1.0], [2.0, 3.0])
-    owner.refresh()
-    line.set_ydata([10.0, 20.0])
-    owner.refresh()
-    np.testing.assert_array_equal(plots.snapshots[0][0], [2.0, 3.0])
-    np.testing.assert_array_equal(plots.snapshots[1][0], [10.0, 20.0])
 
 
 def test_bar_progress_and_identity_are_retained_until_owner_closes(
@@ -231,9 +192,3 @@ def test_invalid_bar_declaration_is_rejected(
 ) -> None:
     with pytest.raises(ValueError, match="nonnegative integer total"):
         env.pbar(name, total)
-
-
-@pytest.mark.parametrize("name", ["", " "])
-def test_empty_axes_name_is_rejected(env: WorkflowEnv[str], name: str) -> None:
-    with pytest.raises(ValueError, match="name must not be empty"):
-        env.axes(name)

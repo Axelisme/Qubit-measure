@@ -10,9 +10,8 @@ from pathlib import Path
 from re import fullmatch
 from typing import Protocol
 
-from .display import Live1D, Live2D, Live2DRow
 from .models import Completed, Effect, Failed
-from .run import Run
+from .run import LiveUpdate, Run
 
 
 class EffectExecutor(Protocol):
@@ -55,7 +54,7 @@ class RunEffect[Cfg, Result](Effect):
     experiment: Callable[[Run[Cfg]], Result]
     cfg: Cfg
     save: Callable[[Completed[Cfg, Result], Path], None]
-    live: Live1D | Live2D | Live2DRow | None
+    live: LiveUpdate | None
     setup_devices: bool
     name: str = field(init=False)
     outcome: Completed[Cfg, Result] | Failed | None = field(default=None, init=False)

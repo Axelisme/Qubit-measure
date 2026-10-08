@@ -1,6 +1,5 @@
 """Engine effect boundary: failure source, Completed pairing, files, and live."""
 
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Never
@@ -17,9 +16,6 @@ from zcu_tools.experiment.workflows import (
     DeviceSnapshot,
     Done,
     Failed,
-    Live1D,
-    Live2D,
-    Live2DRow,
     Next,
     Run,
     Step,
@@ -322,7 +318,9 @@ def test_live_callback_caught_by_schedule_is_still_run_failure(
 ) -> None:
     observed: list[Completed[Cfg, int] | Failed] = []
 
-    def projection(_values: NDArray[np.complex128]) -> NDArray[np.float64]:
+    def projection(
+        _axes: tuple[NDArray[np.float64], ...], _values: NDArray[np.complex128]
+    ) -> None:
         raise ValueError("live projection failed")
 
     def acquire(run: Run[Cfg]) -> int:
@@ -340,13 +338,8 @@ def test_live_callback_caught_by_schedule_is_still_run_failure(
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
     ) -> Step[State, int]:
-        (line,) = env.axes("live").plot([], [])
         observed.append(
-            (
-                yield from env.run(
-                    acquire, Cfg(), save=save_integer, live=Live1D(line, projection)
-                )
-            )
+            (yield from env.run(acquire, Cfg(), save=save_integer, live=projection))
         )
         return Next(1, state)
 
@@ -359,174 +352,6 @@ def test_live_callback_caught_by_schedule_is_still_run_failure(
     failed = next(event for event in rig.events() if event["kind"] == "step_failed")
     assert isinstance(failed["error"], dict)
     assert failed["error"]["type"] == "builtins.ValueError"
-
-
-@pytest.mark.parametrize("display", ["line", "image", "row"])
-def test_live_projects_without_overwriting_other_rows_or_changing_shape(
-    rig: Rig, display: str
-) -> None:
-    def acquire(run: Run[Cfg]) -> int:
-        if display == "image":
-            buffer = run.buffer(
-                (2, 2), axes=(np.array([0.0, 1.0]), np.array([2.0, 3.0]))
-            )
-            buffer.set(np.array([[1 + 1j, 2 + 1j], [3 + 1j, 4 + 1j]]))
-        else:
-            buffer = run.buffer((2,), axes=(np.array([2.0, 3.0]),))
-            buffer.set(np.array([1 + 1j, 2 + 1j]))
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index:
-            return Done()
-        axes = env.axes("live")
-        if display == "line":
-            (line,) = axes.plot([], [])
-            live = Live1D(line, lambda values: values.real)
-        else:
-            image = axes.imshow(np.full((2, 2), 9.0))
-            live = (
-                Live2D(image, lambda values: values.real)
-                if display == "image"
-                else Live2DRow(image, 1, lambda values: values.real)
-            )
-        yield from env.run(acquire, Cfg(), save=save_integer, live=live)
-        if display == "line":
-            np.testing.assert_array_equal(axes.lines[0].get_xdata(), [2.0, 3.0])
-            np.testing.assert_array_equal(axes.lines[0].get_ydata(), [1.0, 2.0])
-        else:
-            expected = (
-                [[1.0, 2.0], [3.0, 4.0]]
-                if display == "image"
-                else [[9.0, 9.0], [1.0, 2.0]]
-            )
-            np.testing.assert_array_equal(axes.images[0].get_array(), expected)
-        state.index = 1
-        return Next(1, state)
-
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "done"
-
-
-@pytest.mark.parametrize("display", ["line", "image", "row"])
-def test_live_finalization_projects_latest_values(
-    rig: Rig, monkeypatch: pytest.MonkeyPatch, display: str
-) -> None:
-    now = 1000.0
-    at_return: list[NDArray[np.float64]] = []
-
-    def wall_time() -> float:
-        return now
-
-    monkeypatch.setattr(time, "time", wall_time)
-
-    def project(values: NDArray[np.complex128]) -> NDArray[np.float64]:
-        nonlocal now
-        # A costly projection followed immediately by another buffer update.
-        now += 1.0
-        return values.real
-
-    def acquire(run: Run[Cfg]) -> int:
-        shape = (2, 2) if display == "image" else (2,)
-        axes = tuple(np.array([0.0, 1.0]) for _ in shape)
-        buffer = run.buffer(shape, axes=axes)
-        buffer.set(np.full(shape, 1.0 + 0j, dtype=np.complex128))
-        buffer.set(np.full(shape, 7.0 + 0j, dtype=np.complex128))
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index:
-            return Done()
-        axes = env.axes("live")
-        if display == "line":
-            (line,) = axes.plot([], [])
-            live = Live1D(line, project)
-        else:
-            image = axes.imshow(np.full((2, 2), 9.0))
-            live = (
-                Live2D(image, project)
-                if display == "image"
-                else Live2DRow(image, 1, project)
-            )
-        yield from env.run(acquire, Cfg(), save=save_integer, live=live)
-        values = (
-            axes.lines[0].get_ydata()
-            if display == "line"
-            else axes.images[0].get_array()
-        )
-        at_return.append(np.asarray(values, dtype=np.float64).copy())
-        state.index = 1
-        return Next(1, state)
-
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "done"
-    assert status.committed_seq == 1
-    if display == "line":
-        expected = np.array([7.0, 7.0])
-    elif display == "image":
-        expected = np.array([[7.0, 7.0], [7.0, 7.0]])
-    else:
-        expected = np.array([[9.0, 9.0], [7.0, 7.0]])
-    np.testing.assert_array_equal(at_return[0], expected)
-    snapshots = rig.plots.snapshots if display == "line" else rig.plots.image_snapshots
-    np.testing.assert_array_equal(snapshots[-1][0], expected)
-
-
-@pytest.mark.parametrize("control", ["pause", "stop"])
-@pytest.mark.parametrize("failure", ["none", "refresh", "cleanup", "effect"])
-def test_live_finalization_after_generator_shutdown(
-    rig: Rig, control: str, failure: str
-) -> None:
-    def acquire(_run: Run[Cfg]) -> int:
-        if control == "pause":
-            rig.engine.pause("run")
-        else:
-            rig.engine.stop("run")
-        if failure == "effect":
-            raise OSError("primary effect failure")
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        axes = env.axes("live")
-        (line,) = axes.plot([0.0], [1.0])
-        try:
-            yield from env.run(acquire, Cfg(), save=save_integer)
-        finally:
-            line.set_ydata([9.0])
-            if failure != "none":
-                rig.plots.error = OSError("shutdown refresh failure")
-            if failure == "cleanup":
-                raise OSError("primary cleanup failure")
-        return Next(1, state)
-
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.committed_seq == 0
-    assert "experiment_failed" not in rig.kinds()
-    assert not tuple(rig.paths.data_root.rglob("*.h5"))
-    if failure == "none":
-        assert status.lifecycle == ("paused" if control == "pause" else "stopped")
-        assert "step_discarded" in rig.kinds()
-        np.testing.assert_array_equal(rig.plots.snapshots[-1][0], [9.0])
-    else:
-        assert status.lifecycle == "failed"
-        expected = (
-            "shutdown refresh failure"
-            if failure == "refresh"
-            else f"primary {failure} failure"
-        )
-        assert status.reason == f"OSError: {expected}"
-        failed = next(event for event in rig.events() if event["kind"] == "step_failed")
-        error = failed["error"]
-        assert isinstance(error, dict)
-        assert error["message"] == expected
 
 
 def test_workflow_can_abort_after_a_recoverable_failed_effect(rig: Rig) -> None:
@@ -768,43 +593,6 @@ def test_analysis_error_after_completed_effect_retains_file_but_never_commits(
     assert failed["error"]["type"] == "builtins.ValueError"
     assert "raise ValueError" in str(failed["error"]["traceback"])
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
-
-
-@pytest.mark.parametrize("source", ["refresh", "ambiguous", "shape", "row"])
-def test_invalid_live_binding_or_snapshot_fails_run_at_display_source(
-    rig: Rig, source: str
-) -> None:
-    def acquire(run: Run[Cfg]) -> int:
-        buffer = run.buffer((2,), axes=(np.array([0.0, 1.0]),))
-        if source == "refresh":
-            rig.plots.error = OSError("snapshot failed")
-        if source == "ambiguous":
-            run.buffer((2,), axes=(np.array([0.0, 1.0]),))
-        buffer.set(np.array([1 + 0j, 2 + 0j]))
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        axes = env.axes("live")
-        if source == "row":
-            live = Live2DRow(
-                axes.imshow(np.ones((2, 2))), 2, lambda values: values.real
-            )
-        else:
-            (line,) = axes.plot([], [])
-            live = Live1D(
-                line,
-                lambda values: values.real[:1] if source == "shape" else values.real,
-            )
-        yield from env.run(acquire, Cfg(), save=save_integer, live=live)
-        return Next(1, state)
-
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert "experiment_failed" not in rig.kinds()
-    assert not tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))
 
 
 def test_active_update_journal_failure_cancels_then_reports_original_cause(

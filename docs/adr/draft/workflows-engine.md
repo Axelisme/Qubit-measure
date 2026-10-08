@@ -20,7 +20,7 @@ overnight 也需要校準、單次實驗、間隔等待與存檔，但不需要 
 | --- | --- | --- |
 | `experiment.workflows` | workflow 宣告、迭代、effect 執行、取消、deepcopy、revision、journal、manifest、迭代目錄 | flux、fit 接受度、校準策略、Qt、單次資料檔格式 |
 | `zcu_lab.workflows` | 具體 workflow、experiment 函式、分析、完整 cfg 組裝、record 與 state | 宿主控制、通用檔案格式 |
-| `gui.app.workflows` | controller、硬體 session、operation segment、表單、圖快照、RPC | 第二份 engine state、量測策略 |
+| `gui.app.workflows` | controller、硬體 session、operation segment、表單、圖呈現與 PNG、RPC | 第二份 engine state、量測策略 |
 | `mcp.workflows` | RPC client、工具與 image 投影 | engine、Figure、硬體 session |
 | `datafile` 與 experiment persistence | 單次 cfg／Result 的格式、schema 與 writer | workflow 路徑、迭代提交 |
 
@@ -46,7 +46,9 @@ GUI 每個 Start／Resume segment 使用 [[0066]] 的 operation 與 lease。Paus
 
 ### 圖與進度
 
-workflow 取得原生 matplotlib Axes，從 state 重畫累積資料。Live 綁定只把單次實驗 buffer 投影到 artists。engine 執行緒是 figure 唯一寫者；宿主在明確 refresh 時取得快照，GUI 不掛 live canvas。快照策略需在期 2 驗證，不把 worker 呼叫當成 Qt owner 寫入。
+宿主注入 operation-owned Plots。Workflow 透過 typed handles 從 state 重畫資料，或以同步 draw callback 自由繪圖，再以 save 保存；artists 的更新與渲染留在既有 host owner thread。GUI 使用 QtPlotHost，離線使用 NonPresentingHost。RPC PNG 在 owner thread 由 render_figure_png 產生，不序列化 Figure，也不另造繪圖 port。
+
+LiveUpdate 接 buffer 維度順序的 float64 axes tuple 與 complex128 samples，包含未填的 NaN。回呼在 producer 上同步執行，再透過 Plots 提交實數投影；借用的陣列不修改或保留。核心只綁定一個 buffer，保留回呼錯誤來源，不碰 artist 或檢查投影策略。這個回呼簽名目前由顧問代裁，待使用者審查。Producer 停止後由宿主 finish／release；Pause 保留 Plots lifetime。
 
 進度沿用 `progress_bar.BaseProgressBar`。同名 bar 跨步驟保留，total 必須相同。engine 在 terminal 關閉 bar。Pause 保留 bar，重做步驟使用 `set_progress`。
 
@@ -60,7 +62,7 @@ workflow 取得原生 matplotlib Axes，從 state 重畫累積資料。Live 綁�
 
 期 0 候選已建立 `experiment.workflows` package，並在 `.importlinter` 宣告 C18，contract ID 為 `workflows-core-no-ui`。source 為 `zcu_tools.experiment.workflows`，禁止依賴 `zcu_tools.gui`、`zcu_tools.mcp`、`zcu_tools.notebook`、QtPy 與各 Qt binding。Import-linter 已啟用 external package 分析，涵蓋 Qt 外部套件。這條 contract 不增加 ignore_imports。
 
-本篇保持 draft。候選實作與 C18 已有 gate 證據，不代表持久分支已採用或期 0 已完整接受。既有 C8、C9、C16 同時限制分層、循環與 framework 反向 import 使用者套件。核心對 progress_bar 與 runtime 的依賴使用 C8 的既有方向，不把 GUI 排除規則的債務當成先例。
+本篇保持 draft。候選實作與 C18 已有 gate 證據，不代表持久分支已採用或期 0 已完整接受。既有 C8、C9、C16 同時限制分層、循環與 framework 反向 import 使用者套件。核心對 plotting、progress_bar 與 runtime 的依賴使用 C8 的既有方向，不把 GUI 排除規則的債務當成先例。
 
 ## 取捨
 
@@ -70,7 +72,7 @@ deepcopy 隔離可變資料，使定義者可以直接修改 state 副本。代�
 
 每次實驗明確給 saver，保持函式物件介面與 cfg／Result 型別配對。代價是 helper 需多寫一個 keyword，不引入 Experiment wrapper 或全域註冊。
 
-D10 已核准所有 effect helper 使用 `yield from`，讓 Python 型別系統保留各 experiment 的回傳型別。engine 在入口拒絕非 effect 的 yield 值並提示正確寫法。axes、pbar 與資料存取仍直接呼叫。
+D10 已核准所有 effect helper 使用 `yield from`，讓 Python 型別系統保留各 experiment 的回傳型別。engine 在入口拒絕非 effect 的 yield 值並提示正確寫法。plots、pbar 與資料存取仍直接呼叫。
 
 D9 依失敗來源分流。Schedule 捕捉的 Exception 回 Failed，journal 保存例外型別、訊息與 traceback；Schedule 外例外使 run failed；KeyboardInterrupt 視為宿主 Stop。SoC 在 acquire 內斷線可以逐步 Failed，直到 Schedule 外操作拋出例外才停，符合 R3。不建立斷線例外分類表。
 

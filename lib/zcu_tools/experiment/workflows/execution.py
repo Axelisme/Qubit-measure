@@ -84,7 +84,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         self._definition = definition
         self._ports = ports
         self._lock = lock
-        self._displays = Displays(ports.plots, ports.progress)
+        self._displays = Displays(ports.progress)
         self._displays_closed = False
         self._lifecycle: Lifecycle = "running"
         self._reason: str | None = None
@@ -233,7 +233,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             except (Exception, KeyboardInterrupt):
                 _logger.exception("Workflow shutdown also failed")
             raise
-        self._displays.refresh()
         if isinstance(outcome, Next):
             self._commit(outcome)
         else:
@@ -255,16 +254,8 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 self._end(lifecycle, reason)
 
     def _close_step(self, generator: Step[S, R]) -> None:
-        """Close the producer and refresh its final artists, preserving close errors."""
-        try:
-            generator.close()
-        except BaseException:
-            try:
-                self._displays.refresh()
-            except (Exception, KeyboardInterrupt):
-                _logger.exception("Final display refresh also failed")
-            raise
-        self._displays.refresh()
+        """Close a discarded producer; its cleanup errors propagate unchanged."""
+        generator.close()
 
     def _drive(self, generator: Step[S, R]) -> Next[R, S] | Done | Aborted:
         while True:
@@ -278,7 +269,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                     ) from None
                 return outcome
             self._check_cancel()
-            self._displays.refresh()
             # Effect exits handle pure cancellation. A genuine Schedule Failed
             # reaches workflow code even when a control request arrived with it.
             dispatch_effect(effect, self)
@@ -382,7 +372,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 devices=self._ports.devices,
             )
             if request.live is not None:
-                run.bind_live(request.live, self._ports.plots)
+                run.bind_live(request.live)
             settings = run.device_setup
             if request.setup_devices and settings is not None:
                 run.devices.setup(settings, signal)

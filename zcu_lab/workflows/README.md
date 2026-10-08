@@ -1,6 +1,6 @@
 # `zcu_lab.workflows` — 使用者 workflow
 
-**Last updated:** 2026-10-08，workflow-owned calibration timing 與 port 自檢
+**Last updated:** 2026-10-09，owner-thread Plots
 
 本 package 擁有具體 workflow 的校準、cfg 組裝、分析、record 與 state。通用迭代、取消、提交與保存路徑由 `zcu_tools.experiment.workflows` 負責。宿主建立 catalog，再明確注入框架；import 不啟動 run。宣告只列 name、plan、tunables、init。T1 在步驟開頭檢查 soc／devices／context，v0 檢查 devices／context，缺少時明確失敗。這是定義者的選擇，不是框架的 admission 保證；硬體操作仍經 effect。
 
@@ -13,6 +13,8 @@
 `calibration` 從固定的 qub_pulse／readout modules 組裝 native cfg，執行 frequency、length-Rabi 與按 cadence 的 readout landscape。它擁有接受度與純資料 carry，全部成功才更新校準歷史。Caller 明確傳入正 finite 的 T1 estimate（µs）。Frequency relax_delay 為1µs，Rabi／readout為5倍estimate；initial_delay／dev沿native cfg預設，不依賴Measure adapters或host timing capture。Context只有四個校準scalar，mutable modules放在engine會複製的plan。三個 saver 以具名參數物件明確注入，不放進 context 或建立 registry。接受度、cadence 與 Rabi range 的預設值是暫定 tunables，待使用者在 CP-B／CP-C 確認，不是已驗證的物理預設。
 
 `t1` 宣告 `T1_fluxdep`，逐 setpoint 執行完整 calibration 與 native T1。Plan 持有固定 setpoints、兩個選定的modules與caller捕捉的歷史RunSnapshot，context只含scalar seed。Pi drive 使用量出 pi duration 的 Rabi waveform／gain。T1的delay grid與relax delay由lifetime history的EWMA guess生成。Calibration使用首點guess_us，後續使用最新accepted lifetime；拒絕fit不加入history。校準失敗與 fit 不接受提交具名 reason，只有接受的 lifetime 加入 history。Pause／stop 由 Engine 丟棄當前步驟，已發布的 acquisition 保留。
+
+Workflow 透過 `env.plots` 的 typed handles 更新 live trace，buffer 回呼只送座標與複數資料。校準參考線、靜態圖與 fit 疊圖經 draw 在 host owner 執行；每點 decay／最終 summary 經 save 保存。跨 retry 清除並重建具名圖的 axes，再接新模板，不把 handles 存進 state。核心不再持 Live artist 宣告。
 
 `saving` 的四個具體 writer 使用各 experiment 的既有 persistence declaration 與 native `save_run`。Writer 接 Engine 的 exact path，不決定 entry layout，也不捕捉 live context。Acquisition evidence 提供 run_id、時間、completion 與 software provenance；caller 的 RunSnapshot 提供當時的 entry／point／roles。保存不以 workflow run_id 或保存時間覆寫 acquisition facts。
 

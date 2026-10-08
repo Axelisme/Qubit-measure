@@ -6,10 +6,6 @@ from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 
-import numpy as np
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import DeviceInfo, DeviceManager
@@ -26,6 +22,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 
 START = datetime(2026, 10, 7, tzinfo=UTC)
@@ -75,39 +72,6 @@ class RecordingDevices:
             self.manager.setup_devices(
                 settings, progress=False, cancel_signal=cancel_signal.event
             )
-
-
-class RecordingPlots:
-    """Record detached line and image snapshots from native Figures."""
-
-    def __init__(self) -> None:
-        self.figures: dict[str, Figure] = {}
-        self.snapshots: list[tuple[NDArray[np.float64], ...]] = []
-        self.image_snapshots: list[tuple[NDArray[np.float64], ...]] = []
-        self.error: Exception | None = None
-
-    def axes(self, name: str) -> Axes:
-        figure = Figure()
-        self.figures[name] = figure
-        return figure.subplots()
-
-    def refresh(self, figure: Figure) -> None:
-        if self.error is not None:
-            raise self.error
-        self.snapshots.append(
-            tuple(
-                np.asarray(line.get_ydata(), dtype=np.float64).copy()
-                for axes in figure.axes
-                for line in axes.lines
-            )
-        )
-        self.image_snapshots.append(
-            tuple(
-                np.asarray(image.get_array(), dtype=np.float64).copy()
-                for axes in figure.axes
-                for image in axes.images
-            )
-        )
 
 
 class RecordingBar(TQDMProgressBar):
@@ -165,7 +129,7 @@ class Rig:
     root: Path
     clock: ManualClock = field(default_factory=ManualClock)
     devices: RecordingDevices = field(default_factory=RecordingDevices)
-    plots: RecordingPlots = field(default_factory=RecordingPlots)
+    plots: Plots = field(default_factory=lambda: Plots(NonPresentingHost()))
     initialized: list[datetime] = field(default_factory=list)
     bars: list[RecordingBar] = field(default_factory=list)
     engine: Engine[int] = field(init=False)

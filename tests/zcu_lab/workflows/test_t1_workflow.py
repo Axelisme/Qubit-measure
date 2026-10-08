@@ -19,6 +19,7 @@ from zcu_tools.experiment.workflows import (
     RunPaths,
     TunableChange,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.entry import workflow_roots
 
@@ -26,7 +27,6 @@ from tests.experiment.workflows._engine_fakes import (
     ManualClock,
     RecordingBar,
     RecordingDevices,
-    RecordingPlots,
 )
 from zcu_lab.v2.twotone.freq.core import FreqExp
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
@@ -43,7 +43,7 @@ def start_t1(
     root: Path,
     tun: T1Tunables,
     devices: RecordingDevices,
-    plots: RecordingPlots,
+    plots: Plots,
 ) -> Engine[Calibrated]:
     """Start the shipped declaration with real acquisitions and isolated offline ports."""
     engine = Engine(
@@ -89,7 +89,7 @@ def tunables() -> T1Tunables:
 def test_native_t1_checks_ports_before_hardware_effects(
     inputs: Inputs, tmp_path: Path, port: str
 ) -> None:
-    devices, plots = RecordingDevices(), RecordingPlots()
+    devices, plots = RecordingDevices(), Plots(NonPresentingHost())
     ports = EnginePorts(
         plots,
         RecordingBar,
@@ -129,7 +129,7 @@ def test_native_t1_checks_ports_before_hardware_effects(
     assert status.lifecycle == "failed"
     assert f"Missing workflow capability: {port}" in str(status.reason)
     assert devices.values == []
-    assert plots.snapshots == []
+    assert len(plots) == 0
     assert engine.records("workflow") == ()
     assert not tuple(paths.data_root.glob("iter/*/runs/*.h5"))
 
@@ -137,7 +137,7 @@ def test_native_t1_checks_ports_before_hardware_effects(
 def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
     inputs: Inputs, tmp_path: Path
 ) -> None:
-    devices, plots = RecordingDevices(), RecordingPlots()
+    devices, plots = RecordingDevices(), Plots(NonPresentingHost())
     before = inputs.t1.model_dump(mode="python")
     tun = tunables()
     engine = start_t1(inputs, tmp_path, tun, devices, plots)
@@ -211,7 +211,7 @@ def test_calibration_relax_uses_initial_guess_then_latest_accepted_t1(
     tun.guess_us = 12.0
     tun.cal.ro_every = 1
     devices = RecordingDevices()
-    engine = start_t1(inputs, tmp_path, tun, devices, RecordingPlots())
+    engine = start_t1(inputs, tmp_path, tun, devices, Plots(NonPresentingHost()))
     status = engine.execute("workflow")
     assert status.lifecycle == "done", status.reason
     records = engine.records("workflow")
@@ -246,7 +246,7 @@ def test_calibration_relax_uses_initial_guess_then_latest_accepted_t1(
 def test_flux_bound_native_t1_acquires_each_committed_setpoint(
     inputs: Inputs, tmp_path: Path
 ) -> None:
-    devices, plots = RecordingDevices(), RecordingPlots()
+    devices, plots = RecordingDevices(), Plots(NonPresentingHost())
     fluxes = tuple(inputs.flux_value + offset for offset in (0.0, 0.01, 0.02))
     plan = make_plan(inputs).model_copy(update={"fluxes": fluxes})
     roots = workflow_roots(
@@ -319,7 +319,9 @@ def test_failed_calibration_commits_reason_and_never_runs_t1(
 ) -> None:
     tun = tunables()
     tun.cal.max_frequency_rel_err = 1e-8
-    engine = start_t1(inputs, tmp_path, tun, RecordingDevices(), RecordingPlots())
+    engine = start_t1(
+        inputs, tmp_path, tun, RecordingDevices(), Plots(NonPresentingHost())
+    )
     status = engine.execute("workflow")
     assert status.lifecycle == "done", status.reason
     records = engine.records("workflow")
@@ -341,7 +343,9 @@ def test_rejected_t1_fit_keeps_raw_data_but_not_lifetime_history(
 ) -> None:
     tun = tunables()
     tun.max_rel_err = 1e-8
-    engine = start_t1(inputs, tmp_path, tun, RecordingDevices(), RecordingPlots())
+    engine = start_t1(
+        inputs, tmp_path, tun, RecordingDevices(), Plots(NonPresentingHost())
+    )
     status = engine.execute("workflow")
     assert status.lifecycle == "done", status.reason
     records = engine.records("workflow")
@@ -375,14 +379,15 @@ def test_rejected_t1_fit_keeps_raw_data_but_not_lifetime_history(
 def test_pause_during_native_acquisition_discards_step_then_uses_new_revision(
     inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    plots, devices = RecordingPlots(), RecordingDevices()
+    host = NonPresentingHost()
+    plots, devices = Plots(host), RecordingDevices()
     engine = start_t1(inputs, tmp_path, tunables(), devices, plots)
-    refresh = plots.refresh
+    refresh = host.refresh
     requested_at: float | None = None
 
-    def request_pause(figure: Figure) -> None:
+    def request_pause(figure: Figure, *, final: bool = False) -> None:
         nonlocal requested_at
-        refresh(figure)
+        refresh(figure, final=final)
         if requested_at is None and any(
             np.asarray(line.get_xdata()).size > 2
             for ax in figure.axes
@@ -391,7 +396,7 @@ def test_pause_during_native_acquisition_discards_step_then_uses_new_revision(
             requested_at = perf_counter()
             engine.pause("workflow")
 
-    monkeypatch.setattr(plots, "refresh", request_pause)
+    monkeypatch.setattr(host, "refresh", request_pause)
     status = engine.execute("workflow")
     returned_at = perf_counter()
     assert requested_at is not None
@@ -423,18 +428,19 @@ def test_pause_during_native_acquisition_discards_step_then_uses_new_revision(
 def test_stop_during_native_acquisition_preserves_only_prior_committed_point(
     inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    plots, devices = RecordingPlots(), RecordingDevices()
+    host = NonPresentingHost()
+    plots, devices = Plots(host), RecordingDevices()
     engine = start_t1(inputs, tmp_path, tunables(), devices, plots)
-    refresh = plots.refresh
+    refresh = host.refresh
     requested_at: float | None = None
 
-    def request_stop(figure: Figure) -> None:
+    def request_stop(figure: Figure, *, final: bool = False) -> None:
         nonlocal requested_at
-        refresh(figure)
+        refresh(figure, final=final)
         if (
             requested_at is None
             and len(devices.values) == 2
-            and figure is plots.figures["calibration/qubit_freq"]
+            and figure is plots["calibration/qubit_freq"]
             and any(
                 np.asarray(line.get_xdata()).size > 2
                 for ax in figure.axes
@@ -444,7 +450,7 @@ def test_stop_during_native_acquisition_preserves_only_prior_committed_point(
             requested_at = perf_counter()
             engine.stop("workflow")
 
-    monkeypatch.setattr(plots, "refresh", request_stop)
+    monkeypatch.setattr(host, "refresh", request_stop)
     status = engine.execute("workflow")
     returned_at = perf_counter()
     assert requested_at is not None
