@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
     from zcu_tools.resources.entry.provenance import Provenance
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+    from zcu_tools.resources.entry.storage import PointStorageBinding
 
 
 class ContextControlPort(Protocol):
@@ -70,6 +71,14 @@ class ContextControlPort(Protocol):
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         """Capture published values; EMPTY/source/role errors propagate."""
+        ...
+
+    def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
+        """Return historical origin/roles on the owner thread without I/O.
+
+        Source faults propagate. Draft/unbound captures raise
+        FailedPreconditionError(storage_unavailable); current selection is ignored.
+        """
         ...
 
     def read_target(
@@ -202,6 +211,10 @@ class ContextControlFacet(ContextControlPort):
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         return self._context.read_context(roles=roles)
+
+    def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
+        """Return the fixed capture's storage using the service contract."""
+        return self._context.capture_storage(parameters)
 
     def read_target(
         self, target: ContextTarget, *, roles: RoleBinding | None = None

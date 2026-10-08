@@ -164,6 +164,9 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     cfg: CfgResource
     # Fixed role/target capture from tab creation; None for context-free adapters.
     parameters: ParameterContext | None = None
+    # Fixed origin for Save, also on roleless tabs whose cfg parameters stay None.
+    # None means no context at creation, not permission to use a later context.
+    save_context: ParameterContext | None = None
 
     # Canonical pane-owned resources.
     run: RunPaneState[T_Result] = field(
