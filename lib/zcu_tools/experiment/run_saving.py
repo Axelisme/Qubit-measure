@@ -195,7 +195,7 @@ def save_artifacts(
                     member, outputs, current_metadata
                 )
             else:
-                attempts = _save_file(member, outputs)
+                attempts = _save_file(member, outputs, figure_encoder)
             results.extend(attempts)
     report = SaveReport(metadata.run_id, tuple(results))
     successful_labber = next(
@@ -286,13 +286,18 @@ def _save_data(
 
 
 def _save_file(
-    member: FileMember, outputs: tuple[Output, ...]
+    member: FileMember,
+    outputs: tuple[Output, ...],
+    figure_encoder: Callable[[Figure], bytes] | None,
 ) -> tuple[OutputResult, ...]:
     try:
         if isinstance(member.content, Figure):
-            with BytesIO() as stream:
-                member.content.savefig(stream, format="png")
-                content = stream.getvalue()
+            if figure_encoder is None:
+                with BytesIO() as stream:
+                    member.content.savefig(stream, format="png")
+                    content = stream.getvalue()
+            else:
+                content = figure_encoder(member.content)
         else:
             content = encode_analysis_document(member.content)
     except Exception as error:
