@@ -28,6 +28,7 @@ from zcu_tools.gui.cfg import (
     make_custom_reference_key,
     make_default_value,
 )
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import RoleSpec
 
@@ -192,11 +193,8 @@ class OneToneFreqAdapter(
         cfg = result.cfg
         if cfg is None:
             return None
-        try:
-            res_ch = cfg.modules.readout.pulse_cfg.ch
-            ro_ch = cfg.modules.readout.ro_cfg.ro_ch
-        except AttributeError:
-            return None
+        res_ch = cfg.modules.readout.pulse_cfg.ch
+        ro_ch = cfg.modules.readout.ro_cfg.ro_ch
         if (
             isinstance(res_ch, bool)
             or not isinstance(res_ch, Integral)
@@ -221,13 +219,16 @@ class OneToneFreqAdapter(
 
     @classmethod
     def _route_matched_prior(
-        cls, md_obj: object, route: tuple[int, int] | None
+        cls, parameters: ParameterContext | None, route: tuple[int, int] | None
     ) -> float | None:
-        if route is None:
+        if parameters is None or route is None:
             return None
-        get = getattr(md_obj, "get")
-        raw = get(_EDELAY_PARAMETER_PATH)
-        if not isinstance(raw, Mapping) or set(raw) != _EDELAY_CALIBRATION_FIELDS:
+        lookup = parameters.lookup(_EDELAY_PARAMETER_PATH)
+        raw = lookup.value
+        if not lookup.present or raw is None or not isinstance(raw, Mapping):
+            return None
+        fields: frozenset[str] = frozenset(raw)
+        if fields != _EDELAY_CALIBRATION_FIELDS:
             return None
         prior = cls._finite_real(raw["edelay"])
         prior_res_ch = cls._channel(raw["res_ch"])
@@ -242,7 +243,7 @@ class OneToneFreqAdapter(
     def _resolve_edelay_seed(
         cls,
         params: OneToneFreqAnalyzeParams,
-        md_obj: object,
+        parameters: ParameterContext | None,
         route: tuple[int, int] | None,
     ) -> tuple[float | None, EDelaySource]:
         if params.edelay_mode == "manual":
@@ -253,7 +254,7 @@ class OneToneFreqAdapter(
                 raise ValueError("manual_edelay must be finite")
             return seed, "manual"
 
-        prior = cls._route_matched_prior(md_obj, route)
+        prior = cls._route_matched_prior(parameters, route)
         if params.edelay_mode == "calibrated":
             if prior is None:
                 raise ValueError(
@@ -368,7 +369,9 @@ class OneToneFreqAdapter(
     ) -> OneToneFreqAnalyzeResult:
         params = req.analyze_params
         route = self._readout_route(req.run_result)
-        edelay_seed, edelay_source = self._resolve_edelay_seed(params, req.md, route)
+        edelay_seed, edelay_source = self._resolve_edelay_seed(
+            params, req.parameters, route
+        )
         max_search_radius: float | None = None
         if edelay_seed is None:
             max_search_radius = self._finite_real(params.max_edelay_search_radius)
