@@ -90,7 +90,15 @@ def path_seed(
     Resolve only at fresh defaults. Empty paths raise ValueError; source faults
     propagate rather than becoming fallback. expr overrides the live expression.
     """
-    raise NotImplementedError
+    if not path.strip():
+        raise ValueError("parameter seed path must not be empty")
+
+    def resolve(ctx: SessionEnv) -> ScalarLeafInput:
+        if ctx.parameters is not None and ctx.parameters.lookup(path).present:
+            return EvalValue(expr=expr if expr is not None else path)
+        return fallback
+
+    return Seed(resolve, description=f"parameter:{path}")
 
 
 def scaled_path_seed(
@@ -100,7 +108,15 @@ def scaled_path_seed(
 
     Empty paths raise ValueError. Capture faults propagate; no focus rebind.
     """
-    raise NotImplementedError
+    if not path.strip():
+        raise ValueError("scaled parameter seed path must not be empty")
+
+    def resolve(ctx: SessionEnv) -> float | EvalValue:
+        if ctx.parameters is not None and ctx.parameters.lookup(path).present:
+            return EvalValue(expr=f"{factor} * {path}")
+        return fallback_value
+
+    return Seed(resolve, description=f"{factor} * parameter:{path}")
 
 
 def scaled_md(
@@ -223,7 +239,9 @@ __all__ = [
     "flux_range",
     "literal",
     "md",
+    "path_seed",
     "qub_freq_range",
+    "scaled_path_seed",
     "res_freq_range",
     "scaled_md",
     "value_source",

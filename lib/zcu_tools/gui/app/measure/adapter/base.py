@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
 
 from zcu_tools.experiment.cfg_assembler import (
+    ExperimentCfgInput,
     ExperimentCfgValue,
     assemble_experiment_cfg,
 )
@@ -305,7 +306,10 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
                 f"{type(self).__name__} must set ExpCfg_cls or override build_exp_cfg"
             )
         return assemble_experiment_cfg(
-            raw_cfg, self.ExpCfg_cls, ml=None, device_snapshot=req.device_snapshot
+            ExperimentCfgInput(raw_cfg),
+            self.ExpCfg_cls,
+            context=req.cfg_context,
+            device_snapshot=req.device_snapshot,
         )
 
     def validate_run_request(
@@ -445,7 +449,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         """Instantiate and validate a fresh cfg from the context-free definition."""
         schema = type(self).cfg_definition().instantiate(ctx)
-        validate_schema(schema, ctx.ml)
+        validate_schema(schema, ctx.parameters)
         return schema
 
     @classmethod

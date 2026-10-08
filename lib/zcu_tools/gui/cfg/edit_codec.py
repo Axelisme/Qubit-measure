@@ -161,7 +161,11 @@ def _require_finite(value: float) -> None:
 def encode_input(value: CfgInput) -> object:
     """Encode input intent only; resolved values and diagnostics are not inputs."""
     if isinstance(value, DirectValue):
-        value = {"__text": value.raw} if value.raw is not None else value.value
+        return encode_input(
+            decode_input(
+                {"__text": value.raw} if value.raw is not None else value.value
+            )
+        )
     if isinstance(value, EvalValue):
         return {"__expr": value.expr}
     if isinstance(value, complex):

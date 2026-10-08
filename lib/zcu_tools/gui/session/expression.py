@@ -1,7 +1,8 @@
 """Restricted shared scalar expressions, evaluated by simpleeval.
 
-Inputs use registered math functions, numeric MetaDict names and constants.
-Attribute access, indexing and arbitrary calls are not part of this language.
+Inputs use registered math functions, captured parameter paths and constants.
+Dotted paths are owner-resolved data references, not Python attribute access.
+Indexing and arbitrary calls are not part of this language.
 """
 
 from __future__ import annotations
@@ -57,6 +58,7 @@ _ALLOWED_NODES = (
     ast.Expression,
     ast.Constant,
     ast.Name,
+    ast.Attribute,
     ast.Load,
     ast.BinOp,
     ast.UnaryOp,
@@ -105,24 +107,42 @@ def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scal
     Invalid grammar, missing/non-numeric paths and arithmetic failures raise.
     """
     tree = _parse_expression(expr)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            _require_unshadowed(node.func.id, md)
+    paths: dict[str, Scalar] = {}
+
+    def resolve_path(path: str) -> Scalar:
+        if parameters is None:
+            raise ExpressionError(f"Parameter path {path!r} requires a context")
+        try:
+            value = parameters.value(path)
+        except (AttributeError, ValueError, InvalidInputError) as exc:
+            raise ExpressionError(f"Invalid parameter path {path!r}: {exc}") from exc
+        return _number(value, f"Parameter path {path!r}")
+
+    # Replace complete dotted paths before simpleeval can perform attribute access.
+    class CapturePaths(ast.NodeTransformer):
+        def visit_Attribute(self, node: ast.Attribute) -> ast.Name:
+            parts: list[str] = []
+            root: ast.expr = node
+            while isinstance(root, ast.Attribute):
+                parts.append(root.attr)
+                root = root.value
+            if not isinstance(root, ast.Name):
+                raise ExpressionError("Parameter paths must start with a name")
+            path = ".".join([root.id, *reversed(parts)])
+            name = f"__parameter_{len(paths)}"
+            paths[name] = resolve_path(path)
+            return ast.copy_location(ast.Name(id=name, ctx=ast.Load()), node)
+
+    CapturePaths().visit(tree)
 
     def lookup(node: ast.Name) -> Scalar:
+        if node.id in paths:
+            return paths[node.id]
         if node.id in _FUNCTIONS:
-            _require_unshadowed(node.id, md)
             raise ExpressionError(f"Function {node.id!r} must be called")
         if node.id in _CONSTANTS:
-            _require_unshadowed(node.id, md)
             return _CONSTANTS[node.id]
-        try:
-            value = getattr(md, node.id)
-        except AttributeError as exc:
-            raise ExpressionError(
-                f"Variable {node.id!r} is not defined in MetaDict"
-            ) from exc
-        return _number(value, f"MetaDict variable {node.id!r}")
+        return resolve_path(node.id)
 
     operators = {
         kind: _checked(_power if kind is ast.Pow else DEFAULT_OPERATORS[kind])
@@ -191,16 +211,6 @@ def _parse_expression(expr: str) -> ast.Expression:
             raise ExpressionError("Unsupported expression syntax: function call")
         pending.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
     return tree
-
-
-def _require_unshadowed(name: str, md: MetaDict) -> None:
-    try:
-        getattr(md, name)
-    except AttributeError:
-        return
-    raise ExpressionError(
-        f"MetaDict name {name!r} conflicts with a reserved expression name"
-    )
 
 
 def _number(value: object, label: str) -> Scalar:
