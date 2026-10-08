@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-07-15 — table-backed readout frequency sweep
+**Last updated:** 2026-10-06 — packed lookup hardware shift limits
 
 ## Testing & Type Checking Conventions
 
@@ -14,6 +14,15 @@
 - **Cfg Contracts**: `AbsModuleCfg` and `AbsWaveformCfg` are abstract contracts. Concrete cfg classes implement both `build()` and `set_param()`; unknown parameter names raise `ValueError` rather than being ignored. `tests/program/v2/modules/test_set_param_contract.py` is the cross-family audit for this fail-fast rule.
 
 ## IR System & Hardware Alignment
+
+### Packed data-memory lookups
+
+tProc v2's ALU uses only the low four bits of a shift-count operand, including
+register operands. A single shift cannot extract slots beginning at bit 16 or
+higher. `LoadValue` retains full 32-bit packing and decomposes extraction into
+shifts of at most 15 bits. Lookup regression tests execute compiled register and
+data-memory operations using this hardware limit; semantic physical simulation
+alone does not validate the emitted extraction instructions.
 
 ### Instruction Address Increment (`addr_inc`)
 

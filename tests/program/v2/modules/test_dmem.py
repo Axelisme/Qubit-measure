@@ -2,12 +2,103 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.program.v2.base import ProgramV2Cfg
+from zcu_tools.program.v2.ir.instructions import RegWriteInst
+from zcu_tools.program.v2.ir.operands import (
+    AluExpr,
+    AluOp,
+    Immediate,
+    Register,
+    SrcKeyword,
+)
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.dmem import (
     _COMPRESS_MIN_VALUES,
     LoadValue,
     LoadWord,
     ScanWith,
 )
+
+
+def _execute_lookup_alu(expr: AluExpr, registers: dict[str, int]) -> int:
+    lhs = registers[expr.lhs.name]
+    rhs = expr.rhs
+    if expr.op == AluOp.NONE:
+        return lhs
+    assert isinstance(rhs, (Register, Immediate))
+    operand = registers[rhs.name] if isinstance(rhs, Register) else rhs.value
+    match expr.op:
+        case AluOp.ADD:
+            return lhs + operand
+        case AluOp.AND:
+            return lhs & operand
+        case AluOp.SL:
+            return lhs << (operand & 15)
+        case AluOp.SR:
+            return (lhs & 0xFFFFFFFF) >> (operand & 15)
+        case AluOp.ASR:
+            signed = lhs if lhs < 2**31 else lhs - 2**32
+            return signed >> (operand & 15)
+        case _:
+            pytest.fail(f"Unsupported lookup ALU operation: {expr}")
+
+
+def _execute_lookup_body(program: ModularProgramV2, index: int) -> int:
+    """Replay straight-line lookup ASM up to WAIT with tProc's 4-bit shifts.
+
+    This deliberately narrow oracle executes the compiled register/data-memory
+    instructions, not LoadValue's packing metadata or its Python simulation.
+    The outer sweep's index is supplied by the test; control flow is not emulated.
+    """
+    index_reg = f"r{program.reg_dict['idx'].addr}"
+    output_reg = f"r{program.reg_dict['value'].addr}"
+    ignored = {index_reg}
+    if "unused" in program.reg_dict:
+        ignored.add(f"r{program.reg_dict['unused'].addr}")
+    registers = {index_reg: index}
+    dmem = program.compile_datamem()
+    assert dmem is not None
+    for raw in program.prog_list:
+        if raw["CMD"] == "WAIT":
+            break
+        if raw["CMD"] != "REG_WR":
+            continue
+        inst = RegWriteInst.from_dict(raw)
+        dst = inst.dst.name
+        if dst in ignored or inst.src == SrcKeyword.LABEL:
+            continue
+        if inst.src == SrcKeyword.IMM:
+            assert inst.lit is not None
+            result = inst.lit.value
+        elif inst.src == SrcKeyword.DMEM:
+            assert isinstance(inst.addr, Register)
+            result = int(dmem[registers[inst.addr.name]])
+        else:
+            assert inst.src == SrcKeyword.OP and inst.op is not None
+            result = _execute_lookup_alu(inst.op, registers)
+        registers[dst] = result & 0xFFFFFFFF
+    return registers[output_reg]
+
+
+@pytest.mark.parametrize("bits", [1, 2, 3, 4, 5, 8, 9, 16])
+@pytest.mark.parametrize("padding", [False, True])
+def test_compiled_lookup_recovers_every_slot_with_hardware_shift_width(
+    bits: int, padding: bool
+) -> None:
+    import numpy as np
+
+    rng = np.random.default_rng(1906)
+    values = rng.integers(0, 1 << bits, size=131).tolist()
+    values[0] = (1 << bits) - 1
+    lookup = LoadValue("lookup", values, idx_reg="idx", val_reg="value")
+    modules = [LoadValue("padding", [31, 17, 9], "idx", "unused")] if padding else []
+    modules.append(lookup)
+    program = ModularProgramV2(
+        make_mock_soccfg(), ProgramV2Cfg(reps=1), modules, sweep=[("idx", len(values))]
+    )
+    assert lookup.is_compressed
+    assert [_execute_lookup_body(program, i) for i in range(len(values))] == values
 
 
 def _make_dmem_prog(temp_regs=("r10", "r11")):

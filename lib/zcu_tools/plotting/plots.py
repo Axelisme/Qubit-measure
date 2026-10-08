@@ -466,18 +466,24 @@ class Plots(FigureCollection):
         ylabel: str,
         *,
         title: str | None = None,
+        axes: Axes | None = None,
     ) -> ScatterPlot:
-        """Present scalar-colored points, with artist updates on the host owner."""
+        """Present scalar-colored points, with artist updates on the host owner.
+
+        Without ``axes`` the figure gets one new axes; pass axes of the named
+        figure to place several live plots in one experiment-defined layout.
+        """
         self._ensure_active()
 
         def create() -> ScatterPlot:
             self._ensure_active()
-            figure, axes = self.subplots(name)
+            figure, (ax,) = self._resolve_axes(
+                name, None if axes is None else (axes,), 1
+            )
             segment = ScatterSegment(xlabel, ylabel, title=title)
-            segment.init_ax(axes)
-            viewer = ScatterPlot(self._host, figure, axes, segment, self._ensure_active)
-            self._host.present(figure)
-            self._live.append(figure)
+            segment.init_ax(ax)
+            viewer = ScatterPlot(self._host, figure, ax, segment, self._ensure_active)
+            self._present_live(figure)
             return viewer
 
         return self._host.call(create)

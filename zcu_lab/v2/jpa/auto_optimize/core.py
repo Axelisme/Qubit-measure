@@ -276,13 +276,22 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
         point_indices = np.arange(num_points, dtype=np.float64)
+        figure, initial_ax = context.plots.subplots("measurement", figsize=(8, 5))
+        initial_ax.remove()
+        figure.suptitle("JPA Auto Optimization")
+        grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
         viewers = [
-            context.plots.liveplot_scatter(f"measurement.{name}", label, "SNR (a.u.)")
-            for name, label in (
-                ("iteration", "Iteration"),
-                ("flux", "JPA Flux value (a.u.)"),
-                ("freq", "JPA Frequency (MHz)"),
-                ("power", "JPA Power (dBm)"),
+            context.plots.liveplot_scatter(
+                "measurement",
+                label,
+                "SNR (a.u.)",
+                axes=figure.add_subplot(cell),
+            )
+            for label, cell in (
+                ("Iteration", grid[:, 0]),
+                ("JPA Flux value (a.u.)", grid[0, 1]),
+                ("JPA Frequency (MHz)", grid[1, 1]),
+                ("JPA Power (dBm)", grid[2, 1]),
             )
         ]
         current_index = 0
@@ -296,12 +305,16 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
                 f"Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
             )
             colors = phases.astype(np.float64)
-            for viewer, xs in zip(
+            for viewer, xs, viewer_title in zip(
                 viewers,
                 (point_indices, params[:, 0], params[:, 1], params[:, 2]),
+                (title, None, None, None),
                 strict=True,
             ):
-                viewer.update(xs, snrs, colors=colors, title=title)
+                viewer.update(
+                    xs, snrs, colors=colors, title=viewer_title, refresh=False
+                )
+            context.plots.refresh("measurement")
 
         signals_buffer = SignalBuffer(
             (num_points,), dtype=np.float64, on_update=plot_fn

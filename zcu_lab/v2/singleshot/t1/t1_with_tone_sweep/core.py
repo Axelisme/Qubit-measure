@@ -176,30 +176,36 @@ class T1WithToneSweepExp(
                 line.set_label(label)
             ax.legend()
 
+        figure, _ = plots.subplots("measurement", nrows=4, ncols=2, figsize=(12, 10))
+        # Row-major 4x2 grid: columns are initial g/e, rows are states g/e/o then current.
+        cells = figure.axes
         heatmaps = tuple(
             plots.liveplot_2d(
-                f"measurement_{initial}{state}",
+                "measurement",
                 sweep_name,
-                "Time (us)",
+                "Time (us)" if column == 0 else "",
                 uniform=False,
                 clim=(0.0, 1.0),
+                axes=cells[2 * row + column],
             )
-            for initial in ("g", "e")
-            for state in ("g", "e", "o")
+            for column in (0, 1)
+            for row in (0, 1, 2)
         )
         current_g = plots.liveplot_1d(
-            "measurement_current_ground",
+            "measurement",
             "Time (us)",
             "Population",
             num_lines=3,
             configure_axes=configure_axes,
+            axes=cells[6],
         )
         current_e = plots.liveplot_1d(
-            "measurement_current_excited",
+            "measurement",
             "Time (us)",
             "",
             num_lines=3,
             configure_axes=configure_axes,
+            axes=cells[7],
         )
         return (*heatmaps, current_g, current_e)
 
