@@ -131,6 +131,26 @@ def test_status_indexes_gui_operations_and_session_executions(
             "invalidated_on_success": [],
         }
         replies["operation.await"] = {"reason": "completed", "status": "finished"}
+        replies["tab.save_artifacts"] = {
+            "run_id": "run-a",
+            "artifacts": {
+                "analysis": {
+                    "results": {
+                        "status": "Saved",
+                        "members": {
+                            "analysis:primary": [
+                                {
+                                    "format": "json",
+                                    "path": "/actual/analysis/results.json",
+                                    "status": "saved",
+                                    "error": None,
+                                }
+                            ]
+                        },
+                    }
+                }
+            },
+        }
         replies["tab.get_analyze_result"] = {
             "summary": None,
             "invalid": [],

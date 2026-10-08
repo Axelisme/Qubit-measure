@@ -67,7 +67,11 @@ def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_pa
         }
         assert captured.outcome == {"reason": "completed", "status": "finished"}
         receipt = run.save_raw()
-        assert receipt.status == "saved" and receipt.path == "/actual/raw.h5"
+        assert receipt.run_id == "run-a"
+        assert receipt.artifacts["raw"]["data"].status == "Saved"
+        assert [
+            output.path for output in receipt.artifacts["raw"]["data"].members["data"]
+        ] == ["/runs/run-a/data.h5", "/labber/raw.hdf5"]
         captured = operation.snapshot()
         assert captured is not None and captured.raw_save == receipt
         assert (
@@ -107,7 +111,9 @@ def test_cancelled_run_delivers_partial_handle_and_only_saves_available_data(
         run, status = operation.complete_in_current_worker()
         assert isinstance(run, RecipeRun) and status == "cancelled"
         if available:
-            assert run.save_raw().path == "/actual/raw.h5"
+            report = run.save_raw()
+            assert report.run_id == "run-a"
+            assert report.artifacts["raw"]["data"].status == "Saved"
         else:
             with pytest.raises(GuiRpcError) as error:
                 run.save_raw()
@@ -139,7 +145,7 @@ def test_run_rejects_a_superseded_source_without_saving_it(tmp_path, outcome):
         assert capture.outcome["status"] == outcome
         assert capture.result_state is not None
         assert capture.result_state["source_operation_id"] == 99
-        assert capture.raw_save.status == "not_started"
+        assert capture.raw_save is None
 
 
 def test_failed_run_preserves_its_native_outcome_before_throwing(tmp_path):

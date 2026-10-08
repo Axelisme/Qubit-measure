@@ -401,11 +401,14 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
             client.call("status", {"execution": execution, "detail": "full"}) == frozen
         )
         if expected == "finished":
-            assert result.data["raw_save"]["path"] == "/actual/raw.h5"
+            assert result.data["raw_save"]["run_id"] == "run-a"
+            assert (
+                result.data["raw_save"]["artifacts"]["raw"]["data"]["status"] == "Saved"
+            )
             assert result.data["analysis"]["status"] == "finished"
         elif expected == "failed":
             assert result.data["error"]["reason"] == "run_result_unavailable"
-            assert result.data["raw_save"]["status"] == "not_started"
+            assert result.data["raw_save"] is None
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("operation.cancel") == 1
         assert methods.count("tab.run_start") == 1
@@ -931,7 +934,7 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
             "revision": 99,
             "source_operation_id": replacement_source,
         }
-        assert reply.data["raw_save"]["status"] == "not_started"
+        assert reply.data["raw_save"] is None
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert "tab.save_data" not in methods
@@ -1170,7 +1173,7 @@ def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
         assert not reply.data["cancel_requested"]
         assert not reply.data["finish_early_requested"]
         assert reply.data["run_outcome"]["status"] == "cancelled"
-        assert reply.data["raw_save"]["status"] == "not_started"
+        assert reply.data["raw_save"] is None
         methods = [method for method, _ in client.transport.sent]
         assert "tab.save_data" not in methods
         assert "tab.analyze" not in methods

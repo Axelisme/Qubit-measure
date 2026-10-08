@@ -3,6 +3,7 @@
 import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from threading import Event, Thread, get_ident
 from typing import Any
 
@@ -42,6 +43,7 @@ from ._analyze_support import (
 from ._analyze_support import (
     stdio_data as _data,
 )
+from ._save_report_support import analysis_report
 from ._support import MeasureClient
 
 _INVALID_PNGS = [
@@ -56,7 +58,7 @@ _INVALID_PNGS = [
 
 
 @pytest.mark.parametrize("payload", [None, {"command": "set_value", "args": {"x": 2}}])
-def test_interact_forwards_once_and_materializes_session_image(
+def test_interact_forwards_once_and_delivers_inline_image(
     tmp_path, clients, monkeypatch, payload
 ):
     state = {"value": 2}
@@ -88,10 +90,8 @@ def test_interact_forwards_once_and_materializes_session_image(
     assert result["commands"] == [{"name": "set_value"}, {"name": "done"}]
     assert result["plugin"] == "generic-test"
     assert result["preview_active"] is True
-    path = _assert_figure(reply, present=True)
+    _assert_figure(reply, present=True)
     assert _methods(client) == ["tab.interact"]
-    client.context.session.cleanup_pngs()
-    assert path is not None and not path.exists()
 
 
 def test_interact_headless_and_wire_failure_do_not_retry(
@@ -103,7 +103,7 @@ def test_interact_headless_and_wire_failure_do_not_retry(
         lambda method, params: {"operation_id": 71, "state": {}, "figure": None},
     )
     reply = _call_stdio(monkeypatch, client, "tab_interact", {"tab": "t"})
-    assert _data(reply) == {"handle": 1, "state": {}, "figure": None}
+    assert _data(reply) == {"handle": 1, "state": {}}
     _assert_figure(reply, present=False)
     client.transport.sent.clear()
     client.transport.replies["tab.interact"] = {
@@ -170,15 +170,15 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
                     {"path": "summary.frequency_error", "reason": "non_finite"}
                 ]
             return observed
-        if name == "tab.save_image":
+        if name == "tab.save_artifacts":
             assert params == {
                 "tab_id": "t",
-                "subtab_id": pane,
-                "figure_name": params["figure_name"],
-                "image_path": None,
+                "artifacts": [{"section": pane, "name": "results"}],
                 "operation_id": 71,
             }
-            return {"image_path": f"/actual/{params['figure_name']}.png"}
+            return asdict(
+                analysis_report(pane, ["fit", "residual"] if has_figure else [])
+            )
         if name == "tab.get_figure":
             assert params == {
                 "tab_id": "t",
@@ -219,48 +219,28 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
             _call_full_execution_stdio(monkeypatch, client, tool, arguments)
         )
         assert observed["result"] == result["result"]
-        assert observed["saved_images"] == result["saved_images"]
+        assert observed["save_report"] == result["save_report"]
     summary = client.call("status", {"execution": result["execution"]})
-    assert summary["previews"] == {
-        "run": [],
-        "primary": [result["figure"]] if stage == "primary" and has_figure else [],
-        "post": [result["figure"]] if stage == "post" and has_figure else [],
-    }
-    assert summary["analysis"][stage]["warnings"] == (
-        ["singular error"] if has_invalid else []
-    )
-    assert summary["analysis"][stage]["details"] == (
-        {"frequency": 5.0, "frequency_error": None}
-        if has_invalid
-        else {"frequency": 5.0}
-    )
-    assert summary["invalid"] == (
-        [{"path": f"analysis.{stage}.details.frequency_error", "reason": "non_finite"}]
-        if has_invalid
-        else []
-    )
+    assert summary["analysis"][stage]["summary"] == result["result"]["summary"]
+    assert summary["analysis"][stage]["invalid"] == result["result"]["invalid"]
+    assert summary["invalid"] == result["result"]["invalid"]
     assert result["result"]["params"] == {"gain": 2, "model": "fit"}
     assert result["params"] == result["result"]["params"]
     assert result["invalidated"] == ["post.writeback"]
     assert result["operation_outcome"]["status"] == "finished"
-    assert result["save_status"] == ("saved" if has_figure else "not_available")
-    assert result["saved_images"] == (
-        [
-            {"figure_name": "fit", "image_path": "/actual/fit.png"},
-            {"figure_name": "residual", "image_path": "/actual/residual.png"},
-        ]
-        if has_figure
-        else []
+    assert result["save_status"] == "saved"
+    assert result["save_report"] == asdict(
+        analysis_report(pane, ["fit", "residual"] if has_figure else [])
     )
-    assert result["remaining_images"] == []
-    assert result["unconfirmed_image"] is None
+    assert summary["artifacts"] == result["save_report"]["artifacts"]
     assert result["error"] is None
     _assert_figure(reply, present=has_figure)
     assert _methods(client) == [
         method,
         "operation.await",
         result_method,
-        *(["tab.save_image", "tab.save_image", "tab.get_figure"] if has_figure else []),
+        "tab.save_artifacts",
+        *(["tab.get_figure"] if has_figure else []),
         "tab.writeback_preview",
     ]
 
@@ -338,11 +318,6 @@ def test_interactive_start_hands_off_current_state_without_waiting(
     for key in ("state", "commands", "plugin", "info", "preview_active"):
         assert data["interaction"][key] == interaction[key]
     summary = client.call("status", {"execution": data["execution"]})
-    assert summary["previews"] == {
-        "run": [],
-        "primary": [data["figure"]] if has_figure else [],
-        "post": [],
-    }
     assert summary["interaction"] == {
         "plugin": "picker",
         "state": {"value": 3},
@@ -1075,6 +1050,9 @@ def test_analysis_can_complete_on_recipe_worker(
             await_callers.append(get_ident())
             assert params["operation_id"] == 71
             return {"reason": "completed", "status": outcome, "error": "fit failed"}
+        if name == "tab.save_artifacts":
+            assert params["artifacts"] == [{"section": pane, "name": "results"}]
+            return asdict(analysis_report(pane))
         assert name == result_method
         return _result_reply(pane, [], {"gain": 2})
 
@@ -1106,6 +1084,7 @@ def test_analysis_can_complete_on_recipe_worker(
             method,
             "operation.await",
             result_method,
+            "tab.save_artifacts",
             "tab.writeback_preview",
         ]
     else:

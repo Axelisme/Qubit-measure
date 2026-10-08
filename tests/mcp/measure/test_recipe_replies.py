@@ -36,7 +36,7 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
         assert summary["status"] == (
             "needs_parameters" if outcome == "missing" else outcome
         )
-        assert summary["run_id"] is None
+        assert summary["run_id"] == ("run-a" if outcome == "awaiting_answer" else None)
         assert summary["steps"]["run"]["status"] == (
             "not_started"
             if outcome == "missing"
@@ -44,21 +44,12 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
             if outcome == "awaiting_answer"
             else outcome
         )
-        assert summary["previews"] == {
-            "run": [],
-            "primary": [full["analysis"]["figure"]]
-            if outcome == "awaiting_answer"
-            else [],
-            "post": [],
-        }
         if outcome == "awaiting_answer":
             assert summary["question_items"] == ("trigger_offset",)
             assert not summary["writeback"]["receipts"]
             assert initial.images
             assert waited.images
-            assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
-                {"path": "/actual/raw.h5", "status": "saved"}
-            ]
+            assert summary["artifacts"]["raw"] == full["raw_save"]["artifacts"]["raw"]
             assert (
                 full["actual"]["publication"]["cfg_ref"] == summary["actual"]["cfg_ref"]
             )
@@ -304,7 +295,7 @@ def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
         assert summary["error"]["reason"] == reason
         assert summary["run_op"] is None
         assert summary["actual"]["cfg_ref"] == full["actual"]["publication"]["cfg_ref"]
-        assert summary["steps"]["raw_save"]["status"] == "not_started"
+        assert summary["steps"]["raw_save"] is None
         assert len(client.transport.sent) == before
         assert [method for method, _ in client.transport.sent].count(
             "tab.run_start"
@@ -474,7 +465,7 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
 
 @pytest.mark.parametrize(
     "wire_op,phase,raw_status",
-    [(71, "run", "not_started"), (82, "raw_save", "failed"), (93, "analysis", "saved")],
+    [(71, "run", "not_started"), (93, "analysis", "saved")],
 )
 @pytest.mark.parametrize(
     "outcome",
@@ -509,10 +500,13 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
             ]["children"]["pulse_cfg"]["children"]["freq"]["input"],
             "source": "frequency_mhz",
         }
-        assert reply.data["raw_save"]["status"] == raw_status
-        assert reply.data["raw_save"]["path"] == (
-            "/actual/raw.h5" if wire_op == 93 else None
-        )
+        if wire_op == 93:
+            assert reply.data["raw_save"]["run_id"] == "run-a"
+            assert (
+                reply.data["raw_save"]["artifacts"]["raw"]["data"]["status"] == "Saved"
+            )
+        else:
+            assert reply.data["raw_save"] is None
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.save_data") == (0 if wire_op == 71 else 1)
@@ -604,8 +598,7 @@ def test_full_query_keeps_the_publication_used_before_run(tmp_path):
     ("pending_method", "wire_op", "phase", "raw_status"),
     [
         ("operation.await", 71, "run", "not_started"),
-        ("tab.save_data", None, "raw_save", "unknown"),
-        ("operation.await", 82, "raw_save", "unknown"),
+        ("tab.save_data", None, "preparing", "unknown"),
         ("operation.await", 93, "analysis", "saved"),
     ],
 )
@@ -648,12 +641,14 @@ def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
         assert terminal.data["status"] == "failed"
         assert terminal.data["error"]["reason"] == "connection_lost"
         assert terminal.data["error"]["phase"] == phase
-        assert terminal.data["raw_save"]["status"] == raw_status
-        if wire_op == 82:
-            assert terminal.data["raw_save"]["reserved_path"] == "/actual/raw.h5"
-            assert terminal.data["raw_save"]["path"] is None
         if raw_status == "saved":
-            assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+            assert terminal.data["raw_save"]["run_id"] == "run-a"
+            assert (
+                terminal.data["raw_save"]["artifacts"]["raw"]["data"]["status"]
+                == "Saved"
+            )
+        else:
+            assert terminal.data["raw_save"] is None
         state = client.call("status", {"execution": execution})
         assert state["error"] == terminal.data["error"]
         assert not reconnects
@@ -669,10 +664,9 @@ def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
     "failure, phase, raw_status",
     [
         ("run", "run", "not_started"),
-        ("raw_start", "raw_save", "failed"),
-        ("raw_finish", "raw_save", "failed"),
+        ("raw_start", "preparing", "failed"),
         ("analysis", "analysis", "saved"),
-        ("superseded_raw", "raw_save", "failed"),
+        ("superseded_raw", "preparing", "failed"),
         ("superseded_analysis", "analysis", "saved"),
         ("superseded_writeback", "writeback_read", "saved"),
         ("image", "analysis", "saved"),
@@ -685,7 +679,7 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
     gui = LookbackGui()
 
     def respond(method, params):
-        fail_operation = {"run": 71, "raw_finish": 82, "analysis": 93}.get(failure)
+        fail_operation = {"run": 71, "analysis": 93}.get(failure)
         if method == "operation.await" and params["operation_id"] == fail_operation:
             return {
                 "reason": "completed",
@@ -700,7 +694,7 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
         "superseded_raw": "tab.save_data",
         "superseded_analysis": "tab.analyze",
         "superseded_writeback": "tab.writeback_preview",
-        "image": "tab.save_image",
+        "image": "tab.save_artifacts",
         "writeback": "tab.writeback_preview",
     }.get(failure)
     if failed_method:
@@ -724,36 +718,30 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
         assert len(client.transport.sent) == before
         assert summary["status"] == data["status"] == "failed", data
         assert summary["error"] == data["error"]
-        assert summary["steps"]["raw_save"]["status"] == raw_status
-        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == (
-            [{"path": "/actual/raw.h5", "status": "saved"}]
-            if raw_status == "saved"
-            else [{"path": "/actual/raw.h5", "status": "reserved"}]
-            if failure == "raw_finish"
-            else []
-        )
-        if failure == "writeback":
-            assert summary["artifacts"]["analysis"]["trace"]["members"]["image"] == [
-                {"path": "/actual/trace.png", "status": "saved"}
-            ]
+        if raw_status == "saved":
+            assert summary["steps"]["raw_save"]["status"] == "saved"
+            assert summary["artifacts"]["raw"] == data["raw_save"]["artifacts"]["raw"]
+        else:
+            assert summary["steps"]["raw_save"] is None
         assert reply.is_error
         assert data["error"]["phase"] == phase
         if failure.startswith("superseded"):
             assert data["error"]["reason"] == "result_superseded"
-        assert data["raw_save"]["status"] == raw_status
         assert data["tab"] == "t"
         assert data["run_op"] is not None
         if raw_status == "saved":
-            assert data["raw_save"]["path"] == "/actual/raw.h5"
-        if failure == "raw_finish":
-            assert data["raw_save"]["reserved_path"] == "/actual/raw.h5"
-            assert data["raw_save"]["operation_outcome"]["status"] == "failed"
+            assert data["raw_save"]["run_id"] == "run-a"
+        else:
+            assert data["raw_save"] is None
         if failure in ("image", "writeback"):
             assert data["analysis"]["result"]["summary"] == {"offset": 0.24}
         if failure == "writeback":
-            assert data["analysis"]["saved_images"] == [
-                {"figure_name": "trace", "image_path": "/actual/trace.png"}
-            ]
+            assert (
+                data["analysis"]["save_report"]["artifacts"]["analysis"]["results"][
+                    "status"
+                ]
+                == "Saved"
+            )
             assert reply.images[0].data == PNG
         methods = [method for method, _ in client.transport.sent]
         for method in (
