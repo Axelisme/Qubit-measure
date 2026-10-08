@@ -14,7 +14,6 @@ from .env import InitEnv, WorkflowEnv
 from .models import (
     Aborted,
     Actor,
-    Capability,
     CommittedRecord,
     Completed,
     Done,

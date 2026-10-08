@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
-from typing import Literal
+from typing import Literal, assert_type
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -63,8 +63,6 @@ def _declare[P: BaseModel, T: BaseModel](
         name,
         plan=plan,
         tunables=tunables,
-        state=State,
-        record=object,
         init=_init,
     )(step)
 
@@ -87,10 +85,7 @@ def test_decorator_preserves_function_and_does_not_execute_init() -> None:
         "original",
         plan=Plan,
         tunables=Knobs,
-        state=State,
-        record=object,
         init=init,
-        requires=("context",),
     )(original)
     registry = WorkflowRegistry()
     registry.add(declared)
@@ -145,13 +140,12 @@ def test_record_type_is_not_required_to_have_a_serialization_schema() -> None:
         "opaque-record",
         plan=Plan,
         tunables=Knobs,
-        state=State,
-        record=OpaqueRecord,
         init=_init,
     )(step)
     registry = WorkflowRegistry()
     registry.add(declared)
     assert registry.names() == ("opaque-record",)
+    assert_type(declared, WorkflowStep[Plan, Knobs, State, OpaqueRecord, None])
 
 
 class EmptyTupleKnobs(BaseModel):
@@ -252,39 +246,12 @@ def test_unsupported_tunables_are_rejected(
         _declare("invalid-knobs", Plan, knobs)
 
 
-def test_state_must_be_a_dataclass_type() -> None:
-    with pytest.raises(ValueError, match="dataclass type"):
-        workflow(
-            "invalid-state",
-            plan=Plan,
-            tunables=Knobs,
-            state=int,
-            record=str,
-            init=lambda _env, _plan: 0,
-        )
-
-
-def test_capabilities_cannot_be_repeated() -> None:
-    with pytest.raises(ValueError, match="unique known capabilities"):
-        workflow(
-            "invalid-requires",
-            plan=Plan,
-            tunables=Knobs,
-            state=State,
-            record=object,
-            init=_init,
-            requires=("soc", "soc"),
-        )
-
-
 def test_function_cannot_be_declared_twice() -> None:
     declared = _declare("once", Plan, Knobs)
     decorate = workflow(
         "again",
         plan=Plan,
         tunables=Knobs,
-        state=State,
-        record=object,
         init=_init,
     )
     with pytest.raises(ValueError, match="already declared"):

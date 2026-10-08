@@ -11,7 +11,6 @@ from pydantic import JsonValue
 
 from .ports import DeviceSnapshot
 
-type Capability = Literal["soc", "devices", "context"]
 type Lifecycle = Literal[
     "running", "pausing", "paused", "stopping", "done", "aborted", "stopped", "failed"
 ]

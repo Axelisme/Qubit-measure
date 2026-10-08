@@ -204,8 +204,6 @@ class Rig:
             "example",
             plan=Plan,
             tunables=Tunables,
-            state=State,
-            record=int,
             init=self.init,
         )(invoke)
         self.engine.start(

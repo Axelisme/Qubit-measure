@@ -66,7 +66,6 @@ def metadata(tmp_path: Path, clock: ManualClock) -> RunMetadata:
         workflow="storage-contract",
         plan={"targets": [1, 2]},
         tunables={"reps": 2},
-        requires=(),
         roots=RunPaths(tmp_path / "metadata-slug", tmp_path / "data-slug"),
         started_at=clock.now(),
     )

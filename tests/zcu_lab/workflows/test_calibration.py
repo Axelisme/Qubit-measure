@@ -143,10 +143,7 @@ class Rig:
             "calibration",
             plan=T1Plan,
             tunables=CalibrationTunables,
-            state=State,
-            record=Record,
             init=init,
-            requires=("soc", "context"),
         )
         def step(
             env: WorkflowEnv[Calibrated],

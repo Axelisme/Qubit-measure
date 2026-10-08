@@ -78,7 +78,8 @@ class Engine[C]:
 
         plan/tunables are revalidated against the declaration and copied. paths
         are distinct, non-overlapping, nonexistent directories; identity is
-        host-supplied provenance. Missing requires raise MissingCapability.
+        host-supplied provenance. Port availability is not checked here;
+        missing ports raise MissingCapability when first used during execute.
         An active run raises InvalidRunState. init waits for first execute.
         """
         with self._lock:
