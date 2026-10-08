@@ -19,6 +19,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
+    ComponentFocusChangedPayload,
     ContextSwitchedPayload,
     PredictorChangedPayload,
     SocChangedPayload,
@@ -207,6 +208,9 @@ class MainWindowEventCoordinator:
         self._subs.subscribe(bus, RunStartedPayload, self._on_run_started)
         self._subs.subscribe(bus, RunFinishedPayload, self._on_run_finished)
         self._subs.subscribe(bus, ContextSwitchedPayload, self._on_context_switched)
+        self._subs.subscribe(
+            bus, ComponentFocusChangedPayload, self._on_component_focus_changed
+        )
         self._subs.subscribe(bus, TabAddedPayload, self._on_tab_added)
         self._subs.subscribe(bus, TabClosedPayload, self._on_tab_closed)
         self._subs.subscribe(bus, TabActivatedPayload, self._on_tab_activated)
@@ -242,6 +246,12 @@ class MainWindowEventCoordinator:
         """Refresh terminal state without changing the user's selected pane."""
         self._react_to_tab(payload.tab_id, (_TabReaction.INTERACTION,))
         self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
+
+    def _on_component_focus_changed(
+        self, payload: ComponentFocusChangedPayload
+    ) -> None:
+        del payload
+        self._host.refresh_context_panel()
 
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload

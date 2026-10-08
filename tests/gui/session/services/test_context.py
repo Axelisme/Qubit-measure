@@ -107,6 +107,40 @@ def _entry_command(context: ContextService, command: str, entry_id: str) -> obje
     return context.entry_ledger(entry_id)
 
 
+def test_single_candidate_point_publishes_automatic_focus(context, tmp_path):
+    entry = _entry(tmp_path)
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0)
+    context.install_entry(entry)
+    context.new_point(_new_request("first"))
+    first = context.get_component_focus()
+    assert first.name == "Q1"
+    assert first.target == context.read_context().target
+    context.set_component_focus(None)
+    context.use_point(PointUseRequest("first"))
+    assert context.get_component_focus().name == "Q1"
+
+
+def test_multiple_candidates_do_not_guess_focus(context, rich_entry):
+    context.install_entry(rich_entry)
+    context.new_point(_new_request("first"))
+    assert context.get_component_focus().name is None
+    context.set_component_focus("Q2")
+    context.use_point(PointUseRequest("first"))
+    assert context.get_component_focus().name is None
+
+
+def test_first_component_uses_default_focus_without_overwriting_selection(
+    context, tmp_path
+):
+    context.install_entry(_entry(tmp_path))
+    context.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
+    assert context.get_component_focus().name == "Q1"
+    context.add_component("Q2", "fake/drive/a", {"rate": 5100.0})
+    assert context.get_component_focus().name == "Q1"
+    context.set_component_focus(None)
+    assert context.get_component_focus().name is None
+
+
 def test_parameter_write_preserves_selected_component_focus(
     context: ContextService,
     rich_entry: ResultEntry,

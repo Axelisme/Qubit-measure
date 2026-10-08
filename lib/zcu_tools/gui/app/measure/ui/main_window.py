@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -32,6 +33,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
+from zcu_tools.resources.entry import RoleResolutionError
 
 from .exp_tab_widget import ExpTabWidget, TabActions
 from .main_dialog_registry import MainDialogRegistry
@@ -94,7 +96,13 @@ class _MainWindowTabActions:
 
 
 class MainWindow(QMainWindow):
-    """Top-level window; implements ViewProtocol for Controller callbacks."""
+    """Present session focus and each tab's immutable role capture.
+
+    The always-visible component_focus combo projects context_control focus.
+    Selection calls the owner; it affects only newly created tabs. Tab titles
+    and tooltips use their own TabSnapshot.parameters.roles, never live focus.
+    Expected role failures during create_tab are shown without creating a tab.
+    """
 
     def __init__(
         self,
@@ -137,16 +145,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(self._toolbar.layout)
 
         # --- context / predictor status bar ---
-        ctx_bar = QHBoxLayout()
-        ctx_bar.addWidget(QLabel("Context:"))
-        self._ctx_label = QLabel("(none)")
-        ctx_bar.addWidget(self._ctx_label)
-        ctx_bar.addSpacing(24)
-        ctx_bar.addWidget(QLabel("Predictor:"))
-        self._predictor_label = QLabel("none")
-        ctx_bar.addWidget(self._predictor_label)
-        ctx_bar.addStretch()
-        main_layout.addLayout(ctx_bar)
+        main_layout.addLayout(self._build_context_bar())
 
         # --- tab widget ---
         self._tabs = QTabWidget()
@@ -168,6 +167,63 @@ class MainWindow(QMainWindow):
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
+    def _build_context_bar(self) -> QHBoxLayout:
+        """Assemble the persistent context/focus/predictor controls."""
+        ctx_bar = QHBoxLayout()
+        ctx_bar.addWidget(QLabel("Context:"))
+        self._ctx_label = QLabel("(none)")
+        ctx_bar.addWidget(self._ctx_label)
+        ctx_bar.addWidget(QLabel("Focus:"))
+        self._focus_combo = QComboBox(self)
+        self._focus_combo.setObjectName("component_focus")
+        self._focus_combo.currentIndexChanged.connect(self._on_focus_selected)
+        ctx_bar.addWidget(self._focus_combo)
+        ctx_bar.addSpacing(24)
+        ctx_bar.addWidget(QLabel("Predictor:"))
+        self._predictor_label = QLabel("none")
+        ctx_bar.addWidget(self._predictor_label)
+        ctx_bar.addStretch()
+        self._render_component_focus()
+        return ctx_bar
+
+    def _on_focus_selected(self, index: int) -> None:
+        """Translate a combo selection into the session owner's focus command."""
+        if index < 0:
+            return
+        name = self._focus_combo.itemData(index)
+        if name is not None and not isinstance(name, str):
+            raise TypeError("Component focus item data must be a name or None")
+        self._ctrl.context_control.set_component_focus(name)
+
+    def _render_component_focus(self) -> None:
+        """Project all owner options in kind groups without sending commands."""
+        focus = self._ctrl.context_control.get_component_focus()
+        signals_blocked = self._focus_combo.blockSignals(True)
+        try:
+            self._focus_combo.clear()
+            self._focus_combo.addItem("(none)", None)
+            previous_kind: str | None = None
+            for option in sorted(
+                focus.components, key=lambda option: (option.kind, option.name)
+            ):
+                if previous_kind != option.kind:
+                    self._focus_combo.insertSeparator(self._focus_combo.count())
+                self._focus_combo.addItem(f"{option.name} ({option.kind})", option.name)
+                previous_kind = option.kind
+            self._focus_combo.setCurrentIndex(self._focus_combo.findData(focus.name))
+        finally:
+            self._focus_combo.blockSignals(signals_blocked)
+
+    @staticmethod
+    def _captured_tab_label(adapter_name: str, snapshot: TabSnapshot) -> str:
+        """Format only this tab's fixed role names, never the current focus."""
+        roles = snapshot.parameters.roles if snapshot.parameters is not None else None
+        if roles is None:
+            return adapter_name
+        return " · ".join(
+            [adapter_name, *(f"{role}={name}" for role, name in roles.names.items())]
+        )
+
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         self._events.close()
 
@@ -176,10 +232,10 @@ class MainWindow(QMainWindow):
         if tab_id in self._tab_widgets:
             return
 
-        tab_label = adapter_name
         # Construct the tab from the same immutable capabilities snapshot used
         # for its initial attach, so optional panes never need dynamic rebuilds.
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        tab_label = self._captured_tab_label(adapter_name, snapshot)
         caps = snapshot.capabilities
         if caps is None:
             raise RuntimeError(
@@ -198,7 +254,9 @@ class MainWindow(QMainWindow):
         # A tab can be added while another tab is running. Project the current
         # State-owned running identity immediately instead of waiting for a new
         # lifecycle event.
-        self._set_tab_activity_marker(tab_id, self._ctrl.get_running_tab_id() == tab_id)
+        self._set_tab_activity_marker(
+            tab_id, active=self._ctrl.get_running_tab_id() == tab_id
+        )
 
     def remove_tab_widget(self, tab_id: str) -> None:
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
@@ -326,7 +384,7 @@ class MainWindow(QMainWindow):
         if tab_w is not None:
             tab_w.clear_all_figures()
 
-    def _set_tab_activity_marker(self, tab_id: str, active: bool) -> None:
+    def _set_tab_activity_marker(self, tab_id: str, *, active: bool) -> None:
         """Project Run activity on one top-level tab without storing busy state."""
         tab_w = self._tab_widgets.get(tab_id)
         if not isinstance(tab_w, QWidget):
@@ -347,7 +405,7 @@ class MainWindow(QMainWindow):
     def _refresh_tab_activity_markers(self, running_tab_id: str | None) -> None:
         """Derive every tab marker from the current State running identity."""
         for tab_id in self._tab_widgets:
-            self._set_tab_activity_marker(tab_id, tab_id == running_tab_id)
+            self._set_tab_activity_marker(tab_id, active=tab_id == running_tab_id)
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
@@ -369,6 +427,12 @@ class MainWindow(QMainWindow):
         tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_context_panel(self) -> None:
+        """Project committed context and component focus without changing captures.
+
+        Focus options include all components grouped by kind. Empty/ambiguous
+        focus remains unselected; rendering must not submit a focus command.
+        """
+        self._render_component_focus()
         label = self._ctrl.get_active_context_label()
         if label is not None:
             # file-backed flux context is active
@@ -521,7 +585,16 @@ class MainWindow(QMainWindow):
         return self._ctrl.get_adapter_names()
 
     def create_tab(self, adapter_name: str) -> None:
-        self._ctrl.new_tab(adapter_name)
+        """Create from session focus; present role failures without retry or Run.
+
+        adapter_name is a registered measure adapter key. Expected role errors
+        appear through the dialog presenter and leave the tab list unchanged.
+        Other failures propagate to the existing UI error boundary.
+        """
+        try:
+            self._ctrl.new_tab(adapter_name)
+        except RoleResolutionError as exc:
+            self.show_error_dialog("Cannot create tab", str(exc))
 
     def reload_experiments(self) -> None:
         if (

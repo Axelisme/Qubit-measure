@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtGui import QKeyEvent
-from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QStackedWidget, QWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QStackedWidget,
+    QTabWidget,
+    QWidget,
+)
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -48,9 +56,23 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.events import SocChangedPayload
+from zcu_tools.gui.session.context_types import (
+    ComponentFocus,
+    ComponentOption,
+    EntryDraft,
+)
+from zcu_tools.gui.session.events import ComponentFocusChangedPayload, SocChangedPayload
+from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry import (
+    ComponentSchema,
+    RoleResolutionError,
+    RoleSpec,
+    component_registry,
+)
+from zcu_tools.resources.entry.schema import PointDocument
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._cfg_fakes import PublishedHost, configure_cfg_lookup
@@ -64,6 +86,144 @@ def _mock_ctrl() -> MagicMock:
     return ctrl
 
 
+@pytest.fixture
+def focus_captures() -> Iterator[tuple[ParameterContext, ParameterContext]]:
+    before = component_registry.kinds()
+    component_registry.register("ui-focus/driver", ComponentSchema)
+    component_registry.register("ui-focus/sensor", ComponentSchema)
+    try:
+        point = PointDocument.model_validate(
+            {
+                "format": "zcu.parameter-container",
+                "format_version": "1.0",
+                "general": {"created_at": "2026-10-08T00:00:00Z"},
+                "components": {
+                    "Q1": {"kind": "ui-focus/driver"},
+                    "Q2": {"kind": "ui-focus/driver"},
+                    "R1": {"kind": "ui-focus/sensor"},
+                    "R2": {"kind": "ui-focus/sensor"},
+                },
+            }
+        )
+        library = LibrarySnapshot(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        )
+        declarations = {
+            "qubit": RoleSpec("ui-focus/driver"),
+            "resonator": RoleSpec("ui-focus/sensor"),
+        }
+        captures = tuple(
+            ParameterContext(
+                point=point,
+                library=library,
+                target=EntryDraft(entry_id="entry"),
+                roles=RoleBinding(
+                    qubit, declarations, {"qubit": qubit, "resonator": resonator}
+                ),
+            )
+            for qubit, resonator in (("Q1", "R1"), ("Q2", "R2"))
+        )
+        yield captures[0], captures[1]
+    finally:
+        component_registry.unregister("ui-focus/driver")
+        component_registry.unregister("ui-focus/sensor")
+        assert component_registry.kinds() == before
+
+
+def test_main_window_focus_selection_projects_owner_without_rebinding_tabs(qapp):
+    ctrl = _apply_window_defaults(_mock_ctrl())
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    target = EntryDraft(entry_id="entry")
+    options = (
+        ComponentOption("Q1", "qubit/a"),
+        ComponentOption("Q2", "qubit/a"),
+        ComponentOption("R1", "resonator"),
+    )
+    focus = ComponentFocus(target, "Q1", options)
+    facet = ctrl.context_control
+    facet.get_component_focus.return_value = focus
+    window = MainWindow(ctrl)
+    combo = window.findChild(QComboBox, "component_focus")
+    assert combo is not None
+    window.refresh_context_panel()
+    assert combo.currentData() == "Q1"
+    assert {
+        combo.itemData(index)
+        for index in range(combo.count())
+        if combo.itemData(index) is not None
+    } == {"Q1", "Q2", "R1"}
+    facet.set_component_focus.assert_not_called()
+
+    def select(name: str | None) -> ComponentFocus:
+        selected = replace(focus, name=name)
+        facet.get_component_focus.return_value = selected
+        bus.emit(ComponentFocusChangedPayload(focus=selected))
+        return selected
+
+    facet.set_component_focus.side_effect = select
+    combo.setCurrentIndex(combo.findData("Q2"))
+    assert facet.get_component_focus().name == "Q2"
+    facet.set_component_focus.assert_called_once_with("Q2")
+    ctrl.new_tab.assert_not_called()
+    externally_selected = replace(focus, name="R1")
+    facet.get_component_focus.return_value = externally_selected
+    bus.emit(ComponentFocusChangedPayload(focus=externally_selected))
+    assert combo.currentData() == "R1"
+    facet.set_component_focus.assert_called_once_with("Q2")
+
+
+def test_main_window_titles_keep_captured_roles_after_focus_and_activity(
+    qapp, focus_captures
+):
+    ctrl = _apply_window_defaults(_mock_ctrl())
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_running_tab_id.return_value = None
+    captures = dict(zip(("a", "b"), focus_captures, strict=True))
+    snapshots = {
+        tab_id: replace(
+            _snapshot(tab_id, supports_analysis=False, analyze_params=None),
+            parameters=capture,
+        )
+        for tab_id, capture in captures.items()
+    }
+    ctrl.get_tab_snapshot.side_effect = snapshots.__getitem__
+    window = MainWindow(ctrl)
+    window.add_tab_widget("a", "fake")
+    window.add_tab_widget("b", "fake")
+    tabs = window.findChild(QTabWidget)
+    assert tabs is not None and tabs.count() == 2
+    for index, qubit, resonator in ((0, "Q1", "R1"), (1, "Q2", "R2")):
+        assert f"qubit={qubit}" in tabs.tabText(index)
+        assert f"resonator={resonator}" in tabs.tabToolTip(index)
+    selected = ComponentFocus(EntryDraft(entry_id="entry"), "Q2", ())
+    ctrl.context_control.get_component_focus.return_value = selected
+    bus.emit(ComponentFocusChangedPayload(focus=selected))
+    window.refresh_run_lock("a")
+    assert "qubit=Q1" in tabs.tabText(0)
+    assert "resonator=R1" in tabs.tabToolTip(0)
+    window.refresh_run_lock(None)
+    assert "qubit=Q1" in tabs.tabText(0)
+    assert "resonator=R1" in tabs.tabToolTip(0)
+    assert snapshots["a"].parameters is focus_captures[0]
+
+
+def test_main_window_role_failure_is_presented_without_registering_tab(qapp):
+    ctrl = _apply_window_defaults(_mock_ctrl())
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.new_tab.side_effect = RoleResolutionError(
+        "qubit", "R1", "qubit/*", "wrong kind"
+    )
+    dialogs = RecordingDialogPresenter()
+    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window.create_tab("fake")
+    assert len(dialogs.calls) == 1
+    assert "qubit" in dialogs.calls[0].message
+    tabs = window.findChild(QTabWidget)
+    assert tabs is not None and tabs.count() == 0
+
+
 def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     """Set the minimal return values required by MainWindow.__init__ on a mock ctrl.
 
@@ -71,6 +231,12 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     Stub the count to keep tests independent of live operations.
     """
     ctrl.active_operation_count.return_value = 0
+    ctrl.get_active_context_label.return_value = None
+    ctrl.has_draft_context.return_value = False
+    ctrl.has_project.return_value = False
+    ctrl.context_control.get_component_focus.return_value = ComponentFocus(
+        None, None, ()
+    )
     ctrl.get_session_env.return_value = SessionEnv(
         parameters=None, soc=None, soccfg=None
     )
