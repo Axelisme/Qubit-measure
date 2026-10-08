@@ -68,6 +68,24 @@ def test_codec_encodes_required_zero_q_and_decodes_it_as_none() -> None:
     [
         ([0, 1], ["bad", 0], None, "array_not_numeric"),
         ([0, 1], np.array([0.0, 1.0j]), None, "array_not_numeric"),
+        (
+            np.array([0.0, np.complex128(1.0j)], dtype=object),
+            [0, 1],
+            None,
+            "array_not_numeric",
+        ),
+        (
+            [0, 1],
+            np.array([0.0, np.complex128(1.0j)], dtype=object),
+            None,
+            "array_not_numeric",
+        ),
+        (
+            [0, 1],
+            [0, 0],
+            np.array([0.0, np.complex128(1.0j)], dtype=object),
+            "array_not_numeric",
+        ),
         ([0, 1], [[0, 1]], None, "array_not_1d"),
         ([0, 1], [0, np.nan], None, "array_non_finite"),
         ([0, np.inf], [0, 1], None, "array_non_finite"),
