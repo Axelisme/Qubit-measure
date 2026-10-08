@@ -320,17 +320,8 @@ def test_raw_save_rejects_malformed_native_report_at_the_wire_boundary(
         assert run.snapshot().raw_save is None
 
 
-@pytest.mark.parametrize(
-    "scenario,expected_status",
-    [
-        ("before_run", "not_started"),
-        ("without_save", "unknown"),
-        ("uncertain_save", "unknown"),
-    ],
-)
-def test_recipe_raw_step_does_not_infer_save_admission_from_missing_report(
-    tmp_path, scenario, expected_status
-):
+@pytest.mark.parametrize("scenario", ["before_run", "without_save", "uncertain_save"])
+def test_recipe_raw_step_is_null_without_report(tmp_path, scenario):
     def sample(session: RecipeSession) -> RecipeGenerator:
         if scenario == "before_run":
             return
@@ -353,7 +344,7 @@ def test_recipe_raw_step_does_not_infer_save_admission_from_missing_report(
         assert reply.data["status"] == (
             "failed" if scenario == "uncertain_save" else "finished"
         )
-        assert reply.data["steps"]["raw_save"]["status"] == expected_status
+        assert reply.data["steps"]["raw_save"] is None
         if scenario == "uncertain_save":
             assert reply.data["error"]["reason"] == "response_encoding_failed"
         before = list(client.transport.sent)
