@@ -478,12 +478,11 @@ def test_author_sweep_rejects_empty_sources_before_any_edit(tmp_path, key, label
         assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
 
 
-@pytest.mark.parametrize("name", [None, "coil"])
-def test_author_flux_device_checks_units_without_changing_coordinates(tmp_path, name):
+def test_author_flux_device_checks_units_without_changing_coordinates(tmp_path):
     gui = _SweepGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        tab.use_flux_device(name, unit="A")
+        tab.use_flux_device("coil", unit="A")
     assert (
         gui.publication["tree"]["children"]["dev"]["children"]["flux_dev"]["input"][
             "resolved"
@@ -502,7 +501,7 @@ def test_author_flux_device_checks_units_without_changing_coordinates(tmp_path, 
         ({"unit": "A", "type_name": "YOKOGS200", "info": {"type": "YOKOGS200"}}, "V"),
         (
             {"unit": "none", "type_name": "FakeDevice", "info": {"type": "FakeDevice"}},
-            None,
+            "A",
         ),
         (
             {"unit": "none", "type_name": "FakeDevice", "info": {"type": "Other"}},
@@ -538,14 +537,17 @@ def test_author_fake_flux_requires_explicit_native_opt_in(tmp_path):
     assert gui.publication["cfg_ref"]["revision"] == "3"
 
 
-def test_author_flux_device_without_a_default_reports_a_named_gap(tmp_path):
+@pytest.mark.parametrize(
+    "name,unit", [("", "A"), ("coil", ""), (" ", "A"), ("coil", " ")]
+)
+def test_author_flux_device_rejects_blank_assertions_before_edit(tmp_path, name, unit):
     gui = _SweepGui()
     with recipe_client(tmp_path, gui) as client:
-        client.transport.replies["value.list"] = {"ok": True, "result": {"values": []}}
         tab = RecipeSession(client.context).open_tab("lookback")
-        with pytest.raises(RecipeNeedsParameters) as error:
-            tab.use_flux_device()
-        assert [item.parameter for item in error.value.missing] == ["flux_device"]
+        before = len(client.transport.sent)
+        with pytest.raises(ValueError, match="must be non-empty"):
+            tab.use_flux_device(name, unit=unit)
+        assert len(client.transport.sent) == before
     assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
@@ -695,14 +697,14 @@ def test_author_run_captures_asserted_flux_unit_without_conversion(tmp_path):
     gui = _SweepGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        tab.use_flux_device(unit="A")
-        tab.set_flux_sweep("sweep.flux")
+        tab.use_flux_device("coil", unit="A")
+        tab.set_flux_sweep("sweep.flux", start=0.005, stop=-0.001)
         capture = tab.run().snapshot()
         assert capture is not None
         fields = capture.actual["fields"]
         assert fields["dev.flux_dev"] == {
             "value": "coil",
-            "source": "device.flux.name",
+            "source": "explicit",
             "unit": "A",
         }
         assert fields["sweep.flux"]["value"] == {
@@ -711,4 +713,4 @@ def test_author_run_captures_asserted_flux_unit_without_conversion(tmp_path):
             "expts": 19,
         }
         assert fields["sweep.flux"].get("unit") == "A"
-        assert fields["sweep.flux"].get("source") == "gui_calibration"
+        assert fields["sweep.flux"].get("source") == "explicit"
