@@ -22,7 +22,15 @@ def fitcos(
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
 ) -> FitResult:
-    """fitparams = [y0, yscale, freq (1/x), phase (deg)]"""
+    """Fit [y0, yscale, freq (1/x), phase (deg)] and return parameters/covariance.
+
+    Phase is unbounded during optimization and returned modulo 360 degrees.
+    ``fitparams`` supplies initial guesses; non-None ``fixedparams`` entries
+    hold those parameters fixed. Automatic initialization expects regularly
+    spaced coordinates in ascending or descending order.
+    """
+    if xdata[0] > xdata[-1]:
+        xdata, ydata = xdata[::-1], ydata[::-1]
     if fitparams is None:
         fitparams = [None] * 4
     fitparams = list(fitparams)
@@ -52,8 +60,8 @@ def fitcos(
     yscale = fitparams[1]
     freq = fitparams[2]
     bounds = (
-        [-np.inf, -1.1 * np.abs(yscale), 0.2 * freq, -360],
-        [np.inf, 1.1 * np.abs(yscale), 5 * freq, 360],
+        [-np.inf, -1.1 * np.abs(yscale), 0.2 * freq, -np.inf],
+        [np.inf, 1.1 * np.abs(yscale), 5 * freq, np.inf],
     )
 
     pOpt, pCov = fit_func(xdata, ydata, cosfunc, fitparams, bounds, fixedparams)
@@ -79,7 +87,16 @@ def fitdecaycos(
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
 ) -> FitResult:
-    """return (y0, yscale, freq, phase, decay_time), (pOpt, pCov)"""
+    """Fit [y0, yscale, freq (1/x), phase (deg), decay_time] and covariance.
+
+    Phase is unbounded during optimization and returned modulo 360 degrees.
+    ``fitparams`` supplies initial guesses; non-None ``fixedparams`` entries
+    hold those parameters fixed. Decay time uses the units of ``xdata``.
+    Automatic initialization expects regularly spaced coordinates in ascending
+    or descending order.
+    """
+    if xdata[0] > xdata[-1]:
+        xdata, ydata = xdata[::-1], ydata[::-1]
     if fitparams is None:
         fitparams = [None] * 5
     fitparams = list(fitparams)
@@ -117,8 +134,8 @@ def fitdecaycos(
     freq = fitparams[2]
     decay_time = fitparams[4]
     bounds = (
-        [-np.inf, -1.1 * np.abs(yscale), freq_bound[0], -360, 0],
-        [np.inf, 1.1 * np.abs(yscale), freq_bound[1], 360, np.inf],
+        [-np.inf, -1.1 * np.abs(yscale), freq_bound[0], -np.inf, 0],
+        [np.inf, 1.1 * np.abs(yscale), freq_bound[1], np.inf, np.inf],
     )
 
     pOpt, pCov = fit_func(xdata, ydata, decaycos, fitparams, bounds, fixedparams)

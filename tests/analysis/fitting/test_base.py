@@ -61,6 +61,46 @@ def test_fitdecaycos_recovers_parameters():
     assert abs(pOpt[4] - true[4]) / true[4] < 1e-1
 
 
+@pytest.mark.parametrize("decay", [False, True])
+@pytest.mark.parametrize("initial_phase,true_phase", [(355.0, 2.0), (-355.0, 358.0)])
+def test_cosine_phase_can_cross_wrap_boundary(
+    decay: bool, initial_phase: float, true_phase: float
+) -> None:
+    x = np.linspace(0.03, 1.89, 161)
+    truth = [0.1, 0.7, 2.0, true_phase]
+    initial = [0.1, 0.7, 2.0, initial_phase]
+    if decay:
+        truth.append(15.0)
+        initial.append(15.0)
+    model = decaycos if decay else cosfunc
+    fitter = fitdecaycos if decay else fitcos
+    y = model(x, *truth)
+
+    params, covariance = fitter(x, y, fitparams=initial)
+
+    assert 0.0 <= params[3] < 360.0
+    np.testing.assert_allclose(params[2], truth[2], atol=1e-7)
+    np.testing.assert_allclose(model(x, *params), y, atol=1e-7)
+    assert np.all(np.isfinite(covariance))
+
+
+@pytest.mark.parametrize("decay", [False, True])
+def test_cosine_auto_initialization_accepts_descending_coordinates(decay: bool) -> None:
+    x = np.linspace(0.03, 8.03, 201)[::-1]
+    truth = [1.1, 0.7, 2.0, 20.0]
+    if decay:
+        truth.append(15.0)
+    model = decaycos if decay else cosfunc
+    fitter = fitdecaycos if decay else fitcos
+    y = model(x, *truth)
+
+    params, covariance = fitter(x, y)
+
+    np.testing.assert_allclose(params[2], truth[2], atol=1e-7)
+    np.testing.assert_allclose(model(x, *params), y, atol=1e-7)
+    assert np.all(np.isfinite(covariance))
+
+
 def test_fitlor_recovers_parameters():
     x = np.linspace(-5, 5, 400)
     true = (0.1, 0.0, 1.0, 1.0, 0.5)
