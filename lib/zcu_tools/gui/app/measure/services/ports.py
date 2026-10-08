@@ -297,26 +297,9 @@ class CfgEditorPort(Protocol):
 
 
 @runtime_checkable
-class TabResultWritePort(Protocol):
-    """The narrow State-write contract a run policy depends on (ADR-0066).
-
-    Run's lifecycle writes only these three tab-result mutations; depending on
-    this port instead of the concrete ``State`` keeps the policy bound to a
-    contract, not behaviour (ADR-0067). ``State`` is the only implementer and
-    satisfies it structurally (no inheritance change)."""
-
-    def clear_tab_results(self, tab_id: str) -> RetiredPaneResources: ...
-    def set_tab_running(self, tab_id: str, *, running: bool) -> None: ...
-    def update_tab_result(
-        self, tab_id: str, result: object, *, source_operation_id: int | None = None
-    ) -> RetiredPaneResources: ...
-
-
-@runtime_checkable
 class TabAnalyzeWritePort(Protocol):
     """The narrow State-write contract an analyze / post-analyze policy depends
-    on (ADR-0066). Same rationale as ``TabResultWritePort``; ``State`` is the
-    only implementer. Result replacement methods return detached resources for
+    on (ADR-0066). Result replacement methods return detached resources for
     post-commit draft cleanup."""
 
     def set_tab_analyzing(self, tab_id: str, *, analyzing: bool) -> None: ...
@@ -362,11 +345,6 @@ class TabAnalyzeReadPort(Protocol):
     def session_env(self) -> SessionEnv: ...
 
     def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]: ...
-
-
-@runtime_checkable
-class RunStatePort(TabBusyQueryPort, TabResultWritePort, Protocol):
-    """Complete State surface consumed by ``RunService``."""
 
 
 @runtime_checkable

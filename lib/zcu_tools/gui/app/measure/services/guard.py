@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
+from zcu_tools.datafile import RunSnapshot
 from zcu_tools.device import DeviceInfo
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -42,7 +43,11 @@ class RunPermit:
 
     Carries detached resolved cfg and observed device settings captured at issue.
     RunService never re-reads State and the adapter never re-lowers a schema.
-    This credential requires no release; the operation owns its hardware lease.
+    snapshot fixes the tab's original saved entry/point/roles, or None for
+    drafts, unbound tabs or adapters without native evidence. experiment_tag is
+    the adapter's persistence declaration tag, or None. Neither is recaptured
+    after admission. This credential requires no release; the operation owns
+    its hardware lease.
     """
 
     tab_id: str
@@ -50,6 +55,8 @@ class RunPermit:
     request: RunRequest
     adapter: ExpAdapterProtocol
     accepted_cfg: AcceptedConfig
+    snapshot: RunSnapshot | None = None
+    experiment_tag: str | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +183,21 @@ class GuardService:
                 f"Run config invalid: {exc}", reason_code="invalid_cfg"
             ) from exc
 
+        snapshot = None
+        experiment_tag = tab.adapter.experiment_tag
+        if (
+            experiment_tag is not None
+            and tab.save_context is not None
+            and tab.save_context.storage is not None
+        ):
+            storage = tab.save_context.capture_storage()
+            snapshot = RunSnapshot(
+                entry_id=storage.entry_id,
+                entry_name=storage.entry_name,
+                point=storage.point,
+                description=storage.description,
+                roles=dict(storage.roles),
+            )
         logger.debug("acquire_run_permit: tab_id=%r", tab_id)
         return RunPermit(
             tab_id=tab_id,
@@ -183,6 +205,8 @@ class GuardService:
             request=req,
             adapter=tab.adapter,
             accepted_cfg=accepted,
+            snapshot=snapshot,
+            experiment_tag=experiment_tag,
         )
 
     def acquire_save_permit(self, tab_id: str) -> SavePermit:
