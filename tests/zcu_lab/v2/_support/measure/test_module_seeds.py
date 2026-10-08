@@ -2,10 +2,15 @@
 
 from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.measure.cfg_binding import (
+    MeasureCfgBindingHost,
+    MeasureCfgBindings,
+)
 from zcu_tools.gui.cfg import (
     DirectValue,
     EvalValue,
@@ -14,6 +19,7 @@ from zcu_tools.gui.cfg import (
     make_default_value,
     read_value_path,
 )
+from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgResource, CfgStatus
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
@@ -61,6 +67,7 @@ def _environment(
     faults: tuple[ContextSourceFault, ...] = (),
     calibration: float | str | None = None,
     calibration_present: bool = False,
+    bound: bool = True,
 ) -> SessionEnv:
     point = PointDocument.model_validate(
         {
@@ -104,7 +111,9 @@ def _environment(
         library=library,
         target=EntryDraft(entry_id="entry"),
         roles=RoleBinding(
-            "Q1", {"qubit": RoleSpec("seed/module_owner")}, {"qubit": "Q1"}
+            "Q1",
+            {"qubit": RoleSpec("seed/module_owner")},
+            {"qubit": "Q1"} if bound else {},
         ),
         source_faults=faults,
     )
@@ -171,6 +180,70 @@ def test_optional_scalar_seed_does_not_hide_unavailable_source(
     )
     with pytest.raises(ContextSourceUnavailableError):
         seed.resolve(env)
+
+
+@pytest.mark.parametrize("scaled", [False, True], ids=["path", "scaled-path"])
+@pytest.mark.parametrize("calibration", [6.0, None], ids=["calibrated", "null"])
+def test_unbound_scalar_defaults_publish_invalid_then_refresh_or_reset(
+    scaled: bool, calibration: float | None
+) -> None:
+    environment = _environment(bound=False)
+    seed = (
+        scaled_path_seed("qubit.calibration", factor=2.0, fallback_value=8.0)
+        if scaled
+        else path_seed("qubit.calibration", fallback=8.0)
+    )
+    expression = "2.0 * qubit.calibration" if scaled else "qubit.calibration"
+    definition = (
+        MeasureCfgBuilder()
+        .float("value", label="Value", default=seed)
+        .float("neighbor", label="Neighbor", default=3.0)
+        .build()
+    )
+    host = MagicMock(spec=MeasureCfgBindingHost)
+    host.list_device_names.return_value = []
+    host.arb_waveforms.list_data_keys.return_value = []
+    bindings = MeasureCfgBindings(host)
+    resource = CfgResource(
+        defaults=lambda: definition.instantiate(environment),
+        resolution=lambda: bindings.snapshot(
+            (), captured_values={}, parameters=environment.parameters
+        ),
+    )
+    initial = resource.observe()
+    assert initial.status is CfgStatus.INVALID
+    assert any(
+        diagnostic.path == ("value",) and "qubit" in diagnostic.message
+        for diagnostic in initial.diagnostics
+    )
+    assert read_value_path(resource.snapshot_inputs().value, "value") == EvalValue(
+        expression
+    )
+    assert read_value_path(resource.snapshot_inputs().value, "neighbor") == DirectValue(
+        3.0
+    )
+    with pytest.raises(CfgPreconditionError):
+        resource.accept(initial.ref.revision)
+
+    environment = _environment(calibration=calibration, calibration_present=True)
+    refreshed = resource.refresh(initial.ref.revision)
+    assert refreshed.ref.cfg_id == initial.ref.cfg_id
+    assert refreshed.ref.revision > initial.ref.revision
+    assert read_value_path(resource.snapshot_inputs().value, "value") == EvalValue(
+        expression
+    )
+    if calibration is not None:
+        assert refreshed.status is CfgStatus.VALID
+        accepted = resource.accept(refreshed.ref.revision)
+        assert accepted.values["value"] == (12.0 if scaled else 6.0)
+        assert accepted.values["neighbor"] == 3.0
+    else:
+        assert refreshed.status is CfgStatus.INVALID
+        with pytest.raises(CfgPreconditionError):
+            resource.accept(refreshed.ref.revision)
+        reset = resource.reset(refreshed.ref.revision)
+        assert reset.status is CfgStatus.VALID
+        assert resource.accept(reset.ref.revision).values["value"] == 8.0
 
 
 def _fallback() -> ReferenceValue:
