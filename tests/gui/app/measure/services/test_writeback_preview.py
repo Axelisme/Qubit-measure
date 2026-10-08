@@ -1,128 +1,159 @@
-"""Complete live writeback previews through the service's public boundary."""
+"""Complete previews read current values at each draft's fixed destination."""
 
-from dataclasses import replace
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
-    SessionEnv,
     WaveformWriteback,
 )
 from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
+from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.writeback import WritebackService
 from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.types import ContextReadiness
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
-def test_values_follow_live_context_retarget_and_do_not_alias_mutable_md():
-    context = SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
-        soc=None,
-        soccfg=None,
-        readiness=ContextReadiness.ACTIVE,
+@pytest.fixture
+def component_kinds():
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        yield
+        assert registry_state() == installed
+    finally:
+        restore_registry(before)
+
+
+@pytest.fixture
+def session(tmp_path: Path, component_kinds):
+    entry = ResultEntry.create(
+        "entry", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
     )
-    context.md.value = [1, 2]
-    service = WritebackService(MagicMock(), MagicMock())
+    entry.new_point("a")
+    bus = BaseEventBus()
+    context = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        bus,
+        bind_assets=ArbWaveformDatabase.info_at,
+    )
+    context.install_entry(entry)
+    control = ContextControlFacet(context=context)
+    control.use_point(PointUseRequest(entry.entry_id, "a"))
+    control.add_component("Q1", "fake/drive/a", {})
+    editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
+    service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
+    return entry, control, editor, service
+
+
+def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(session):
+    entry, control, _editor, service = session
+    target = control.read_context().target
+    control.set_parameter(target, "general.ext.value", [1, 2])
+    capture = control.read_context()
     draft = service.create_draft(
-        [
-            MetaDictWriteback(
-                target_name="value", description="d", proposed_value=[3, 4]
-            ),
-        ]
+        [MetaDictWriteback("general.ext.value", "d", proposed_value=[3, 4])],
+        parameters=capture,
     )
-    first = service.preview_values(draft, context)["md-1"]
+    first = service.preview_values(draft)["md-1"]
     assert first.current == [1, 2]
     assert first.proposed == [3, 4]
-    context.md.value.append(5)
+    control.set_parameter(target, "general.ext.value", [1, 2, 5])
     assert first.current == [1, 2]
     assert isinstance(first.proposed, list)
     first.proposed.append(99)
-    assert service.preview_values(draft, context)["md-1"].proposed == [3, 4]
-    draft.edit("md-1", target_name="other")
-    assert service.preview_values(draft, context)["md-1"].current is None
-    context.md.other = 7
-    assert service.preview_values(draft, context)["md-1"].current == 7
-    replacement = replace(context, md=MetaDict())
-    replacement.md.other = 8
-    assert service.preview_values(draft, replacement)["md-1"].current == 8
+    assert service.preview_values(draft)["md-1"].proposed == [3, 4]
+    assert service.preview_values(draft)["md-1"].current == [1, 2, 5]
+    draft.edit("md-1", target_name="general.ext.other")
+    assert service.preview_values(draft)["md-1"].current is None
+    control.set_parameter(target, "general.ext.other", 7)
+    assert service.preview_values(draft)["md-1"].current == 7
+    entry.new_point("b")
+    control.use_point(PointUseRequest(entry.entry_id, "b"))
+    control.set_parameter(control.read_context().target, "general.ext.other", 8)
+    assert service.preview_values(draft)["md-1"].current == 7
     assert service.get_all_applied(draft) == {"md-1": False}
     assert draft.items[0].selected is True
 
 
 @pytest.mark.parametrize("kind", ["module", "waveform"])
-def test_cfg_preview_contains_complete_current_and_live_draft_values(kind):
-    context = SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
-        soc=None,
-        soccfg=None,
-        readiness=ContextReadiness.ACTIVE,
-    )
+def test_cfg_preview_contains_complete_current_and_live_draft_values(
+    session, kind, monkeypatch
+):
+    _entry, control, editor, service = session
+    target = control.read_context().target
     if kind == "module":
-        cfg = ModuleCfgFactory.from_raw(
-            {
-                "type": "pulse",
-                "ch": 0,
-                "nqz": 1,
-                "freq": 100.0,
-                "gain": 0.5,
-                "phase": 0.0,
-                "pre_delay": 0.0,
-                "post_delay": 0.0,
-                "waveform": {"style": "const", "length": 0.1},
-            }
+        cfg = PulseSpec(
+            ch=0, nqz=1, freq=100.0, gain=0.5, waveform=ConstWaveformCfg(length=0.1)
         )
-        context.ml.modules["target"] = cfg
-        spec, value = module_cfg_to_value(cfg)
-        item_type, item_id = ModuleWriteback, "ml-1"
+        name = "Q1.pulses.target"
+        control.set_module(target, name, cfg)
+        capture = control.read_context()
+        spec, value = module_cfg_to_value(capture.library.get_module(name))
+        proposal = ModuleWriteback(name, "d", edit_schema=CfgSchema(spec, value))
+        item_id, path, edited = "ml-1", "freq", 250.0
     else:
-        cfg = WaveformCfgFactory.from_raw({"style": "const", "length": 0.1})
-        context.ml.waveforms["target"] = cfg
-        spec, value = waveform_cfg_to_value(cfg)
-        item_type, item_id = WaveformWriteback, "wf-1"
-    schema = CfgSchema(spec, value)
-    editor = MagicMock()
-    editor.open_seeded.return_value = ("editor", ())
-    editor.get_draft.return_value.snapshot.return_value = schema
-    service = WritebackService(editor, MagicMock())
-    draft = service.create_draft(
-        [
-            item_type(target_name="target", description="d", edit_schema=schema),
-        ]
-    )
-
-    preview = service.preview_values(draft, context)[item_id]
-
-    assert preview.current == cfg.to_dict()
-    assert preview.proposed == cfg.to_dict()
-    draft.edit(item_id, target_name="new")
-    missing = service.preview_values(draft, context)[item_id]
+        name = "Q1.waveforms.target"
+        control.set_waveform(target, name, ConstWaveformCfg(length=0.1))
+        capture = control.read_context()
+        spec, value = waveform_cfg_to_value(capture.library.get_waveform(name))
+        proposal = WaveformWriteback(name, "d", edit_schema=CfgSchema(spec, value))
+        item_id, path, edited = "wf-1", "length", 0.2
+    draft = service.create_draft([proposal], parameters=capture)
+    preview = service.preview_values(draft)[item_id]
+    assert preview.current == capture.library.entry_value(name, kind=kind)
+    if kind == "module":
+        assert PulseSpec.model_validate(
+            preview.proposed
+        ) == capture.library.module_spec(name)
+    else:
+        assert preview.proposed == preview.current
+    service.edit_draft(draft, item_id, edits=[{"path": path, "value": edited}])
+    live = service.preview_values(draft)[item_id]
+    assert isinstance(live.proposed, dict)
+    assert live.proposed[path] == edited
+    assert live.current == preview.current
+    draft.edit(item_id, target_name=name.replace("target", "new"))
+    missing = service.preview_values(draft)[item_id]
     assert missing.current is None
-    assert missing.proposed == preview.proposed
+    assert missing.proposed == live.proposed
     error = FailedPreconditionError("draft unavailable")
-    editor.get_draft.return_value.snapshot.side_effect = error
-    with pytest.raises(FailedPreconditionError) as caught:
-        service.preview_values(draft, context)
-    assert caught.value is error
+
+    def fail_read(_editor_id):
+        raise error
+
+    with monkeypatch.context() as patch:
+        patch.setattr(editor, "get_draft", fail_read)
+        with pytest.raises(FailedPreconditionError) as caught:
+            service.preview_values(draft)
+        assert caught.value is error
+    draft.teardown()
+    with pytest.raises(FailedPreconditionError):
+        service.preview_values(draft)
 
 
 def test_preview_without_context_fails_instead_of_claiming_missing_targets():
-    service = WritebackService(MagicMock(), MagicMock())
+    service = WritebackService(MagicMock(), MagicMock(), entry_ledger=MagicMock())
     draft = service.create_draft(
-        [
-            MetaDictWriteback(target_name="value", description="d", proposed_value=1),
-        ]
+        [MetaDictWriteback("general.ext.value", "d", proposed_value=1)],
+        parameters=None,
     )
     with pytest.raises(FailedPreconditionError):
-        service.preview_values(
-            draft, SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-        )
+        service.preview_values(draft)
