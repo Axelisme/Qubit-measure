@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -20,9 +21,11 @@ from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._native_save_support import native_save_session
 
 
-@pytest.mark.parametrize("completion", ["complete", "stopped", "failed"])
+@pytest.mark.parametrize("completion", ["complete", "partial", "stopped"])
 def test_native_load_retains_history_and_resaves_captured_source(
-    tmp_path: Path, qapp: QApplication, completion: str
+    tmp_path: Path,
+    qapp: QApplication,
+    completion: Literal["complete", "partial", "stopped"],
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         session.metadata = replace(session.metadata, completion=completion)
@@ -41,7 +44,11 @@ def test_native_load_retains_history_and_resaves_captured_source(
             result_root=tmp_path / "Elsewhere",
             database_root=tmp_path / "ElseDB",
         )
+        other.new_point("other-point")
         session.context.install_entry(other)
+        ContextControlFacet(context=session.context).use_point(
+            PointUseRequest("other-point")
+        )
         service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
 
         outcome = service.load_result(LoadPermit("tab"), str(path))
@@ -120,9 +127,9 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
             save()
 
         message = str(error.value)
-        assert session.metadata.snapshot.entry_id in message
+        assert str(session.metadata.snapshot.entry_id) in message
         assert session.metadata.snapshot.point in message
-        assert captured.entry_id in message
+        assert str(captured.entry_id) in message
         assert captured.point in message
         assert "save" in message.lower()
         after = {
