@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class _AnalyzeCapture:
     run_result: object | None
+    run_id: str | None
     context: SessionEnv
     adapter: ExpAdapterProtocol
     params: object | None
@@ -114,6 +115,7 @@ class AnalyzeService(_StagedAnalyzeService):
         adapter = tab.adapter
         captured_inputs = _AnalyzeCapture(
             run_result=req.run_result,
+            run_id=tab.run.metadata.run_id if tab.run.metadata is not None else None,
             context=ctx,
             adapter=adapter,
             params=analyze_params_instance,
@@ -162,6 +164,7 @@ class AnalyzeService(_StagedAnalyzeService):
         ctx = replace(self._state.session_env, parameters=tab.parameters)
         captured = _AnalyzeCapture(
             run_result=tab.run.result,
+            run_id=tab.run.metadata.run_id if tab.run.metadata is not None else None,
             context=ctx,
             adapter=tab.adapter,
             params=analyze_params_instance,
@@ -393,7 +396,9 @@ class AnalyzeService(_StagedAnalyzeService):
         draft: Any | None = None
         try:
             draft = self._writeback.create_draft(
-                proposal_items, parameters=ctx.parameters
+                proposal_items,
+                parameters=ctx.parameters,
+                run_id=captured_inputs.run_id,
             )
             plots.finish()
             retired = self._state.update_tab_analyze(

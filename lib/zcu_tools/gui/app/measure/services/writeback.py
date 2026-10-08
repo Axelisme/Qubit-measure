@@ -140,6 +140,7 @@ class WritebackDraft:
         identity: str,
         entries: list[_DraftEntry],
         parameters: ParameterContext | None,
+        run_id: str | None = None,
     ) -> None:
         self._service = service
         self._identity = identity
@@ -155,6 +156,15 @@ class WritebackDraft:
         target. Later selection changes never replace it.
         """
         return self._parameters
+
+    @property
+    def run_id(self) -> str | None:
+        """Historical RunMetadata identity fixed at creation, or None without it.
+
+        Save does not change this value. It identifies a Run, not whether that
+        Run has a saved file; native Load retains the file's original identity.
+        """
+        raise NotImplementedError("Run identity capture is not implemented")
 
     @property
     def items(self) -> tuple[WritebackItem, ...]:
@@ -241,6 +251,7 @@ class WritebackService:
         items: Iterable[WritebackItem],
         *,
         parameters: ParameterContext | None,
+        run_id: str | None = None,
     ) -> WritebackDraft:
         """Create a draft and all item-local cfg sessions transactionally.
 
@@ -254,6 +265,10 @@ class WritebackService:
         target for the draft lifetime. None is valid for an empty/context-free
         proposal, but nonempty application fails without a destination. Baseline
         display uses this capture; no live selection provider is retained.
+        run_id is the source RunMetadata.run_id, including unsaved Runs and
+        historical native Loads; None means no native acquisition evidence.
+        It stays fixed through Save, selection changes, edits and application.
+        Application copies it into accepted evidence and destination provenance.
         """
         identity = uuid.uuid4().hex
         entries: list[_DraftEntry] = []
@@ -424,6 +439,8 @@ class WritebackService:
         Nonempty writes require a capture and its still-open entry. GUI defaults
         to the GUI origin; MCP callers explicitly identify the MCP frontend.
         Unknown/duplicate IDs or concrete destinations fail before any write.
+        Accepted payload and every destination provenance use draft.run_id;
+        application never re-reads Run or Save state to determine its identity.
         """
         self._require_draft(draft)
         selected_entries = _entries_to_apply(draft._entries, item_ids)

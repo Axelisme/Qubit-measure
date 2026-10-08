@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
     from .persistence_types import AppPersistedState
+    from .writeback import WritebackDraft
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +229,16 @@ class WritebackLifecyclePort(Protocol):
         items: Iterable[WritebackItem],
         *,
         parameters: ParameterContext | None,
-    ) -> Any: ...
+        run_id: str | None = None,
+    ) -> WritebackDraft:
+        """Fix proposals, destination and native Run identity in one draft.
+
+        run_id is historical RunMetadata.run_id, even before Save, or None
+        without native evidence. Save does not change the draft's identity.
+        Editor failure propagates after retiring any newly opened sessions.
+        """
+        ...
+
     def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
     def teardown_draft(self, draft: Any) -> None: ...
 

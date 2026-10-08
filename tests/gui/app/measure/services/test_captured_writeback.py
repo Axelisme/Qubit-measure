@@ -1,12 +1,13 @@
 """Accepted evidence and fixed destinations at the real writeback/owner seam."""
 
 from collections.abc import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import (
@@ -18,8 +19,11 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
+from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
+from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
 from zcu_tools.gui.app.measure.services.writeback import (
+    WritebackDraft,
     WritebackEdit,
     WritebackService,
     WritebackWritten,
@@ -27,15 +31,19 @@ from zcu_tools.gui.app.measure.services.writeback import (
 from zcu_tools.gui.cfg import CfgSchema, EvalValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.interactive import PluginDefinition
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     ContextTarget,
     PointUseRequest,
 )
+from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.ledger import RecordsLedger
 from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
@@ -43,6 +51,7 @@ from zcu_tools.resources.entry.provenance import Provenance
 from zcu_tools.resources.entry.registry import RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui.app.measure._native_save_support import PaneSummary, native_save_session
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -81,6 +90,105 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         assert registry_state() == installed
     finally:
         restore_registry(before)
+
+
+@pytest.mark.parametrize("save_before_accept", [False, True])
+def test_accepted_retains_run_identity_with_or_without_save(
+    tmp_path: Path, qapp: QApplication, save_before_accept: bool
+) -> None:
+    with native_save_session(tmp_path, qapp) as native:
+        control = ContextControlFacet(context=native.context)
+        editor = CfgEditorService(
+            MagicMock(), control, MagicMock(), MagicMock(), native.bus
+        )
+        service = WritebackService(
+            editor, write_port=control, entry_ledger=native.context.entry_ledger
+        )
+        tab = native.state.get_tab("tab")
+        captured = control.read_context()
+        assert tab.run.metadata is not None
+        source_run_id = tab.run.metadata.run_id
+        draft = service.create_draft(
+            [MetaDictWriteback("general.flux_value", "Flux", proposed_value=2.0)],
+            parameters=captured,
+            run_id=source_run_id,
+        )
+        if save_before_accept:
+            native.save()
+        assert (
+            any(event.kind == "saved" for event in native.entry.ledger.events())
+            is save_before_accept
+        )
+        tab.run.metadata = replace(native.metadata, run_id="later-run")
+        service.apply_draft(draft)
+        event = native.entry.ledger.events()[-1]
+        assert event.kind == "accepted"
+        assert isinstance(event.payload, AcceptedPayload)
+        assert event.payload.run_id == source_run_id
+        source = control.read_target(captured.target).meta("general.flux_value")
+        assert source is not None
+        assert source.source == event.id
+        assert source.run_id == source_run_id
+        assert draft.run_id == source_run_id
+        service.teardown_draft(draft)
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+@pytest.mark.parametrize("source", ["run", "load", "without_metadata"])
+def test_analysis_draft_uses_start_run_identity(
+    tmp_path: Path,
+    qapp: QApplication,
+    interactive: bool,
+    source: str,
+) -> None:
+    with native_save_session(tmp_path, qapp) as native:
+        tab = native.state.get_tab("tab")
+        if source == "load":
+            native.state.update_tab_loaded_result(
+                "tab", tab.run.result, "historical.h5", metadata=native.metadata
+            )
+        elif source == "without_metadata":
+            tab.run.metadata = None
+        expected = tab.run.metadata.run_id if tab.run.metadata is not None else None
+        control = ContextControlFacet(context=native.context)
+        editor = CfgEditorService(
+            MagicMock(), control, MagicMock(), MagicMock(), native.bus
+        )
+        writeback = WritebackService(
+            editor, write_port=control, entry_ledger=native.context.entry_ledger
+        )
+        runner = OperationRunner(
+            None, native.handles, None, native.background, native.bus
+        )
+        service = AnalyzeService(
+            native.state, runner, native.bus, writeback, native.handles
+        )
+        plots = Plots(NonPresentingHost())
+        if interactive:
+            plugin = PluginDefinition(
+                "pick", 2, (), lambda _state: None, lambda _state: PaneSummary()
+            )
+            service.start_plugin(
+                AnalyzePermit("tab"),
+                plugin,
+                ManualOwnerScheduler(),
+                analyze_params_instance="submitted",
+                plots=plots,
+            )
+        else:
+            service.start_analyze(AnalyzePermit("tab"), object(), plots=plots)
+        tab.run.metadata = replace(native.metadata, run_id="later-run")
+        if interactive:
+            assert service.finish_plugin("tab")
+        else:
+            assert native.background.quiesce()
+            assert not tab.is_analyzing
+        assert isinstance(tab.analysis.result, PaneSummary)
+        draft = tab.analysis.writeback_draft
+        assert isinstance(draft, WritebackDraft)
+        assert draft.run_id == expected
+        assert draft.parameters is tab.parameters
+        writeback.teardown_draft(draft)
 
 
 def test_writeback_lowers_waveform_expression_from_creation_capture(
@@ -147,6 +255,7 @@ def test_setter_failure_retains_accepted_and_successful_prefix(
             MetaDictWriteback("general.flux_unit", "Not started", proposed_value="mA"),
         ],
         parameters=captured,
+        run_id="original-run",
     )
     original = session.control.set_parameter
 
@@ -173,8 +282,10 @@ def test_setter_failure_retains_accepted_and_successful_prefix(
     event = session.entry.ledger.events()[-1]
     assert event.kind == "accepted" and event.origin == "mcp"
     assert isinstance(event.payload, AcceptedPayload) and len(event.payload.writes) == 3
+    assert event.payload.run_id == "original-run"
     source = current.meta("general.flux_value")
     assert source is not None and source.source == event.id
+    assert source.run_id == "original-run"
 
 
 def test_receipt_reads_actual_role_target_after_point_and_focus_change(
@@ -189,6 +300,7 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     draft = session.service.create_draft(
         [MetaDictWriteback("driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
         parameters=captured,
+        run_id="original-run",
     )
     session.control.set_parameter(first, "Q1.rate", 0.6)
     session.entry.new_point("b")
@@ -212,6 +324,8 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     assert event.origin == "mcp"
     source = session.control.read_target(first).meta("Q1.rate")
     assert source is not None and source.source == event.id and source.stderr == 0.05
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id == source.run_id == draft.run_id == "original-run"
 
 
 @pytest.mark.parametrize("kind", ["module", "waveform"])
@@ -250,7 +364,9 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
             captured.target, item.target_name, ConstWaveformCfg(length=0.6)
         )
         item_id, field = "wf-1", "length"
-    draft = session.service.create_draft([item], parameters=captured)
+    draft = session.service.create_draft(
+        [item], parameters=captured, run_id="original-run"
+    )
     session.control.set_parameter(captured.target, "general.flux_value", 9.0)
     preview = session.service.preview_values(draft)[item_id]
     assert isinstance(preview.current, dict) and preview.current[field] == 0.6
@@ -261,6 +377,9 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
     assert isinstance(receipt.after, dict) and receipt.after[field] == 0.2
     source = session.control.read_context().library.meta(f"{item.target_name}.{field}")
     assert source is not None and source.stderr == item.stderr
+    event = session.entry.ledger.events()[-1]
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id == source.run_id == draft.run_id == "original-run"
 
 
 def test_each_parameter_write_preserves_its_own_stderr(
@@ -289,6 +408,11 @@ def test_each_parameter_write_preserves_its_own_stderr(
         None,
     ]
     assert len({source.source for source in sources if source is not None}) == 1
+    event = session.entry.ledger.events()[-1]
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id is None
+    assert all(source.run_id is None for source in sources if source is not None)
+    assert draft.run_id is None
 
 
 def test_duplicate_concrete_role_destinations_fail_before_accepted(

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09, ledger Load selection and recorded event time
+**Last updated:** 2026-10-09, captured accepted Run identity
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -369,7 +369,12 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    `current_summary` → `proposed_summary` per item (S2). Scalar MetaDict items
    show concrete values; module/waveform items show bounded change summaries and
    keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
-   the Writeback service remains stage-free.
+   the Writeback service remains stage-free. Primary FIT and interactive
+   operations capture the source `RunMetadata.run_id` at start and pass it to
+   the opaque draft. Accepted ledger events and destination provenance use
+   that identity whether or not Save occurred. The identity does not imply a
+   saved file; consult saved events for persistence. Native Load retains the
+   original identity, and analysis without native metadata uses `None`.
 
 - `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。缺 cfg 時保留可用資料，不捏造設定。有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource identity 並推進 revision。Run/Load 先提交 primary result；analysis preparation 失敗不撤回它，只報 diagnostic。Named figures 和各 pane 的 presentation lifecycle 分開管理。
 dynamic selectors must match live options and the new complete draft must be valid
