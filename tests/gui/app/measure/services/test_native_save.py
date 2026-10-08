@@ -220,7 +220,7 @@ def test_cancel_during_metadata_preserves_completed_acquisition_when_saved(
     assert metadata is not None and metadata.completion == "complete"
     session.metadata = metadata
     saved = session.save()
-    stored = load_run_data(Path(saved.data_path))
+    stored = load_run_data(saved.outputs[0].output.path)
     assert stored.metadata.completion == "complete"
     assert stored.metadata.run_id == metadata.run_id
     assert stored.metadata.started_at == metadata.started_at

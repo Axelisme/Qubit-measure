@@ -171,8 +171,8 @@ def save_artifacts(
     but do not preflight path/content conflicts or establish a transaction.
     Encode each FileMember once. figure_encoder receives each native Figure and
     returns PNG bytes; None uses Figure.savefig. The callback runs synchronously
-    on the calling thread, so a live GUI Figure requires owner-thread marshalling
-    by the caller. AnalysisDocument always uses the datafile analysis encoder.
+    on the calling thread, so callers must encode a live GUI Figure on its owner
+    thread. AnalysisDocument always uses the datafile analysis encoder.
     Encoding failure marks all destinations of that member failed and still
     attempts other members. Do not encode in the caller or accept bytes aliases.
     Attempt Labber before native for each data member, retaining the previous
