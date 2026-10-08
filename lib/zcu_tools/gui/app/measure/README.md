@@ -149,13 +149,14 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   GUI 直接呼 SaveControlFacet。SaveService 捕捉 tab 的固定 storage、歷史
   RunMetadata、窗格結果與 result_params，再用一次 shared saver 保存全部選集。
   Data 寫 canonical `runs/<run_id>/data.h5`，每次保存另取新的 Labber filename。
-  Worker 負責 data mapping、檔案 I/O 與一次 saved ledger event。
-  Figure 編碼經 OwnerScheduler 回 owner thread，shared saver 隔離逐輸出失敗。
-  這個 operation 不可取消、不持硬體 lease，保存中拒絕同 tab 的 Run、Load 與分析。
-  Terminal 先提交完整 report、清 busy，再 settle handle，最後發布 completion fact。
-  Qt 顯示同一份 report，包含本次實際 Labber path。Submission 的 paths 只是預約，
-  不是成功證據。保存不產生 acquisition identity，也不重讀 live point。
-  Remote/MCP 保存 consumer、acquired event 與 ledger-based Load 尚待遷移。
+  Data mapping、Figure 編碼、檔案 I/O 與一次 saved ledger event 都在 owner thread
+  同步完成。shared saver 每個 member 編碼一次，隔離逐輸出失敗。
+  Save 不持硬體 lease，不建立 worker、handle 或 save-busy phase。
+  State 提交完整 report 後才發布同步 completion fact，再回傳同一份 SaveReport。
+  Qt 顯示本次輸出的 path/status/error，包含實際 Labber path。
+  Mapping／ledger 錯誤直接傳遞，不偽造 report 或回滾已寫文件。
+  保存不產生 acquisition identity，也不重讀 live point。
+  RPC 直接投影回傳報告；MCP consumer、acquired event 與 ledger-based Load 尚待遷移。
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane
   is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
@@ -316,7 +317,7 @@ Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消
 catalog。開始 shutdown 若拋錯，Controller 恢復原 gate 狀態並保留例外。
 
 Reload 在 owner thread 同步執行，不 pump Qt events；進行中 handle 與 tab busy flags
-共同阻止 reload，包含 handle-backed data及artifact batch save。共用 `ExperimentAccess` 阻止 local/remote
+共同阻止 reload。Save 在同一 owner thread 同步完成，不建立 handle。共用 `ExperimentAccess` 阻止 local/remote
 experiment driving facets 在切換時重入。確認等待期間 tab identity、resource versions 或 run
 result 改變會使確認失效。重新建立的 tabs 使用新 id，舊 RPC locator 不可沿用。
 
@@ -382,19 +383,19 @@ partial success. A genuine load or run failure keeps its existing failure contra
 `Session` is the aggregate root and its fixed pane carriers are the resource owners:
 Run stores only the run result/source. Analysis and Post-Analysis each store params,
 result, a named `Plots` collection and an opaque writeback draft (with S2 baseline
-snapshot). Save stores the data-path override. Each image path override belongs to
-one `(stage, figure_name)` key; the read model projects DATA and current named
-images separately. Run live figures remain view-only and
+snapshot). Save stores the annotation; ArtifactTracker stores each member's latest
+output paths/status/error. Run live figures remain view-only and
 are not stored in State. Writeback baseline is a display-only draft-creation
 snapshot；同一opaque draft另擁有per-item applied state，只有成功write包含的items才標記applied，
 selection本身不改狀態，retarget或內容修改會重設；同kind items不得指向重複destination，
 避免batch覆寫卻誤標applied。狀態不跨draft/process持久化，也不提供
 concurrent-write detection或apply-conflict policy。
 
-Analysis/Post 逐圖記錄目前 result／Figure 產物是否曾成功保存，不追蹤
-artist、視圖或目的地的 dirty 變更。新圖從未保存開始；舊圖晚到的保存完成
-只更新提交時捕捉的record，不將同名新圖標成已保存。再次匯出失敗保留先前成功紀錄。DATA 仍追蹤原有
-result、path 與 comment 的保存 signature。
+Analysis/Post 的 artifact 記錄目前 result／Figure 各 member 的最新保存輸出，
+不追蹤 artist 或視圖的 dirty 變更。新結果從未保存開始；同步 Save 返回前
+提交本次完整 report。重存失敗取代前次成功輸出狀態，不沿用舊 success 清單。
+至少一個輸出成功才確認 run_id；failed resave 保留已確認的身分。
+Comment 變更把已有成功輸出的 Run artifact 標為 Unsaved changes。
 
 Analysis/Post result services prepare proposals, named plots and drafts before calling one
 owner-thread State swap. The swap returns every retired pane resource; services tear

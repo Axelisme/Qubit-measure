@@ -1065,7 +1065,7 @@ class ExpTabWidget(QWidget):
             )
         state = snapshot.interaction
         capabilities = snapshot.capabilities
-        local_busy = state.is_running or state.is_analyzing or state.is_saving_data
+        local_busy = state.is_running or state.is_analyzing
         # Status-free action row (A5): no readiness text, only button enablement + tooltip.
         if state.is_running:
             self.reset_btn.setVisible(False)

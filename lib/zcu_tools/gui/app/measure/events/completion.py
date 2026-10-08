@@ -26,12 +26,13 @@ class AnalyzeFailedPayload(BasePayload):
 
 @dataclass(frozen=True)
 class SaveDataFinishedPayload(BasePayload):
-    """Latest native data terminal fact, delivered after State and handle settle.
+    """Native data completion fact, delivered after the synchronous State commit.
 
-    tab_id identifies the owning tab; data_path is the canonical reservation.
-    error is the operation diagnostic, including failed output paths. report
-    contains every attempted output, or None for preparation/submission/ledger
-    failure that prevented the shared saver returning a report.
+    tab_id identifies the owning tab; data_path is the attempted canonical path.
+    error joins failed output paths and diagnostics, or is None on full success.
+    report contains every attempted output from this call. The existing None
+    default carries no output evidence. Preparation/ledger errors propagate
+    without publishing a completion fact.
     """
 
     EVENT: ClassVar[CompletionEvent] = CompletionEvent.SAVE_DATA_FINISHED
@@ -43,11 +44,12 @@ class SaveDataFinishedPayload(BasePayload):
 
 @dataclass(frozen=True)
 class SaveArtifactsFinishedPayload(BasePayload):
-    """Latest multi-artifact terminal, after State commit and handle settle.
+    """Multi-artifact completion fact, after the synchronous State commit.
 
-    tab_id identifies the owner. error is the operation diagnostic, or None on
-    complete success. report lists every attempted output, or is None when
-    preparation/submission/ledger failure prevented a complete saver report.
+    tab_id identifies the owner. error joins failed output paths and diagnostics,
+    or is None on complete success. report lists every attempted output from
+    this call. The existing None default carries no output evidence.
+    Preparation/ledger errors propagate without publishing a completion fact.
     """
 
     EVENT: ClassVar[CompletionEvent] = CompletionEvent.SAVE_ARTIFACTS_FINISHED

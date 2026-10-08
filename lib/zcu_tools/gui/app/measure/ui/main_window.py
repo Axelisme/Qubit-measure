@@ -28,7 +28,7 @@ from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
-from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
@@ -774,10 +774,11 @@ class MainWindow(QMainWindow):
     def _dispatch_artifact_save(
         self, tab_w: ExpTabWidget, save_call: Callable[[], object]
     ) -> None:
-        """Present operational errors; render the State-owned terminal outcome."""
+        """Present synchronous Save errors and refresh the committed output state."""
         try:
             save_call()
-        except (ExpectedError, OSError, ValueError) as exc:
+        except Exception as exc:
+            logger.exception("Synchronous Save failed for tab %r", tab_w.tab_id)
             self.refresh_tab_interaction(tab_w.tab_id)
             self.show_error_dialog("Save failed", str(exc))
             return
@@ -818,16 +819,12 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "save_tab_artifacts")
         if tab_w is None:
             return
-        try:
-            submission = self._ctrl.save_control.save_artifacts(
+        self._dispatch_artifact_save(
+            tab_w,
+            lambda: self._ctrl.save_control.save_artifacts(
                 tab_id, comment=tab_w.get_comment(), origin=CommandOrigin("gui")
-            )
-            self._status_bar.showMessage(
-                f"Saving {len(submission.destinations)} outputs…"
-            )
-        except (ExpectedError, OSError, ValueError) as exc:
-            self.show_error_dialog("Save failed", str(exc))
-        self.refresh_tab_interaction(tab_id)
+            ),
+        )
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         tab_id = payload.tab_id

@@ -272,7 +272,7 @@ class ArtifactSaveCenter(QWidget):
             raise RuntimeError("Save center needs a live tab snapshot")
         self.update_from_snapshot(snapshot)
         state = snapshot.interaction
-        idle = not (state.is_running or state.is_analyzing or state.is_saving_data)
+        idle = not (state.is_running or state.is_analyzing)
         for button in self._save_btns.values():
             button.setEnabled(idle and state.has_active_context)
         self._comment_edit.setEnabled(idle)
