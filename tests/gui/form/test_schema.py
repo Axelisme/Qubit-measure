@@ -573,6 +573,40 @@ def identity_values(node: dict[str, JsonValue]) -> list[JsonValue]:
     ]
 
 
+def identity_snapshot(schema: dict[str, JsonValue]) -> dict[str, list[JsonValue]]:
+    """Read identities at the eight public positions of SchemaIdentityForm's schema."""
+    fields = schema_object(schema["properties"])
+    definitions = schema_object(schema["$defs"])
+    sequence = schema_object(fields["sequence"])
+    fixed = schema_object(fields["fixed"])
+    mapping = schema_object(fields["mapping"])
+    prefix = fixed["prefixItems"]
+    assert isinstance(prefix, list)
+    return {
+        "items": identity_values(schema_object(sequence["items"])),
+        "prefix0": identity_values(schema_object(prefix[0])),
+        "prefix1": identity_values(schema_object(prefix[1])),
+        "additionalProperties": identity_values(
+            schema_object(mapping["additionalProperties"])
+        ),
+        "NumericChoice": identity_values(schema_object(definitions["NumericChoice"])),
+        "RangeInput": identity_values(schema_object(definitions["RangeInput"])),
+        "restricted": identity_values(schema_object(fields["restricted"])),
+        "unrestricted": identity_values(schema_object(fields["unrestricted"])),
+    }
+
+
+def range_count_options(node: dict[str, JsonValue]) -> JsonValue:
+    """Read the ordinary n options from the first branch of a RangeInput schema."""
+    branches = node["oneOf"]
+    assert isinstance(branches, list)
+    fields = schema_object(schema_object(branches[0])["properties"])
+    count = schema_object(fields["n"])
+    alternatives = count["anyOf"]
+    assert isinstance(alternatives, list)
+    return schema_object(alternatives[0])["enum"]
+
+
 def test_container_discriminator_identity_and_retained_discriminator_identity_refresh() -> (
     None
 ):
@@ -588,26 +622,7 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
         env.md.update({"empty_containers": empty, "three_only": three_only})
         schema = SchemaIdentityForm.input_schema(env)
         fields = schema_object(schema["properties"])
-        definitions = schema_object(schema["$defs"])
-        sequence = schema_object(fields["sequence"])
-        fixed = schema_object(fields["fixed"])
-        mapping = schema_object(fields["mapping"])
-        prefix = fixed["prefixItems"]
-        assert isinstance(prefix, list)
-        observed = {
-            "items": identity_values(schema_object(sequence["items"])),
-            "prefix0": identity_values(schema_object(prefix[0])),
-            "prefix1": identity_values(schema_object(prefix[1])),
-            "additionalProperties": identity_values(
-                schema_object(mapping["additionalProperties"])
-            ),
-            "NumericChoice": identity_values(
-                schema_object(definitions["NumericChoice"])
-            ),
-            "RangeInput": identity_values(schema_object(definitions["RangeInput"])),
-            "restricted": identity_values(schema_object(fields["restricted"])),
-            "unrestricted": identity_values(schema_object(fields["unrestricted"])),
-        }
+        observed = identity_snapshot(schema)
         assert observed == {
             "items": [[1, 2], [3]],
             "prefix0": [[1, 2], [3]],
@@ -628,25 +643,14 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
             for tags in observed[location]:
                 assert isinstance(tags, list)
                 assert all(type(tag) is int for tag in tags)
-        for name, node in (
-            ("sequence", sequence),
-            ("fixed", fixed),
-            ("mapping", mapping),
-        ):
+        for name in ("sequence", "fixed", "mapping"):
+            node = schema_object(fields[name])
             if empty:
                 assert node["not"] == {}
             else:
                 assert node["enum"] == [before[name]]
-        restricted = schema_object(fields["restricted"])
-        branches = restricted["oneOf"]
-        assert isinstance(branches, list)
-        linear = schema_object(branches[0])
-        linear_fields = schema_object(linear["properties"])
-        count_schema = schema_object(linear_fields["n"])
-        alternatives = count_schema["anyOf"]
-        assert isinstance(alternatives, list)
         allowed_n = 3 if three_only else 2
-        assert schema_object(alternatives[0])["enum"] == [allowed_n]
+        assert range_count_options(schema_object(fields["restricted"])) == [allowed_n]
         validator = Draft202012Validator(schema)
         assert validator.is_valid(before) == (not empty and not three_only)
         candidate: dict[str, JsonValue] = {

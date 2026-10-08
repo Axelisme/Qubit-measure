@@ -1,15 +1,49 @@
 """Partial input schema projection, retaining Pydantic's field constraints."""
 
 from collections.abc import Mapping
+from enum import Enum
 from typing import get_args, get_origin
 
 from pydantic import BaseModel, JsonValue
 from pydantic.fields import FieldInfo
+from pydantic.json_schema import GenerateJsonSchema
+from pydantic_core import core_schema
 
-from ._json import copy_object
+from ._json import copy_object, default_json
 from ._sources import local_choices
-from ._structure import alternatives, discriminator, discriminator_values, model_types
+from ._structure import alternatives, model_types
 from .model import Display, FormEnv, FormModel, FormPath
+
+
+class _InputJsonSchema(GenerateJsonSchema):
+    """Annotate native tagged schemas, including containers, aliases and definitions.
+
+    Pydantic owns traversal and refs. Its mapping identifies each emitted branch;
+    core choice keys supply intrinsic typed tags before any form choices apply.
+    """
+
+    def tagged_union_schema(
+        self, schema: core_schema.TaggedUnionSchema
+    ) -> dict[str, JsonValue]:
+        """Add intrinsic JSON tags to discriminator branches; native errors propagate."""
+        generated = copy_object(super().tagged_union_schema(schema))
+        discriminator = generated.get("discriminator")
+        branches = generated.get("oneOf")
+        if isinstance(discriminator, dict) and isinstance(branches, list):
+            mapping = discriminator.get("mapping")
+            if isinstance(mapping, dict):
+                for branch in branches:
+                    if not isinstance(branch, dict):
+                        continue
+                    target = branch.get("$ref", branch)
+                    tags: list[JsonValue] = []
+                    for tag in schema["choices"]:
+                        native_key = tag.value if isinstance(tag, Enum) else tag
+                        if mapping.get(str(native_key)) == target:
+                            tags.append(default_json(native_key))
+                    branch["x-form-discriminator-values"] = tags
+        return generated
+
 
 _EXPR: dict[str, JsonValue] = {
     "type": "object",
@@ -229,12 +263,7 @@ def _decorate(
             for path, values in options.items()
             if len(path) > 1 and path[0] == name
         }
-        key = discriminator(info)
         for child, variant in _child_nodes(info, target, root):
-            if key is not None:
-                variant["x-form-discriminator-values"] = list(
-                    discriminator_values(child, key)
-                )
             _decorate(child, variant, root, env, seen, child_options)
         values = options.get((name,))
         if values is not None:
@@ -243,7 +272,7 @@ def _decorate(
 
 def input_schema(model: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
     """Project a Pydantic schema to partial tagged JSON input for this environment."""
-    raw = copy_object(model.model_json_schema())
+    raw = copy_object(model.model_json_schema(schema_generator=_InputJsonSchema))
     root = copy_object(_partial(raw))
     _decorate(model, root, root, env, set(), {})
     return root
