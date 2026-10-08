@@ -8,6 +8,7 @@ from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
 if TYPE_CHECKING:
     from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
     from zcu_tools.experiment.context import RunContext
+    from zcu_tools.experiment.native_persistence import PreparedRunData
     from zcu_tools.plotting.plots import Plots
     from zcu_tools.resources.entry import RoleSpec
 
@@ -165,6 +166,15 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         self, req: PostWritebackRequest[Any, Any, Any]
     ) -> Sequence[WritebackItem]:
         """Return the writeback items proposed from one post-analysis result."""
+        ...
+
+    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
+        """Prepare this experiment's RunRecord for both native data writers.
+
+        No I/O or metadata capture occurs. Invalid record/cfg/Result/comment or
+        a missing persistence declaration raises TypeError, ValueError or
+        NotImplementedError. Do not mutate result arrays during saving.
+        """
         ...
 
     def save(self, req: SaveDataRequest[Any]) -> None:

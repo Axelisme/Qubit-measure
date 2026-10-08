@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08，唯讀存檔路徑、cfg 固定 capture 與 Run metadata
+**Last updated:** 2026-10-08，固定 Run metadata 與單項 native Data Save
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -139,8 +139,16 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   `Open folder`開啟最新路徑的父目錄，不建立目錄，無路徑時不開啟。
   每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
   `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
-  Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
-  都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
+  單項 Data Save 直接走 SaveControlFacet、SaveService 與 shared saver，使用 tab 的
+  固定 storage、歷史 RunMetadata 及本次 CommandOrigin。Worker 準備 typed record，
+  寫 canonical `runs/<run_id>/data.h5` 與新的 Labber 檔案，再追加一筆 saved ledger
+  事件。兩個輸出失敗各自隔離，terminal fact 帶完整 SaveReport，handle 在發布前
+  已 settled。Save 不建立 acquisition 身分或重讀 live point。
+  Data save 使用既有 OperationRunner/Handles，不可取消、不持硬體 lease。
+  SaveDataSubmission 包含 operation ID、內部 run_id、canonical path 與全部
+  reserved outputs；這些欄位不代表成功。GUI 直接用 facet，不經 Controller
+  純轉發。Save All、舊 tracker 與 remote/MCP consumer 尚未遷移至完整 native
+  多輸出投影，以下 Save All 說明仍是既有路徑。
   Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 path/comment 變更。
   同次請求的新 DATA draft 先參與選取預檢，驗證成功後才發布草稿。
   `ArtifactSnapshot.needs_save` 同時供 facade 選取與 Qt 按鈕 gating 使用；全數已保存時

@@ -13,6 +13,8 @@ from zcu_tools.experiment.cfg_assembler import (
     assemble_experiment_cfg,
 )
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.native_persistence import PreparedRunData, prepare_run_data
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterCfgDefinition,
@@ -548,6 +550,21 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
         return self.make_default_save_paths(ctx)
+
+    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
+        """Map one completed RunRecord through this adapter's persistence spec.
+
+        The record must contain this experiment's typed cfg and Result. Return
+        the shared SI payload and cfg snapshot without paths, metadata capture
+        or I/O. Invalid record/cfg/Result/comment and missing declarations raise
+        the owning experiment's TypeError, ValueError or NotImplementedError.
+        Arrays remain shared; do not mutate the record while saving.
+        """
+        if not isinstance(result, RunRecord):
+            raise TypeError("Native saving requires a RunRecord")
+        return prepare_run_data(
+            result, spec=self.exp_cls().persistence_spec(), comment=comment
+        )
 
     def save(self, req: SaveDataRequest[T_Result]) -> None:
         self.exp_cls().save(req.run_result, Path(req.data_path), comment=req.comment)

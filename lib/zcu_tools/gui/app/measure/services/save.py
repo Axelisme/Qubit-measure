@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.datafile.paths import reserve_labber_filepath
+from zcu_tools.experiment.run_saving import (
+    ArtifactRef,
+    DataMember,
+    SaveArtifact,
+    SaveReport,
+    save_artifacts,
+)
 from zcu_tools.gui.app.measure.adapter import SaveDataRequest
 from zcu_tools.gui.app.measure.artifact_paths import require_distinct_paths
 from zcu_tools.gui.app.measure.artifact_tracker import (
@@ -26,6 +36,7 @@ from zcu_tools.gui.app.measure.figure_export import (
     save_figure_to_path,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
@@ -33,6 +44,8 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
+from zcu_tools.resources.entry import ArtifactKey as NativeArtifactKey
+from zcu_tools.resources.entry import SaveLayout
 
 from .guard import SavePermit
 from .ports import (
@@ -127,18 +140,55 @@ class SaveService:
         )
 
     def _start_save(
-        self, tab_id: str, req: SaveDataRequest[object], attempt: SaveAttempt
+        self,
+        tab_id: str,
+        req: SaveDataRequest[object],
+        attempt: SaveAttempt,
+        *,
+        layout: SaveLayout,
+        metadata: RunMetadata,
+        origin: CommandOrigin,
     ) -> int:
-        """Submit non-cancellable I/O to the shared handle lifecycle, without a lease."""
+        """Run both writers and one ledger event in the non-cancellable worker."""
         adapter = self._state.get_tab(tab_id).adapter
 
-        def on_terminal(result: BgResult, settle: SettleFn) -> None:
-            error = (
-                None
-                if result.ok
-                else result.error or RuntimeError("save failed without an error")
+        def work(_factory: object) -> SaveReport:
+            prepared = adapter.prepare_save_data(req.run_result, comment=req.comment)
+            artifact = SaveArtifact(
+                ArtifactRef("run", "measurement_data"),
+                (
+                    DataMember(
+                        NativeArtifactKey("run", "measurement_data", "data"), prepared
+                    ),
+                ),
             )
-            payload = self._finish_save_state(tab_id, error, attempt)
+            return save_artifacts(
+                (artifact,),
+                layout=layout,
+                metadata=metadata,
+                ledger=req.storage.ledger,
+                origin=origin.origin,
+                call_id=origin.call_id,
+            )
+
+        def on_terminal(result: BgResult, settle: SettleFn) -> None:
+            report: SaveReport | None = None
+            error = result.error
+            if result.ok:
+                if isinstance(result.result, SaveReport):
+                    report = result.result
+                    failures = [
+                        f"{item.output.path}: {item.error}"
+                        for item in report.outputs
+                        if item.status == "failed"
+                    ]
+                    if failures:
+                        error = RuntimeError("\n".join(failures))
+                else:
+                    error = TypeError("Native Save worker returned no SaveReport")
+            elif error is None:
+                error = RuntimeError("save failed without an error")
+            payload = self._finish_save_state(tab_id, error, attempt, report=report)
             settle(
                 OperationOutcome(
                     "finished" if error is None else "failed", payload.error
@@ -152,30 +202,54 @@ class SaveService:
                 owner_id=tab_id,
                 wants_progress=False,
                 cancel_hook=None,
-                work=lambda _factory: adapter.save(req),
+                work=work,
                 run_in_pool=False,
                 on_terminal=on_terminal,
             )
         )
 
     def start_save_data(
-        self, permit: SavePermit, data_path: str, comment: str = ""
+        self, permit: SavePermit, comment: str = "", *, origin: CommandOrigin
     ) -> SaveDataSubmission:
+        """Submit both native and Labber outputs for the pane's captured Run.
+
+        permit identifies the guarded existing tab. comment is its annotation;
+        origin identifies this Save command. Missing historical Run metadata or
+        captured entry storage raises FailedPreconditionError before submission.
+        SaveLayout reserves destinations without mkdir or writes. Preparation,
+        both writers and ledger append run in the worker; output failures are
+        isolated by the shared saver and reported at terminal. No retry/rollback,
+        acquisition identity generation, live-context lookup or path override.
+        """
         tab_id = permit.tab_id
         self._require_tab_idle(tab_id)
-        # Reserve the final data path in the GUI orchestration layer so the
-        # worker receives the exact file it must write.
-        data_path = reserve_labber_filepath(data_path)
-        req = self._make_save_data_request(tab_id, data_path, comment=comment)
+        req = self._make_save_data_request(tab_id, "", comment=comment)
+        metadata = req.metadata
+        if metadata is None:
+            raise FailedPreconditionError(
+                "Run has no native acquisition metadata",
+                reason_code="storage_unavailable",
+            )
+        layout = SaveLayout(
+            result_path=req.storage.result_path,
+            database_path=req.storage.database_path,
+            run_id=metadata.run_id,
+            point=req.storage.point,
+            saved_at=datetime.now().astimezone(),
+        )
+        outputs = layout.outputs(NativeArtifactKey("run", "measurement_data", "data"))
+        data_path = str(outputs[0].path)
+        req = replace(req, data_path=data_path)
         logger.info("start_save_data: tab_id=%r path=%r", tab_id, data_path)
-        self._ensure_parent_directory(data_path)
         self._state.get_artifact_snapshots(tab_id)
         tracker = self._state.get_tab(tab_id).artifacts
         attempt = tracker.started(ArtifactKey(ArtifactKind.DATA))
         self._active_paths[tab_id] = data_path
         self._mark_saving(tab_id, TabInteractionFact.SAVE_STARTED)
         try:
-            token = self._start_save(tab_id, req, attempt)
+            token = self._start_save(
+                tab_id, req, attempt, layout=layout, metadata=metadata, origin=origin
+            )
         except Exception as error:
             # OperationRunner has already settled a synchronous submission failure.
             if attempt.pending:
@@ -186,7 +260,7 @@ class SaveService:
         # Inline executors may have delivered terminal before begin returns.
         if tab_id in self._active_paths:
             self._active_operations[tab_id] = token
-        return SaveDataSubmission(token, data_path)
+        return SaveDataSubmission(token, data_path, metadata.run_id, outputs)
 
     def start_save_artifacts(
         self,
@@ -404,7 +478,12 @@ class SaveService:
         )
 
     def _finish_save_state(
-        self, tab_id: str, error: Exception | None, attempt: SaveAttempt
+        self,
+        tab_id: str,
+        error: Exception | None,
+        attempt: SaveAttempt,
+        *,
+        report: SaveReport | None = None,
     ) -> SaveDataFinishedPayload:
         path = self._active_paths.pop(tab_id, "")
         self._active_operations.pop(tab_id, None)
@@ -419,7 +498,10 @@ class SaveService:
                 attempt.fail()
         self._state.set_tab_saving_data(tab_id, saving_data=False)
         return SaveDataFinishedPayload(
-            tab_id=tab_id, data_path=path, error=None if error is None else str(error)
+            tab_id=tab_id,
+            data_path=path,
+            error=None if error is None else str(error),
+            report=report,
         )
 
     def _emit_save_finished(self, payload: SaveDataFinishedPayload) -> None:

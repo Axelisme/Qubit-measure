@@ -11,6 +11,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionFact,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import CommandOrigin
 
 from .ports import SaveDestination
 from .save import resolve_artifact_destinations
@@ -35,11 +36,19 @@ class SaveControlPort(Protocol):
     def save_data(
         self,
         tab_id: str,
-        data_path: str | None = None,
         comment: str | None = None,
         *,
+        origin: CommandOrigin,
         run_operation_id: int | None = None,
-    ) -> SaveDataSubmission: ...
+    ) -> SaveDataSubmission:
+        """Submit both native data outputs with explicit Save-command attribution.
+
+        tab_id names a completed, idle, active-context tab; origin identifies this
+        Save. comment=None keeps its annotation. An optional run_operation_id
+        must identify the current pane. Guards or missing captured storage/Run
+        metadata raise FailedPreconditionError. Reservations are not success.
+        """
+        ...
 
     def save_artifacts(
         self,
@@ -96,26 +105,27 @@ class SaveControlFacet:
     def save_data(
         self,
         tab_id: str,
-        data_path: str | None = None,
         comment: str | None = None,
         *,
+        origin: CommandOrigin,
         run_operation_id: int | None = None,
     ) -> SaveDataSubmission:
+        """Save measurement data to both entry-owned destinations.
+
+        origin attributes this command, not a previous Run or a later query.
+        comment=None uses the pane annotation; a supplied comment publishes it.
+        run_operation_id, when supplied, must still identify this pane's Run.
+        Static/dynamic save guards and missing storage/Run evidence fail before
+        submission. Returned paths and run_id are reservations, not success.
+        """
         if run_operation_id is not None:
             self._state.require_run_operation(tab_id, run_operation_id)
-        if data_path is not None and not data_path.strip():
-            raise FailedPreconditionError(f"Tab {tab_id!r} has an empty data path")
         permit = self._guard.acquire_save_permit(tab_id)
         self._save.require_save_available(tab_id)
-        if data_path is not None:
-            self._tab.update_tab_data_path_override(tab_id, data_path)
         if comment is not None:
             self._state.update_tab_comment(tab_id, comment)
-        resolved = self._tab.get_tab_data_path(tab_id)
-        if not resolved:
-            raise FailedPreconditionError(f"Tab {tab_id!r} has no data path configured")
         draft_comment = self._state.get_tab(tab_id).save.comment
-        return self._save.start_save_data(permit, resolved, comment=draft_comment)
+        return self._save.start_save_data(permit, comment=draft_comment, origin=origin)
 
     def save_artifacts(
         self,

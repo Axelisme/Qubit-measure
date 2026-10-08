@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import ClassVar, Literal
 
+from zcu_tools.experiment.run_saving import SaveReport
 from zcu_tools.gui.event_bus import BasePayload
 
 
@@ -25,10 +26,19 @@ class AnalyzeFailedPayload(BasePayload):
 
 @dataclass(frozen=True)
 class SaveDataFinishedPayload(BasePayload):
+    """Latest native data terminal fact, delivered after State and handle settle.
+
+    tab_id identifies the owning tab; data_path is the canonical reservation.
+    error is the operation diagnostic, including failed output paths. report
+    contains every attempted output, or None for preparation/submission/ledger
+    failure that prevented the shared saver returning a report.
+    """
+
     EVENT: ClassVar[CompletionEvent] = CompletionEvent.SAVE_DATA_FINISHED
     tab_id: str
     data_path: str
     error: str | None = None
+    report: SaveReport | None = None
 
 
 @dataclass(frozen=True)

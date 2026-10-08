@@ -30,6 +30,7 @@ from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
+from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 
 from .exp_tab_widget import ExpTabWidget, TabActions
@@ -815,17 +816,22 @@ class MainWindow(QMainWindow):
         return True
 
     def save_tab_data(self, tab_id: str) -> None:
+        """Submit native data Save using the displayed annotation and GUI origin.
+
+        Unknown tab IDs leave the UI unchanged. Guard/submission failures use
+        the existing save feedback path; successful submission is asynchronous.
+        """
         logger.info("save_tab_data: tab_id=%r", tab_id)
         tab_w = self._resolve_tab_widget(tab_id, "save_tab_data")
         if tab_w is None:
             return
-        # Path/comment read is invariant; let exception propagate (Fast Fail)
-        path = tab_w.get_data_path() or None
         comment = tab_w.get_comment()
         self._dispatch_artifact_save(
             tab_w,
             ArtifactKind.DATA,
-            lambda: self._ctrl.save_data(tab_id, path, comment=comment),
+            lambda: self._ctrl.save_control.save_data(
+                tab_id, comment=comment, origin=CommandOrigin("gui", None)
+            ),
         )
 
     def save_tab_image(self, tab_id: str, key: ArtifactKey) -> None:

@@ -81,7 +81,7 @@ if TYPE_CHECKING:
     from .artifact_tracker import ArtifactKey
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
-    from .services.ports import SaveArtifactsSubmission, SaveDataSubmission
+    from .services.ports import SaveArtifactsSubmission
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
     from .services.tab_cfg import TabCfgLookup
@@ -825,11 +825,6 @@ class Controller(SessionControllerMixin):
 
     def save_artifacts(self, tab_id: str) -> SaveArtifactsSubmission:
         return self._save_control.save_artifacts(tab_id)
-
-    def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str | None = None
-    ) -> SaveDataSubmission:
-        return self._save_control.save_data(tab_id, data_path, comment=comment)
 
     def save_image(
         self, tab_id: str, key: ArtifactKey, image_path: str | None = None
