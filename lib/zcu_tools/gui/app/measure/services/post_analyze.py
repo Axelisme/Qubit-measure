@@ -94,8 +94,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
             run_result=tab.run.result,
             analyze_result=analyze_result,
             post_analyze_params=post_analyze_params_instance,
-            md=ctx.md,
-            ml=ctx.ml,
+            parameters=tab.run.parameters,
             predictor=ctx.predictor,
         )
         logger.info(

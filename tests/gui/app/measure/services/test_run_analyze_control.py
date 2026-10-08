@@ -24,6 +24,7 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import (
 from zcu_tools.gui.cfg.resource import CfgId, CfgRef, CfgRevision, CfgStaleError
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import Plots
 
 from tests.gui._control_fakes import CallLog, call
@@ -44,7 +45,7 @@ class RecordingState:
         self.tab = SimpleNamespace(
             adapter=RecordingAdapter(log, analysis=analysis),
             parameters=None,
-            run=SimpleNamespace(result="run-result"),
+            run=SimpleNamespace(result="run-result", parameters=None),
             cfg=SimpleNamespace(
                 observe=lambda: SimpleNamespace(
                     ref=CfgRef(CfgId("cfg-1"), CfgRevision(0))
@@ -399,13 +400,17 @@ def test_fit_analyze_uses_worker_service_and_live_container() -> None:
     assert isinstance(log.calls[4].args[2], Plots)
 
 
-def test_interactive_factory_receives_tab_capture_not_current_parameters() -> None:
-    from tests.gui.session.ui._parameter_fakes import make_parameters
-
+@pytest.mark.parametrize("context_free", [False, True])
+def test_interactive_factory_receives_run_source_after_tab_rebinding(
+    result_sources: tuple[ParameterContext, ParameterContext],
+    context_free: bool,
+) -> None:
     facet, log, state, _bus = _facet(analysis=AnalysisMode.INTERACTIVE)
-    captured = make_parameters({"rate": 1.0})
-    state.tab.parameters = captured
-    state.session_env.parameters = make_parameters({"rate": 2.0})
+    q1, q2 = result_sources
+    captured = None if context_free else q1
+    state.tab.run.parameters = captured
+    state.tab.parameters = q2
+    state.session_env.parameters = q2
 
     assert facet.analyze("tab-1", "params") == 23
     factory = next(
@@ -414,8 +419,9 @@ def test_interactive_factory_receives_tab_capture_not_current_parameters() -> No
     request = factory.args[0]
     assert isinstance(request, AnalyzeRequest)
     assert request.parameters is captured
-    assert request.parameters is not None
-    assert request.parameters.value("general.ext.rate") == 1.0
+    if request.parameters is not None:
+        assert request.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
+        assert request.parameters.value("source_qubit.rate") == 1.0
 
 
 def test_interactive_analyze_mounts_render_host_session() -> None:

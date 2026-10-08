@@ -49,6 +49,7 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui._completion_helpers import on_analyze_failed
@@ -150,16 +151,18 @@ def _make_two_tab_state() -> State:
 
 
 @pytest.mark.parametrize("context_free", [False, True])
-def test_fit_uses_tab_capture_for_request_and_writeback_after_context_switch(
-    qapp, context_free: bool
+def test_fit_uses_run_source_for_request_and_writeback_after_rebinding(
+    qapp,
+    result_sources: tuple[ParameterContext, ParameterContext],
+    context_free: bool,
 ):
     state = _make_state()
-    captured = None if context_free else make_parameters({"rate": 1.0})
+    q1, q2 = result_sources
+    captured = None if context_free else q1
     tab = state.get_tab("tab1")
-    tab.parameters = captured
-    state.set_context(
-        replace(state.session_env, parameters=make_parameters({"rate": 2.0}))
-    )
+    state.update_tab_result("tab1", object(), parameters=captured)
+    tab.parameters = q2
+    state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
     service, background = _make_service(state, EventBus(), writeback=writeback)
     service.start_analyze(AnalyzePermit("tab1"), object(), plots=_plots())
@@ -174,13 +177,54 @@ def test_fit_uses_tab_capture_for_request_and_writeback_after_context_switch(
     assert isinstance(request, AnalyzeRequest)
     assert request.parameters is captured
     if request.parameters is not None:
-        assert request.parameters.value("general.ext.rate") == 1.0
+        assert request.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
+        assert request.parameters.value("source_qubit.rate") == 1.0
     assert background.last_on_done is not None
     background.last_on_done(result)
     proposal = tab.adapter.get_writeback_items.call_args.args[0]
     assert proposal.ctx.parameters is captured
     assert writeback.create_draft.call_args.kwargs["parameters"] is captured
+    if proposal.ctx.parameters is not None:
+        assert proposal.ctx.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
     assert tab.analysis.result is result
+
+
+@pytest.mark.parametrize("context_free", [False, True])
+def test_interactive_writeback_retains_run_source_after_rebinding(
+    qapp,
+    result_sources: tuple[ParameterContext, ParameterContext],
+    context_free: bool,
+) -> None:
+    state = _make_state()
+    q1, q2 = result_sources
+    captured = None if context_free else q1
+    state.update_tab_result("tab1", object(), parameters=captured)
+    tab = state.get_tab("tab1")
+    tab.parameters = q2
+    state.set_context(replace(state.session_env, parameters=q2))
+    writeback = MagicMock()
+    service, _background = _make_service(state, EventBus(), writeback=writeback)
+    plugin = PluginDefinition(
+        "pick", 0, (), lambda _state: None, lambda _state: object()
+    )
+    service.start_plugin(
+        AnalyzePermit("tab1"),
+        plugin,
+        ManualOwnerScheduler(),
+        analyze_params_instance="submitted",
+        plots=_plots(),
+    )
+    state.set_context(replace(state.session_env, parameters=None))
+    assert service.finish_plugin("tab1") is True
+
+    assert isinstance(tab.adapter, MagicMock)
+    proposal = tab.adapter.get_writeback_items.call_args.args[0]
+    assert proposal.ctx.parameters is captured
+    assert writeback.create_draft.call_args.kwargs["parameters"] is captured
+    if proposal.ctx.parameters is not None:
+        assert proposal.ctx.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
+    assert tab.analysis.result is not None
+    assert service.is_interactive_active("tab1") is False
 
 
 def test_start_analyze_submits_to_bg(qapp):

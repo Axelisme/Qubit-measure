@@ -74,12 +74,15 @@ class RunPaneState(Generic[T_Result]):
     data, not an acquisition destination. source_operation_id identifies the
     publishing GUI operation. metadata is evidence from Run, or None when no
     native evidence was acquired; Load must not manufacture new run timing.
+    parameters is the fixed source accepted for this result (Run permit or Load
+    request), or None for context-free data. Later tab bindings never replace it.
     """
 
     result: T_Result | None = None
     source_path: str | None = None
     source_operation_id: int | None = None
     metadata: RunMetadata | None = None
+    parameters: ParameterContext | None = None
 
 
 @dataclass
@@ -469,11 +472,14 @@ class State(SessionState):
         *,
         source_operation_id: int | None = None,
         metadata: RunMetadata | None = None,
+        parameters: ParameterContext | None = None,
     ) -> RetiredPaneResources:
         """Replace result/evidence together and invalidate dependent panes.
 
         metadata must describe this result, never the current session. Omit it
-        for non-acquisition replacement. Returns detached resources for cleanup;
+        for non-acquisition replacement. parameters is this result's accepted
+        source, or None for context-free data, never a current-context fallback.
+        Returns detached resources for cleanup;
         unknown tabs raise KeyError, and off-owner calls fail before mutation.
         """
         self._assert_owner()
@@ -490,8 +496,20 @@ class State(SessionState):
         )
 
     def update_tab_loaded_result(
-        self, tab_id: str, result: object, source_path: str
+        self,
+        tab_id: str,
+        result: object,
+        source_path: str,
+        *,
+        parameters: ParameterContext | None = None,
     ) -> RetiredPaneResources:
+        """Publish loaded data and its request source without acquisition evidence.
+
+        parameters is the Load request's fixed capture, or None for context-free
+        data. source_path identifies the imported file. Clears dependent panes
+        and Run token/metadata; returns retired resources. Unknown tabs raise
+        KeyError and off-owner calls fail before mutation.
+        """
         self._assert_owner()
         logger.debug(
             "update_tab_loaded_result: tab_id=%r source_path=%r result_type=%s",
