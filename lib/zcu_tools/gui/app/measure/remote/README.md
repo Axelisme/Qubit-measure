@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-08, version handshake
+**Last updated:** 2026-10-09, version handshake and native parameter-context snapshots
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -182,9 +182,16 @@ GUI owns observation and write tracking:
   snapshot. Ordinary summary queries and figure previews establish none. Bound figure reads and
   image saves reject replaced results with `result_superseded`; image saves also
   retain the existing seen guards. No failed read or stale write triggers a retry.
-- `soc.info(include_cfg=true)` reveals the full SoC cfg. `context.snapshot` reveals
-  the active label and complete serializable md/ml contents. Encoding failure
-  does not establish a baseline. These replies may be large or sensitive.
+- `soc.info(include_cfg=true)` reveals the full SoC cfg. `context.snapshot`
+  returns `{target, point, library}` from the published parameter capture.
+  `target` is the existing `entry_draft` or `saved_point` locator. `point` and
+  `library` contain the complete working-unit native documents, including
+  headers, registered component fields and provenance. The library contains
+  persistent Specs; this read does not materialize references or open waveform
+  assets. A memory draft is readable; EMPTY and necessary source faults fail.
+  Complex numbers retain the `{__complex__: [real, imag]}` wire projection.
+  Unsupported values, non-finite numbers and encoding failures reject the full
+  read and establish no baseline. These replies may be large or sensitive.
 - Off-main methods cannot declare guard/reveals or owner-thread write tracking.
   Disconnection discards seen; reconnection requires explicit new reads.
 

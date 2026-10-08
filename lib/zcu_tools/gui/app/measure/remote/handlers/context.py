@@ -64,22 +64,26 @@ def h_context_active(
 def h_context_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    """Return the complete published target, point and library as native JSON.
+
+    No params are accepted. Reads the fixed working-unit documents without
+    refreshing or materializing library assets. EMPTY and source faults retain
+    their owner errors. Unsupported/non-finite values fail the entire read with
+    PRECONDITION_FAILED/unserializable_context, never a partial observation.
+    Shared dispatch records context seen only after successful reply encoding.
+    """
     del params
-    ctx = adapter.context_control
-    md = ctx.get_current_md()
-    ml = ctx.get_current_ml()
+    parameters = adapter.context_control.read_context()
     try:
         snapshot = {
-            "label": ctx.get_active_context_label(),
-            "md": {key: value for key, value in sorted(md.items())},
-            "ml": {
-                "modules": {
-                    name: cfg.to_dict() for name, cfg in sorted(ml.modules.items())
-                },
-                "waveforms": {
-                    name: cfg.to_dict() for name, cfg in sorted(ml.waveforms.items())
-                },
-            },
+            "target": parameters.target.model_dump(mode="python"),
+            # Registered component subclasses own the complete persisted fields.
+            "point": parameters.document().model_dump(
+                mode="python", serialize_as_any=True
+            ),
+            "library": parameters.library.document().model_dump(
+                mode="python", serialize_as_any=True
+            ),
         }
         # Validate every nested value before JSON encoding. Success is a full
         # context observation and advances the MCP guard baseline.
