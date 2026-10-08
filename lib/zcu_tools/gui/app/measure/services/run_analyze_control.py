@@ -293,8 +293,7 @@ class RunAnalyzeControlFacet:
         req = AnalyzeRequest(
             run_result=tab.run.result,
             analyze_params=analyze_params_instance,
-            md=ctx.md,
-            ml=ctx.ml,
+            parameters=tab.parameters,
             predictor=ctx.predictor,
         )
         host = self._render_host()

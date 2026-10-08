@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from zcu_tools.cfg_model import CfgValidationContext
     from zcu_tools.device import DeviceInfo
     from zcu_tools.experiment.cfg_model import ExpCfgModel
+    from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.context import ModuleLibrary
     from zcu_tools.resources.context.metadict import MetaDict
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
@@ -172,17 +173,28 @@ class RunRequest:
 
 @dataclass(frozen=True)
 class LoadDataRequest:
+    """Canonical result file path and the destination tab's fixed parameter capture.
+
+    data_path identifies the file consumed by the adapter. parameters is the
+    tab-opening capture, or None for an adapter without parameter roles.
+    """
+
     data_path: str
-    md: MetaDict
-    ml: ModuleLibrary
+    parameters: ParameterContext | None
 
 
 @dataclass(frozen=True)
 class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
+    """Inputs accepted for one primary analysis, independent of later session edits.
+
+    run_result is the selected run data. analyze_params holds adapter-specific
+    inputs. parameters is the tab-opening capture, or None for pure calculation.
+    predictor is the operation-start model, or None when no model is loaded.
+    """
+
     run_result: T_Result
     analyze_params: T_AnalyzeParams
-    md: MetaDict
-    ml: ModuleLibrary
+    parameters: ParameterContext | None
     predictor: FluxoniumPredictor | None
 
 

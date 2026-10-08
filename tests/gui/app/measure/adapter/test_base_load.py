@@ -93,7 +93,7 @@ class _InternalTypeErrorAdapter(_LoadAdapter):
 
 
 def _request(path: str = "/tmp/result.hdf5") -> LoadDataRequest:
-    return LoadDataRequest(data_path=path, md=MagicMock(), ml=MagicMock())
+    return LoadDataRequest(data_path=path, parameters=None)
 
 
 def test_base_adapter_load_calls_canonical_experiment_load() -> None:
