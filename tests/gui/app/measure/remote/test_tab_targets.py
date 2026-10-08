@@ -19,6 +19,7 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
+    DirectValue,
     EvalValue,
     ScalarSpec,
 )
@@ -79,6 +80,12 @@ class RolelessAdapter(TargetAdapter):
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
         return {}
 
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+        return CfgSchema(
+            CfgSectionSpec(fields={"rate": ScalarSpec("Rate", float)}),
+            CfgSectionValue(fields={"rate": DirectValue(1.0)}),
+        )
+
 
 @dataclass
 class TargetApplication:
@@ -105,7 +112,9 @@ def application(qapp, tmp_path: Path) -> Generator[TargetApplication]:
         controller.setup_control.new_entry(EntryRequest("entry"))
         context = controller.context_control
         context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
-        context.add_component("Q2", "fake/drive/a", {"rate": 20.0, "source": "Q1"})
+        context.add_component(
+            "Q2", "fake/drive/a", {"rate": 20.0, "source": "Q1", "energy_a": None}
+        )
         context.add_component("S1", "fake/sensor", {"rate": 30.0})
         context.add_component(
             "QL",
@@ -272,6 +281,39 @@ def test_parameter_read_rejects_unbound_role_instead_of_live_focus_fallback(
             application.remote,
             {"tab_id": tab_id, "paths": ["qubit.freq"], "module_refs": []},
         )
+
+
+def test_parameter_read_source_free_tab_accepts_only_empty_queries(
+    application: TargetApplication,
+) -> None:
+    tab_id = h_tab_new(application.remote, {"adapter_name": "roleless"})["tab_id"]
+    assert h_tab_parameter_read(
+        application.remote, {"tab_id": tab_id, "paths": [], "module_refs": []}
+    ) == {"values": {}, "modules": {}}
+    for requested in (
+        {"paths": ["driver.rate"]},
+        {"module_refs": ["driver.pulses.pi"]},
+    ):
+        with pytest.raises(RemoteError) as caught:
+            h_tab_parameter_read(
+                application.remote,
+                {"tab_id": tab_id, "paths": [], "module_refs": [], **requested},
+            )
+        assert caught.value.code is ErrorCode.PRECONDITION_FAILED
+
+
+@pytest.mark.parametrize("field", ["paths", "module_refs"])
+@pytest.mark.parametrize("invalid", [None, "driver.rate", [""], ["  "], [False], [12]])
+def test_parameter_read_rejects_invalid_query_arrays(
+    application: TargetApplication, field: str, invalid: object
+) -> None:
+    tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
+    with pytest.raises(RemoteError) as caught:
+        h_tab_parameter_read(
+            application.remote,
+            {"tab_id": tab_id, "paths": [], "module_refs": [], field: invalid},
+        )
+    assert caught.value.code is ErrorCode.INVALID_PARAMS
 
 
 def test_omitted_target_captures_focus_and_later_focus_only_affects_new_tabs(
