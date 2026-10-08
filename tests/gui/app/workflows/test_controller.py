@@ -499,10 +499,11 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
         harness.background.deliver()
         status = controller.status()
         assert status is not None and status.lifecycle == "failed"
-        assert isinstance(finished[-1][1], ValueError)
-        assert str(finished[-1][1]) == "resumed workflow failed"
+        assert finished[-1] == (status, None)
+        assert "resumed workflow failed" in (status.reason or "")
         outcome = harness.handles.known_outcome(resumed)
         assert outcome is not None and outcome.status == "failed"
+        assert outcome.error == status.reason
     assert progress_calls == ([token], [token])
     assert not harness.progress.bars_for_owner("example")
     assert not harness.gate.snapshot()
