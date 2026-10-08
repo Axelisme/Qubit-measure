@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.state import (
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.resource import CfgObservation, CfgResolution
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import RoleSpec
 
@@ -207,6 +208,8 @@ class TabService:
         detached ``cfg_schema`` input memento. Path overrides are process-local and not
         persisted, so restore creates fresh panes.
         """
+        if target is not None and not target.strip():
+            raise InvalidInputError("target must be a non-empty component name")
         adapter = self._registry.create(adapter_name)
         tab_id = f"{_slug(adapter_name)}-{uuid.uuid4().hex[:8]}"
         logger.info(
