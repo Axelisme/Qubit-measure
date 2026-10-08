@@ -300,46 +300,48 @@ class AmpRabiAdapter(
         role resolution, non-scalar source length and conversion/asset faults
         fail explicitly. No hardware, live calibration reads or writes occur.
         """
-        result = req.analyze_result
-        items: list[WritebackItem] = [
-            # Scalar gains write back as 'pi_gain'/'pi2_gain' per the naming
-            # convention (single_qubit.md); the 'pi_amp'/'pi2_amp' names below
-            # belong to the pi-pulse MODULES, not these scalars.
-            MetaDictWriteback(
-                target_name="pi_gain",
-                description="Pi pulse gain (a.u.)",
-                proposed_value=result.pi_gain,
-            ),
-            MetaDictWriteback(
-                target_name="pi2_gain",
-                description="Pi/2 pulse gain (a.u.)",
-                proposed_value=result.pi2_gain,
-            ),
-        ]
-
-        # Emit module writeback items when the source record has a cfg.
-        # Each item is a copy of qub_pulse with gain overridden to the fitted
-        # pi / pi/2 value, registered as a library module for subsequent
-        # experiments that reference the calibrated pulse by name.
         snapshot = req.run_result.cfg
-        if snapshot is not None:
-            qub_pulse_cfg = snapshot.modules.qub_pulse
-            # Module targets keep the 'pi_amp'/'pi2_amp' names; the gain values come
-            # from the renamed pi_gain / pi2_gain scalar fields.
-            for target, gain, desc in [
-                ("pi_amp", result.pi_gain, "amp pi pulse"),
-                ("pi2_amp", result.pi2_gain, "amp pi/2 pulse"),
-            ]:
-                spec, value = module_cfg_to_value(qub_pulse_cfg)
-                value.with_field("gain", gain)
-                items.append(
-                    ModuleWriteback(
-                        target_name=target,
-                        description=desc,
-                        edit_schema=CfgSchema(spec=spec, value=value),
-                    )
+        if snapshot is None:
+            return []
+        parameters = req.ctx.parameters
+        if parameters is None:
+            raise ValueError("Amplitude Rabi writeback requires captured parameters")
+        pulse = snapshot.modules.qub_pulse
+        length = pulse.waveform.length
+        if not isinstance(length, (int, float)):
+            raise ValueError(
+                "Amplitude Rabi pi_product requires a scalar source length"
+            )
+        result = req.analyze_result
+        items: list[WritebackItem] = []
+        for target, slot, gain, description in (
+            ("qubit.pulses.pi_amp", "qubit.module.x180", result.pi_gain, "Pi pulse"),
+            ("qubit.pulses.pi2_amp", "qubit.module.x90", result.pi2_gain, "Pi/2 pulse"),
+        ):
+            key = parameters.library_key(target)
+            spec, value = module_cfg_to_value(pulse)
+            value.with_field("gain", gain)
+            items.append(
+                ModuleWriteback(
+                    target_name=target,
+                    description=description,
+                    edit_schema=CfgSchema(spec=spec, value=value),
                 )
-
+            )
+            items.append(
+                MetaDictWriteback(
+                    target_name=slot,
+                    description=f"{description} slot",
+                    proposed_value=key,
+                )
+            )
+        items.append(
+            MetaDictWriteback(
+                target_name="qubit.ext.pi_product",
+                description="Pi pulse gain times length (a.u. * us)",
+                proposed_value=result.pi_gain * length,
+            )
+        )
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

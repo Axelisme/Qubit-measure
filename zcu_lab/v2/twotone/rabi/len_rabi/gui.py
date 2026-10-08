@@ -279,50 +279,52 @@ class LenRabiAdapter(
         waveform-length conversion fail explicitly. No hardware, live
         calibration reads or writes occur.
         """
+        parameters = req.ctx.parameters
+        if parameters is None:
+            raise ValueError("Length Rabi writeback requires captured parameters")
         result = req.analyze_result
         items: list[WritebackItem] = [
             MetaDictWriteback(
-                target_name="pi_len",
-                description="Pi pulse length (us)",
-                proposed_value=result.pi_len,
-            ),
-            MetaDictWriteback(
-                target_name="pi2_len",
-                description="Pi/2 pulse length (us)",
-                proposed_value=result.pi2_len,
-            ),
-            MetaDictWriteback(
-                target_name="rabi_f",
+                target_name="qubit.ext.rabi_freq",
                 description="Rabi oscillation frequency (MHz)",
                 proposed_value=result.rabi_f,
             ),
         ]
-
-        # Emit module writeback items when the source record has a cfg.
-        # Each item is a copy of qub_pulse with waveform.length overridden to
-        # the fitted pi / pi/2 value, registered as a library module for
-        # subsequent experiments that reference the calibrated pulse by name.
-        # These are the LENGTH-calibrated modules 'pi_len'/'pi2_len' produced
-        # by this adapter (single_qubit.md); amp_rabi produces the separate
-        # gain-calibrated 'pi_amp'/'pi2_amp' modules and reads the 'pi_len'
-        # SCALAR (also written above) as its gain-sweep default-value seed.
         snapshot = req.run_result.cfg
-        if snapshot is not None:
-            qub_pulse_cfg = snapshot.modules.qub_pulse
-            for target, length, desc in [
-                ("pi_len", result.pi_len, "len pi pulse"),
-                ("pi2_len", result.pi2_len, "len pi/2 pulse"),
-            ]:
-                spec, value = module_cfg_to_value(qub_pulse_cfg)
-                value.with_field("waveform.length", length)
-                items.append(
-                    ModuleWriteback(
-                        target_name=target,
-                        description=desc,
-                        edit_schema=CfgSchema(spec=spec, value=value),
-                    )
+        if snapshot is None:
+            return items
+        pulse = snapshot.modules.qub_pulse
+        gain = pulse.gain
+        if not isinstance(gain, (int, float)):
+            raise ValueError("Length Rabi pi_product requires a scalar source gain")
+        for target, slot, length, description in (
+            ("qubit.pulses.pi_amp", "qubit.module.x180", result.pi_len, "Pi pulse"),
+            ("qubit.pulses.pi2_amp", "qubit.module.x90", result.pi2_len, "Pi/2 pulse"),
+        ):
+            key = parameters.library_key(target)
+            spec, value = module_cfg_to_value(pulse)
+            value.with_field("waveform.length", length)
+            items.append(
+                ModuleWriteback(
+                    target_name=target,
+                    description=description,
+                    edit_schema=CfgSchema(spec=spec, value=value),
                 )
-
+            )
+            items.append(
+                MetaDictWriteback(
+                    target_name=slot,
+                    description=f"{description} slot",
+                    proposed_value=key,
+                )
+            )
+        items.append(
+            MetaDictWriteback(
+                target_name="qubit.ext.pi_product",
+                description="Pi pulse gain times length (a.u. * us)",
+                proposed_value=gain * result.pi_len,
+            )
+        )
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
