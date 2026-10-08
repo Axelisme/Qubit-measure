@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from fnmatch import fnmatchcase
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -37,19 +37,27 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class RoleBinding:
-    """Captured focus (or None), ordered declarations and role-to-component names.
+    """Fixed role inference inputs and resolved aliases for one capture.
 
-    Construction detaches both mappings. ParameterContext also detaches returned
-    bindings, so editing a consumer's mapping never changes another capture.
+    focus is the captured component name, or None for default-focus inference.
+    declarations preserves ordered role kind/via rules. names contains only
+    bound role-to-component names; omitted declared roles are unbound.
+    explicit preserves manual choices: a component name binds that role, None
+    explicitly leaves it unbound, and an absent key allows inference. It is
+    process-local capture state, not storage or ledger metadata.
+    Construction detaches mappings. ParameterContext also detaches returned
+    bindings, so consumer edits do not change another capture.
     """
 
     focus: str | None
     declarations: Mapping[str, RoleSpec]
     names: Mapping[str, str]
+    explicit: Mapping[str, str | None] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "declarations", deepcopy(dict(self.declarations)))
         object.__setattr__(self, "names", deepcopy(dict(self.names)))
+        object.__setattr__(self, "explicit", dict(self.explicit))
 
 
 class ParameterContext:
@@ -177,12 +185,14 @@ class ParameterContext:
         declarations: Mapping[str, RoleSpec],
         *,
         focus: str | None,
-        explicit: Mapping[str, str],
+        explicit: Mapping[str, str | None],
     ) -> ParameterContext:
         """Resolve roles on this fixed point and return an independent capture.
 
         Declarations are ordered kind/via rules. Explicit concrete names win
-        over focus/via inference. Empty declarations remain empty. Entry
+        over focus/via inference. None explicitly leaves its role unbound;
+        an absent explicit key allows inference. The returned RoleBinding keeps
+        the same focus and explicit choices. Empty declarations remain empty.
         Auto inference with zero/multiple candidates leaves roles unbound;
         their use raises RoleResolutionError. Invalid explicit choices and
         dangling/wrong-kind references still raise during binding.
@@ -194,7 +204,7 @@ class ParameterContext:
             point=self._point,
             library=self._library,
             target=self._target,
-            roles=RoleBinding(focus, declarations, names),
+            roles=RoleBinding(focus, declarations, names, explicit),
             storage=self._storage,
         )
 

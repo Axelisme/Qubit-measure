@@ -25,7 +25,12 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
-from zcu_tools.resources.entry import ResultEntry, RoleSpec, source_path
+from zcu_tools.resources.entry import (
+    ResultEntry,
+    RoleResolutionError,
+    RoleSpec,
+    source_path,
+)
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import (
@@ -352,6 +357,49 @@ def test_cross_entry_clone_rejects_before_destination_or_ledger_changes(
     assert entry.ledger.events() == before_events
     assert other.ledger.events() == other_events
     assert context.read_context().target == before
+
+
+@pytest.mark.parametrize(
+    ("explicit", "expected"),
+    [
+        ({"driver": "Q2"}, {"driver": "Q2", "sense": "R2"}),
+        ({"driver": None}, {}),
+        ({"driver": None, "sense": "R2"}, {"sense": "R2"}),
+    ],
+)
+def test_manual_capture_retains_choices_without_ledger_or_live_focus(
+    context: ContextService,
+    rich_entry: ResultEntry,
+    explicit: dict[str, str | None],
+    expected: dict[str, str],
+) -> None:
+    rich_entry.new_point("first")
+    context.install_entry(rich_entry)
+    context.use_point(PointUseRequest("first"))
+    ledger_before = rich_entry.ledger.events()
+    declarations = {
+        "driver": RoleSpec("fake/drive/*"),
+        "sense": RoleSpec("fake/sensor", "driver.sense"),
+    }
+    binding = context.capture_roles(declarations, focus="Q1", explicit=explicit)
+    fixed = context.read_context(roles=binding)
+    context.set_component_focus("Q2")
+    assert context.get_component_focus().name == "Q2"
+    assert dict(binding.explicit) == explicit
+    assert dict(binding.names) == expected
+    captured = fixed.roles
+    assert captured is not None
+    assert captured.focus == "Q1"
+    assert dict(captured.explicit) == explicit
+    assert dict(captured.names) == expected
+    storage = fixed.capture_storage()
+    assert dict(storage.roles) == expected
+    assert fixed.value("Q1.rate") == 4300.0
+    if "driver" not in expected:
+        with pytest.raises(RoleResolutionError) as error:
+            fixed.value("driver.rate")
+        assert error.value.role == "driver"
+    assert rich_entry.ledger.events() == ledger_before
 
 
 @pytest.mark.parametrize("explicit", [{}, {"driver": "Q2"}])
