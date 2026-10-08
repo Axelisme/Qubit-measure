@@ -53,7 +53,7 @@ def test_coordinate_constants_unique_and_in_order() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Validation (A1)
+# Validate sample-table inputs for criterion A1.
 
 
 def test_validate_accepts_minimal_v2_table() -> None:
@@ -261,7 +261,7 @@ def test_validate_empty_table_modes() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Frames (A1)
+# Check sample-table frames for criterion A1.
 
 
 def test_sample_flux_frame_rejects_invalid_frames() -> None:
@@ -380,7 +380,7 @@ def test_flux_frames_reject_non_real_numeric_values(value: object) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Resolution (A2)
+# Check sample-table resolution for criterion A2.
 
 
 def test_resolve_explicit_flux_wins_over_row_frame() -> None:
@@ -535,7 +535,7 @@ def test_resolve_empty_table() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Migration (A3)
+# Check sample-table migration for criterion A3.
 
 
 @pytest.mark.parametrize(
