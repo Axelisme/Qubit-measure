@@ -203,10 +203,17 @@ class HeatmapPlot:
 
         def apply() -> None:
             self._ensure_active()
+            if self._axes not in self._figure.axes:
+                raise RuntimeError("Point marker was removed from its original axes.")
             if self._marker is None:
                 self._marker = self._axes.scatter(
                     [], [], color="red", label="Best Point", zorder=3
                 )
+            elif (
+                self._marker.axes is not self._axes
+                or self._marker not in self._axes.collections
+            ):
+                raise RuntimeError("Point marker was removed from its original axes.")
             self._marker.set_offsets(point)
 
         self._host.call(apply)
@@ -266,10 +273,17 @@ class HeatmapLinePlot:
 
         def apply() -> None:
             self._ensure_active()
+            if self._line_axes not in self._figure.axes:
+                raise RuntimeError("Line marker was removed from its original axes.")
             if self._marker is None:
                 self._marker = self._line_axes.axvline(
                     np.nan, color="red", linestyle="--"
                 )
+            elif (
+                self._marker.axes is not self._line_axes
+                or self._marker not in self._line_axes.lines
+            ):
+                raise RuntimeError("Line marker was removed from its original axes.")
             self._marker.set_xdata([position])
 
         self._host.call(apply)
