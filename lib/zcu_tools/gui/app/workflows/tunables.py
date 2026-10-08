@@ -1,16 +1,23 @@
 """Input submission shared by GUI and remote callers, without GUI version guards."""
 
 from collections.abc import Mapping
+from math import isfinite
 
 from pydantic import JsonValue
 
-from zcu_tools.experiment.workflows import Actor, Engine, TunablesSnapshot
+from zcu_tools.experiment.workflows import (
+    Actor,
+    Engine,
+    TunableChange,
+    TunablesSnapshot,
+)
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
     FormInput,
     FormModel,
     FormState,
+    FormValue,
     FormWritePath,
 )
 
@@ -68,7 +75,22 @@ class TunablesHost[F: FormModel, C]:
         Success resets base to current input; failure retains draft/base.
         Even unchanged complete input is an accepted new Engine revision.
         """
-        raise NotImplementedError
+        if local_errors is not None and local_errors.messages:
+            return local_errors
+        preview = self.state.preview(self._env)
+        if preview.errors is not None:
+            return preview.errors
+        changes = tuple(
+            TunableChange(".".join(path), self._json_value(value))
+            for path, value in preview.values.items()
+        )
+        revision = self._engine.tunables(self._run_id).revision
+        snapshot = self._engine.update_tunables(
+            self._run_id, changes, expected_revision=revision, actor=actor
+        )
+        self._accepted_input = self.state.input
+        self.state.reset(self._accepted_input)
+        return snapshot
 
     def apply_external(
         self,
@@ -85,7 +107,8 @@ class TunablesHost[F: FormModel, C]:
         and resets draft base. There is no external-edit draft preservation or
         conflict guard. Caller clears renderer-local text only after success.
         """
-        raise NotImplementedError
+        self.state.write(batch, self._env)
+        return self.apply(actor=actor)
 
     def discard(self) -> None:
         """Restore latest accepted expression input without changing Engine.
@@ -93,4 +116,15 @@ class TunablesHost[F: FormModel, C]:
         Caller separately discards renderer-local unparseable text. No Engine
         revision or holder state is restored or checked.
         """
-        raise NotImplementedError
+        self.state.reset(self._accepted_input)
+
+    def _json_value(self, value: FormValue) -> JsonValue:
+        if isinstance(value, (list, tuple)):
+            return [self._json_value(item) for item in value]
+        if isinstance(value, dict):
+            return {key: self._json_value(item) for key, item in value.items()}
+        if isinstance(value, complex):
+            raise TypeError("Complex values cannot be submitted as JSON tunables")
+        if isinstance(value, float) and not isfinite(value):
+            raise ValueError("Nonfinite values cannot be submitted as JSON tunables")
+        return value
