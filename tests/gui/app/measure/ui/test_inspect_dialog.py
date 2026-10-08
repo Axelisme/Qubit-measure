@@ -206,16 +206,6 @@ def test_C9_inspect_dialog_raises_when_parent_has_no_open_dialog(qapp):
         dialog._on_arb_waveform_clicked()
 
 
-def _send_key(widget: QLineEdit, key: Qt.Key, qapp) -> None:
-    event = QKeyEvent(
-        QEvent.Type.KeyPress,
-        key,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    QApplication.sendEvent(widget, event)
-    qapp.processEvents()
-
-
 def _select_ml_child(dialog: InspectDialog, group_index: int, child_index: int = 0):
     group = dialog._ml_tree.topLevelItem(group_index)
     assert group is not None
