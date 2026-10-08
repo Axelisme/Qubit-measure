@@ -7,6 +7,14 @@ import pytest
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    LiteralSpec,
+    ReferenceSpec,
+    ReferenceValue,
+    is_custom_reference_key,
+    read_value_path,
+)
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
@@ -70,7 +78,7 @@ def component_kinds() -> Generator[None]:
         assert component_registry.kinds() == before
 
 
-def _source(*, calibrated: bool) -> ParameterContext:
+def _source(*, calibrated: bool, null_calibrations: bool = False) -> ParameterContext:
     components: dict[str, object] = {}
     libraries: dict[str, object] = {}
     for index in [1, 2]:
@@ -85,9 +93,9 @@ def _source(*, calibrated: bool) -> ParameterContext:
         components[qubit] = {
             "kind": "qubit/transmon",
             "resonator": resonator,
-            "freq": pulse["freq"],
+            "freq": None if null_calibrations else pulse["freq"],
             "kappa": 10.0 * index,
-            "t1": 12.0 * index,
+            "t1": None if null_calibrations else 12.0 * index,
             "wiring": {"L01": {"ch": index}},
             "ext": {"best_ro_freq": 6000.0 + 100 * index},
             "module": (
@@ -98,7 +106,7 @@ def _source(*, calibrated: bool) -> ParameterContext:
         }
         components[resonator] = {
             "kind": "resonator",
-            "freq": 6000.0 + 100 * index,
+            "freq": None if null_calibrations else 6000.0 + 100 * index,
             "kappa": 20.0 * index,
             "wiring": {"ch": index, "ro_ch": index},
         }
@@ -150,13 +158,59 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
     first = source.bind_roles(adapter.parameter_roles(), focus="Q1", explicit={})
     second = source.bind_roles(adapter.parameter_roles(), focus="Q2", explicit={})
     definition = type(adapter).cfg_definition()
-    schema = adapter.make_default_cfg(
-        SessionEnv(parameters=first, soc=None, soccfg=None)
+    schema = definition.instantiate(SessionEnv(parameters=first, soc=None, soccfg=None))
+    second_schema = definition.instantiate(
+        SessionEnv(parameters=second, soc=None, soccfg=None)
     )
     raw_first = schema_to_raw_dict(schema, first)
-    raw_second = schema_to_raw_dict(schema, second)
-    assert raw_first != raw_second
-    assert definition.spec == schema.spec
+    raw_second = schema_to_raw_dict(second_schema, second)
+    assert definition.spec == schema.spec == second_schema.spec
+    module_spec = definition.spec.fields["modules"]
+    assert isinstance(module_spec, CfgSectionSpec)
+    pulses: list[tuple[str, ReferenceSpec]] = []
+    for key, spec in module_spec.fields.items():
+        if isinstance(spec, ReferenceSpec):
+            discriminator = spec.allowed[0].fields.get("type")
+            if (
+                isinstance(discriminator, LiteralSpec)
+                and discriminator.value == "pulse"
+            ):
+                pulses.append((key, spec))
+    assert len(pulses) == 1
+    pulse_key, pulse_spec = pulses[0]
+    inline_probe = isinstance(pulse_spec.allowed[0].fields["freq"], LiteralSpec)
+    for capture, cfg, raw in [
+        (first, schema, raw_first),
+        (second, second_schema, raw_second),
+    ]:
+        pulse = read_value_path(cfg.value, f"modules.{pulse_key}")
+        readout = read_value_path(cfg.value, "modules.readout")
+        assert isinstance(pulse, ReferenceValue)
+        assert isinstance(readout, ReferenceValue)
+        assert is_custom_reference_key(pulse.chosen_key) == (
+            not calibrated or inline_probe
+        )
+        assert is_custom_reference_key(readout.chosen_key) == (not calibrated)
+        for ref, slot in [(pulse, "x180"), (readout, "readout")]:
+            if not is_custom_reference_key(ref.chosen_key):
+                assert ref.chosen_key == f"qubit.module.{slot}"
+                assert (
+                    capture.library_key(ref.chosen_key)
+                    == capture.lookup(f"qubit.module.{slot}").value
+                )
+        modules = raw["modules"]
+        assert isinstance(modules, dict)
+        lowered_pulse, lowered_readout = modules[pulse_key], modules["readout"]
+        assert isinstance(lowered_pulse, dict)
+        assert isinstance(lowered_readout, dict)
+        readout_pulse, readout_ro = (
+            lowered_readout["pulse_cfg"],
+            lowered_readout["ro_cfg"],
+        )
+        assert isinstance(readout_pulse, dict) and isinstance(readout_ro, dict)
+        assert lowered_pulse["ch"] == capture.lookup("qubit.wiring.L01.ch").value
+        assert readout_pulse["ch"] == capture.lookup("resonator.wiring.ch").value
+        assert readout_ro["ro_ch"] == capture.lookup("resonator.wiring.ro_ch").value
     # Later target selection does not alter the original source or the template.
     source.bind_roles(adapter.parameter_roles(), focus="Q2", explicit={})
     assert schema_to_raw_dict(schema, first) == raw_first
@@ -164,6 +218,22 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
         definition.instantiate(SessionEnv(parameters=first, soc=None, soccfg=None))
         == schema
     )
+
+
+@pytest.mark.parametrize("name", _role_adapters())
+def test_registered_role_adapter_accepts_uncalibrated_null_scalar_values(
+    name: str,
+) -> None:
+    adapter = _registry().create(name)
+    capture = _source(calibrated=False, null_calibrations=True).bind_roles(
+        adapter.parameter_roles(), focus="Q2", explicit={}
+    )
+    schema = adapter.make_default_cfg(
+        SessionEnv(parameters=capture, soc=None, soccfg=None)
+    )
+    raw = schema_to_raw_dict(schema, capture)
+    assert isinstance(raw["relax_delay"], (int, float))
+    assert isinstance(raw["modules"], dict)
 
 
 @pytest.mark.parametrize("name", _role_adapters())

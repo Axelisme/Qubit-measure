@@ -147,6 +147,7 @@ class TabService:
             ),
             save=SavePaneSnapshot(comment=tab.save.comment),
             artifacts=self._state.get_artifact_snapshots(tab_id),
+            parameters=tab.parameters,
         )
 
     def new_tab(

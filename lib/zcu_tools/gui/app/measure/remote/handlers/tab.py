@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.services.ports import TabPathsSnapshot
+from zcu_tools.gui.cfg import is_custom_reference_key
 from zcu_tools.gui.cfg.edit_codec import decode_edits, decode_ref, encode_ref
 from zcu_tools.gui.cfg.resource import (
     CfgInputError,
@@ -209,6 +211,80 @@ def _save_paths_wire(paths: TabPathsSnapshot | None) -> dict[str, object] | None
             name: path.path for name, path in paths.post_analysis_images.items()
         },
     }
+
+
+class TabParameterRead(TypedDict):
+    """Requested values and module references from one fixed tab capture.
+
+    values maps requested logical paths to YAML values. Absent leaves are
+    omitted; explicit null is retained. modules maps each requested reference
+    to its existing canonical library root, or None for custom/missing roots.
+    Neither mapping reads current point/focus or refreshes the live context guard.
+    """
+
+    values: dict[str, YamlValue]
+    modules: dict[str, str | None]
+
+
+def _parameter_query_strings(params: Mapping[str, object], name: str) -> list[str]:
+    """Validate a requested parameter path/reference array at the wire boundary."""
+    items = params.get(name)
+    if not isinstance(items, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"{name} must be a string array")
+    strings: list[str] = []
+    for item in items:
+        if not isinstance(item, str) or not item.strip():
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, f"{name} must contain non-empty strings"
+            )
+        strings.append(item)
+    return strings
+
+
+def h_tab_parameter_read(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> TabParameterRead:
+    """Read paths and module_refs through the named tab's ParameterContext.
+
+    tab_id is an existing GUI tab. paths and module_refs are arrays of non-empty
+    strings, including captured role prefixes. Query only these requested data.
+    Missing leaves and explicit null follow TabParameterRead. Module lookup uses
+    the parameter owner's role/slot resolution and library membership. Unknown
+    roles, malformed paths, unavailable sources and owner I/O errors propagate.
+    A source-free tab accepts empty arrays only; otherwise precondition_failed.
+    This read does not refresh any live-context or operation observation guard.
+    """
+    tab_id = params.get("tab_id")
+    if not isinstance(tab_id, str) or not adapter.tab_control.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    paths = _parameter_query_strings(params, "paths")
+    module_refs = _parameter_query_strings(params, "module_refs")
+    parameters = adapter.tab_control.get_tab_snapshot(tab_id).parameters
+    if parameters is None:
+        if paths or module_refs:
+            raise RemoteError(
+                ErrorCode.PRECONDITION_FAILED, "Tab has no parameter capture"
+            )
+        return {"values": {}, "modules": {}}
+    values: dict[str, YamlValue] = {}
+    for path in paths:
+        result = parameters.lookup(path)
+        if result.present:
+            values[path] = result.value
+    modules: dict[str, str | None] = {}
+    module_keys = parameters.library.module_keys() if module_refs else ()
+    for reference in module_refs:
+        if is_custom_reference_key(reference):
+            modules[reference] = None
+            continue
+        try:
+            root = parameters.library_key(reference)
+        except AttributeError:
+            # library_key reports only unset/dangling captured module slots here.
+            modules[reference] = None
+        else:
+            modules[reference] = root if root in module_keys else None
+    return {"values": values, "modules": modules}
 
 
 def h_tab_get_cfg(

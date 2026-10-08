@@ -86,17 +86,21 @@ def md(
 def path_seed(
     path: str, *, fallback: ScalarLeafInput, expr: str | None = None
 ) -> Seed[ScalarLeafInput]:
-    """Use a role/component parameter path when present, else explicit fallback.
+    """Use a non-null role/component calibration, else explicit fallback.
 
-    Resolve only at fresh defaults. Empty paths raise ValueError; source faults
-    propagate rather than becoming fallback. expr overrides the live expression.
+    Resolve only at fresh defaults. Absent/explicit null means uncalibrated.
+    Empty paths raise ValueError; source/role faults propagate rather than becoming
+    fallback. A malformed non-null value still fails expression lowering.
+    expr overrides the captured expression.
     """
     if not path.strip():
         raise ValueError("parameter seed path must not be empty")
 
     def resolve(ctx: SessionEnv) -> ScalarLeafInput:
-        if ctx.parameters is not None and ctx.parameters.lookup(path).present:
-            return EvalValue(expr=expr if expr is not None else path)
+        if ctx.parameters is not None:
+            calibration = ctx.parameters.lookup(path)
+            if calibration.present and calibration.value is not None:
+                return EvalValue(expr=expr if expr is not None else path)
         return fallback
 
     return Seed(resolve, description=f"parameter:{path}")
@@ -141,9 +145,9 @@ def module_seed(
 def scaled_path_seed(
     path: str, *, factor: float, fallback_value: float
 ) -> Seed[float | EvalValue]:
-    """Seed factor * path, or the already scaled fallback when absent.
+    """Seed factor * path, or the already scaled fallback when absent/null.
 
-    Unset/dangling module slots count as absent calibration. Empty paths raise
+    Explicit null and unset/dangling module slots mean uncalibrated. Empty paths raise
     ValueError. Capture, role and materialization faults propagate; no rebind.
     """
     if not path.strip():
@@ -157,7 +161,7 @@ def scaled_path_seed(
         except AttributeError:
             # The parameter owner reports unset/dangling module slots this way.
             return fallback_value
-        if calibration.present:
+        if calibration.present and calibration.value is not None:
             return EvalValue(expr=f"{factor} * {path}")
         return fallback_value
 
