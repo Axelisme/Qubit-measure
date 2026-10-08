@@ -695,6 +695,43 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
     assert ("unrestricted", "n") in errors.messages
 
 
+class StringNumericTagBranch(FormModel):
+    """The string tag 1 is not the numeric tag 1."""
+
+    kind: Literal["1"] = "1"
+    text_only: float = 4.0
+
+
+class TypedTagCollisionForm(FormModel):
+    """Typed intrinsic tags must not be grouped by their string representation."""
+
+    branch: Annotated[
+        NumericAliasBranch | StringNumericTagBranch, Field(discriminator="kind")
+    ]
+
+
+def test_discriminator_identity_keeps_numeric_and_string_tags_distinct() -> None:
+    env = FormEnv(md=MetaDict())
+    schema = TypedTagCollisionForm.input_schema(env)
+    fields = schema_object(schema["properties"])
+    branches = schema_object(fields["branch"])["oneOf"]
+    assert isinstance(branches, list)
+    observed: dict[str, JsonValue] = {}
+    for value in branches:
+        branch = schema_object(value)
+        properties = schema_object(branch["properties"])
+        name = "amount" if "amount" in properties else "text_only"
+        observed[name] = branch.get("x-form-discriminator-values")
+    assert observed == {"amount": [1, 2], "text_only": ["1"]}
+    for tag in (1, 2, "1"):
+        data: dict[str, JsonValue] = {"branch": {"kind": tag}}
+        assert Draft202012Validator(schema).is_valid(data)
+        result = FormState(FormInput(TypedTagCollisionForm, data)).result(env)
+        assert isinstance(result, TypedTagCollisionForm)
+        assert result.branch.kind == tag
+        assert type(result.branch.kind) is type(tag)
+
+
 def test_whole_container_choices_share_json_value_membership() -> None:
     env = FormEnv(md=MetaDict())
     valid: dict[str, JsonValue] = {
