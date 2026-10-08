@@ -1,13 +1,14 @@
-"""Data save center for current named artifacts and their path drafts."""
+"""Data save center for current named artifacts and their published paths."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QUrl  # type: ignore[attr-defined]
+from qtpy.QtGui import QDesktopServices
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -45,35 +46,12 @@ _STATUS_COLOR = {
 }
 
 
-class _FocusPreservingSaveAllButton(QPushButton):
-    """Keep the DATA editor's focus and selection across a Save All click."""
-
-    def __init__(
-        self,
-        capture_editor_state: Callable[[], None],
-        restore_editor_state: Callable[[], None],
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__("Save All", parent)
-        self._capture_editor_state = capture_editor_state
-        self._restore_editor_state = restore_editor_state
-
-    def mousePressEvent(self, e: Any) -> None:
-        self._capture_editor_state()
-        super().mousePressEvent(e)
-
-    def mouseReleaseEvent(self, e: Any) -> None:
-        try:
-            super().mouseReleaseEvent(e)
-        finally:
-            self._restore_editor_state()
-
-
 class ArtifactSaveCenter(QWidget):
     """Render DATA and only the named images currently published by State.
 
-    Image rows are keyed by (stage, name), not by stage. Updating save status
-    retains the editor widgets; a pane replacement retires only its old rows.
+    Image rows are keyed by (stage, name), not by stage. Published paths are
+    read-only and can be selected or copied. Updating save status retains the
+    widgets; a pane replacement retires only its old rows.
     """
 
     def __init__(
@@ -92,13 +70,7 @@ class ArtifactSaveCenter(QWidget):
         self._status_labels: dict[ArtifactKey, QLabel] = {}
         self._path_edits: dict[ArtifactKey, QLineEdit] = {}
         self._save_btns: dict[ArtifactKey, QPushButton] = {}
-        self._image_path_handler: Callable[[ArtifactKey, str], None] | None = None
         self._image_save_handler: Callable[[ArtifactKey], None] | None = None
-        self._image_path_slots: dict[ArtifactKey, Callable[[str], None]] = {}
-        self._local_path_edits: set[ArtifactKey] = set()
-        self._saved_data_editor_state: (
-            tuple[QLineEdit, str, int, int, int, bool] | None
-        ) = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 10, 10, 10)
@@ -126,7 +98,6 @@ class ArtifactSaveCenter(QWidget):
         )
         self._rows_layout.addWidget(self._rows[_DATA])
         outer.addStretch()
-        self._path_edits[_DATA].installEventFilter(self)
 
     def _build_actions(self) -> QWidget:
         actions = QWidget()
@@ -139,9 +110,7 @@ class ArtifactSaveCenter(QWidget):
         self.load_button.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self.save_all_button = _FocusPreservingSaveAllButton(
-            self._capture_data_editor_state, self._restore_data_editor_state
-        )
+        self.save_all_button = QPushButton("Save All")
         self.save_all_button.setFixedHeight(36)
         self.save_all_button.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -181,23 +150,16 @@ class ArtifactSaveCenter(QWidget):
         path_row = QHBoxLayout()
         path_row.setSpacing(6)
         edit = QLineEdit()
+        edit.setReadOnly(True)
         edit.setPlaceholderText(
             "/tmp/data.hdf5" if key.kind is ArtifactKind.DATA else "/tmp/image.png"
         )
         path_row.addWidget(edit, stretch=1)
         self._path_edits[key] = edit
-        if key.kind is not ArtifactKind.DATA:
-
-            def slot(text: str, *, bound_key: ArtifactKey = key) -> None:
-                self._image_path_changed(bound_key, text)
-
-            edit.textChanged.connect(slot)
-            self._image_path_slots[key] = slot
-        browse = QPushButton("Browse…")
-        browse.setFixedWidth(80)
-        browse.setToolTip("Choose a destination")
-        browse.clicked.connect(lambda _checked=False, k=key: self._on_browse(k))
-        path_row.addWidget(browse)
+        open_folder = QPushButton("Open folder")
+        open_folder.setToolTip("Open the published output's parent folder")
+        open_folder.clicked.connect(lambda _checked=False, k=key: self._open_folder(k))
+        path_row.addWidget(open_folder)
         save = QPushButton("Save")
         save.setFixedWidth(72)
         if key.kind is not ArtifactKind.DATA:
@@ -216,89 +178,14 @@ class ArtifactSaveCenter(QWidget):
             layout.addWidget(self._comment_edit)
         return container
 
-    def _image_path_changed(self, key: ArtifactKey, text: str) -> None:
-        if self._image_path_handler is not None:
-            self._image_path_handler(key, text)
-
     def _image_save(self, key: ArtifactKey) -> None:
         if self._image_save_handler is not None:
             self._image_save_handler(key)
 
-    def _on_browse(self, key: ArtifactKey) -> None:
-        data = key.kind is ArtifactKind.DATA
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save data file" if data else "Save image file",
-            "",
-            "HDF5 files (*.hdf5);;All files (*)"
-            if data
-            else "PNG files (*.png);;All files (*)",
-        )
+    def _open_folder(self, key: ArtifactKey) -> None:
+        path = self._path_edits[key].text()
         if path:
-            self._path_edits[key].setText(path)
-
-    def _remember_data_editor_state(self, edit: QLineEdit) -> None:
-        start = edit.selectionStart()
-        self._saved_data_editor_state = (
-            edit,
-            edit.text(),
-            edit.cursorPosition(),
-            start,
-            edit.selectionLength(),
-            start >= 0 and edit.cursorPosition() == start,
-        )
-
-    @staticmethod
-    def _restore_cursor_and_selection(
-        edit: QLineEdit,
-        cursor: int,
-        selection_start: int,
-        selection_length: int,
-        *,
-        selection_reversed: bool,
-    ) -> None:
-        text_length = len(edit.text())
-        if selection_start < 0 or selection_length <= 0:
-            edit.setCursorPosition(min(cursor, text_length))
-            return
-        start = min(selection_start, text_length)
-        length = min(selection_length, text_length - start)
-        if length <= 0:
-            edit.setCursorPosition(start)
-            return
-        if selection_reversed:
-            edit.setCursorPosition(start + length)
-            edit.cursorBackward(True, length)
-        else:
-            edit.setCursorPosition(start)
-            edit.cursorForward(True, length)
-
-    def _capture_data_editor_state(self) -> None:
-        edit = self._path_edits[_DATA]
-        if edit.hasFocus():
-            self._remember_data_editor_state(edit)
-
-    def eventFilter(self, a0: Any, a1: Any) -> bool:
-        if (
-            a0 is self._path_edits.get(_DATA)
-            and a1.type() == QEvent.Type.FocusOut
-            and self.save_all_button.hasFocus()
-        ):
-            self._remember_data_editor_state(a0)
-        return super().eventFilter(a0, a1)
-
-    def _restore_data_editor_state(self) -> None:
-        state = self._saved_data_editor_state
-        self._saved_data_editor_state = None
-        if state is None:
-            return
-        edit, text, cursor, start, length, reversed_selection = state
-        if edit.text() != text:
-            return
-        self._restore_cursor_and_selection(
-            edit, cursor, start, length, selection_reversed=reversed_selection
-        )
-        edit.setFocus()
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(path).parent)))
 
     def get_data_path(self) -> str:
         return self._path_edits[_DATA].text()
@@ -309,35 +196,13 @@ class ArtifactSaveCenter(QWidget):
     def get_comment(self) -> str:
         return self._comment_edit.toPlainText()
 
-    def _set_path_preserving_editor_state(self, key: ArtifactKey, path: str) -> None:
-        if key in self._local_path_edits:
-            return
-        edit = self._path_edits[key]
-        if edit.text() == path:
-            return
-        had_focus = edit.hasFocus()
-        cursor = edit.cursorPosition()
-        start = edit.selectionStart()
-        length = edit.selectionLength()
-        reversed_selection = start >= 0 and cursor == start
-        edit.blockSignals(True)
-        try:
-            edit.setText(path)
-        finally:
-            edit.blockSignals(False)
-        self._restore_cursor_and_selection(
-            edit, cursor, start, length, selection_reversed=reversed_selection
-        )
-        if had_focus:
-            edit.setFocus()
-
     def set_data_path(self, path: str) -> None:
-        self._set_path_preserving_editor_state(_DATA, path)
+        self._path_edits[_DATA].setText(path)
 
     def set_image_path(self, key: ArtifactKey, path: str) -> None:
         if key.kind is ArtifactKind.DATA:
             raise ValueError("Use set_data_path for DATA")
-        self._set_path_preserving_editor_state(key, path)
+        self._path_edits[key].setText(path)
 
     def set_comment_text(self, text: str) -> None:
         if self._comment_edit.toPlainText() != text:
@@ -415,7 +280,6 @@ class ArtifactSaveCenter(QWidget):
             self._status_labels.pop(key)
             self._path_edits.pop(key)
             self._save_btns.pop(key)
-            self._image_path_slots.pop(key)
         for index, key in enumerate(images, start=1):
             if key not in self._rows:
                 stage = (
@@ -429,7 +293,7 @@ class ArtifactSaveCenter(QWidget):
             label.setText(_STATUS_TEXT[artifact.status])
             label.setStyleSheet(f"color: {_STATUS_COLOR[artifact.status]};")
             # No figure gets a fake artifact row; every image path is per-name.
-            self._set_path_preserving_editor_state(key, artifact.default_path or "")
+            self._path_edits[key].setText(artifact.default_path or "")
 
     def update_interaction(self, snapshot: TabSnapshot) -> None:
         if snapshot.interaction is None or snapshot.capabilities is None:

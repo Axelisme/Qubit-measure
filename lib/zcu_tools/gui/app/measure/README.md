@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-06，operation cancellation、feedback UI removal 與共用 interactive contracts
+**Last updated:** 2026-10-08，唯讀存檔路徑與 Open folder
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -129,14 +129,16 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   selection. `ExpTabWidget` delegates the Data pane to an
   internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
   action row放在`Measurement data`card之前，並從`TabSnapshot`呈現DATA與目前每張
-  具名圖的status、saveability與路徑草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
+  具名圖的status、saveability與已發布路徑。路徑欄位唯讀，仍可選取與複製；每列的
+  `Open folder`開啟最新路徑的父目錄，不建立目錄，無路徑時不開啟。
+  每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
   `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
   Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
   都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
-  Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 path/comment 變更。
+  Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 comment 變更。
   同次請求的新 DATA draft 先參與選取預檢，驗證成功後才發布草稿。
   `ArtifactSnapshot.needs_save` 同時供 facade 選取與 Qt 按鈕 gating 使用；全數已保存時
-  Save All 停用，明確單項匯出仍可再次保存。修改圖形目的地不取消已保存狀態。
+  Save All 停用，明確單項匯出仍可再次保存。GUI 不提供手動修改圖形目的地。
   SaveService 依 analysis逐圖→post逐圖→data 順序，以單一 operation 執行並 Fast Fail，
   不回滾已完成的存檔；再次 Save All 省略成功項。Qt 按鈕不編排各項存檔。
   AppServices獨立注入OwnerScheduler，image export回owner thread，data I/O在worker。
@@ -145,7 +147,7 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   查詢其投影，並將app關閉的資料流失與active-operation風險合併確認。
   Programmatic RPC shutdown不彈互動式確認。
   Save All updates that center in place: terminal status updates do not replace the Data
-  pane or its widgets, and the data-path editor retains focus, cursor and selection.
+  pane or its widgets, and published snapshots update the read-only path fields.
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane
   is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
