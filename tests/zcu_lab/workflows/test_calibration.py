@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
     Completed,
@@ -175,7 +176,18 @@ class Rig:
             plan=self.plan,
             tunables=tun,
             paths=RunPaths(self.root / "metadata", self.root / "data"),
-            identity=RunIdentity("calibration", DeviceSnapshot({}), "offline"),
+            identity=RunIdentity(
+                "calibration",
+                DeviceSnapshot({}),
+                SoftwareProvenance(
+                    software_versions={},
+                    git_commit=None,
+                    git_dirty=None,
+                    qick_version=None,
+                    soc_fingerprint=None,
+                    hostname="offline",
+                ),
+            ),
         )
 
 

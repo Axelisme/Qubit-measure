@@ -16,13 +16,13 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from socket import gethostname
 
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from pydantic import TypeAdapter
 from zcu_tools.device import DeviceInfo, DeviceManager, FakeDevice
+from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     DeviceSnapshot,
@@ -129,7 +129,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     Print run_id, lifecycle, commit count, reason and both workflow roots as
     JSON. Return only after execution and FakeDevice cleanup. Non-done runs
     exit with status 1; input, startup, I/O and cleanup errors propagate.
-    Never connect hardware, modify real data or execute another process.
+    Never connect hardware or modify real data. Native software capture may run
+    read-only Git commands; it never requests live instrument information.
     """
     args = _arguments(argv)
     plan = T1Plan.model_validate_json(args.plan.read_text(encoding="utf-8"))
@@ -166,10 +167,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             identity=RunIdentity(
                 run_id,
                 DeviceSnapshot(manager.get_all_info()),
-                gethostname(),
+                capture_software_provenance(),
                 entry_id=str(plan.snapshot.entry_id),
                 entry_label=plan.snapshot.entry_name,
-                soc_fingerprint="MockQickSoc",
             ),
         )
         status = engine.execute(run_id)

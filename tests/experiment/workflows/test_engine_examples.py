@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
+from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     CommittedRecord,
     DeviceSnapshot,
@@ -53,7 +54,18 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
         plan=plan,
         tunables=tunables,
         paths=RunPaths(root / "metadata", root / "data"),
-        identity=RunIdentity("example", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "example",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     status = engine.execute("example")
     assert status.lifecycle == "done", status.reason
@@ -87,7 +99,18 @@ def test_demo_workflows_check_ports_before_effects(
         ports = replace(ports, context=None)
     engine = Engine(ports)
     paths = RunPaths(tmp_path / "metadata", tmp_path / "data")
-    identity = RunIdentity("example", DeviceSnapshot({}), "offline")
+    identity = RunIdentity(
+        "example",
+        DeviceSnapshot({}),
+        SoftwareProvenance(
+            software_versions={},
+            git_commit=None,
+            git_dirty=None,
+            qick_version=None,
+            soc_fingerprint=None,
+            hostname="offline",
+        ),
+    )
     if name == "echo":
         engine.start(
             t2echo_fluxdep,

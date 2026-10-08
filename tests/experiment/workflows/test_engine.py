@@ -9,6 +9,7 @@ from threading import Event
 
 import pytest
 from pydantic import ValidationError
+from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
     DeviceSnapshot,
@@ -100,7 +101,18 @@ def start_replacement(rig: Rig) -> RunStatus:
         plan=Plan(count=1),
         tunables=Tunables(),
         paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity("new", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "new",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
 
 
@@ -572,7 +584,18 @@ def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
         plan=Plan(count=1),
         tunables=Tunables(),
         paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity("new", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "new",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     with pytest.raises(RunMismatch):
         rig.engine.records("run")
@@ -608,7 +631,18 @@ def test_scalar_state_and_inferred_record_type_commit_normally(rig: Rig) -> None
         plan=Plan(count=2),
         tunables=Tunables(),
         paths=rig.paths,
-        identity=RunIdentity("run", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "run",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     status = rig.engine.execute("run")
     assert status.lifecycle == "done", status.reason
@@ -666,7 +700,18 @@ def test_init_failure_is_failed_without_step_or_commit(rig: Rig) -> None:
         plan=Plan(),
         tunables=Tunables(),
         paths=rig.paths,
-        identity=RunIdentity("run", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "run",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     status = rig.engine.execute("run")
     assert status.lifecycle == "failed"

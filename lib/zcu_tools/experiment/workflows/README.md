@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-08，簡化宣告與定義者 port 自檢
+**Last updated:** 2026-10-08，native software provenance
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -19,6 +19,8 @@
 Record encoder 將摘要投影成 detached JSON。非有限數字變成 null，曲線陣列與過大 record 會警告。只有摘要序列化可降級為 repr；deepcopy、必要 journal 欄位與檔案 I/O 不能借用此降級規則。
 
 Package 內的保存 seam 集中 typed journal、manifest、iteration 路徑與單次檔案發布，不另建公開宿主 API。Journal 使用 Engine 的同一把 control lock，逐行追加並 flush，不宣稱 fsync 或崩潰接續。Manifest 只摘要生命週期，不保存每點 record 或 state。單次 saver 寫入同目錄 temporary，關閉後以 hard link 原子發布 final，再 unlink temporary。data_root 的檔案系統須支援 hard link；不支援時保留原始 I/O cause，不覆蓋、不自動 retry。發布後清除失敗會保留 final 與 temporary，兩個路徑指向同一檔案，不是獨立備份。Engine 只在 final 發布及 temporary 清理完成後交回 Completed。
+
+RunIdentity 持有宿主傳入的 native SoftwareProvenance。Manifest 與 run_started journal 在 provenance 底下保存同一份資訊，unknown 保留 None，不以預設 False 或字串代替。
 
 Engine.start 只驗證並保存啟動資料。第一次 execute 才執行 init；每次 execute 在呼叫執行緒同步跑到 paused 或 terminal。宿主安排 worker 與 lease。核心以同一把 control lock 序列化控制、revision 與不可中斷的提交，不在 effect 執行期間持有這把鎖。Pause／Stop 不等待 effect，取消時關閉並丟棄 step generator。Next 已返回時仍先提交；Resume 使用已提交 state 與最新 tunables 重做未提交步驟。內部 typed run 保留宣告的泛型配對，Engine 只持有 detached control view。Terminal run 只有在 execute 真正返回後才能被新 run 取代。
 

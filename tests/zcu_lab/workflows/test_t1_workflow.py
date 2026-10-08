@@ -8,7 +8,7 @@ from time import perf_counter
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.datafile import load_run_data
+from zcu_tools.datafile import SoftwareProvenance, load_run_data
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import (
     Actor,
@@ -62,7 +62,18 @@ def start_t1(
         plan=make_plan(inputs),
         tunables=tun,
         paths=RunPaths(root / "metadata", root / "data"),
-        identity=RunIdentity("workflow", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "workflow",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     return engine
 
@@ -101,7 +112,18 @@ def test_native_t1_checks_ports_before_hardware_effects(
         plan=make_plan(inputs),
         tunables=tunables(),
         paths=paths,
-        identity=RunIdentity("workflow", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "workflow",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     status = engine.execute("workflow")
     assert status.lifecycle == "failed"
@@ -251,7 +273,18 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
         plan=plan,
         tunables=tun,
         paths=RunPaths(roots.result, roots.database),
-        identity=RunIdentity("flux-bound", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "flux-bound",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     inputs.soc.set_flux_source(lambda: devices.values[-1][1])
     try:
