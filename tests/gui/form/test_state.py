@@ -734,3 +734,58 @@ def test_callback_failure_propagates_after_installation_without_rollback() -> No
     unsubscribe()
     state.write({("amount",): 4.0}, env)
     assert state.input.data["amount"] == 4.0
+
+
+def test_preview_includes_validated_defaults_without_materializing_input() -> None:
+    env = environment()
+    state = FormState(FormInput(DraftForm, {}))
+    notices: list[int] = []
+    state.subscribe(lambda: notices.append(1))
+    preview = state.preview(env)
+    assert preview.errors is None
+    assert preview.values[("amount",)] == 2.0
+    assert preview.values[("amplitude",)] == 1 + 0j
+    assert preview.values[("samples",)] == (1.0,)
+    assert preview.values[("offsets",)] == {}
+    assert state.input.data == {}
+    assert notices == []
+
+
+def test_preview_re_evaluates_other_leaves_and_omits_failed_whole_container() -> None:
+    env = environment()
+    state = FormState(
+        FormInput(
+            DraftForm,
+            {
+                "amount": {"expr": "seed"},
+                "optional": None,
+                "samples": [{"expr": "absent_name"}],
+            },
+        )
+    )
+    before = state.input.data
+    preview = state.preview(environment(8.0))
+    assert preview.errors == state.result(environment(8.0))
+    assert preview.values[("amount",)] == 8.0
+    assert preview.values[("optional",)] is None
+    assert ("samples",) not in preview.values
+    assert ("amplitude",) not in preview.values
+    assert state.input.data == before
+    state.write({("samples",): [3.0]}, env)
+    recovered = state.preview(env)
+    assert recovered.errors is None
+    assert recovered.values[("samples",)] == (3.0,)
+
+
+def test_preview_keeps_model_invalid_values_and_returns_detached_containers() -> None:
+    env = environment()
+    state = FormState(DraftForm.default_input(env))
+    state.write({("amount",): -2.0, ("offsets",): {"left": 3.0}}, env)
+    preview = state.preview(env)
+    assert preview.errors == state.result(env)
+    assert preview.values[("amount",)] == -2.0
+    offsets = preview.values[("offsets",)]
+    assert isinstance(offsets, dict)
+    offsets["left"] = 100.0
+    assert state.input.data["offsets"] == {"left": 3.0}
+    assert state.preview(env).values[("offsets",)] == {"left": 3.0}

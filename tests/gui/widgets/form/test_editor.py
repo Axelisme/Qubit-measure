@@ -445,3 +445,71 @@ def test_detach_and_close_stop_publications_without_resetting_the_state(
         editor.refresh(env)
     with pytest.raises(RuntimeError, match="detach|closed|inactive"):
         editor.local_parse_errors()
+
+
+class NumericChoiceForm(FormModel):
+    """A numeric choice remains editable through an Expr alternative."""
+
+    amount: float = 2.0
+
+    @classmethod
+    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Offer direct values without restricting expression syntax in the view."""
+        return {("amount",): (2.0, 4.0)}
+
+
+def test_numeric_choices_switch_between_direct_selection_and_expression(
+    views: list[QWidget],
+) -> None:
+    env = environment()
+    state = FormState(NumericChoiceForm.default_input(env))
+    editor = FormEditor(state, env)
+    views.append(editor)
+    direct = editor.findChild(QComboBox, "form.input.amount")
+    mode = editor.findChild(QComboBox, "form.mode.amount")
+    assert isinstance(direct, QComboBox)
+    assert isinstance(mode, QComboBox)
+    direct.setCurrentIndex(direct.findData(4.0))
+    assert state.input.data["amount"] == 4.0
+    mode.setCurrentIndex(mode.findData("expr"))
+    text = editor.findChild(QLineEdit, "form.input.amount")
+    assert isinstance(text, QLineEdit)
+    text.setText("seed / 2")
+    assert state.input.data["amount"] == {"expr": "seed / 2"}
+    assert editor.errors() is None
+    mode.setCurrentIndex(mode.findData("direct"))
+    assert state.input.data["amount"] == 2.0
+    assert isinstance(editor.findChild(QComboBox, "form.input.amount"), QComboBox)
+
+
+def test_invalid_complex_envelope_is_displayed_without_breaking_construction(
+    views: list[QWidget],
+) -> None:
+    env = environment()
+    state = FormState(SampleForm.default_input(env))
+    state.write({("amplitude",): {"__complex__": [1.0]}}, env)
+    editor = FormEditor(state, env)
+    views.append(editor)
+    assert isinstance(editor.errors(), FormErrors)
+    assert label(editor, "form.error.amplitude").text()
+    assert label(editor, "form.value.amplitude").text() == ""
+    line(editor, "amplitude").setText("2+3j")
+    assert state.input.data["amplitude"] == {"__complex__": [2.0, 3.0]}
+    assert editor.errors() is None
+
+
+def test_inactive_branch_discards_only_its_local_unparsed_text(
+    views: list[QWidget],
+) -> None:
+    env = environment()
+    state = FormState(SampleForm.default_input(env))
+    editor = FormEditor(state, env)
+    views.append(editor)
+    line(editor, "branch.old_only").setText("-")
+    line(editor, "amount").setText("-")
+    selector = combo(editor, "form.input.branch.kind")
+    selector.setCurrentIndex(selector.findData("alternate"))
+    local = editor.local_parse_errors()
+    assert isinstance(local, FormErrors)
+    assert set(local.messages) == {("amount",)}
+    assert line(editor, "amount").text() == "-"

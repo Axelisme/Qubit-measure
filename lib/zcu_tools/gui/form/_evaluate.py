@@ -12,8 +12,8 @@ from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_ex
 
 from ._json import default_json
 from ._sources import check_sources, error_path
-from ._structure import alternatives, discriminator, selected, unwrap
-from .model import FormEnv, FormErrors, FormModel, FormPath, FormValue
+from ._structure import alternatives, discriminator, leaves, selected, unwrap
+from .model import FormEnv, FormErrors, FormModel, FormPath, FormPreview, FormValue
 
 
 def _decode(
@@ -198,6 +198,41 @@ def result[F: FormModel](
     errors: dict[FormPath, str] = {}
     tags: dict[FormPath, str] = {}
     ordinary = _decode_model(model, data, env, (), errors, tags)
+    return _validate(model, data, ordinary, env, errors, tags)
+
+
+def preview(
+    model: type[FormModel], data: dict[str, JsonValue], env: FormEnv
+) -> FormPreview:
+    """Share decoding/validation while retaining non-failing leaves for display."""
+    errors: dict[FormPath, str] = {}
+    tags: dict[FormPath, str] = {}
+    ordinary = _decode_model(model, data, env, (), errors, tags)
+    failed_decoding = tuple(errors)
+    validated = _validate(model, data, ordinary, env, errors, tags)
+    if not isinstance(validated, FormErrors):
+        complete = {
+            key: default_json(getattr(validated, key)) for key in model.model_fields
+        }
+        return FormPreview(
+            {path: value_at(validated, path) for path in leaves(model, complete)}, None
+        )
+    values = {
+        path: _model_value(_read(ordinary, path))
+        for path in leaves(model, data)
+        if not any(failed[: len(path)] == path for failed in failed_decoding)
+    }
+    return FormPreview(values, validated)
+
+
+def _validate[F: FormModel](
+    model: type[F],
+    data: dict[str, JsonValue],
+    ordinary: dict[str, FormValue],
+    env: FormEnv,
+    errors: dict[FormPath, str],
+    tags: dict[FormPath, str],
+) -> F | FormErrors:
     try:
         options = check_sources(model, data, env, validate_paths=True)
     except PydanticCustomError as exc:

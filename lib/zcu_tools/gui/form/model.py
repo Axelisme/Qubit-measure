@@ -84,6 +84,23 @@ class FormErrors:
 
 
 @dataclass(frozen=True)
+class FormPreview:
+    """Detached evaluated leaves and complete errors for view presentation.
+
+    values maps active model-field leaf paths to ordinary decoded values.
+    Successful validation includes Pydantic coercions and static defaults.
+    On failure, only present input leaves that decoded successfully appear;
+    a container with any decoding failure is omitted as a whole. Missing keys
+    do not mean null. Model-invalid values may appear and are not submittable.
+    errors is the complete result error set, or None for a valid model.
+    Neither field aliases state or captured sources. This is not an Apply result.
+    """
+
+    values: Mapping[FormWritePath, FormValue]
+    errors: FormErrors | None
+
+
+@dataclass(frozen=True)
 class FormChange:
     """One changed scalar, whole sequence or typed mapping relative to base.
 
@@ -305,6 +322,19 @@ class FormState[F: FormModel]:
         from ._evaluate import result
 
         return result(self._model, self._data, env)
+
+    def preview(self, env: FormEnv) -> FormPreview:
+        """Evaluate once for display, preserving partial values on model errors.
+
+        Return detached active leaves and the same errors as result(env).
+        Failed expression/container decoding has no value, not a stale value
+        or a null substitute. This does not edit input, run domain defaults,
+        submit, poll sources, or establish validity beyond preview.errors.
+        Structural/choice declaration failures propagate as for result.
+        """
+        from ._evaluate import preview
+
+        return preview(self._model, self._data, env)
 
     def changes(self, env: FormEnv) -> tuple[FormChange, ...] | FormErrors:
         """Return changed input leaves and their evaluated values, or errors.
