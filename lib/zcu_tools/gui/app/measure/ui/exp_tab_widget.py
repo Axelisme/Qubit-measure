@@ -698,6 +698,7 @@ class ExpTabWidget(QWidget):
                 f"widget {self._capabilities!r} vs snapshot {snapshot.capabilities!r}"
             )
         self.cfg_form.attach(self._cfg)
+        self.refresh_roles(snapshot)
         if (
             self._has_analysis
             and snapshot.analysis is not None
@@ -1065,6 +1066,23 @@ class ExpTabWidget(QWidget):
             return
         # Guide
         self._right_stack.setCurrentWidget(self._right_placeholder)
+
+    def refresh_roles(self, snapshot: TabSnapshot) -> None:
+        """Render ordered declarations from this fixed capture without commands.
+
+        Role selectors use object names role-<alias>, itemData component/None
+        and kind-matched captured components. Manual labels use
+        role-manual-<alias>; reset buttons role-reset-<alias> name birth focus
+        (or explicitly no birth focus). Roleless tabs hide the row. Busy state
+        comes only from snapshot.interaction. User activation invokes tab_control.
+        """
+        del snapshot
+
+    def _on_role_selected(self, role: str, component: str | None) -> None:
+        self._ctrl.tab_control.set_role(self.tab_id, role, component)
+
+    def _on_role_reset(self, role: str) -> None:
+        self._ctrl.tab_control.reset_role(self.tab_id, role)
 
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
         assert snapshot.interaction is not None

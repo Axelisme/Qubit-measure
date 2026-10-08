@@ -43,7 +43,7 @@ class RunPermit:
 
     Carries detached resolved cfg and observed device settings captured at issue.
     RunService never re-reads State and the adapter never re-lowers a schema.
-    snapshot fixes the tab's original saved entry/point/roles, or None for
+    snapshot fixes the original saved entry/point and admission capture's roles, or None for
     drafts, unbound tabs or adapters without native evidence. experiment_tag is
     the adapter's persistence declaration tag, or None. Neither is recaptured
     after admission. This credential requires no release; the operation owns

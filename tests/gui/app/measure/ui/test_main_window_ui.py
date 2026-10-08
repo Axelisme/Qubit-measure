@@ -15,6 +15,7 @@ from qtpy.QtWidgets import (
     QComboBox,
     QLabel,
     QLineEdit,
+    QPushButton,
     QStackedWidget,
     QTabWidget,
     QWidget,
@@ -128,6 +129,171 @@ def focus_captures() -> Iterator[tuple[ParameterContext, ParameterContext]]:
         component_registry.unregister("ui-focus/driver")
         component_registry.unregister("ui-focus/sensor")
         assert component_registry.kinds() == before
+
+
+def test_role_rebind_ui_renders_capture_choices_and_emits_only_user_intent(
+    qapp,
+    focus_captures: tuple[ParameterContext, ParameterContext],
+) -> None:
+    ctrl = _mock_ctrl()
+    q1, _q2 = focus_captures
+    snapshot = replace(
+        _snapshot("a", supports_analysis=False, analyze_params=None), parameters=q1
+    )
+    assert snapshot.capabilities is not None
+    widget = ExpTabWidget("a", ctrl, snapshot.capabilities)
+    widget.attach(snapshot, _RecordingTabActions())
+    driver = widget.findChild(QComboBox, "role-qubit")
+    sensor = widget.findChild(QComboBox, "role-resonator")
+    reset = widget.findChild(QPushButton, "role-reset-qubit")
+    assert driver is not None and sensor is not None and reset is not None
+    assert {driver.itemData(index) for index in range(driver.count())} == {
+        None,
+        "Q1",
+        "Q2",
+    }
+    assert {sensor.itemData(index) for index in range(sensor.count())} == {
+        None,
+        "R1",
+        "R2",
+    }
+    assert driver.currentData() == "Q1" and sensor.currentData() == "R1"
+    assert "Q1" in reset.text()
+    ctrl.tab_control.set_role.assert_not_called()
+    ctrl.tab_control.reset_role.assert_not_called()
+    index = driver.findData("Q2")
+    driver.setCurrentIndex(index)
+    ctrl.tab_control.set_role.assert_not_called()
+    driver.activated.emit(index)
+    ctrl.tab_control.set_role.assert_called_once_with("a", "qubit", "Q2")
+    ctrl.tab_control.set_role.reset_mock()
+    clear = driver.findData(None)
+    driver.setCurrentIndex(clear)
+    driver.activated.emit(clear)
+    ctrl.tab_control.set_role.assert_called_once_with("a", "qubit", None)
+    reset.click()
+    ctrl.tab_control.reset_role.assert_called_once_with("a", "qubit")
+    widget.detach()
+
+
+@pytest.mark.parametrize("busy", ["running", "analyzing", "saving"])
+def test_role_rebind_ui_manual_clear_and_local_busy_are_projected_without_commands(
+    qapp,
+    focus_captures: tuple[ParameterContext, ParameterContext],
+    busy: str,
+) -> None:
+    ctrl = _mock_ctrl()
+    q1, _q2 = focus_captures
+    assert q1.roles is not None
+    rebound = ParameterContext(
+        point=q1.document(),
+        library=q1.library,
+        target=q1.target,
+        roles=RoleBinding(
+            "Q1",
+            q1.roles.declarations,
+            {"qubit": "Q2"},
+            {"qubit": "Q2", "resonator": None},
+        ),
+    )
+    snapshot = replace(
+        _snapshot("a", supports_analysis=False, analyze_params=None), parameters=rebound
+    )
+    assert snapshot.capabilities is not None and snapshot.interaction is not None
+    widget = ExpTabWidget("a", ctrl, snapshot.capabilities)
+    widget.attach(snapshot, _RecordingTabActions())
+    widget.refresh_roles(snapshot)
+    driver = widget.findChild(QComboBox, "role-qubit")
+    sensor = widget.findChild(QComboBox, "role-resonator")
+    manual = widget.findChild(QLabel, "role-manual-resonator")
+    reset = widget.findChild(QPushButton, "role-reset-qubit")
+    assert (
+        driver is not None
+        and sensor is not None
+        and manual is not None
+        and reset is not None
+    )
+    assert driver.currentData() == "Q2" and sensor.currentData() is None
+    assert not manual.isHidden()
+    interaction = replace(
+        snapshot.interaction,
+        is_running=busy == "running",
+        is_analyzing=busy == "analyzing",
+        is_saving_data=busy == "saving",
+    )
+    widget.update_interaction_state(replace(snapshot, interaction=interaction))
+    assert not driver.isEnabled() and not sensor.isEnabled() and not reset.isEnabled()
+    widget.update_interaction_state(
+        replace(
+            snapshot, interaction=replace(snapshot.interaction, global_run_active=True)
+        )
+    )
+    assert driver.isEnabled() and sensor.isEnabled() and reset.isEnabled()
+    ctrl.tab_control.set_role.assert_not_called()
+    ctrl.tab_control.reset_role.assert_not_called()
+    widget.detach()
+
+
+def test_role_rebind_ui_roleless_capture_hides_row(qapp) -> None:
+    ctrl = _mock_ctrl()
+    snapshot = _snapshot("a", supports_analysis=False, analyze_params=None)
+    assert snapshot.capabilities is not None
+    widget = ExpTabWidget("a", ctrl, snapshot.capabilities)
+    widget.attach(snapshot, _RecordingTabActions())
+    row = widget.findChild(QWidget, "tab-roles")
+    assert row is not None and row.isHidden()
+    widget.detach()
+
+
+def test_role_rebind_ui_owner_fact_updates_complete_title_and_keeps_run_marker(
+    qapp,
+    focus_captures: tuple[ParameterContext, ParameterContext],
+) -> None:
+    ctrl = _apply_window_defaults(_mock_ctrl())
+    bus = EventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.get_running_tab_id.return_value = "a"
+    q1, _q2 = focus_captures
+    assert q1.roles is not None
+    snapshot = replace(
+        _snapshot("a", supports_analysis=False, analyze_params=None), parameters=q1
+    )
+    ctrl.get_tab_snapshot.return_value = snapshot
+    window = MainWindow(ctrl)
+    window.add_tab_widget("a", "fake")
+    tabs = window.findChild(QTabWidget)
+    assert tabs is not None
+    assert "●" in tabs.tabText(0)
+    rebound = ParameterContext(
+        point=q1.document(),
+        library=q1.library,
+        target=q1.target,
+        roles=RoleBinding(
+            "Q1",
+            q1.roles.declarations,
+            {"qubit": "Q2"},
+            {"qubit": "Q2", "resonator": None},
+        ),
+    )
+    ctrl.get_tab_snapshot.return_value = replace(snapshot, parameters=rebound)
+    ctrl.get_tab_snapshot.reset_mock()
+    from zcu_tools.gui.app.measure.events.tab import (
+        TabContentChangedPayload,
+        TabContentFact,
+    )
+
+    bus.emit(TabContentChangedPayload(tab_id="a", fact=TabContentFact.ROLES_COMMITTED))
+    ctrl.get_tab_snapshot.assert_called_once_with("a")
+    assert "●" in tabs.tabText(0)
+    assert "qubit=Q2" in tabs.tabText(0)
+    assert "resonator=" in tabs.tabText(0)
+    assert "resonator=" in tabs.tabToolTip(0)
+    widget = window.findChild(ExpTabWidget)
+    assert widget is not None
+    combo = widget.findChild(QComboBox, "role-qubit")
+    assert combo is not None and combo.currentData() == "Q2"
+    ctrl.tab_control.set_role.assert_not_called()
+    ctrl.tab_control.reset_role.assert_not_called()
 
 
 def test_main_window_focus_selection_projects_owner_without_rebinding_tabs(qapp):

@@ -442,6 +442,24 @@ class MainWindow(QMainWindow):
         # the run's terminal path drops the container and notifies the tab's
         # listener, which re-renders to empty.
 
+    def refresh_tab_roles(self, tab_id: str, snapshot: TabSnapshot) -> None:
+        """Render committed roles/title from one snapshot, retaining the Run marker.
+
+        Does not refresh results, drafts, figures or selected panes.
+        """
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        tab_w.refresh_roles(snapshot)
+        index = self._tabs.indexOf(tab_w)
+        if index >= 0:
+            self._tabs.setTabText(
+                index, self._captured_tab_label(snapshot.adapter_name, snapshot)
+            )
+            self._set_tab_activity_marker(
+                tab_id, active=self._ctrl.get_running_tab_id() == tab_id
+            )
+
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:

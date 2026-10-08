@@ -759,6 +759,14 @@ class State(SessionState):
                 )
         return tab.artifacts.project(observations)
 
+    def update_tab_parameters(self, tab_id: str, parameters: ParameterContext) -> None:
+        """Owner-thread commit of the next-operation capture, bumping tab version.
+
+        Preserve run/analysis/post/save captures, results, drafts and artifacts.
+        Missing tab raises KeyError. Caller owns admission and cfg publication.
+        """
+        raise NotImplementedError("Tab parameter commit is not implemented")
+
     def update_tab_comment(self, tab_id: str, comment: str) -> None:
         """Publish the Data comment draft shared by GUI and remote saves."""
         self._assert_owner()

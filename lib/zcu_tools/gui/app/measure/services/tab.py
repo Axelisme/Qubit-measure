@@ -189,6 +189,21 @@ class TabService:
             parameters=tab.parameters,
         )
 
+    def set_role(self, tab_id: str, role: str, component: str | None) -> None:
+        """Commit a manual choice/None clear and refresh this idle tab's cfg.
+
+        Re-infer all non-manual roles from this capture's declarations/focus.
+        RoleResolutionError rejects invalid names/kinds/roles before mutation.
+        FailedPreconditionError rejects busy/roleless tabs. CfgPreconditionError
+        rejects any tab cfg notification reentrancy. Preserve resource identity,
+        cfg inputs and historical pane/save captures. Facet publishes the fact.
+        """
+        raise NotImplementedError("Tab role rebinding is not implemented")
+
+    def reset_role(self, tab_id: str, role: str) -> None:
+        """Remove one manual choice, re-infer and refresh; set_role errors apply."""
+        raise NotImplementedError("Tab role reset is not implemented")
+
     def new_tab(
         self,
         adapter_name: str,
