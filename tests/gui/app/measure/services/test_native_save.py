@@ -1,5 +1,7 @@
 """Native measurement-data Save through real state, workers, writers and ledger."""
 
+import json
+import threading
 from collections.abc import Generator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +14,9 @@ import pytest
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import (
+    CfgSnapshot,
+    ExperimentPayload,
+    NativeExtensions,
     RunMetadata,
     RunSnapshot,
     SoftwareProvenance,
@@ -21,20 +26,32 @@ from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    AnalyzeRequest,
+    PostAnalyzeRequest,
     RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.adapter.types import (
+    AnalyzeResultBase,
+    PostAnalyzeResultBase,
+)
+from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
+from zcu_tools.gui.app.measure.events.completion import (
+    SaveArtifactsFinishedPayload,
+    SaveDataFinishedPayload,
+)
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
+from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -48,7 +65,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.entry import ResultEntry, SavedPayload
+from zcu_tools.resources.entry import ResultEntry, SavedPayload, SaveLayout
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
@@ -59,7 +76,24 @@ from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 GUI_ORIGIN = CommandOrigin("gui", None)
 
 
-class SavingAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]):
+@dataclass
+class PaneParams:
+    gain: float = 2.0
+
+
+@dataclass
+class PaneSummary(AnalyzeResultBase):
+    mean: float = 3.0
+
+
+@dataclass
+class PostSummary(PostAnalyzeResultBase):
+    correction: float = 0.5
+
+
+class SavingAdapter(
+    BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult], PaneSummary, PaneParams]
+):
     """Real BaseAdapter mapping with an offline typed experiment declaration."""
 
     exp_cls = SavingCore
@@ -87,6 +121,38 @@ class SavingAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]):
         return RunRecord(cfg, SavingCore().run(cfg, context=context))
 
 
+class AnalysisSavingAdapter(SavingAdapter):
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        analysis=AnalysisMode.FIT,
+        post_analysis=True,
+        load_data=False,
+        requires_soc=False,
+    )
+
+    def analyze(
+        self,
+        req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams],
+        *,
+        plots: Plots,
+    ) -> PaneSummary:
+        return PaneSummary()
+
+    def get_post_analyze_params(
+        self, analyze_result: PaneSummary, ctx: SessionEnv
+    ) -> PaneParams:
+        return PaneParams()
+
+    def post_analyze(
+        self,
+        req: PostAnalyzeRequest[
+            RunRecord[SavingCfg, SavingResult], PaneSummary, PaneParams
+        ],
+        *,
+        plots: Plots,
+    ) -> PostSummary:
+        return PostSummary()
+
+
 @dataclass
 class NativeSaveSession:
     entry: ResultEntry
@@ -97,6 +163,7 @@ class NativeSaveSession:
     bus: BaseEventBus
     metadata: RunMetadata
     completions: list[SaveDataFinishedPayload]
+    artifact_completions: list[SaveArtifactsFinishedPayload]
     background: BackgroundRunner
 
     def save(self, *, origin: CommandOrigin = GUI_ORIGIN) -> SaveDataFinishedPayload:
@@ -130,6 +197,65 @@ class NativeSaveSession:
         completed = self.completions[-1]
         assert outcome.status == ("failed" if completed.error else "finished")
         assert not self.state.is_tab_busy("tab")
+        return completed
+
+    def save_artifacts(
+        self, refs: tuple[ArtifactRef, ...] | None = None
+    ) -> SaveArtifactsFinishedPayload:
+        """Wait at the batch terminal seam and inspect the public settled handle."""
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+        before = len(self.artifact_completions)
+        observed: list[tuple[bool, bool, bool]] = []
+
+        def terminal(payload: SaveArtifactsFinishedPayload) -> None:
+            observed.append(
+                (
+                    not self.state.is_tab_busy("tab"),
+                    self.handles.known_outcome(submission.operation_id) is not None,
+                    payload.report is None
+                    or all(
+                        any(
+                            member.key == item.key
+                            and any(
+                                output.path == item.output.path
+                                and output.status == item.status
+                                and output.error == item.error
+                                for output in member.outputs
+                            )
+                            for section in self.state.get_artifact_snapshots("tab")
+                            for artifact in section.artifacts
+                            for member in artifact.members
+                        )
+                        for item in payload.report.outputs
+                    ),
+                )
+            )
+            loop.quit()
+
+        subscription = self.bus.subscribe(SaveArtifactsFinishedPayload, terminal)
+        try:
+            submission = self.control.save_artifacts(
+                "tab", artifacts=refs, origin=GUI_ORIGIN
+            )
+            assert self.state.is_tab_busy("tab")
+            with pytest.raises(FailedPreconditionError, match="busy"):
+                self.control.save_artifacts("tab", origin=GUI_ORIGIN)
+            with pytest.raises(FailedPreconditionError, match="busy"):
+                self.control.set_comment("tab", "not admitted")
+            timer.start(5000)
+            loop.exec()
+        finally:
+            timer.stop()
+            subscription.unsubscribe()
+        assert len(self.artifact_completions) == before + 1
+        assert observed == [(True, True, True)]
+        completed = self.artifact_completions[-1]
+        outcome = self.handles.known_outcome(submission.operation_id)
+        assert outcome is not None
+        assert outcome.status == ("failed" if completed.error else "finished")
         return completed
 
 
@@ -176,7 +302,7 @@ def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSe
         "tab",
         Session(
             adapter_name="saving",
-            adapter=SavingAdapter(),
+            adapter=AnalysisSavingAdapter(),
             cfg=make_cfg(CfgSchema(CfgSectionSpec(), CfgSectionValue()), state=state),
             parameters=captured,
             save_context=captured,
@@ -191,18 +317,13 @@ def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSe
         bus,
         owner_scheduler=QtOwnerScheduler(),
     )
-    # TabService participates only in legacy path commands, not native Data Save.
-    # Passing the real assembled tab owner is unnecessary for this entry seam.
-    control = SaveControlFacet(
-        state=state,
-        bus=bus,
-        guard=GuardService(state),
-        tab=MagicMock(),
-        save=service,
-        notify_info=lambda _message: None,
-    )
+    control = SaveControlFacet(state=state, guard=GuardService(state), save=service)
     completions: list[SaveDataFinishedPayload] = []
     subscription = bus.subscribe(SaveDataFinishedPayload, completions.append)
+    artifact_completions: list[SaveArtifactsFinishedPayload] = []
+    batch_subscription = bus.subscribe(
+        SaveArtifactsFinishedPayload, artifact_completions.append
+    )
     try:
         yield NativeSaveSession(
             entry,
@@ -213,10 +334,12 @@ def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSe
             bus,
             metadata,
             completions,
+            artifact_completions,
             background,
         )
     finally:
         subscription.unsubscribe()
+        batch_subscription.unsubscribe()
         background.quiesce()
         background.deleteLater()
         qapp.processEvents()
@@ -407,3 +530,353 @@ def test_invalid_record_fails_in_worker_without_writing_or_saved_event(
     assert completed.error and "RunRecord" in completed.error
     assert session.entry.ledger.events() == ()
     assert not (session.entry.database_path / "runs").exists()
+
+
+def declare_panes(
+    session: NativeSaveSession, names: tuple[str, ...] = ("fit", "residual")
+) -> Plots:
+    """Publish finished pane resources through the same State terminal commands."""
+    plots = Plots(NonPresentingHost())
+    for name in names:
+        _, axes = plots.subplots(name)
+        axes.plot([0, 1], [1, 2])
+    plots.finish(present=False)
+    session.state.update_tab_analyze(
+        "tab", PaneSummary(), plots, analyze_params_instance=PaneParams(2.0)
+    )
+    session.state.update_tab_post_analyze(
+        "tab", PostSummary(), None, post_analyze_params_instance=PaneParams(4.0)
+    )
+    return plots
+
+
+def test_save_all_writes_all_members_and_resaves_saved_artifacts(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    declare_panes(session)
+    first = session.save_artifacts()
+    assert first.error is None and first.report is not None
+    assert len(first.report.outputs) == 8  # data ×2, two figures ×2, two JSON
+    assert all(
+        item.status == "saved" and item.output.path.is_file()
+        for item in first.report.outputs
+    )
+    sections = session.state.get_artifact_snapshots("tab")
+    assert [section.section for section in sections] == [
+        "run",
+        "analysis",
+        "post_analysis",
+    ]
+    assert all(
+        artifact.status is SaveStatus.SAVED
+        for section in sections
+        for artifact in section.artifacts
+    )
+    primary_json = next(
+        item.output.path
+        for item in first.report.outputs
+        if item.key.section == "analysis" and item.output.format == "json"
+    )
+    post_json = next(
+        item.output.path
+        for item in first.report.outputs
+        if item.key.section == "post_analysis"
+    )
+    assert json.loads(primary_json.read_text())["parameters"] == {"gain": 2.0}
+    assert json.loads(post_json.read_text())["summary"] == {"correction": 0.5}
+    assert len(session.entry.ledger.events()) == 1
+    saved_event = session.entry.ledger.events()[0].payload
+    assert isinstance(saved_event, SavedPayload)
+    assert len(saved_event.outputs) == 8
+    second = session.save_artifacts()
+    assert second.error is None and second.report is not None
+    assert second.report.run_id == first.report.run_id
+    assert second.report.outputs[0].output.path == first.report.outputs[0].output.path
+    assert second.report.outputs[1].output.path != first.report.outputs[1].output.path
+    metadata = session.state.get_tab("tab").run.metadata
+    assert metadata is not None
+    assert metadata.labber_path == str(second.report.outputs[1].output.path)
+    assert len(session.entry.ledger.events()) == 2
+
+
+def test_json_only_save_uses_result_inputs_and_preserves_unselected_dirty_run(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    session.save()
+    declare_panes(session, ())
+    session.state.update_tab_analyze_param_instance("tab", PaneParams(99.0))
+    session.control.set_comment("tab", "changed")
+    completed = session.save_artifacts((ArtifactRef("analysis", "results"),))
+    assert completed.error is None and completed.report is not None
+    assert len(completed.report.outputs) == 1
+    document = json.loads(completed.report.outputs[0].output.path.read_text())
+    assert document["parameters"] == {"gain": 2.0}
+    assert document["summary"] == {"mean": 3.0}
+    sections = session.state.get_artifact_snapshots("tab")
+    assert sections[0].artifacts[0].status is SaveStatus.UNSAVED_CHANGES
+    assert sections[1].artifacts[0].status is SaveStatus.SAVED
+    assert sections[2].artifacts[0].status is SaveStatus.NOT_SAVED
+
+
+def test_owner_encoding_once_and_worker_io_with_member_failure_isolation(
+    native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from matplotlib.figure import Figure
+    from zcu_tools.experiment import run_saving
+    from zcu_tools.gui.app.measure.services import save as saving
+
+    session = native_session
+    plots = declare_panes(session)
+    owner_id = threading.get_ident()
+    encoded: list[Figure] = []
+    io_threads: list[int] = []
+    render = saving.render_save_figure_png
+    native_write = run_saving.save_run_data
+
+    def encode(figure: Figure) -> bytes:
+        assert threading.get_ident() == owner_id
+        encoded.append(figure)
+        if figure is plots["fit"]:
+            raise RuntimeError("encoder failed")
+        return render(figure)
+
+    def write(
+        destination: Path,
+        payload: ExperimentPayload,
+        metadata: RunMetadata,
+        *,
+        cfg: CfgSnapshot,
+        replace: bool = False,
+        extensions: NativeExtensions | None = None,
+    ) -> None:
+        io_threads.append(threading.get_ident())
+        native_write(
+            destination,
+            payload,
+            metadata,
+            cfg=cfg,
+            replace=replace,
+            extensions=extensions,
+        )
+
+    monkeypatch.setattr(saving, "render_save_figure_png", encode)
+    monkeypatch.setattr(run_saving, "save_run_data", write)
+    completed = session.save_artifacts()
+    assert completed.report is not None and completed.error is not None
+    assert encoded == [plots["fit"], plots["residual"]]
+    assert io_threads and all(thread != owner_id for thread in io_threads)
+    failed = [item for item in completed.report.outputs if item.status == "failed"]
+    assert len(failed) == 2
+    assert all(
+        item.key.member_name == "fit" and "encoder failed" in (item.error or "")
+        for item in failed
+    )
+    assert all(
+        item.output.path.is_file()
+        for item in completed.report.outputs
+        if item.status == "saved"
+    )
+    sections = session.state.get_artifact_snapshots("tab")
+    assert sections[1].artifacts[0].status is SaveStatus.PARTIALLY_SAVED
+    assert (
+        sections[0].artifacts[0].status
+        is sections[2].artifacts[0].status
+        is SaveStatus.SAVED
+    )
+    assert len(session.entry.ledger.events()) == 1
+
+
+def test_copy_path_failure_preserves_canonical_png_and_other_members(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    declare_panes(session, ("fit",))
+    planned = (
+        session.state.get_artifact_snapshots("tab")[1].artifacts[0].members[0].outputs
+    )
+    planned[1].path.mkdir(parents=True)
+    completed = session.save_artifacts()
+    assert completed.report is not None and completed.error is not None
+    figures = [item for item in completed.report.outputs if item.key.member == "figure"]
+    assert [item.status for item in figures] == ["saved", "failed"]
+    assert figures[0].output.path.is_file()
+    assert figures[1].error
+    assert (
+        session.state.get_artifact_snapshots("tab")[1].artifacts[0].status
+        is SaveStatus.PARTIALLY_SAVED
+    )
+    assert len(session.entry.ledger.events()) == 1
+
+
+@pytest.mark.parametrize(
+    "refs",
+    [
+        (),
+        (ArtifactRef("missing", "results"),),
+        (ArtifactRef("run", "measurement_data"),) * 2,
+    ],
+)
+def test_invalid_artifact_selection_preserves_annotation_and_admission(
+    native_session: NativeSaveSession, refs: tuple[ArtifactRef, ...]
+) -> None:
+    session = native_session
+    previous = session.state.get_artifact_snapshots("tab")
+    with pytest.raises(FailedPreconditionError):
+        session.control.save_artifacts(
+            "tab", artifacts=refs, comment="rejected", origin=GUI_ORIGIN
+        )
+    assert session.state.get_tab("tab").save.comment == ""
+    assert session.state.get_artifact_snapshots("tab") == previous
+    assert not session.state.is_tab_busy("tab")
+    assert session.artifact_completions == []
+    assert session.entry.ledger.events() == ()
+    assert not (session.entry.database_path / "runs").exists()
+
+
+@pytest.mark.parametrize("missing", ["metadata", "storage"])
+@pytest.mark.parametrize("batch", [False, True])
+def test_missing_evidence_rejects_comment_before_operation(
+    native_session: NativeSaveSession, missing: str, batch: bool
+) -> None:
+    session = native_session
+    if missing == "metadata":
+        session.state.update_tab_result("tab", session.state.get_tab("tab").run.result)
+    else:
+        session.state.get_tab("tab").save_context = None
+    command = session.control.save_artifacts if batch else session.control.save_data
+    with pytest.raises(FailedPreconditionError):
+        command("tab", comment="rejected", origin=GUI_ORIGIN)
+    assert session.state.get_tab("tab").save.comment == ""
+    assert not session.state.is_tab_busy("tab")
+    assert not session.completions and not session.artifact_completions
+    assert session.entry.ledger.events() == ()
+    assert not (session.entry.database_path / "runs").exists()
+
+
+def test_analysis_replacement_and_new_run_retire_saved_sections(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    declare_panes(session)
+    completed = session.save_artifacts()
+    assert completed.report is not None
+    session.state.update_tab_post_analyze(
+        "tab", PostSummary(0.8), None, post_analyze_params_instance=PaneParams(5.0)
+    )
+    sections = session.state.get_artifact_snapshots("tab")
+    assert sections[1].artifacts[0].status is SaveStatus.SAVED
+    assert sections[2].artifacts[0].status is SaveStatus.NOT_SAVED
+    session.state.update_tab_analyze(
+        "tab", PaneSummary(7.0), None, analyze_params_instance=PaneParams(8.0)
+    )
+    sections = session.state.get_artifact_snapshots("tab")
+    assert [section.section for section in sections] == ["run", "analysis"]
+    assert sections[0].artifacts[0].status is SaveStatus.SAVED
+    assert [member.key.member for member in sections[1].artifacts[0].members] == [
+        "analysis"
+    ]
+    session.state.clear_tab_results("tab")
+    assert session.state.get_artifact_snapshots("tab") == ()
+
+
+def test_resave_all_failed_replaces_previous_success_evidence(
+    native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from zcu_tools.experiment import run_saving
+
+    session = native_session
+    first = session.save()
+    assert first.report is not None and first.error is None
+    native_path = first.report.outputs[0].output.path
+    native_path.unlink()
+    native_path.mkdir()
+
+    def fail_labber(*args: object, **kwargs: object) -> None:
+        raise OSError("Labber denied")
+
+    monkeypatch.setattr(run_saving, "write_labber", fail_labber)
+    second = session.save()
+    assert second.report is not None and second.error is not None
+    assert [item.status for item in second.report.outputs] == ["failed", "failed"]
+    sections = session.state.get_artifact_snapshots("tab")
+    data = sections[0].artifacts[0]
+    assert data.status is SaveStatus.NOT_SAVED
+    assert [output.status for output in data.members[0].outputs] == ["failed", "failed"]
+    assert data.members[0].outputs[1].path == second.report.outputs[1].output.path
+    assert data.members[0].outputs[1].path != first.report.outputs[1].output.path
+    metadata = session.state.get_tab("tab").run.metadata
+    assert metadata is not None
+    assert metadata.labber_path == str(first.report.outputs[1].output.path)
+
+
+def test_invalid_analysis_json_rejects_before_annotation_or_files(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    session.state.update_tab_analyze(
+        "tab", PaneSummary(float("nan")), None, analyze_params_instance=PaneParams()
+    )
+    with pytest.raises(ValueError, match="strict JSON"):
+        session.control.save_artifacts("tab", comment="rejected", origin=GUI_ORIGIN)
+    assert session.state.get_tab("tab").save.comment == ""
+    assert not session.state.is_tab_busy("tab")
+    assert session.entry.ledger.events() == ()
+    assert not (session.entry.database_path / "runs").exists()
+
+
+def test_ledger_failure_has_no_complete_report_and_settles_operation(
+    native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = native_session
+    declare_panes(session, ())
+
+    def fail_ledger(*args: object, **kwargs: object) -> None:
+        raise OSError("ledger denied")
+
+    monkeypatch.setattr(type(session.entry.ledger), "append", fail_ledger)
+    completed = session.save_artifacts()
+    assert completed.report is None
+    assert completed.error and "ledger denied" in completed.error
+    assert session.entry.ledger.events() == ()
+    assert all(
+        artifact.status is SaveStatus.NOT_SAVED
+        for section in session.state.get_artifact_snapshots("tab")
+        for artifact in section.artifacts
+    )
+
+
+def test_tab_snapshot_reads_committed_sections_without_payload_or_path_planning(
+    native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = native_session
+    declare_panes(session)
+    expected = session.state.get_artifact_snapshots("tab")
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("read model attempted capture or planning")
+
+    monkeypatch.setattr(SaveLayout, "outputs", forbidden)
+    monkeypatch.setattr(
+        session.state.get_tab("tab").adapter, "capture_analysis_document", forbidden
+    )
+    tab_service = TabService(
+        session.state,
+        registry=MagicMock(),
+        writeback=MagicMock(),
+        cfg_resources=MagicMock(),
+        cfg_resolution=MagicMock(),
+        captured_parameters=MagicMock(),
+    )
+    actual = tab_service.get_snapshot("tab")
+    assert actual.artifacts == expected
+    assert actual.save is not None and actual.save.comment == ""
+    assert actual.analysis is not None and actual.analysis.result_params == PaneParams(
+        2.0
+    )
+    assert (
+        actual.post_analysis is not None
+        and actual.post_analysis.result_params == PaneParams(4.0)
+    )
+    assert session.state.get_artifact_snapshots("tab") == expected

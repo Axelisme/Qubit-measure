@@ -127,7 +127,6 @@ def build_app_services(
     registry: Registry,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
-    notify_info: Callable[[str], None],
     resource_versions: Callable[[], Mapping[str, int]],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
     owner_scheduler: OwnerScheduler,
@@ -280,14 +279,7 @@ def build_app_services(
         run_analyze=run_analyze_control,
         device=session.device_control,
     )
-    save_control = SaveControlFacet(
-        state=state,
-        bus=bus,
-        guard=guard,
-        tab=tab,
-        save=save,
-        notify_info=notify_info,
-    )
+    save_control = SaveControlFacet(state=state, guard=guard, save=save)
     writeback_control = WritebackControlFacet(
         state=state,
         guard=guard,

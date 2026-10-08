@@ -12,6 +12,8 @@ import os.path
 from matplotlib import rcParams
 from matplotlib.figure import Figure
 
+from zcu_tools.gui.plotting.figure_export import render_figure_png
+
 # Fixed export geometry for SAVED images — full quality, independent of the GUI
 # window size. The 4:3 canvas matches the preview geometry while providing enough
 # physical area that labels do not dominate multi-panel figures.
@@ -55,6 +57,16 @@ def resolve_figure_path(path: str) -> str:
 def save_figure_to_path(fig: Figure, path: str) -> None:
     """Save ``fig`` to ``path`` at the full-quality save size/dpi (window-independent)."""
     _render_with_fixed_size(fig, path, SAVE_FIGSIZE, SAVE_DPI)
+
+
+def render_save_figure_png(fig: Figure) -> bytes:
+    """Encode full-quality 12×9 inch/150 dpi PNG on the Figure owner thread.
+
+    Return bytes without I/O or backend selection. Restore the displayed size
+    even when Matplotlib raises; rendering errors propagate to the shared saver
+    for member-scoped isolation.
+    """
+    return render_figure_png(fig, figsize=SAVE_FIGSIZE, dpi=SAVE_DPI)
 
 
 def render_figure_preview_png(fig: Figure) -> bytes:

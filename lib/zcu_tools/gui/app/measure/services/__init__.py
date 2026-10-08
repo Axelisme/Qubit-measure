@@ -56,13 +56,11 @@ if TYPE_CHECKING:
     )
     from .ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         RestoreIssue,
         RestoreReport,
         RunPaneSnapshot,
         SavePaneSnapshot,
-        TabPathsSnapshot,
     )
     from .post_analyze import PostAnalyzeService
     from .run import RunService
@@ -117,12 +115,10 @@ __all__ = [
     "ProjectSettingsService",
     "TabService",
     "TabSnapshot",
-    "PathResourceSnapshot",
     "RunPaneSnapshot",
     "AnalysisPaneSnapshot",
     "PostAnalysisPaneSnapshot",
     "SavePaneSnapshot",
-    "TabPathsSnapshot",
     "RestoreIssue",
     "RestoreReport",
     "WorkspaceService",
@@ -176,12 +172,10 @@ _EXPORT_MODULES: dict[str, str] = {
     "ProjectSettingsService": "zcu_tools.gui.session.services.project_settings",
     "TabService": ".tab",
     "TabSnapshot": ".tab",
-    "PathResourceSnapshot": ".ports",
     "RunPaneSnapshot": ".ports",
     "AnalysisPaneSnapshot": ".ports",
     "PostAnalysisPaneSnapshot": ".ports",
     "SavePaneSnapshot": ".ports",
-    "TabPathsSnapshot": ".ports",
     "RestoreIssue": ".ports",
     "RestoreReport": ".ports",
     "WorkspaceService": ".workspace",

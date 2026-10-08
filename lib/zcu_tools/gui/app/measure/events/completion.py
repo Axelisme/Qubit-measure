@@ -43,9 +43,17 @@ class SaveDataFinishedPayload(BasePayload):
 
 @dataclass(frozen=True)
 class SaveArtifactsFinishedPayload(BasePayload):
+    """Latest multi-artifact terminal, after State commit and handle settle.
+
+    tab_id identifies the owner. error is the operation diagnostic, or None on
+    complete success. report lists every attempted output, or is None when
+    preparation/submission/ledger failure prevented a complete saver report.
+    """
+
     EVENT: ClassVar[CompletionEvent] = CompletionEvent.SAVE_ARTIFACTS_FINISHED
     tab_id: str
     error: str | None = None
+    report: SaveReport | None = None
 
 
 __all__ = [

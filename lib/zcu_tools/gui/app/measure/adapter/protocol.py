@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
 
 if TYPE_CHECKING:
+    from zcu_tools.datafile import AnalysisDocument
     from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
     from zcu_tools.experiment.context import RunContext
     from zcu_tools.experiment.native_persistence import PreparedRunData
@@ -179,6 +180,22 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         self, req: PostWritebackRequest[Any, Any, Any]
     ) -> Sequence[WritebackItem]:
         """Return the writeback items proposed from one post-analysis result."""
+        ...
+
+    def capture_analysis_document(
+        self,
+        result: object,
+        parameters: object | None,
+        *,
+        pane: Literal["analysis", "post_analysis"],
+    ) -> AnalysisDocument:
+        """Capture a completed result and its historical dataclass inputs.
+
+        None parameters means no inputs. Return finite JSON without figures or
+        arrays; invalid result/input types or values raise TypeError/ValueError.
+        The returned document isolates containers at the datafile boundary.
+        No live-context lookup or I/O. BaseAdapter supplies the implementation.
+        """
         ...
 
     def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:

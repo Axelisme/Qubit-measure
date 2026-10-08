@@ -10,6 +10,7 @@ from typing import (
     Any,
     Generic,
     Protocol,
+    runtime_checkable,
 )
 
 from typing_extensions import TypeVar
@@ -130,6 +131,7 @@ class AnalyzeResultBase:
         return result
 
 
+@runtime_checkable
 class AnalyzeResult(Protocol):
     """Numeric analysis payload; figures belong to the operation's plots."""
 

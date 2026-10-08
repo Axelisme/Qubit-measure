@@ -22,8 +22,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
@@ -39,12 +39,6 @@ from .main_window_activity import activity_marker_presentation
 from .main_window_events import MainWindowEventCoordinator
 from .main_window_tab_list import configure_tab_bar
 from .main_window_toolbar import MainWindowToolbar
-
-_SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
-    ArtifactKind.DATA: "Save data failed",
-    ArtifactKind.ANALYSIS: "Save image failed",
-    ArtifactKind.POST_ANALYSIS: "Save post-analysis image failed",
-}
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +83,11 @@ class _MainWindowTabActions:
     def apply_post_writeback(self, tab_id: str) -> None:
         self._window.apply_tab_writeback(tab_id, pane="post_analysis")
 
-    def save_data(self, tab_id: str) -> None:
-        self._window.save_tab_data(tab_id)
-
-    def save_image(self, tab_id: str, key: ArtifactKey) -> None:
-        self._window.save_tab_image(tab_id, key)
+    def save_artifact(self, tab_id: str, ref: ArtifactRef) -> None:
+        if ref == ArtifactRef("run", "measurement_data"):
+            self._window.save_tab_data(tab_id)
+        else:
+            self._window.save_tab_artifact(tab_id, ref)
 
     def save_all(self, tab_id: str) -> None:
         self._window.save_tab_artifacts(tab_id)
@@ -298,25 +292,6 @@ class MainWindow(QMainWindow):
         if current.capabilities.post_analysis:
             tab_w.update_post_writeback_items(
                 list(current.post_analysis.writeback_items)
-            )
-
-    def refresh_tab_save_paths(
-        self, tab_id: str, snapshot: TabSnapshot | None = None
-    ) -> None:
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        assert current.paths is not None
-        assert current.capabilities is not None
-        tab_w.set_data_path(current.paths.data.path or "")
-        for name, path in current.paths.analysis_images.items():
-            tab_w.set_image_path(
-                ArtifactKey(ArtifactKind.ANALYSIS, name), path.path or ""
-            )
-        for name, path in current.paths.post_analysis_images.items():
-            tab_w.set_image_path(
-                ArtifactKey(ArtifactKind.POST_ANALYSIS, name), path.path or ""
             )
 
     def refresh_tab_figure(
@@ -796,24 +771,17 @@ class MainWindow(QMainWindow):
 
     # -- centralized save dispatch (S2) --------------------------
 
-    def _present_save_error(self, kind: ArtifactKind, exc: Exception) -> None:
-        title = _SAVE_ERROR_TITLES.get(kind)
-        if title is None:
-            raise RuntimeError(f"unknown artifact {kind!r}")
-        self.show_error_dialog(title, str(exc))
-
     def _dispatch_artifact_save(
-        self, tab_w: ExpTabWidget, kind: ArtifactKind, save_call: Callable[[], object]
-    ) -> bool:
+        self, tab_w: ExpTabWidget, save_call: Callable[[], object]
+    ) -> None:
         """Present operational errors; render the State-owned terminal outcome."""
         try:
             save_call()
         except (ExpectedError, OSError, ValueError) as exc:
             self.refresh_tab_interaction(tab_w.tab_id)
-            self._present_save_error(kind, exc)
-            return False
+            self.show_error_dialog("Save failed", str(exc))
+            return
         self.refresh_tab_interaction(tab_w.tab_id)
-        return True
 
     def save_tab_data(self, tab_id: str) -> None:
         """Submit native data Save using the displayed annotation and GUI origin.
@@ -828,20 +796,21 @@ class MainWindow(QMainWindow):
         comment = tab_w.get_comment()
         self._dispatch_artifact_save(
             tab_w,
-            ArtifactKind.DATA,
             lambda: self._ctrl.save_control.save_data(
                 tab_id, comment=comment, origin=CommandOrigin("gui", None)
             ),
         )
 
-    def save_tab_image(self, tab_id: str, key: ArtifactKey) -> None:
-        logger.info("save_tab_image: tab_id=%r key=%r", tab_id, key)
-        tab_w = self._resolve_tab_widget(tab_id, "save_tab_image")
+    def save_tab_artifact(self, tab_id: str, ref: ArtifactRef) -> None:
+        """Submit every member of a declared artifact with GUI attribution."""
+        tab_w = self._resolve_tab_widget(tab_id, "save_tab_artifact")
         if tab_w is None:
             return
-        path = tab_w.get_image_path(key) or None
         self._dispatch_artifact_save(
-            tab_w, key.kind, lambda: self._ctrl.save_image(tab_id, key, path)
+            tab_w,
+            lambda: self._ctrl.save_control.save_artifacts(
+                tab_id, artifacts=(ref,), origin=CommandOrigin("gui", None)
+            ),
         )
 
     def save_tab_artifacts(self, tab_id: str) -> None:
@@ -850,7 +819,12 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         try:
-            self._ctrl.save_artifacts(tab_id)
+            submission = self._ctrl.save_control.save_artifacts(
+                tab_id, comment=tab_w.get_comment(), origin=CommandOrigin("gui", None)
+            )
+            self._status_bar.showMessage(
+                f"Saving {len(submission.destinations)} outputs…"
+            )
         except (ExpectedError, OSError, ValueError) as exc:
             self.show_error_dialog("Save failed", str(exc))
         self.refresh_tab_interaction(tab_id)

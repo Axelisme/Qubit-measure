@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import dataclasses
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from inspect import signature
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
 
+from zcu_tools.datafile import AnalysisDocument
 from zcu_tools.experiment.cfg_assembler import (
     ExperimentCfgInput,
     ExperimentCfgValue,
@@ -39,6 +41,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
+from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.resources.entry import RoleSpec
@@ -551,6 +554,38 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
         return self.make_default_save_paths(ctx)
+
+    def capture_analysis_document(
+        self,
+        result: object,
+        parameters: object | None,
+        *,
+        pane: Literal["analysis", "post_analysis"],
+    ) -> AnalysisDocument:
+        """Capture one completed pane's historical inputs and numeric summary.
+
+        result must implement AnalyzeResult.to_summary_dict. parameters is the
+        dataclass instance used for that result, or None for no inputs, never
+        the next edited draft. Unsupported input/result types raise TypeError;
+        invalid/non-finite JSON raises ValueError. The datafile model isolates
+        containers once; this hook neither reads live context nor writes files.
+        """
+        if not isinstance(result, AnalyzeResult):
+            raise TypeError("Analysis result must implement to_summary_dict")
+        if parameters is None:
+            inputs: dict[str, object] = {}
+        elif dataclasses.is_dataclass(parameters) and not isinstance(parameters, type):
+            inputs = {
+                field.name: getattr(parameters, field.name)
+                for field in dataclasses.fields(parameters)
+            }
+        else:
+            raise TypeError(
+                "Historical analysis parameters must be a dataclass or None"
+            )
+        return AnalysisDocument.model_validate(
+            {"pane": pane, "parameters": inputs, "summary": result.to_summary_dict()}
+        )
 
     def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
         """Map one completed RunRecord through this adapter's persistence spec.

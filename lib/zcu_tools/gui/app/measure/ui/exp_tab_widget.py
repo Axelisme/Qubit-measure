@@ -29,8 +29,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
@@ -93,9 +93,9 @@ class TabActions(Protocol):
 
     def apply_post_writeback(self, tab_id: str) -> None: ...
 
-    def save_data(self, tab_id: str) -> None: ...
-
-    def save_image(self, tab_id: str, key: ArtifactKey) -> None: ...
+    def save_artifact(self, tab_id: str, ref: ArtifactRef) -> None:
+        """Save every member of one declared artifact."""
+        ...
 
     def save_all(self, tab_id: str) -> None: ...
 
@@ -470,7 +470,7 @@ class ExpTabWidget(QWidget):
 
     def _build_data_panel(self) -> None:
         # ── Tab: Data (always) — save center ──────────────────────
-        self._save_center = ArtifactSaveCenter(self.tab_id, self._capabilities)
+        self._save_center = ArtifactSaveCenter(self._capabilities)
         self._save_center.bind_comment_changed(self._on_comment_changed)
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
@@ -720,8 +720,6 @@ class ExpTabWidget(QWidget):
                 raise RuntimeError(
                     f"tab {self.tab_id!r} received post params but does not support post-analysis"
                 )
-        assert snapshot.paths is not None
-        self.set_data_path(snapshot.paths.data.path or "")
         self.update_interaction_state(snapshot)
         self._bind_to_controller(actions)
 
@@ -770,18 +768,6 @@ class ExpTabWidget(QWidget):
         self._require_post()
         self.post_writeback_widget.populate(items)
         self.post_writeback_section.setVisible(len(items) > 0)
-
-    def set_data_path(self, data_path: str) -> None:
-        self._save_center.set_data_path(data_path)
-
-    def set_image_path(self, key: ArtifactKey, path: str) -> None:
-        self._save_center.set_image_path(key, path)
-
-    def get_data_path(self) -> str:
-        return self._save_center.get_data_path()
-
-    def get_image_path(self, key: ArtifactKey) -> str:
-        return self._save_center.path_for(key)
 
     def get_comment(self) -> str:
         return self._save_center.get_comment()
@@ -1192,15 +1178,14 @@ class ExpTabWidget(QWidget):
             self.writeback_widget.apply_requested.connect(
                 lambda: actions.apply_writeback(tab_id)
             )
-            self._save_center.bind_image_save(
-                lambda key: actions.save_image(tab_id, key)
-            )
         if self._has_post:
             self.post_analyze_btn.clicked.connect(lambda: actions.post_analyze(tab_id))
             self.post_writeback_widget.apply_requested.connect(
                 lambda: actions.apply_post_writeback(tab_id)
             )
-        self._save_center.bind_save_data(lambda: actions.save_data(tab_id))
+        self._save_center.bind_artifact_save(
+            lambda ref: actions.save_artifact(tab_id, ref)
+        )
 
         self._validity_cb = validity_cb
 

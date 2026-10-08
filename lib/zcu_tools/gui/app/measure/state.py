@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 from zcu_tools.datafile import RunMetadata
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
 from zcu_tools.gui.cfg.resource import CfgResource
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
@@ -86,7 +86,6 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     result: T_AnalyzeResult | None = None
     plots: Plots | None = None
     writeback_draft: object | None = None
-    image_path_overrides: dict[str, str] = field(default_factory=dict)
     source_operation_id: int | None = None
     result_params: T_AnalyzeParams | None = None
 
@@ -97,16 +96,14 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     result: T_AnalyzeResult | None = None
     plots: Plots | None = None
     writeback_draft: object | None = None
-    image_path_overrides: dict[str, str] = field(default_factory=dict)
     source_operation_id: int | None = None
     result_params: T_AnalyzeParams | None = None
 
 
 @dataclass
 class SavePaneState:
-    """Save owns the data path and comment drafts; image paths belong to image panes."""
+    """Current annotation; destinations and evidence belong to ArtifactTracker."""
 
-    data_path_override: str | None = None
     comment: str = ""
 
 
@@ -359,20 +356,6 @@ class State(SessionState):
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
 
-    @staticmethod
-    def _empty_analysis_like(
-        pane: AnalysisPaneState[Any, Any] | PostAnalysisPaneState[Any, Any],
-    ) -> AnalysisPaneState[Any, Any]:
-        return AnalysisPaneState(image_path_overrides=dict(pane.image_path_overrides))
-
-    @staticmethod
-    def _empty_post_analysis_like(
-        pane: PostAnalysisPaneState[Any, Any] | AnalysisPaneState[Any, Any],
-    ) -> PostAnalysisPaneState[Any, Any]:
-        return PostAnalysisPaneState(
-            image_path_overrides=dict(pane.image_path_overrides)
-        )
-
     def _replace_run_pane(
         self,
         tab_id: str,
@@ -402,8 +385,8 @@ class State(SessionState):
         retired = self._retired_all(tab)
         tab.artifacts = artifacts
         tab.run = pane
-        tab.analysis = self._empty_analysis_like(tab.analysis)
-        tab.post_analysis = self._empty_post_analysis_like(tab.post_analysis)
+        tab.analysis = AnalysisPaneState()
+        tab.post_analysis = PostAnalysisPaneState()
         self.version.bump(f"tab:{tab_id}:result")
         self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
@@ -503,7 +486,7 @@ class State(SessionState):
             )
             tab.artifacts.replace_section("post_analysis", (), layout=layout)
         tab.analysis = pane
-        tab.post_analysis = self._empty_post_analysis_like(tab.post_analysis)
+        tab.post_analysis = PostAnalysisPaneState()
         self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
         return retired
@@ -516,7 +499,6 @@ class State(SessionState):
         plots: Plots | None,
         params: object | None = None,
         writeback_draft: object | None = None,
-        image_path_overrides: dict[str, str] | None = None,
     ) -> RetiredPaneResources:
         """Build and commit an Analysis carrier in one State transition."""
         return self.swap_analysis_pane(
@@ -526,9 +508,6 @@ class State(SessionState):
                 result=result,
                 plots=plots,
                 writeback_draft=writeback_draft,
-                image_path_overrides=(
-                    {} if image_path_overrides is None else dict(image_path_overrides)
-                ),
             ),
         )
 
@@ -569,13 +548,13 @@ class State(SessionState):
     @staticmethod
     def _reset_tab_derived(tab: Session[Any, Any, Any, Any]) -> None:
         """Clear state derived from a tab's current run result."""
-        tab.analysis = State._empty_analysis_like(tab.analysis)
-        tab.post_analysis = State._empty_post_analysis_like(tab.post_analysis)
+        tab.analysis = AnalysisPaneState()
+        tab.post_analysis = PostAnalysisPaneState()
 
     @staticmethod
     def _invalidate_post_analyze(tab: Session[Any, Any, Any, Any]) -> None:
-        """Drop Post resources while preserving its independent image path."""
-        tab.post_analysis = State._empty_post_analysis_like(tab.post_analysis)
+        """Drop resources derived from the replaced primary Analysis."""
+        tab.post_analysis = PostAnalysisPaneState()
 
     def swap_post_analysis_pane(
         self,
@@ -612,7 +591,6 @@ class State(SessionState):
         plots: Plots | None,
         params: object | None = None,
         writeback_draft: object | None = None,
-        image_path_overrides: dict[str, str] | None = None,
     ) -> RetiredPaneResources:
         """Build and commit a Post carrier in one State transition."""
         return self.swap_post_analysis_pane(
@@ -622,9 +600,6 @@ class State(SessionState):
                 result=result,
                 plots=plots,
                 writeback_draft=writeback_draft,
-                image_path_overrides=(
-                    {} if image_path_overrides is None else dict(image_path_overrides)
-                ),
             ),
         )
 
@@ -673,6 +648,29 @@ class State(SessionState):
             type(instance).__name__,
         )
         self.tabs[tab_id].post_analysis.params = instance
+
+    def commit_save_report(self, tab_id: str, report: SaveReport) -> None:
+        """Publish latest output evidence and the last successful Labber path.
+
+        Call on State's owner thread after a complete shared saver report. The
+        tab must retain historical RunMetadata; missing metadata raises
+        ValueError before mutation, and unknown tabs raise KeyError. Unselected
+        artifacts and acquisition identity/times remain unchanged.
+        """
+        self._assert_owner()
+        tab = self.get_tab(tab_id)
+        metadata = tab.run.metadata
+        if metadata is None:
+            raise ValueError("Save report requires historical RunMetadata")
+        tab.artifacts.apply_report(report)
+        for item in report.outputs:
+            if (
+                item.key.section == "run"
+                and item.output.format == "labber"
+                and item.status == "saved"
+            ):
+                tab.run.metadata = replace(metadata, labber_path=str(item.output.path))
+        self.version.bump(f"tab:{tab_id}:save")
 
     def get_artifact_snapshots(
         self, tab_id: str
@@ -741,15 +739,6 @@ class State(SessionState):
             type(instance).__name__,
         )
         self.tabs[tab_id].analysis.params = instance
-
-    def _bump_path_versions(self, tab_id: str, *resources: str) -> None:
-        for resource in resources:
-            self.version.bump(f"tab:{tab_id}:path:{resource}")
-
-    def update_tab_data_path_override(self, tab_id: str, data_path: str | None) -> None:
-        self._assert_owner()
-        self.tabs[tab_id].save.data_path_override = data_path
-        self._bump_path_versions(tab_id, "data")
 
     def set_tab_running(self, tab_id: str, *, running: bool) -> None:
         """Set or clear this existing tab's run ownership on the owner thread.

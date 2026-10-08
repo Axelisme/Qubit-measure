@@ -8,7 +8,7 @@ only what the consumer uses; an existing implementer need not inherit the port.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -36,8 +36,14 @@ class SaveDataSubmission:
 
 @dataclass(frozen=True, slots=True)
 class SaveDestination:
+    """One member output reservation, not proof of successful I/O.
+
+    key is the complete resource member identity. output carries its format and
+    absolute planned path; terminal SaveReport supplies actual paths and status.
+    """
+
     key: ArtifactKey
-    path: str
+    output: Output
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,10 +95,7 @@ if TYPE_CHECKING:
         AdapterCapabilities,
         WritebackItem,
     )
-    from zcu_tools.gui.app.measure.artifact_tracker import (
-        ArtifactKey,
-        ArtifactSnapshot,
-    )
+    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactSectionSnapshot
     from zcu_tools.gui.app.measure.state import (
         RetiredPaneResources,
         Session,
@@ -103,16 +106,9 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.figures import FigureCollection
     from zcu_tools.plotting.plots import Plots
+    from zcu_tools.resources.entry import ArtifactKey, Output
 
     from .persistence_types import AppPersistedState
-
-
-@dataclass(frozen=True, slots=True)
-class PathResourceSnapshot:
-    """Read model for one independently-owned path resource."""
-
-    override: str | None
-    path: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +124,6 @@ class AnalysisPaneSnapshot:
     result: object | None
     figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
-    image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
@@ -140,7 +135,6 @@ class PostAnalysisPaneSnapshot:
     result: object | None
     figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
-    image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
@@ -148,17 +142,9 @@ class PostAnalysisPaneSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class SavePaneSnapshot:
-    data_path: PathResourceSnapshot
+    """Current annotation; destinations belong only to artifact outputs."""
+
     comment: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class TabPathsSnapshot:
-    """Data and each named image path, projected independently by a tab."""
-
-    data: PathResourceSnapshot
-    analysis_images: Mapping[str, PathResourceSnapshot]
-    post_analysis_images: Mapping[str, PathResourceSnapshot]
 
 
 @dataclass(frozen=True)
@@ -167,7 +153,7 @@ class TabSnapshot:
 
     Render (``TabService.get_snapshot``) populates every field; persist/restore
     uses only the serializable head (adapter_name + cfg_schema). Pane-owned
-    read models (run/analysis/post_analysis/save/paths) are the only
+    read models (run/analysis/post_analysis/save/artifacts) are the only
     runtime/read-model contract — no flat projections for legacy callers.
     """
 
@@ -180,8 +166,7 @@ class TabSnapshot:
     analysis: AnalysisPaneSnapshot | None = None
     post_analysis: PostAnalysisPaneSnapshot | None = None
     save: SavePaneSnapshot | None = None
-    paths: TabPathsSnapshot | None = None
-    artifacts: tuple[ArtifactSnapshot, ...] = ()
+    artifacts: tuple[ArtifactSectionSnapshot, ...] = ()
 
 
 @dataclass(frozen=True)
