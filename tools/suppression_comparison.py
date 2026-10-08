@@ -1,8 +1,9 @@
 """Compare type-checker ignores by their source identity and diagnostic scope.
 
 An unchanged AST statement in the same owner/branch keeps its identity through
-comment deletion and formatting. Ambiguous statements receive no migration
-credit. Raw usage counts remain the responsibility of check_suppressions.
+comment deletion and formatting. Existing unproven debt may also be retained by
+identical stripped ignore lines whose multiplicity does not increase. Other
+position and scope rules remain strict; check_suppressions owns raw usage counts.
 """
 
 from __future__ import annotations
@@ -246,12 +247,20 @@ def _change_reason(before: _Comment, after: _Comment) -> IgnoreReason | None:
 
 
 def compare_ignores(before: str, after: str) -> tuple[IgnoreRegression, ...]:
-    """Return every new, broader or unproven type-checker escape site.
+    """Compare Python source strings and return candidate ignore regressions.
 
-    Exact unchanged input preserves even ambiguous existing debt. Otherwise a
-    unique AST statement, owner/branch and logical line role must prove the
-    position. Type-ignore to pyright-ignore additionally requires a valid,
-    nonempty diagnostic list. Deletion elsewhere never supplies credit.
+    Each returned site identifies the candidate line, ignore kind and reason.
+    Exact unchanged input preserves even ambiguous existing debt. Otherwise,
+    unique AST statement, owner/branch and logical line role determine position.
+    Type-ignore to pyright-ignore requires a valid, nonempty diagnostic list.
+
+    Only a result originally classified as unproven-position can retain debt
+    through exact stripped source lines, including the recognized ignore comment.
+    The count of that ignore line in before must be at least its count in after.
+    Unchanged invalid directives can retain existing debt, but duplicated or
+    edited lines cannot use this fallback. New-position, scope-expanded and
+    not-narrow results are never overridden. Deleted lines cannot fund other ones.
+    Unparseable source keeps the same rules for recognized comments.
     """
     if before == after:
         return ()
