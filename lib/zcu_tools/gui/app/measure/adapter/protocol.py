@@ -141,7 +141,9 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         Run publication boundary and publishes neither result nor metadata.
         Without the tag or saved origin, the framework does not manufacture
         acquisition metadata and retains the adapter's opaque result contract.
-        Acquisition errors propagate to the operation's failed outcome.
+        Acquisition errors follow the operation's terminal policy: without
+        accepted user cancellation they fail the operation. Accepted cancellation
+        may instead produce a cancelled outcome; Schedule errors remain failures.
         """
         ...
 

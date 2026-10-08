@@ -38,6 +38,30 @@ class TargetAdapter(T1Adapter):
         )
 
 
+class DependentTargetAdapter(TargetAdapter):
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        return {
+            "driver": RoleSpec("fake/drive/*"),
+            "target": RoleSpec("fake/drive/*", via="driver.source"),
+        }
+
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+        return CfgSchema(
+            CfgSectionSpec(
+                fields={
+                    "rate": ScalarSpec("Rate", float),
+                    "peer_rate": ScalarSpec("Peer rate", float),
+                }
+            ),
+            CfgSectionValue(
+                fields={
+                    "rate": EvalValue("driver.rate"),
+                    "peer_rate": EvalValue("target.rate"),
+                }
+            ),
+        )
+
+
 class RolelessAdapter(TargetAdapter):
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
         return {}
@@ -58,6 +82,7 @@ def application(qapp, tmp_path: Path) -> Generator[TargetApplication]:
         installed = registry_state()
         registry = Registry()
         registry.register("targeted", TargetAdapter)
+        registry.register("dependent", DependentTargetAdapter)
         registry.register("roleless", RolelessAdapter)
         state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
         controller = Controller(
@@ -66,7 +91,7 @@ def application(qapp, tmp_path: Path) -> Generator[TargetApplication]:
         controller.setup_control.new_entry(EntryRequest("entry"))
         context = controller.context_control
         context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
-        context.add_component("Q2", "fake/drive/a", {"rate": 20.0})
+        context.add_component("Q2", "fake/drive/a", {"rate": 20.0, "source": "Q1"})
         context.add_component("S1", "fake/sensor", {"rate": 30.0})
         context.set_component_focus("Q1")
         remote = RemoteControlAdapter(
@@ -97,6 +122,40 @@ def test_explicit_target_uses_other_component_without_changing_focus(
     parameters = application.state.get_tab(tab_id).parameters
     assert parameters is not None and parameters.roles is not None
     assert dict(parameters.roles.names) == {"driver": "Q2"}
+    assert application.controller.context_control.get_component_focus().name == "Q1"
+
+
+def test_explicit_target_consumes_focus_and_resolves_same_kind_peer_via(
+    application: TargetApplication,
+) -> None:
+    tab_id = h_tab_new(
+        application.remote, {"adapter_name": "dependent", "target": "Q2"}
+    )["tab_id"]
+    assert isinstance(tab_id, str)
+    tab = application.state.get_tab(tab_id)
+    assert tab.parameters is not None and tab.parameters.roles is not None
+    assert dict(tab.parameters.roles.names) == {"driver": "Q2", "target": "Q1"}
+    cfg = tab.cfg
+    accepted = cfg.accept(cfg.observe().ref.revision)
+    assert accepted.values == {"rate": 20.0, "peer_rate": 10.0}
+    assert application.controller.context_control.get_component_focus().name == "Q1"
+
+
+def test_explicit_target_does_not_hide_missing_same_kind_peer_reference(
+    application: TargetApplication,
+) -> None:
+    with pytest.raises(RemoteError) as caught:
+        h_tab_new(application.remote, {"adapter_name": "dependent", "target": "Q1"})
+    error = caught.value
+    assert error.code is ErrorCode.PRECONDITION_FAILED
+    assert error.reason == "role_resolution_failed"
+    assert error.data is not None
+    assert error.data["role"] == "target"
+    assert error.data["focus"] == "Q1"
+    assert error.data["required_kind"] == "fake/drive/*"
+    assert error.data["detail"]
+    assert application.state.list_tab_ids() == []
+    assert application.state.active_tab_id is None
     assert application.controller.context_control.get_component_focus().name == "Q1"
 
 
