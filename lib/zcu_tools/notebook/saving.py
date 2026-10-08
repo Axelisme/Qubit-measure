@@ -198,7 +198,6 @@ class SavedRun(Generic[CfgT, ResultT]):
             metadata=self._metadata,
             ledger=self._storage.ledger,
             origin="notebook",
-            call_id=None,
         )
         for item in self._report.outputs:
             if item.output.format == "labber" and item.status == "saved":
