@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.detune import (
@@ -83,27 +84,26 @@ class T2EchoAdapter(
             "is typically longer than the Ramsey T2*."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional, seeding defaults): 't2e' — "
-            "prior T2-echo estimate (us); the total-delay sweep spans up to "
-            "1.5*t2e (fallback ~20 us). 't1' seeds relax_delay (5*t1, fallback "
-            "~100 us). The pi and pi/2 pulses pull 'q_f' (~2000–6000 MHz) and "
-            "'qub_ch'. Readout pulls 'r_f' (~4000–8000 MHz), 'res_ch' / "
-            "'ro_ch', and 'timeFly' for the readout trigger offset (~0–1 us)."
+            "Defaults use the tab's fixed qubit and referenced resonator. "
+            "Total delay ends at 1.5 * qubit.t2e (us, fallback 20 us); "
+            "relax_delay is 5 * qubit.t1 (fallback 100 us). Inline pulses "
+            "read qubit.freq and qubit.wiring.L01.ch. Inline readout reads "
+            "resonator.freq, resonator.wiring.ch/ro_ch, and "
+            "resonator.ext.time_of_fly + 0.05 us (fallback 0.55 us). "
+            "Missing or null calibration uses fallback; unbound roles remain "
+            "Invalid until supplied."
         ),
         expects_ml=(
-            "Needs both a qubit pi-pulse module (prefers library 'pi_amp' / "
-            "'pi_len') and a pi/2-pulse module (prefers 'pi2_amp' / 'pi2_len'); "
-            "each falls back to a blank inline pulse. Plus a readout module "
-            "(calibrated 'readout_dpm' / "
-            "'readout_rf' / 'readout' / 'res_readout', else a blank "
-            "pulse-readout referencing 'ro_waveform' when present). Optional "
-            "reset references a library reset ('reset_bath' / 'reset_10' / "
-            "'reset_120') when present."
+            "Uses captured qubit.module.x180 for the pi pulse, "
+            "qubit.module.x90 for pi/2, and qubit.module.readout. Missing or "
+            "dangling slots seed fresh inline pulse/readout defaults. "
+            "Optional qubit.module.reset stays disabled when absent. "
+            "Verify the inline pulse values and readout timing before Run."
         ),
         typical_writeback=(
-            "Proposes the fitted T2-echo time into MetaDict 't2e' (us). No "
-            "qubit-frequency writeback (unlike T2 Ramsey, echo does not update "
-            "'q_f'). No ModuleLibrary writeback."
+            "Proposes fitted qubit.t2e (us) to the captured qubit and working "
+            "point, including analysis of a source without cfg. No frequency "
+            "or module writeback; later focus changes do not retarget it."
         ),
         recommended=(
             "Enable Fit phase offset to fit a free fringe phase; it defaults to "
@@ -121,8 +121,21 @@ class T2EchoAdapter(
         ),
     )
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Declare the qubit and its referenced resonator for tab capture."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
+        """Declare static shape and defaults resolved on the supplied capture.
+
+        Instantiate with SessionEnv.parameters. Bound missing/null calibration
+        uses the documented fallback; unbound roles remain cfg Invalid. Source
+        or module materialization faults propagate, without reading live md/ml.
+        """
         return (
             MeasureCfgBuilder()
             .reset(optional=True)
@@ -188,6 +201,13 @@ class T2EchoAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[T2EchoRunResult, T2EchoAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose the fitted T2E in us at captured qubit.t2e.
+
+        req supplies the result and its captured context; source.cfg may be None.
+        WritebackService resolves the role and destination on req.ctx.parameters
+        and rejects a missing capture or unbound role. No live focus lookup,
+        frequency/module update, or write occurs here.
+        """
         result = req.analyze_result
         return [
             MetaDictWriteback(

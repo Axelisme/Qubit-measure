@@ -99,7 +99,11 @@ def _source(*, calibrated: bool, null_calibrations: bool = False) -> ParameterCo
             "wiring": {"L01": {"ch": index}},
             "ext": {"best_ro_freq": 6000.0 + 100 * index},
             "module": (
-                {"x180": f"{qubit}.pulses.cal", "readout": f"{resonator}.readout.cal"}
+                {
+                    "x180": f"{qubit}.pulses.cal",
+                    "x90": f"{qubit}.pulses.half",
+                    "readout": f"{resonator}.readout.cal",
+                }
                 if calibrated
                 else {}
             ),
@@ -114,7 +118,9 @@ def _source(*, calibrated: bool, null_calibrations: bool = False) -> ParameterCo
                 "time_of_fly": None if null_calibrations else 0.2 * index,
             },
         }
-        libraries[qubit] = {"pulses": {"cal": pulse}}
+        libraries[qubit] = {
+            "pulses": {"cal": pulse, "half": {**pulse, "gain": 0.1 * index}}
+        }
         libraries[resonator] = {
             "readout": {
                 "cal": {
@@ -197,7 +203,7 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
         assert is_custom_reference_key(readout.chosen_key) == (
             not calibrated or inline_readout
         )
-        references = [(readout, "readout")]
+        references = [readout]
         modules = raw["modules"]
         assert isinstance(modules, dict)
         for pulse_key, pulse_spec in pulses:
@@ -207,16 +213,16 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
             assert is_custom_reference_key(pulse.chosen_key) == (
                 not calibrated or inline_probe
             )
-            references.append((pulse, "x180"))
+            references.append(pulse)
             lowered_pulse = modules[pulse_key]
             assert isinstance(lowered_pulse, dict)
             assert lowered_pulse["ch"] == capture.lookup("qubit.wiring.L01.ch").value
-        for ref, slot in references:
+        for ref in references:
             if not is_custom_reference_key(ref.chosen_key):
-                assert ref.chosen_key == f"qubit.module.{slot}"
+                assert ref.chosen_key.startswith("qubit.module.")
                 assert (
                     capture.library_key(ref.chosen_key)
-                    == capture.lookup(f"qubit.module.{slot}").value
+                    == capture.lookup(ref.chosen_key).value
                 )
         lowered_readout = modules["readout"]
         assert isinstance(lowered_readout, dict)
