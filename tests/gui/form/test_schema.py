@@ -859,11 +859,10 @@ def test_literal_tag_declaration_keeps_schema_and_result_agreement(
         assert all(type(tag) is int for tag in numeric_tags)
         assert all(type(tag) is str for tag in string_tags)
         validator = Draft202012Validator(schema)
-        allowed = 9.0 if nine_only else 7.0
         for tag in (1, 2):
             for amount in (7.0, 9.0):
                 data: dict[str, JsonValue] = {"branch": {"kind": tag, "amount": amount}}
-                accepted = not empty and amount == allowed
+                accepted = not empty and amount == (9.0 if nine_only else 7.0)
                 assert validator.is_valid(data) is accepted
                 candidate = FormState(FormInput(model, data))
                 result = candidate.result(env)
@@ -960,6 +959,10 @@ def test_skipped_choice_keeps_branch_ownership_through_choices_refresh(
     env = FormEnv(md=MetaDict())
     state = FormState(FormInput(model, {"branch": {"kind": 2, "amount": 7.0}}))
     before = state.input.data
+    string_state = FormState(
+        FormInput(model, {"branch": {"kind": "1", "text_only": 4.0}})
+    )
+    string_before = string_state.input.data
     for empty, nine_only in (
         (False, False),
         (True, False),
@@ -995,14 +998,14 @@ def test_skipped_choice_keeps_branch_ownership_through_choices_refresh(
                     assert isinstance(result, FormErrors)
                     assert ("branch", "amount") in result.messages
                 assert candidate.input.data == data
-        string_data: dict[str, JsonValue] = {"branch": {"kind": "1", "text_only": 4.0}}
-        assert validator.is_valid(string_data)
-        string_result = FormState(FormInput(model, string_data)).result(env)
+        assert validator.is_valid(string_before)
+        string_result = string_state.result(env)
         assert isinstance(string_result, model)
         assert isinstance(string_result.branch, StringNumericTagBranch)
         assert string_result.branch.kind == "1"
         assert type(string_result.branch.kind) is str
         assert string_result.branch.text_only == 4.0
+        assert string_state.input.data == string_before
         assert validator.is_valid(before) == (not empty and not nine_only)
         current = state.result(env)
         if empty or nine_only:

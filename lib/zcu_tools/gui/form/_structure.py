@@ -81,18 +81,25 @@ def _expand_alias(annotation: object) -> object:
 
 
 def _tag(model: type[BaseModel], key: str) -> tuple[object, ...]:
+    """Read native Literal tags through named aliases and unions of Literals."""
     info = model.model_fields.get(key)
-    if info is None or get_origin(info.annotation) is not Literal:
+    if info is None:
         return ()
-    return get_args(info.annotation)
+    return tuple(
+        tag
+        for annotation in alternatives(info.annotation)
+        if get_origin(annotation) is Literal
+        for tag in get_args(annotation)
+    )
 
 
 def schema_branch_model(info: FieldInfo, tags: list[JsonValue]) -> type[BaseModel]:
     """Match emitted intrinsic JSON tags to info's declared union model.
 
     info must declare a discriminator field name for a model union. tags are its emitted
-    x-form-discriminator-values, not dynamic choice enums. Match both JSON type
-    and value. Raise ValueError for a missing discriminator or unmatched tags;
+    x-form-discriminator-values, not dynamic choice enums. Declared Literal tags
+    may use named aliases, Annotated wrappers or unions of Literals. Match both
+    JSON type and value. Raise ValueError for a missing discriminator or unmatched tags;
     declared non-JSON/non-finite tags also fail through the shared JSON codec.
     """
     key = discriminator(info)
