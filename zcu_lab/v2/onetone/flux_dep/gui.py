@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
@@ -8,6 +8,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickState,
     fold_initial_lines,
 )
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -22,12 +23,10 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import (
-    EvalValue,
-)
+from zcu_tools.gui.cfg import ReferenceValue
 from zcu_tools.gui.interactive import PluginDefinition, Session
+from zcu_tools.resources.entry import RoleSpec
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.flux_pick_frontend import make_flux_pick_frontend
 from zcu_lab.v2._support.measure.flux_pick_plugin import (
     FluxPickPlugin,
@@ -40,9 +39,9 @@ from zcu_lab.v2._support.measure.interactive_flux_pick import (
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import Seed, custom, flux_range, res_freq_range
+from zcu_lab.v2._support.measure.seeds import custom, flux_range, res_freq_range
+from zcu_lab.v2._support.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepExp, FluxDepResult
 
 if TYPE_CHECKING:
@@ -55,14 +54,9 @@ if TYPE_CHECKING:
 OneToneFluxDepRunResult: TypeAlias = RunRecord[FluxDepCfg, FluxDepResult]
 
 
-def _readout_length_default() -> Seed[float | EvalValue]:
-    def resolve(ctx: SessionEnv) -> float | EvalValue:
-        probe_len = md_get_float(ctx, "res_probe_len", 1.0)
-        if md_has_key(ctx, "res_probe_len") and probe_len > 0.1:
-            return EvalValue(expr="res_probe_len - 0.1")
-        return probe_len - 0.1
-
-    return custom(resolve, description="one-tone flux readout length")
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    """Build fresh inline readout defaults from the tab's fixed roles."""
+    raise NotImplementedError("captured flux readout defaults")
 
 
 class OneToneFluxDepAdapter(
@@ -84,28 +78,27 @@ class OneToneFluxDepAdapter(
             "flux-bias device."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' — resonator "
-            "frequency, centring the frequency sweep (~4000–8000 MHz); 'rf_w' "
-            "— linewidth, span r_f ± rf_w (~5–50 MHz; falls back to ±30 MHz); "
-            "'res_probe_len' — readout probe length, from which ro_length is "
-            "derived as 'res_probe_len - 0.1' us (~0.5–5 us); 'res_ch' / "
-            "'ro_ch' — drive / ADC channels; 'timeFly' — trigger-offset cable "
-            "delay; 'flx_half' / 'flx_int' — already-calibrated half-flux / "
-            "integer-flux device values when present. First bring-up must not "
-            "assume these are known; absent values fall back to a fixed "
-            "[-4e-3, 4e-3] device sweep that the operator should adjust to a "
-            "safe, user-approved range."
+            "Reads fixed tab parameters: resonator.freq and resonator.kappa "
+            "seed the frequency sweep; resonator.ext.default_probe_length "
+            "minus 0.1 us seeds the ADC window; resonator.wiring.ch/ro_ch "
+            "seed channels; resonator.ext.time_of_fly plus 0.05 us seeds "
+            "trigger timing. Captured qubit.flux_half/flux_int seed the flux "
+            "sweep and picker when calibrated. First bring-up must not assume "
+            "these are known: absent/null flux values use a [-4e-3, 4e-3] "
+            "device sweep that the operator must adjust to a safe, "
+            "user-approved range."
         ),
         expects_ml=(
-            "Needs a pulse-readout module, and references a ModuleLibrary "
-            "waveform named 'ro_waveform' when present (optional)."
+            "Starts with a fresh inline pulse readout and const waveform. "
+            "It does not adopt a library module or named waveform."
         ),
         typical_writeback=(
             "Interactive analysis (not a fit): after the run, the user drags "
             "two lines on the 2D map to mark the half-flux and integer-flux "
-            "sweet spots, then clicks Done. The result writes back 'flx_half', "
-            "'flx_int', and 'flx_period' (= 2·|flx_int − flx_half|) to the "
-            "MetaDict as a preview. The picking is user/agent judgement from "
+            "sweet spots, then clicks Done. The preview proposes "
+            "qubit.flux_half, qubit.flux_int, and qubit.flux_period "
+            "(= 2·|flx_int − flx_half|) through the captured role binding. "
+            "The picking is user/agent judgement from "
             "the measured map, not simulator truth; apply writeback only after "
             "reviewing the figure."
         ),
@@ -134,18 +127,23 @@ class OneToneFluxDepAdapter(
         ),
     )
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Capture the chosen qubit and its resonator for the flux survey."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
-            .readout(
-                pulse_only=True,
-                init=ModuleInit.INLINE,
-                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
-                overrides={
-                    "pulse_cfg.gain": 0.05,
-                    "ro_cfg.ro_length": _readout_length_default(),
-                },
+            .field(
+                "modules.readout",
+                spec=make_pulse_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0),
+                default=custom(_blank_readout, description="inline flux readout"),
             )
             .device_from_value_source(
                 "flux_dev",
@@ -171,7 +169,11 @@ class OneToneFluxDepAdapter(
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> OneToneFluxDepRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FluxDepExp().run(cfg, context=context)
@@ -222,23 +224,25 @@ class OneToneFluxDepAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                target_name="flx_half",
+                target_name="qubit.flux_half",
                 description="Half-flux (Φ₀/2) sweet-spot device value",
                 proposed_value=result.flx_half,
             ),
             MetaDictWriteback(
-                target_name="flx_int",
+                target_name="qubit.flux_int",
                 description="Integer-flux sweet-spot device value",
                 proposed_value=result.flx_int,
             ),
             MetaDictWriteback(
-                target_name="flx_period",
+                target_name="qubit.flux_period",
                 description="Flux period (device units) = 2·|flx_int − flx_half|",
                 proposed_value=result.flx_period,
             ),
         ]
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FluxDepCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> FluxDepCfg:
         cfg_raw = dict(raw_cfg)
         dev_raw = cfg_raw.pop("dev")
         if not isinstance(dev_raw, dict):
