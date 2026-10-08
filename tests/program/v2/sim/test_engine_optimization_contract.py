@@ -377,11 +377,9 @@ def test_acquire_cancel_flag_does_not_cancel_inside_mock_signal_grid(
         totals.append(kwargs.get("total"))
         return reps_bar
 
-    with (
-        use_pbar_factory(factory),
-        pytest.raises(StoppedPartialAcquireError, match="first round"),
-    ):
-        prog.acquire(soc, progress=False, cancel_flag=cancel_flag)
+    with use_pbar_factory(factory):
+        with pytest.raises(StoppedPartialAcquireError, match="first round"):
+            prog.acquire(soc, progress=False, cancel_flag=cancel_flag)
 
     assert totals == [sw.expts]
     reps_bar.close.assert_called_once_with()
