@@ -15,14 +15,19 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import ReferenceValue, SweepValue
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    SweepValue,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import custom, res_freq_range
+from zcu_lab.v2._support.measure.seeds import custom, path_seed, res_freq_range
 from zcu_lab.v2._support.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_lab.v2.onetone.power_dep.core import PowerDepCfg, PowerDepExp, PowerDepResult
 
@@ -37,7 +42,42 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     ext.default_probe_length minus 0.1 us and ext.time_of_fly plus 0.05 us use
     absent/null fallbacks 0.9 and 0.55 us. Role/source errors propagate.
     """
-    raise NotImplementedError("captured power-dependence readout defaults")
+    spec = make_pulse_readout_module_spec().allowed[0]
+    return (
+        ReferenceValue(
+            make_custom_reference_key(spec.label or "Readout"),
+            make_default_value(spec),
+        )
+        .with_field("pulse_cfg.freq", 0.0)
+        .with_field("pulse_cfg.gain", 0.0)
+        .with_field("pulse_cfg.nqz", 2)
+        .with_field("pulse_cfg.waveform.length", 1.0)
+        .with_field(
+            "pulse_cfg.ch",
+            path_seed("resonator.wiring.ch", fallback=0).resolve(ctx),
+        )
+        .with_field("ro_cfg.ro_freq", 0.0)
+        .with_field(
+            "ro_cfg.ro_ch",
+            path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx),
+        )
+        .with_field(
+            "ro_cfg.ro_length",
+            path_seed(
+                "resonator.ext.default_probe_length",
+                fallback=0.9,
+                expr="resonator.ext.default_probe_length - 0.1",
+            ).resolve(ctx),
+        )
+        .with_field(
+            "ro_cfg.trig_offset",
+            path_seed(
+                "resonator.ext.time_of_fly",
+                fallback=0.55,
+                expr="resonator.ext.time_of_fly + 0.05",
+            ).resolve(ctx),
+        )
+    )
 
 
 class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult]):
