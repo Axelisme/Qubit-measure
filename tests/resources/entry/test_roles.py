@@ -227,6 +227,25 @@ def test_manual_clear_overrides_focus_and_keeps_other_explicit_roles(
         assert roles.sense.rate == 7100.0
 
 
+def test_manual_clear_consumes_matching_focus_before_same_kind_via(
+    tmp_path: Path,
+) -> None:
+    point = make_point(tmp_path)
+    roles = point.resolve(
+        {
+            "driver": RoleSpec("fake/drive/*"),
+            "target": RoleSpec("fake/drive/*", via="driver.source"),
+        },
+        focus="Q1",
+        driver=None,
+    )
+    assert roles.components == {}
+    for role in ("driver", "target"):
+        with pytest.raises(RoleResolutionError) as error:
+            getattr(roles, role)
+        assert error.value.role == role
+
+
 def test_manual_clear_rejects_undeclared_role(tmp_path: Path) -> None:
     point = make_point(tmp_path)
     with pytest.raises(RoleResolutionError) as error:

@@ -198,8 +198,9 @@ def resolve_names(
 
     roles is an ordered registered declaration mapping/sequence; None uses the
     notebook shorthand. explicit maps declared roles to concrete names or None
-    and wins over focus/via inference. None explicitly leaves that role unbound;
-    omitted keys allow inference. focus is a concrete name or None for the registry
+    and wins over focus/via inference. None explicitly leaves that role unbound
+    and consumes the one focus assignment when the focus matches its kind; it
+    never shifts that focus to another role. Omitted keys allow inference. focus is a concrete name or None for the registry
     default. Automatic zero/multiple candidates omit the role; missing via
     source roles omit their dependents. Return only bound aliases. Unknown
     declarations/explicit choices and dangling/wrong-kind targets raise
@@ -214,6 +215,12 @@ def resolve_names(
         if role in explicit:
             name = explicit[role]
             if name is None:
+                if (
+                    focus is not None
+                    and focus in components
+                    and fnmatchcase(components[focus].kind, spec.kind)
+                ):
+                    focus_used = True
                 continue
             if name == focus:
                 focus_used = True
