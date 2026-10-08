@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -99,7 +100,13 @@ class _MainWindowTabActions:
 
 
 class MainWindow(QMainWindow):
-    """Top-level window; implements ViewProtocol for Controller callbacks."""
+    """Present session focus and each tab's immutable role capture.
+
+    The always-visible component_focus combo projects context_control focus.
+    Selection calls the owner; it affects only newly created tabs. Tab titles
+    and tooltips use their own TabSnapshot.parameters.roles, never live focus.
+    Expected role failures during create_tab are shown without creating a tab.
+    """
 
     def __init__(
         self,
@@ -146,6 +153,10 @@ class MainWindow(QMainWindow):
         ctx_bar.addWidget(QLabel("Context:"))
         self._ctx_label = QLabel("(none)")
         ctx_bar.addWidget(self._ctx_label)
+        ctx_bar.addWidget(QLabel("Focus:"))
+        self._focus_combo = QComboBox(self)
+        self._focus_combo.setObjectName("component_focus")
+        ctx_bar.addWidget(self._focus_combo)
         ctx_bar.addSpacing(24)
         ctx_bar.addWidget(QLabel("Predictor:"))
         self._predictor_label = QLabel("none")
@@ -393,6 +404,11 @@ class MainWindow(QMainWindow):
         tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_context_panel(self) -> None:
+        """Project committed context and component focus without changing captures.
+
+        Focus options include all components grouped by kind. Empty/ambiguous
+        focus remains unselected; rendering must not submit a focus command.
+        """
         label = self._ctrl.get_active_context_label()
         if label is not None:
             # file-backed flux context is active
@@ -545,6 +561,12 @@ class MainWindow(QMainWindow):
         return self._ctrl.get_adapter_names()
 
     def create_tab(self, adapter_name: str) -> None:
+        """Create from session focus; present role failures without retry or Run.
+
+        adapter_name is a registered measure adapter key. Expected role errors
+        appear through the dialog presenter and leave the tab list unchanged.
+        Other failures propagate to the existing UI error boundary.
+        """
         self._ctrl.new_tab(adapter_name)
 
     def reload_experiments(self) -> None:

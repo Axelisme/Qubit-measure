@@ -271,7 +271,9 @@ class ContextService:
         current DRAFT in memory or ACTIVE point in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point publishes one parameter change and updates
-        focus options. Setup edits never change existing points or their captures.
+        focus options. If no focus is selected, the registry's sole candidate is
+        selected; existing focus is retained. Setup edits never change existing
+        points or their captures.
         No entry/context, schema, conflict and I/O errors propagate.
         """
         self._owner.assert_owner()
