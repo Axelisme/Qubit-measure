@@ -81,11 +81,12 @@ def _execute[
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Parse current cfg/simulator JSON files, acquire, and print a JSON summary.
+    """Acquire from current cfg/simulator JSON and report metadata or echo fit.
 
-    argv uses the process arguments when None. File, validation and acquisition
-    errors propagate. This acquisition-only caller never creates output files
-    or connects hardware; argparse rejects unknown experiment names.
+    argv uses the process arguments when None. Completed echo also reports
+    lifetime_us/lifetime_error_us; other callbacks or stops omit those fields.
+    File, validation, acquisition and analysis errors propagate. No output
+    files or hardware connections; argparse rejects unknown experiments.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
