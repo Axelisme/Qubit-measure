@@ -195,7 +195,8 @@ class RunAnalyzeControlFacet:
 
         expected is the observed CfgRef; stale refs and unavailable/busy tabs
         raise before start. origin identifies the initiating gui/mcp frontend for
-        acquired. Native terminal ledger failures settle failed on that token;
+        acquired. Native terminal ledger failures settle failed on that token
+        with ERROR diagnostics, retaining the published result for Save;
         missing saved-point storage emits a diagnostic instead of an event.
         No refresh, focus substitution, Save or automatic retry occurs.
         """

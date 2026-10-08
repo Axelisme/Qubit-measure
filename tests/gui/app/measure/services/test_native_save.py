@@ -207,18 +207,40 @@ def test_native_run_stop_records_usable_result_but_failure_does_not(
     assert not (session.entry.database_path / "runs").exists()
 
 
-def test_native_run_ledger_failure_settles_failed_without_retry_or_result(
-    native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
+def test_native_run_ledger_failure_is_visible_and_retains_result_for_save(
+    native_session: NativeSaveSession,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     session = native_session
-    (session.entry.result_path / "records" / "ledger.jsonl").mkdir()
+    blocked = session.entry.result_path / "records" / "ledger.jsonl"
+    blocked.mkdir()
     token, terminal = _acquire_to_terminal(session, monkeypatch)
     assert terminal.outcome == "failed" and terminal.error_message
+    assert str(blocked) in terminal.error_message
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "failed"
-    assert session.state.get_tab("tab").run.result is None
-    assert session.state.get_tab("tab").run.metadata is None
+    assert outcome.error == terminal.error_message
+    tab = session.state.get_tab("tab")
+    assert tab.run.result is not None
+    metadata = tab.run.metadata
+    assert metadata is not None
+    assert tab.run.source_operation_id == token
+    assert tab.run.confirmed_run_id is None
+    assert any(
+        record.name == "zcu_tools.gui.app.measure.services.run"
+        and record.levelno >= logging.ERROR
+        for record in caplog.records
+    )
     assert not (session.entry.database_path / "runs").exists()
+    blocked.rmdir()
+    saved = session.save()
+    assert all(output.status == "saved" for output in saved.outputs)
+    assert saved.run_id == metadata.run_id
+    stored = load_run_data(saved.outputs[0].output.path)
+    assert stored.metadata.started_at == metadata.started_at
+    assert stored.metadata.finished_at == metadata.finished_at
+    assert [event.kind for event in session.entry.ledger.events()] == ["saved"]
 
 
 def test_native_run_without_storage_reports_missing_acquired_destination(

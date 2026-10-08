@@ -51,8 +51,9 @@ class RunPermit:
     used for snapshot, or None for drafts, unbound tabs, missing storage or an
     adapter without native evidence. With storage=None, Run remains usable but
     terminal does not append acquired and reports that omission in diagnostics;
-    it must not claim a ledger record. With storage, append failures fail the
-    operation without retry. This credential requires no release; the operation
+    it must not claim a ledger record. With storage, terminal publishes the
+    usable result before append. Append failures fail the operation with an
+    ERROR diagnostic, but retain the published result for Save, without retry. This credential requires no release; the operation
     owns its hardware lease.
     """
 

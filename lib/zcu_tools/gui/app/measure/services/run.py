@@ -232,10 +232,11 @@ class RunService:
 
         permit fixes cfg and saved-point storage; plots is this Run's owned host.
         origin attributes acquired to the initiating gui/mcp frontend. A usable
-        native result appends acquired at terminal before State publication,
+        native result publishes to State before terminal appends acquired,
         without Save or creating a run folder. Missing storage/native evidence
         leaves Run usable but records a diagnostic, not a fabricated event.
-        Ledger errors settle failed without retry or publishing a new result.
+        Ledger errors settle failed with ERROR diagnostics, retaining the
+        published result and metadata for Save, without retry or rollback.
         Busy, exclusion and submission failures raise before a token is returned.
         """
         # Static preconditions (context readiness, committed-cfg validity, soc
