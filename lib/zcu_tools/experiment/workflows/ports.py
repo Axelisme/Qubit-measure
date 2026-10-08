@@ -30,13 +30,17 @@ class DeviceSnapshot:
 
 
 class DevicePort(Protocol):
-    """Host-owned connected devices; adapters enforce device limits and cancel."""
+    """Host-owned connected devices; drivers enforce their hardcoded limits.
+
+    Adapters forward cooperative cancellation and propagate driver failures.
+    Neither the adapter nor the engine declares or checks device limits.
+    """
 
     def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
         """Set an absolute value in native device units, or raise on failure.
 
         Observe ``cancel_signal`` between cooperative work segments. Unknown or
-        disconnected names, invalid limits, and I/O failures must raise.
+        disconnected names, driver-limit violations, and I/O failures must raise.
         """
         ...
 
