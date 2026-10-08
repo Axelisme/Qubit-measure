@@ -258,7 +258,6 @@ def test_injected_figure_encoder_runs_once_and_shares_png_bytes(tmp_path: Path) 
             metadata=metadata,
             ledger=ledger,
             origin="gui",
-            call_id=None,
             figure_encoder=encode,
         )
         assert calls == [figure]
@@ -294,7 +293,6 @@ def test_injected_encoder_failure_leaves_data_and_json_saved(tmp_path: Path) -> 
             metadata=metadata,
             ledger=ledger,
             origin="gui",
-            call_id=None,
             figure_encoder=encode,
         )
         assert calls == [figure]

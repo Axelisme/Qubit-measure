@@ -784,10 +784,10 @@ class MainWindow(QMainWindow):
         self.refresh_tab_interaction(tab_w.tab_id)
 
     def save_tab_data(self, tab_id: str) -> None:
-        """Submit native data Save using the displayed annotation and GUI origin.
+        """Execute synchronous native data Save using the displayed annotation and GUI origin.
 
         Unknown tab IDs leave the UI unchanged. Guard/submission failures use
-        the existing save feedback path; successful submission is asynchronous.
+        the existing save feedback path; the Save report is complete on return.
         """
         logger.info("save_tab_data: tab_id=%r", tab_id)
         tab_w = self._resolve_tab_widget(tab_id, "save_tab_data")
@@ -797,7 +797,7 @@ class MainWindow(QMainWindow):
         self._dispatch_artifact_save(
             tab_w,
             lambda: self._ctrl.save_control.save_data(
-                tab_id, comment=comment, origin=CommandOrigin("gui", None)
+                tab_id, comment=comment, origin=CommandOrigin("gui")
             ),
         )
 
@@ -809,7 +809,7 @@ class MainWindow(QMainWindow):
         self._dispatch_artifact_save(
             tab_w,
             lambda: self._ctrl.save_control.save_artifacts(
-                tab_id, artifacts=(ref,), origin=CommandOrigin("gui", None)
+                tab_id, artifacts=(ref,), origin=CommandOrigin("gui")
             ),
         )
 
@@ -820,7 +820,7 @@ class MainWindow(QMainWindow):
             return
         try:
             submission = self._ctrl.save_control.save_artifacts(
-                tab_id, comment=tab_w.get_comment(), origin=CommandOrigin("gui", None)
+                tab_id, comment=tab_w.get_comment(), origin=CommandOrigin("gui")
             )
             self._status_bar.showMessage(
                 f"Saving {len(submission.destinations)} outputs…"

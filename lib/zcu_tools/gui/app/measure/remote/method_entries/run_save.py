@@ -96,22 +96,19 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_save_data",
         MethodSpec(
             30.0,
-            "Save the current measurement_data artifact to every native/Labber output. "
-            "Non-cancellable and lease-free. Returns operation_id and complete reserved "
-            "artifacts; await the operation, then read tab.snapshot(operation_id=save ID) "
-            "for the same complete report. Reserved outputs do not prove success. "
-            "call_id is the initiating native MCP ID, preserved verbatim. Optional "
-            "run_operation_id requires that Run result; it does not replace seen guards.",
+            "Synchronously save measurement_data to every native/Labber output on "
+            "the GUI owner thread. Returns confirmed run_id and the complete "
+            "current artifacts with paths/status/error; no Save handle or await. "
+            "Partial failures stay in the report. run_operation_id optionally "
+            "binds the Run source and does not replace seen guards.",
             (
                 required_string("tab_id"),
-                required_string("call_id", "Initiating native MCP call ID"),
                 save_comment(),
                 optional_integer("run_operation_id"),
             ),
         ),
         agent=AgentMethodPolicy(
             guard_deps=("tab:{tab_id}:result", "tab:{tab_id}:save"),
-            operation_key="tab:{tab_id}",
             refresh_after_write=True,
         ),
     ),
@@ -120,16 +117,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_save_artifacts",
         MethodSpec(
             30.0,
-            "Save whole artifacts, including every figure, JSON member and destination. "
-            "artifacts is all (including Saved) or unique {section,name} refs. "
-            "No caller paths. Returns operation_id and complete reservations; await, then "
-            "read tab.snapshot(operation_id=save ID) for that report. Failure can contain "
-            "saved and failed outputs. call_id is the initiating native MCP ID. "
-            "run_operation_id binds the Run source. operation_id optionally binds one "
-            "explicitly selected analysis/post_analysis artifact to its analysis source.",
+            "Synchronously save complete artifacts, including all figures, JSON "
+            "and destinations. artifacts is all (including Saved) or unique "
+            "{section,name} refs. No caller paths. Returns confirmed run_id and "
+            "this attempt's complete paths/status/error; no Save handle or await. "
+            "run_operation_id binds the Run source. operation_id optionally binds "
+            "one explicitly selected analysis/post_analysis artifact to its "
+            "analysis source, not to a Save operation.",
             (
                 required_string("tab_id"),
-                required_string("call_id", "Initiating native MCP call ID"),
                 ParamSpec("artifacts", JsonType.JSON, required=False, default="all"),
                 save_comment(),
                 optional_integer("run_operation_id"),
@@ -146,7 +142,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:post_analyze",
                 "tab:{tab_id}:save",
             ),
-            operation_key="tab:{tab_id}",
             refresh_after_write=True,
         ),
     ),

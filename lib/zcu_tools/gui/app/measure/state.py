@@ -82,12 +82,6 @@ class RunPaneState(Generic[T_Result]):
     source_operation_id: int | None = None
     metadata: RunMetadata | None = None
     confirmed_run_id: str | None = None
-    save_operation_id: int | None = None
-    """Handle that committed the current complete Save report, or None.
-
-    New Save admission clears this token. A missing report never confirms it,
-    so a terminal query cannot mistake an earlier attempt for this one.
-    """
 
 
 @dataclass
@@ -200,7 +194,6 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
 
     # State flags are tab interaction resources, not result ownership.
     is_analyzing: bool = False
-    is_saving_data: bool = False
 
     # -- predicates (the entity answers questions about itself) ------------
 
@@ -222,7 +215,6 @@ class TabInteractionState:
     global_run_active: bool
     is_running: bool
     is_analyzing: bool
-    is_saving_data: bool
     has_context: bool
     has_active_context: bool
     has_soc: bool
@@ -659,16 +651,13 @@ class State(SessionState):
         )
         self.tabs[tab_id].post_analysis.params = instance
 
-    def commit_save_report(
-        self, tab_id: str, report: SaveReport, *, operation_id: int
-    ) -> None:
-        """Publish outputs, confirmed identity and the latest complete report token.
+    def commit_save_report(self, tab_id: str, report: SaveReport) -> None:
+        """Publish complete outputs and confirmed identity on State's owner thread.
 
-        Call on State's owner thread after a complete shared saver report. The
-        tab must retain historical RunMetadata; missing metadata raises
-        ValueError before mutation, and unknown tabs raise KeyError. operation_id
-        identifies the Save that produced this report, not its preceding Run.
-        Unselected artifacts and acquisition identity/times remain unchanged.
+        Missing historical RunMetadata raises ValueError before mutation;
+        unknown tabs raise KeyError. At least one saved output confirms run_id;
+        a failed resave keeps that identity. Unselected artifacts and acquisition
+        identity/times stay unchanged. This command owns no operation handle.
         """
         self._assert_owner()
         tab = self.get_tab(tab_id)
@@ -676,7 +665,6 @@ class State(SessionState):
         if metadata is None:
             raise ValueError("Save report requires historical RunMetadata")
         tab.artifacts.apply_report(report)
-        tab.run.save_operation_id = operation_id
         if any(item.status == "saved" for item in report.outputs):
             tab.run.confirmed_run_id = report.run_id
         for item in report.outputs:
@@ -793,22 +781,6 @@ class State(SessionState):
         logger.debug("set_tab_analyzing: tab_id=%r analyzing=%s", tab_id, analyzing)
         self.tabs[tab_id].is_analyzing = analyzing
 
-    def set_tab_saving_data(self, tab_id: str, *, saving_data: bool) -> None:
-        """Set the save busy flag and clear prior report provenance at admission.
-
-        True marks saving active and clears the previous complete report token;
-        False clears busy without confirming a report. Raise KeyError for an
-        unknown tab and RuntimeError off-owner. Do not bump resource versions.
-        """
-        self._assert_owner()
-        logger.debug(
-            "set_tab_saving_data: tab_id=%r saving_data=%s", tab_id, saving_data
-        )
-        tab = self.tabs[tab_id]
-        tab.is_saving_data = saving_data
-        if saving_data:
-            tab.run.save_operation_id = None
-
     def is_run_active(self) -> bool:
         return self.running_tab_id is not None
 
@@ -819,9 +791,6 @@ class State(SessionState):
     def is_tab_analyzing(self, tab_id: str) -> bool:
         return self.tabs[tab_id].is_analyzing
 
-    def is_tab_saving_data(self, tab_id: str) -> bool:
-        return self.tabs[tab_id].is_saving_data
-
     def is_tab_busy(self, tab_id: str) -> bool:
         tab = self.tabs[tab_id]
-        return self.running_tab_id == tab_id or tab.is_analyzing or tab.is_saving_data
+        return self.running_tab_id == tab_id or tab.is_analyzing

@@ -11,11 +11,13 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactSectionSnapshot,
+    SaveStatus,
+)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactSectionSnapshot
-    from zcu_tools.gui.app.measure.services.ports import SaveDestination
+    from zcu_tools.experiment.run_saving import SaveReport
 
 
 ArtifactStatusWire = Literal["Not saved", "Saved", "Partially saved", "Unsaved changes"]
@@ -118,29 +120,27 @@ def project_save_snapshot(
     return SaveSnapshotWire(run_id=run_id, artifacts=artifacts)
 
 
-def project_save_reservations(
-    destinations: tuple[SaveDestination, ...], *, run_id: str | None
+def project_save_report(
+    report: SaveReport,
+    sections: tuple[ArtifactSectionSnapshot, ...],
+    *,
+    run_id: str | None,
 ) -> SaveSnapshotWire:
-    """Project this submission's complete reservations, never earlier successes.
+    """Encode only artifacts attempted in the synchronous report.
 
-    destinations comes from SaveDataSubmission or SaveArtifactsSubmission;
-    run_id is the currently confirmed identity, not the reserved internal ID.
-    This does no path planning or I/O. Native terminal reads replace these
-    outputs with the report's actual paths/status/error.
+    report comes directly from SaveControl; sections and confirmed run_id are
+    the owner's committed read model immediately after that call. The owner
+    supplies aggregate status. Unselected declarations and previous outputs
+    are not part of this response. This performs no RPC, path planning or I/O.
     """
-    artifacts: dict[str, dict[str, SaveArtifactWire]] = {}
-    for destination in destinations:
-        key = destination.key
-        section = artifacts.setdefault(key.section, {})
-        artifact = section.setdefault(
-            key.name, SaveArtifactWire(status="Not saved", members={})
+    selected = {(item.key.section, item.key.name) for item in report.outputs}
+    groups = []
+    for section in sections:
+        artifacts = tuple(
+            artifact
+            for artifact in section.artifacts
+            if (artifact.ref.section, artifact.ref.name) in selected
         )
-        member = "data" if key.member == "data" else f"{key.member}:{key.member_name}"
-        artifact.members.setdefault(member, []).append(
-            SaveOutputWire(
-                format=destination.output.format,
-                path=str(destination.output.path),
-                status="reserved",
-            )
-        )
-    return SaveSnapshotWire(run_id=run_id, artifacts=artifacts)
+        if artifacts:
+            groups.append(ArtifactSectionSnapshot(section.section, artifacts))
+    return project_save_snapshot(tuple(groups), run_id=run_id)

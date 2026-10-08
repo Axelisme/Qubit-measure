@@ -14,7 +14,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import CommandOrigin
 
 from ..cfg_observation import cfg_error_to_remote
-from ..save_types import SaveArtifactRefWire, project_save_reservations
+from ..save_types import SaveArtifactRefWire, project_save_report
 from ._common import follow_tab
 
 if TYPE_CHECKING:
@@ -81,13 +81,6 @@ def h_run_running_tab(
     return {"tab_id": adapter.run_analyze_control.get_running_tab_id()}
 
 
-def _save_origin(params: Mapping[str, object]) -> CommandOrigin:
-    call_id = params["call_id"]
-    if not isinstance(call_id, str) or not call_id.strip():
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "call_id must be a nonblank string")
-    return CommandOrigin("mcp", call_id)
-
-
 def _operation_id(value: object, field: str) -> int | None:
     if value is None:
         return None
@@ -103,14 +96,14 @@ def h_tab_save_data(
     written = adapter.save_control.save_data(
         tab_id,
         comment=str(params["comment"]) if params["comment"] is not None else None,
-        origin=_save_origin(params),
+        origin=CommandOrigin("mcp"),
         run_operation_id=_operation_id(params["run_operation_id"], "run_operation_id"),
     )
     snap = adapter.tab_control.get_tab_snapshot(tab_id)
-    projection = project_save_reservations(
-        written.destinations, run_id=None if snap.run is None else snap.run.run_id
+    projection = project_save_report(
+        written, snap.artifacts, run_id=None if snap.run is None else snap.run.run_id
     )
-    return {"operation_id": written.operation_id, **projection.model_dump(mode="json")}
+    return projection.model_dump(mode="json")
 
 
 def h_tab_save_artifacts(
@@ -136,7 +129,7 @@ def h_tab_save_artifacts(
     tab_id = str(params["tab_id"])
     if not adapter.save_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    origin = _save_origin(params)
+    origin = CommandOrigin("mcp")
     run_operation_id = _operation_id(params["run_operation_id"], "run_operation_id")
     operation_id = _operation_id(params["operation_id"], "operation_id")
     if run_operation_id is not None:
@@ -161,7 +154,7 @@ def h_tab_save_artifacts(
         origin=origin,
     )
     snap = adapter.tab_control.get_tab_snapshot(tab_id)
-    projection = project_save_reservations(
-        written.destinations, run_id=None if snap.run is None else snap.run.run_id
+    projection = project_save_report(
+        written, snap.artifacts, run_id=None if snap.run is None else snap.run.run_id
     )
-    return {"operation_id": written.operation_id, **projection.model_dump(mode="json")}
+    return projection.model_dump(mode="json")

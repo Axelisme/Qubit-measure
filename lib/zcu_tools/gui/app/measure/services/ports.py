@@ -22,47 +22,6 @@ from zcu_tools.gui.session.types import ParameterContext
 
 
 @dataclass(frozen=True, slots=True)
-class SaveDataSubmission:
-    """Accepted native data save; the reservation does not prove success.
-
-    operation_id identifies the non-cancellable handle. data_path is the exact
-    canonical native HDF5 destination. Terminal SaveReport establishes the
-    latest status of both native and Labber outputs.
-    """
-
-    operation_id: int
-    data_path: str
-    destinations: tuple[SaveDestination, ...]
-    """Every reserved native and Labber output for this submission."""
-
-
-@dataclass(frozen=True, slots=True)
-class SaveDestination:
-    """One member output reservation, not proof of successful I/O.
-
-    key is the complete resource member identity. output carries its format and
-    absolute planned path; terminal SaveReport supplies actual paths and status.
-    """
-
-    key: ArtifactKey
-    output: Output
-
-
-@dataclass(frozen=True, slots=True)
-class SaveArtifactsSubmission:
-    """Reserved destinations; only a finished outcome establishes successful I/O."""
-
-    operation_id: int
-    destinations: tuple[SaveDestination, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ActiveSaveOperation:
-    operation_id: int
-    tab_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class CfgEdit:
     path: str
     value: object
@@ -108,7 +67,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.figures import FigureCollection
     from zcu_tools.plotting.plots import Plots
-    from zcu_tools.resources.entry import ArtifactKey, Output
 
     from .persistence_types import AppPersistedState
 
@@ -127,8 +85,6 @@ class RunPaneSnapshot:
     source_path: str | None
     source_operation_id: int | None = None
     run_id: str | None = None
-    save_operation_id: int | None = None
-    """Save handle that committed the current report; None before complete capture."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -33,12 +33,6 @@ from zcu_tools.gui.session.operation_runner import BgResult, OperationSpec, Sett
 from zcu_tools.resources.entry import ArtifactKey, SaveLayout
 
 from .guard import SavePermit
-from .ports import (
-    ActiveSaveOperation,
-    SaveArtifactsSubmission,
-    SaveDataSubmission,
-    SaveDestination,
-)
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -272,7 +266,6 @@ class SaveService:
                 metadata=plan.metadata,
                 ledger=plan.storage.ledger,
                 origin=plan.origin.origin,
-                call_id=plan.origin.call_id,
                 figure_encoder=encode_figure,
             )
 

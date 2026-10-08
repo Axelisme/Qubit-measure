@@ -134,7 +134,6 @@ def tab_operation_state(
             "global_run_active": bool(interaction.global_run_active),
             "is_running": bool(interaction.is_running),
             "is_analyzing": bool(interaction.is_analyzing),
-            "is_saving_data": bool(interaction.is_saving_data),
             "has_context": bool(interaction.has_context),
             "has_active_context": bool(interaction.has_active_context),
             "has_soc": bool(interaction.has_soc),
@@ -146,7 +145,6 @@ def tab_operation_state(
         **project_save_snapshot(snap.artifacts, run_id=snap.run.run_id).model_dump(
             mode="json"
         ),
-        "save_operation_id": snap.run.save_operation_id,
         "result_source_path": snap.run.source_path,
         # Revisions distinguish replacements even when availability and source
         # path stay unchanged. Payload arrays remain with the application owner.
@@ -186,26 +184,6 @@ def h_tab_snapshot(
         if not adapter.tab_control.has_tab(tab_id):
             raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
         tab_ids = [tab_id]
-    operation_id = params.get("operation_id")
-    if operation_id is not None:
-        if (
-            tab_id_raw is None
-            or isinstance(operation_id, bool)
-            or not isinstance(operation_id, int)
-        ):
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                "operation_id requires a single tab and integer Save handle",
-            )
-        snap = adapter.tab_control.get_tab_snapshot(str(tab_id_raw))
-        actual = None if snap.run is None else snap.run.save_operation_id
-        if actual != operation_id:
-            raise RemoteError(
-                ErrorCode.PRECONDITION_FAILED,
-                "This Save has no current complete report; do not use another attempt's outputs",
-                reason="save_report_unavailable",
-                data={"expected": operation_id, "actual": actual},
-            )
     return {"tabs": [tab_operation_state(adapter, tid) for tid in tab_ids]}
 
 

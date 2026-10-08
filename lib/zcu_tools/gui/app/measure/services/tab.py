@@ -100,7 +100,6 @@ class TabService:
             has_soc=ctx.has_soc(),
             is_running=is_running,
             is_analyzing=tab.is_analyzing,
-            is_saving_data=tab.is_saving_data,
             has_run_result=tab.has_run_result(),
             has_analyze_result=tab.has_analyze_result(),
             has_figure=tab.has_figure(),
@@ -127,7 +126,6 @@ class TabService:
                 source_path=tab.run.source_path,
                 source_operation_id=tab.run.source_operation_id,
                 run_id=tab.run.confirmed_run_id,
-                save_operation_id=tab.run.save_operation_id,
             ),
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,

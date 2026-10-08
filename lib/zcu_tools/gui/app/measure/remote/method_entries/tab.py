@@ -6,7 +6,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
-    optional_integer,
     optional_string,
     required_json,
     required_object,
@@ -106,12 +105,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Result arrays are not required for this observation. Read writeback "
             "preview separately for proposal contents. The all-tabs summary is "
             "only an index and does not refresh a per-tab guard baseline.",
-            (
-                optional_string("tab_id", "Tab to inspect; omit for all tabs"),
-                optional_integer(
-                    "operation_id", "Require this Save's current complete report"
-                ),
-            ),
+            (optional_string("tab_id", "Tab to inspect; omit for all tabs"),),
         ),
         agent=AgentMethodPolicy(
             reveals=(
