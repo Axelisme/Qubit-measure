@@ -8,11 +8,16 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.adapter import SaveDataRequest, SavePaths
-from zcu_tools.gui.app.measure.services.guard import SavePermit
+from zcu_tools.datafile import RunMetadata, RunSnapshot, SoftwareProvenance
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    SaveDataRequest,
+    SavePaths,
+)
+from zcu_tools.gui.app.measure.services.guard import GuardService, SavePermit
 from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -30,7 +35,7 @@ from zcu_tools.resources.entry import ResultEntry, RoleSpec
 from zcu_tools.resources.entry.save_layout import ArtifactKey, SaveLayout
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
+from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources, make_cfg
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -212,7 +217,31 @@ def test_save_worker_uses_tab_capture_after_entry_switch(
     )
     tab_id = tabs.new_tab("T1")
     result = object()
-    session.state.update_tab_result(tab_id, result)
+    storage = capture.capture_storage()
+    metadata = RunMetadata(
+        run_id="20261008T000000Z-a1b2c3",
+        experiment="test/native",
+        started_at="2026-10-08T00:00:00+00:00",
+        finished_at="2026-10-08T00:01:00+00:00",
+        completion="complete",
+        labber_path=None,
+        snapshot=RunSnapshot(
+            entry_id=storage.entry_id,
+            entry_name=storage.entry_name,
+            point=storage.point,
+            description=storage.description,
+            roles=storage.roles,
+        ),
+        provenance=SoftwareProvenance(
+            software_versions={},
+            git_commit=None,
+            git_dirty=None,
+            qick_version=None,
+            soc_fingerprint=None,
+            hostname=None,
+        ),
+    )
+    session.state.update_tab_result(tab_id, result, metadata=metadata)
     destination = tmp_path / "out/data.h5"
     session.state.get_tab(tab_id).save.data_path_override = str(destination)
     other = ResultEntry.create(
@@ -235,6 +264,7 @@ def test_save_worker_uses_tab_capture_after_entry_switch(
 
     request = received[0]
     assert request.run_result is result
+    assert request.metadata is metadata
     assert request.parameters is (None if roleless else capture)
     assert request.storage.point == "p"
     assert str(request.storage.entry_id) == session.entry.entry_id
@@ -272,3 +302,44 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
     with pytest.raises(FailedPreconditionError, match="captured save context"):
         service.start_save_data(SavePermit(tab_id), str(destination))
     assert not destination.parent.exists()
+
+
+def test_guard_keeps_original_tab_entry_point_and_roles_in_run_permit(
+    session: SaveSession, tmp_path: Path
+) -> None:
+    capture = _bound(session)
+    adapter = MagicMock()
+    adapter.capabilities = AdapterCapabilities(requires_soc=False)
+    adapter.experiment_tag = "test/native"
+    tab_id = "native"
+    session.state.add_tab(
+        tab_id,
+        Session(
+            adapter_name="native",
+            adapter=adapter,
+            cfg=make_cfg(
+                CfgSchema(CfgSectionSpec(), CfgSectionValue()), state=session.state
+            ),
+            parameters=capture,
+            save_context=capture,
+        ),
+    )
+    other = ResultEntry.create(
+        "entry-b", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
+    )
+    other.new_point("q")
+    session.context.install_entry(other)
+    session.control.use_point(PointUseRequest(other.entry_id, "q"))
+    tab = session.state.get_tab(tab_id)
+    permit = GuardService(session.state).acquire_run_permit(
+        tab_id, expected_revision=tab.cfg.observe().ref.revision
+    )
+    assert permit.snapshot is not None
+    assert str(permit.snapshot.entry_id) == session.entry.entry_id
+    assert permit.snapshot.entry_name == "entry-a"
+    assert permit.snapshot.point == "p"
+    assert dict(permit.snapshot.roles) == {"driver": "Q1"}
+    assert permit.experiment_tag == "test/native"
+    session.context.clear_context()
+    assert permit.snapshot.point == "p"
+    assert dict(permit.snapshot.roles) == {"driver": "Q1"}
