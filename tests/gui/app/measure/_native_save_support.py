@@ -215,7 +215,9 @@ def native_save_session(
     handles = OperationHandles()
     background = BackgroundRunner()
     service = SaveService(state, bus)
-    control = SaveControlFacet(state=state, guard=GuardService(state), save=service)
+    control = SaveControlFacet(
+        state=state, guard=GuardService(state), save=service, context=context
+    )
     completions: list[SaveDataFinishedPayload] = []
     subscription = bus.subscribe(SaveDataFinishedPayload, completions.append)
     artifact_completions: list[SaveArtifactsFinishedPayload] = []

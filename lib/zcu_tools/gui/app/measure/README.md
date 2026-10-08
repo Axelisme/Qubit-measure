@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09, native Load history and Save source checks
+**Last updated:** 2026-10-09, ledger Load selection and recorded event time
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -162,7 +162,12 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   保存不產生 acquisition identity，也不重讀 live point。
   RPC／MCP 直接投影回傳報告。Native Load 讀回 typed record 與原 RunMetadata。
   Save 在 mapping 或輸出 I/O 前比對歷史 entry／point 與 tab captured storage。
-  不符時顯示雙方來源並拒絕，不重綁 tab 或寫回 Load 來源。Ledger-based Load 清單尚待接線。
+  不符時顯示雙方來源並拒絕，不重綁 tab 或寫回 Load 來源。
+  Load Data 的 RunLoadDialog 由既有 SaveControlFacet 查詢 opened entry ledger，
+  按 run_id 合併 acquired／saved，保留最近成功 native path。未存 native 的列不可 Load。
+  Point／experiment／Recorded at 篩選只看 ledger，Recorded at 不冒充量測開始時間。
+  清單不讀 data.h5 或檢查輸出是否仍存在；File 選檔與清單選定後都交既有 native Load。
+  Ledger 或附檔錯誤明確回報，不偽裝空清單。
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane
   is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at

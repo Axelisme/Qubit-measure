@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
 from zcu_tools.gui.session.context_types import CommandOrigin
+from zcu_tools.gui.session.services.context import ContextService
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
@@ -14,8 +17,37 @@ if TYPE_CHECKING:
     from .save import SaveService
 
 
+@dataclass(frozen=True)
+class SavedRunInfo:
+    """One opened-entry ledger run, without inspecting its data file.
+
+    run_id is the opaque acquisition identity. point is its label or None;
+    experiment is the recorded spec tag. recorded_at is the first acquired
+    event time, or first saved event time for saved-only runs, never started_at.
+    data_path is the latest successful data_h5 output, or None if none exists;
+    it is historical evidence and need not still exist on disk.
+    """
+
+    run_id: str
+    point: str | None
+    experiment: str
+    recorded_at: str
+    data_path: Path | None
+
+
 class SaveControlPort(Protocol):
     """Existing app-facing Save surface shared by GUI and remote adapters."""
+
+    def list_saved_runs(self, *, point: str | None = None) -> tuple[SavedRunInfo, ...]:
+        """Return opened-entry runs in first-event order, optionally at one point.
+
+        None lists all points. Acquired metadata wins over saved-only metadata;
+        later failed/non-native saves do not erase a successful native path.
+        No opened entry raises FailedPreconditionError(no_entry). Ledger and
+        saved attachment schema/I/O errors propagate, including missing records.
+        Reads do not inspect HDF5, stat outputs, create folders or append events.
+        """
+        ...
 
     def has_tab(self, tab_id: str) -> bool: ...
 
@@ -61,11 +93,23 @@ class SaveControlPort(Protocol):
 class SaveControlFacet:
     """Compose existing guards and synchronous native Save commands."""
 
-    def __init__(self, *, state: State, guard: GuardService, save: SaveService) -> None:
-        """Inject State, static preconditions and the owning synchronous saver."""
+    def __init__(
+        self,
+        *,
+        state: State,
+        guard: GuardService,
+        save: SaveService,
+        context: ContextService,
+    ) -> None:
+        """Inject State, Save owners and the current opened-entry context owner."""
         self._state = state
         self._guard = guard
         self._save = save
+        self._context = context
+
+    def list_saved_runs(self, *, point: str | None = None) -> tuple[SavedRunInfo, ...]:
+        """Read the ledger under SaveControlPort.list_saved_runs's contract."""
+        raise NotImplementedError("Ledger run aggregation is not implemented")
 
     def has_tab(self, tab_id: str) -> bool:
         """Return whether tab_id is a current State resource."""

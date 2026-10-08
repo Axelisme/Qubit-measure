@@ -275,7 +275,9 @@ def build_app_services(
         run_analyze=run_analyze_control,
         device=session.device_control,
     )
-    save_control = SaveControlFacet(state=state, guard=guard, save=save)
+    save_control = SaveControlFacet(
+        state=state, guard=guard, save=save, context=context
+    )
     writeback_control = WritebackControlFacet(
         state=state,
         guard=guard,

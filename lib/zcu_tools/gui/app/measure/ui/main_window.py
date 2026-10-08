@@ -13,7 +13,7 @@ from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QComboBox,
-    QFileDialog,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -41,6 +41,7 @@ from .main_window_activity import activity_marker_presentation
 from .main_window_events import MainWindowEventCoordinator
 from .main_window_tab_list import configure_tab_bar
 from .main_window_toolbar import MainWindowToolbar
+from .run_load_dialog import RunLoadDialog
 
 logger = logging.getLogger(__name__)
 
@@ -789,14 +790,26 @@ class MainWindow(QMainWindow):
         logger.info("load_tab_data_dialog: tab_id=%r", tab_id)
         if self._resolve_tab_widget(tab_id, "load_tab_data_dialog") is None:
             return
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Load data file",
-            self._load_data_dialog_start_dir(),
-            "HDF5 files (*.hdf5 *.h5);;All files (*)",
-        )
-        if not path:
+        try:
+            runs = self._ctrl.save_control.list_saved_runs()
+        except Exception as exc:
+            logger.exception("Ledger run listing failed: tab_id=%r", tab_id)
+            self.show_error_dialog("Load data failed", str(exc))
             return
+        dialog = RunLoadDialog(
+            runs,
+            initial_point=self._ctrl.get_session_env().active_label,
+            start_directory=self._load_data_dialog_start_dir(),
+            parent=self,
+        )
+        try:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            path = dialog.selected_path()
+        finally:
+            dialog.deleteLater()
+        if path is None:
+            raise RuntimeError("Accepted Load Data dialog did not select a path")
         try:
             outcome = self._ctrl.load_tab_result(tab_id, path)
         except LoadDataError as exc:
