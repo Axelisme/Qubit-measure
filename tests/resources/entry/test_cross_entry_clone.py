@@ -166,13 +166,10 @@ def test_library_only_import_keeps_evidence_after_source_entry_moves(
     with foreign.use_point("source").edit() as draft:
         draft.set("Q1.rate", 5300.0)
         draft.set("Q1.duration", 12.0)
-    entry.new_point(
-        "library-only", clone_from="other/source", origin="mcp", call_id="library-clone"
-    )
+    entry.new_point("library-only", clone_from="other/source", origin="mcp")
     imported = entry.ledger.events()[0]
     assert len(entry.ledger.events()) == 1
     assert imported.origin == "mcp"
-    assert imported.call_id == "library-clone"
     assert isinstance(imported.payload, ImportPayload)
     assert imported.payload.source_event_json == original.event_json
     assert imported.payload.source_record == original.event.record
@@ -407,14 +404,13 @@ def test_clone_preserves_forward_minor_point_provenance(
 
 
 @pytest.mark.parametrize("source_mode", ["label", "view"])
-@pytest.mark.parametrize("origin,call_id", [("notebook", None), ("mcp", "clone-call")])
+@pytest.mark.parametrize("origin", ["notebook", "mcp"])
 def test_cross_entry_clone_imports_once_and_uses_published_values(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
     foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
     source_mode: str,
     origin: Literal["notebook", "mcp"],
-    call_id: str | None,
 ) -> None:
     results, _database = entry_roots
     foreign, stale_point, original_event = foreign_recorded_point
@@ -433,9 +429,7 @@ def test_cross_entry_clone_imports_once_and_uses_published_values(
     # Clone does not depend on the destination setup.
     (results / "entry/setup.yaml").write_text("invalid: [", encoding="utf-8")
     source_arg = "other/source" if source_mode == "label" else stale_point
-    clone = entry.new_point(
-        "target", clone_from=source_arg, origin=origin, call_id=call_id
-    )
+    clone = entry.new_point("target", clone_from=source_arg, origin=origin)
     assert clone.Q1.rate == 5400.0
     assert clone.Q1.duration == 12.0
     assert clone.description == "source environment"
@@ -449,7 +443,6 @@ def test_cross_entry_clone_imports_once_and_uses_published_values(
     assert imported.kind == "import"
     assert imported.entry_id == entry.entry_id
     assert imported.origin == origin
-    assert imported.call_id == call_id
     assert isinstance(imported.payload, ImportPayload)
     assert imported.payload.source_entry_id == foreign.entry_id
     assert imported.payload.source_event_id == original_event.id
@@ -616,25 +609,6 @@ def test_existing_cross_entry_destination_is_not_merged(
     with pytest.raises(FileExistsError):
         entry.new_point("target", clone_from="other/source")
     assert source.read_bytes() == before
-    assert entry.ledger.events() == ()
-
-
-@pytest.mark.parametrize(
-    "origin,call_id", [("mcp", None), ("mcp", ""), ("gui", "extra")]
-)
-def test_cross_entry_clone_rejects_invalid_origin_call_id_before_publication(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
-    origin: Literal["mcp", "gui"],
-    call_id: str | None,
-) -> None:
-    results, _database = entry_roots
-    with pytest.raises(ValueError, match="call_id"):
-        entry.new_point(
-            "failed", clone_from="other/source", origin=origin, call_id=call_id
-        )
-    assert not (results / "entry/points/failed").exists()
     assert entry.ledger.events() == ()
 
 

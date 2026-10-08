@@ -161,14 +161,13 @@ def save_artifacts(
     metadata: RunMetadata,
     ledger: RecordsLedger,
     origin: Origin,
-    call_id: str | None,
     figure_encoder: Callable[[Figure], bytes] | None = None,
 ) -> SaveReport:
     """Rewrite every selected output, isolate failures, then append one saved event.
 
     metadata supplies fixed run/context/acquisition evidence; layout supplies
     exact entry destinations and ledger belongs to that entry. origin is gui,
-    notebook or mcp; only mcp requires a nonempty call_id. Validate members,
+    notebook or mcp. Validate members,
     but do not preflight path/content conflicts or establish a transaction.
     Encode each FileMember once. figure_encoder receives each native Figure and
     returns PNG bytes; None uses Figure.savefig. The callback runs synchronously
@@ -182,7 +181,7 @@ def save_artifacts(
     Return every output attempt, even when some fail. Ledger append errors
     propagate after the writes, without deleting files or returning a receipt.
     """
-    validate_origin(origin, call_id)
+    validate_origin(origin)
     for artifact in artifacts:
         artifact.__post_init__()
     results: list[OutputResult] = []
@@ -230,7 +229,6 @@ def save_artifacts(
             at=datetime.now(UTC).isoformat(),
             entry_id=str(metadata.snapshot.entry_id),
             origin=origin,
-            call_id=call_id,
             payload=SavedPayload(
                 run_id=report.run_id,
                 labber_path=successful_labber,
