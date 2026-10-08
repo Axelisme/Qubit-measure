@@ -512,8 +512,8 @@ class WritebackService:
         Targets in receipts are concrete paths resolved from the creation capture.
         Empty changes are a no-op. Edit failures retain the successful draft
         prefix without writes. Read/append/setter failures propagate; accepted
-        evidence and any successful writes remain. MCP supplies its native
-        call ID in origin; GUI uses the default.
+        evidence and any successful writes remain. MCP supplies
+        CommandOrigin("mcp"); GUI uses the default.
         """
         self._require_draft(draft)
         if not changes:
