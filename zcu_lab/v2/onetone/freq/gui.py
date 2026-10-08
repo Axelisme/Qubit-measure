@@ -7,6 +7,7 @@ from numbers import Integral, Real
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import numpy as np
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -21,15 +22,16 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import ScalarSpec
+from zcu_tools.gui.cfg import ReferenceValue, ScalarSpec
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import md, res_freq_range
+from zcu_lab.v2._support.measure.seeds import custom, res_freq_range
+from zcu_lab.v2._support.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_lab.v2._support.measure.writeback_helpers import (
     pulse_readout_module_writeback_items,
 )
@@ -50,6 +52,17 @@ _SAMPLING_MODE_CHOICES: list[SamplingMode] = ["linear", "homophasal"]
 _EDELAY_MD_KEY = "res_edelay_calibration"
 _EDELAY_CALIBRATION_FIELDS = frozenset({"edelay", "res_ch", "ro_ch"})
 _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    """Seed a fresh sweep-owned readout from the tab's captured resonator.
+
+    Keep generator/ADC frequencies locked at zero, gain 0.05 and pulse length
+    1 us. Resolve channels, optional ADC length minus 0.1 us, and trigger delay
+    plus 0.05 us from resonator role paths; absent/null values use 0, 0.9 and
+    0.55 respectively. Source and role errors propagate.
+    """
+    raise NotImplementedError
 
 
 @dataclass
@@ -229,24 +242,25 @@ class OneToneFreqAdapter(
         steps = np.abs(np.diff(fitting_freqs))
         return not bool(np.allclose(steps, np.median(steps), rtol=1e-8, atol=0.0))
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Capture the chosen qubit and its resonator for one-tone calibration."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
             # No reset module — one-tone spectroscopy runs without a qubit
             # reset. The sweep owns both readout frequency leaves.
-            .readout(
-                pulse_only=True,
-                init=ModuleInit.INLINE,
-                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
-                overrides={
-                    "pulse_cfg.gain": 0.05,
-                    "ro_cfg.ro_length": md(
-                        "res_probe_len",
-                        expr="res_probe_len - 0.1",
-                        fallback=0.9,
-                    ),
-                },
+            .field(
+                "modules.readout",
+                spec=make_pulse_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0),
+                default=custom(_blank_readout, description="inline readout"),
             )
             .relax_delay(1.0)
             .sweep(
@@ -280,7 +294,7 @@ class OneToneFreqAdapter(
             .build()
         )
 
-    def _sampling_mode(self, raw_cfg: dict[str, object]) -> SamplingMode:
+    def _sampling_mode(self, raw_cfg: Mapping[str, ExperimentCfgValue]) -> SamplingMode:
         value = raw_cfg.get("sampling_mode", "linear")
         if value == "linear":
             return "linear"
@@ -291,19 +305,23 @@ class OneToneFreqAdapter(
             f"{', '.join(_SAMPLING_MODE_CHOICES)}, got {value!r}"
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> FreqCfg:
         cfg_raw = dict(raw_cfg)
         if self._sampling_mode(cfg_raw) == "homophasal":
             # Validate required fit values before the assembler can query devices.
-            cfg_raw["homophasal"] = HomophasalSamplingCfg.model_validate(
-                cfg_raw.get("homophasal")
-            )
+            HomophasalSamplingCfg.model_validate(cfg_raw.get("homophasal"))
         else:
             cfg_raw.pop("homophasal", None)
         return super().build_exp_cfg(cfg_raw, req)
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> OneToneFreqRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FreqExp().run(cfg, context=context)
