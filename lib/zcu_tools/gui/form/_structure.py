@@ -86,6 +86,18 @@ def _tag(model: type[BaseModel], key: str) -> tuple[object, ...]:
     return get_args(info.annotation)
 
 
+def discriminator_values(model: type[BaseModel], key: str) -> tuple[JsonValue, ...]:
+    """Return intrinsic Literal tags for model's discriminator field key.
+
+    Preserve their ordinary JSON types independently of dynamic choices.
+    Missing/non-Literal fields or non-finite/non-JSON tags raise ValueError.
+    """
+    tags = _tag(model, key)
+    if not tags:
+        raise ValueError(f"Discriminator field {key!r} must have Literal tags")
+    return tuple(default_json(tag) for tag in tags)
+
+
 def selected(info: FieldInfo, value: JsonValue) -> type[BaseModel] | None:
     """Select a sole model or an explicitly tagged model; otherwise return None."""
     models = model_types(info.annotation)

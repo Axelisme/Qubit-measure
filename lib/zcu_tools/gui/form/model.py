@@ -197,8 +197,10 @@ class FormModel(BaseModel):
         """Describe accepted input without constructing editing state.
 
         Include numeric Expr alternatives, the shared complex tag, Field
-        constraints, Display metadata and current choices enums. This schema
-        describes partial JSON input, not just a valid ordinary model. Domain
+        constraints, Display metadata and current choices enums. Each tagged
+        oneOf branch has x-form-discriminator-values: its intrinsic Literal
+        tags as ordinary JSON values, independent of current choices. This
+        schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
         """
         from ._schema import input_schema

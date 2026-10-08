@@ -8,7 +8,7 @@ from pydantic.fields import FieldInfo
 
 from ._json import copy_object
 from ._sources import local_choices
-from ._structure import alternatives, model_types
+from ._structure import alternatives, discriminator, discriminator_values, model_types
 from .model import Display, FormEnv, FormModel, FormPath
 
 _EXPR: dict[str, JsonValue] = {
@@ -229,7 +229,12 @@ def _decorate(
             for path, values in options.items()
             if len(path) > 1 and path[0] == name
         }
+        key = discriminator(info)
         for child, variant in _child_nodes(info, target, root):
+            if key is not None:
+                variant["x-form-discriminator-values"] = list(
+                    discriminator_values(child, key)
+                )
             _decorate(child, variant, root, env, seen, child_options)
         values = options.get((name,))
         if values is not None:
