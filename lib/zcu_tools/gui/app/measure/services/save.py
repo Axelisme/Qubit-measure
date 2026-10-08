@@ -7,13 +7,30 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from zcu_tools.datafile import RunMetadata
-from zcu_tools.experiment.run_saving import ArtifactRef, FileMember
+from zcu_tools.experiment.run_saving import (
+    ArtifactRef,
+    DataMember,
+    FileMember,
+    SaveArtifact,
+    SaveReport,
+    save_artifacts,
+)
 from zcu_tools.gui.app.measure.adapter import SaveDataRequest
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
+from zcu_tools.gui.app.measure.events.completion import (
+    SaveArtifactsFinishedPayload,
+    SaveDataFinishedPayload,
+)
+from zcu_tools.gui.app.measure.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.measure.figure_export import render_save_figure_png
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
-from zcu_tools.resources.entry import SaveLayout
+from zcu_tools.gui.session.operation_handles import OperationOutcome
+from zcu_tools.gui.session.operation_runner import BgResult, OperationSpec, SettleFn
+from zcu_tools.resources.entry import ArtifactKey, SaveLayout
 
 from .guard import SavePermit
 from .ports import (
@@ -24,6 +41,8 @@ from .ports import (
 )
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -227,4 +246,112 @@ class SaveService:
         self, tab_id: str, plan: _SavePlan, *, data_path: str | None = None
     ) -> int:
         """Admit captured inputs, run shared saver, commit report, settle and emit."""
-        raise NotImplementedError("19ac worker and terminal implementation pending")
+        adapter = self._state.get_tab(tab_id).adapter
+        self._state.update_tab_comment(tab_id, plan.comment)
+        self._state.set_tab_saving_data(tab_id, saving_data=True)
+        self._bus.emit(
+            TabInteractionChangedPayload(
+                tab_id=tab_id, fact=TabInteractionFact.SAVE_STARTED
+            )
+        )
+        terminal_delivered = False
+
+        def encode_figure(figure: Figure) -> bytes:
+            return self._owner_scheduler.call(lambda: render_save_figure_png(figure))
+
+        def work(_factory: object) -> SaveReport:
+            artifacts: list[SaveArtifact] = []
+            for captured in plan.artifacts:
+                if isinstance(captured.members, SaveDataRequest):
+                    request = captured.members
+                    prepared = adapter.prepare_save_data(
+                        request.run_result, comment=request.comment
+                    )
+                    members = (
+                        DataMember(
+                            ArtifactKey(
+                                captured.ref.section, captured.ref.name, "data"
+                            ),
+                            prepared,
+                        ),
+                    )
+                else:
+                    members = captured.members
+                artifacts.append(SaveArtifact(captured.ref, members))
+            return save_artifacts(
+                tuple(artifacts),
+                layout=plan.layout,
+                metadata=plan.metadata,
+                ledger=plan.storage.ledger,
+                origin=plan.origin.origin,
+                call_id=plan.origin.call_id,
+                figure_encoder=encode_figure,
+            )
+
+        def on_opened(token: int) -> None:
+            self._active_operations[tab_id] = token
+
+        def emit_finished(report: SaveReport | None, error: str | None) -> None:
+            self._bus.emit(
+                TabInteractionChangedPayload(
+                    tab_id=tab_id,
+                    fact=(
+                        TabInteractionFact.SAVE_SUCCEEDED
+                        if error is None
+                        else TabInteractionFact.SAVE_FAILED
+                    ),
+                )
+            )
+            if data_path is None:
+                self._bus.emit(
+                    SaveArtifactsFinishedPayload(
+                        tab_id=tab_id, error=error, report=report
+                    )
+                )
+            else:
+                self._bus.emit(
+                    SaveDataFinishedPayload(
+                        tab_id=tab_id, data_path=data_path, error=error, report=report
+                    )
+                )
+
+        def on_terminal(bg: BgResult, settle: SettleFn) -> None:
+            nonlocal terminal_delivered
+            report: SaveReport | None = bg.result if bg.ok else None
+            error = None if bg.ok else str(bg.error)
+            if report is not None:
+                self._state.commit_save_report(tab_id, report)
+                error = (
+                    "\n".join(
+                        f"{item.output.path}: {item.error}"
+                        for item in report.outputs
+                        if item.status == "failed"
+                    )
+                    or None
+                )
+            self._state.set_tab_saving_data(tab_id, saving_data=False)
+            self._active_operations.pop(tab_id, None)
+            settle(OperationOutcome("finished" if error is None else "failed", error))
+            terminal_delivered = True
+            emit_finished(report, error)
+
+        try:
+            return self._runner.begin(
+                OperationSpec(
+                    exclusion=None,
+                    owner_id=tab_id,
+                    wants_progress=False,
+                    cancel_hook=None,
+                    work=work,
+                    run_in_pool=False,
+                    on_terminal=on_terminal,
+                    on_opened=on_opened,
+                )
+            )
+        except Exception as exc:
+            # Runner settles startup failures; inline completion may already emit.
+            if not terminal_delivered:
+                self._state.set_tab_saving_data(tab_id, saving_data=False)
+                self._active_operations.pop(tab_id, None)
+                emit_finished(None, str(exc))
+            raise
