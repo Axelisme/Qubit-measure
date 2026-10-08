@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import Qt, QUrl  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QUrl
 from qtpy.QtGui import QDesktopServices
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,
@@ -196,13 +196,19 @@ class ArtifactSaveCenter(QWidget):
     def get_comment(self) -> str:
         return self._comment_edit.toPlainText()
 
+    def _set_path(self, key: ArtifactKey, path: str) -> None:
+        edit = self._path_edits[key]
+        # Repainting unchanged paths must not clear the selection being copied.
+        if edit.text() != path:
+            edit.setText(path)
+
     def set_data_path(self, path: str) -> None:
-        self._path_edits[_DATA].setText(path)
+        self._set_path(_DATA, path)
 
     def set_image_path(self, key: ArtifactKey, path: str) -> None:
         if key.kind is ArtifactKind.DATA:
             raise ValueError("Use set_data_path for DATA")
-        self._path_edits[key].setText(path)
+        self._set_path(key, path)
 
     def set_comment_text(self, text: str) -> None:
         if self._comment_edit.toPlainText() != text:
@@ -293,7 +299,7 @@ class ArtifactSaveCenter(QWidget):
             label.setText(_STATUS_TEXT[artifact.status])
             label.setStyleSheet(f"color: {_STATUS_COLOR[artifact.status]};")
             # No figure gets a fake artifact row; every image path is per-name.
-            self._path_edits[key].setText(artifact.default_path or "")
+            self._set_path(key, artifact.default_path or "")
 
     def update_interaction(self, snapshot: TabSnapshot) -> None:
         if snapshot.interaction is None or snapshot.capabilities is None:

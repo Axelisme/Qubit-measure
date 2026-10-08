@@ -54,7 +54,8 @@ def test_paths_reject_keyboard_edits_and_follow_published_snapshots(
     paths = tuple(tmp_path / name for name in ("data.h5", "fit.png", "post.png"))
     center = ArtifactSaveCenter("tab-1", _CAPABILITIES)
     try:
-        center.update_from_snapshot(_snapshot(paths))
+        snapshot = _snapshot(paths)
+        center.update_from_snapshot(snapshot)
         center.show()
         qapp.processEvents()
         for path in paths:
@@ -75,6 +76,9 @@ def test_paths_reject_keyboard_edits_and_follow_published_snapshots(
                 ),
             )
             assert editor.text() == str(path)
+            editor.selectAll()
+            center.update_from_snapshot(snapshot)
+            assert editor.selectedText() == str(path)
         updated = tuple(tmp_path / "new" / path.name for path in paths)
         center.update_from_snapshot(_snapshot(updated))
         assert tuple(center.path_for(key) for key in (_DATA, _FIT, _POST)) == tuple(

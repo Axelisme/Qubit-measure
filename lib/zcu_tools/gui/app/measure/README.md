@@ -135,7 +135,7 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
   Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
   都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
-  Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 comment 變更。
+  Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 path/comment 變更。
   同次請求的新 DATA draft 先參與選取預檢，驗證成功後才發布草稿。
   `ArtifactSnapshot.needs_save` 同時供 facade 選取與 Qt 按鈕 gating 使用；全數已保存時
   Save All 停用，明確單項匯出仍可再次保存。GUI 不提供手動修改圖形目的地。
