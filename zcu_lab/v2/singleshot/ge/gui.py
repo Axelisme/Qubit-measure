@@ -25,6 +25,11 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
@@ -32,7 +37,17 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import scaled_md
+from zcu_lab.v2._support.measure.seeds import (
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.singleshot.ge.core import (
     GE_Cfg,
     GE_Exp,
@@ -46,6 +61,42 @@ if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
 GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
+
+
+def _blank_pulse(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.1)
+    value.with_field("waveform.length", 5.1)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field(
+        "ro_cfg.trig_offset",
+        path_seed(
+            "resonator.ext.time_of_fly",
+            expr="resonator.ext.time_of_fly + 0.05",
+            fallback=0.55,
+        ).resolve(ctx),
+    )
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -163,11 +214,33 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         """
         return (
             MeasureCfgBuilder()
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .pulse("probe_pulse", role_id="pi_pulse", label="Probe Pulse")
-            .readout(pulse_only=True)
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("qubit.module.reset", fallback=None),
+            )
+            .field(
+                "modules.init_pulse",
+                spec=make_pulse_module_spec(optional=True),
+                default=module_seed("qubit.module.x180", fallback=None),
+            )
+            .field(
+                "modules.probe_pulse",
+                spec=make_pulse_module_spec(label="Probe Pulse"),
+                default=module_seed(
+                    "qubit.module.x180",
+                    fallback=custom(_blank_pulse, description="inline probe pulse"),
+                ),
+            )
+            .field(
+                "modules.readout",
+                spec=make_pulse_readout_module_spec(),
+                default=module_seed(
+                    "qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
+            .relax_delay(scaled_path_seed("qubit.t1", factor=5.0, fallback_value=100.0))
             .int("shots", label="Shots", default=100000)
             .reps(1, locked=True)
             .rounds(1, locked=True)
