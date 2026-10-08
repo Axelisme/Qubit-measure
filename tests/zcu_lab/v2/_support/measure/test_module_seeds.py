@@ -8,6 +8,7 @@ from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     DirectValue,
+    EvalValue,
     ReferenceValue,
     make_custom_reference_key,
     make_default_value,
@@ -28,7 +29,7 @@ from zcu_tools.resources.entry import ComponentSchema, RoleSpec, component_regis
 from zcu_tools.resources.entry.schema import PointDocument
 
 from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder
-from zcu_lab.v2._support.measure.seeds import literal, module_seed
+from zcu_lab.v2._support.measure.seeds import literal, module_seed, scaled_path_seed
 from zcu_lab.v2._support.measure.spec_helpers import make_pulse_module_spec
 
 
@@ -181,6 +182,48 @@ def test_unavailable_capture_does_not_become_fallback(tmp_path: Path) -> None:
     with pytest.raises(ContextSourceUnavailableError):
         module_seed("qubit.module.x180", fallback=literal(_fallback())).resolve(
             environment
+        )
+
+
+@pytest.mark.parametrize("slot", [None, "Q1.pulses.missing"])
+def test_scaled_module_calibration_absence_uses_explicit_fallback(
+    slot: str | None,
+) -> None:
+    seed = scaled_path_seed(
+        "qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
+    )
+    assert seed.resolve(_environment(slot=slot)) == 0.3
+
+
+def test_scaled_module_calibration_preserves_capture_expression() -> None:
+    value = scaled_path_seed(
+        "qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
+    ).resolve(_environment())
+    assert isinstance(value, EvalValue)
+    assert value.expr == "4.0 * qubit.module.x180.waveform.length"
+
+
+def test_scaled_module_calibration_does_not_hide_materialization_errors() -> None:
+    seed = scaled_path_seed(
+        "qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
+    )
+    with pytest.raises((ValueError, KeyError)):
+        seed.resolve(_environment(broken_waveform=True))
+
+
+def test_scaled_module_calibration_does_not_hide_source_faults(tmp_path: Path) -> None:
+    seed = scaled_path_seed(
+        "qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
+    )
+    with pytest.raises(ContextSourceUnavailableError):
+        seed.resolve(
+            _environment(
+                faults=(
+                    ContextSourceFault(
+                        "point", tmp_path / "point.yaml", "ValueError", "broken"
+                    ),
+                )
+            )
         )
 
 

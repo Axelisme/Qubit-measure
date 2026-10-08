@@ -203,6 +203,9 @@ class TabService:
             from_dict is not None,
         )
         parameters = self._captured_parameters(adapter.parameter_roles())
+        save_context = (
+            parameters if parameters is not None else self._state.session_env.parameters
+        )
         cfg = self._cfg_resources.create(
             tab_id,
             lambda: adapter.make_default_cfg(
@@ -218,6 +221,7 @@ class TabService:
                 adapter=adapter,
                 cfg=cfg,
                 parameters=parameters,
+                save_context=save_context,
             ),
         )
 

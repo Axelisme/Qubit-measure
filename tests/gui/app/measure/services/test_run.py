@@ -15,13 +15,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import numpy as np
 import pytest
+from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
 from zcu_tools.device import BaseDevice, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import ExpCfgModel
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import setup_devices
@@ -70,6 +74,8 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
 from zcu_lab.v2.fake.stub.core import FakeResult, FakeRunResult
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
+from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 
 
 def _empty_schema() -> CfgSchema:
@@ -163,7 +169,7 @@ class _FakeBg:
                 result = self.last_work()
                 assert self.last_on_done is not None
                 self.last_on_done(result)
-            except (RuntimeError, ValueError) as exc:
+            except (RuntimeError, ValueError, TypeError) as exc:
                 assert self.last_on_error is not None
                 self.last_on_error(exc)
 
@@ -711,3 +717,295 @@ def test_bg_error_after_cancel_reports_cancelled_without_result():
     payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is None
+
+
+def _run_snapshot() -> RunSnapshot:
+    return RunSnapshot(
+        entry_id=UUID("00000000-0000-0000-0000-000000000001"),
+        entry_name="original-entry",
+        point="original-point",
+        description="original description",
+        roles={"qubit": "Q1", "resonator": "R1"},
+    )
+
+
+def _provenance() -> SoftwareProvenance:
+    return SoftwareProvenance(
+        software_versions={"python": "3.13"},
+        git_commit="a" * 40,
+        git_dirty=False,
+        qick_version=None,
+        soc_fingerprint="cached-config",
+        hostname="test-host",
+    )
+
+
+@pytest.mark.parametrize("stopped", [False, True])
+def test_run_publishes_record_and_historical_metadata_together(
+    monkeypatch: pytest.MonkeyPatch, stopped: bool
+) -> None:
+    state, tab_id, adapter = _make_state()
+    record = RunRecord(cfg=ExpCfgModel(), result=FakeResult(np.array([1.0])))
+    adapter.run.return_value = record
+    provenance = _provenance()
+    capture = MagicMock(return_value=provenance)
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance", capture
+    )
+    snapshot = _run_snapshot()
+    permit = replace(
+        _make_permit(state, tab_id, adapter),
+        snapshot=snapshot,
+        experiment_tag="test/native",
+    )
+    service, _gate, background, handles = _make_run_service(state)
+    token = service.start_run(permit, plots=_plots())
+    state.set_context(
+        replace(state.session_env, parameters=parameter_capture(gain=0.8))
+    )
+    if stopped:
+        assert service.cancel_run()
+    before_acquire = datetime.now(UTC)
+    background.run_work()
+    after_acquire = datetime.now(UTC)
+    pane = state.get_tab(tab_id).run
+    assert pane.result is record
+    assert pane.source_operation_id == token
+    metadata = pane.metadata
+    assert metadata is not None
+    assert metadata.snapshot == snapshot
+    assert metadata.experiment == "test/native"
+    assert metadata.provenance == provenance
+    assert metadata.completion == ("stopped" if stopped else "complete")
+    assert metadata.labber_path is None
+    assert metadata.finished_at is not None
+    assert before_acquire <= datetime.fromisoformat(metadata.started_at)
+    assert (
+        datetime.fromisoformat(metadata.started_at)
+        <= datetime.fromisoformat(metadata.finished_at)
+        <= after_acquire
+    )
+    assert metadata.run_id.startswith(
+        datetime.fromisoformat(metadata.started_at).strftime("%Y%m%dT%H%M%SZ-")
+    )
+    capture.assert_called_once()
+    outcome = handles.poll(token)
+    assert outcome is not None
+    assert outcome.status == ("cancelled" if stopped else "finished")
+
+
+@pytest.mark.parametrize("provenance_failure", [False, True])
+def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
+    monkeypatch: pytest.MonkeyPatch, provenance_failure: bool
+) -> None:
+    state, tab_id, adapter = _make_state()
+    adapter.run.return_value = RunRecord(
+        cfg=ExpCfgModel(), result=FakeResult(np.array([1.0]))
+    )
+    capture = MagicMock(return_value=_provenance())
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance", capture
+    )
+    permit = replace(
+        _make_permit(state, tab_id, adapter),
+        snapshot=_run_snapshot(),
+        experiment_tag="test/native",
+    )
+    service, _gate, background, handles = _make_run_service(state)
+    service.start_run(permit, plots=_plots())
+    background.run_work()
+    assert state.get_tab(tab_id).run.metadata is not None
+    if provenance_failure:
+        capture.side_effect = RuntimeError("provenance failed")
+    else:
+        adapter.run.side_effect = RuntimeError("acquire failed")
+    token = service.start_run(permit, plots=_plots())
+    assert state.get_tab(tab_id).run.result is None
+    assert state.get_tab(tab_id).run.metadata is None
+    background.run_work()
+    assert state.get_tab(tab_id).run.result is None
+    assert state.get_tab(tab_id).run.metadata is None
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+
+
+@pytest.mark.parametrize("has_snapshot", [False, True])
+def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence(
+    monkeypatch: pytest.MonkeyPatch, has_snapshot: bool
+) -> None:
+    state, tab_id, adapter = _make_state()
+    capture = MagicMock(side_effect=RuntimeError("must not capture"))
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance", capture
+    )
+    permit = replace(
+        _make_permit(state, tab_id, adapter),
+        snapshot=_run_snapshot() if has_snapshot else None,
+        experiment_tag=None if has_snapshot else "test/native",
+    )
+    service, _gate, background, _handles = _make_run_service(state)
+    service.start_run(permit, plots=_plots())
+    background.run_work()
+    assert state.get_tab(tab_id).run.metadata is None
+    capture.assert_not_called()
+
+
+def test_load_replaces_result_without_manufacturing_acquisition_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state, tab_id, adapter = _make_state()
+    adapter.run.return_value = RunRecord(
+        cfg=ExpCfgModel(), result=FakeResult(np.array([1.0]))
+    )
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+        MagicMock(return_value=_provenance()),
+    )
+    permit = replace(
+        _make_permit(state, tab_id, adapter),
+        snapshot=_run_snapshot(),
+        experiment_tag="test/native",
+    )
+    service, _gate, background, _handles = _make_run_service(state)
+    service.start_run(permit, plots=_plots())
+    background.run_work()
+    assert state.get_tab(tab_id).run.metadata is not None
+    loaded = RunRecord(cfg=None, result=FakeResult(np.array([2.0])))
+    state.update_tab_loaded_result(tab_id, loaded, "old-data.h5")
+    assert state.get_tab(tab_id).run.result is loaded
+    assert state.get_tab(tab_id).run.source_path == "old-data.h5"
+    assert state.get_tab(tab_id).run.metadata is None
+
+
+def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # This producer seam substitutes the public cfg assembly/acquisition
+    # collaborators. It does not claim the pending assembler/core integration.
+    state, tab_id, _mock_adapter = _make_state()
+    adapter = T1Adapter()
+    pulse = {
+        "type": "pulse",
+        "waveform": {"style": "const", "length": 0.1},
+        "ch": 0,
+        "nqz": 2,
+        "freq": 4400.0,
+        "gain": 0.2,
+    }
+    cfg = T1Cfg.model_validate(
+        {
+            "modules": {
+                "pi_pulse": pulse,
+                "readout": {
+                    "type": "readout/pulse",
+                    "pulse_cfg": pulse,
+                    "ro_cfg": {
+                        "ro_ch": 0,
+                        "ro_freq": 4400.0,
+                        "ro_length": 1.0,
+                        "trig_offset": 0.5,
+                        "gen_ch": 0,
+                    },
+                },
+            },
+            "sweep": {"length": {"start": 0.0, "stop": 1.0, "expts": 2, "step": 1.0}},
+        }
+    )
+    result = T1Result(
+        times=np.array([0.0, 1.0]), signals=np.array([1.0 + 0j, 0.5 + 0j])
+    )
+
+    def assemble(
+        self: T1Adapter, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> T1Cfg:
+        return cfg
+
+    def acquire(self: T1Exp, config: T1Cfg, *, context: RunContext) -> T1Result:
+        assert config is cfg
+        assert not context.cancel_signal.is_set()
+        return result
+
+    monkeypatch.setattr(T1Adapter, "build_exp_cfg", assemble)
+    monkeypatch.setattr(T1Exp, "run", acquire)
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+        MagicMock(return_value=_provenance()),
+    )
+    tab = state.get_tab(tab_id)
+    tab.adapter = adapter
+    permit = RunPermit(
+        tab_id=tab_id,
+        adapter_name="twotone/t1",
+        adapter=adapter,
+        request=RunRequest(soc=None, soccfg=None, device_snapshot={}, cfg_context=None),
+        accepted_cfg=tab.cfg.accept(tab.cfg.observe().ref.revision),
+        snapshot=_run_snapshot(),
+        experiment_tag=adapter.experiment_tag,
+    )
+    service, _gate, background, handles = _make_run_service(state)
+    token = service.start_run(permit, plots=_plots())
+    background.run_work()
+    record = state.get_tab(tab_id).run.result
+    metadata = state.get_tab(tab_id).run.metadata
+    assert isinstance(record, RunRecord)
+    assert isinstance(record.cfg, T1Cfg)
+    assert record.cfg == cfg
+    assert record.result is result
+    assert metadata is not None
+    assert metadata.experiment == T1Exp().persistence_spec().tag
+    assert metadata.completion == "complete"
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "finished"
+
+
+def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state, tab_id, adapter = _make_state()
+    adapter.run.return_value = RunRecord(
+        cfg=ExpCfgModel(), result=FakeResult(np.array([1.0]))
+    )
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+        MagicMock(return_value=_provenance()),
+    )
+    permit = replace(
+        _make_permit(state, tab_id, adapter),
+        snapshot=_run_snapshot(),
+        experiment_tag="test/native",
+    )
+    service, _gate, background, handles = _make_run_service(state)
+    token = service.start_run(permit, plots=_plots())
+    assert background.last_work is not None
+    acquired = background.last_work()
+    assert service.cancel_run()
+    assert background.last_on_done is not None
+    background.last_on_done(acquired)
+    metadata = state.get_tab(tab_id).run.metadata
+    assert metadata is not None and metadata.completion == "complete"
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "cancelled"
+
+
+def test_native_run_rejects_an_unpaired_result_without_publishing_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state, tab_id, adapter = _make_state()
+    adapter.run.return_value = object()
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+        MagicMock(return_value=_provenance()),
+    )
+    permit = replace(
+        _make_permit(state, tab_id, adapter),
+        snapshot=_run_snapshot(),
+        experiment_tag="test/native",
+    )
+    service, _gate, background, handles = _make_run_service(state)
+    token = service.start_run(permit, plots=_plots())
+    background.run_work()
+    assert state.get_tab(tab_id).run.result is None
+    assert state.get_tab(tab_id).run.metadata is None
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error == "Native acquisition must return a RunRecord"
