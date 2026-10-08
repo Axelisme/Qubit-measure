@@ -50,9 +50,9 @@ def _restore_complex(obj: Any) -> Any:
                 )
             return raw_string
         return {k: _restore_complex(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         return [_restore_complex(v) for v in obj]
-    elif isinstance(obj, str) and _looks_like_legacy_complex_string(obj):
+    if isinstance(obj, str) and _looks_like_legacy_complex_string(obj):
         try:
             restored = complex(obj)
         except ValueError:
@@ -64,8 +64,7 @@ def _restore_complex(obj: Any) -> Any:
             stacklevel=2,
         )
         return restored
-    else:
-        return obj
+    return obj
 
 
 def _dump_tagged_values(obj: Any) -> Any:
