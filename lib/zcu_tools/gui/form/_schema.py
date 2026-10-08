@@ -4,10 +4,10 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import get_args, get_origin
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, PydanticInvalidForJsonSchema
 from pydantic.fields import FieldInfo
 from pydantic.json_schema import GenerateJsonSchema
-from pydantic_core import core_schema
+from pydantic_core import PydanticOmit, core_schema
 
 from ._json import copy_object, default_json
 from ._sources import local_choices
@@ -25,16 +25,22 @@ class _InputJsonSchema(GenerateJsonSchema):
     def tagged_union_schema(
         self, schema: core_schema.TaggedUnionSchema
     ) -> dict[str, JsonValue]:
-        """Extend schema's native oneOf with typed tags; generation errors propagate.
+        """Extend native oneOf with typed tags, preserving native skipped choices.
 
-        Non-finite/non-JSON tags raise ValueError through the shared JSON codec.
+        Other generation errors propagate. Non-finite/non-JSON tags raise
+        ValueError through the shared JSON codec.
         """
         generated = copy_object(super().tagged_union_schema(schema))
         branches: list[dict[str, JsonValue]] = []
         identities: list[list[JsonValue]] = []
         # Group aliases before adding metadata so it does not change schema equality.
         for tag, choice in schema["choices"].items():
-            branch = copy_object(self.generate_inner(choice))
+            try:
+                choice_schema = self.generate_inner(choice)
+            except (PydanticOmit, PydanticInvalidForJsonSchema):
+                # The native generator already skipped this choice and owns warnings.
+                continue
+            branch = copy_object(choice_schema)
             if branch not in branches:
                 branches.append(branch)
                 identities.append([])
