@@ -67,6 +67,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
@@ -131,6 +132,7 @@ def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
             state.get_tab(tab_id).cfg.observe().ref.revision
         ),
         adapter=adapter,
+        parameters=parameters,
     )
 
 
@@ -281,6 +283,89 @@ def test_run_started_and_terminal_events_keep_operation_origin(
 # ---------------------------------------------------------------------------
 # start_run — normal path
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("context_free", [False, True])
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_run_publishes_permit_source_despite_later_tab_binding(
+    result_sources: tuple[ParameterContext, ParameterContext],
+    context_free: bool,
+    cancelled: bool,
+) -> None:
+    state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    q1, q2 = result_sources
+    captured = None if context_free else q1
+    tab = state.get_tab(tab_id)
+    state.update_tab_result(tab_id, object(), parameters=q2, source_operation_id=91)
+    state.update_tab_analyze(tab_id, object(), None)
+    tab.parameters = captured
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=tab.cfg.observe().ref.revision
+    )
+    assert permit.parameters is captured
+    tab.parameters = q2
+    service, gate, background, _handles = _make_run_service(state)
+    result = object()
+    adapter.run.return_value = result
+    token = service.start_run(permit, plots=_plots())
+
+    assert tab.run.result is None
+    assert tab.run.parameters is None
+    assert tab.analysis.result is None
+    state.set_context(replace(state.session_env, parameters=q2))
+    if cancelled:
+        assert service.cancel_run() is True
+    background.run_work()
+
+    assert tab.run.result is result
+    assert tab.run.source_operation_id == token
+    assert tab.run.parameters is captured
+    if tab.run.parameters is not None:
+        assert tab.run.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
+        assert tab.run.parameters.value("source_qubit.rate") == 1.0
+    assert not state.is_tab_running(tab_id)
+    assert not gate.has_active(OperationKind.RUN)
+
+    next_permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=tab.cfg.observe().ref.revision
+    )
+    next_token = service.start_run(next_permit, plots=_plots())
+    assert tab.run.parameters is None
+    assert tab.run.source_operation_id is None
+    background.run_work()
+    next_source = state.get_tab(tab_id).run.parameters
+    assert next_source is not None
+    assert next_source is q2
+    assert next_source.value("source_qubit.rate") == 2.0
+    assert tab.run.source_operation_id == next_token
+
+    state.clear_tab_results(tab_id)
+    assert tab.run.result is None
+    assert tab.run.parameters is None
+    assert tab.run.source_operation_id is None
+
+
+def test_cancelled_run_without_data_keeps_no_previous_source(
+    result_sources: tuple[ParameterContext, ParameterContext],
+) -> None:
+    state, tab_id, _adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    q1, q2 = result_sources
+    tab = state.get_tab(tab_id)
+    state.update_tab_result(tab_id, object(), parameters=q1, source_operation_id=91)
+    tab.parameters = q2
+    permit = GuardService(state).acquire_run_permit(
+        tab_id, expected_revision=tab.cfg.observe().ref.revision
+    )
+    service, _gate, background, _handles = _make_run_service(state)
+    service.start_run(permit, plots=_plots())
+    service.cancel_run()
+    assert background.last_on_error is not None
+    background.last_on_error(RuntimeError("interrupted"))
+
+    assert tab.run.result is None
+    assert tab.run.parameters is None
+    assert tab.run.source_operation_id is None
+    assert not state.is_tab_running(tab_id)
 
 
 def test_start_run_acquires_lease_and_submits_to_bg():

@@ -211,7 +211,7 @@ def native_save_session(
             save_context=captured,
         ),
     )
-    state.update_tab_result("tab", record, metadata=metadata)
+    state.update_tab_result("tab", record, metadata=metadata, parameters=captured)
     handles = OperationHandles()
     background = BackgroundRunner()
     service = SaveService(state, bus)

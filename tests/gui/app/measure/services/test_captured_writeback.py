@@ -11,9 +11,12 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import (
+    AnalyzeRequest,
     MetaDictWriteback,
     ModuleWriteback,
     WaveformWriteback,
+    WritebackItem,
+    WritebackRequest,
 )
 from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
@@ -134,22 +137,48 @@ def test_accepted_retains_run_identity_with_or_without_save(
 
 
 @pytest.mark.parametrize("interactive", [False, True])
-@pytest.mark.parametrize("source", ["run", "load", "without_metadata"])
+@pytest.mark.parametrize("source", ["run", "load", "without_metadata", "context_free"])
 def test_analysis_draft_uses_start_run_identity(
     tmp_path: Path,
     qapp: QApplication,
     interactive: bool,
     source: str,
+    monkeypatch,
 ) -> None:
     with native_save_session(tmp_path, qapp) as native:
         tab = native.state.get_tab("tab")
         if source == "load":
             native.state.update_tab_loaded_result(
-                "tab", tab.run.result, "historical.h5", metadata=native.metadata
+                "tab",
+                tab.run.result,
+                "historical.h5",
+                metadata=native.metadata,
+                parameters=tab.run.parameters,
             )
-        elif source == "without_metadata":
+        elif source in ("without_metadata", "context_free"):
             tab.run.metadata = None
+            if source == "context_free":
+                tab.run.parameters = None
+        captured = tab.run.parameters
         expected = tab.run.metadata.run_id if tab.run.metadata is not None else None
+        seen_analyze: list[AnalyzeRequest[object, object]] = []
+        seen_proposals: list[WritebackRequest[object, PaneSummary]] = []
+
+        def analyze(
+            request: AnalyzeRequest[object, object], *, plots: Plots
+        ) -> PaneSummary:
+            del plots
+            seen_analyze.append(request)
+            return PaneSummary()
+
+        def proposals(
+            request: WritebackRequest[object, PaneSummary],
+        ) -> list[WritebackItem]:
+            seen_proposals.append(request)
+            return []
+
+        monkeypatch.setattr(tab.adapter, "analyze", analyze)
+        monkeypatch.setattr(tab.adapter, "get_writeback_items", proposals)
         control = ContextControlFacet(context=native.context)
         editor = CfgEditorService(
             MagicMock(), control, MagicMock(), MagicMock(), native.bus
@@ -164,6 +193,10 @@ def test_analysis_draft_uses_start_run_identity(
             native.state, runner, native.bus, writeback, native.handles
         )
         plots = Plots(NonPresentingHost())
+        tab.parameters = control.read_context() if captured is None else None
+        native.state.set_context(
+            replace(native.state.session_env, parameters=tab.parameters)
+        )
         if interactive:
             plugin = PluginDefinition(
                 "pick", 2, (), lambda _state: None, lambda _state: PaneSummary()
@@ -187,7 +220,12 @@ def test_analysis_draft_uses_start_run_identity(
         draft = tab.analysis.writeback_draft
         assert isinstance(draft, WritebackDraft)
         assert draft.run_id == expected
-        assert draft.parameters is tab.parameters
+        assert draft.parameters is captured
+        assert len(seen_proposals) == 1
+        assert seen_proposals[0].ctx.parameters is captured
+        if not interactive:
+            assert len(seen_analyze) == 1
+            assert seen_analyze[0].parameters is captured
         writeback.teardown_draft(draft)
 
 

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -25,6 +26,7 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import make_cfg
@@ -61,19 +63,30 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
 
 
 @pytest.mark.parametrize("context_free", [False, True])
-def test_load_uses_tab_capture_after_active_context_changes(context_free: bool) -> None:
+def test_load_retains_request_source_and_native_history(
+    result_sources: tuple[ParameterContext, ParameterContext],
+    context_free: bool,
+) -> None:
     state, tab_id, adapter = _make_state()
-    captured = None if context_free else make_parameters({"rate": 1.0})
-    state.get_tab(tab_id).parameters = captured
+    q1, q2 = result_sources
+    captured = None if context_free else q1
+    tab = state.get_tab(tab_id)
+    state.update_tab_result(tab_id, object(), parameters=q2, source_operation_id=91)
+    tab.parameters = captured
     state.set_context(
         replace(state.session_env, parameters=make_parameters({"rate": 2.0}))
     )
-    adapter.load.return_value = (
-        RunRecord(cfg=None, result=object()),
-        historical_metadata(),
-    )
-    service, _emit, _writeback = _service(state)
+    loaded: RunRecord[ExpCfgModel, object] = RunRecord(cfg=None, result=object())
+    metadata = historical_metadata()
 
+    def load_and_rebind(
+        _request: LoadDataRequest,
+    ) -> tuple[RunRecord[ExpCfgModel, object], RunMetadata]:
+        tab.parameters = q2
+        return loaded, metadata
+
+    adapter.load.side_effect = load_and_rebind
+    service, _emit, _writeback = _service(state)
     service.load_result(LoadPermit(tab_id), "result.h5")
 
     request = adapter.load.call_args.args[0]
@@ -81,7 +94,13 @@ def test_load_uses_tab_capture_after_active_context_changes(context_free: bool) 
     assert request.data_path == "result.h5"
     assert request.parameters is captured
     if request.parameters is not None:
-        assert request.parameters.value("general.ext.rate") == 1.0
+        assert request.parameters.value("source_qubit.rate") == 1.0
+    assert tab.run.result is loaded
+    assert tab.run.parameters is captured
+    assert tab.run.source_operation_id is None
+    assert tab.run.metadata is metadata
+    state.clear_tab_results(tab_id)
+    assert tab.run.parameters is None
 
 
 @pytest.mark.parametrize("missing_cfg", [False, True])

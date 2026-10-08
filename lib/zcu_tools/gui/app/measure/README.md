@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09, captured accepted Run identity
+**Last updated:** 2026-10-09, result source and accepted Run identity
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -19,6 +19,11 @@ Ledger 失敗使 operation failed 並記錄 ERROR，但保留已發布的結果�
 不重試、回滾或釋放已發布的結果資源。Save request 取用這份歷史
 metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。未宣告 native evidence
 或沒有 saved origin 時 metadata 為 None；新 Run 清舊 evidence。Native Load 保留檔案的完整歷史 metadata，不製造 acquired 事件或 Save confirmation。
+
+Run permit 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
+晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
+Load 保存 LoadDataRequest 的 capture 與 native 檔案的原 metadata，不新增 Run token 或量測歷史。
+純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。predictor 仍跨 tab 共享。
 
 ## 局部設計與閱讀入口
 

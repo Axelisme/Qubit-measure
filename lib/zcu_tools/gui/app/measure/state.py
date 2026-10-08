@@ -75,6 +75,8 @@ class RunPaneState(Generic[T_Result]):
     confirmed_run_id is None until a complete Save report confirms at least one
     persistent output. It survives failed resaves of this Run, but replacement
     or a new Run resets it; it is identity, not a successful-output history.
+    parameters is the fixed source accepted for this result (Run permit or Load
+    request), or None for context-free data. Later tab bindings never replace it.
     """
 
     result: T_Result | None = None
@@ -82,6 +84,7 @@ class RunPaneState(Generic[T_Result]):
     source_operation_id: int | None = None
     metadata: RunMetadata | None = None
     confirmed_run_id: str | None = None
+    parameters: ParameterContext | None = None
 
 
 @dataclass
@@ -428,11 +431,14 @@ class State(SessionState):
         *,
         source_operation_id: int | None = None,
         metadata: RunMetadata | None = None,
+        parameters: ParameterContext | None = None,
     ) -> RetiredPaneResources:
         """Replace result/evidence together and invalidate dependent panes.
 
         metadata must describe this result, never the current session. Omit it
-        for non-acquisition replacement. Returns detached resources for cleanup;
+        for non-acquisition replacement. parameters is this result's accepted
+        source, or None for context-free data, never a current-context fallback.
+        Returns detached resources for cleanup;
         unknown tabs raise KeyError, and off-owner calls fail before mutation.
         """
         self._assert_owner()
@@ -445,6 +451,7 @@ class State(SessionState):
                 result=result,
                 source_operation_id=source_operation_id,
                 metadata=metadata,
+                parameters=parameters,
             ),
         )
 
@@ -455,12 +462,15 @@ class State(SessionState):
         source_path: str,
         *,
         metadata: RunMetadata,
+        parameters: ParameterContext | None = None,
     ) -> RetiredPaneResources:
-        """Replace a tab's run with loaded data and its original native history.
+        """Replace loaded data, its original native history and request source.
 
-        source_path is the exact loaded file, not a saving destination. Clear
-        dependent panes and Save confirmation; return their resources for caller
-        cleanup. Do not emit acquired or recapture metadata. Owner thread only.
+        source_path is the exact loaded file, not a saving destination. metadata
+        is the original native history, never a new acquisition. parameters is
+        the Load request's fixed capture, or None for context-free data.
+        Clear dependent panes, Run token and Save confirmation; return retired
+        resources. Unknown tabs raise KeyError; off-owner calls fail before mutation.
         """
         self._assert_owner()
         logger.debug(
@@ -471,7 +481,12 @@ class State(SessionState):
         )
         return self._replace_run_pane(
             tab_id,
-            RunPaneState(result=result, source_path=source_path, metadata=metadata),
+            RunPaneState(
+                result=result,
+                source_path=source_path,
+                metadata=metadata,
+                parameters=parameters,
+            ),
         )
 
     def swap_analysis_pane(

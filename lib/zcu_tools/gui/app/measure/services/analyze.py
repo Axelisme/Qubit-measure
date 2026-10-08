@@ -100,7 +100,7 @@ class AnalyzeService(_StagedAnalyzeService):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
-        ctx = replace(self._state.session_env, parameters=tab.parameters)
+        ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         req = AnalyzeRequest(
             run_result=tab.run.result,
             analyze_params=analyze_params_instance,
@@ -123,7 +123,7 @@ class AnalyzeService(_StagedAnalyzeService):
         )
         self._captured_inputs[tab_id] = captured_inputs
 
-        def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
+        def work(_factory: Any) -> Any:  # factory is None (wants_progress=False)
             return adapter.analyze(req, plots=plots)
 
         def discard() -> None:
@@ -161,7 +161,7 @@ class AnalyzeService(_StagedAnalyzeService):
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
         tab = self._state.get_tab(tab_id)
-        ctx = replace(self._state.session_env, parameters=tab.parameters)
+        ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         captured = _AnalyzeCapture(
             run_result=tab.run.result,
             run_id=tab.run.metadata.run_id if tab.run.metadata is not None else None,

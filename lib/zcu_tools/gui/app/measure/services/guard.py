@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.cfg.resource import AcceptedConfig, CfgRevision
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.types import ContextReadiness
+from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
 from zcu_tools.resources.entry import PointStorageBinding
 
 logger = logging.getLogger(__name__)
@@ -53,8 +53,10 @@ class RunPermit:
     terminal does not append acquired and reports that omission in diagnostics;
     it must not claim a ledger record. With storage, terminal publishes the
     usable result before append. Append failures fail the operation with an
-    ERROR diagnostic, but retain the published result for Save, without retry. This credential requires no release; the operation
-    owns its hardware lease.
+    ERROR diagnostic, but retain the published result for Save, without retry.
+    This credential requires no release; the operation owns its hardware lease.
+    parameters is the fixed source used at admission, or None for context-free
+    work; Run publishes it with the result for later analysis.
     """
 
     tab_id: str
@@ -65,6 +67,7 @@ class RunPermit:
     snapshot: RunSnapshot | None = None
     experiment_tag: str | None = None
     storage: PointStorageBinding | None = None
+    parameters: ParameterContext | None = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +220,7 @@ class GuardService:
             snapshot=snapshot,
             experiment_tag=experiment_tag,
             storage=storage,
+            parameters=tab.parameters,
         )
 
     def acquire_save_permit(self, tab_id: str) -> SavePermit:

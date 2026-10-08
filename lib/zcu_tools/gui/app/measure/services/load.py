@@ -109,7 +109,11 @@ class LoadService:
 
         snapshot = getattr(result, "cfg", None)
         retired = self._state.update_tab_loaded_result(
-            tab_id, result, data_path, metadata=metadata
+            tab_id,
+            result,
+            data_path,
+            metadata=metadata,
+            parameters=request.parameters,
         )
         self._teardown_retired(retired)
         return LoadTabResultOutcome(
