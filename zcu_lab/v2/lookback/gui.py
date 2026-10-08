@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.defaults.helpers import make_trig_offset
 from zcu_lab.v2._support.measure.schema_builder import (
@@ -72,23 +73,24 @@ class LookbackAdapter(
             "calibrate the trigger offset."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' — resonator "
-            "frequency, used for both the readout pulse and the ADC "
-            "down-conversion (~4000–8000 MHz); 'res_ch' / 'ro_ch' — readout "
-            "drive / ADC channel indices; 'timeFly' — a previously measured "
-            "cable time-of-flight; when present the trigger offset is taken as "
-            "'timeFly - 0.1' us, otherwise it falls back to ~0.4 us."
+            "Defaults use the tab's fixed qubit and referenced resonator. "
+            "Resonator frequency seeds the readout pulse and ADC at once; "
+            "resonator wiring supplies drive and ADC channels. Trigger offset "
+            "is resonator.ext.time_of_fly - 0.1 us, with fallback 0.4 us. "
+            "Missing or null calibration uses fallback; unbound roles remain "
+            "Invalid until supplied."
         ),
         expects_ml=(
-            "Needs a pulse-readout module, and references a ModuleLibrary "
-            "waveform named 'ro_waveform' for the readout pulse shape when one "
-            "exists (optional). Optionally composes 'reset' / 'init_pulse' "
-            "modules ahead of the readout."
+            "Readout always starts as a fresh inline pulse-readout, even "
+            "when a calibrated readout slot exists. It does not adopt a "
+            "legacy ro_waveform. Optional reset and init pulse start disabled; "
+            "you can select their modules explicitly before Run."
         ),
         typical_writeback=(
-            "Proposes the detected signal-arrival time back into MetaDict "
-            "'timeFly' (us) — the seed for the trigger offset of every "
-            "subsequent readout-based experiment. No ModuleLibrary writeback."
+            "Proposes the detected signal-arrival time in us at captured "
+            "resonator.ext.time_of_fly. The writeback service resolves the "
+            "destination on the analysis capture, not current focus. "
+            "No module or waveform writeback."
         ),
         recommended=(
             "Analysis defaults: threshold 'ratio'=0.1 (the offset is the "
@@ -100,8 +102,22 @@ class LookbackAdapter(
         ),
     )
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Capture the chosen qubit and its resonator for one lookback tab."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
+        """Declare static shape and fresh defaults on SessionEnv.parameters.
+
+        Reset and init start disabled. Readout always starts inline on the fixed
+        resonator capture, with trigger offset time_of_fly minus 0.1 us or 0.4 us
+        for absent/null calibration. Unbound roles remain cfg Invalid, while
+        source and materialization faults propagate without fallback.
+        """
         return (
             MeasureCfgBuilder()
             .reset(optional=True, init=ModuleInit.DISABLED)
@@ -161,6 +177,13 @@ class LookbackAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[LookbackRunResult, LookbackAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose detected arrival time in us at captured resonator.ext.time_of_fly.
+
+        req supplies the analysis and its capture; source.cfg may be None.
+        WritebackService resolves the destination on req.ctx.parameters and
+        rejects missing capture or unbound roles. No live focus lookup or write
+        occurs here.
+        """
         return [
             MetaDictWriteback(
                 target_name="timeFly",

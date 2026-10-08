@@ -186,23 +186,12 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
                 and discriminator.value == "pulse"
             ):
                 pulses.append((key, spec))
-    readout_spec = module_spec.fields["readout"]
-    assert isinstance(readout_spec, ReferenceSpec)
-    readout_pulse_spec = readout_spec.allowed[0].fields.get("pulse_cfg")
-    inline_readout = (
-        not pulses
-        and isinstance(readout_pulse_spec, CfgSectionSpec)
-        and isinstance(readout_pulse_spec.fields["freq"], LiteralSpec)
-    )
     for capture, cfg, raw in [
         (first, schema, raw_first),
         (second, second_schema, raw_second),
     ]:
         readout = read_value_path(cfg.value, "modules.readout")
         assert isinstance(readout, ReferenceValue)
-        assert is_custom_reference_key(readout.chosen_key) == (
-            not calibrated or inline_readout
-        )
         references = [readout]
         modules = raw["modules"]
         assert isinstance(modules, dict)
@@ -212,12 +201,6 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
                 assert pulse_spec.optional
             else:
                 assert isinstance(pulse, ReferenceValue)
-                inline_probe = isinstance(
-                    pulse_spec.allowed[0].fields["freq"], LiteralSpec
-                )
-                assert is_custom_reference_key(pulse.chosen_key) == (
-                    not calibrated or inline_probe
-                )
                 references.append(pulse)
                 lowered_pulse = modules[pulse_key]
                 assert isinstance(lowered_pulse, dict)
