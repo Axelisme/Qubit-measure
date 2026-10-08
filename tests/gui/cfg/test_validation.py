@@ -100,6 +100,92 @@ def test_static_reference_input_exemption_does_not_mask_faults(
         validate_finished_cfg(schema, resolve_reference=lambda kind, key: "Shape")
 
 
+@pytest.mark.parametrize("dynamic", [False, True])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        CfgSectionSpec(label="LiteralOnly", fields={"type": LiteralSpec("none")}),
+        CfgSectionSpec(
+            label="OptionalOnly",
+            fields={
+                "optional": ReferenceSpec(
+                    kind="module",
+                    allowed=[CfgSectionSpec(label="Zero", fields={})],
+                    optional=True,
+                )
+            },
+        ),
+    ],
+)
+def test_finished_reference_requires_literal_and_optional_entries(
+    shape: CfgSectionSpec,
+    dynamic: bool,
+) -> None:
+    schema = _schema(
+        {"ref": ReferenceSpec(kind="module", allowed=[shape])},
+        {"ref": ReferenceValue("library.pending", CfgSectionValue())},
+    )
+    validate_finished_cfg(schema, resolve_reference=None)
+    with pytest.raises(RuntimeError, match="ref\\.(type|optional).*missing"):
+        lower_finished_cfg(
+            schema,
+            resolve_expression=(lambda _: 1.0) if dynamic else None,
+            resolve_reference=lambda kind, key: shape.label,
+        )
+
+
+@pytest.mark.parametrize("dynamic", [False, True])
+def test_finished_nested_reference_rejects_incomplete_payload(dynamic: bool) -> None:
+    inner = CfgSectionSpec(label="Inner", fields={"type": LiteralSpec("none")})
+    outer = CfgSectionSpec(
+        label="Outer", fields={"nested": ReferenceSpec(kind="module", allowed=[inner])}
+    )
+    schema = _schema(
+        {"ref": ReferenceSpec(kind="module", allowed=[outer])},
+        {
+            "ref": ReferenceValue(
+                "outer",
+                CfgSectionValue(
+                    fields={"nested": ReferenceValue("inner", CfgSectionValue())}
+                ),
+            )
+        },
+    )
+    validate_finished_cfg(schema, resolve_reference=lambda kind, key: "Outer")
+    with pytest.raises(RuntimeError, match="ref.nested.type.*missing"):
+        lower_finished_cfg(
+            schema,
+            resolve_expression=(lambda _: 1.0) if dynamic else None,
+            resolve_reference=lambda kind, key: "Outer" if key == "outer" else "Inner",
+        )
+
+
+def test_finished_reference_allows_complete_disabled_optional_payload() -> None:
+    shape = CfgSectionSpec(
+        label="OptionalOnly",
+        fields={
+            "optional": ReferenceSpec(
+                kind="module",
+                allowed=[CfgSectionSpec(label="Zero", fields={})],
+                optional=True,
+            )
+        },
+    )
+    schema = _schema(
+        {"ref": ReferenceSpec(kind="module", allowed=[shape])},
+        {
+            "ref": ReferenceValue(
+                "library.complete", CfgSectionValue(fields={"optional": None})
+            )
+        },
+    )
+    assert lower_finished_cfg(
+        schema,
+        resolve_expression=None,
+        resolve_reference=lambda kind, key: "OptionalOnly",
+    ) == {"ref": {}}
+
+
 def test_complex_live_value_cannot_lower_to_real_scalar() -> None:
     schema = _schema(
         {"frequency": ScalarSpec("Frequency", float)},
