@@ -69,6 +69,18 @@ class ContextControlPort(Protocol):
         """Capture published values; EMPTY/source/role errors propagate."""
         ...
 
+    def read_target(
+        self, target: ContextTarget, *, roles: RoleBinding | None = None
+    ) -> ParameterContext:
+        """Read current values at a fixed target without selecting it.
+
+        SavedPoint may read point/library files in the opened entry. EntryDraft
+        requires that memory draft to remain selected. Supplied roles stay fixed;
+        cross-entry, stale draft, missing point, schema and I/O errors propagate.
+        No versions or events are published.
+        """
+        ...
+
     def set_parameter(
         self,
         target: ContextTarget,
@@ -170,6 +182,12 @@ class ContextControlFacet(ContextControlPort):
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         return self._context.read_context(roles=roles)
+
+    def read_target(
+        self, target: ContextTarget, *, roles: RoleBinding | None = None
+    ) -> ParameterContext:
+        """Read a captured target using ContextControlPort's current-value policy."""
+        return self._context.read_target(target, roles=roles)
 
     def set_parameter(
         self,

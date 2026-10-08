@@ -346,6 +346,31 @@ class ContextService:
             source_faults=parameters.source_faults,
         )
 
+    def read_target(
+        self, target: ContextTarget, *, roles: RoleBinding | None = None
+    ) -> ParameterContext:
+        """Read current values at a fixed target without changing selection.
+
+        SavedPoint opens independent point/library views in the currently opened
+        entry and may perform file I/O. EntryDraft reads the published memory
+        draft and requires that draft to remain selected. Supplied role names
+        stay fixed. Cross-entry, stale draft, missing point, schema, source and
+        I/O failures propagate. This read publishes no versions or events.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        if isinstance(target, EntryDraft):
+            return self.read_context(roles=roles)
+        point = entry.use_point(target.point)
+        assets = self._bind_assets(entry.database_path / "arb_waveforms")
+        library = entry.module_library(target.point, assets=assets)
+        return ParameterContext(
+            point=snapshot(point),
+            library=library.snapshot(),
+            target=target,
+            roles=roles,
+        )
+
     def capture_roles(
         self,
         declarations: Mapping[str, RoleSpec],
