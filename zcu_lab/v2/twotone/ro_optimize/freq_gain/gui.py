@@ -67,6 +67,11 @@ def _best_ro_freq_range(ctx: SessionEnv) -> SweepValue:
         center_path = "resonator.freq"
         center_value = parameters.lookup(center_path).value
     width_value = parameters.lookup("resonator.kappa").value
+    for path, value in [(center_path, center_value), ("resonator.kappa", width_value)]:
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, (int, float))
+        ):
+            raise TypeError(f"{path} must be a real number")
     center = float(center_value) if isinstance(center_value, (int, float)) else 6500.0
     width = float(width_value) if isinstance(width_value, (int, float)) else 500.0
     if center_value is not None and width_value is not None:
