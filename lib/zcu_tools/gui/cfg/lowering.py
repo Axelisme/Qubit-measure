@@ -593,17 +593,8 @@ def _validate_static_node(
         return
 
     if isinstance(spec, ReferenceSpec):
-        if not isinstance(node_value, ReferenceValue):
-            raise RuntimeError(
-                f"Config field '{full_path}' must be an enabled module/waveform "
-                f"ref, got {type(node_value).__name__}"
-            )
-        chosen_spec = _select_reference_spec(spec, node_value, resolve_reference)
-        _validate_static_section(
-            chosen_spec,
-            node_value.value,
-            resolve_reference=resolve_reference,
-            path=[full_path],
+        _validate_static_reference(
+            spec, node_value, resolve_reference=resolve_reference, full_path=full_path
         )
         return
 
@@ -623,6 +614,39 @@ def _validate_static_node(
 
     raise RuntimeError(
         f"Config field '{full_path}': unknown spec {type(spec).__name__}"
+    )
+
+
+def _validate_static_reference(
+    spec: ReferenceSpec,
+    node_value: object,
+    *,
+    resolve_reference: ReferenceResolver | None,
+    full_path: str,
+) -> None:
+    if not isinstance(node_value, ReferenceValue):
+        raise RuntimeError(
+            f"Config field '{full_path}' must be an enabled module/waveform "
+            f"ref, got {type(node_value).__name__}"
+        )
+    if (
+        not node_value.is_overridden
+        and not node_value.value.fields
+        and node_value.error is None
+    ):
+        try:
+            custom_label = parse_custom_reference_key(node_value.chosen_key)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        if custom_label is None:
+            # Binding supplies shape later; execution still resolves this key.
+            return
+    chosen_spec = _select_reference_spec(spec, node_value, resolve_reference)
+    _validate_static_section(
+        chosen_spec,
+        node_value.value,
+        resolve_reference=resolve_reference,
+        path=[full_path],
     )
 
 

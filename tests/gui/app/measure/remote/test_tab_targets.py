@@ -550,6 +550,21 @@ def test_inherited_defaults_open_unbound_tab_and_recover_without_focus_rebinding
 ) -> None:
     context = application.controller.context_control
     control = application.controller.tab_control
+    context.new_point(PointCreateRequest("default-reference", "", CommandOrigin("gui")))
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
+    context.add_component("Q2", "fake/drive/a", {"rate": 20.0})
+    context.add_component(
+        "QL",
+        "fake/drive/library",
+        {"rate": 40.0, "module": {"pi": "driver.pulses.pi"}},
+    )
+    context.set_module(
+        context.read_context().target,
+        "QL.pulses.pi",
+        PulseSpec(
+            ch=0, nqz=1, freq=100.0, gain=0.25, waveform=ConstWaveformCfg(length=0.05)
+        ),
+    )
     context.set_component_focus(None)
     tab_id = control.new_tab("default_reference")
     tab = application.state.get_tab(tab_id)
@@ -579,7 +594,16 @@ def test_inherited_defaults_open_unbound_tab_and_recover_without_focus_rebinding
     assert isinstance(raw_modules, dict)
     raw_readout = raw_modules["readout"]
     assert isinstance(raw_readout, dict) and raw_readout["freq"] == 100.0
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("modules", "reset"), None),))
+    context.new_point(
+        PointCreateRequest(
+            "other-point", "", CommandOrigin("gui"), clone_from="default-reference"
+        )
+    )
+    assert tab.parameters.roles.names == {"driver": "QL"}
+    assert cfg.observe().status is CfgStatus.VALID
+    cfg.edit(
+        cfg.observe().ref.revision, (CfgEdit(("modules", "reset", "__ref"), None),)
+    )
     control.set_role(tab_id, "driver", None)
     assert cfg.observe().status is CfgStatus.INVALID
     control.set_role(tab_id, "driver", "QL")
