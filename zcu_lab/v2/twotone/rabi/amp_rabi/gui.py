@@ -22,7 +22,12 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.cfg import CfgSchema, ReferenceValue
+from zcu_tools.gui.cfg import (
+    CfgSchema,
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import RoleSpec
 
@@ -35,10 +40,12 @@ from zcu_lab.v2._support.measure.seeds import (
     SweepDefault,
     custom,
     module_seed,
+    path_seed,
     scaled_path_seed,
 )
 from zcu_lab.v2._support.measure.spec_helpers import (
     make_pulse_module_spec,
+    make_pulse_readout_module_spec,
     make_readout_module_spec,
     make_reset_module_spec,
 )
@@ -77,7 +84,21 @@ def _blank_rabi_pulse(ctx: SessionEnv) -> ReferenceValue:
     module.x180.waveform.length (fallback 1.1 us). Missing/null calibration
     uses the fallback; role, capture and materialization faults propagate.
     """
-    raise NotImplementedError
+    spec = make_pulse_module_spec().allowed[0]
+    value = make_default_value(spec)
+    return (
+        ReferenceValue(make_custom_reference_key(spec.label), value)
+        .with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
+        .with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+        .with_field("nqz", 2)
+        .with_field("gain", 0.0)
+        .with_field(
+            "waveform.length",
+            scaled_path_seed(
+                "qubit.module.x180.waveform.length", factor=1.01, fallback_value=1.1
+            ).resolve(ctx),
+        )
+    )
 
 
 def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
@@ -89,7 +110,32 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     (fallback 0.55 us). Missing/null values use these fallbacks; role,
     capture and materialization faults propagate. Do not use named waveforms.
     """
-    raise NotImplementedError
+    spec = make_pulse_readout_module_spec().allowed[0]
+    value = make_default_value(spec)
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    return (
+        ReferenceValue(make_custom_reference_key(spec.label), value)
+        .with_field("pulse_cfg.freq", frequency)
+        .with_field(
+            "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+        )
+        .with_field("pulse_cfg.nqz", 2)
+        .with_field("pulse_cfg.gain", 0.1)
+        .with_field("pulse_cfg.waveform.length", 1.0)
+        .with_field("ro_cfg.ro_freq", frequency)
+        .with_field(
+            "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+        )
+        .with_field("ro_cfg.ro_length", 0.9)
+        .with_field(
+            "ro_cfg.trig_offset",
+            path_seed(
+                "resonator.ext.time_of_fly",
+                fallback=0.55,
+                expr="resonator.ext.time_of_fly + 0.05",
+            ).resolve(ctx),
+        )
+    )
 
 
 class AmpRabiAdapter(
