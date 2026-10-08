@@ -121,24 +121,17 @@ class PointUseRequest:
 
 @dataclass(frozen=True)
 class CommandOrigin:
-    """Frontend attribution: gui has no call ID; mcp has a native nonblank ID.
+    """Frontend attribution, exactly gui or mcp.
 
-    origin is exactly gui or mcp. call_id is None for gui and nonblank for mcp.
-    Invalid combinations raise ValueError before any resource command.
+    origin identifies the initiating frontend. Unknown values raise ValueError
+    before any resource command.
     """
 
     origin: Literal["gui", "mcp"]
-    call_id: str | None
 
     def __post_init__(self) -> None:
         if self.origin not in ("gui", "mcp"):
             raise ValueError("Command origin must be gui or mcp")
-        if self.origin == "gui" and self.call_id is not None:
-            raise ValueError("GUI commands require call_id=None")
-        if self.origin == "mcp" and (
-            not isinstance(self.call_id, str) or not self.call_id.strip()
-        ):
-            raise ValueError("MCP commands require a nonblank call_id")
 
 
 @dataclass(frozen=True)

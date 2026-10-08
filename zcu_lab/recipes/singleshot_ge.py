@@ -25,6 +25,7 @@ def _validate_inputs(
 def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     session: RecipeSession,
     *,
+    target: str | None = None,
     reuse_tab_id: str | None = None,
     readout_ref: str | None = None,
     pi_ref: str | None = None,
@@ -33,6 +34,9 @@ def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool in
     shots: int | None = None,
 ) -> RecipeGenerator:
     """Save GE raw data, then yield Primary and Post before asking to write.
+
+    target binds the new tab's primary role without changing GUI focus.
+    Omission uses focus. Do not pass target when reusing an existing tab.
 
     session is driver-supplied. reuse_tab_id resets that idle singleshot/ge tab.
     readout_ref and pi_ref select calibrated library modules; None retains their
@@ -55,7 +59,7 @@ def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool in
         shots,
     )
 
-    tab = session.open_tab("singleshot/ge", reuse=reuse_tab_id)
+    tab = session.open_tab("singleshot/ge", target=target, reuse=reuse_tab_id)
     if use_reset is None:
         tab.disable_library("modules.reset")
     else:
@@ -107,6 +111,7 @@ DEFINITION = RecipeDefinition(
         "type": "object",
         "additionalProperties": False,
         "properties": {
+            "target": {"type": ["string", "null"], "minLength": 1},
             **{
                 name: {"type": ["string", "null"], "minLength": 1}
                 for name in (

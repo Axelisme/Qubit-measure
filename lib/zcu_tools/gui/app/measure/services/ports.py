@@ -177,6 +177,12 @@ class TabSnapshot:
     save: SavePaneSnapshot | None = None
     paths: TabPathsSnapshot | None = None
     artifacts: tuple[ArtifactSnapshot, ...] = ()
+    parameters: ParameterContext | None = None
+    """Fixed tab point/library capture for source reads; None for source-free tabs.
+
+    This runtime field is not part of the persist/restore head. Reads never
+    resolve roles again or use the currently selected point.
+    """
 
 
 @dataclass(frozen=True)

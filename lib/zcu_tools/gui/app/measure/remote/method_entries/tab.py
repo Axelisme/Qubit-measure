@@ -121,6 +121,25 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
+        "tab.parameter_read",
+        "tab:h_tab_parameter_read",
+        MethodSpec(
+            5.0,
+            "Read only requested paths and module_refs from this tab's fixed "
+            "parameter capture. Returns {values, modules}: absent values are "
+            "omitted, null is retained; each module ref maps to an existing "
+            "canonical library root or null for missing/custom. Invalid paths, "
+            "unknown roles and source failures propagate. Does not observe "
+            "or refresh the live context guard.",
+            (
+                required_string("tab_id"),
+                ParamSpec("paths", JsonType.ARRAY, required=True),
+                ParamSpec("module_refs", JsonType.ARRAY, required=True),
+            ),
+        ),
+        agent=AgentMethodPolicy(),
+    ),
+    method_entry(
         "tab.get_cfg",
         "tab:h_tab_get_cfg",
         MethodSpec(

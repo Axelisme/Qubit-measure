@@ -12,6 +12,7 @@ from zcu_tools.mcp.measure.recipe import (
 def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     session: RecipeSession,
     *,
+    target: str | None = None,
     reuse_tab_id: str | None = None,
     readout_ref: str | None = None,
     use_reset: str | None = None,
@@ -23,6 +24,9 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
 ) -> RecipeGenerator:
     """Run once, save raw/Primary images, then ask before explicit writeback.
 
+    target binds the new tab's primary role without changing GUI focus.
+    Omission uses focus. Do not pass target when reusing an existing tab.
+
     session is driver-supplied. Names select observed libraries; nullable reset
     and init_pulse disable those optional modules. reuse_tab_id resets the named
     idle Lookback tab. Frequencies use MHz, lengths/offsets use us, and None retains
@@ -30,7 +34,7 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     invalid cfg/native failures throw at their author step. Cancel returns without
     later saves/analyses/writes; finish_early saves usable partial Run data.
     """
-    tab = session.open_tab("lookback", reuse=reuse_tab_id)
+    tab = session.open_tab("lookback", target=target, reuse=reuse_tab_id)
     tab.use_library("modules.readout", readout_ref)
     if use_reset is None:
         tab.disable_library("modules.reset")
@@ -84,6 +88,7 @@ DEFINITION = RecipeDefinition(
         "type": "object",
         "additionalProperties": False,
         "properties": {
+            "target": {"type": ["string", "null"], "minLength": 1},
             **{
                 name: {"type": ["string", "null"], "minLength": 1}
                 for name in (

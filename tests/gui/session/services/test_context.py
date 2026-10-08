@@ -99,7 +99,7 @@ def _new_request(
     entry: ResultEntry, label: str, *, clone: str | None = None
 ) -> PointCreateRequest:
     return PointCreateRequest(
-        entry.entry_id, label, "session description", CommandOrigin("gui", None), clone
+        entry.entry_id, label, "session description", CommandOrigin("gui"), clone
     )
 
 
@@ -108,7 +108,7 @@ def _entry_command(context: ContextService, command: str, entry_id: str) -> obje
         return context.use_point(PointUseRequest(entry_id, "new"))
     if command == "new":
         return context.new_point(
-            PointCreateRequest(entry_id, "new", "", CommandOrigin("gui", None))
+            PointCreateRequest(entry_id, "new", "", CommandOrigin("gui"))
         )
     return context.entry_ledger(entry_id)
 
