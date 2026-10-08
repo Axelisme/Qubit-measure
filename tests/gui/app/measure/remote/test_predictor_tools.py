@@ -24,7 +24,7 @@ from zcu_tools.gui.session.services.predictor import (
     SetModelParamsRequest,
 )
 
-from ._helpers import dispatch_handler as _dispatch  # noqa: E402
+from ._helpers import dispatch_handler as _dispatch
 
 
 def _ctrl_backed_by_real_service() -> MagicMock:

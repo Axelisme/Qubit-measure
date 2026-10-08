@@ -55,7 +55,7 @@ def test_write_read_round_trip(session_root: Path) -> None:
         listener.close()
 
 
-def test_read_missing_returns_none(session_root: Path) -> None:  # noqa: ARG001
+def test_read_missing_returns_none(session_root: Path) -> None:
     assert sd.read_session("measure") is None
 
 
@@ -115,7 +115,7 @@ def test_malformed_entry_is_swept(session_root: Path) -> None:
     assert not (session_root / "measure.json").exists()
 
 
-def test_clear_session_is_idempotent(session_root: Path) -> None:  # noqa: ARG001
+def test_clear_session_is_idempotent(session_root: Path) -> None:
     sd.clear_session("measure")  # no file yet — must not raise
     sd.write_session(
         "measure",
@@ -134,7 +134,7 @@ def test_clear_session_is_idempotent(session_root: Path) -> None:  # noqa: ARG00
 # ---------------------------------------------------------------------------
 
 
-def _bridge_config(app_slug: str, default_port: int):  # noqa: ANN202
+def _bridge_config(app_slug: str, default_port: int):
     from zcu_tools.mcp.core.bridge import MCPBridgeConfig
 
     return MCPBridgeConfig(
@@ -152,7 +152,7 @@ def _bridge_config(app_slug: str, default_port: int):  # noqa: ANN202
     )
 
 
-def test_resolve_explicit_port_wins(session_root: Path) -> None:  # noqa: ARG001
+def test_resolve_explicit_port_wins(session_root: Path) -> None:
     from zcu_tools.mcp.core.bridge import resolve_connect_port
 
     cfg = _bridge_config("measure", 8765)
@@ -179,7 +179,7 @@ def test_resolve_uses_discovery_when_omitted(session_root: Path) -> None:
 
 
 def test_resolve_falls_back_to_default_without_discovery(
-    session_root: Path,  # noqa: ARG001
+    session_root: Path,
 ) -> None:
     from zcu_tools.mcp.core.bridge import resolve_connect_port
 

@@ -13,7 +13,7 @@ def _assert_owner_scheduler_contract(scheduler: OwnerScheduler) -> None:
     assert scheduler.is_owner_thread()
 
 
-def test_owner_scheduler_adapters_expose_owner_probe(qapp) -> None:  # noqa: ARG001
+def test_owner_scheduler_adapters_expose_owner_probe(qapp) -> None:
     _assert_owner_scheduler_contract(ManualOwnerScheduler())
     _assert_owner_scheduler_contract(QtOwnerScheduler())
 
@@ -109,7 +109,7 @@ def test_qt_scheduler_posts_and_calls_on_owner_thread(qapp) -> None:
     assert called == [owner_thread_id]
 
 
-def test_qt_scheduler_rejects_owner_thread_call(qapp) -> None:  # noqa: ARG001
+def test_qt_scheduler_rejects_owner_thread_call(qapp) -> None:
     scheduler = QtOwnerScheduler()
     with pytest.raises(RuntimeError, match="owner thread"):
         scheduler.call(lambda: None)

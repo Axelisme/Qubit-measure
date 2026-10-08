@@ -26,7 +26,7 @@ def _restore_hooks() -> None:
     threading.excepthook = _thread._excepthook  # type: ignore[attr-defined]
 
 
-def test_install_replaces_sys_excepthook(qapp):  # noqa: ARG001
+def test_install_replaces_sys_excepthook(qapp):
     from zcu_tools.gui.app.measure.utils.error_handler import (
         install_global_exception_hook,
     )
@@ -38,7 +38,7 @@ def test_install_replaces_sys_excepthook(qapp):  # noqa: ARG001
         _restore_hooks()
 
 
-def test_install_replaces_threading_excepthook(qapp):  # noqa: ARG001
+def test_install_replaces_threading_excepthook(qapp):
     from zcu_tools.gui.app.measure.utils.error_handler import (
         install_global_exception_hook,
     )
@@ -52,7 +52,7 @@ def test_install_replaces_threading_excepthook(qapp):  # noqa: ARG001
         _restore_hooks()
 
 
-def test_keyboard_interrupt_bypasses_dialog(qapp):  # noqa: ARG001
+def test_keyboard_interrupt_bypasses_dialog(qapp):
     from zcu_tools.gui.app.measure.utils.error_handler import (
         install_global_exception_hook,
     )
@@ -69,7 +69,7 @@ def test_keyboard_interrupt_bypasses_dialog(qapp):  # noqa: ARG001
         _restore_hooks()
 
 
-def test_ordinary_exception_calls_show_dialog(qapp):  # noqa: ARG001
+def test_ordinary_exception_calls_show_dialog(qapp):
     from zcu_tools.gui.app.measure.utils.error_handler import (
         install_global_exception_hook,
     )
@@ -86,7 +86,7 @@ def test_ordinary_exception_calls_show_dialog(qapp):  # noqa: ARG001
         _restore_hooks()
 
 
-def test_thread_keyboard_interrupt_bypasses_log(qapp):  # noqa: ARG001
+def test_thread_keyboard_interrupt_bypasses_log(qapp):
     from zcu_tools.gui.app.measure.utils.error_handler import (
         install_global_exception_hook,
     )
@@ -104,7 +104,7 @@ def test_thread_keyboard_interrupt_bypasses_log(qapp):  # noqa: ARG001
         _restore_hooks()
 
 
-def test_thread_ordinary_exception_logs_error(qapp):  # noqa: ARG001
+def test_thread_ordinary_exception_logs_error(qapp):
     from zcu_tools.gui.app.measure.utils.error_handler import (
         install_global_exception_hook,
     )

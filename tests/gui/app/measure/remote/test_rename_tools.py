@@ -8,7 +8,7 @@ import pytest
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
-from ._helpers import dispatch_handler as _dispatch  # noqa: E402
+from ._helpers import dispatch_handler as _dispatch
 
 
 def test_rename_module_drives_controller():

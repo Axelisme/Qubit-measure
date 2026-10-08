@@ -58,7 +58,7 @@ class _RecordingToolbarHost:
         pass
 
 
-def test_toolbar_dialog_buttons_open_expected_dialogs(qapp) -> None:  # noqa: ANN001
+def test_toolbar_dialog_buttons_open_expected_dialogs(qapp) -> None:
     parent = QWidget()
     host = _RecordingToolbarHost()
     toolbar = MainWindowToolbar(host, parent=parent)

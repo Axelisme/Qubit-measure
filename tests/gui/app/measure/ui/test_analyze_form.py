@@ -21,7 +21,7 @@ class _OptionalParams:
     t0: Annotated[float | None, ParamMeta(label="T0")] = None
 
 
-def test_analyze_form_round_trips_values(qapp):  # noqa: ARG001
+def test_analyze_form_round_trips_values(qapp):
     form = AnalyzeFormWidget()
     form.populate(_TestParams(threshold=0.5, model="a"))
 
@@ -31,7 +31,7 @@ def test_analyze_form_round_trips_values(qapp):  # noqa: ARG001
     assert form.is_valid() is True
 
 
-def test_analyze_form_has_params_after_populate(qapp):  # noqa: ARG001
+def test_analyze_form_has_params_after_populate(qapp):
     form = AnalyzeFormWidget()
     assert form.has_params() is False
 
@@ -40,14 +40,14 @@ def test_analyze_form_has_params_after_populate(qapp):  # noqa: ARG001
     assert form.has_params() is True
 
 
-def test_analyze_form_populate_values_restores_state(qapp):  # noqa: ARG001
+def test_analyze_form_populate_values_restores_state(qapp):
     form = AnalyzeFormWidget()
     form.populate(_TestParams(threshold=0.5, model="a"))
     form.populate_values(_TestParams(threshold=0.9, model="b"))
     assert form.read_params() == _TestParams(threshold=0.9, model="b")
 
 
-def test_analyze_form_hydration_does_not_emit_params_changed(qapp):  # noqa: ARG001
+def test_analyze_form_hydration_does_not_emit_params_changed(qapp):
     form = AnalyzeFormWidget()
     emitted: list[object] = []
     form.params_changed.connect(lambda values: emitted.append(values))
@@ -58,7 +58,7 @@ def test_analyze_form_hydration_does_not_emit_params_changed(qapp):  # noqa: ARG
     assert emitted == []
 
 
-def test_sync_same_class_preserves_widgets_and_only_hydrates(qapp):  # noqa: ARG001
+def test_sync_same_class_preserves_widgets_and_only_hydrates(qapp):
     form = AnalyzeFormWidget()
     emitted: list[object] = []
     form.params_changed.connect(emitted.append)
@@ -75,7 +75,7 @@ def test_sync_same_class_preserves_widgets_and_only_hydrates(qapp):  # noqa: ARG
     assert emitted == []
 
 
-def test_sync_class_change_rebuilds_and_clear_fast_fails(qapp):  # noqa: ARG001
+def test_sync_class_change_rebuilds_and_clear_fast_fails(qapp):
     form = AnalyzeFormWidget()
     form.sync(_TestParams(threshold=0.5, model="a"))
     old_widgets = tuple(form._widgets.values())
@@ -92,7 +92,7 @@ def test_sync_class_change_rebuilds_and_clear_fast_fails(qapp):  # noqa: ARG001
         form.read_params()
 
 
-def test_field_metadata_is_resolved_once_per_class_build(qapp, monkeypatch):  # noqa: ARG001
+def test_field_metadata_is_resolved_once_per_class_build(qapp, monkeypatch):
     from zcu_tools.gui.app.measure.ui import analyze_form as module
 
     real_hints = module.get_type_hints
@@ -123,7 +123,7 @@ def test_field_metadata_is_resolved_once_per_class_build(qapp, monkeypatch):  # 
     assert resolve_calls == 2
 
 
-def test_analyze_form_user_edit_emits_params_changed(qapp):  # noqa: ARG001
+def test_analyze_form_user_edit_emits_params_changed(qapp):
     form = AnalyzeFormWidget()
     emitted: list[object] = []
     form.populate(_TestParams(threshold=0.5, model="a"))
@@ -136,7 +136,7 @@ def test_analyze_form_user_edit_emits_params_changed(qapp):  # noqa: ARG001
     assert emitted[-1] == _TestParams(threshold=0.9, model="a")
 
 
-def test_analyze_form_text_edit_emits_only_when_committed(qapp):  # noqa: ARG001
+def test_analyze_form_text_edit_emits_only_when_committed(qapp):
     form = AnalyzeFormWidget()
     emitted: list[object] = []
     form.populate(_OptionalParams(t0=None))
@@ -154,7 +154,7 @@ def test_analyze_form_text_edit_emits_only_when_committed(qapp):  # noqa: ARG001
 # --- optional analyze fields (blank = None) --------------------------------
 
 
-def test_analyze_form_optional_blank_reads_none(qapp):  # noqa: ARG001
+def test_analyze_form_optional_blank_reads_none(qapp):
     form = AnalyzeFormWidget()
     form.populate(_OptionalParams(t0=None))
     # an optional float renders the "(none)" QLineEdit, starting empty
@@ -163,7 +163,7 @@ def test_analyze_form_optional_blank_reads_none(qapp):  # noqa: ARG001
     assert form.read_params() == _OptionalParams(t0=None)
 
 
-def test_analyze_form_optional_typed_value_reads_float(qapp):  # noqa: ARG001
+def test_analyze_form_optional_typed_value_reads_float(qapp):
     form = AnalyzeFormWidget()
     form.populate(_OptionalParams(t0=None))
     edit = form.findChild(QLineEdit)
@@ -172,7 +172,7 @@ def test_analyze_form_optional_typed_value_reads_float(qapp):  # noqa: ARG001
     assert form.read_params() == _OptionalParams(t0=1.5)
 
 
-def test_analyze_form_optional_round_trips_none_and_value(qapp):  # noqa: ARG001
+def test_analyze_form_optional_round_trips_none_and_value(qapp):
     form = AnalyzeFormWidget()
     form.populate(_OptionalParams(t0=2.0))  # starts set
     assert form.read_params() == _OptionalParams(t0=2.0)

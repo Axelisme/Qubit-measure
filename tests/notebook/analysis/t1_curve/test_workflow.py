@@ -247,7 +247,7 @@ def test_t1_mechanism_probe_passes_temperature_bounds_to_temp_fit(
 
     def _fake_find_temp(
         guess_Temp: float,
-        calc_Q_fn: Callable[[float], NDArray[np.float64]],  # noqa: ARG001
+        calc_Q_fn: Callable[[float], NDArray[np.float64]],
         *,
         Temp_bounds: tuple[float | None, float],
     ) -> float:
@@ -331,7 +331,7 @@ def test_calculate_purcell_t1_limit_reuses_lru_cache(
         kappa: float,
         g: float,
         Temp: float,
-        params: tuple[float, float, float],  # noqa: ARG001
+        params: tuple[float, float, float],
         progress: bool,
     ) -> NDArray[np.float64]:
         nonlocal call_count
@@ -365,9 +365,9 @@ def test_estimate_purcell_temp_upper_bound_uses_observed_t1_constraint(
     data = _synthetic_prepared_data()
 
     def _fake_purcell(
-        context: T1CurveContext,  # noqa: ARG001
+        context: T1CurveContext,
         fluxs: NDArray[np.float64],
-        purcell: PurcellEffectParams,  # noqa: ARG001
+        purcell: PurcellEffectParams,
         *,
         Temp: float,
     ) -> NDArray[np.float64]:
@@ -393,9 +393,9 @@ def test_estimate_purcell_temp_upper_bound_updates_progress_bar(
     bars: list[_RecordingProgressBar] = []
 
     def _fake_purcell(
-        context: T1CurveContext,  # noqa: ARG001
+        context: T1CurveContext,
         fluxs: NDArray[np.float64],
-        purcell: PurcellEffectParams,  # noqa: ARG001
+        purcell: PurcellEffectParams,
         *,
         Temp: float,
     ) -> NDArray[np.float64]:
@@ -432,9 +432,9 @@ def test_plot_purcell_temp_upper_bound_overlays_t1_samples_and_curve(
     captured: dict[str, object] = {}
 
     def _fake_purcell(
-        context: T1CurveContext,  # noqa: ARG001
+        context: T1CurveContext,
         fluxs: NDArray[np.float64],
-        purcell: PurcellEffectParams,  # noqa: ARG001
+        purcell: PurcellEffectParams,
         *,
         Temp: float,
     ) -> NDArray[np.float64]:
@@ -474,11 +474,11 @@ def test_t1_mechanism_probe_subtracts_purcell_before_q(
     captured: dict[str, NDArray[np.float64]] = {}
 
     def _fake_purcell(
-        context: T1CurveContext,  # noqa: ARG001
+        context: T1CurveContext,
         fluxs: NDArray[np.float64],
-        purcell: PurcellEffectParams,  # noqa: ARG001
+        purcell: PurcellEffectParams,
         *,
-        Temp: float,  # noqa: ARG001
+        Temp: float,
     ) -> NDArray[np.float64]:
         return 2.0 * data.fit.T1_ns[: len(fluxs)]
 
@@ -527,11 +527,11 @@ def test_t1_mechanism_dipole_plot_uses_t1_after_purcell_subtraction(
     captured: dict[str, object] = {}
 
     def _fake_purcell(
-        context: T1CurveContext,  # noqa: ARG001
+        context: T1CurveContext,
         fluxs: NDArray[np.float64],
-        purcell: PurcellEffectParams,  # noqa: ARG001
+        purcell: PurcellEffectParams,
         *,
-        Temp: float,  # noqa: ARG001
+        Temp: float,
     ) -> NDArray[np.float64]:
         return 2.0 * data.fit.T1_ns[: len(fluxs)]
 
@@ -541,7 +541,7 @@ def test_t1_mechanism_dipole_plot_uses_t1_after_purcell_subtraction(
         _Temp: float,
         *,
         T1_ns: NDArray[np.float64] | None = None,
-        T1err_ns: NDArray[np.float64] | None = None,  # noqa: ARG001
+        T1err_ns: NDArray[np.float64] | None = None,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
         assert mechanism == "capacitive"
         assert T1_ns is not None
@@ -555,9 +555,9 @@ def test_t1_mechanism_dipole_plot_uses_t1_after_purcell_subtraction(
         dipoles: NDArray[np.float64],
         T1s: NDArray[np.float64],
         T1errs: NDArray[np.float64] | None = None,
-        dipole_name: str = "d_{01}",  # noqa: ARG001
+        dipole_name: str = "d_{01}",
         Q_name: str = r"$Q_{cap}$",
-        product2val: Callable[[float], float] = lambda x: x,  # noqa: ARG005
+        product2val: Callable[[float], float] = lambda x: x,
     ) -> tuple[Figure, Axes]:
         captured["dipoles"] = dipoles
         captured["T1s"] = T1s
@@ -600,7 +600,7 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
         _Temp: float,
         *,
         T1_ns: NDArray[np.float64] | None = None,
-        T1err_ns: NDArray[np.float64] | None = None,  # noqa: ARG001
+        T1err_ns: NDArray[np.float64] | None = None,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
         assert mechanism == "capacitive"
         assert T1_ns is not None
@@ -620,11 +620,11 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
         return np.full_like(fluxs, pure_t1_limits.pop(0))
 
     def _fake_purcell(
-        context: T1CurveContext,  # noqa: ARG001
+        context: T1CurveContext,
         fluxs: NDArray[np.float64],
-        purcell: PurcellEffectParams,  # noqa: ARG001
+        purcell: PurcellEffectParams,
         *,
-        Temp: float,  # noqa: ARG001
+        Temp: float,
     ) -> NDArray[np.float64]:
         return np.full_like(fluxs, 40.0)
 
@@ -638,14 +638,14 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
         _t_fluxs: NDArray[np.float64],
         *,
         label: str = r"$t_1^{eff}$",
-        title: str | None = None,  # noqa: ARG001
-        xlabel: str = "Current (mA)",  # noqa: ARG001
+        title: str | None = None,
+        xlabel: str = "Current (mA)",
         component_t1s: dict[str, NDArray[np.float64]] | None = None,
         component_bands: (
             dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]] | None
         ) = None,
         parameter_text: str | None = None,
-        show_value_axis: bool = False,  # noqa: ARG001
+        show_value_axis: bool = False,
     ) -> tuple[Figure, Axes]:
         captured["t1_effs"] = t1_effs
         captured["component_t1s"] = component_t1s
@@ -765,9 +765,9 @@ def test_fit_t1_curve_passes_purcell_rate_callable(
     captured: dict[str, object] = {}
 
     def _fake_purcell(
-        context: T1CurveContext,  # noqa: ARG001
+        context: T1CurveContext,
         fluxs: NDArray[np.float64],
-        purcell: PurcellEffectParams,  # noqa: ARG001
+        purcell: PurcellEffectParams,
         *,
         Temp: float,
     ) -> NDArray[np.float64]:
@@ -978,11 +978,11 @@ def test_build_t1_channel_curves_adds_purcell_component(
         return np.full_like(fluxs, 7.5)
 
     def _fake_purcell(
-        context: T1CurveContext,  # noqa: ARG001
+        context: T1CurveContext,
         fluxs: NDArray[np.float64],
-        purcell: PurcellEffectParams,  # noqa: ARG001
+        purcell: PurcellEffectParams,
         *,
-        Temp: float,  # noqa: ARG001
+        Temp: float,
     ) -> NDArray[np.float64]:
         return np.full_like(fluxs, 30.0)
 

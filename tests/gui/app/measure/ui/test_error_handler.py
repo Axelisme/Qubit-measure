@@ -6,7 +6,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 
-def test_show_error_dialog_formats_exception(qapp):  # noqa: ARG001
+def test_show_error_dialog_formats_exception(qapp):
     from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
 
     with patch("zcu_tools.gui.app.measure.ui.error_handler.QMessageBox") as mock_mb_cls:

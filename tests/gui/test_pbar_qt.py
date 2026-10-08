@@ -14,7 +14,7 @@ pytest.importorskip("qtpy")
 # ---------------------------------------------------------------------------
 
 
-def _make_stack(qapp):  # noqa: ARG001
+def _make_stack(qapp):
     from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
     return ProgressStack()
@@ -45,7 +45,7 @@ def _make_factory(stack, *, operation_id: int = 1, owner_id: str = "owner"):
 # ---------------------------------------------------------------------------
 
 
-def test_lightweight_progress_bar_format_and_value(qapp):  # noqa: ARG001
+def test_lightweight_progress_bar_format_and_value(qapp):
     from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
 
     bar = LightweightProgressBar()
