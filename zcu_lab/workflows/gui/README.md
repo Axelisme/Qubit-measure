@@ -1,6 +1,6 @@
 # workflows/gui — Workflow form attachments
 
-**Last updated:** 2026-10-08，module-only T1 plan 與 arb 拒絕
+**Last updated:** 2026-10-08，T1 tuning host caller seed
 
 這個 package 擁有具體 workflow 的表單、明寫的 to_cfg 與 Qt panel attachment，不實作通用 editor 或 Engine。Native workflow definitions 不依賴這些 GUI attachments。
 
@@ -11,3 +11,5 @@ T1TunablesForm 與 nested CalibrationTunablesForm 定義使用者可編輯的普
 T1TunablesPanel 用 host 提供的 env 建立 state，嵌入通用 FormEditor，並公開 state 與 editor。Host 提交前檢查 editor.local_parse_errors。Panel 不提供 native preview、Apply／Discard／Start 或 live source capture。
 
 FormState 處理 draft、驗證與 input 差異。to_cfg 只把合法普通值轉成 native T1Tunables。Expression 留在 FormInput，Engine journal 只記普通值。Host 決定何時提交；表單不更新 owner revision，也不操作設備。
+
+T1TuningPanel 為已接受的 native T1 run 嵌入 T1TunablesPanel。它的 GUI Apply 與外部 JSON edit 共用 gui/app/workflows 的 TunablesHost。Host 保存 expression input／draft base revision，Engine 保存普通值。這個 caller 不 Start、capture、安排 worker 或保存 input 檔案。

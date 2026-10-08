@@ -109,6 +109,18 @@ class FormEditor[F: FormModel](QWidget):
         self._env = env
         self._publish()
 
+    def discard_local_text(self) -> None:
+        """Discard unparseable view text and render the current state.
+
+        Call on the GUI thread before detach. This does not reset/write state,
+        evaluate defaults, submit, or change the fixed env. Parsed draft changes
+        remain unless the host resets state separately. Detached views raise
+        RuntimeError.
+        """
+        self._require_state()
+        self._local.clear()
+        self._publish()
+
     def set_editing_enabled(self, *, enabled: bool) -> None:
         """Enable or disable input controls without changing state or local text.
 

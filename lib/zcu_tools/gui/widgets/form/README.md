@@ -1,10 +1,10 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-08，typed discriminator projection
+**Last updated:** 2026-10-08，host Discard integration
 
 FormEditor renders caller-owned FormState using a host-captured FormEnv. Parsed input writes the draft. Incomplete text and parse errors stay in the Qt view. The generic local_parse_errors query lets hosts reject submission while state still holds an earlier valid value.
 
-The view projects the public input schema and read-only FormPreview. It does not import core walkers or evaluate expressions. Core owns evaluation, model validation, choices and branch defaults. The view owns controls, error display and subscription lifetime. Sequences and typed mappings are whole leaves. Detach and close do not reset or submit the caller's state.
+The view projects the public input schema and read-only FormPreview. It does not import core walkers or evaluate expressions. Core owns evaluation, model validation, choices and branch defaults. The view owns controls, error display and subscription lifetime. Sequences and typed mappings are whole leaves. Detach and close do not reset or submit the caller's state. discard_local_text drops view-local unparseable text and redraws the current state. The host separately resets its draft on Discard; the renderer does not own that policy.
 
 Tagged branch identity comes from the schema owner's x-form-discriminator-values metadata, not the current choices enum. Selector options intersect that identity with current leaf options. Empty choices keep the current branch visible and its input unchanged. Numeric discriminators offer ordinary typed tags without expression mode.
 
