@@ -225,7 +225,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
     )
     context_service.install_entry(entry)
     control = ContextControlFacet(context=context_service)
-    control.use_point(PointUseRequest(entry.entry_id, "a"))
+    control.use_point(PointUseRequest("a"))
     parameters = control.read_context()
     state = State(SessionEnv(parameters=parameters, soc=None, soccfg=None))
     state.add_tab(

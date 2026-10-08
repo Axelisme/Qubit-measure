@@ -186,12 +186,12 @@ class ContextService:
     def use_point(self, request: PointUseRequest) -> SavedPoint:
         """Prepare point/library/assets, then install ACTIVE and publish facts.
 
-        No opened entry raises FailedPreconditionError(no_entry); a different
-        entry_id raises entry_not_open. Preparation failure retains the old
-        binding. The returned target has no session selection generation.
+        No opened entry raises FailedPreconditionError(no_entry). Preparation
+        failure retains the old binding. The returned target has no session
+        selection generation.
         """
         self._owner.assert_owner()
-        entry = self._require_entry(request.entry_id)
+        entry = self._require_open_entry()
         point = entry.use_point(request.label)
         parameters, library, sources, info = self._prepare_point(
             entry, request.label, point
@@ -202,13 +202,13 @@ class ContextService:
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
         """Create from setup or a same-entry clone, then install ACTIVE.
 
-        Validate opened entry UUID before creation. Pass description and origin
-        unchanged to ResultEntry.new_point; never copy DRAFT. Resource errors
+        No opened entry raises FailedPreconditionError(no_entry). Pass description
+        and origin unchanged to ResultEntry.new_point; never copy DRAFT. Resource errors
         propagate. Post-creation binding failure raises PointBindingError from
         its cause, retaining the point and old binding without retry/deletion.
         """
         self._owner.assert_owner()
-        entry = self._require_entry(request.entry_id)
+        entry = self._require_open_entry()
         clone = (
             entry.use_point(request.clone_from)
             if request.clone_from is not None
@@ -660,14 +660,18 @@ class ContextService:
             )
         return self.get_component_focus()
 
-    def _require_entry(self, entry_id: str) -> ResultEntry:
+    def _require_open_entry(self) -> ResultEntry:
         if self._entry is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
-        if entry_id != self._entry.entry_id:
+        return self._entry
+
+    def _require_entry(self, entry_id: str) -> ResultEntry:
+        entry = self._require_open_entry()
+        if entry_id != entry.entry_id:
             raise FailedPreconditionError(
                 f"Entry {entry_id!r} is not opened", reason_code="entry_not_open"
             )
-        return self._entry
+        return entry
 
     def _require_write_target(self, target: ContextTarget) -> ResultEntry:
         """Reject cross-entry and stale memory targets before opening a resource."""
