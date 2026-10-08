@@ -31,7 +31,7 @@ from .schema import (
     SetupDocument,
     is_forward_minor,
 )
-from .views import SetupView, prepare_point_update
+from .views import SetupView, add_component_to_draft, prepare_point_update
 
 if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary, ModuleLibraryDocument
@@ -174,7 +174,11 @@ class ResultEntry:
         created, read or saved, and inputs are unchanged on success or failure.
         Invalid name, duplicate, unknown kind or invalid fields propagate.
         """
-        raise NotImplementedError
+        candidate = document.model_copy(deep=True)
+        add_component_to_draft(
+            candidate, name, kind, fields, self._result_path / "setup.yaml"
+        )
+        return candidate
 
     def validate_library(self, document: ModuleLibraryDocument) -> None:
         """Validate a memory library's keys/Specs/sources against this entry.

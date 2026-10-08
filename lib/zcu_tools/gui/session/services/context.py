@@ -251,7 +251,14 @@ class ContextService:
         DRAFT/ACTIVE point. No entry/context raises FailedPreconditionError.
         Returned data is isolated; changing it does not write.
         """
-        raise NotImplementedError
+        self._owner.assert_owner()
+        if setup:
+            if self._setup is None:
+                raise FailedPreconditionError(
+                    "No entry is opened", reason_code="no_entry"
+                )
+            return snapshot(self._setup)
+        return self.read_context().document()
 
     def add_component(
         self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
@@ -265,7 +272,45 @@ class ContextService:
         focus options. Setup edits never change existing points or their captures.
         No entry/context, schema, conflict and I/O errors propagate.
         """
-        raise NotImplementedError
+        self._owner.assert_owner()
+        if self._entry is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        if setup:
+            if self._setup is None:
+                raise FailedPreconditionError(
+                    "No setup is opened", reason_code="no_entry"
+                )
+            self._setup.add_component(name, kind=kind, **fields)
+            return
+        parameters = self.read_context()
+        if isinstance(parameters.target, EntryDraft):
+            document = self._entry.updated_component(
+                parameters.document(), name, kind, fields
+            )
+        else:
+            if self._point is None:
+                raise FailedPreconditionError(
+                    "No point is selected", reason_code="no_context"
+                )
+            self._point.add_component(name, kind=kind, **fields)
+            document = snapshot(self._point)
+        self._focus = replace(
+            self._focus,
+            components=tuple(
+                ComponentOption(component_name, component.kind)
+                for component_name, component in document.components.items()
+            ),
+        )
+        self._publish_write(
+            ParameterContext(
+                point=document,
+                library=parameters.library,
+                target=parameters.target,
+                roles=None,
+            ),
+            parameter=True,
+        )
+        self._bus.emit(ComponentFocusChangedPayload(focus=self.get_component_focus()))
 
     def set_setup_parameter(self, path: str, value: YamlValue) -> None:
         """Edit an existing concrete setup field in working units.
@@ -273,7 +318,11 @@ class ContextService:
         Commit through the setup resource, never an existing point. No entry,
         invalid path/schema, conflict and I/O failures propagate; no retry.
         """
-        raise NotImplementedError
+        self._owner.assert_owner()
+        if self._setup is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        with self._setup.edit() as draft:
+            draft.set(path, value)
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         """Capture published point/library on the owner sequence without I/O.
