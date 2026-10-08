@@ -37,12 +37,24 @@ from zcu_tools.resources.entry import RoleSpec
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from ..calibration import Calibrated
-from ..t1 import t1_fluxdep
+from ..t1 import T1Plan, t1_fluxdep
 from .panel import T1PlanPanel, T1TunablesPanel
 from .tunables import T1TunablesForm
 from .tuning_panel import T1TuningPanel
 
 logger = logging.getLogger(__name__)
+
+
+def _calibrated_seed(plan: T1Plan, pi_length_us: float) -> Calibrated:
+    frequency = plan.qub_pulse.freq
+    readout = plan.readout.pulse_cfg
+    if (
+        not isinstance(frequency, float)
+        or not isinstance(readout.freq, float)
+        or not isinstance(readout.gain, float)
+    ):
+        raise ValueError("T1 initial calibration requires scalar module frequency/gain")
+    return Calibrated(frequency, pi_length_us, readout.freq, readout.gain)
 
 
 class T1WorkflowWindow(QWidget):
@@ -166,17 +178,7 @@ class T1WorkflowWindow(QWidget):
         plan = form.to_cfg(env, snapshot)
         if isinstance(plan, FormErrors):
             return plan
-        frequency = plan.qub_pulse.freq
-        readout = plan.readout.pulse_cfg
-        if (
-            not isinstance(frequency, float)
-            or not isinstance(readout.freq, float)
-            or not isinstance(readout.gain, float)
-        ):
-            raise ValueError(
-                "T1 initial calibration requires scalar module frequency/gain"
-            )
-        seed = Calibrated(frequency, form.pi_length_us, readout.freq, readout.gain)
+        seed = _calibrated_seed(plan, form.pi_length_us)
         session = self._state.session_env
         if session.soc is None or not isinstance(session.soccfg, QickConfig):
             raise ValueError("T1 Start requires connected SoC and native QickConfig")
@@ -204,24 +206,29 @@ class T1WorkflowWindow(QWidget):
         if self._plots is not None:
             self._plots.release()
         accepted_input = self.tunables_panel.state.input
-        token = candidate.start(
-            t1_fluxdep,
-            plan=plan,
-            tunables=tunables_form.to_cfg(),
-            paths=RunPaths(metadata_root=roots.result, data_root=roots.database),
-            identity=RunIdentity(
-                run_id,
-                DeviceSnapshot(env.devices),
-                provenance,
-                str(storage.entry_id),
-                storage.point,
-            ),
-        )
+        # Runner progress listeners can synchronously request Stop or close.
+        self.controller = candidate
+        try:
+            token = candidate.start(
+                t1_fluxdep,
+                plan=plan,
+                tunables=tunables_form.to_cfg(),
+                paths=RunPaths(metadata_root=roots.result, data_root=roots.database),
+                identity=RunIdentity(
+                    run_id,
+                    DeviceSnapshot(env.devices),
+                    provenance,
+                    str(storage.entry_id),
+                    storage.point,
+                ),
+            )
+        except Exception:
+            self.controller = None
+            raise
         if self.tuning_panel is not None:
             self.tuning_panel.close()
             self.tuning_panel.deleteLater()
             self.tuning_panel = None
-        self.controller = candidate
         self._plots = plots
         self._run_env = env
         self._accepted_input = accepted_input
