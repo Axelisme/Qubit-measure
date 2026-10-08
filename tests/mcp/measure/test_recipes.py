@@ -688,11 +688,14 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
         release.set()
         controller.join(2)
         assert not controller.is_alive()
-        assert control_replies[0].data["cancel_requested"]
+        # The worker may consume the one-shot intent before the control reply.
+        assert control_replies[0].data["execution"] == execution
+        assert not control_replies[0].is_error
         terminal = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 2})
         )
         assert terminal.data["status"] == "cancelled"
+        assert not terminal.data["cancel_requested"]
         methods = [method for method, _ in client.transport.sent]
         assert forbidden_method not in methods
         assert methods.count("tab.run_start") == 1

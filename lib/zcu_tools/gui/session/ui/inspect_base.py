@@ -1,6 +1,6 @@
-"""InspectDialogBase — app-agnostic context inspector (MetaDict + ModuleLibrary).
+"""InspectDialogBase — app-agnostic context inspector (components + ModuleLibrary).
 
-The session-core half of the inspect dialog: the MetaDict tab (read + edit) and
+The session-core half of the inspect dialog: the component tab (read + edit) and
 the ModuleLibrary tab's *view / rename / delete*. App-specific actions live in
 subclasses; this base exposes template-method hooks for the top toolbar and the
 ModuleLibrary button row so the base never learns app-local concerns.
@@ -23,13 +23,10 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -37,32 +34,28 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     MdChangedPayload,
     MlChangedPayload,
     SessionPayload,
 )
-from zcu_tools.gui.session.services.context import MdValueError
-from zcu_tools.gui.session.ui.value_source_input import (
-    SessionValueSourceInputHost,
-    ValueSourceInputController,
-)
+from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
+    from zcu_tools.resources.context.library import LibrarySnapshot
 
 logger = logging.getLogger(__name__)
 
 _MONO_FONT = QFont("Monospace")
 _MONO_FONT.setStyleHint(QFont.StyleHint.Monospace)
 
-_MAX_VALUE_LEN = 80
-
 
 class InspectDialogBase(QDialog):
-    """Non-modal dialog showing MetaDict and ModuleLibrary contents."""
+    """Non-modal dialog showing components and ModuleLibrary contents."""
 
     def __init__(
         self,
@@ -73,7 +66,6 @@ class InspectDialogBase(QDialog):
         super().__init__(parent)
         self._ctrl = ctrl
         self._bus = bus
-        self._md_value_source_input: ValueSourceInputController | None = None
         self.setWindowTitle("Inspect Context")
         self.resize(700, 500)
         self.setWindowFlags(
@@ -134,53 +126,8 @@ class InspectDialogBase(QDialog):
     # ------------------------------------------------------------------
 
     def _build_md_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(0, 4, 0, 0)
-
-        self._md_table = QTableWidget(0, 2)
-        self._md_table.setHorizontalHeaderLabels(["Key", "Value"])
-        header = self._md_table.horizontalHeader()
-        if header is not None:
-            header.setStretchLastSection(True)
-        self._md_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._md_table.setAlternatingRowColors(True)
-        self._md_table.setSortingEnabled(True)
-        self._md_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._md_table.cellClicked.connect(self._on_md_row_clicked)
-        layout.addWidget(self._md_table)
-
-        # Edit bar
-        edit_row = QHBoxLayout()
-        edit_row.addWidget(QLabel("Key:"))
-        self._edit_key = QLineEdit()
-        self._edit_key.setPlaceholderText("key")
-        self._edit_key.setFixedWidth(120)
-        self._edit_key.textChanged.connect(self._on_edit_key_changed)
-        edit_row.addWidget(self._edit_key)
-        edit_row.addWidget(QLabel("Value:"))
-        self._edit_value = QLineEdit()
-        self._edit_value.setPlaceholderText("value (Python literal or plain string)")
-        self._md_value_source_input = ValueSourceInputController(
-            self._edit_value,
-            SessionValueSourceInputHost(self._ctrl),
-            parent=self._edit_value,
-        )
-        self._md_value_source_input.resolve_failed.connect(  # type: ignore[attr-defined]
-            self._edit_value.setToolTip
-        )
-        edit_row.addWidget(self._edit_value)
-        self._set_btn = QPushButton("Set")
-        self._set_btn.setEnabled(False)
-        self._set_btn.clicked.connect(self._on_set_clicked)
-        edit_row.addWidget(self._set_btn)
-        self._delete_btn = QPushButton("Delete")
-        self._delete_btn.setEnabled(False)
-        self._delete_btn.clicked.connect(self._on_delete_clicked)
-        edit_row.addWidget(self._delete_btn)
-        layout.addLayout(edit_row)
-
-        return w
+        self._component_tree = ComponentTreeWidget(self._ctrl)
+        return self._component_tree
 
     def _build_ml_tab(self) -> QWidget:
         w = QWidget()
@@ -232,41 +179,7 @@ class InspectDialogBase(QDialog):
     # Populate helpers
     # ------------------------------------------------------------------
 
-    def _populate_md(self, md: Any) -> None:
-        self._md_table.setSortingEnabled(False)
-        self._md_table.setRowCount(0)
-
-        if md is None:
-            self._md_table.setSortingEnabled(True)
-            return
-
-        for key, value in md.items():
-            row = self._md_table.rowCount()
-            self._md_table.insertRow(row)
-
-            key_item = QTableWidgetItem(str(key))
-            key_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)  # type: ignore[attr-defined]
-
-            value_str = str(value)
-            display_str = (
-                value_str
-                if len(value_str) <= _MAX_VALUE_LEN
-                else value_str[:_MAX_VALUE_LEN] + "…"
-            )
-            value_item = QTableWidgetItem(display_str)
-            value_item.setFlags(  # type: ignore[arg-type]
-                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable  # type: ignore[attr-defined]
-            )
-            if len(value_str) > _MAX_VALUE_LEN:
-                value_item.setToolTip(value_str)
-
-            self._md_table.setItem(row, 0, key_item)
-            self._md_table.setItem(row, 1, value_item)
-
-        self._md_table.resizeColumnToContents(0)
-        self._md_table.setSortingEnabled(True)
-
-    def _populate_ml(self, ml: Any) -> None:
+    def _populate_ml(self, ml: LibrarySnapshot | None) -> None:
         # Remember current selection to restore after rebuild
         prev_item = self._ml_tree.currentItem()
         prev_data = (
@@ -288,8 +201,8 @@ class InspectDialogBase(QDialog):
 
         restore_item: QTreeWidgetItem | None = None
         for group_label, store in [
-            ("modules", ml.modules),
-            ("waveforms", ml.waveforms),
+            ("modules", ml.module_keys()),
+            ("waveforms", ml.waveform_keys()),
         ]:
             if not store:
                 continue
@@ -297,7 +210,7 @@ class InspectDialogBase(QDialog):
             group_item.setFont(0, bold)
             group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # type: ignore[attr-defined]
             group_item.setExpanded(True)
-            for name in sorted(store.keys()):
+            for name in store:
                 child = QTreeWidgetItem(group_item, [name])
                 child.setData(0, Qt.ItemDataRole.UserRole, (group_label, name))  # type: ignore[attr-defined]
                 if prev_data == (group_label, name):
@@ -309,55 +222,6 @@ class InspectDialogBase(QDialog):
             self._ml_tree.setCurrentItem(restore_item)
         else:
             self._ml_text.setPlainText("")
-
-    def _on_md_row_clicked(self, row: int, _col: int) -> None:
-        key_item = self._md_table.item(row, 0)
-        val_item = self._md_table.item(row, 1)
-        if key_item is None:
-            return
-        self._edit_key.setText(key_item.text())
-        # Use full value from tooltip if truncated, else display text
-        full_val = (
-            val_item.toolTip()
-            if (val_item and val_item.toolTip())
-            else (val_item.text() if val_item else "")
-        )
-        self._edit_value.setText(full_val)
-
-    def _on_edit_key_changed(self, text: str) -> None:
-        has_key = bool(text.strip())
-        self._set_btn.setEnabled(has_key)
-        self._delete_btn.setEnabled(has_key)
-
-    def _on_set_clicked(self) -> None:
-        key = self._edit_key.text().strip()
-        if not key:
-            return
-        try:
-            value = self._ctrl.coerce_md_value(key, self._edit_value.text())
-        except MdValueError as exc:
-            # Keep the user's input so they can correct it; do not clear.
-            QMessageBox.warning(self, "Invalid value", str(exc))
-            return
-        self._ctrl.set_md_attr(key, value)
-        self._populate_md(self._ctrl.get_current_md())
-        # Clear only the value field to signal the submitted value is now live.
-        # The key field is intentionally kept: the user may want to set the same
-        # key again (e.g. during calibration) or use Delete immediately after.
-        self._edit_value.clear()
-        now = datetime.now().strftime("%H:%M:%S")
-        self._status_label.setText(f"Last updated: {now}")
-
-    def _on_delete_clicked(self) -> None:
-        key = self._edit_key.text().strip()
-        if not key:
-            return
-        self._ctrl.del_md_attr(key)
-        self._edit_key.clear()
-        self._edit_value.clear()
-        self._populate_md(self._ctrl.get_current_md())
-        now = datetime.now().strftime("%H:%M:%S")
-        self._status_label.setText(f"Last updated: {now}")
 
     def _on_ml_item_changed(
         self, current: QTreeWidgetItem | None, _previous: Any
@@ -378,14 +242,11 @@ class InspectDialogBase(QDialog):
         self._on_ml_selection_changed(True)
 
         group, name = data
-        ml = self._ctrl.get_current_ml()
-        if ml is None:
-            self._ml_text.setPlainText("")
-            return
-
-        store = ml.modules if group == "modules" else ml.waveforms
-        cfg = store[name]
-        text = yaml.dump(cfg.to_dict(), allow_unicode=True, sort_keys=False)
+        ml = self._ctrl.read_context().library
+        value = ml.entry_value(
+            name, kind="module" if group == "modules" else "waveform"
+        )
+        text = yaml.dump(value, allow_unicode=True, sort_keys=False)
         self._ml_text.setPlainText(text)
 
     def _current_ml_item_data(self) -> tuple[str, str] | None:
@@ -447,9 +308,6 @@ class InspectDialogBase(QDialog):
     # ------------------------------------------------------------------
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
-        if self._md_value_source_input is not None:
-            self._md_value_source_input.detach()
-            self._md_value_source_input = None
         if not self._bus_subs_active:
             logger.debug("_cleanup_bus_subscriptions called but already inactive")
             return
@@ -464,16 +322,14 @@ class InspectDialogBase(QDialog):
         self.refresh()
 
     def refresh(self) -> None:
-        md = self._ctrl.get_current_md()
-        ml = self._ctrl.get_current_ml()
-
-        self._populate_md(md)
-        self._populate_ml(ml)
-
-        if md is None and ml is None:
+        self._component_tree.refresh()
+        try:
+            parameters = self._ctrl.read_context()
+        except FailedPreconditionError:
+            self._populate_ml(None)
             self._status_label.setText("No context")
-        else:
-            now = datetime.now().strftime("%H:%M:%S")
-            self._status_label.setText(f"Last updated: {now}")
-
+            return
+        self._populate_ml(parameters.library)
+        now = datetime.now().strftime("%H:%M:%S")
+        self._status_label.setText(f"Last updated: {now}")
         logger.debug("InspectDialog: refreshed")
