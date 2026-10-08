@@ -24,8 +24,11 @@ class DummyYokoSession:
         self.mode = mode
         self.level = level
         self.level_writes: list[float] = []
+        self.queries: list[str] = []
+        self.writes: list[str] = []
 
     def query(self, cmd: str) -> str:
+        self.queries.append(cmd)
         if cmd == "*IDN?":
             return "yoko-dummy"
         if cmd == ":OUTPut?":
@@ -37,6 +40,7 @@ class DummyYokoSession:
         raise ValueError(f"unsupported query: {cmd}")
 
     def write(self, cmd: str) -> object:
+        self.writes.append(cmd)
         if cmd.startswith(":OUTPut "):
             self.output = cast(Literal["0", "1"], cmd.rsplit(" ", 1)[1])
             return None
@@ -124,6 +128,62 @@ def test_yoko_output_off_nonzero_target_raises_without_level_write() -> None:
         dev.set_voltage(1.0, progress=False)
 
     assert session.level_writes == []
+
+
+@pytest.mark.parametrize("mode", ["voltage", "current"])
+@pytest.mark.parametrize("status", ["on", "off"])
+@pytest.mark.parametrize("level", [-1e-6, 1e-6])
+def test_yoko_output_transition_rejects_nonzero_level_without_write(
+    mode: Literal["voltage", "current"],
+    status: Literal["on", "off"],
+    level: float,
+) -> None:
+    initial_output = "off" if status == "on" else "on"
+    dev, session = _make_yoko(mode=mode, output=initial_output, level=level)
+
+    with pytest.raises(RuntimeError, match="ramp to zero first"):
+        dev.set_output(status)
+
+    assert session.writes == []
+    assert session.output == ("0" if initial_output == "off" else "1")
+    assert session.level == level
+
+
+@pytest.mark.parametrize("mode", ["voltage", "current"])
+@pytest.mark.parametrize("status", ["on", "off"])
+def test_yoko_output_transition_allows_zero_level(
+    mode: Literal["voltage", "current"],
+    status: Literal["on", "off"],
+) -> None:
+    dev, session = _make_yoko(
+        mode=mode, output="off" if status == "on" else "on", level=0.0
+    )
+
+    dev.set_output(status)
+
+    expected_output = "1" if status == "on" else "0"
+    assert session.writes == [f":OUTPut {expected_output}"]
+    assert session.output == expected_output
+    assert session.level == 0.0
+
+
+@pytest.mark.parametrize("mode", ["voltage", "current"])
+@pytest.mark.parametrize("status", ["on", "off"])
+@pytest.mark.parametrize("level", [0.0, 1e-6])
+def test_yoko_unchanged_output_skips_level_check_and_write(
+    mode: Literal["voltage", "current"],
+    status: Literal["on", "off"],
+    level: float,
+) -> None:
+    dev, session = _make_yoko(mode=mode, output=status, level=level)
+    session.queries.clear()
+
+    dev.set_output(status)
+
+    assert session.queries == [":OUTPut?"]
+    assert session.writes == []
+    assert session.output == ("1" if status == "on" else "0")
+    assert session.level == level
 
 
 def test_yoko_voltage_safety_raises_without_level_write() -> None:

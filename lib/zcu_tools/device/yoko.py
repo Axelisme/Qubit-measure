@@ -148,6 +148,18 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
     @device_operation
     def set_output(self, status: Literal["on", "off"]) -> None:
+        """Set output on/off only when the source level is zero.
+
+        An unchanged status returns without checking the level or writing.
+        RuntimeError rejects a transition at a nonzero level without writing;
+        the caller must first ramp to zero. This method never ramps automatically.
+        """
+        if self.get_output() == status:
+            return
+        if self._get_level() != 0.0:
+            raise RuntimeError(
+                "Cannot switch output while level is nonzero. Please ramp to zero first."
+            )
         self.write(f":OUTPut {STATUS_MAP[status]}")
 
     # Turn on output
