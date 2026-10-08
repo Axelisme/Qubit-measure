@@ -28,5 +28,4 @@ def get_proper_model(
 
     if magnitudes.max() - background < 3 * (background - magnitudes.min()):
         return HangerModel()
-    else:
-        return TransmissionModel()
+    return TransmissionModel()
