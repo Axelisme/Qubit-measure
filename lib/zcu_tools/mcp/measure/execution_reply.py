@@ -103,8 +103,6 @@ def _summary_estimates(
 ) -> tuple[SummaryEstimate, ...]:
     if definition is not None:
         return definition.summary_estimates
-    if details.get("fit_quality") is None:
-        return ()
     # Analysis-only carries no recipe identity. Only unambiguous declarations
     # may project present scalar keys; never infer an experiment or read the GUI.
     by_key: dict[str, SummaryEstimate] = {}
@@ -121,124 +119,33 @@ def _summary_estimates(
     return tuple(by_key.values())
 
 
-def _estimate_quality(
-    qualities: dict[str, Any] | None, stage: str, estimate: str
-) -> dict[str, Any] | None:
-    if qualities is None:
-        return None
-    projected = deepcopy(qualities)
-    prefix = f"analysis.{stage}.estimates.{estimate}.quality."
-    for quality in projected.values():
-        for issue in quality["invalid"]:
-            issue["path"] = prefix + issue["path"].removeprefix("summary.fit_quality.")
-    return projected
-
-
 def _pane(
     execution: dict[str, Any] | None,
     definition: RecipeDefinition | None,
-    stage: str,
     recipes: Sequence[RecipeDefinition],
-) -> tuple[dict[str, Any] | None, dict[str, list[str]]]:
+) -> dict[str, Any] | None:
     if execution is None:
-        return None, {}
+        return None
     result = execution.get("result") or {}
-    native = result.get("summary")
-    details = deepcopy(native) if isinstance(native, dict) else {"result": native}
-    warnings = details.pop("warnings", [])
-    qualities = details.get("fit_quality")
+    summary = result.get("summary")
     estimates: dict[str, EstimateReply] = {}
-    paths: dict[str, list[str]] = {}
-    for estimate in _summary_estimates(details, definition, recipes):
-        if estimate.value_key not in details:
-            continue
-        estimates[estimate.name] = {
-            "value": details.pop(estimate.value_key),
-            "stderr": details.pop(estimate.error_key, None)
-            if estimate.error_key
-            else None,
-            "unit": estimate.unit,
-            "quality": _estimate_quality(qualities, stage, estimate.name),
-        }
-        paths[f"summary.{estimate.value_key}"] = [f"estimates.{estimate.name}.value"]
-        if estimate.error_key:
-            paths[f"summary.{estimate.error_key}"] = [
-                f"estimates.{estimate.name}.stderr"
-            ]
-        if qualities is not None:
-            paths.setdefault("summary.fit_quality", []).append(
-                f"estimates.{estimate.name}.quality"
-            )
-    if "summary.fit_quality" in paths:
-        details.pop("fit_quality")
+    if isinstance(summary, dict):
+        for estimate in _summary_estimates(summary, definition, recipes):
+            if estimate.value_key not in summary:
+                continue
+            estimates[estimate.name] = {
+                "value": summary[estimate.value_key],
+                "stderr": summary.get(estimate.error_key)
+                if estimate.error_key
+                else None,
+                "unit": estimate.unit,
+            }
     return {
         "params": result.get("params", execution.get("params")),
         "estimates": estimates,
-        "details": details,
-        "warnings": warnings,
-    }, paths
-
-
-def _pane_invalid(
-    execution: dict[str, Any] | None, paths: dict[str, list[str]], stage: str
-) -> list[dict[str, str]]:
-    result = (execution or {}).get("result") or {}
-    qualities = (result.get("summary") or {}).get("fit_quality") or {}
-    issues = [
-        *result.get("invalid", []),
-        *(issue for quality in qualities.values() for issue in quality["invalid"]),
-    ]
-    projected = []
-    seen = set()
-    for issue in issues:
-        path = issue["path"]
-        destinations = paths.get(path)
-        if destinations is None and path.startswith("summary.fit_quality."):
-            suffix = path.removeprefix("summary.fit_quality")
-            destinations = [
-                prefix + suffix for prefix in paths.get("summary.fit_quality", [])
-            ]
-        for destination in destinations or [path.replace("summary.", "details.", 1)]:
-            qualified = f"analysis.{stage}.{destination}"
-            key = (qualified, issue["reason"])
-            if key not in seen:
-                seen.add(key)
-                projected.append({"path": qualified, "reason": issue["reason"]})
-    return projected
-
-
-def _image_artifacts(execution: dict[str, Any] | None) -> dict[str, Any]:
-    if execution is None:
-        return {}
-    artifacts = {}
-    for image in execution.get("saved_images", []):
-        artifacts[image["figure_name"]] = {
-            "status": "saved",
-            "lifetime": "persistent",
-            "members": {"image": [{"path": image["image_path"], "status": "saved"}]},
-        }
-    for name in execution.get("remaining_images") or []:
-        if name not in artifacts:
-            artifacts[name] = {
-                "status": execution["save_status"]
-                if name == execution.get("unconfirmed_image")
-                else "incomplete"
-                if execution["phase"] == "terminal"
-                else "not_started",
-                "lifetime": "persistent",
-                "members": {"image": []},
-            }
-    return artifacts
-
-
-def _preview_paths(execution: dict[str, Any] | None) -> list[str]:
-    if execution is None:
-        return []
-    paths = (
-        execution.get("figure"),
-        (execution.get("interaction") or {}).get("figure"),
-    )
-    return list(dict.fromkeys(path for path in paths if path is not None))
+        "summary": summary,
+        "invalid": result.get("invalid", []),
+    }
 
 
 def _module_summary(value: Any) -> dict[str, Any] | None:
@@ -376,7 +283,7 @@ def _analysis_envelope(snapshot: dict[str, Any]) -> dict[str, Any]:
         "cancel_requested": snapshot["cancel_requested"],
         "finish_early_requested": False,
         "run_start": {"status": "not_started"},
-        "raw_save": {"status": "not_started", "path": None, "reserved_path": None},
+        "raw_save": None,
         "analysis_stage": stage,
         "analysis": snapshot if stage == "primary" else None,
         "post_analysis": snapshot if stage == "post" else None,
@@ -413,25 +320,46 @@ def project_execution(
         snapshot = _analysis_envelope(snapshot)
     primary_execution = snapshot.get("analysis")
     post_execution = snapshot.get("post_analysis")
-    preview = snapshot.get("preview")
     current_execution = (
         post_execution
         if snapshot.get("analysis_stage") == "post"
         else primary_execution
     )
     interaction = (current_execution or {}).get("interaction")
-    primary, primary_paths = _pane(primary_execution, definition, "primary", recipes)
-    post, post_paths = _pane(post_execution, definition, "post", recipes)
+    primary = _pane(primary_execution, definition, recipes)
+    post = _pane(post_execution, definition, recipes)
     invalid = [
-        *_pane_invalid(primary_execution, primary_paths, "primary"),
-        *_pane_invalid(post_execution, post_paths, "post"),
+        *(primary or {}).get("invalid", []),
+        *(post or {}).get("invalid", []),
     ]
     raw = snapshot["raw_save"]
-    paths = []
-    if raw["path"] is not None:
-        paths.append({"path": raw["path"], "status": "saved"})
-    if raw["reserved_path"] is not None and raw["reserved_path"] != raw["path"]:
-        paths.append({"path": raw["reserved_path"], "status": "reserved"})
+    reports = [
+        raw,
+        (primary_execution or {}).get("save_report"),
+        (post_execution or {}).get("save_report"),
+    ]
+    artifacts: dict[str, Any] = {}
+    run_id = None
+    for report in reports:
+        if report is None:
+            continue
+        run_id = report["run_id"]
+        for section, captures in report["artifacts"].items():
+            artifacts.setdefault(section, {}).update(captures)
+    raw_artifacts = [
+        artifact
+        for section in (raw or {}).get("artifacts", {}).values()
+        for artifact in section.values()
+    ]
+    raw_status = (
+        # A Run handle permits Save, but cannot prove it was dispatched.
+        ("not_started" if snapshot["run_op"] is None else "unknown")
+        if raw is None
+        else "saved"
+        if raw_artifacts
+        and all(artifact["status"] == "Saved" for artifact in raw_artifacts)
+        else "incomplete"
+    )
     outcome = snapshot.get("run_outcome")
     run = _step(
         outcome["status"]
@@ -444,7 +372,7 @@ def project_execution(
     return deepcopy(
         {
             "execution": snapshot["execution"],
-            "run_id": None,
+            "run_id": run_id,
             "recipe": snapshot["recipe"],
             "tab": snapshot["tab"],
             "op": snapshot["op"],
@@ -455,7 +383,7 @@ def project_execution(
             "finish_early_requested": snapshot["finish_early_requested"],
             "steps": {
                 "run": run,
-                "raw_save": _step(raw["status"], raw.get("operation_outcome")),
+                "raw_save": _step(raw_status),
                 "analysis": {
                     "primary": _analysis_step(
                         primary_execution,
@@ -476,28 +404,9 @@ def project_execution(
                 "primary": primary,
                 "post": post,
             },
-            "artifacts": {
-                "raw": {
-                    "data": {
-                        "status": raw["status"],
-                        "lifetime": "persistent",
-                        "members": {"data": paths},
-                    }
-                },
-                "analysis": _image_artifacts(primary_execution),
-                "post_analysis": _image_artifacts(post_execution),
-            },
+            "artifacts": artifacts,
             "writeback": _writeback(snapshot),
-            "previews": {
-                "run": [preview["path"]] if preview is not None else [],
-                "primary": _preview_paths(primary_execution),
-                "post": _preview_paths(post_execution),
-            },
-            "interaction": {
-                key: value for key, value in interaction.items() if key != "figure"
-            }
-            if interaction is not None
-            else None,
+            "interaction": interaction,
             "question_items": snapshot.get("question_items"),
             "question_preview": snapshot.get("question_preview"),
             "missing": snapshot["missing"],

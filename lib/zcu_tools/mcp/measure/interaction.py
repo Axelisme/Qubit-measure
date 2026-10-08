@@ -79,6 +79,7 @@ def interact(
         raise GuiRpcError(
             "Interactive analysis has been replaced", reason="result_superseded"
         )
+    figure = reply.pop("figure", None)
     execution = ctx.session.executions.for_op(reply["handle"])
     if done:
         if execution is None:
@@ -96,19 +97,15 @@ def interact(
         execution.observe_interaction(ToolReply(reply), done=True)
         recipe = ctx.session.recipes.for_op(reply["handle"])
         return recipe.wait(300.0) if recipe is not None else execution.wait(2.0)
-    figure = reply["figure"]
     images: tuple[PngImage, ...] = ()
     delivery_error = False
     try:
         if figure is not None:
             image = validated_png(base64.b64decode(figure["png_b64"], validate=True))
-            path = ctx.session.write_png(image.data)
-            reply["figure"] = str(path)
             images = (image,)
-    except (ValueError, OSError) as exc:
+    except ValueError as exc:
         if execution is None:
             raise
-        reply["figure"] = None
         reply["delivery_error"] = str(exc)
         delivery_error = True
     if execution is not None:
