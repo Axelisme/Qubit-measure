@@ -7,6 +7,7 @@ from numbers import Integral, Real
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import numpy as np
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -21,15 +22,22 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import ScalarSpec
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    ScalarSpec,
+    make_custom_reference_key,
+    make_default_value,
+)
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import md, res_freq_range
+from zcu_lab.v2._support.measure.seeds import custom, path_seed, res_freq_range
+from zcu_lab.v2._support.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_lab.v2._support.measure.writeback_helpers import (
     pulse_readout_module_writeback_items,
 )
@@ -47,9 +55,48 @@ EDelayMode: TypeAlias = Literal["auto", "calibrated", "manual"]
 EDelaySource: TypeAlias = Literal["global", "calibrated", "manual"]
 
 _SAMPLING_MODE_CHOICES: list[SamplingMode] = ["linear", "homophasal"]
-_EDELAY_MD_KEY = "res_edelay_calibration"
+_EDELAY_PARAMETER_PATH = "resonator.ext.edelay"
 _EDELAY_CALIBRATION_FIELDS = frozenset({"edelay", "res_ch", "ro_ch"})
 _DEFAULT_MAX_EDELAY_SEARCH_RADIUS = 100.0
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    """Seed a fresh sweep-owned readout from the tab's captured resonator.
+
+    Keep generator/ADC frequencies locked at zero, gain 0.05 and pulse length
+    1 us. Resolve channels, optional ADC length minus 0.1 us, and trigger delay
+    plus 0.05 us from resonator role paths; absent/null values use 0, 0.9 and
+    0.55 respectively. Source and role errors propagate.
+    """
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    value.with_field("pulse_cfg.freq", 0.0)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.05)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", 0.0)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field(
+        "ro_cfg.ro_length",
+        path_seed(
+            "resonator.ext.default_probe_length",
+            fallback=0.9,
+            expr="resonator.ext.default_probe_length - 0.1",
+        ).resolve(ctx),
+    )
+    value.with_field(
+        "ro_cfg.trig_offset",
+        path_seed(
+            "resonator.ext.time_of_fly",
+            fallback=0.55,
+            expr="resonator.ext.time_of_fly + 0.05",
+        ).resolve(ctx),
+    )
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -103,27 +150,27 @@ class OneToneFreqAdapter(
             "resonator search has placed you near the right frequency."
         ),
         expects_md=(
-            "Reads from the MetaDict: 'r_f' seeds the default sweep centre; "
-            "'rf_w' seeds the default span; 'res_probe_len' seeds the readout "
-            "window; 'res_ch' / 'ro_ch' seed drive / readout channels; "
-            "'timeFly' seeds the trigger offset. Homophasal sampling also "
-            "requires explicit cfg calibration values for 'r_f', 'rf_w', and "
-            "'theta0', supplied directly or as expressions. Analysis optionally "
-            "uses a route-matched 'res_edelay_calibration' value."
+            "Uses the tab's captured resonator parameters: freq and kappa "
+            "seed the sweep; ext.default_probe_length and ext.time_of_fly "
+            "seed readout timing; wiring.ch and wiring.ro_ch seed channels. "
+            "Homophasal sampling requires explicit cfg calibration values "
+            "for r_f, rf_w, and theta0, supplied directly or as expressions. "
+            "Analysis optionally reads the route-matched resonator.ext.edelay "
+            "prior from the same fixed capture."
         ),
         expects_ml=(
-            "Needs a pulse-readout module, and references a ModuleLibrary "
-            "waveform named 'ro_waveform' when one exists (optional)."
+            "Starts with a fresh inline pulse readout and a const waveform. "
+            "It does not adopt a calibrated library module or named waveform."
         ),
         typical_writeback=(
-            "Proposes the fitted resonator frequency, linewidth, and phase "
-            "offset into MetaDict 'r_f' / 'rf_w' / 'theta0'. When the run "
-            "result includes a pulse-readout cfg snapshot, it also proposes "
-            "ModuleLibrary 'readout_rf' from that readout template, changing "
-            "only pulse/readout frequency to the fitted 'r_f' while preserving "
-            "gain, lengths, channels, and trigger timing. A route-qualified "
-            "electrical-delay calibration is proposed only when its absolute "
-            "branch is identifiable or a trusted prior/manual seed was used."
+            "Proposes fitted values to resonator.freq, resonator.kappa, and "
+            "resonator.ext.theta0 through the captured role binding. With a "
+            "pulse-readout run snapshot, it also proposes "
+            "resonator.readout.readout_rf from that template, changing only "
+            "pulse/readout frequency while preserving gain, lengths, channels, "
+            "and trigger timing. The compound resonator.ext.edelay proposal "
+            "keeps delay and route together; it requires an identifiable "
+            "absolute branch or a trusted prior/manual seed."
         ),
         recommended=(
             "Analysis defaults to the hanger-model fit ('hm') with "
@@ -146,11 +193,8 @@ class OneToneFreqAdapter(
         cfg = result.cfg
         if cfg is None:
             return None
-        try:
-            res_ch = cfg.modules.readout.pulse_cfg.ch
-            ro_ch = cfg.modules.readout.ro_cfg.ro_ch
-        except AttributeError:
-            return None
+        res_ch = cfg.modules.readout.pulse_cfg.ch
+        ro_ch = cfg.modules.readout.ro_cfg.ro_ch
         if (
             isinstance(res_ch, bool)
             or not isinstance(res_ch, Integral)
@@ -175,13 +219,16 @@ class OneToneFreqAdapter(
 
     @classmethod
     def _route_matched_prior(
-        cls, md_obj: object, route: tuple[int, int] | None
+        cls, parameters: ParameterContext | None, route: tuple[int, int] | None
     ) -> float | None:
-        if route is None:
+        if parameters is None or route is None:
             return None
-        get = getattr(md_obj, "get")
-        raw = get(_EDELAY_MD_KEY)
-        if not isinstance(raw, Mapping) or set(raw) != _EDELAY_CALIBRATION_FIELDS:
+        lookup = parameters.lookup(_EDELAY_PARAMETER_PATH)
+        raw = lookup.value
+        if not lookup.present or raw is None or not isinstance(raw, Mapping):
+            return None
+        fields: frozenset[str] = frozenset(raw)
+        if fields != _EDELAY_CALIBRATION_FIELDS:
             return None
         prior = cls._finite_real(raw["edelay"])
         prior_res_ch = cls._channel(raw["res_ch"])
@@ -196,7 +243,7 @@ class OneToneFreqAdapter(
     def _resolve_edelay_seed(
         cls,
         params: OneToneFreqAnalyzeParams,
-        md_obj: object,
+        parameters: ParameterContext | None,
         route: tuple[int, int] | None,
     ) -> tuple[float | None, EDelaySource]:
         if params.edelay_mode == "manual":
@@ -207,12 +254,12 @@ class OneToneFreqAdapter(
                 raise ValueError("manual_edelay must be finite")
             return seed, "manual"
 
-        prior = cls._route_matched_prior(md_obj, route)
+        prior = cls._route_matched_prior(parameters, route)
         if params.edelay_mode == "calibrated":
             if prior is None:
                 raise ValueError(
                     "calibrated edelay mode requires a finite route-matched "
-                    "res_edelay_calibration prior"
+                    "resonator.ext.edelay prior"
                 )
             return prior, "calibrated"
         if params.edelay_mode == "auto":
@@ -229,24 +276,25 @@ class OneToneFreqAdapter(
         steps = np.abs(np.diff(fitting_freqs))
         return not bool(np.allclose(steps, np.median(steps), rtol=1e-8, atol=0.0))
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Capture the chosen qubit and its resonator for one-tone calibration."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
             # No reset module — one-tone spectroscopy runs without a qubit
             # reset. The sweep owns both readout frequency leaves.
-            .readout(
-                pulse_only=True,
-                init=ModuleInit.INLINE,
-                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
-                overrides={
-                    "pulse_cfg.gain": 0.05,
-                    "ro_cfg.ro_length": md(
-                        "res_probe_len",
-                        expr="res_probe_len - 0.1",
-                        fallback=0.9,
-                    ),
-                },
+            .field(
+                "modules.readout",
+                spec=make_pulse_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0),
+                default=custom(_blank_readout, description="inline readout"),
             )
             .relax_delay(1.0)
             .sweep(
@@ -280,7 +328,7 @@ class OneToneFreqAdapter(
             .build()
         )
 
-    def _sampling_mode(self, raw_cfg: dict[str, object]) -> SamplingMode:
+    def _sampling_mode(self, raw_cfg: Mapping[str, ExperimentCfgValue]) -> SamplingMode:
         value = raw_cfg.get("sampling_mode", "linear")
         if value == "linear":
             return "linear"
@@ -291,19 +339,23 @@ class OneToneFreqAdapter(
             f"{', '.join(_SAMPLING_MODE_CHOICES)}, got {value!r}"
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> FreqCfg:
         cfg_raw = dict(raw_cfg)
         if self._sampling_mode(cfg_raw) == "homophasal":
             # Validate required fit values before the assembler can query devices.
-            cfg_raw["homophasal"] = HomophasalSamplingCfg.model_validate(
-                cfg_raw.get("homophasal")
-            )
+            HomophasalSamplingCfg.model_validate(cfg_raw.get("homophasal"))
         else:
             cfg_raw.pop("homophasal", None)
         return super().build_exp_cfg(cfg_raw, req)
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> OneToneFreqRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FreqExp().run(cfg, context=context)
@@ -317,7 +369,9 @@ class OneToneFreqAdapter(
     ) -> OneToneFreqAnalyzeResult:
         params = req.analyze_params
         route = self._readout_route(req.run_result)
-        edelay_seed, edelay_source = self._resolve_edelay_seed(params, req.md, route)
+        edelay_seed, edelay_source = self._resolve_edelay_seed(
+            params, req.parameters, route
+        )
         max_search_radius: float | None = None
         if edelay_seed is None:
             max_search_radius = self._finite_real(params.max_edelay_search_radius)
@@ -367,17 +421,17 @@ class OneToneFreqAdapter(
             )
         items: list[WritebackItem] = [
             MetaDictWriteback(
-                target_name="r_f",
+                target_name="resonator.freq",
                 description="Resonator frequency (MHz)",
                 proposed_value=result.freq,
             ),
             MetaDictWriteback(
-                target_name="rf_w",
+                target_name="resonator.kappa",
                 description="Resonator linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,
             ),
             MetaDictWriteback(
-                target_name="theta0",
+                target_name="resonator.ext.theta0",
                 description="Resonator circle phase offset (rad)",
                 proposed_value=float(theta0),
             ),
@@ -393,7 +447,7 @@ class OneToneFreqAdapter(
             res_ch, ro_ch = route
             items.append(
                 MetaDictWriteback(
-                    target_name=_EDELAY_MD_KEY,
+                    target_name=_EDELAY_PARAMETER_PATH,
                     description="Route-qualified resonator electrical-delay calibration",
                     proposed_value={
                         "edelay": edelay,
@@ -405,7 +459,7 @@ class OneToneFreqAdapter(
         items.extend(
             pulse_readout_module_writeback_items(
                 req.run_result.cfg,
-                target="readout_rf",
+                target="resonator.readout.readout_rf",
                 desc="Readout at fitted resonator frequency",
                 field_updates=(
                     ("pulse_cfg.freq", float(result.freq)),

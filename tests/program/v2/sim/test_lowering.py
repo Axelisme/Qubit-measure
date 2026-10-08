@@ -28,6 +28,7 @@ test asserts exact durations without depending on a real soccfg.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -291,29 +292,14 @@ class TestShapedPulseSegments:
         # Total duration is preserved.
         assert sum(s.t for s in lp.segments) == pytest.approx(0.6)
 
-    def test_arb_waveform_segments_use_asset_duration(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_arb_waveform_segments_use_asset_duration(self, tmp_path: Path) -> None:
         time = np.array([0.0, 1.0, 2.0], dtype=np.float64)
         idata = np.array([0.0, 0.5, 1.0], dtype=np.float64)
-
-        class Info:
-            duration = 2.0
-
-        def fake_get(name: str):
-            assert name == "arb_drive"
-            return idata, None, time
-
-        monkeypatch.setattr(
-            "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.inspect",
-            lambda name: Info(),
-        )
-        monkeypatch.setattr(
-            "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get", fake_get
-        )
+        path = tmp_path / "arb_drive.npz"
+        np.savez(path, idata=idata, qdata=np.zeros_like(idata), time=time)
 
         cfg = PulseCfg(
-            waveform=ArbWaveformCfg(data="arb_drive"),
+            waveform=ArbWaveformCfg(data="arb_drive", path=path.as_posix()),
             ch=0,
             nqz=1,
             freq=4000.0,

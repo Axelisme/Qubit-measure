@@ -15,6 +15,9 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -40,6 +43,7 @@ from zcu_tools.program.v2.sim.readout import (
     s21,
 )
 from zcu_tools.program.v2.sim.waveforms import envelope_at
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from zcu_tools.simulate.fluxonium.dispersive import DressedLabelingError
 
 from zcu_tools.program.v2.sim import SimParams  # isort: skip
@@ -511,6 +515,13 @@ def _flat_top_readout_cfg(length: float = 1.0, ramp: float = 0.2) -> PulseCfg:
     )
 
 
+@pytest.fixture(scope="module", autouse=True)
+def repository_state_guard() -> Iterator[None]:
+    before = vars(ArbWaveformDatabase)["_database_path"]
+    yield
+    assert vars(ArbWaveformDatabase)["_database_path"] == before
+
+
 class TestEnvelopeAt:
     """envelope_at: peak-normalized shape, zero outside the pulse window."""
 
@@ -549,22 +560,17 @@ class TestEnvelopeAt:
         assert abs(amp_fall - amp_rise) < 1e-9
 
     def test_arb_waveform_samples_iq_magnitude_on_reference_axis(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
-        def fake_get(name: str):
-            assert name == "arb_readout"
-            return (
-                np.array([0.0, 0.3, 0.6], dtype=np.float64),
-                np.array([0.0, 0.4, 0.8], dtype=np.float64),
-                np.array([0.0, 0.5, 1.0], dtype=np.float64),
-            )
-
-        monkeypatch.setattr(
-            "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get", fake_get
+        path = tmp_path / "arb_readout.npz"
+        np.savez(
+            path,
+            idata=np.array([0.0, 0.3, 0.6]),
+            qdata=np.array([0.0, 0.4, 0.8]),
+            time=np.array([0.0, 0.5, 1.0]),
         )
-
         cfg = PulseCfg(
-            waveform=ArbWaveformCfg(data="arb_readout"),
+            waveform=ArbWaveformCfg(data="arb_readout", path=path.as_posix()),
             ch=0,
             nqz=1,
             freq=7200.0,
@@ -573,6 +579,26 @@ class TestEnvelopeAt:
         t = np.array([-0.1, 0.0, 0.5, 0.75, 1.0], dtype=np.float64)
         amp = envelope_at(cfg, t, length=1.0)
 
+        np.testing.assert_allclose(amp, [0.0, 0.0, 0.5, 0.75, 0.0])
+
+    def test_arb_envelope_uses_native_path_after_global_db_switch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
+        path = tmp_path / "shape.npz"
+        np.savez(path, time=[0, 0.5, 1], idata=[0, 0.3, 0.6], qdata=[0, 0.4, 0.8])
+        ArbWaveformDatabase.init(tmp_path / "other")
+        ArbWaveformDatabase.save(
+            "shape", idata=np.array([0.9, 0.9]), time=np.array([0.0, 9.0])
+        )
+        cfg = PulseCfg(
+            waveform=ArbWaveformCfg(data="shape", path=path.as_posix()),
+            ch=0,
+            nqz=1,
+            freq=7200.0,
+            gain=1.0,
+        )
+        amp = envelope_at(cfg, np.array([-0.1, 0.0, 0.5, 0.75, 1.0]), length=1.0)
         np.testing.assert_allclose(amp, [0.0, 0.0, 0.5, 0.75, 0.0])
 
     def test_unknown_window_is_zero_before_start(self) -> None:

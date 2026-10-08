@@ -109,6 +109,10 @@ def _source(*, calibrated: bool, null_calibrations: bool = False) -> ParameterCo
             "freq": None if null_calibrations else 6000.0 + 100 * index,
             "kappa": 20.0 * index,
             "wiring": {"ch": index, "ro_ch": index},
+            "ext": {
+                "default_probe_length": None if null_calibrations else 2.0 * index,
+                "time_of_fly": None if null_calibrations else 0.2 * index,
+            },
         }
         libraries[qubit] = {"pulses": {"cal": pulse}}
         libraries[resonator] = {
@@ -176,39 +180,51 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
                 and discriminator.value == "pulse"
             ):
                 pulses.append((key, spec))
-    assert len(pulses) == 1
-    pulse_key, pulse_spec = pulses[0]
-    inline_probe = isinstance(pulse_spec.allowed[0].fields["freq"], LiteralSpec)
+    readout_spec = module_spec.fields["readout"]
+    assert isinstance(readout_spec, ReferenceSpec)
+    readout_pulse_spec = readout_spec.allowed[0].fields.get("pulse_cfg")
+    inline_readout = (
+        not pulses
+        and isinstance(readout_pulse_spec, CfgSectionSpec)
+        and isinstance(readout_pulse_spec.fields["freq"], LiteralSpec)
+    )
     for capture, cfg, raw in [
         (first, schema, raw_first),
         (second, second_schema, raw_second),
     ]:
-        pulse = read_value_path(cfg.value, f"modules.{pulse_key}")
         readout = read_value_path(cfg.value, "modules.readout")
-        assert isinstance(pulse, ReferenceValue)
         assert isinstance(readout, ReferenceValue)
-        assert is_custom_reference_key(pulse.chosen_key) == (
-            not calibrated or inline_probe
+        assert is_custom_reference_key(readout.chosen_key) == (
+            not calibrated or inline_readout
         )
-        assert is_custom_reference_key(readout.chosen_key) == (not calibrated)
-        for ref, slot in [(pulse, "x180"), (readout, "readout")]:
+        references = [(readout, "readout")]
+        modules = raw["modules"]
+        assert isinstance(modules, dict)
+        for pulse_key, pulse_spec in pulses:
+            pulse = read_value_path(cfg.value, f"modules.{pulse_key}")
+            assert isinstance(pulse, ReferenceValue)
+            inline_probe = isinstance(pulse_spec.allowed[0].fields["freq"], LiteralSpec)
+            assert is_custom_reference_key(pulse.chosen_key) == (
+                not calibrated or inline_probe
+            )
+            references.append((pulse, "x180"))
+            lowered_pulse = modules[pulse_key]
+            assert isinstance(lowered_pulse, dict)
+            assert lowered_pulse["ch"] == capture.lookup("qubit.wiring.L01.ch").value
+        for ref, slot in references:
             if not is_custom_reference_key(ref.chosen_key):
                 assert ref.chosen_key == f"qubit.module.{slot}"
                 assert (
                     capture.library_key(ref.chosen_key)
                     == capture.lookup(f"qubit.module.{slot}").value
                 )
-        modules = raw["modules"]
-        assert isinstance(modules, dict)
-        lowered_pulse, lowered_readout = modules[pulse_key], modules["readout"]
-        assert isinstance(lowered_pulse, dict)
+        lowered_readout = modules["readout"]
         assert isinstance(lowered_readout, dict)
         readout_pulse, readout_ro = (
             lowered_readout["pulse_cfg"],
             lowered_readout["ro_cfg"],
         )
         assert isinstance(readout_pulse, dict) and isinstance(readout_ro, dict)
-        assert lowered_pulse["ch"] == capture.lookup("qubit.wiring.L01.ch").value
         assert readout_pulse["ch"] == capture.lookup("resonator.wiring.ch").value
         assert readout_ro["ro_ch"] == capture.lookup("resonator.wiring.ro_ch").value
     # Later target selection does not alter the original source or the template.
@@ -217,6 +233,50 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
     assert (
         definition.instantiate(SessionEnv(parameters=first, soc=None, soccfg=None))
         == schema
+    )
+
+
+@pytest.mark.parametrize("name", _role_adapters())
+@pytest.mark.parametrize("null_calibrations", [False, True])
+def test_registered_readout_frequency_sweep_uses_captured_probe_timing(
+    name: str, null_calibrations: bool
+) -> None:
+    adapter = _registry().create(name)
+    assert isinstance(adapter, BaseAdapter)
+    modules_spec = type(adapter).cfg_definition().spec.fields["modules"]
+    assert isinstance(modules_spec, CfgSectionSpec)
+    for spec in modules_spec.fields.values():
+        if isinstance(spec, ReferenceSpec):
+            discriminator = spec.allowed[0].fields.get("type")
+            if (
+                isinstance(discriminator, LiteralSpec)
+                and discriminator.value == "pulse"
+            ):
+                pytest.skip("adapter also calibrates a qubit-drive pulse")
+    readout_spec = modules_spec.fields["readout"]
+    assert isinstance(readout_spec, ReferenceSpec)
+    pulse_spec = readout_spec.allowed[0].fields.get("pulse_cfg")
+    if not isinstance(pulse_spec, CfgSectionSpec) or not isinstance(
+        pulse_spec.fields["freq"], LiteralSpec
+    ):
+        pytest.skip("adapter does not own an inline readout-frequency sweep")
+    capture = _source(calibrated=True, null_calibrations=null_calibrations).bind_roles(
+        adapter.parameter_roles(), focus="Q2", explicit={}
+    )
+    schema = adapter.make_default_cfg(
+        SessionEnv(parameters=capture, soc=None, soccfg=None)
+    )
+    raw = schema_to_raw_dict(schema, capture)
+    modules = raw["modules"]
+    assert isinstance(modules, dict)
+    readout = modules["readout"]
+    assert isinstance(readout, dict)
+    pulse, acquisition = readout["pulse_cfg"], readout["ro_cfg"]
+    assert isinstance(pulse, dict) and isinstance(acquisition, dict)
+    assert pulse["freq"] == acquisition["ro_freq"] == 0.0
+    assert acquisition["ro_length"] == pytest.approx(0.9 if null_calibrations else 3.9)
+    assert acquisition["trig_offset"] == pytest.approx(
+        0.55 if null_calibrations else 0.45
     )
 
 

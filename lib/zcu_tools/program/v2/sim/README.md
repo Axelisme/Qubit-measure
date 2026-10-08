@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-10-08 — hardware-clock time quantization and worker GIL yielding
+**Last updated:** 2026-10-09 — native arb paths, hardware-clock quantization and worker GIL yielding
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -171,8 +171,10 @@ Each soc keeps its own copied parameters and source binding.
   lowering cannot represent faithfully.
 - `waveforms.py` — shared peak-normalized envelope sampling for both lowering and
   decimated readout. `ArbWaveform` uses the asset's stored reference time axis and
-  asset duration (`time[-1]`) as its playback length; config no longer supplies a
-  separate arb waveform length.
+  asset duration (`time[-1]`) as its playback length. Native cfg supplies a
+  required absolute path and logical key. The sampler decodes path bytes through
+  core.waveform_format without global repository lookup or formula interpretation.
+  Config does not supply a separate arb waveform length.
 - `readout.py` — dispersive readout: physical quantities -> complex IQ.
   `resonator_freqs` is the eigensolve (flux -> `rf_g` / `rf_e`); `s21` is the pure,
   eigh-free per-state hanger response (the engine calls it twice per point for the
