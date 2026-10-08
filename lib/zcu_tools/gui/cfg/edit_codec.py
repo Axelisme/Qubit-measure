@@ -158,14 +158,14 @@ def _require_finite(value: float) -> None:
         raise CfgInputError(CfgInputReason.INVALID_VALUE, "input must be finite")
 
 
-def encode_input(value: CfgInput) -> object:
-    """Encode input intent only; resolved values and diagnostics are not inputs."""
+def encode_input(value: object) -> object:
+    """Encode primitive, container or DirectValue/EvalValue input intent.
+
+    Carrier metadata is ignored. Unsupported objects, malformed reserved tags
+    and nonfinite numbers raise CfgInputError; raw text stays editable input.
+    """
     if isinstance(value, DirectValue):
-        return encode_input(
-            decode_input(
-                {"__text": value.raw} if value.raw is not None else value.value
-            )
-        )
+        value = {"__text": value.raw} if value.raw is not None else value.value
     if isinstance(value, EvalValue):
         return {"__expr": value.expr}
     if isinstance(value, complex):
