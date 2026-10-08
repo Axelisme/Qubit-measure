@@ -4,14 +4,17 @@ from collections.abc import Iterator
 
 import pytest
 from qtpy.QtWidgets import QApplication, QLineEdit
-from zcu_tools.gui.form import FormEnv, FormErrors
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
-from zcu_lab.workflows.gui.panel import T1TunablesPanel
+from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan
+from zcu_lab.workflows.gui.panel import T1PlanPanel, T1TunablesPanel
+from zcu_lab.workflows.gui.plan import T1PlanForm
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
+from zcu_lab.workflows.t1 import T1Plan
 
 
 @pytest.fixture(scope="session")
@@ -101,3 +104,37 @@ def test_t1_panel_exposes_generic_local_parse_errors_and_host_reset(
     assert isinstance(field, QLineEdit)
     assert result.guess_us == 40.0
     assert float(field.text()) == result.sweep_factor
+
+
+def test_plan_panel_previews_native_plan_and_blocks_incomplete_text(
+    qapp: QApplication,
+    inputs: Inputs,
+) -> None:
+    env = FormEnv()
+    template = make_plan(inputs)
+    panel = T1PlanPanel(env)
+    try:
+        missing = panel.preview(template.snapshot)
+        assert isinstance(missing, FormErrors)
+        data = FormInput.from_json(T1PlanForm, template.model_dump_json()).data
+        data.pop("snapshot")
+        data["fluxes"] = {"kind": "list", "values": [1.0, 1.1]}
+        panel.state.reset(FormInput(T1PlanForm, data))
+        panel.editor.refresh(env)
+        preview = panel.preview(template.snapshot)
+        assert isinstance(preview, T1Plan)
+        assert preview == template
+        field = panel.editor.findChild(QLineEdit, "form.input.points")
+        assert isinstance(field, QLineEdit)
+        field.setText("-")
+        errors = panel.preview(template.snapshot)
+        assert isinstance(errors, FormErrors)
+        assert ("points",) in errors.messages
+        field.setText("31")
+        repaired = panel.preview(template.snapshot)
+        assert isinstance(repaired, T1Plan)
+        assert repaired.points == 31
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
