@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import cast
 from unittest.mock import MagicMock
 
@@ -35,9 +36,8 @@ from zcu_tools.gui.cfg.resource import (
     CfgStaleError,
 )
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-from tests.gui.app.measure._cfg_fakes import make_cfg
+from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
 
 
 def _make_state(
@@ -50,11 +50,13 @@ def _make_state(
     analyze_result: object = object(),
     load_data: bool = True,
 ) -> tuple[State, str]:
-    md = MetaDict(None)
-    ml = ModuleLibrary(None)
     soc = MagicMock() if soc_attached else None
     soccfg = MagicMock() if soc_attached else None
-    state = State(SessionEnv(md=md, ml=ml, soc=soc, soccfg=soccfg, readiness=readiness))
+    state = State(
+        SessionEnv(
+            parameters=parameter_capture(), soc=soc, soccfg=soccfg, readiness=readiness
+        )
+    )
     tab_id = "tab-1"
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(
@@ -70,7 +72,10 @@ def _make_state(
         schema = CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
     tab = Session(
-        adapter_name="any", adapter=adapter, cfg=make_cfg(schema, state=state)
+        adapter_name="any",
+        adapter=adapter,
+        cfg=make_cfg(schema, state=state),
+        parameters=state.session_env.parameters,
     )
     tab.run.result = run_result
     tab.analysis.result = analyze_result
@@ -93,6 +98,9 @@ def test_run_permit_issued_for_active_valid_cfg():
     assert permit.tab_id == tab_id
     assert permit.accepted_cfg.values == {}
     assert permit.request.soc is state.session_env.soc
+    parameters = state.get_tab(tab_id).parameters
+    assert parameters is not None
+    assert permit.request.cfg_context == parameters.library.validation_context()
     assert permit.adapter is state.get_tab(tab_id).adapter
     adapter = cast(MagicMock, permit.adapter)
     adapter.validate_run_request.assert_called_once_with(permit.request, {})
@@ -100,11 +108,13 @@ def test_run_permit_issued_for_active_valid_cfg():
 
 def test_run_permit_freezes_published_expression_and_provenance() -> None:
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    state.session_env.md.update(gain=0.25)
+    state.set_context(
+        replace(state.session_env, parameters=parameter_capture(gain=0.25))
+    )
     cfg = make_cfg(
         CfgSchema(
             CfgSectionSpec(fields={"gain": ScalarSpec("Gain", float)}),
-            CfgSectionValue(fields={"gain": EvalValue("gain")}),
+            CfgSectionValue(fields={"gain": EvalValue("general.ext.gain")}),
         ),
         state=state,
     )
@@ -113,14 +123,16 @@ def test_run_permit_freezes_published_expression_and_provenance() -> None:
     permit = GuardService(state).acquire_run_permit(
         tab_id, expected_revision=before.ref.revision
     )
-    state.session_env.md.update(gain=0.75)
+    state.set_context(
+        replace(state.session_env, parameters=parameter_capture(gain=0.75))
+    )
     state.version.bump("context")
     cfg.refresh(before.ref.revision)
 
     assert permit.accepted_cfg.values == {"gain": 0.25}
     assert permit.accepted_cfg.ref == before.ref
     assert permit.accepted_cfg.source_basis == before.source_basis
-    assert cfg.accept(cfg.observe().ref.revision).values == {"gain": 0.75}
+    assert cfg.accept(cfg.observe().ref.revision).values == {"gain": 0.25}
 
 
 def test_run_permit_rejects_invalid_expression_without_preflight() -> None:
@@ -128,7 +140,7 @@ def test_run_permit_rejects_invalid_expression_without_preflight() -> None:
     cfg = make_cfg(
         CfgSchema(
             CfgSectionSpec(fields={"gain": ScalarSpec("Gain", float)}),
-            CfgSectionValue(fields={"gain": EvalValue("missing_gain")}),
+            CfgSectionValue(fields={"gain": EvalValue("general.ext.missing_gain")}),
         ),
         state=state,
     )
