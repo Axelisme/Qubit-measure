@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
-    from zcu_tools.format_version import YamlValue
+    from zcu_tools.format_version import YamlMap, YamlValue
     from zcu_tools.gui.session.context_types import (
         ComponentFocus,
         ContextSourceBinding,
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ParameterContext, RoleBinding
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
     from zcu_tools.resources.entry.provenance import Provenance
+    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
 
 
 class ContextControlPort(Protocol):
@@ -32,6 +33,37 @@ class ContextControlPort(Protocol):
     the binding; a created-but-unbound point raises PointBindingError. Focus
     commands do not edit consumer roles or bump parameter revisions.
     """
+
+    def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
+        """Return the cached setup template or current point document without I/O.
+
+        setup=True reads the opened entry template; False reads the published
+        DRAFT/ACTIVE point. No entry/context raises FailedPreconditionError.
+        Returned data is isolated; changing it does not write.
+        """
+        ...
+
+    def add_component(
+        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+    ) -> None:
+        """Add one component with working-unit fields using its registered kind.
+
+        setup=True edits only the opened entry template. Otherwise edit the
+        current DRAFT in memory or ACTIVE point in one resource transaction.
+        Invalid names/kinds/required fields/duplicates leave content unchanged.
+        Success on the current point publishes one parameter change and updates
+        focus options. Setup edits never change existing points or their captures.
+        No entry/context, schema, conflict and I/O errors propagate.
+        """
+        ...
+
+    def set_setup_parameter(self, path: str, value: YamlValue) -> None:
+        """Edit an existing concrete setup field in working units.
+
+        Commit through the setup resource, never an existing point. No entry,
+        invalid path/schema, conflict and I/O failures propagate; no retry.
+        """
+        ...
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         """Capture published values; EMPTY/source/role errors propagate."""
@@ -121,6 +153,20 @@ class ContextControlFacet(ContextControlPort):
     def __init__(self, *, context: ContextService) -> None:
         """Use the session's owning ContextService; construction performs no I/O."""
         self._context = context
+
+    def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
+        """Read the owner's isolated template/current point without I/O."""
+        return self._context.inspect_document(setup=setup)
+
+    def add_component(
+        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+    ) -> None:
+        """Add through the owning service; see ContextControlPort."""
+        self._context.add_component(name, kind, fields, setup=setup)
+
+    def set_setup_parameter(self, path: str, value: YamlValue) -> None:
+        """Edit only the owning setup template."""
+        self._context.set_setup_parameter(path, value)
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         return self._context.read_context(roles=roles)

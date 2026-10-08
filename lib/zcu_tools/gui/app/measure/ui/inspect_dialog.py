@@ -36,6 +36,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.session.services.context import MdValueError
+from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 from zcu_tools.gui.session.ui.value_source_input import (
     SessionValueSourceInputHost,
@@ -325,50 +326,9 @@ class InspectDialog(InspectDialogBase):
         self.finished.connect(self._on_finished)
 
     def _build_md_tab(self) -> QWidget:
-        """Build measure's dense inline-editable Parameters property grid.
-
-        The shared base keeps its generic presentation and read-only hooks
-        unchanged; measure opts into this composition.
-        """
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 4, 0, 0)
-
-        self._md_table = _MdTable(self._on_md_delete_requested)
-        self._md_table.setHorizontalHeaderLabels(["Key", "Value"])
-        header = self._md_table.horizontalHeader()
-        if header is not None:
-            header.setStretchLastSection(True)
-        self._md_table.setEditTriggers(
-            QTableWidget.EditTrigger.DoubleClicked
-            | QTableWidget.EditTrigger.EditKeyPressed
-        )
-        self._md_table.setAlternatingRowColors(True)
-        self._md_table.setSortingEnabled(True)
-        self._md_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._md_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._md_table.setWordWrap(False)
-        self._md_table.cellClicked.connect(self._on_md_row_clicked)
-        self._md_table.itemChanged.connect(self._on_md_item_changed)
-        self._md_table.itemSelectionChanged.connect(self._on_md_selection_changed)
-
-        delegate = self._md_table.itemDelegate()
-        if delegate is not None:
-            delegate.closeEditor.connect(self._on_md_editor_closed)  # type: ignore[attr-defined]
-        layout.addWidget(self._md_table)
-
-        action_row = QHBoxLayout()
-        action_row.addStretch()
-        self._new_btn = QPushButton("New")
-        self._delete_btn = QPushButton("Delete")
-        self._delete_btn.setEnabled(False)
-        action_row.addWidget(self._new_btn)
-        action_row.addWidget(self._delete_btn)
-        layout.addLayout(action_row)
-
-        self._new_btn.clicked.connect(self._on_new_md_clicked)
-        self._delete_btn.clicked.connect(self._on_md_delete_clicked)
-        return widget
+        """Use the session component-tree editor for measure parameters."""
+        self._component_tree = ComponentTreeWidget(self._ctrl)
+        return self._component_tree
 
     def _populate_md(self, md: Any) -> None:
         """Populate the measure grid while retaining the selected key."""

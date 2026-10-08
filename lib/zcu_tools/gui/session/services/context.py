@@ -51,11 +51,12 @@ from zcu_tools.resources.entry.schema import (
     PARAMETER_VERSION,
     PointDocument,
     PointGeneral,
+    SetupDocument,
 )
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformAssetInfo, WaveformSpec
-    from zcu_tools.format_version import YamlValue
+    from zcu_tools.format_version import YamlMap, YamlValue
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_types import (
         ContextTarget,
@@ -242,6 +243,37 @@ class ContextService:
         self._library = None
         self._points = ()
         self._publish(None, (), ContextReadiness.EMPTY, active_label="")
+
+    def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
+        """Return the cached setup template or current point document without I/O.
+
+        setup=True reads the opened entry template; False reads the published
+        DRAFT/ACTIVE point. No entry/context raises FailedPreconditionError.
+        Returned data is isolated; changing it does not write.
+        """
+        raise NotImplementedError
+
+    def add_component(
+        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+    ) -> None:
+        """Add one component with working-unit fields using its registered kind.
+
+        setup=True edits only the opened entry template. Otherwise edit the
+        current DRAFT in memory or ACTIVE point in one resource transaction.
+        Invalid names/kinds/required fields/duplicates leave content unchanged.
+        Success on the current point publishes one parameter change and updates
+        focus options. Setup edits never change existing points or their captures.
+        No entry/context, schema, conflict and I/O errors propagate.
+        """
+        raise NotImplementedError
+
+    def set_setup_parameter(self, path: str, value: YamlValue) -> None:
+        """Edit an existing concrete setup field in working units.
+
+        Commit through the setup resource, never an existing point. No entry,
+        invalid path/schema, conflict and I/O failures propagate; no retry.
+        """
+        raise NotImplementedError
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         """Capture published point/library on the owner sequence without I/O.
