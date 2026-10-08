@@ -5,18 +5,9 @@ from collections.abc import Mapping
 import numpy as np
 from pydantic import Field, JsonValue
 from zcu_tools.cfg_model import (
-    ArbWaveformCfg,
-    FlatTopWaveformCfg,
     ModuleCfgFactory,
     PulseReadoutSpec,
     PulseSpec,
-    WaveformCfg,
-)
-from zcu_tools.cfg_model import (
-    PulseCfg as MaterializedPulseCfg,
-)
-from zcu_tools.cfg_model import (
-    PulseReadoutCfg as MaterializedPulseReadoutCfg,
 )
 from zcu_tools.datafile.native_models import RunSnapshot
 from zcu_tools.gui.form import (
@@ -29,18 +20,10 @@ from zcu_tools.gui.form import (
     ModuleRef,
     RangeInput,
 )
+from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
 from zcu_lab.workflows.t1 import T1Plan
-
-
-def _reject_arb_assets(waveform: WaveformCfg) -> None:
-    """Reject assets before native conversion loses the captured binding."""
-    if isinstance(waveform, ArbWaveformCfg) or (
-        isinstance(waveform, FlatTopWaveformCfg)
-        and isinstance(waveform.raise_waveform, ArbWaveformCfg)
-    ):
-        raise ValueError("Arb assets are currently unsupported by T1 calibration")
 
 
 class T1PlanForm(FormModel):
@@ -88,9 +71,12 @@ class T1PlanForm(FormModel):
         env supplies the captured library and validation/assets context; pure
         inline modules can omit the library. snapshot is fixed historical
         entry/point/roles supplied by the host. Return consuming-field errors
-        for missing refs, wrong families or materialization failure. Arb assets
-        are currently unsupported, including flat_top arb ramps; return the
-        consuming module field error rather than using global asset scope. Keep
+        for missing refs, wrong families or materialization failure. Convert
+        through the native factory with the same captured context, so arb paths
+        (including flat_top raises) stay bound to its asset directory. Native
+        asset I/O failures propagate; no global scope or recipe interpretation.
+        Pure arb drive duration is fixed by its asset; later workflow stages
+        cannot tune its length. Keep
         descending/repeated/list order and a single range point. No acquisition
         cfg, tunables, timing/grid generation, capture, submission or extra copy
         layer is involved; Engine owns plan isolation.
@@ -106,9 +92,10 @@ class T1PlanForm(FormModel):
                 else self.qub_pulse.module,
                 context=context,
             )
-            if isinstance(drive, MaterializedPulseCfg):
-                _reject_arb_assets(drive.waveform)
-            qub_pulse = PulseCfg.model_validate(drive.model_dump(mode="python"))
+            native_drive = NativeModuleCfgFactory.from_core(drive, context=context)
+            if not isinstance(native_drive, PulseCfg):
+                raise ValueError("T1 drive selection must be a pulse")
+            qub_pulse = native_drive
         except ValueError as exc:
             errors[("qub_pulse",)] = str(exc)
         try:
@@ -118,9 +105,10 @@ class T1PlanForm(FormModel):
                 else self.readout.module,
                 context=context,
             )
-            if isinstance(ro, MaterializedPulseReadoutCfg):
-                _reject_arb_assets(ro.pulse_cfg.waveform)
-            readout = PulseReadoutCfg.model_validate(ro.model_dump(mode="python"))
+            native_readout = NativeModuleCfgFactory.from_core(ro, context=context)
+            if not isinstance(native_readout, PulseReadoutCfg):
+                raise ValueError("T1 readout selection must support pulse gain control")
+            readout = native_readout
         except ValueError as exc:
             errors[("readout",)] = str(exc)
         if qub_pulse is None or readout is None:

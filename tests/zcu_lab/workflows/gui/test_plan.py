@@ -1,19 +1,34 @@
 """Reference conversion and runtime T1 generation at public form seams."""
 
+from collections.abc import Iterator
+from pathlib import Path
+
 import numpy as np
 import pytest
 from pydantic import JsonValue
-from zcu_tools.cfg_model import PulseSpec, WaveformSamples
+from zcu_tools.cfg_model import PulseSpec
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from tests.program.v2.support.waveform_assets import InMemoryWaveformAsset
 from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan, seed_from_inputs
+from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqExp, FreqModuleCfg
 from zcu_lab.workflows.gui.plan import T1PlanForm
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables, t1_cfg
 
 from ._plan_inputs import inline_input, library_env
+
+
+@pytest.fixture(scope="module", autouse=True)
+def asset_scope_guard() -> Iterator[None]:
+    """Identify tests leaking repository scope beyond this module."""
+    before = vars(ArbWaveformDatabase)["_database_path"]
+    yield
+    assert vars(ArbWaveformDatabase)["_database_path"] == before
 
 
 @pytest.mark.parametrize(
@@ -122,40 +137,80 @@ def test_bad_module_selections_block_plan_with_consuming_paths(
     assert any(path and path[0] == field for path in result.messages)
 
 
-@pytest.mark.parametrize("selection", ["drive", "readout", "readout_ramp"])
-def test_asset_backed_selection_is_rejected_at_consuming_field(
-    inputs: Inputs, selection: str
+@pytest.mark.parametrize(
+    "selection", ["drive", "drive_ramp", "readout", "readout_ramp"]
+)
+def test_captured_asset_directory_reaches_native_acquisition_without_global_scope(
+    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str
 ) -> None:
-    env = FormEnv(
-        library=LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0"),
-            assets=InMemoryWaveformAsset(
-                "present",
-                WaveformSamples(
-                    time=np.array([0.0, 0.05]),
-                    idata=np.array([0.0, 1.0]),
-                    qdata=None,
-                ),
-            ),
-        )
-    )
+    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
     data = inline_input(inputs).data
-    waveform = {"style": "arb", "data": "present"}
-    field = "qub_pulse" if selection == "drive" else "readout"
-    if selection == "drive":
-        raw = inputs.rabi.modules.qub_pulse.model_dump(mode="json")
-        raw["waveform"] = waveform
+    waveform = {"style": "arb", "data": "shape"}
+    field = "qub_pulse" if selection.startswith("drive") else "readout"
+    raw = (
+        inputs.rabi.modules.qub_pulse.model_dump(mode="json")
+        if field == "qub_pulse"
+        else inputs.readout.modules.readout.model_dump(mode="json")
+    )
+    shape = (
+        {"style": "flat_top", "length": 1.0, "raise_waveform": waveform}
+        if selection.endswith("ramp")
+        else waveform
+    )
+    if field == "qub_pulse":
+        raw["waveform"] = shape
     else:
-        raw = inputs.readout.modules.readout.model_dump(mode="json")
-        raw["pulse_cfg"]["waveform"] = (
-            {"style": "flat_top", "length": 1.0, "raise_waveform": waveform}
-            if selection == "readout_ramp"
-            else waveform
-        )
+        raw["pulse_cfg"]["waveform"] = shape
     data[field] = {"kind": "inline", "module": raw}
-    form = FormState(FormInput(T1PlanForm, data)).result(env)
-    assert isinstance(form, T1PlanForm), form
-    result = form.to_cfg(env, make_plan(inputs).snapshot)
-    assert isinstance(result, FormErrors)
-    assert (field,) in result.messages
-    assert "arb asset" in result.messages[(field,)].lower()
+    state = FormState(FormInput(T1PlanForm, data))
+    for name, duration in (("first", 0.05), ("second", 0.1)):
+        directory = tmp_path / name
+        directory.mkdir()
+        np.savez(
+            directory / "shape.npz",
+            time=np.array([0.0, duration / 2, duration]),
+            idata=np.array([0.0, 1.0, 0.0]),
+            qdata=np.zeros(3),
+        )
+        env = FormEnv(
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library", format_version="1.0"
+                ),
+                assets=ArbWaveformDatabase.info_at(directory),
+            )
+        )
+        form = state.result(env)
+        assert isinstance(form, T1PlanForm)
+        plan = form.to_cfg(env, make_plan(inputs).snapshot)
+        assert isinstance(plan, T1Plan)
+        native_waveform = (
+            plan.qub_pulse.waveform
+            if field == "qub_pulse"
+            else plan.readout.pulse_cfg.waveform
+        )
+        # Public cfg serialization exposes the path consumed by native playback.
+        native = native_waveform.to_dict()
+        if selection.endswith("ramp"):
+            assert native["length"] == 1.0
+        asset = native["raise_waveform"] if selection.endswith("ramp") else native
+        assert isinstance(asset, dict)
+        assert asset["path"] == (directory / "shape.npz").resolve().as_posix()
+        cfg = FreqCfg(
+            reps=2,
+            rounds=1,
+            modules=FreqModuleCfg(qub_pulse=plan.qub_pulse, readout=plan.readout),
+            sweep=inputs.freq.sweep,
+        )
+        plots = Plots(NonPresentingHost())
+        try:
+            result = FreqExp().run(
+                cfg,
+                context=RunContext(inputs.soc, inputs.soccfg, plots, {}, StopSignal()),
+            )
+            assert result.signals.shape == result.freqs.shape
+            assert len(result.freqs) == inputs.freq.sweep.freq.expts
+            assert np.all(np.isfinite(result.signals))
+        finally:
+            plots.finish(present=False)
+            plots.release()
