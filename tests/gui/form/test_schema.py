@@ -778,6 +778,149 @@ def test_skipped_discriminator_choice_keeps_normal_field_and_identity(
         assert state.input.data == data
 
 
+class SkippedChoiceWithChoices(NumericOtherBranch):
+    """A skipped choice's kind restriction belongs only to that choice."""
+
+    @classmethod
+    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Restrict the skipped model to its own intrinsic tag."""
+        return {("kind",): (3,)}
+
+
+class InvalidChoiceWithChoices(SkippedChoiceWithChoices):
+    """Native generation skips a callable branch with different local choices."""
+
+    callback: Callable[[], None]
+
+
+class RetainedChoiceWithChoices(NumericAliasBranch):
+    """The emitted numeric branch owns dynamic amount choices."""
+
+    @classmethod
+    def choices(cls, env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Read empty or singleton amount choices from the captured environment."""
+        if env.md.get("empty_amounts", False):
+            return {("amount",): ()}
+        return {("amount",): (9.0,) if env.md.get("nine_only", False) else (7.0,)}
+
+
+class SkipFirstOwnerForm(FormModel):
+    """Skipping the first choice must retain both following model owners."""
+
+    branch: Annotated[
+        SkipJsonSchema[SkippedChoiceWithChoices]
+        | RetainedChoiceWithChoices
+        | StringNumericTagBranch,
+        Field(discriminator="kind"),
+    ]
+
+
+class InvalidFirstOwnerForm(FormModel):
+    """An invalid first schema choice must not shift following model owners."""
+
+    branch: Annotated[
+        InvalidChoiceWithChoices | RetainedChoiceWithChoices | StringNumericTagBranch,
+        Field(discriminator="kind"),
+    ]
+
+
+class SkipMiddleOwnerForm(FormModel):
+    """Skipping a middle choice must retain the final string-tag owner."""
+
+    branch: Annotated[
+        RetainedChoiceWithChoices
+        | SkipJsonSchema[SkippedChoiceWithChoices]
+        | StringNumericTagBranch,
+        Field(discriminator="kind"),
+    ]
+
+
+class InvalidMiddleOwnerForm(FormModel):
+    """An invalid middle schema choice must not shift the final model owner."""
+
+    branch: Annotated[
+        RetainedChoiceWithChoices | InvalidChoiceWithChoices | StringNumericTagBranch,
+        Field(discriminator="kind"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        SkipFirstOwnerForm,
+        InvalidFirstOwnerForm,
+        SkipMiddleOwnerForm,
+        InvalidMiddleOwnerForm,
+    ],
+)
+def test_skipped_choice_keeps_branch_ownership_through_choices_refresh(
+    model: type[
+        SkipFirstOwnerForm
+        | InvalidFirstOwnerForm
+        | SkipMiddleOwnerForm
+        | InvalidMiddleOwnerForm
+    ],
+) -> None:
+    env = FormEnv(md=MetaDict())
+    state = FormState(FormInput(model, {"branch": {"kind": 2, "amount": 7.0}}))
+    before = state.input.data
+    for empty, nine_only in (
+        (False, False),
+        (True, False),
+        (False, True),
+        (False, False),
+    ):
+        env.md.update({"empty_amounts": empty, "nine_only": nine_only})
+        schema = model.input_schema(env)
+        fields = schema_object(schema["properties"])
+        identities = identity_values(schema_object(fields["branch"]))
+        assert identities == [[1, 2], ["1"]]
+        numeric_tags = identities[0]
+        string_tags = identities[1]
+        assert isinstance(numeric_tags, list) and isinstance(string_tags, list)
+        assert all(type(tag) is int for tag in numeric_tags)
+        assert all(type(tag) is str for tag in string_tags)
+        validator = Draft202012Validator(schema)
+        allowed = 9.0 if nine_only else 7.0
+        for tag in (1, 2):
+            for amount in (7.0, 9.0):
+                data: dict[str, JsonValue] = {"branch": {"kind": tag, "amount": amount}}
+                accepted = not empty and amount == allowed
+                assert validator.is_valid(data) is accepted
+                candidate = FormState(FormInput(model, data))
+                result = candidate.result(env)
+                if accepted:
+                    assert isinstance(result, model)
+                    assert isinstance(result.branch, RetainedChoiceWithChoices)
+                    assert result.branch.kind == tag
+                    assert type(result.branch.kind) is int
+                    assert result.branch.amount == amount
+                else:
+                    assert isinstance(result, FormErrors)
+                    assert ("branch", "amount") in result.messages
+                assert candidate.input.data == data
+        string_data: dict[str, JsonValue] = {
+            "branch": {"kind": "1", "text_only": "kept"}
+        }
+        assert validator.is_valid(string_data)
+        string_result = FormState(FormInput(model, string_data)).result(env)
+        assert isinstance(string_result, model)
+        assert isinstance(string_result.branch, StringNumericTagBranch)
+        assert string_result.branch.kind == "1"
+        assert type(string_result.branch.kind) is str
+        assert string_result.branch.text_only == "kept"
+        assert validator.is_valid(before) == (not empty and not nine_only)
+        current = state.result(env)
+        if empty or nine_only:
+            assert isinstance(current, FormErrors)
+            assert ("branch", "amount") in current.messages
+        else:
+            assert isinstance(current, model)
+            assert isinstance(current.branch, RetainedChoiceWithChoices)
+            assert current.branch.kind == 2
+        assert state.input.data == before
+
+
 def test_whole_container_choices_share_json_value_membership() -> None:
     env = FormEnv(md=MetaDict())
     valid: dict[str, JsonValue] = {
