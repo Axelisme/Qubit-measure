@@ -330,7 +330,11 @@ class _BoundWaveformAssetInfo:
         recipe. Raise ArbWaveformError for an invalid/missing key; propagate
         filesystem errors. The current global DB does not affect this path.
         """
-        raise NotImplementedError("Capture-bound asset paths are not connected")
+        _validate_data_key(data_key)
+        path = self.directory / f"{data_key}.npz"
+        if not path.exists():
+            raise _asset_not_found(data_key, path)
+        return path
 
     def samples(self, data_key: str) -> WaveformSamples:
         """Read validated, isolated arrays from this binding's fixed directory."""

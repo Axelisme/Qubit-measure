@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Optional, TypeAlias, Union
 import qick.asm_v2 as qick_asm_v2
 from pydantic import BeforeValidator, Field, TypeAdapter
 
+from zcu_tools import cfg_model as core_cfgs
 from zcu_tools.cfg_model import CfgValidationContext
 from zcu_tools.cfg_model import ModuleCfg as CoreModuleCfg
 
@@ -83,7 +84,33 @@ class ModuleCfgFactory:
         is mutated and no provider/library/context is retained in native cfg.
         Non-arb trees permit context=None. Formula semantics are not interpreted.
         """
-        raise NotImplementedError("Core to native module conversion is not connected")
+        if isinstance(core_cfg, core_cfgs.PulseCfg):
+            return _pulse_from_core(core_cfg, context=context)
+        if isinstance(core_cfg, core_cfgs.PulseReadoutCfg):
+            return PulseReadoutCfg(
+                pulse_cfg=_pulse_from_core(core_cfg.pulse_cfg, context=context),
+                ro_cfg=DirectReadoutCfg.model_validate(core_cfg.ro_cfg.to_dict()),
+            )
+        if isinstance(core_cfg, core_cfgs.PulseResetCfg):
+            return PulseResetCfg(
+                pulse_cfg=_pulse_from_core(core_cfg.pulse_cfg, context=context)
+            )
+        if isinstance(core_cfg, core_cfgs.TwoPulseResetCfg):
+            return TwoPulseResetCfg(
+                pulse1_cfg=_pulse_from_core(core_cfg.pulse1_cfg, context=context),
+                pulse2_cfg=_pulse_from_core(core_cfg.pulse2_cfg, context=context),
+            )
+        if isinstance(core_cfg, core_cfgs.BathResetCfg):
+            return BathResetCfg(
+                cavity_tone_cfg=_pulse_from_core(
+                    core_cfg.cavity_tone_cfg, context=context
+                ),
+                qubit_tone_cfg=_pulse_from_core(
+                    core_cfg.qubit_tone_cfg, context=context
+                ),
+                pi2_cfg=_pulse_from_core(core_cfg.pi2_cfg, context=context),
+            )
+        return TypeAdapter(ModuleCfg).validate_python(core_cfg.to_dict())
 
     @classmethod
     def from_raw(
@@ -99,6 +126,23 @@ class ModuleCfgFactory:
                 )
             raw = ml.get_module(raw)
         return TypeAdapter(ModuleCfg).validate_python(raw, context=dict(ml=ml))
+
+
+def _pulse_from_core(
+    core_cfg: core_cfgs.PulseCfg,
+    *,
+    context: CfgValidationContext | None,
+) -> PulseCfg:
+    """Translate pulse scalars and delegate envelope conversion to its owner."""
+    fields = core_cfg.model_dump(mode="python", exclude={"waveform"}, exclude_none=True)
+    return PulseCfg.model_validate(
+        {
+            **fields,
+            "waveform": WaveformCfgFactory.from_core(
+                core_cfg.waveform, context=context
+            ),
+        }
+    )
 
 
 def param_repr(self) -> str:

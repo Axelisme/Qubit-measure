@@ -7,7 +7,9 @@ formula recipes; program and simulation play the saved samples.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Literal, TypedDict
 
 import numpy as np
@@ -115,7 +117,61 @@ def validate_samples(*, time: object, idata: object, qdata: object) -> WaveformS
     length, reference time, sample count, or magnitude violations.
     The returned arrays do not share caller-owned storage.
     """
-    raise NotImplementedError("Shared sample validation is not connected")
+    time_arr = _isolate_array(time, name="time")
+    idata_arr = _isolate_array(idata, name="idata")
+    qdata_arr = None if qdata is None else _isolate_array(qdata, name="qdata")
+    qdata_shape = idata_arr.shape if qdata_arr is None else qdata_arr.shape
+    if idata_arr.shape != time_arr.shape or idata_arr.shape != qdata_shape:
+        raise WaveformFormatError(
+            "idata, qdata, and time must have the same shape",
+            reason="array_shape_mismatch",
+            data={
+                "idata_shape": idata_arr.shape,
+                "qdata_shape": qdata_shape,
+                "time_shape": time_arr.shape,
+            },
+        )
+    sample_count = int(time_arr.size)
+    if sample_count < 2:
+        raise WaveformFormatError(
+            "arbitrary waveform must contain at least 2 samples",
+            reason="sample_count_too_small",
+            data={"sample_count": sample_count},
+        )
+    if sample_count > MAX_ARB_WAVEFORM_SAMPLES:
+        raise WaveformFormatError(
+            f"arbitrary waveform has {sample_count} samples, exceeding "
+            f"{MAX_ARB_WAVEFORM_SAMPLES}",
+            reason="sample_count_too_large",
+            data={
+                "sample_count": sample_count,
+                "max_sample_count": MAX_ARB_WAVEFORM_SAMPLES,
+            },
+        )
+    if time_arr[0] != 0.0:
+        raise WaveformFormatError(
+            "time[0] must be 0 us",
+            reason="time_must_start_at_zero",
+            data={"time0": float(time_arr[0])},
+        )
+    if not np.all(np.diff(time_arr) > 0):
+        raise WaveformFormatError(
+            "time array must be strictly increasing",
+            reason="time_not_strictly_increasing",
+        )
+    magnitude = (
+        np.abs(idata_arr) if qdata_arr is None else np.hypot(idata_arr, qdata_arr)
+    )
+    peak = float(np.max(magnitude))
+    if peak > 1.0:
+        raise WaveformFormatError(
+            f"waveform magnitude peak ({peak:.6g}) exceeds 1.0",
+            reason="amplitude_out_of_range",
+            data={"peak_abs": peak},
+        )
+    if qdata_arr is not None and not np.any(qdata_arr):
+        qdata_arr = None
+    return WaveformSamples(time=time_arr, idata=idata_arr, qdata=qdata_arr)
 
 
 def decode_npz(payload: bytes) -> WaveformFile:
@@ -126,7 +182,47 @@ def decode_npz(payload: bytes) -> WaveformFile:
     unsupported/missing keys and malformed content with WaveformFormatError.
     No filesystem or repository access occurs.
     """
-    raise NotImplementedError("Shared NPZ decoding is not connected")
+    try:
+        loaded = np.load(BytesIO(payload), allow_pickle=False)
+        if not isinstance(loaded, np.lib.npyio.NpzFile):
+            raise ValueError("Waveform payload must be an NPZ archive")
+        with loaded as archive:
+            keys = set(archive.files)
+            extra = keys - {"idata", "qdata", "time", "recipe_json"}
+            if extra:
+                raise WaveformFormatError(
+                    f"Unsupported NPZ key(s): {sorted(extra)}",
+                    reason="unknown_npz_key",
+                    data={"unknown_keys": sorted(extra)},
+                )
+            missing = {"idata", "qdata", "time"} - keys
+            if missing:
+                raise WaveformFormatError(
+                    f"Missing required NPZ key(s): {sorted(missing)}",
+                    reason="missing_npz_key",
+                    data={"missing_keys": sorted(missing)},
+                )
+            recipe_json = None
+            if "recipe_json" in keys:
+                raw_recipe = archive["recipe_json"]
+                if raw_recipe.shape != ():
+                    raise WaveformFormatError(
+                        "recipe_json must be a scalar JSON string",
+                        reason="invalid_recipe_json",
+                        data={"path": "recipe_json"},
+                    )
+                recipe_json = _validate_recipe_json(raw_recipe.item())
+            samples = validate_samples(
+                time=archive["time"], idata=archive["idata"], qdata=archive["qdata"]
+            )
+            return WaveformFile(samples=samples, recipe_json=recipe_json)
+    except WaveformFormatError:
+        raise
+    except Exception as exc:
+        raise WaveformFormatError(
+            f"Failed to decode arbitrary waveform NPZ: {exc}",
+            reason="npz_read_failed",
+        ) from exc
 
 
 def encode_npz(data: WaveformFile) -> bytes:
@@ -136,4 +232,75 @@ def encode_npz(data: WaveformFile) -> bytes:
     Preserve recipe text without interpreting it. Raise WaveformFormatError
     for invalid samples or JSON; do not write files or alter the input.
     """
-    raise NotImplementedError("Shared NPZ encoding is not connected")
+    samples = validate_samples(
+        time=data.samples.time, idata=data.samples.idata, qdata=data.samples.qdata
+    )
+    recipe_json = (
+        None if data.recipe_json is None else _validate_recipe_json(data.recipe_json)
+    )
+    qdata = samples.qdata
+    if qdata is None:
+        qdata = np.zeros_like(samples.idata)
+    stream = BytesIO()
+    if recipe_json is None:
+        np.savez(stream, idata=samples.idata, qdata=qdata, time=samples.time)
+    else:
+        np.savez(
+            stream,
+            idata=samples.idata,
+            qdata=qdata,
+            time=samples.time,
+            recipe_json=np.array(recipe_json),
+        )
+    return stream.getvalue()
+
+
+def _isolate_array(value: object, *, name: str) -> NDArray[np.float64]:
+    """Convert a real array-like to owned float64 storage, rejecting complex input."""
+    try:
+        raw = np.asarray(value)
+        # Object arrays can hide NumPy complex scalars that otherwise cast with a warning.
+        has_object_complex = raw.dtype.kind == "O" and any(
+            isinstance(item, (complex, np.complexfloating)) for item in raw.flat
+        )
+        if np.iscomplexobj(raw) or has_object_complex:
+            raise ValueError("I/Q and time arrays must be real")
+        arr = np.array(raw, dtype=np.float64, copy=True)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise WaveformFormatError(
+            f"{name} must be a real numeric array",
+            reason="array_not_numeric",
+            data={"name": name},
+        ) from exc
+    if arr.ndim != 1:
+        raise WaveformFormatError(
+            f"{name} must be a 1D array",
+            reason="array_not_1d",
+            data={"name": name, "ndim": arr.ndim},
+        )
+    if not np.all(np.isfinite(arr)):
+        raise WaveformFormatError(
+            f"{name} must contain only finite values",
+            reason="array_non_finite",
+            data={"name": name},
+        )
+    return arr
+
+
+def _validate_recipe_json(value: object) -> str:
+    """Validate opaque JSON text, without normalizing it or interpreting a recipe."""
+    if not isinstance(value, str):
+        raise WaveformFormatError(
+            "recipe_json must be a scalar JSON string",
+            reason="invalid_recipe_json",
+            data={"path": "recipe_json"},
+        )
+    try:
+        json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise WaveformFormatError(
+            f"recipe_json is not valid JSON: {exc.msg}",
+            reason="invalid_recipe_json",
+            data={"path": "recipe_json"},
+        ) from exc
+    return value
