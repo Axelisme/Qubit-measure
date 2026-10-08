@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Literal, TypedDict
+from typing import Literal, NoReturn, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
@@ -287,6 +287,11 @@ def _isolate_array(value: object, *, name: str) -> NDArray[np.float64]:
     return arr
 
 
+def _reject_json_constant(constant: str) -> NoReturn:
+    """Reject Python decoder extensions that are not part of JSON syntax."""
+    raise ValueError(f"{constant} is not a valid JSON constant")
+
+
 def _validate_recipe_json(value: object) -> str:
     """Validate opaque JSON text, without normalizing it or interpreting a recipe."""
     if not isinstance(value, str):
@@ -296,10 +301,10 @@ def _validate_recipe_json(value: object) -> str:
             data={"path": "recipe_json"},
         )
     try:
-        json.loads(value)
-    except json.JSONDecodeError as exc:
+        json.loads(value, parse_constant=_reject_json_constant)
+    except ValueError as exc:
         raise WaveformFormatError(
-            f"recipe_json is not valid JSON: {exc.msg}",
+            f"recipe_json is not valid JSON: {exc}",
             reason="invalid_recipe_json",
             data={"path": "recipe_json"},
         ) from exc

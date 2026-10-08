@@ -34,8 +34,14 @@ def _npz(
     return stream.getvalue()
 
 
-def test_codec_round_trip_preserves_samples_and_opaque_recipe_text() -> None:
-    recipe = ' { "future_recipe": {"formula": "not a formula"} } '
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        ' { "future_recipe": {"formula": "not a formula"} } ',
+        '{"quoted_constants": "NaN Infinity -Infinity"}',
+    ],
+)
+def test_codec_round_trip_preserves_samples_and_opaque_recipe_text(recipe: str) -> None:
     source = WaveformFile(
         WaveformSamples(
             time=np.array([0.0, 0.2, 1.0]),
@@ -170,6 +176,33 @@ def test_decoder_rejects_malformed_or_pickle_archive_with_cause() -> None:
             decode_npz(payload)
         assert error.value.reason == "npz_read_failed"
         assert error.value.__cause__ is not None
+
+
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        "NaN",
+        "Infinity",
+        "-Infinity",
+        '{"opaque": {"values": [NaN]}}',
+        '{"opaque": {"values": [Infinity]}}',
+        '{"opaque": {"values": [-Infinity]}}',
+    ],
+)
+@pytest.mark.parametrize("operation", ["encode", "decode"])
+def test_codec_rejects_non_json_constants_with_cause(
+    recipe: str, operation: str
+) -> None:
+    samples = validate_samples(time=[0, 1], idata=[0, 1], qdata=None)
+    if operation == "encode":
+        with pytest.raises(WaveformFormatError) as error:
+            encode_npz(WaveformFile(samples, recipe_json=recipe))
+    else:
+        with pytest.raises(WaveformFormatError) as error:
+            decode_npz(_npz(recipe_json=recipe))
+    assert error.value.reason == "invalid_recipe_json"
+    assert error.value.data.get("path") == "recipe_json"
+    assert isinstance(error.value.__cause__, ValueError)
 
 
 def test_encoder_rejects_invalid_samples_and_json_before_emitting_bytes() -> None:
