@@ -213,7 +213,7 @@ def test_save_worker_uses_tab_capture_after_entry_switch(
         MagicMock(),
         cfg_resources(session.state),
         cfg_resolution=lambda parameters: cfg_resolution(session.state, parameters),
-        captured_parameters=lambda _roles: None if roleless else capture,
+        captured_parameters=lambda _roles, _target: None if roleless else capture,
     )
     tab_id = tabs.new_tab("T1")
     result = object()
@@ -290,7 +290,7 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
         MagicMock(),
         cfg_resources(empty_state),
         cfg_resolution=lambda parameters: cfg_resolution(empty_state, parameters),
-        captured_parameters=lambda _roles: None,
+        captured_parameters=lambda _roles, _target: None,
     )
     tab_id = tabs.new_tab("pure")
     empty_state.update_tab_result(tab_id, object())
