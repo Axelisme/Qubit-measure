@@ -67,7 +67,7 @@ def session(tmp_path: Path) -> Generator[SaveSession]:
         context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
         context.install_entry(entry)
         control = ContextControlFacet(context=context)
-        control.use_point(PointUseRequest(entry.entry_id, "p"))
+        control.use_point(PointUseRequest("p"))
         yield SaveSession(entry, context, control, state, bus)
         assert registry_state() == installed
     finally:
@@ -89,7 +89,7 @@ def test_storage_retains_entry_point_description_and_roles_after_switch(
     session.control.set_parameter(target, "general.description", "edited")
     session.control.set_component_focus("Q2")
     session.entry.new_point("q")
-    session.control.use_point(PointUseRequest(session.entry.entry_id, "q"))
+    session.control.use_point(PointUseRequest("q"))
     other = ResultEntry.create(
         "entry-b", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
     )
@@ -180,7 +180,7 @@ def test_storage_requires_saved_origin_and_readable_sources(
 def test_storage_rejects_mismatched_target(session: SaveSession) -> None:
     saved = session.control.read_context()
     session.entry.new_point("q")
-    session.control.use_point(PointUseRequest(session.entry.entry_id, "q"))
+    session.control.use_point(PointUseRequest("q"))
     other = session.control.read_context()
     with pytest.raises(ValueError, match="origin"):
         ParameterContext(
@@ -329,7 +329,7 @@ def test_guard_keeps_original_tab_entry_point_and_roles_in_run_permit(
     )
     other.new_point("q")
     session.context.install_entry(other)
-    session.control.use_point(PointUseRequest(other.entry_id, "q"))
+    session.control.use_point(PointUseRequest("q"))
     tab = session.state.get_tab(tab_id)
     permit = GuardService(session.state).acquire_run_permit(
         tab_id, expected_revision=tab.cfg.observe().ref.revision
