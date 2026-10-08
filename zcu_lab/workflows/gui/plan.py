@@ -20,8 +20,8 @@ from zcu_tools.gui.form import (
     ModuleRef,
     RangeInput,
 )
+from zcu_tools.program.v2.modules import ArbWaveformCfg, PulseCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
-from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
 from zcu_lab.workflows.t1 import T1Plan
 
@@ -75,9 +75,9 @@ class T1PlanForm(FormModel):
         through the native factory with the same captured context, so arb paths
         (including flat_top raises) stay bound to its asset directory. Native
         asset I/O failures propagate; no global scope or recipe interpretation.
-        Pure arb drive duration is fixed by its asset; later workflow stages
-        cannot tune its length. Keep
-        descending/repeated/list order and a single range point. No acquisition
+        Pure arb drive returns a qub_pulse field error because Length-Rabi must
+        vary its duration; flat_top arb ramps and arb readout remain supported.
+        Keep descending/repeated/list order and a single range point. No acquisition
         cfg, tunables, timing/grid generation, capture, submission or extra copy
         layer is involved; Engine owns plan isolation.
         """
@@ -95,6 +95,11 @@ class T1PlanForm(FormModel):
             native_drive = NativeModuleCfgFactory.from_core(drive, context=context)
             if not isinstance(native_drive, PulseCfg):
                 raise ValueError("T1 drive selection must be a pulse")
+            if isinstance(native_drive.waveform, ArbWaveformCfg):
+                raise ValueError(
+                    "T1 workflow uses Length-Rabi calibration; pure arb drive cannot "
+                    "change length and is unsupported"
+                )
             qub_pulse = native_drive
         except ValueError as exc:
             errors[("qub_pulse",)] = str(exc)

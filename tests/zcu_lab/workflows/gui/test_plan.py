@@ -137,9 +137,36 @@ def test_bad_module_selections_block_plan_with_consuming_paths(
     assert any(path and path[0] == field for path in result.messages)
 
 
-@pytest.mark.parametrize(
-    "selection", ["drive", "drive_ramp", "readout", "readout_ramp"]
-)
+def test_pure_arb_drive_reports_length_rabi_limit_at_consuming_field(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    np.savez(
+        tmp_path / "shape.npz",
+        time=np.array([0.0, 0.05, 0.1]),
+        idata=np.array([0.0, 1.0, 0.0]),
+        qdata=np.zeros(3),
+    )
+    env = FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0"),
+            assets=ArbWaveformDatabase.info_at(tmp_path),
+        )
+    )
+    data = inline_input(inputs).data
+    drive = inputs.rabi.modules.qub_pulse.model_dump(mode="json")
+    drive["waveform"] = {"style": "arb", "data": "shape"}
+    data["qub_pulse"] = {"kind": "inline", "module": drive}
+    form = FormState(FormInput(T1PlanForm, data)).result(env)
+    assert isinstance(form, T1PlanForm)
+    result = form.to_cfg(env, make_plan(inputs).snapshot)
+    assert isinstance(result, FormErrors)
+    assert set(result.messages) == {("qub_pulse",)}
+    assert "Length-Rabi" in result.messages[("qub_pulse",)]
+    assert "cannot change length" in result.messages[("qub_pulse",)]
+    assert "unsupported" in result.messages[("qub_pulse",)]
+
+
+@pytest.mark.parametrize("selection", ["drive_ramp", "readout", "readout_ramp"])
 def test_captured_asset_directory_reaches_native_acquisition_without_global_scope(
     inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str
 ) -> None:

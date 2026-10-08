@@ -4,7 +4,7 @@
 
 這個 package 擁有具體 workflow 的表單、明寫的 to_cfg 與 Qt panel attachment，不實作通用 editor 或 Engine。Native workflow definitions 不依賴這些 GUI attachments。
 
-T1PlanForm 編輯 absolute flux range/list、delay points 與共用 drive/readout ModuleInput。to_cfg 以 captured library 的公開 factory 解析 ref/inline，轉成 native modules，展開 setpoints，接 host 的歷史 RunSnapshot。缺 root、錯 family 或 materialization 失敗回報 consuming-field error。Native ModuleCfgFactory.from_core 接同一 materialization context，arb 與 flat_top arb ramp 的播放路徑固定在 captured asset directory，不讀 global repository。純 arb drive 的 duration 由 asset 決定，現行 length-Rabi／T1 仍不能調整其 length；這個 caller 切片不代表完整 calibration 支援。非 arb flat_top 的 length 沿 native 總長語意原值直傳。Plan 不含完整 cfg、template 或 acquisition grid。T1PlanPanel preview 先阻擋 local parse errors，再產生 native T1Plan，不 Start 或捕捉來源。
+T1PlanForm 編輯 absolute flux range/list、delay points 與共用 drive/readout ModuleInput。to_cfg 以 captured library 的公開 factory 解析 ref/inline，轉成 native modules，展開 setpoints，接 host 的歷史 RunSnapshot。缺 root、錯 family 或 materialization 失敗回報 consuming-field error。Native ModuleCfgFactory.from_core 接同一 materialization context，arb 與 flat_top arb ramp 的播放路徑固定在 captured asset directory，不讀 global repository。T1 drive 若是純 arb，在 qub_pulse 回 consuming-field error，因為 Length-Rabi 需要改 length 而 arb duration 固定。Flat_top 的 arb ramp、direct arb readout 與 flat_top arb readout ramp 繼續支援；不加入 gain-Rabi 或 time-scaling。非 arb flat_top 的 length 沿 native 總長語意原值直傳。Plan 不含完整 cfg、template 或 acquisition grid。T1PlanPanel preview 先阻擋 local parse errors，再產生 native T1Plan，不 Start 或捕捉來源。
 
 T1TunablesForm 與 nested CalibrationTunablesForm 定義使用者可編輯的普通值、Field 約束與呈現 metadata。Defaults 只讀 host 捕捉的 ParameterContext。general.ext.guess_us 存在時保留 expression 輸入，沒有 capture 或缺 leaf 時使用 native 暫定預設。明確 null 與無效引用值產生欄位錯誤，不以 fallback 蓋掉。
 
