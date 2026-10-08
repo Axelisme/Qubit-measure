@@ -127,9 +127,7 @@ def test_save_uses_tab_storage_after_live_entry_switch(
     )
     other.new_point("q")
     session.context.install_entry(other)
-    ContextControlFacet(context=session.context).use_point(
-        PointUseRequest(other.entry_id, "q")
-    )
+    ContextControlFacet(context=session.context).use_point(PointUseRequest("q"))
     completed = session.save()
     assert all(
         item.output.path.is_relative_to(session.entry.database_path)

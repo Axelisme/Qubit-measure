@@ -173,7 +173,7 @@ def native_save_session(
     context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
     context.install_entry(entry)
     context_control = ContextControlFacet(context=context)
-    context_control.use_point(PointUseRequest(entry.entry_id, "p"))
+    context_control.use_point(PointUseRequest("p"))
     captured = context_control.read_context()
     storage = captured.capture_storage()
     cfg = SavingCfg()
