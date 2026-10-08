@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.app.measure.adapter import AnalysisMode, AnalyzeRequest
 from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
@@ -40,9 +40,10 @@ class RecordingState:
         self._log = log
         self._busy = busy
         self.running_tab_id: str | None = "running-tab"
-        self.session_env = SimpleNamespace(md="md", ml="ml", predictor="predictor")
+        self.session_env = SimpleNamespace(predictor="predictor")
         self.tab = SimpleNamespace(
             adapter=RecordingAdapter(log, analysis=analysis),
+            parameters=None,
             run=SimpleNamespace(result="run-result"),
             cfg=SimpleNamespace(
                 observe=lambda: SimpleNamespace(
@@ -396,6 +397,25 @@ def test_fit_analyze_uses_worker_service_and_live_container() -> None:
     assert log.calls[4].method == "start_analyze"
     assert log.calls[4].args[:2] == ("analyze-permit", params)
     assert isinstance(log.calls[4].args[2], Plots)
+
+
+def test_interactive_factory_receives_tab_capture_not_current_parameters() -> None:
+    from tests.gui.session.ui._parameter_fakes import make_parameters
+
+    facet, log, state, _bus = _facet(analysis=AnalysisMode.INTERACTIVE)
+    captured = make_parameters({"rate": 1.0})
+    state.tab.parameters = captured
+    state.session_env.parameters = make_parameters({"rate": 2.0})
+
+    assert facet.analyze("tab-1", "params") == 23
+    factory = next(
+        entry for entry in log.calls if entry.method == "make_interactive_plugin"
+    )
+    request = factory.args[0]
+    assert isinstance(request, AnalyzeRequest)
+    assert request.parameters is captured
+    assert request.parameters is not None
+    assert request.parameters.value("general.ext.rate") == 1.0
 
 
 def test_interactive_analyze_mounts_render_host_session() -> None:
