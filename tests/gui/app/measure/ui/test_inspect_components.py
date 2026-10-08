@@ -89,7 +89,9 @@ def test_inspect_template_edits_do_not_change_current_point_or_focus(inspector) 
         if combo.findText("Setup template") >= 0
     )
     destination.setCurrentText("Setup template")
-    assert editor.add_component("Template", "fake/drive/a", {"rate": 5000.0})
+    assert editor.add_component(
+        "Template", "fake/drive/a", {"rate": 5000.0}, setup=True
+    )
     dialog.refresh()
     assert "Template" in control.inspect_document(setup=True).components
     assert control.inspect_document() == before
