@@ -77,7 +77,11 @@ class ReferenceField(CfgField):
     ) -> None:
         super().__init__(spec)
         initial_spec: CfgSectionSpec | None = None
-        if isinstance(initial_val, ReferenceValue):
+        if isinstance(initial_val, ReferenceValue) and not (
+            _binding_state_for_key(initial_val.chosen_key) is LibraryBindingState.LINKED
+            and not initial_val.is_overridden
+            and not initial_val.value.fields
+        ):
             initial_spec = select_ref_value_spec(spec, initial_val)
             validate_section_keys(
                 initial_spec,

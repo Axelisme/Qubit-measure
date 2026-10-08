@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.cfg import EvalValue, ReferenceValue, ScalarLeafInput, SweepValue
+from zcu_tools.gui.cfg import (
+    CfgSectionValue,
+    EvalValue,
+    ReferenceValue,
+    ScalarLeafInput,
+    SweepValue,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
@@ -137,6 +143,14 @@ def module_seed(
     def resolve(ctx: SessionEnv) -> ReferenceValue | None:
         parameters = ctx.parameters
         if parameters is not None:
+            roles = parameters.roles
+            prefix = path.split(".", 1)[0]
+            if (
+                roles is not None
+                and prefix in roles.declarations
+                and prefix not in roles.names
+            ):
+                return ReferenceValue(chosen_key=path, value=CfgSectionValue())
             try:
                 key = parameters.library_key(path)
             except AttributeError:
