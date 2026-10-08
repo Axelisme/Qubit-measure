@@ -1,0 +1,60 @@
+"""Fixtures shared only by real point and context-snapshot socket contracts."""
+
+from collections.abc import Generator
+from pathlib import Path
+
+import pytest
+from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.event_bus import BaseEventBus
+
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
+
+from ._helpers import open_client
+from ._point_application import PointAdapter, PointApplication, PointController
+
+
+@pytest.fixture(scope="module")
+def point_models() -> Generator[None]:
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        yield
+        assert registry_state() == installed, "point RPC module polluted registries"
+    finally:
+        restore_registry(before)
+
+
+@pytest.fixture
+def point_registry_guard(request: pytest.FixtureRequest) -> Generator[None]:
+    before = registry_state()
+    yield
+    assert registry_state() == before, f"registry polluter: {request.node.nodeid}"
+
+
+@pytest.fixture
+def application(
+    qapp, tmp_path: Path, point_models, point_registry_guard
+) -> Generator[PointApplication]:
+    registry = Registry()
+    registry.register("pointed", PointAdapter)
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    controller = PointController(
+        state, registry, None, BaseEventBus(), project_root=str(tmp_path)
+    )
+    remote = RemoteControlAdapter(
+        controller, ControlOptions(port=0, app_slug=""), controller.owner_scheduler
+    )
+    client = open_client(remote.start())
+    try:
+        yield PointApplication(state, controller, remote, client)
+    finally:
+        client.close()
+        remote.stop()
+        controller.quiesce()
+        for tab_id in tuple(state.list_tab_ids()):
+            controller.tab_control.close_tab(tab_id)
+        qapp.processEvents()
