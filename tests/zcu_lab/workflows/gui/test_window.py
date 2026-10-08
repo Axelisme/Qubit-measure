@@ -20,6 +20,7 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
 from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.events import GateChangedPayload
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -398,6 +399,125 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     assert len(figures) == 2 and figures[0] == figures[1]
     assert window.plan_panel.isEnabled()
     assert not harness.gate.snapshot()
+
+
+@pytest.mark.parametrize("action", ["stop", "close"])
+def test_resume_register_stop_or_close_keeps_window_locked_until_delivery(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    window, harness, _entry = attachment
+    attempts: list[str] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("register-window", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del plan, tun, state
+        attempts.append("step")
+        env.pbar("work", 2).refresh()
+        window.pause()
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    assert isinstance(window.start("register-window"), int)
+    harness.complete_segment()
+    observations: list[bool] = []
+    close_results: list[bool] = []
+
+    def stop_on_register(payload: GateChangedPayload) -> None:
+        if payload.active:
+            if action == "close":
+                close_results.append(window.close())
+            else:
+                window.stop()
+            observations.append(window.plan_panel.isEnabled())
+
+    subscription = harness.bus.subscribe(GateChangedPayload, stop_on_register)
+    try:
+        window.resume()
+    finally:
+        subscription.unsubscribe()
+    assert observations == [False]
+    assert close_results == ([False] if action == "close" else [])
+    assert not window.plan_panel.isEnabled() and harness.gate.snapshot()
+    harness.background.execute()
+    assert not window.plan_panel.isEnabled() and harness.gate.snapshot()
+    harness.background.deliver()
+    controller = window.controller
+    assert controller is not None
+    status = controller.status()
+    assert status is not None and status.lifecycle == "stopped"
+    assert attempts == ["step"]
+    assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
+    assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
+    assert harness.progress.bars_for_owner("t1-workflow") == ()
+    assert window.close()
+
+
+@pytest.mark.parametrize("failure", ["capture", "submit"])
+def test_resume_stop_rejection_unlocks_window_without_a_producer(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    window, harness, _entry = attachment
+    attempts: list[str] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("reject-window", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del plan, tun, state
+        attempts.append("step")
+        env.pbar("work", 2).refresh()
+        window.pause()
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    assert isinstance(window.start("reject-window"), int)
+    harness.complete_segment()
+    capture_native = harness.services.device.capture_native_device_info
+    capture_error = ValueError("cached snapshot failed after Stop")
+
+    def capture() -> dict[str, DeviceInfo]:
+        window.stop()
+        if failure == "capture":
+            raise capture_error
+        return capture_native()
+
+    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
+    harness.background.fail_submit = failure == "submit"
+    with pytest.raises(ValueError if failure == "capture" else OSError) as raised:
+        window.resume()
+    if failure == "capture":
+        assert raised.value is capture_error
+    else:
+        assert str(raised.value) == "submit failed"
+    controller = window.controller
+    assert controller is not None
+    status = controller.status()
+    assert status is not None and status.lifecycle == "stopped"
+    start = window.findChild(QPushButton, "workflow.run.start")
+    pause = window.findChild(QPushButton, "workflow.run.pause")
+    resume = window.findChild(QPushButton, "workflow.run.resume")
+    assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
+    assert start is not None and start.isEnabled()
+    assert pause is not None and not pause.isEnabled()
+    assert resume is not None and not resume.isEnabled()
+    assert harness.progress.bars_for_owner("t1-workflow") == ()
+    assert not harness.gate.snapshot() and harness.handles.live_count() == 0
+    assert harness.background.work is None and attempts == ["step"]
+    assert window.close()
 
 
 @pytest.mark.parametrize("action", ["stop", "close"])

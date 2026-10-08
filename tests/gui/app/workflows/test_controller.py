@@ -24,6 +24,7 @@ from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.session.adapters.thread_pool_background import (
     ThreadPoolBackgroundExecutor,
 )
+from zcu_tools.gui.session.events import GateChangedPayload
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.ports import OperationConflictError
@@ -625,6 +626,119 @@ def test_stop_during_resume_capture_does_not_restart_paused_step(
     assert progress_calls == ([token], [token])
     assert harness.handles.known_outcome(resumed) == OperationOutcome("cancelled")
     assert not harness.gate.snapshot()
+
+
+def test_resume_register_stop_waits_for_owner_terminal_delivery(
+    tmp_path: Path,
+    progress_calls: tuple[list[int], list[int]],
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    finished: list[tuple[RunStatus | None, Exception | None]] = []
+    controller = create_controller(
+        harness, rig, lambda status, error: finished.append((status, error))
+    )
+    attempts: list[str] = []
+
+    @workflow("register-stop", plan=Plan, tunables=Tunables, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        del plan, tun, state
+        attempts.append("step")
+        env.pbar("work", 2).refresh()
+        controller.pause()
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    token = controller.start(
+        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+    )
+    harness.complete_segment()
+    paused = controller.status()
+    assert paused is not None and paused.lifecycle == "paused"
+    notifications: list[tuple[int, bool]] = []
+
+    def stop_on_register(payload: GateChangedPayload) -> None:
+        if payload.active:
+            controller.stop()
+            notifications.append(
+                (len(finished), bool(harness.progress.bars_for_owner("example")))
+            )
+
+    subscription = harness.bus.subscribe(GateChangedPayload, stop_on_register)
+    try:
+        resumed = controller.resume(devices=lambda: DeviceSnapshot({}))
+    finally:
+        subscription.unsubscribe()
+    assert notifications == [(1, True)]
+    assert len(finished) == 1 and harness.gate.snapshot()
+    harness.background.execute()
+    assert len(finished) == 1 and harness.gate.snapshot()
+    harness.background.deliver()
+    status = controller.status()
+    assert status is not None and status.lifecycle == "stopped"
+    assert finished == [(paused, None), (status, None)]
+    assert attempts == ["step"]
+    assert progress_calls == ([token], [token])
+    assert harness.handles.known_outcome(resumed) == OperationOutcome("cancelled")
+    assert not harness.gate.snapshot() and harness.handles.live_count() == 0
+    controller.stop()
+    assert len(finished) == 2
+
+
+@pytest.mark.parametrize("failure", ["capture", "submit"])
+def test_resume_stop_rejection_finishes_without_a_producer(
+    tmp_path: Path,
+    progress_calls: tuple[list[int], list[int]],
+    failure: str,
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    finished: list[tuple[RunStatus | None, Exception | None]] = []
+    controller = create_controller(
+        harness, rig, lambda status, error: finished.append((status, error))
+    )
+    attempts: list[str] = []
+
+    @workflow("stop-rejection", plan=Plan, tunables=Tunables, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        del plan, tun, state
+        attempts.append("step")
+        env.pbar("work", 2).refresh()
+        controller.pause()
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    token = controller.start(
+        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+    )
+    harness.complete_segment()
+    capture_error = ValueError("cached snapshot failed after Stop")
+
+    def capture() -> DeviceSnapshot:
+        controller.stop()
+        if failure == "capture":
+            raise capture_error
+        return DeviceSnapshot({})
+
+    harness.background.fail_submit = failure == "submit"
+    with pytest.raises(ValueError if failure == "capture" else OSError) as raised:
+        controller.resume(devices=capture)
+    if failure == "capture":
+        assert raised.value is capture_error
+    else:
+        assert str(raised.value) == "submit failed"
+    status = controller.status()
+    assert status is not None and status.lifecycle == "stopped"
+    assert len(finished) == 2 and finished[-1] == (status, None)
+    assert progress_calls == ([token], [token])
+    assert not harness.progress.bars_for_owner("example")
+    assert controller.operation_id is None and harness.handles.live_count() == 0
+    assert not harness.gate.snapshot() and harness.background.work is None
+    assert attempts == ["step"]
+    controller.stop()
+    assert len(finished) == 2 and progress_calls == ([token], [token])
 
 
 def test_pause_resume_reject_pending_start_without_accepting_native_run(
