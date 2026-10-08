@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
 from types import MappingProxyType
 
 import numpy as np
@@ -15,12 +17,17 @@ from zcu_tools.experiment.cfg_assembler import (
     make_cfg,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.program.v2.modules import ModuleCfg as NativeModuleCfg
+from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
+from zcu_tools.program.v2.modules.pulse import PulseCfg as NativePulseCfg
+from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg as NativeArbWaveformCfg
 from zcu_tools.resources.context import MetaDict
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 
 class _DeviceOnlyCfg(ExpCfgModel):
@@ -28,12 +35,118 @@ class _DeviceOnlyCfg(ExpCfgModel):
 
 
 class _PulseModules(ConfigBase):
-    drive: PulseCfg
+    drive: NativePulseCfg
 
 
 class _PulseExperimentCfg(ExpCfgModel):
     reps: int = 1
     modules: _PulseModules
+
+
+class _NativeModules(ConfigBase):
+    drive: NativeModuleCfg
+
+
+class _NativeExperimentCfg(ExpCfgModel):
+    modules: _NativeModules
+
+
+@pytest.fixture(scope="module", autouse=True)
+def repository_state_guard() -> Iterator[None]:
+    before = vars(ArbWaveformDatabase)["_database_path"]
+    yield
+    assert vars(ArbWaveformDatabase)["_database_path"] == before
+
+
+@pytest.mark.parametrize(
+    ("family", "path"),
+    [
+        ("pulse", ("waveform",)),
+        ("readout/pulse", ("pulse_cfg", "waveform")),
+        ("reset/pulse", ("pulse_cfg", "waveform")),
+        ("reset/two_pulse", ("pulse1_cfg", "waveform")),
+        ("reset/bath", ("qubit_tone_cfg", "waveform")),
+    ],
+)
+def test_assembly_converts_nested_arb_with_capture_bound_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, family: str, path: tuple[str, ...]
+) -> None:
+    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
+    first = tmp_path / "first"
+    ArbWaveformDatabase.init(first)
+    ArbWaveformDatabase.save(
+        "shape", idata=np.array([0.0, 0.5]), time=np.array([0.0, 1.0])
+    )
+    captured = LibrarySnapshot(
+        _library().document(), assets=ArbWaveformDatabase.bound_info()
+    )
+    pulse = _pulse_raw(1000.0)
+    pulse["waveform"] = {
+        "style": "flat_top",
+        "length": 3.0,
+        "raise_waveform": {"style": "arb", "data": "shape"},
+    }
+    raw: dict[str, ExperimentCfgValue] = pulse
+    if family == "readout/pulse":
+        raw = {
+            "type": family,
+            "pulse_cfg": pulse,
+            "ro_cfg": {
+                "type": "readout/direct",
+                "ro_ch": 0,
+                "ro_length": 3.0,
+                "trig_offset": 0.0,
+            },
+        }
+    elif family == "reset/pulse":
+        raw = {"type": family, "pulse_cfg": pulse}
+    elif family == "reset/two_pulse":
+        raw = {"type": family, "pulse1_cfg": pulse, "pulse2_cfg": pulse}
+    elif family == "reset/bath":
+        raw = {
+            "type": family,
+            "qubit_tone_cfg": pulse,
+            "cavity_tone_cfg": pulse,
+            "pi2_cfg": pulse,
+        }
+    fields = ExperimentCfgInput({"modules": {"drive": raw}})
+    ArbWaveformDatabase.init(tmp_path / "other")
+    ArbWaveformDatabase.save(
+        "shape", idata=np.array([0.0, 0.9]), time=np.array([0.0, 9.0])
+    )
+    cfg = assemble_experiment_cfg(
+        fields,
+        _NativeExperimentCfg,
+        context=captured.validation_context(),
+        device_snapshot={},
+    )
+    # Inspect the public serialized native cfg, not factory internals.
+    restored = NativeModuleCfgFactory.from_raw(cfg.modules.drive.to_dict())
+    native = restored.to_dict()
+    for part in (*path, "raise_waveform"):
+        child = native[part]
+        assert isinstance(child, dict)
+        native = child
+    arb = NativeArbWaveformCfg.model_validate(native)
+    assert arb.path == (first / "shape.npz").resolve().as_posix()
+    assert arb.data == "shape" and arb.length == 1.0
+    assert pulse["waveform"] == {
+        "style": "flat_top",
+        "length": 3.0,
+        "raise_waveform": {"style": "arb", "data": "shape"},
+    }
+
+
+def test_assembly_rejects_arb_without_assets() -> None:
+    pulse = _pulse_raw(1000.0)
+    pulse["waveform"] = {"style": "arb", "data": "missing"}
+    with pytest.raises(ValueError, match="assets"):
+        assemble_experiment_cfg(
+            ExperimentCfgInput({"modules": {"drive": pulse}}),
+            _PulseExperimentCfg,
+            context=None,
+            device_snapshot={},
+        )
 
 
 class _SingleSweep(ConfigBase):

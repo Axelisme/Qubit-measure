@@ -10,7 +10,8 @@ from typing import ClassVar
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from zcu_tools.cfg_model import WaveformAssetInfo, WaveformSamples
+from zcu_tools.cfg_model import WaveformAssetInfo
+from zcu_tools.core.waveform_format import WaveformSamples
 
 from ._waveform_data import (
     MAX_ARB_WAVEFORM_SAMPLES,
@@ -60,8 +61,8 @@ class ArbWaveformDatabase:
         """Bind asset reads to the currently initialized repository directory.
 
         Raises RuntimeError if init() has not set an explicit scope. A later
-        init() does not change this binding. duration() and samples() load
-        current asset bytes on every call and propagate ArbWaveformError for
+        init() does not change this binding. path_for() checks existence without
+        loading bytes. duration() and samples() load current asset bytes on every call and propagate ArbWaveformError for
         missing keys, invalid archives or I/O failures. No data is cached.
         """
         return cls.info_at(cls._check_initialized())
@@ -79,6 +80,12 @@ class ArbWaveformDatabase:
 
     @classmethod
     def path_for(cls, data_key: str) -> Path:
+        """Return the current DB key path without reading or requiring a file.
+
+        Validate key grammar and require initialized scope. The path follows
+        init's directory, which may be relative; native conversion uses the
+        capture-bound absolute WaveformAssetInfo.path_for instead.
+        """
         db_path = cls._check_initialized()
         _validate_data_key(data_key)
         return db_path / f"{data_key}.npz"
@@ -315,6 +322,15 @@ class _BoundWaveformAssetInfo:
     def duration(self, data_key: str) -> float:
         """Read current asset duration in microseconds, propagating read errors."""
         return float(self.samples(data_key).time[-1])
+
+    def path_for(self, data_key: str) -> Path:
+        """Return the existing asset path in this binding's absolute directory.
+
+        Validate key grammar and file existence without reading its bytes or
+        recipe. Raise ArbWaveformError for an invalid/missing key; propagate
+        filesystem errors. The current global DB does not affect this path.
+        """
+        raise NotImplementedError("Capture-bound asset paths are not connected")
 
     def samples(self, data_key: str) -> WaveformSamples:
         """Read validated, isolated arrays from this binding's fixed directory."""

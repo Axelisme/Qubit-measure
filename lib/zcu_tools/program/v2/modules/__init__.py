@@ -5,6 +5,9 @@ from typing import TYPE_CHECKING, Annotated, Any, Optional, TypeAlias, Union
 import qick.asm_v2 as qick_asm_v2
 from pydantic import BeforeValidator, Field, TypeAdapter
 
+from zcu_tools.cfg_model import CfgValidationContext
+from zcu_tools.cfg_model import ModuleCfg as CoreModuleCfg
+
 if TYPE_CHECKING:
     from zcu_tools.resources.context import ModuleLibrary
 
@@ -65,6 +68,23 @@ ModuleCfg: TypeAlias = Annotated[
 
 
 class ModuleCfgFactory:
+    @staticmethod
+    def from_core(
+        core_cfg: CoreModuleCfg,
+        *,
+        context: CfgValidationContext | None,
+    ) -> ModuleCfg:
+        """Convert a materialized core module tree to native runtime cfg.
+
+        Resolve every nested arb through the supplied capture-bound
+        context.assets.path_for, including pulses/readouts/resets and flat-top
+        raise envelopes. Missing context/assets raises ValueError at arb use;
+        key/missing-file/I/O failures propagate from the asset owner. No input
+        is mutated and no provider/library/context is retained in native cfg.
+        Non-arb trees permit context=None. Formula semantics are not interpreted.
+        """
+        raise NotImplementedError("Core to native module conversion is not connected")
+
     @classmethod
     def from_raw(
         cls,

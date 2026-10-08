@@ -9,8 +9,10 @@ from typing import Annotated, Literal
 from pydantic import Field, PrivateAttr
 from qick.asm_v2 import QickParam
 
+from zcu_tools.core.waveform_format import WaveformSamples
+
 from .base import ConfigBase
-from .dependencies import CfgValidationContext, WaveformAssetInfo, WaveformSamples
+from .dependencies import CfgValidationContext, WaveformAssetInfo
 
 
 class AbsWaveformCfg(ConfigBase, ABC):

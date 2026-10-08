@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -14,10 +15,17 @@ from typing import (
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BeforeValidator, Field, TypeAdapter, ValidationInfo
+from pydantic import (
+    BeforeValidator,
+    Field,
+    TypeAdapter,
+    ValidationInfo,
+    field_validator,
+)
 from qick.asm_v2 import QickParam
 
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import CfgValidationContext, ConfigBase
+from zcu_tools.cfg_model import WaveformCfg as CoreWaveformCfg
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
@@ -120,11 +128,30 @@ class DragWaveformCfg(AbsWaveformCfg):
 
 
 class ArbWaveformCfg(AbsWaveformCfg):
+    """Native arbitrary envelope with an explicit local playback path.
+
+    style is arb. data is the logical asset key, retained for diagnostics.
+    path is the required host-absolute NPZ location, serialized with POSIX
+    separators; it is the sole playback authority, not a repository key lookup.
+    Relative/foreign paths raise ValueError during validation. Reads propagate
+    file/format failures and read current bytes; cfg does not freeze samples.
+    """
+
     style: Literal["arb"] = "arb"
     data: str
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, value: str) -> str:
+        path = Path(value)
+        if not value or not path.is_absolute():
+            raise ValueError("Arb playback path must be an absolute local path")
+        return path.as_posix()
 
     @property
     def length(self) -> float:
+        """Read path-derived time[-1] in µs; propagate I/O/format failures."""
         from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
         return ArbWaveformDatabase.inspect(self.data).duration
@@ -134,7 +161,7 @@ class ArbWaveformCfg(AbsWaveformCfg):
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         raise ValueError(
-            "Arb waveform length is asset-derived; data cannot be changed through set_param"
+            f"Arb waveform length is asset-derived; data cannot be changed through set_param: {name}={value}"
         )
 
 
@@ -181,6 +208,22 @@ WaveformCfg: TypeAlias = Annotated[
 
 
 class WaveformCfgFactory:
+    @staticmethod
+    def from_core(
+        core_cfg: CoreWaveformCfg,
+        *,
+        context: CfgValidationContext | None,
+    ) -> WaveformCfg:
+        """Convert a materialized core envelope to native cfg without mutation.
+
+        context supplies capture-bound asset paths for arb, including a
+        flat-top raise envelope. Arb without context/assets raises ValueError.
+        Resolve keys through assets.path_for and propagate key/missing/I/O
+        errors. Native cfg holds only key/path values, never the capability.
+        Non-arb conversion needs no assets. Do not reinterpret formula recipes.
+        """
+        raise NotImplementedError("Core to native waveform conversion is not connected")
+
     @staticmethod
     def from_raw(
         raw: str | dict[str, Any] | AbsWaveformCfg,
@@ -315,8 +358,16 @@ class ArbWaveform(AbsWaveform):
         prog.add_envelope(ch, self.name, idata=idata, qdata=qdata)
 
     def make_iqdata(
-        self, ch: int, prog: ModularProgramV2, even_length: bool = False
-    ) -> tuple[NDArray, NDArray | None]:
+        self, ch: int, prog: ModularProgramV2, *, even_length: bool = False
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64] | None]:
+        """Read cfg.path samples and interpolate at the channel's timing grid.
+
+        ch selects prog.soccfg generator scale and samples per clock. Scale
+        normalized samples by get_maxv(ch) and return I/Q arrays; zero Q is
+        None. even_length rounds to an even number of clocks for flat-top ramps.
+        Use the full reference duration, never stretch/truncate by another cfg
+        length. File/codec failures propagate; no repository lookup occurs.
+        """
         # lazy import to avoid circular import
         from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
