@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
+    DeviceSnapshot,
     Engine,
     EnginePorts,
     InvalidRunState,
@@ -26,21 +27,25 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
-from zcu_tools.gui.session.services.progress import BoundProgressFactory
+from zcu_tools.gui.session.services.progress import (
+    BoundProgressFactory,
+    ProgressService,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_runner import OperationRunner
 
 
 class WorkflowController[C]:
-    """Submit one Start/Stop operation through the session's shared runner.
+    """Submit Start/Resume segments and cooperative Pause/Stop through the runner.
 
     All methods except Engine queries are called on the runner's owner thread.
     The controller owns admission and the pending operation token, not native
     lifecycle or a second device registry. ``engine`` is None until the worker
     accepts startup; its status and artifacts remain authoritative thereafter.
-    An operation token is not proof that Engine.start has succeeded. Pause and
-    Resume are not part of this initial Start/Stop attachment.
+    An operation token is not proof of native acceptance. Each segment holds its
+    own lease until owner delivery. Paused runs retain progress and plots; only
+    whole-run completion, Stop or failure discards the Start-token progress.
     """
 
     def __init__(
@@ -48,22 +53,27 @@ class WorkflowController[C]:
         runner: OperationRunner,
         ports: EnginePorts[C],
         owner_id: str,
+        progress: ProgressService,
         *,
         on_finished: Callable[[RunStatus | None, Exception | None], None],
     ) -> None:
         """Borrow runner/ports and report worker completion on the owner thread.
 
-        owner_id labels the run lease and progress. The worker uses the runner's
-        bound progress factory instead of ports.progress. on_finished receives
+        owner_id labels the run lease and progress. progress must be the runner's
+        owning ProgressService. Start creates one bound factory using its token;
+        Resume reuses it, without consulting ambient progress or ports.progress.
+        on_finished receives
         the authoritative status (None if startup was never accepted) and the
         original startup/worker error when present. It runs before handle settle
         and lease release; reentrant Start remains blocked until cleanup.
-        The caller owns connections and finishes/releases ports.plots only after
-        this callback or a synchronous begin failure. No rollback is promised.
+        The callback also reports each paused segment; the caller keeps plan,
+        plots and run inputs alive and locked in that case. Terminal run callbacks
+        may finish plots; release belongs to the caller. No rollback is promised.
         """
         self._runner = runner
         self._ports = ports
         self._owner_id = owner_id
+        self._progress = progress
         self._on_finished = on_finished
         self._lock = RLock()
         self._stop_signal = StopSignal()
@@ -169,13 +179,39 @@ class WorkflowController[C]:
         engine = self.engine
         return None if engine is None else engine.status()
 
+    def pause(self) -> RunStatus:
+        """Request cooperative Pause on an accepted active segment.
+
+        No accepted run raises RuntimeError. Terminal runs and segments already
+        awaiting owner delivery reject invalid controls with InvalidRunState. Repeated pausing requests
+        follow Engine.pause. The lease stays held until producer return and owner
+        delivery; Pause does not discard progress, plots or submitted inputs.
+        """
+        raise NotImplementedError("Pause segment control is not implemented")
+
+    def resume(self, *, devices: Callable[[], DeviceSnapshot]) -> int:
+        """Submit the paused run again, returning the new segment token.
+
+        No accepted run raises RuntimeError. Only paused with previous owner
+        delivery complete is admitted; other states raise InvalidRunState. After obtaining the RUN lease, invoke devices once
+        on the owner thread to capture current cached native device provenance.
+        Engine.resume and execute run on the worker with the original progress
+        factory, state and inputs. No init or Start is repeated. Capture, lease or
+        submission failure propagates, leaves the run paused and retains progress;
+        native worker failure reports the original error and discards progress.
+        Stop while this segment is pending prevents its step from restarting.
+        """
+        raise NotImplementedError("Resume segment control is not implemented")
+
     def stop(self) -> RunStatus | None:
         """Request cooperative Stop without waiting for worker terminal delivery.
 
         Before acceptance this cancels pending startup and returns None. After
         acceptance it delegates to Engine.stop and returns its native status.
-        It cannot free the run lease; the worker's terminal callback does that.
-        Native failures propagate and no hardware rollback/cleanup occurs.
+        An active segment keeps its lease until worker terminal delivery. An
+        already-delivered paused run stops synchronously, reports on_finished and
+        discards its retained progress. Native failures propagate; no hardware
+        rollback or cleanup occurs.
         """
         with self._lock:
             self._stop_signal.set()

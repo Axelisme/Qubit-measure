@@ -30,6 +30,7 @@ from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
+from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
@@ -58,14 +59,15 @@ def _calibrated_seed(plan: T1Plan, pi_length_us: float) -> Calibrated:
 
 
 class T1WorkflowWindow(QWidget):
-    """Compose captured T1 Start/Stop and accepted-run tuning on the Qt owner.
+    """Compose captured T1 run controls and accepted-run tuning on the Qt owner.
 
     plan_panel and tunables_panel expose the existing editable form state.
     controller is None before the first submitted Start; its native engine is
     None until startup acceptance. tuning_panel attaches only after acceptance.
     The supplied session/runner own shared hardware, exclusion and workers.
     This window does not create a second registry, launch a GUI process, expose
-    RPC, refresh YAML or implement Pause/Resume. Each Start captures current
+    RPC or refresh YAML. Pause retains plan, plots and input capture; Resume only
+    captures current cached devices after reacquiring the lease. Each Start captures current
     published parameters and cached device data in one owner sequence.
     """
 
@@ -75,11 +77,14 @@ class T1WorkflowWindow(QWidget):
         services: SessionServices,
         runner: OperationRunner,
         owner: OwnerScheduler,
+        progress: ProgressService,
         parent: QWidget | None = None,
     ) -> None:
         """Build form/plot attachments on the GUI owner with a QApplication.
 
-        state/services/runner must be the same owning session; owner marshals
+        state/services/runner/progress must be the same owning session. The
+        progress service is borrowed directly from its composition root, not
+        obtained through a wider control facet. owner marshals
         plot commands to this thread. A readable context and resolvable qubit
         focus are required to build form defaults. Startup also requires a saved
         point, native QickConfig and connected SoC. Source errors propagate.
@@ -91,6 +96,7 @@ class T1WorkflowWindow(QWidget):
         self._services = services
         self._runner = runner
         self._owner = owner
+        self._progress = progress
         self.controller: WorkflowController[Calibrated] | None = None
         self.tuning_panel: T1TuningPanel | None = None
         self._plots: Plots | None = None
@@ -105,6 +111,14 @@ class T1WorkflowWindow(QWidget):
         self._start_button = QPushButton("Start", self)
         self._start_button.setObjectName("workflow.run.start")
         self._start_button.clicked.connect(self._start_clicked)
+        self._pause_button = QPushButton("Pause", self)
+        self._pause_button.setObjectName("workflow.run.pause")
+        self._pause_button.setEnabled(False)
+        self._pause_button.clicked.connect(self._pause_clicked)
+        self._resume_button = QPushButton("Resume", self)
+        self._resume_button.setObjectName("workflow.run.resume")
+        self._resume_button.setEnabled(False)
+        self._resume_button.clicked.connect(self._resume_clicked)
         stop_button = QPushButton("Stop", self)
         stop_button.setObjectName("workflow.run.stop")
         stop_button.clicked.connect(self.stop)
@@ -118,6 +132,8 @@ class T1WorkflowWindow(QWidget):
             self.plan_panel,
             self.tunables_panel,
             self._start_button,
+            self._pause_button,
+            self._resume_button,
             stop_button,
             self._message,
             stack,
@@ -201,7 +217,11 @@ class T1WorkflowWindow(QWidget):
             devices=SessionDevices(self._services.device),
         )
         candidate = WorkflowController(
-            self._runner, ports, "t1-workflow", on_finished=self._finished
+            self._runner,
+            ports,
+            "t1-workflow",
+            self._progress,
+            on_finished=self._finished,
         )
         if self._plots is not None:
             self._plots.release()
@@ -238,6 +258,34 @@ class T1WorkflowWindow(QWidget):
         self._message.setText("Startup pending")
         self._poll.start()
         return token
+
+    def pause(self) -> RunStatus:
+        """Request Pause of the accepted run without unlocking plan or plots.
+
+        No accepted run raises RuntimeError; illegal native states raise
+        InvalidRunState. The
+        lease remains held until the worker returns and owner delivery settles.
+        """
+        if self.controller is None:
+            raise RuntimeError("Pause requires an accepted workflow run")
+        return self.controller.pause()
+
+    def resume(self) -> int:
+        """Reacquire the RUN lease and submit the same paused T1 run.
+
+        Capture only current cached device data after lease admission. Plan,
+        context, roles, accepted expressions and plots stay fixed. Return the
+        pending segment token, not proof of native Resume. No accepted run raises
+        RuntimeError; illegal native states raise InvalidRunState. Other
+        capture/submission errors propagate without retry or live hardware reads.
+        """
+        if self.controller is None:
+            raise RuntimeError("Resume requires a paused workflow run")
+        return self.controller.resume(
+            devices=lambda: DeviceSnapshot(
+                self._services.device.capture_native_device_info()
+            )
+        )
 
     def stop(self) -> RunStatus | None:
         """Request Stop; return native status or None before accepted startup."""
@@ -279,6 +327,20 @@ class T1WorkflowWindow(QWidget):
             self._message.setText("Stopped before startup")
         if self._plots is not None:
             self._plots.finish()
+
+    def _pause_clicked(self) -> None:
+        try:
+            self.pause()
+        except Exception as error:
+            logger.exception("T1 workflow Pause failed")
+            self._message.setText(str(error))
+
+    def _resume_clicked(self) -> None:
+        try:
+            self.resume()
+        except Exception as error:
+            logger.exception("T1 workflow Resume failed")
+            self._message.setText(str(error))
 
     def _start_clicked(self) -> None:
         try:

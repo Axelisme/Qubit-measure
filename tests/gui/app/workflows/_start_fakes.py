@@ -107,3 +107,9 @@ class StartHarness:
             runner=self.runner,
             bind_assets=ArbWaveformDatabase.info_at,
         )
+
+    def complete_segment(self) -> None:
+        """Run the deferred worker, pump its progress, then deliver owner terminal."""
+        self.background.execute()
+        self.owner.pump_all()
+        self.background.deliver()

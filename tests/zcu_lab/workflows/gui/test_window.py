@@ -5,9 +5,18 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from qtpy.QtWidgets import QApplication
+from matplotlib.figure import Figure
+from qtpy.QtWidgets import QApplication, QPushButton
 from zcu_tools.datafile import RunSnapshot
-from zcu_tools.experiment.workflows import Done, InitEnv, Step, WorkflowEnv, workflow
+from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.workflows import (
+    Done,
+    InitEnv,
+    InvalidRunState,
+    Step,
+    WorkflowEnv,
+    workflow,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -83,7 +92,11 @@ def attachment(
         harness.background.execute()
         harness.background.deliver()
         window = T1WorkflowWindow(
-            harness.state, harness.services, harness.runner, harness.owner
+            harness.state,
+            harness.services,
+            harness.runner,
+            harness.owner,
+            harness.progress,
         )
         window.plan_panel.state.reset(inline_input(inputs))
         yield window, harness, entry
@@ -315,3 +328,126 @@ def test_real_t1_gui_caller_runs_native_offline_acquisitions(
         ).is_file()
     assert window.tuning_panel is not None and not window.tuning_panel.isEnabled()
     assert not harness.gate.snapshot()
+
+
+def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, harness, entry = attachment
+    attempts: list[float] = []
+    figures: list[int] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("pause-window", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del plan, tun, state
+        attempts.append(env.context.pi_length_us)
+
+        def draw(figure: Figure) -> None:
+            figures.append(id(figure))
+            figure.clear()
+            figure.subplots().plot([0, 1], [len(attempts), len(attempts)])
+
+        if len(attempts) == 1:
+            env.plots.subplots("live")
+        env.plots.draw("live", draw)
+        bar = env.pbar("work", 2)
+        bar.set_progress(len(attempts))
+        bar.refresh()
+        if len(attempts) == 1:
+            window.pause()
+            yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    token = window.start("paused")
+    assert isinstance(token, int)
+    harness.complete_segment()
+    controller = window.controller
+    assert controller is not None
+    paused = controller.status()
+    assert paused is not None and paused.lifecycle == "paused"
+
+    # Resume must not capture this later point/focus as new run inputs.
+    entry.new_point("later")
+    harness.services.context.use_point(PointUseRequest("later"))
+    harness.services.context.set_component_focus(None)
+    captures: list[str] = []
+    capture_native = harness.services.device.capture_native_device_info
+
+    def capture() -> dict[str, DeviceInfo]:
+        assert harness.gate.snapshot()
+        captures.append("cached devices")
+        return capture_native()
+
+    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
+    resumed = window.resume()
+    assert resumed != token
+    assert captures == ["cached devices"]
+    assert not window.plan_panel.isEnabled()
+    harness.complete_segment()
+    terminal = controller.status()
+    assert terminal is not None and terminal.lifecycle == "done"
+    assert harness.background.error is None
+    assert len(attempts) == 2 and attempts[0] == attempts[1]
+    assert len(figures) == 2 and figures[0] == figures[1]
+    assert window.plan_panel.isEnabled()
+    assert not harness.gate.snapshot()
+
+
+@pytest.mark.parametrize("action", ["stop", "close"])
+def test_paused_window_stop_or_close_ends_run_without_another_worker(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    window, harness, entry = attachment
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("paused-close", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del plan, tun, state
+        env.pbar("work", 2).refresh()
+        window.pause()
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    assert isinstance(window.start("paused-stop"), int)
+    harness.complete_segment()
+    assert harness.background.work is None
+    assert harness.progress.bars_for_owner("t1-workflow")
+    assert not window.plan_panel.isEnabled() and not window.tunables_panel.isEnabled()
+    assert window.tuning_panel is not None and window.tuning_panel.isEnabled()
+    start = window.findChild(QPushButton, "workflow.run.start")
+    pause = window.findChild(QPushButton, "workflow.run.pause")
+    resume = window.findChild(QPushButton, "workflow.run.resume")
+    assert start is not None and not start.isEnabled()
+    assert pause is not None and not pause.isEnabled()
+    assert resume is not None and resume.isEnabled()
+    with pytest.raises(InvalidRunState):
+        window.start("replacement")
+    assert not (entry.result_path / "workflows/replacement").exists()
+    if action == "close":
+        assert window.close()
+    else:
+        status = window.stop()
+        assert status is not None and status.lifecycle == "stopped"
+        assert window.plan_panel.isEnabled() and start.isEnabled()
+        assert not pause.isEnabled() and not resume.isEnabled()
+    controller = window.controller
+    assert controller is not None
+    status = controller.status()
+    assert status is not None and status.lifecycle == "stopped"
+    assert harness.background.work is None
+    assert not harness.gate.snapshot()
+    assert harness.progress.bars_for_owner("t1-workflow") == ()
