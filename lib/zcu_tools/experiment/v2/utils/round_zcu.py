@@ -8,6 +8,7 @@ from typing import Any, Literal, TypeVar
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
+from qick.asm_v2 import QickParam
 
 from zcu_tools.program.v2 import SweepCfg
 
@@ -21,16 +22,17 @@ def round_zcu_time(
     ro_ch: int | None = None,
     scaler: float = 1.0,
 ) -> T_Value:
-    one_cycle = soccfg.cycles2us(1, gen_ch=gen_ch, ro_ch=ro_ch)
+    """Round scalar times or independent time points to the selected QICK clock.
+
+    Times are microseconds; ``scaler`` converts the caller's value to that time.
+    Regular hardware sweeps must use ``round_sweep_dict`` instead, because QICK
+    rounds their start/span before truncating the signed step toward zero.
+    """
 
     def _convert_time(t: float) -> float:
-        # QICK scalar us2cycles rounds, while sweep step conversion truncates.
-        # Shift by half a cycle so scalar preview follows the sweep grid.
         return (
             soccfg.cycles2us(
-                soccfg.us2cycles(
-                    scaler * t - 0.5 * one_cycle, gen_ch=gen_ch, ro_ch=ro_ch
-                ),
+                soccfg.us2cycles(scaler * t, gen_ch=gen_ch, ro_ch=ro_ch),
                 gen_ch=gen_ch,
                 ro_ch=ro_ch,
             )
@@ -49,22 +51,70 @@ def round_zcu_freq(
     gen_ch: int,
     ro_ch: int | None = None,
     scaler: float = 1.0,
+    *,
+    mixer_freq: float | None = None,
 ) -> T_Value:
-    one_reg = soccfg.reg2freq(1, gen_ch=gen_ch) - soccfg.reg2freq(0, gen_ch=gen_ch)
+    """Round independent frequencies using QICK's signed DDS conversion.
+
+    Values are MHz after multiplication by finite nonzero ``scaler``. With
+    ``mixer_freq`` (requested MHz), values are absolute RF frequencies and the
+    quantized mixer is subtracted before DDS conversion. Without it, values
+    are DDS frequencies. ``ro_ch`` requests DAC/ADC grid matching. Regular
+    hardware sweeps must use ``round_sweep_dict`` for signed step rounding.
+    QICK rejects frequencies outside an interpolated generator's DDS range.
+    """
 
     def _convert_freq(f: float) -> float:
-        return (
-            soccfg.reg2freq(
-                soccfg.freq2reg(scaler * f - 0.5 * one_reg, gen_ch=gen_ch, ro_ch=ro_ch),
-                gen_ch=gen_ch,
-            )
-            / scaler
-        )
+        param = QickParam(f)
+        _convert_frequency_param(param, soccfg, gen_ch, ro_ch, scaler, mixer_freq)
+        return float(param.get_actual_values({}))
 
     if isinstance(freq, (Number, float)):
         return _convert_freq(float(freq))
     else:
         return np.vectorize(_convert_freq)(freq)
+
+
+def _convert_frequency_param(
+    param: QickParam,
+    soccfg: QickConfig,
+    gen_ch: int,
+    ro_ch: int | None,
+    scaler: float,
+    mixer_freq: float | None,
+) -> None:
+    if not math.isfinite(scaler) or scaler == 0.0:
+        raise ValueError("frequency scaler must be finite and nonzero")
+    mixer = 0.0
+    if mixer_freq is not None:
+        if not soccfg["gens"][gen_ch]["has_mixer"]:
+            raise ValueError("mixer_freq requires a generator with a mixer")
+        # NQZ only affects setval; rounded is the absolute-frequency offset.
+        mixer = soccfg.calc_mixer_freq(gen_ch, mixer_freq, nqz=1, ro_ch=ro_ch)[
+            "rounded"
+        ]
+    soccfg.freq2reg(scaler * param - mixer, gen_ch=gen_ch, ro_ch=ro_ch)
+
+
+def _round_frequency_sweep(
+    sweep: SweepCfg,
+    soccfg: QickConfig,
+    gen_ch: int,
+    ro_ch: int | None = None,
+    scaler: float = 1.0,
+    mixer_freq: float | None = None,
+) -> SweepCfg:
+    param = QickParam(sweep.start, {"sweep": sweep.stop - sweep.start})
+    _convert_frequency_param(param, soccfg, gen_ch, ro_ch, scaler, mixer_freq)
+    try:
+        values = param.get_actual_values({"sweep": sweep.expts})
+    except RuntimeError as exc:
+        raise ValueError(
+            f"Frequency sweep hardware quantization failed: {exc}"
+        ) from exc
+    start, stop = float(values[0]), float(values[-1])
+    step = (stop - start) / (sweep.expts - 1) if sweep.expts > 1 else 0.0
+    return SweepCfg(start=start, stop=stop, expts=sweep.expts, step=step)
 
 
 def round_zcu_phase(
@@ -150,13 +200,44 @@ def _format_zero_step_error(
     )
 
 
+def _round_time_sweep(
+    sweep: SweepCfg,
+    soccfg: QickConfig,
+    gen_ch: int | None = None,
+    ro_ch: int | None = None,
+    scaler: float = 1.0,
+) -> SweepCfg:
+    if not math.isfinite(scaler) or scaler == 0.0:
+        raise ValueError("time sweep scaler must be finite and nonzero")
+    param = QickParam(sweep.start, {"sweep": sweep.stop - sweep.start})
+    # QICK records the conversion on the parameter for get_actual_values().
+    soccfg.us2cycles(scaler * param, gen_ch=gen_ch, ro_ch=ro_ch)
+    try:
+        values = param.get_actual_values({"sweep": sweep.expts})
+    except RuntimeError as exc:
+        raise ValueError(f"Time sweep hardware quantization failed: {exc}") from exc
+    start, stop = float(values[0]), float(values[-1])
+    step = (stop - start) / (sweep.expts - 1) if sweep.expts > 1 else 0.0
+    return SweepCfg(start=start, stop=stop, expts=sweep.expts, step=step)
+
+
 def round_sweep_dict(
     sweep: SweepCfg,
     round_type: Literal["none", "time", "freq", "phase", "gain"] = "none",
     round_info: dict[str, Any] | None = None,
 ) -> SweepCfg:
+    """Return a regular sweep on the requested hardware grid without acquiring.
+
+    ``round_info`` supplies the selected rounder's clock/channel and scaler.
+    Time/frequency sweeps use QICK's start/span and signed step quantization.
+    Raise ValueError when adjacent requested points collapse on that grid.
+    """
     if round_info is None:
         round_info = {}
+    if round_type == "time":
+        return _round_time_sweep(sweep, **round_info)
+    if round_type == "freq":
+        return _round_frequency_sweep(sweep, **round_info)
 
     expts = sweep.expts
     span = sweep.stop - sweep.start
