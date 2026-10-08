@@ -259,8 +259,10 @@ def test_unpack_two_case_last_case_has_no_extra_jump():
     assert isinstance(expanded, BlockNode)
     children = expanded.insts
 
-    # Keep IRDispatch first, then case_0, jump_bb, case_1 and end_label_bb.
-    # case_1 is children[3]; end_label_bb is children[4]
+    # The IRDispatch node precedes the first case and that case's jump block.
+    # The last case and the end-label block follow the jump block.
+    # The last case occupies the fourth child position.
+    # The end-label block occupies the fifth child position.
     # No extra jump between case_1 and end_label
     assert len(children) == 5
     end_bb = children[-1]
