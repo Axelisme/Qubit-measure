@@ -22,7 +22,12 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import ReferenceValue, ScalarSpec
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    ScalarSpec,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import RoleSpec
 
@@ -30,7 +35,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import custom, res_freq_range
+from zcu_lab.v2._support.measure.seeds import custom, path_seed, res_freq_range
 from zcu_lab.v2._support.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_lab.v2._support.measure.writeback_helpers import (
     pulse_readout_module_writeback_items,
@@ -62,7 +67,35 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     plus 0.05 us from resonator role paths; absent/null values use 0, 0.9 and
     0.55 respectively. Source and role errors propagate.
     """
-    raise NotImplementedError
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    value.with_field("pulse_cfg.freq", 0.0)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.05)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", 0.0)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field(
+        "ro_cfg.ro_length",
+        path_seed(
+            "resonator.ext.default_probe_length",
+            fallback=0.9,
+            expr="resonator.ext.default_probe_length - 0.1",
+        ).resolve(ctx),
+    )
+    value.with_field(
+        "ro_cfg.trig_offset",
+        path_seed(
+            "resonator.ext.time_of_fly",
+            fallback=0.55,
+            expr="resonator.ext.time_of_fly + 0.05",
+        ).resolve(ctx),
+    )
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
