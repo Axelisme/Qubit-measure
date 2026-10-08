@@ -72,12 +72,22 @@ class RunPaneState(Generic[T_Result]):
     data, not an acquisition destination. source_operation_id identifies the
     publishing GUI operation. metadata is evidence from Run, or None when no
     native evidence was acquired; Load must not manufacture new run timing.
+    confirmed_run_id is None until a complete Save report confirms at least one
+    persistent output. It survives failed resaves of this Run, but replacement
+    or a new Run resets it; it is identity, not a successful-output history.
     """
 
     result: T_Result | None = None
     source_path: str | None = None
     source_operation_id: int | None = None
     metadata: RunMetadata | None = None
+    confirmed_run_id: str | None = None
+    save_operation_id: int | None = None
+    """Handle that committed the current complete Save report, or None.
+
+    New Save admission clears this token. A missing report never confirms it,
+    so a terminal query cannot mistake an earlier attempt for this one.
+    """
 
 
 @dataclass
@@ -649,13 +659,16 @@ class State(SessionState):
         )
         self.tabs[tab_id].post_analysis.params = instance
 
-    def commit_save_report(self, tab_id: str, report: SaveReport) -> None:
-        """Publish latest output evidence and the last successful Labber path.
+    def commit_save_report(
+        self, tab_id: str, report: SaveReport, *, operation_id: int
+    ) -> None:
+        """Publish outputs, confirmed identity and the latest complete report token.
 
         Call on State's owner thread after a complete shared saver report. The
         tab must retain historical RunMetadata; missing metadata raises
-        ValueError before mutation, and unknown tabs raise KeyError. Unselected
-        artifacts and acquisition identity/times remain unchanged.
+        ValueError before mutation, and unknown tabs raise KeyError. operation_id
+        identifies the Save that produced this report, not its preceding Run.
+        Unselected artifacts and acquisition identity/times remain unchanged.
         """
         self._assert_owner()
         tab = self.get_tab(tab_id)
@@ -663,6 +676,9 @@ class State(SessionState):
         if metadata is None:
             raise ValueError("Save report requires historical RunMetadata")
         tab.artifacts.apply_report(report)
+        tab.run.save_operation_id = operation_id
+        if any(item.status == "saved" for item in report.outputs):
+            tab.run.confirmed_run_id = report.run_id
         for item in report.outputs:
             if (
                 item.key.section == "run"
@@ -778,16 +794,20 @@ class State(SessionState):
         self.tabs[tab_id].is_analyzing = analyzing
 
     def set_tab_saving_data(self, tab_id: str, *, saving_data: bool) -> None:
-        """Set this existing tab's save busy flag on the owner thread.
+        """Set the save busy flag and clear prior report provenance at admission.
 
-        True marks saving active; False clears it. Raise KeyError for an
+        True marks saving active and clears the previous complete report token;
+        False clears busy without confirming a report. Raise KeyError for an
         unknown tab and RuntimeError off-owner. Do not bump resource versions.
         """
         self._assert_owner()
         logger.debug(
             "set_tab_saving_data: tab_id=%r saving_data=%s", tab_id, saving_data
         )
-        self.tabs[tab_id].is_saving_data = saving_data
+        tab = self.tabs[tab_id]
+        tab.is_saving_data = saving_data
+        if saving_data:
+            tab.run.save_operation_id = None
 
     def is_run_active(self) -> bool:
         return self.running_tab_id is not None

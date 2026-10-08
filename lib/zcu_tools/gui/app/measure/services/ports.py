@@ -32,6 +32,8 @@ class SaveDataSubmission:
 
     operation_id: int
     data_path: str
+    destinations: tuple[SaveDestination, ...]
+    """Every reserved native and Labber output for this submission."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,9 +115,20 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class RunPaneSnapshot:
+    """Current Run and confirmed persistence identity.
+
+    result is the adapter-owned record or None; source_path is the loaded file
+    or None. source_operation_id identifies the publishing acquisition or None
+    after Load. run_id is None until at least one persistent output succeeds;
+    it survives failed resaves, but does not survive Run replacement.
+    """
+
     result: object | None
     source_path: str | None
     source_operation_id: int | None = None
+    run_id: str | None = None
+    save_operation_id: int | None = None
+    """Save handle that committed the current report; None before complete capture."""
 
 
 @dataclass(frozen=True, slots=True)

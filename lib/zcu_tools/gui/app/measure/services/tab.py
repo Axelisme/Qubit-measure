@@ -126,6 +126,8 @@ class TabService:
                 result=tab.run.result,
                 source_path=tab.run.source_path,
                 source_operation_id=tab.run.source_operation_id,
+                run_id=tab.run.confirmed_run_id,
+                save_operation_id=tab.run.save_operation_id,
             ),
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,

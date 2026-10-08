@@ -1,22 +1,21 @@
-"""Guarded native Save commands for GUI and remote driving adapters."""
+"""Guarded synchronous native Save commands for GUI and remote adapters."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
 from zcu_tools.gui.session.context_types import CommandOrigin
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
 
     from .guard import GuardService
-    from .ports import SaveArtifactsSubmission, SaveDataSubmission
     from .save import SaveService
 
 
 class SaveControlPort(Protocol):
-    """App-facing native Save surface shared by GUI and remote adapters."""
+    """Existing app-facing Save surface shared by GUI and remote adapters."""
 
     def has_tab(self, tab_id: str) -> bool: ...
 
@@ -29,14 +28,14 @@ class SaveControlPort(Protocol):
         *,
         origin: CommandOrigin,
         run_operation_id: int | None = None,
-    ) -> SaveDataSubmission:
-        """Submit both data outputs with this command's attribution.
+    ) -> SaveReport:
+        """Save both data formats synchronously on the owner thread.
 
-        tab_id identifies an idle, completed, active-context tab. comment=None
-        retains the annotation. run_operation_id, if supplied, must identify
-        the current Run pane. Guards or absent historical evidence raise
-        FailedPreconditionError before comment mutation or operation admission.
-        A returned reservation is not success; terminal carries SaveReport.
+        tab_id identifies an idle completed active-context tab. comment=None
+        retains its annotation. run_operation_id optionally binds the current
+        Run source, not a Save handle. Guards/missing evidence raise
+        FailedPreconditionError before mutation. Output failures are reported;
+        mapping/ledger errors propagate. Return follows State publication.
         """
         ...
 
@@ -47,23 +46,23 @@ class SaveControlPort(Protocol):
         artifacts: tuple[ArtifactRef, ...] | None = None,
         comment: str | None = None,
         origin: CommandOrigin,
-    ) -> SaveArtifactsSubmission:
-        """Save whole selected artifacts, including JSON and all outputs.
+    ) -> SaveReport:
+        """Synchronously save complete selected artifacts and every destination.
 
-        None selects every declaration, even Saved. Explicit refs are ordered,
-        unique and nonempty. Invalid refs or absent historical metadata/storage
-        raise FailedPreconditionError before mutations or admission. Invalid
-        pane content raises TypeError/ValueError. comment=None retains the
-        annotation; origin attributes this Save. Reservations are not success.
+        None selects all declarations, including Saved. Explicit refs must be
+        ordered, unique and nonempty. Invalid refs/missing evidence raise
+        FailedPreconditionError before mutation; invalid pane content raises
+        TypeError/ValueError. comment=None retains the annotation. Output errors
+        stay in the complete report; mapping/ledger errors propagate.
         """
         ...
 
 
 class SaveControlFacet:
-    """Compose static guards, dynamic availability and native Save admission."""
+    """Compose existing guards and synchronous native Save commands."""
 
     def __init__(self, *, state: State, guard: GuardService, save: SaveService) -> None:
-        """Inject the State owner, static preconditions and owning save service."""
+        """Inject State, static preconditions and the owning synchronous saver."""
         self._state = state
         self._guard = guard
         self._save = save
@@ -73,7 +72,7 @@ class SaveControlFacet:
         return self._state.has_tab(tab_id)
 
     def set_comment(self, tab_id: str, comment: str) -> None:
-        """Publish an idle tab's annotation and mark saved Run evidence dirty.
+        """Update an idle tab's annotation and mark saved Run evidence dirty.
 
         Busy/unavailable tabs raise FailedPreconditionError without mutation;
         unknown tabs propagate their lookup error.
@@ -88,13 +87,13 @@ class SaveControlFacet:
         *,
         origin: CommandOrigin,
         run_operation_id: int | None = None,
-    ) -> SaveDataSubmission:
-        """Submit native data saving under SaveControlPort.save_data's contract."""
+    ) -> SaveReport:
+        """Execute SaveControlPort.save_data's synchronous command contract."""
         if run_operation_id is not None:
             self._state.require_run_operation(tab_id, run_operation_id)
         permit = self._guard.acquire_save_permit(tab_id)
         self._save.require_save_available(tab_id)
-        return self._save.start_save_data(permit, comment=comment, origin=origin)
+        return self._save.save_data(permit, comment=comment, origin=origin)
 
     def save_artifacts(
         self,
@@ -103,10 +102,10 @@ class SaveControlFacet:
         artifacts: tuple[ArtifactRef, ...] | None = None,
         comment: str | None = None,
         origin: CommandOrigin,
-    ) -> SaveArtifactsSubmission:
-        """Submit whole artifacts under SaveControlPort.save_artifacts's contract."""
+    ) -> SaveReport:
+        """Execute SaveControlPort.save_artifacts's whole-artifact contract."""
         permit = self._guard.acquire_save_permit(tab_id)
         self._save.require_save_available(tab_id)
-        return self._save.start_save_artifacts(
+        return self._save.save_artifacts(
             permit, artifacts, comment=comment, origin=origin
         )

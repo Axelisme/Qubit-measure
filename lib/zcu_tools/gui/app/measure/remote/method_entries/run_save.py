@@ -7,7 +7,6 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     optional_integer,
-    optional_string,
     required_object,
     required_string,
     save_comment,
@@ -97,25 +96,21 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_save_data",
         MethodSpec(
             30.0,
-            "Start non-cancellable data saving without a hardware lease. Explicit "
-            "data_path/comment update the GUI draft; omitted values keep it. "
-            "Returns an operation handle and reserved path, not proof of success. "
-            "Wait for completion and read artifacts for the last successful path. "
-            "Optional run_operation_id requires that Run result before any draft "
-            "edit or save; a replaced result returns result_superseded. "
-            "This token does not replace the connection observation guards.",
+            "Save the current measurement_data artifact to every native/Labber output. "
+            "Non-cancellable and lease-free. Returns operation_id and complete reserved "
+            "artifacts; await the operation, then read tab.snapshot(operation_id=save ID) "
+            "for the same complete report. Reserved outputs do not prove success. "
+            "call_id is the initiating native MCP ID, preserved verbatim. Optional "
+            "run_operation_id requires that Run result; it does not replace seen guards.",
             (
                 required_string("tab_id"),
-                optional_string("data_path", "Override data path"),
+                required_string("call_id", "Initiating native MCP call ID"),
                 save_comment(),
                 optional_integer("run_operation_id"),
             ),
         ),
         agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:path:data",
-            ),
+            guard_deps=("tab:{tab_id}:result", "tab:{tab_id}:save"),
             operation_key="tab:{tab_id}",
             refresh_after_write=True,
         ),
@@ -125,24 +120,22 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_save_artifacts",
         MethodSpec(
             30.0,
-            "Start one non-cancellable save operation over selected artifacts. "
-            "Keys are data, analysis:<name> and post:<name>; all selects unsaved artifacts. "
-            "Explicit paths/comment update the shared drafts. Returns operation_id "
-            "and reserved destinations, not proof of completion. Read artifacts "
-            "after terminal failure for partial successes. Via rpc_call the operation_id "
-            "becomes a handle: use wait(op=handle), then tab.snapshot for actual paths. "
-            "Explicitly read tab.snapshot before this guarded mutation.",
+            "Save whole artifacts, including every figure, JSON member and destination. "
+            "artifacts is all (including Saved) or unique {section,name} refs. "
+            "No caller paths. Returns operation_id and complete reservations; await, then "
+            "read tab.snapshot(operation_id=save ID) for that report. Failure can contain "
+            "saved and failed outputs. call_id is the initiating native MCP ID. "
+            "run_operation_id binds the Run source. operation_id optionally binds one "
+            "explicitly selected analysis/post_analysis artifact to its analysis source.",
             (
                 required_string("tab_id"),
+                required_string("call_id", "Initiating native MCP call ID"),
                 ParamSpec("artifacts", JsonType.JSON, required=False, default="all"),
-                ParamSpec(
-                    "paths",
-                    JsonType.OBJECT,
-                    required=False,
-                    default={},
-                    description="Artifact key to destination path",
-                ),
                 save_comment(),
+                optional_integer("run_operation_id"),
+                optional_integer(
+                    "operation_id", "Require the selected analysis source"
+                ),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -151,41 +144,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:analyze",
                 "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:path:data",
-                "tab:{tab_id}:path:analysis_image",
-                "tab:{tab_id}:path:post_analysis_image",
+                "tab:{tab_id}:save",
             ),
             operation_key="tab:{tab_id}",
-            refresh_after_write=True,
-        ),
-    ),
-    method_entry(
-        "tab.save_image",
-        "run_save:h_tab_save_image",
-        MethodSpec(
-            30.0,
-            "Save one named canonical image (analysis|post_analysis only; run "
-            "has no canonical image). Requires tab_id, subtab_id and figure_name. "
-            "The pane is analysis|post_analysis. Explicit image_path updates the GUI "
-            "draft before saving; omission keeps the draft, and an empty path is rejected. "
-            "Optional operation_id rejects a replaced result before changing paths or exporting.",
-            (
-                required_string("tab_id"),
-                required_string("subtab_id", "Pane: analysis|post_analysis"),
-                required_string("figure_name"),
-                optional_string("image_path", "Override image path"),
-                optional_integer(
-                    "operation_id", "Require this analysis operation's current result"
-                ),
-            ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:path:analysis_image",
-                "tab:{tab_id}:path:post_analysis_image",
-            ),
             refresh_after_write=True,
         ),
     ),

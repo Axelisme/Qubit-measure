@@ -78,24 +78,14 @@ class SaveService:
     def __init__(
         self,
         state: State,
-        runner: OperationRunner,
         bus: EventBus,
         *,
-        owner_scheduler: OwnerScheduler,
         access: ExperimentAccess | None = None,
     ) -> None:
-        """Inject the operation runner, terminal bus and Figure owner scheduler.
-
-        access is the shared catalog reload/shutdown gate for driving-entry
-        preflight. None creates an independent available gate. Direct start
-        commands keep their existing same-tab busy-only exclusion policy.
-        """
+        """Inject the State owner, publication bus and reload/shutdown entry gate."""
         self._state = state
-        self._runner = runner
         self._bus = bus
-        self._owner_scheduler = owner_scheduler
         self._access = access if access is not None else ExperimentAccess()
-        self._active_operations: dict[str, int] = {}
 
     def require_save_available(self, tab_id: str) -> None:
         """Reject reload/shutdown or busy tabs without changing drafts or files.
@@ -113,44 +103,42 @@ class SaveService:
             for tab_id, token in self._active_operations.items()
         )
 
-    def start_save_data(
+    def save_data(
         self, permit: SavePermit, comment: str | None = None, *, origin: CommandOrigin
-    ) -> SaveDataSubmission:
-        """Submit native HDF5 and a fresh Labber file for the captured Run.
+    ) -> SaveReport:
+        """Synchronously save native HDF5 and a fresh Labber file on the owner thread.
 
-        permit identifies the guarded tab. comment=None retains its annotation;
-        origin attributes this command. Missing historical storage/metadata or
-        busy state raises FailedPreconditionError before comment mutation,
-        operation admission or I/O. The returned data_path is a reservation.
-        The data terminal contains both outputs after State/handle settle.
+        permit identifies an idle guarded tab with historical storage/metadata.
+        comment=None retains its annotation; origin attributes this command.
+        Missing evidence/busy raises FailedPreconditionError before mutation.
+        Output failures appear in the complete report; mapping or ledger errors
+        propagate without a report. State publication completes before return.
         """
         plan = self._capture(
             permit.tab_id, (ArtifactRef("run", "measurement_data"),), comment, origin
         )
         data_path = str(plan.destinations[0].output.path)
         token = self._begin_save(permit.tab_id, plan, data_path=data_path)
-        return SaveDataSubmission(token, data_path)
+        return SaveDataSubmission(token, data_path, plan.destinations)
 
-    def start_save_artifacts(
+    def save_artifacts(
         self,
         permit: SavePermit,
         artifacts: tuple[ArtifactRef, ...] | None = None,
         comment: str | None = None,
         *,
         origin: CommandOrigin,
-    ) -> SaveArtifactsSubmission:
-        """Save whole artifacts in one non-cancellable, lease-free operation.
+    ) -> SaveReport:
+        """Synchronously save whole artifacts and publish their complete report.
 
-        artifacts=None includes all declarations, including Saved. Explicit refs
-        retain their order; empty, repeated or unknown refs raise
-        FailedPreconditionError. Missing historical storage/metadata and busy
-        state also fail before comment mutation, operation admission or I/O.
-        JSON capture uses each completed pane's historical inputs, not its next
-        draft. Invalid pane content propagates TypeError/ValueError before
-        admission. comment=None retains the annotation. origin identifies this
-        Save command. Destinations are reservations, not proof of success.
-        Every output is reported independently; terminal State commit precedes
-        handle settle, which precedes the completion fact.
+        Call on State's owner thread. None selects all declarations, including
+        Saved; explicit refs are ordered, unique and nonempty. Unknown refs,
+        missing storage/metadata or busy raise FailedPreconditionError before
+        annotation mutation. Invalid pane content raises TypeError/ValueError.
+        comment=None retains the annotation. origin attributes this command.
+        All mapping, PNG encoding, writes and ledger append finish before return.
+        Output failures retain diagnostics and do not stop independent outputs;
+        mapping/ledger errors propagate without a report. No Save handle exists.
         """
         plan = self._capture(permit.tab_id, artifacts, comment, origin)
         token = self._begin_save(permit.tab_id, plan)
@@ -320,7 +308,9 @@ class SaveService:
             report: SaveReport | None = bg.result if bg.ok else None
             error = None if bg.ok else str(bg.error)
             if report is not None:
-                self._state.commit_save_report(tab_id, report)
+                self._state.commit_save_report(
+                    tab_id, report, operation_id=self._active_operations[tab_id]
+                )
                 error = (
                     "\n".join(
                         f"{item.output.path}: {item.error}"
