@@ -90,7 +90,7 @@ def test_yoko_rejects_values_outside_default_output_limit(
 
 
 @pytest.mark.parametrize("mode, limit", [("voltage", 1e-2), ("current", 1e-5)])
-def test_yoko_default_rampstep_limit_boundary(
+def test_yoko_fixed_rampstep_limit_boundary(
     mode: Literal["voltage", "current"],
     limit: float,
 ) -> None:
@@ -103,32 +103,11 @@ def test_yoko_default_rampstep_limit_boundary(
         info.with_updates(rampstep=limit * 1.01)
 
 
-@pytest.mark.parametrize("mode, limit", [("voltage", 2e-2), ("current", 2e-5)])
-def test_yoko_custom_rampstep_limit_boundary(
-    mode: Literal["voltage", "current"],
-    limit: float,
-) -> None:
-    info = YOKOGS200Info(
-        address="GPIB::1",
-        mode=mode,
-        rampstep=limit,
-        max_voltage_rampstep=2e-2,
-        max_current_rampstep=2e-5,
-    )
-    assert YOKOGS200Info.model_validate_json(info.to_json()) == info
-    with pytest.raises(ValidationError, match="rampstep limit"):
-        info.with_updates(rampstep=limit * 1.01)
-    field = "max_voltage_rampstep" if mode == "voltage" else "max_current_rampstep"
-    with pytest.raises(ValidationError, match="rampstep limit"):
-        info.with_updates(**{field: limit / 2})
-
-
-@pytest.mark.parametrize("invalid", [0.0, -1.0, float("inf"), float("nan")])
-def test_yoko_rejects_invalid_rampstep_limits(invalid: float) -> None:
-    with pytest.raises(ValidationError, match="max_voltage_rampstep"):
-        YOKOGS200Info(address="GPIB::1", max_voltage_rampstep=invalid)
-    with pytest.raises(ValidationError, match="max_current_rampstep"):
-        YOKOGS200Info(address="GPIB::1", max_current_rampstep=invalid)
+def test_yoko_rampstep_limit_is_not_a_setup_field() -> None:
+    with pytest.raises(ValidationError):
+        YOKOGS200Info.model_validate(
+            {"address": "GPIB::1", "max_voltage_rampstep": 1.0}
+        )
 
 
 def test_yoko_set_flux_rejects_out_of_range_without_changing_level() -> None:

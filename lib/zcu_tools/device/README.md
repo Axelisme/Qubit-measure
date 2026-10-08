@@ -170,7 +170,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 ### `YOKOGS200`（`yoko.py:34`）— DC 電流／電壓源
 
-**Info 欄位**：`output ∈ {on, off} = "off"`、`mode ∈ {voltage, current} = "voltage"`、`value: float = 0.0`。`rampstep` 依 mode 預設為 1e-3 V 或 1e-6 A，必須為正且有限。`max_voltage_rampstep` 與 `max_current_rampstep` 是正且有限的步長上限，預設 1e-2 V 與 1e-5 A。輸出絕對值上限固定為 module 常數 `MAX_VOLTAGE`＝20 V 與 `MAX_CURRENT`＝20 mA，不可由 setup 設定。
+**Info 欄位**：`output ∈ {on, off} = "off"`、`mode ∈ {voltage, current} = "voltage"`、`value: float = 0.0`。`rampstep` 依 mode 預設為 1e-3 V 或 1e-6 A，必須為正且有限。上限都是 module 常數，不可由 setup 設定：步長上限 `MAX_RAMPSTEP` 為 1e-2 V 與 1e-5 A，輸出絕對值上限 `MAX_VOLTAGE`＝20 V 與 `MAX_CURRENT`＝20 mA。
 
 **SCPI 對應**：
 
@@ -188,7 +188,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 1. 若裝置 output 為 off 而 cfg 要 on → `warnings.warn`（不自動開，怕暴衝）。
 2. **不自動切模式**：cfg mode 與當前不一致直接 `RuntimeError`，明示「切模式要手動先歸零」。
-3. 採用 cfg 的 rampstep，以及兩種模式的輸出與步長上限。
+3. 採用 cfg 的 rampstep。
 4. 照 mode 呼叫 `set_voltage` / `set_current`（smart ramp，透傳 `stop_event`）。
 
 **`get_voltage` / `get_current`**：呼叫 `get_mode()` 檢查 mode 是否符合（否則 raise），然後直接讀 `_get_level()`（即 `:SOURce:LEVel?`），無 re-write 副作用。

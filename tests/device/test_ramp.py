@@ -224,20 +224,13 @@ def test_yoko_setup_uses_mode_default_rampstep(
     assert session.level_writes == pytest.approx([0.0, target / 2, target])
 
 
-@pytest.mark.parametrize("mode, limit", [("voltage", 2e-3), ("current", 2e-6)])
-def test_yoko_setup_rampstep_limits_persist_across_mode_changes(
+@pytest.mark.parametrize("mode, limit", [("voltage", 1e-2), ("current", 1e-5)])
+def test_yoko_rampstep_limits_hold_across_mode_changes(
     mode: Literal["voltage", "current"],
     limit: float,
 ) -> None:
     dev, session = _make_yoko(mode=mode)
-    cfg = YOKOGS200Info(
-        address=dev.address,
-        output="on",
-        mode=mode,
-        rampstep=limit,
-        max_voltage_rampstep=2e-3,
-        max_current_rampstep=2e-6,
-    )
+    cfg = YOKOGS200Info(address=dev.address, output="on", mode=mode, rampstep=limit)
     dev.setup(cfg, progress=False)
     assert dev.get_info() == cfg
     dev.set_mode("voltage" if mode == "current" else "current")

@@ -22,6 +22,10 @@ DEFAULT_RAMPSTEP = {
 }
 MAX_VOLTAGE = 20.0  # V, absolute output limit
 MAX_CURRENT = 20e-3  # A, absolute output limit
+MAX_RAMPSTEP = {
+    "voltage": 1e-2,  # V
+    "current": 1e-5,  # A
+}
 
 
 STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
@@ -53,18 +57,6 @@ class YOKOGS200Info(BaseDeviceInfo):
         allow_inf_nan=False,
         description="Positive ramp increment in V or A; defaults to 1e-3 V or 1e-6 A.",
     )
-    max_voltage_rampstep: float = Field(
-        default=1e-2,
-        gt=0,
-        allow_inf_nan=False,
-        description="Maximum ramp increment in voltage mode, in V.",
-    )
-    max_current_rampstep: float = Field(
-        default=1e-5,
-        gt=0,
-        allow_inf_nan=False,
-        description="Maximum ramp increment in current mode, in A.",
-    )
 
     @model_validator(mode="before")
     @classmethod
@@ -82,11 +74,7 @@ class YOKOGS200Info(BaseDeviceInfo):
         limit = MAX_VOLTAGE if self.mode == "voltage" else MAX_CURRENT
         if abs(self.value) > limit:
             raise ValueError(f"value exceeds {self.mode} output limit {limit}")
-        step_limit = (
-            self.max_voltage_rampstep
-            if self.mode == "voltage"
-            else self.max_current_rampstep
-        )
+        step_limit = MAX_RAMPSTEP[self.mode]
         if self.rampstep > step_limit:
             raise ValueError(
                 f"rampstep exceeds {self.mode} rampstep limit {step_limit}"
@@ -124,8 +112,6 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
         defaults = YOKOGS200Info(address=address, mode=mode)
         self._rampstep = defaults.rampstep
-        self._max_voltage_rampstep = defaults.max_voltage_rampstep
-        self._max_current_rampstep = defaults.max_current_rampstep
         self._rampinterval = 0.01
 
     # ==========================================================================#
@@ -284,14 +270,12 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
         Omitted rampstep uses the mode's default. ValidationError rejects invalid
         or over-limit steps before I/O. RuntimeError rejects a nonzero mode switch unless force
-        is true; force does not change the configured output limits.
+        is true; force does not bypass the fixed output or rampstep limits.
         """
         cfg = YOKOGS200Info(
             address=self.address,
             mode=mode,
             rampstep=DEFAULT_RAMPSTEP[mode] if rampstep is None else rampstep,
-            max_voltage_rampstep=self._max_voltage_rampstep,
-            max_current_rampstep=self._max_current_rampstep,
         )
         cur_mode = self.get_mode()
 
@@ -362,8 +346,6 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             )
 
         self._rampstep = cfg.rampstep
-        self._max_voltage_rampstep = cfg.max_voltage_rampstep
-        self._max_current_rampstep = cfg.max_current_rampstep
 
         value = cfg.value
         if cur_mode == "current":
@@ -380,6 +362,4 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             mode=self.get_mode(),
             value=self._get_level(),
             rampstep=self._rampstep,
-            max_voltage_rampstep=self._max_voltage_rampstep,
-            max_current_rampstep=self._max_current_rampstep,
         )
