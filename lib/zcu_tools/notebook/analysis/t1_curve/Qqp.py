@@ -98,7 +98,7 @@ def calc_qp_dipole(
 
     params: GHz, omega: rad/ns, T: K, Delta: GHz -> GHz
     """
-    EJ, EC, EL = params
+    EJ, _EC, _EL = params
 
     Xqp_factors = qp_spectral_density(omegas, Temp, EJ, Delta_eV) + qp_spectral_density(
         -omegas, Temp, EJ, Delta_eV
@@ -145,7 +145,7 @@ def calc_Qqp_vs_omega(
     omegas: rad/ns, T1s: ns, Temp: K, Delta: GHz (superconducting gap)
     sin2_elements: <0|sin(phi/2)|1> matrix elements
     """
-    EJ, EC, EL = params
+    _EJ, _EC, _EL = params
 
     dipoles = calc_qp_dipole(params, sin2_elements, omegas, Temp, Delta_eV)
     Qqp_vs_omega = T1s * dipoles

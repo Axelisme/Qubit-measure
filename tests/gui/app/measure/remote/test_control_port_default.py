@@ -45,9 +45,9 @@ def test_remote_control_adapter_start_rolls_back_bind_error(qapp) -> None:
     with (
         patch.object(adapter._endpoint, "start", side_effect=bind_error),
         patch.object(adapter._endpoint, "stop") as endpoint_stop,
+        pytest.raises(RuntimeError, match="bind"),
     ):
-        with pytest.raises(RuntimeError, match="bind"):
-            adapter.start()
+        adapter.start()
 
     endpoint_stop.assert_not_called()
     assert len(adapter._bus_subs) == 0
@@ -92,9 +92,11 @@ def test_remote_control_adapter_start_fails_fast_and_rolls_back_event_subscripti
         render_view=MagicMock(),
     )
 
-    with patch.object(adapter._endpoint, "start") as endpoint_start:
-        with pytest.raises(RuntimeError, match="subscribe failed"):
-            adapter.start()
+    with (
+        patch.object(adapter._endpoint, "start") as endpoint_start,
+        pytest.raises(RuntimeError, match="subscribe failed"),
+    ):
+        adapter.start()
 
     endpoint_start.assert_not_called()
     assert len(adapter._bus_subs) == 0
@@ -126,9 +128,9 @@ def test_remote_control_adapter_start_rolls_back_advertise_error(qapp) -> None:
         patch.object(adapter._endpoint, "start", return_value=12345),
         patch.object(adapter._endpoint, "stop") as endpoint_stop,
         patch.object(adapter, "_advertise_session", side_effect=advertise_error),
+        pytest.raises(RuntimeError, match="discovery write failed"),
     ):
-        with pytest.raises(RuntimeError, match="discovery write failed"):
-            adapter.start()
+        adapter.start()
 
     endpoint_stop.assert_called_once_with()
     assert len(adapter._bus_subs) == 0

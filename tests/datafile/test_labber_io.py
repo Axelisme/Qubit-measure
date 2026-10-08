@@ -217,7 +217,7 @@ def test_ragged_trace_roundtrip_with_y(tmp_path):
     # z must be a list because lengths differ
     assert isinstance(d.z, list)
     assert len(d.z) == len(traces)
-    for i, (t_out, t_in) in enumerate(zip(d.z, traces)):
+    for i, (t_out, t_in) in enumerate(zip(d.z, traces, strict=False)):
         assert len(t_out) == lengths[i]
         assert np.allclose(t_out, t_in)
 
@@ -238,7 +238,7 @@ def test_ragged_trace_roundtrip_no_y(tmp_path):
 
     d = load_labber_data(path)
     assert isinstance(d.z, list)
-    for t_out, t_in in zip(d.z, traces):
+    for t_out, t_in in zip(d.z, traces, strict=False):
         assert np.allclose(t_out, t_in)
 
 

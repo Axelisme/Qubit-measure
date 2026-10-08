@@ -14,7 +14,7 @@ from zcu_tools.resources.qubit_params import (
 
 
 def test_load_fit_inputs_reads_params_and_seeds_bare_rf(params_json):
-    path, fit = params_json
+    path, _fit = params_json
     st = DispersiveState()
     inputs = ProjectService(st).load_fit_inputs(path)
 

@@ -42,7 +42,7 @@ def calc_cap_dipole(
 
     params: GHz, omega: rad/ns, T: K, EC: GHz -> GHz
     """
-    EJ, EC, EL = params
+    _EJ, EC, _EL = params
 
     spectral_densities = charge_spectral_density(
         omegas, Temp, EC
@@ -81,7 +81,7 @@ def calc_Qcap_vs_omega(
     Temp: float = 20e-3,
 ) -> NDArray[np.float64] | tuple[NDArray[np.float64], NDArray[np.float64]]:
     """freqs: GHz, T1s: ns, guess_Temp: K -> 1"""
-    EJ, EC, EL = params
+    _EJ, _EC, _EL = params
 
     dipoles = calc_cap_dipole(params, n_elements, omegas, Temp)
     Qcap_vs_omega = T1s * dipoles

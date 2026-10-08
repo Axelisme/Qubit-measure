@@ -69,7 +69,9 @@ class StreamingLabberVariableSpec:
                 f"variable {variable!r} axes count {len(normalized_axes)} must match "
                 f"shape rank {len(normalized_shape)}"
             )
-        for axis, expected in zip(reversed(normalized_axes), normalized_shape):
+        for axis, expected in zip(
+            reversed(normalized_axes), normalized_shape, strict=False
+        ):
             actual = int(np.asarray(axis.values, dtype=float).ravel().shape[0])
             if actual != expected:
                 raise ValueError(

@@ -13,7 +13,7 @@ def test_fit_decay_recovers_T1():
     xs = np.linspace(0, 20, 300)
     true = (0.1, 1.0, 5.0)
     ys = expfunc(xs, *true)
-    t1, _, _, (pOpt, _) = fit_decay(xs, ys)
+    t1, _, _, (_pOpt, _) = fit_decay(xs, ys)
     assert abs(t1 - 5.0) / 5.0 < 1e-3
 
 

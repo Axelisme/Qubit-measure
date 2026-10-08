@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable
 
 import pytest
 from zcu_tools.gui.event_bus import EventOrigin
