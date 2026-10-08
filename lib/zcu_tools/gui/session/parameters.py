@@ -57,6 +57,7 @@ class RoleBinding:
     def __post_init__(self) -> None:
         object.__setattr__(self, "declarations", deepcopy(dict(self.declarations)))
         object.__setattr__(self, "names", deepcopy(dict(self.names)))
+        object.__setattr__(self, "explicit", dict(self.explicit))
 
 
 class ParameterContext:
@@ -203,7 +204,7 @@ class ParameterContext:
             point=self._point,
             library=self._library,
             target=self._target,
-            roles=RoleBinding(focus, declarations, names),
+            roles=RoleBinding(focus, declarations, names, explicit),
             storage=self._storage,
         )
 

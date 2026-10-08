@@ -412,7 +412,7 @@ class ContextService:
         names = resolve_names(
             parameters.document().components, declarations, focus, explicit
         )
-        return RoleBinding(focus, declarations, names)
+        return RoleBinding(focus, declarations, names, explicit)
 
     def set_parameter(
         self,

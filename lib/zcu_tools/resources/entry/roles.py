@@ -213,6 +213,8 @@ def resolve_names(
     for role, spec in declarations.items():
         if role in explicit:
             name = explicit[role]
+            if name is None:
+                continue
             if name == focus:
                 focus_used = True
         elif (
