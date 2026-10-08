@@ -450,6 +450,76 @@ def test_nullable_public_range_alias_projects_choices_and_null() -> None:
     assert ("fluxes", "n") in errors.messages
 
 
+class NumericAliasBranch(FormModel):
+    """Two ordinary numeric tags identify the same branch."""
+
+    kind: Literal[1, 2] = 1
+    amount: float = 3.0
+
+
+class NumericOtherBranch(FormModel):
+    """Another intrinsic tag remains distinct from dynamic choices."""
+
+    kind: Literal[3] = 3
+    other: float = 4.0
+
+
+class DiscriminatorChoicesForm(FormModel):
+    """The host may restrict selector choices without changing branch identity."""
+
+    branch: Annotated[
+        NumericAliasBranch | NumericOtherBranch, Field(discriminator="kind")
+    ]
+
+    @classmethod
+    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Allow one alias or no tags using only the captured context."""
+        return {("branch", "kind"): () if env.md.get("empty_tags") else (2,)}
+
+
+def test_discriminator_identity_survives_dynamic_choices_refresh() -> None:
+    env = FormEnv(md=MetaDict())
+    state = FormState(FormInput(DiscriminatorChoicesForm, {"branch": {"kind": 2}}))
+    before = state.input.data
+    for empty in (False, True, False):
+        env.md.update({"empty_tags": empty})
+        schema = DiscriminatorChoicesForm.input_schema(env)
+        properties = schema["properties"]
+        assert isinstance(properties, dict)
+        branch = properties["branch"]
+        assert isinstance(branch, dict)
+        variants = branch["oneOf"]
+        assert isinstance(variants, list)
+        identities: list[JsonValue] = []
+        for variant in variants:
+            assert isinstance(variant, dict)
+            identities.append(variant["x-form-discriminator-values"])
+            fields = variant["properties"]
+            assert isinstance(fields, dict)
+            selector = fields["kind"]
+            assert isinstance(selector, dict)
+            alternatives = selector["anyOf"]
+            assert isinstance(alternatives, list)
+            direct = alternatives[0]
+            assert isinstance(direct, dict)
+            if empty:
+                assert direct["not"] == {}
+            else:
+                assert direct["enum"] == [2]
+        assert identities == [[1, 2], [3]]
+        validator = Draft202012Validator(schema)
+        assert validator.is_valid(before) is not empty
+        result = state.result(env)
+        if empty:
+            assert isinstance(result, FormErrors)
+            assert ("branch", "kind") in result.messages
+        else:
+            assert isinstance(result, DiscriminatorChoicesForm)
+            assert isinstance(result.branch, NumericAliasBranch)
+            assert result.branch.kind == 2
+        assert state.input.data == before
+
+
 def test_whole_container_choices_share_json_value_membership() -> None:
     env = FormEnv(md=MetaDict())
     valid: dict[str, JsonValue] = {
