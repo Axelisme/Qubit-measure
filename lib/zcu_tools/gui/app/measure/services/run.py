@@ -277,6 +277,8 @@ class RunService:
             with progress_ambient(factory):
                 result = adapter.run(request, raw_cfg, context=context)
                 stop_signal.raise_if_error()
+            # Completion records acquisition progress, not later operation cancellation.
+            completion = "stopped" if stop_event.is_set() else "complete"
             finished_at = datetime.now(UTC)
             if (
                 snapshot is not None
@@ -290,7 +292,7 @@ class RunService:
                     experiment=experiment_tag,
                     started_at=started_at.isoformat(),
                     finished_at=finished_at.isoformat(),
-                    completion="stopped" if stop_event.is_set() else "complete",
+                    completion=completion,
                     labber_path=None,
                     snapshot=snapshot,
                     provenance=provenance,
