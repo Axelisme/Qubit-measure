@@ -20,6 +20,11 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import RoleSpec
 
@@ -33,7 +38,19 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import (
+    SweepDefault,
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
     T2RamseyAnalyzeOptions,
     T2RamseyCfg,
@@ -45,6 +62,42 @@ logger = logging.getLogger(__name__)
 
 
 T2RamseyRunResult: TypeAlias = RunRecord[T2RamseyCfg, T2RamseyResult]
+
+
+def _blank_pulse(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.1)
+    value.with_field("waveform.length", 5.1)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field(
+        "ro_cfg.trig_offset",
+        path_seed(
+            "resonator.ext.time_of_fly",
+            expr="resonator.ext.time_of_fly + 0.05",
+            fallback=0.55,
+        ).resolve(ctx),
+    )
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -142,18 +195,36 @@ class T2RamseyAdapter(
         """
         return (
             MeasureCfgBuilder()
-            .reset(optional=True)
-            .pulse("pi2_pulse", role_id="pi2_pulse")
-            .readout()
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("qubit.module.reset", fallback=None),
+            )
+            .field(
+                "modules.pi2_pulse",
+                spec=make_pulse_module_spec(),
+                default=module_seed(
+                    "qubit.module.x90",
+                    fallback=custom(_blank_pulse, description="inline pi/2 pulse"),
+                ),
+            )
+            .field(
+                "modules.readout",
+                spec=make_readout_module_spec(),
+                default=module_seed(
+                    "qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
             .relax_delay(
-                scaled_md("t1", factor=5.0, fallback_value=100.0),
+                scaled_path_seed("qubit.t1", factor=5.0, fallback_value=100.0),
             )
             .sweep(
                 "length",
                 label="Delay (us)",
                 default=SweepDefault(
                     start=0.0,
-                    stop=scaled_md("t2r", factor=1.5, fallback_value=0.4),
+                    stop=scaled_path_seed("qubit.t2r", factor=1.5, fallback_value=0.4),
                     expts=101,
                 ),
             )
@@ -218,31 +289,30 @@ class T2RamseyAdapter(
         result = req.analyze_result
         items: list[WritebackItem] = [
             MetaDictWriteback(
-                target_name="t2r",
+                target_name="qubit.t2r",
                 description="T2 Ramsey time (us)",
                 proposed_value=result.t2r,
             ),
         ]
 
-        # q_f writeback mirrors the notebook:
-        #   q_f = pi2_pulse.freq + true_detune - fitted_fringe_detune.
-        # Only emit it when the fringe fit ran (a fitted detune exists), the run
-        # captured the source cfg (pi2 freq source), and the realized
-        # true_detune from this run is known — never propose a NaN q_f.
+        # Frequency correction uses only the source run, never current calibration.
         snapshot = req.run_result.cfg
         if (
             result.fit_fringe
             and snapshot is not None
             and req.run_result.result.true_activate_detune is not None
         ):
+            source_freq = snapshot.modules.pi2_pulse.freq
+            if not isinstance(source_freq, float):
+                raise ValueError(
+                    "qubit.freq writeback requires a scalar source pi/2 frequency"
+                )
             q_f = (
-                snapshot.modules.pi2_pulse.freq
-                + req.run_result.result.true_activate_detune
-                - result.detune
+                source_freq + req.run_result.result.true_activate_detune - result.detune
             )
             items.append(
                 MetaDictWriteback(
-                    target_name="q_f",
+                    target_name="qubit.freq",
                     description="Qubit frequency (MHz)",
                     proposed_value=q_f,
                 )
