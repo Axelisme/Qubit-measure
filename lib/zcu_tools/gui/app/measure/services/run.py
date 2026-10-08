@@ -305,7 +305,7 @@ class RunService:
         """
         # Admission checks precede this call; inputs are data, not a proof.
         # Busy and hardware exclusion remain operation-boundary checks.
-        tab_id = permit.tab_id
+        tab_id = inputs.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
@@ -323,9 +323,9 @@ class RunService:
         stop_event = threading.Event()
         stop_signal = StopSignal(stop_event)
         cancel_requested = threading.Event()
-        adapter = permit.adapter
-        request = permit.request
-        raw_cfg = permit.accepted_cfg.values
+        adapter = inputs.adapter
+        request = inputs.request
+        raw_cfg = inputs.accepted_cfg.values
         context = RunContext(
             soc=request.soc,
             soccfg=request.soccfg,
@@ -345,14 +345,14 @@ class RunService:
             stop_signal=stop_signal,
             cancel_requested=cancel_requested,
             origin=origin,
-            adapter_name=permit.adapter_name,
-            storage=permit.storage,
-            parameters=permit.parameters,
+            adapter_name=inputs.adapter_name,
+            storage=inputs.storage,
+            parameters=inputs.parameters,
         )
 
         def work(factory: Any) -> object:
             # Provenance uses only software/host and the cached SoC config.
-            snapshot, experiment_tag = permit.snapshot, permit.experiment_tag
+            snapshot, experiment_tag = inputs.snapshot, inputs.experiment_tag
             provenance = (
                 capture_software_provenance(context=context)
                 if snapshot is not None and experiment_tag is not None
@@ -389,7 +389,7 @@ class RunService:
             exclusion=ExclusionRequest(
                 kind=OperationKind.RUN,
                 owner_id=tab_id,
-                note=f"run {permit.adapter_name} (tab {tab_id})",
+                note=f"run {inputs.adapter_name} (tab {tab_id})",
             ),
             owner_id=tab_id,
             wants_progress=True,

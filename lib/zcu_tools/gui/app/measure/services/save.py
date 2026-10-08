@@ -89,9 +89,9 @@ class SaveService:
         propagate without a report. State publication completes before return.
         """
         plan = self._capture(
-            permit.tab_id, (ArtifactRef("run", "measurement_data"),), comment, origin
+            tab_id, (ArtifactRef("run", "measurement_data"),), comment, origin
         )
-        return self._save(permit.tab_id, plan, data_only=True)
+        return self._save(tab_id, plan, data_only=True)
 
     def save_artifacts(
         self,
@@ -115,8 +115,8 @@ class SaveService:
         Output failures retain diagnostics and do not stop independent outputs;
         mapping/ledger errors propagate without a report. No Save handle exists.
         """
-        plan = self._capture(permit.tab_id, artifacts, comment, origin)
-        return self._save(permit.tab_id, plan)
+        plan = self._capture(tab_id, artifacts, comment, origin)
+        return self._save(tab_id, plan)
 
     def _require_tab_idle(self, tab_id: str) -> None:
         if self._state.is_tab_busy(tab_id):

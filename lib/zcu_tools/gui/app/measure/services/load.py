@@ -83,7 +83,6 @@ class LoadService:
         notification reentrancy rejects before loading; adapter file/capability
         failures raise LoadDataError without replacing the previous result.
         """
-        tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 

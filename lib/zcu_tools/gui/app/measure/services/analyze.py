@@ -99,7 +99,6 @@ class AnalyzeService(_StagedAnalyzeService):
         Capture the historical Run source, not current tab bindings. Busy or
         submission failures raise; worker failures settle the returned token.
         """
-        tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
@@ -169,7 +168,6 @@ class AnalyzeService(_StagedAnalyzeService):
         plugin opening or handle admission failures raise without a live session.
         The owning service disposes the session on terminal paths.
         """
-        tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
         tab = self._state.get_tab(tab_id)
