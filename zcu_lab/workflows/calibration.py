@@ -2,20 +2,19 @@
 
 The Engine owns execution, cancellation and publication. Callers supply the
 three exact-path savers explicitly; this module never selects a storage format.
-Templates are copied before applying calibration and generation tunables.
+Selected modules are copied before applying calibration and generation tunables.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.workflows import (
     Completed,
     Effect,
@@ -193,26 +192,6 @@ def apply_readout_calibration(readout: ReadoutCfg, cal: Calibrated) -> None:
         readout.set_param("ro_freq", cal.readout_freq_mhz)
 
 
-@dataclass(frozen=True)
-class _CalibrationDefaults:
-    """Captured native acquisition defaults supplied by the adapter owner.
-
-    initial_delay/relax_delay use microseconds. dev is the adapter-owned native
-    device mapping or None, not a flux override. No fallback values are stored.
-    """
-
-    initial_delay: float
-    relax_delay: float
-    dev: Mapping[str, DeviceInfo] | None
-
-
-def _calibration_defaults(
-    stage: Literal["frequency", "rabi", "readout"],
-) -> _CalibrationDefaults:
-    """Use one acquisition-default seam; await accepted role-path adapters."""
-    raise NotImplementedError(f"Captured {stage} adapter defaults are not available")
-
-
 def _frequency_cfg(
     qub_pulse: PulseCfg,
     readout: PulseReadoutCfg,
@@ -221,7 +200,6 @@ def _frequency_cfg(
     widen: float,
     hint_mhz: float,
 ) -> FreqCfg:
-    defaults = _calibration_defaults("frequency")
     drive = qub_pulse.model_copy(deep=True)
     ro = readout.model_copy(deep=True)
     apply_readout_calibration(ro, prior)
@@ -229,9 +207,7 @@ def _frequency_cfg(
     return FreqCfg(
         reps=tun.qf_reps,
         rounds=tun.qf_rounds,
-        initial_delay=defaults.initial_delay,
-        relax_delay=defaults.relax_delay,
-        dev=defaults.dev,
+        relax_delay=1.0,
         modules=FreqModuleCfg(qub_pulse=drive, readout=ro),
         sweep=FreqSweepCfg(
             freq=SweepCfg(
@@ -250,8 +226,8 @@ def _rabi_cfg(
     tun: CalibrationTunables,
     prior: Calibrated,
     f01_mhz: float,
+    t1_estimate_us: float,
 ) -> LenRabiCfg:
-    defaults = _calibration_defaults("rabi")
     drive = qub_pulse.model_copy(deep=True)
     drive.set_param("freq", f01_mhz)
     ro = readout.model_copy(deep=True)
@@ -261,9 +237,7 @@ def _rabi_cfg(
     return LenRabiCfg(
         reps=tun.rabi_reps,
         rounds=tun.rabi_rounds,
-        initial_delay=defaults.initial_delay,
-        relax_delay=defaults.relax_delay,
-        dev=defaults.dev,
+        relax_delay=5 * t1_estimate_us,
         modules=LenRabiModuleCfg(qub_pulse=drive, readout=ro),
         sweep=LenRabiSweepCfg(
             length=SweepCfg(
@@ -281,21 +255,18 @@ def _readout_cfg(
     readout: PulseReadoutCfg,
     tun: CalibrationTunables,
     prior: Calibrated,
-    f01_mhz: float,
     pi_length_us: float,
+    t1_estimate_us: float,
 ) -> FreqGainCfg:
-    defaults = _calibration_defaults("readout")
+    """Build readout cfg from the frequency-calibrated Rabi drive module."""
     drive = qub_pulse.model_copy(deep=True)
-    drive.set_param("freq", f01_mhz)
     drive.set_param("length", pi_length_us)
     ro = readout.model_copy(deep=True)
     apply_readout_calibration(ro, prior)
     return FreqGainCfg(
         reps=tun.ro_reps,
         rounds=tun.ro_rounds,
-        initial_delay=defaults.initial_delay,
-        relax_delay=defaults.relax_delay,
-        dev=defaults.dev,
+        relax_delay=5 * t1_estimate_us,
         modules=FreqGainModuleCfg(qub_pulse=drive, readout=ro),
         sweep=FreqGainSweepCfg(
             freq=SweepCfg(
@@ -307,6 +278,14 @@ def _readout_cfg(
             gain=SweepCfg(start=0.0, stop=0.2, expts=31, step=0.2 / 30),
         ),
     )
+
+
+def _validate_calibration_inputs(flux: float, t1_estimate_us: float) -> None:
+    """Reject nonfinite flux and nonpositive/nonfinite T1 estimates in µs."""
+    if not math.isfinite(t1_estimate_us) or t1_estimate_us <= 0:
+        raise ValueError("T1 estimate must be positive and finite")
+    if not math.isfinite(flux):
+        raise ValueError("Calibration flux must be finite")
 
 
 def calibrate(
@@ -352,8 +331,7 @@ def calibrate(
     returns a value; Engine discards the generator and its step state.
     Completed acquisition files remain even if a later stage fails.
     """
-    if not math.isfinite(flux):
-        raise ValueError("Calibration flux must be finite")
+    _validate_calibration_inputs(flux, t1_estimate_us)
     prior = carry.seed if carry.last is None else carry.last
     hint = prior.f01_mhz
     for _, frequency in carry.f01_by_flux:
@@ -397,7 +375,7 @@ def calibrate(
     stages.set_progress(1)
     rabi = yield from env.run(
         run_len_rabi,
-        _rabi_cfg(qub_pulse, readout, tun, prior, f01),
+        _rabi_cfg(qub_pulse, readout, tun, prior, f01, t1_estimate_us),
         save=savers.rabi,
     )
     if isinstance(rabi, Failed):
@@ -424,7 +402,14 @@ def calibrate(
     if carry.last is None or carry.n_calibrated % tun.ro_every == 0:
         ro_result = yield from env.run(
             run_ro_landscape,
-            _readout_cfg(qub_pulse, readout, tun, prior, f01, rabi_fit.pi_length_us),
+            _readout_cfg(
+                rabi.cfg.modules.qub_pulse,
+                readout,
+                tun,
+                prior,
+                rabi_fit.pi_length_us,
+                t1_estimate_us,
+            ),
             save=savers.readout,
         )
         if isinstance(ro_result, Failed):
