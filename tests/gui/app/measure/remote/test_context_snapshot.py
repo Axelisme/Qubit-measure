@@ -17,11 +17,14 @@ from ._point_application import PointApplication
 
 
 def test_active_point_label_and_real_window_follow_published_target_not_focus(
-    application: PointApplication, qapp
+    application: PointApplication, qapp, caplog: pytest.LogCaptureFixture
 ) -> None:
+    import logging
+
     from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
+    caplog.set_level(logging.ERROR)
     controller = application.controller
     window = MainWindow(controller)
     try:
@@ -57,6 +60,9 @@ def test_active_point_label_and_real_window_follow_published_target_not_focus(
                 )
         assert application.result("context.labels", {}) == {"labels": ["base", "next"]}
         assert context.get_entry_info() == info
+        assert not caplog.records, (
+            "Entry/point/focus facts must not raise in GUI subscribers"
+        )
     finally:
         window.deleteLater()
         qapp.processEvents()
