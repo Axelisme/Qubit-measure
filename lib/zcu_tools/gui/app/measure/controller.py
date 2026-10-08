@@ -452,10 +452,13 @@ class Controller(SessionControllerMixin):
             self._notify("error", "Save failed", outcome.error)
 
     def _on_save_data_finished(self, outcome: SaveDataFinishedPayload) -> None:
-        if outcome.error is None:
-            self._info(f"Data saved to {outcome.data_path}")
-            return
-        self._notify("error", "Save data failed", outcome.error)
+        if outcome.report is not None:
+            outputs = "\n".join(
+                f"{item.output.path}: {item.status}" for item in outcome.report.outputs
+            )
+            self._info(f"Data save outputs:\n{outputs}")
+        if outcome.error is not None:
+            self._notify("error", "Save data failed", outcome.error)
 
     def _on_device_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
         if payload.outcome == "finished":

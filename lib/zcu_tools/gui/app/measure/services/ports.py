@@ -19,23 +19,19 @@ from typing import (
 
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import Output
 
 
 @dataclass(frozen=True, slots=True)
 class SaveDataSubmission:
-    """Accepted native data save; none of these reservations proves success.
+    """Accepted native data save; the reservation does not prove success.
 
     operation_id identifies the non-cancellable handle. data_path is the exact
-    canonical native HDF5 destination. run_id is captured acquisition identity,
-    not a confirmed persistent run. outputs lists native then Labber reservations;
-    terminal SaveReport alone establishes each output\'s latest status.
+    canonical native HDF5 destination. Terminal SaveReport establishes the
+    latest status of both native and Labber outputs.
     """
 
     operation_id: int
     data_path: str
-    run_id: str
-    outputs: tuple[Output, ...]
 
 
 @dataclass(frozen=True, slots=True)

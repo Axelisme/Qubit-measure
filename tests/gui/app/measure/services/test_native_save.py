@@ -93,12 +93,9 @@ class NativeSaveSession:
             assert self.state.is_tab_busy("tab")
             with pytest.raises(FailedPreconditionError, match="busy"):
                 self.control.save_data("tab", origin=origin)
-            assert submission.run_id == self.metadata.run_id
-            assert [output.format for output in submission.outputs] == [
-                "data_h5",
-                "labber",
-            ]
-            assert submission.data_path == str(submission.outputs[0].path)
+            assert Path(submission.data_path) == (
+                self.entry.database_path / "runs" / self.metadata.run_id / "data.h5"
+            )
             timer.start(5000)
             loop.exec()
         finally:

@@ -145,8 +145,8 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   事件。兩個輸出失敗各自隔離，terminal fact 帶完整 SaveReport，handle 在發布前
   已 settled。Save 不建立 acquisition 身分或重讀 live point。
   Data save 使用既有 OperationRunner/Handles，不可取消、不持硬體 lease。
-  SaveDataSubmission 包含 operation ID、內部 run_id、canonical path 與全部
-  reserved outputs；這些欄位不代表成功。GUI 直接用 facet，不經 Controller
+  SaveDataSubmission 包含 operation ID 與 canonical reserved path，不代表成功。
+  內部 run_id 與完整 outputs 留在同次 terminal SaveReport。GUI 直接用 facet，不經 Controller
   純轉發。Save All、舊 tracker 與 remote/MCP consumer 尚未遷移至完整 native
   多輸出投影，以下 Save All 說明仍是既有路徑。
   Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 path/comment 變更。

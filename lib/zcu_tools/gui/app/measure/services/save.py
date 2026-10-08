@@ -260,7 +260,7 @@ class SaveService:
         # Inline executors may have delivered terminal before begin returns.
         if tab_id in self._active_paths:
             self._active_operations[tab_id] = token
-        return SaveDataSubmission(token, data_path, metadata.run_id, outputs)
+        return SaveDataSubmission(token, data_path)
 
     def start_save_artifacts(
         self,

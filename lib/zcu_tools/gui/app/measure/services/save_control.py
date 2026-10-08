@@ -116,7 +116,7 @@ class SaveControlFacet:
         comment=None uses the pane annotation; a supplied comment publishes it.
         run_operation_id, when supplied, must still identify this pane's Run.
         Static/dynamic save guards and missing storage/Run evidence fail before
-        submission. Returned paths and run_id are reservations, not success.
+        submission. The returned canonical path is a reservation, not success.
         """
         if run_operation_id is not None:
             self._state.require_run_operation(tab_id, run_operation_id)
