@@ -134,15 +134,21 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
+        figure, _ = context.plots.subplots(
+            "measurement", nrows=3, ncols=1, figsize=(12, 6)
+        )
         viewers = tuple(
             context.plots.liveplot_2d(
-                f"measurement_{state}",
+                "measurement",
                 "gain (a.u.)",
                 "freq (MHz)",
                 title=state.capitalize(),
                 uniform=False,
+                axes=ax,
             )
-            for state in ("ground", "excited", "other")
+            for state, ax in zip(
+                ("ground", "excited", "other"), figure.axes, strict=True
+            )
         )
 
         def plot_fn(data: NDArray[np.float64]) -> None:

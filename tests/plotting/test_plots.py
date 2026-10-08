@@ -539,9 +539,10 @@ def test_invalid_2d_factory_options_or_duplicate_name_never_present() -> None:
 def test_typed_plots_share_one_named_frame_and_preserve_it_after_release() -> None:
     host = RecordingHost()
     plots = Plots(host)
-    figure, _ = plots.subplots("workflow", ncols=4)
+    figure, _ = plots.subplots("workflow", ncols=5)
     axes = figure.axes
     line = plots.liveplot_1d("workflow", "flux", "value", axes=axes[0])
+    samples = plots.liveplot_scatter("workflow", "flux", "snr", axes=axes[4])
     heatmap = plots.liveplot_2d("workflow", "flux", "time", axes=axes[1])
     scan = plots.liveplot_2d_with_line(
         "workflow", "flux", "frequency", axes=(axes[2], axes[3])
@@ -552,6 +553,7 @@ def test_typed_plots_share_one_named_frame_and_preserve_it_after_release() -> No
     line.update(xs, np.array([8.0, 9.0]), refresh=False)
     heatmap.update(xs, ys, data, refresh=False)
     scan.update(xs, ys, data, refresh=False)
+    samples.update(xs, np.array([6.0, 7.0]), colors=np.array([0.0, 1.0]), refresh=False)
     assert list(plots) == ["workflow"]
     assert host.presented == [figure]
     assert host.refreshed == []
@@ -559,6 +561,9 @@ def test_typed_plots_share_one_named_frame_and_preserve_it_after_release() -> No
     np.testing.assert_array_equal(axes[1].images[0].get_array(), data.T)
     np.testing.assert_array_equal(axes[2].images[0].get_array(), data.T)
     np.testing.assert_array_equal(axes[3].lines[0].get_ydata(), data[-1])
+    np.testing.assert_array_equal(
+        axes[4].collections[0].get_offsets(), [[1.0, 6.0], [2.0, 7.0]]
+    )
     heatmap.mark_point(1.0, 4.0)
     scan.mark_line(3.5)
     np.testing.assert_array_equal(axes[1].collections[0].get_offsets(), [[1.0, 4.0]])
@@ -603,6 +608,10 @@ def test_live_axes_reject_foreign_reused_and_removed_axes_before_mutation() -> N
     plots.liveplot_1d("workflow", "x", "y", axes=first)
     with pytest.raises(ValueError, match="already belong"):
         plots.liveplot_2d("workflow", "x", "y", axes=first)
+    with pytest.raises(ValueError, match="already belong"):
+        plots.liveplot_scatter("workflow", "x", "y", axes=first)
+    with pytest.raises(ValueError, match="named figure"):
+        plots.liveplot_scatter("workflow", "x", "y", axes=other_ax)
     assert len(first.lines) == 1
     assert not first.images
     plots.finish()
