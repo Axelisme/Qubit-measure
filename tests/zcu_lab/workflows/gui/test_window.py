@@ -218,6 +218,67 @@ def test_close_pending_start_requests_stop_without_destroying_producer_host(
     assert not (entry.result_path / "workflows").exists()
 
 
+@pytest.mark.parametrize("action", ["stop", "close"])
+@pytest.mark.parametrize("previous_start", [False, True])
+def test_admission_notification_can_cancel_current_start(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    previous_start: bool,
+) -> None:
+    window, harness, entry = attachment
+    calls: list[str] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        calls.append("init")
+
+    @workflow("admission-observer", plan=T1Plan, tunables=T1Tunables, init=init)
+    def observe(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del env, plan, tun, state
+        calls.append("step")
+        yield from ()
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", observe)
+    if previous_start:
+        assert isinstance(window.start("previous"), int)
+        window.stop()
+        harness.background.execute()
+        harness.background.deliver()
+        assert not harness.gate.snapshot()
+
+    close_results: list[bool] = []
+
+    def cancel_on_notification() -> None:
+        if action == "close":
+            close_results.append(window.close())
+        else:
+            window.stop()
+
+    detach = harness.progress.attach_by_owner("t1-workflow", cancel_on_notification)
+    try:
+        token = window.start("notification")
+    finally:
+        detach()
+    assert isinstance(token, int)
+    if action == "close":
+        assert close_results == [False]
+    controller = window.controller
+    assert controller is not None and controller.operation_id == token
+    assert controller.status() is None and harness.gate.snapshot()
+    harness.background.execute()
+    assert calls == []
+    assert controller.status() is None and harness.gate.snapshot()
+    harness.background.deliver()
+    assert controller.operation_id is None and harness.handles.live_count() == 0
+    assert not harness.gate.snapshot()
+    assert not (entry.result_path / "workflows").exists()
+    assert not (entry.database_path / "workflows").exists()
+    assert window.close()
+
+
 def test_real_t1_gui_caller_runs_native_offline_acquisitions(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
 ) -> None:
