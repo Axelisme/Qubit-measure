@@ -1,5 +1,6 @@
 """Accepted evidence and fixed destinations at the real writeback/owner seam."""
 
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -24,6 +25,8 @@ from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
 from zcu_tools.resources.entry.provenance import Provenance
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
+
 
 @dataclass
 class WritebackSession:
@@ -33,23 +36,33 @@ class WritebackSession:
 
 
 @pytest.fixture
-def session(tmp_path: Path) -> WritebackSession:
-    entry = ResultEntry.create(
-        "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
-    )
-    bus = BaseEventBus()
-    context = ContextService(
-        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
-        bus,
-        bind_assets=ArbWaveformDatabase.info_at,
-    )
-    context.install_entry(entry)
-    control = ContextControlFacet(context=context)
-    editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-    service = WritebackService(
-        editor, write_port=control, entry_ledger=context.entry_ledger
-    )
-    return WritebackSession(entry, control, service)
+def session(tmp_path: Path) -> Generator[WritebackSession]:
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        entry = ResultEntry.create(
+            "entry",
+            result_root=tmp_path / "results",
+            database_root=tmp_path / "Database",
+        )
+        bus = BaseEventBus()
+        context = ContextService(
+            SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+            bus,
+            bind_assets=ArbWaveformDatabase.info_at,
+        )
+        context.install_entry(entry)
+        control = ContextControlFacet(context=context)
+        control.add_component("Q1", "fake/drive/a", {})
+        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
+        service = WritebackService(
+            editor, write_port=control, entry_ledger=context.entry_ledger
+        )
+        yield WritebackSession(entry, control, service)
+        assert registry_state() == installed
+    finally:
+        restore_registry(before)
 
 
 def test_writeback_lowers_waveform_expression_from_creation_capture(
@@ -99,7 +112,7 @@ def test_append_failure_leaves_parameter_untouched(
     monkeypatch.setattr(RecordsLedger, "append", fail_append)
     with pytest.raises(OSError, match="ledger unavailable"):
         session.service.apply_draft(draft)
-    assert session.control.read_context().value("general.flux_value") is None
+    assert not session.control.read_context().lookup("general.flux_value").present
     assert session.entry.ledger.events() == ()
 
 
@@ -137,8 +150,8 @@ def test_setter_failure_retains_accepted_and_successful_prefix(
         session.service.apply_draft(draft, origin=CommandOrigin("mcp", "native-call"))
     current = session.control.read_context()
     assert current.value("general.flux_value") == 2.0
-    assert current.value("general.description") is None
-    assert current.value("general.flux_unit") is None
+    assert not current.lookup("general.description").present
+    assert not current.lookup("general.flux_unit").present
     event = session.entry.ledger.events()[-1]
     assert (
         event.kind == "accepted"
