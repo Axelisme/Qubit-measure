@@ -8,6 +8,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QFormLayout,
     QGroupBox,
     QLabel,
+    QListWidget,
     QPushButton,
     QWidget,
 )
@@ -82,6 +83,58 @@ def _form_label_rows(form: QFormLayout) -> dict[str, int]:
             continue
         rows[widget.text()] = row
     return rows
+
+
+def test_setup_dialog_cached_point_list_uses_entry_queries_on_show_and_fact(qapp):
+    from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.context_types import WorkingPointInfo
+    from zcu_tools.gui.session.events import ContextSwitchedPayload
+
+    # Keep unrelated legacy project controls outside this read-side seam.
+    ctrl = MagicMock()
+    prefs = MagicMock()
+    prefs.chip_name = prefs.qub_name = prefs.res_name = prefs.scope_id = ""
+    prefs.ip = "192.168.10.1"
+    prefs.port = 8887
+    ctrl.get_setup_preferences.return_value = prefs
+    ctrl.list_result_scopes.return_value = ()
+    ctrl.list_devices.return_value = []
+    ctrl.get_soccfg.return_value = None
+    bus = BaseEventBus()
+    ctrl.get_bus.return_value = bus
+    ctrl.list_points.return_value = (
+        WorkingPointInfo("base", "first"),
+        WorkingPointInfo("next", "second"),
+    )
+    # Legacy collaborators must not mask a live call to the deleted owner.
+    ctrl.get_active_context_label.side_effect = AttributeError("deleted context label")
+    ctrl.get_context_labels.side_effect = AttributeError("deleted context labels")
+    dialog = SetupDialog(ctrl)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        lists = dialog.findChildren(QListWidget)
+        assert len(lists) == 1
+        labels = []
+        for index in range(lists[0].count()):
+            item = lists[0].item(index)
+            assert item is not None
+            labels.append(item.text())
+        assert labels == ["base", "next"]
+        ctrl.list_points.return_value = (WorkingPointInfo("updated", ""),)
+        bus.emit(ContextSwitchedPayload(binding_id=None, sources=None))
+        assert lists[0].count() == 1
+        updated = lists[0].item(0)
+        assert updated is not None and updated.text() == "updated"
+        dialog.hide()
+        ctrl.list_points.return_value = ()
+        dialog.show()
+        qapp.processEvents()
+        assert lists[0].count() == 0
+    finally:
+        dialog.reject()
+        dialog.deleteLater()
+        qapp.processEvents()
 
 
 def test_setup_dialog_init(qapp):

@@ -31,7 +31,7 @@ from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
-from zcu_tools.gui.session.context_types import CommandOrigin
+from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 from zcu_tools.resources.entry import RoleResolutionError
 
@@ -451,29 +451,27 @@ class MainWindow(QMainWindow):
     def refresh_context_panel(self) -> None:
         """Project committed context and component focus without changing captures.
 
-        Focus options include all components grouped by kind. Empty/ambiguous
-        focus remains unselected; rendering must not submit a focus command.
+        The status label uses cached entry identity and the published parameter
+        target, never a focus-derived qubit name. Focus options include all
+        components grouped by kind. Empty/ambiguous focus remains unselected;
+        rendering must not submit a focus command or change tab titles.
         """
         self._render_component_focus()
-        label = self._ctrl.get_active_context_label()
-        if label is not None:
-            # file-backed flux context is active
-            self._ctx_label.setText(label)
-            self._ctx_label.setStyleSheet("")
-        elif self._ctrl.has_draft_context():
-            # draft context (in-memory, no file sync)
-            self._ctx_label.setText(
-                "Draft context (in-memory) — set up project for persistence"
-            )
-            self._ctx_label.setStyleSheet("color: blue;")
-        elif self._ctrl.has_project():
-            self._ctx_label.setText(
-                "Project set — select a context to enable Run/Analyze/Save"
-            )
-            self._ctx_label.setStyleSheet("color: orange;")
-        else:
-            self._ctx_label.setText("No project set — use Project… to configure")
+        entry = self._ctrl.context_control.get_entry_info()
+        parameters = self._ctrl.get_session_env().parameters
+        target = parameters.target if parameters is not None else None
+        if entry is None:
+            self._ctx_label.setText("No entry open — use Setup… to configure")
             self._ctx_label.setStyleSheet("color: gray;")
+        elif isinstance(target, SavedPoint):
+            self._ctx_label.setText(f"{entry.name} / {target.point}")
+            self._ctx_label.setStyleSheet("")
+        elif parameters is not None:
+            self._ctx_label.setText(f"{entry.name} / Draft (in-memory)")
+            self._ctx_label.setStyleSheet("color: blue;")
+        else:
+            self._ctx_label.setText(f"{entry.name} / No point selected")
+            self._ctx_label.setStyleSheet("color: orange;")
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))

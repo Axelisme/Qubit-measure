@@ -16,6 +16,58 @@ from ._helpers import open_client, recv_response, send
 from ._point_application import PointApplication
 
 
+def test_active_point_label_and_real_window_follow_published_target_not_focus(
+    application: PointApplication, qapp, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    from qtpy.QtWidgets import QLabel
+    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+
+    caplog.set_level(logging.ERROR)
+    controller = application.controller
+    window = MainWindow(controller)
+    try:
+        window.refresh_context_panel()
+        assert any(
+            label.text() == "No entry open — use Setup… to configure"
+            for label in window.findChildren(QLabel)
+        )
+        assert application.result("context.active", {}) == {"label": None}
+        assert application.result("context.labels", {}) == {"labels": []}
+        info = application.open_entry()
+        assert any(
+            label.text() == "entry / Draft (in-memory)"
+            for label in window.findChildren(QLabel)
+        )
+        context = controller.context_control
+        context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+        context.add_component("Q2", "fake/drive/a", {"rate": 20.0}, setup=True)
+        assert application.result("context.active", {}) == {"label": None}
+        for point in ("base", "next"):
+            application.result("point.new", {"label": point, "description": point})
+            assert application.result("context.active", {}) == {"label": point}
+            assert any(
+                label.text() == f"entry / {point}"
+                for label in window.findChildren(QLabel)
+            )
+            for focus in ("Q1", "Q2", None):
+                context.set_component_focus(focus)
+                assert application.result("context.active", {}) == {"label": point}
+                assert any(
+                    label.text() == f"entry / {point}"
+                    for label in window.findChildren(QLabel)
+                )
+        assert application.result("context.labels", {}) == {"labels": ["base", "next"]}
+        assert context.get_entry_info() == info
+        assert not caplog.records, (
+            "Entry/point/focus facts must not raise in GUI subscribers"
+        )
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
 def test_snapshot_returns_complete_native_documents_without_materializing_assets(
     application: PointApplication,
 ) -> None:
