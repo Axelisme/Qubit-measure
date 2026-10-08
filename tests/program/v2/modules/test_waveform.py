@@ -1,6 +1,14 @@
+from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
+from pydantic import ValidationError
+from zcu_tools.cfg_model import ArbWaveformCfg as CoreArbWaveformCfg
+from zcu_tools.cfg_model import CfgValidationContext
+from zcu_tools.cfg_model import FlatTopWaveformCfg as CoreFlatTopWaveformCfg
+from zcu_tools.core.waveform_format import WaveformFormatError
 from zcu_tools.program.v2.modules.waveform import (
     ArbWaveform,
     ArbWaveformCfg,
@@ -14,7 +22,37 @@ from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg,
     GaussWaveform,
     GaussWaveformCfg,
+    WaveformCfgFactory,
 )
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase, ArbWaveformError
+
+
+@pytest.fixture(scope="module", autouse=True)
+def repository_state_guard() -> Iterator[None]:
+    before = vars(ArbWaveformDatabase)["_database_path"]
+    yield
+    assert vars(ArbWaveformDatabase)["_database_path"] == before
+
+
+def _asset(
+    tmp_path: Path,
+    *,
+    idata: object = (0.0, 1.0, 0.0),
+    qdata: object = (0.0, 0.0, 0.0),
+    recipe_json: str | None = None,
+) -> str:
+    path = tmp_path / "demo.npz"
+    if recipe_json is None:
+        np.savez(path, idata=np.asarray(idata), qdata=np.asarray(qdata), time=[0, 1, 2])
+    else:
+        np.savez(
+            path,
+            idata=np.asarray(idata),
+            qdata=np.asarray(qdata),
+            time=[0, 1, 2],
+            recipe_json=np.array(recipe_json),
+        )
+    return path.resolve().as_posix()
 
 
 def test_waveform_build_dispatch_const():
@@ -34,9 +72,9 @@ def test_waveform_build_dispatch_cosine():
     assert isinstance(wf, CosineWaveform)
 
 
-def test_waveform_build_dispatch_drag_arb_and_flat_top():
+def test_waveform_build_dispatch_drag_arb_and_flat_top(tmp_path: Path):
     drag = DragWaveformCfg(length=1.0, sigma=0.2, delta=0.1, alpha=0.0).build("d")
-    arb = ArbWaveformCfg(data="demo").build("a")
+    arb = ArbWaveformCfg(data="demo", path=_asset(tmp_path)).build("a")
     flat_top = FlatTopWaveformCfg(
         length=1.0,
         raise_waveform=GaussWaveformCfg(length=0.2, sigma=0.05),
@@ -79,7 +117,7 @@ def test_waveform_to_wav_kwargs_and_create_methods():
     )
 
 
-def test_arb_waveform_make_iqdata_and_create(monkeypatch):
+def test_arb_waveform_make_iqdata_and_create(tmp_path: Path):
     class FakeSoccfg(dict[str, object]):
         def get_maxv(self, ch):
             assert ch == 0
@@ -89,24 +127,18 @@ def test_arb_waveform_make_iqdata_and_create(monkeypatch):
     prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 2}]})
     prog.us2cycles.side_effect = lambda *, gen_ch, us: 2 if us == 2.0 else 3
 
-    cfg = ArbWaveformCfg(data="demo")
-    waveform = cfg.build("arb")
-
-    idata_raw = np.array([0.0, 1.0, 0.5])
-    qdata_raw = np.array([0.0, -1.0, -0.5])
-    time_raw = np.array([0.0, 1.0, 2.0])
-
-    monkeypatch.setattr(
-        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get",
-        lambda key: (idata_raw, qdata_raw, time_raw),
+    cfg = ArbWaveformCfg(
+        data="demo",
+        path=_asset(tmp_path, idata=[0.0, 0.6, 0.3], qdata=[0.0, -0.8, -0.4]),
     )
+    waveform = cfg.build("arb")
 
     idata, qdata = waveform.make_iqdata(0, prog)
     assert len(idata) == 4
     assert qdata is not None
     assert len(qdata) == 4
-    assert np.allclose(idata, np.array([0.0, 4.0, 8.0, 6.0]))
-    assert np.allclose(qdata, np.array([0.0, -4.0, -8.0, -6.0]))
+    assert np.allclose(idata, np.array([0.0, 2.4, 4.8, 3.6]))
+    assert np.allclose(qdata, np.array([0.0, -3.2, -6.4, -4.8]))
 
     even_idata, even_qdata = waveform.make_iqdata(0, prog, even_length=True)
     assert len(even_idata) == 12
@@ -121,7 +153,7 @@ def test_arb_waveform_make_iqdata_and_create(monkeypatch):
     assert waveform.to_wav_kwargs() == {"style": "arb", "envelope": "arb"}
 
 
-def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
+def test_arb_waveform_make_iqdata_handles_missing_q_channel(tmp_path: Path):
     class FakeSoccfg(dict[str, object]):
         def get_maxv(self, ch):
             return 4.0
@@ -130,16 +162,7 @@ def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
     prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 1}]})
     prog.us2cycles.return_value = 3
 
-    waveform = ArbWaveformCfg(data="demo").build("arb")
-
-    monkeypatch.setattr(
-        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get",
-        lambda key: (
-            np.array([0.0, 1.0, 0.0]),
-            None,
-            np.array([0.0, 1.0, 2.0]),
-        ),
-    )
+    waveform = ArbWaveformCfg(data="demo", path=_asset(tmp_path)).build("arb")
 
     idata, qdata = waveform.make_iqdata(0, prog)
 
@@ -147,7 +170,7 @@ def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
     assert qdata is None
 
 
-def test_arb_waveform_make_iqdata_uses_full_data_duration(monkeypatch):
+def test_arb_waveform_make_iqdata_uses_full_data_duration(tmp_path: Path):
     class FakeSoccfg(dict[str, object]):
         def get_maxv(self, ch):
             return 1.0
@@ -156,22 +179,120 @@ def test_arb_waveform_make_iqdata_uses_full_data_duration(monkeypatch):
     prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 1}]})
     prog.us2cycles.side_effect = lambda *, gen_ch, us: 2 if us == 2.0 else 99
 
-    waveform = ArbWaveformCfg(data="long_data").build("arb")
-
-    monkeypatch.setattr(
-        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get",
-        lambda key: (
-            np.array([0.0, 1.0, 0.0]),
-            None,
-            np.array([0.0, 1.0, 2.0]),
-        ),
-    )
+    waveform = ArbWaveformCfg(data="long_data", path=_asset(tmp_path)).build("arb")
 
     idata, qdata = waveform.make_iqdata(0, prog)
 
     assert qdata is None
     assert np.allclose(idata, np.array([0.0, 1.0]))
     prog.us2cycles.assert_called_once_with(gen_ch=0, us=2.0)
+
+
+def test_arb_path_controls_length_samples_and_flat_top_after_global_db_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
+    path = _asset(tmp_path, idata=[0.0, 0.5, 0.0])
+    ArbWaveformDatabase.init(tmp_path / "other")
+    ArbWaveformDatabase.save(
+        "demo", idata=np.array([0.0, 0.9]), time=np.array([0.0, 9.0])
+    )
+    cfg = ArbWaveformCfg(data="demo", path=path)
+    assert cfg.length == 2.0
+    prog = MagicMock()
+    prog.soccfg.get_maxv.return_value = 1.0
+    prog.soccfg.__getitem__.return_value = [{"samps_per_clk": 1}]
+    prog.us2cycles.return_value = 2
+    data, qdata = cfg.build("arb").make_iqdata(0, prog)
+    np.testing.assert_allclose(data, [0.0, 0.5])
+    assert qdata is None
+    flat = FlatTopWaveformCfg(length=5.0, raise_waveform=cfg).build("flat")
+    assert flat.to_wav_kwargs().get("length") == 3.0
+    # Playback reads the current file; serialization preserves locator values.
+    restored = ArbWaveformCfg.model_validate_json(cfg.model_dump_json())
+    assert restored.data == "demo" and restored.path == path
+    _asset(tmp_path, idata=[0.0, 0.2, 0.0])
+    data, _ = restored.build("updated").make_iqdata(0, prog)
+    np.testing.assert_allclose(data, [0.0, 0.2])
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "relative.npz",
+        "C:/foreign/demo.npz" if Path("/").is_absolute() else "/foreign/demo.npz",
+    ],
+)
+def test_native_arb_rejects_nonlocal_or_relative_paths(path: str) -> None:
+    with pytest.raises(ValidationError):
+        ArbWaveformCfg.model_validate({"data": "demo", "path": path})
+
+
+def test_native_arb_requires_path_and_propagates_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        ArbWaveformCfg.model_validate({"data": "demo"})
+    cfg = ArbWaveformCfg(data="demo", path=(tmp_path / "absent.npz").as_posix())
+    with pytest.raises(FileNotFoundError):
+        _ = cfg.length
+
+
+def test_native_arb_plays_samples_without_interpreting_formula_recipe(
+    tmp_path: Path,
+) -> None:
+    cfg = ArbWaveformCfg(
+        data="demo", path=_asset(tmp_path, recipe_json='{"future_recipe": true}')
+    )
+    assert cfg.length == 2.0
+
+
+def test_native_arb_retains_codec_failure_instead_of_empty_samples(
+    tmp_path: Path,
+) -> None:
+    cfg = ArbWaveformCfg(data="demo", path=_asset(tmp_path, idata=[0.0, 2.0, 0.0]))
+    with pytest.raises(WaveformFormatError) as error:
+        _ = cfg.length
+    assert error.value.reason == "amplitude_out_of_range"
+
+
+@pytest.mark.parametrize("style", ["arb", "flat_top"])
+def test_waveform_factory_converts_core_using_explicit_asset_path(
+    tmp_path: Path, style: str
+) -> None:
+    path = _asset(tmp_path)
+    context = CfgValidationContext(assets=ArbWaveformDatabase.info_at(tmp_path))
+    core = CoreArbWaveformCfg(data="demo")
+    source = (
+        core
+        if style == "arb"
+        else CoreFlatTopWaveformCfg(length=5.0, raise_waveform=core)
+    )
+    converted = WaveformCfgFactory.from_core(source, context=context)
+    native = (
+        converted.raise_waveform
+        if isinstance(converted, FlatTopWaveformCfg)
+        else converted
+    )
+    assert isinstance(native, ArbWaveformCfg)
+    assert native.path == path and native.data == "demo"
+    assert core.has_asset_binding is False
+
+
+@pytest.mark.parametrize("context", [None, CfgValidationContext()])
+def test_waveform_factory_requires_assets_instead_of_global_fallback(
+    context: CfgValidationContext | None,
+) -> None:
+    with pytest.raises(ValueError, match="assets"):
+        WaveformCfgFactory.from_core(CoreArbWaveformCfg(data="demo"), context=context)
+
+
+def test_waveform_factory_propagates_missing_asset(tmp_path: Path) -> None:
+    context = CfgValidationContext(assets=ArbWaveformDatabase.info_at(tmp_path))
+    with pytest.raises(ArbWaveformError) as error:
+        WaveformCfgFactory.from_core(
+            CoreArbWaveformCfg(data="missing"), context=context
+        )
+    assert error.value.reason == "data_key_not_found"
 
 
 def test_flat_top_waveform_create_and_kwargs():

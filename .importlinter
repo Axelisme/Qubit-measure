@@ -132,7 +132,7 @@ type = layers
 layers =
     zcu_tools.gui : zcu_tools.notebook : zcu_tools.mcp
     zcu_tools.experiment
-    zcu_tools.datafile : zcu_tools.device : zcu_tools.program : zcu_tools.analysis : zcu_tools.plotting : zcu_tools.simulate : zcu_tools.resources : zcu_tools.cfg_model : zcu_tools.utils : zcu_tools.progress_bar : zcu_tools.qick_remote
+    zcu_tools.datafile : zcu_tools.device : zcu_tools.program : zcu_tools.analysis : zcu_tools.plotting : zcu_tools.simulate : zcu_tools.resources : zcu_tools.cfg_model : zcu_tools.core : zcu_tools.utils : zcu_tools.progress_bar : zcu_tools.qick_remote
 ignore_imports =
     zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
 
@@ -158,13 +158,11 @@ ignore_imports =
     zcu_tools.program.v2.modules -> zcu_tools.resources.context
     zcu_tools.program.v2.modules.base -> zcu_tools.resources.context
     zcu_tools.program.v2.modules.waveform -> zcu_tools.resources.context
-    zcu_tools.program.v2.modules.waveform -> zcu_tools.resources.waveform_assets
-    zcu_tools.program.v2.sim.waveforms -> zcu_tools.resources.waveform_assets
     # Debt, see C12.
     zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
 
 [importlinter:contract:cfg-kernel-external-only]
-name = C11: the cfg_model kernel depends only on utils
+name = C11: the cfg_model kernel depends only on utils and core.waveform_format
 type = forbidden
 source_modules =
     zcu_tools.cfg_model
@@ -187,6 +185,7 @@ forbidden_modules =
 name = C12: stable tools do not depend on stateful capability modules
 type = forbidden
 source_modules =
+    zcu_tools.core
     zcu_tools.analysis
     zcu_tools.datafile
     zcu_tools.plotting
@@ -201,6 +200,28 @@ forbidden_modules =
 ignore_imports =
     # Debt: predict takes numeric parameters from its caller (backlog).
     zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
+
+# D213: stateless shared core does not depend on domain/runtime owners.
+[importlinter:contract:core-utils-only]
+name = C19: the shared core depends only on utils
+type = forbidden
+source_modules =
+    zcu_tools.core
+forbidden_modules =
+    zcu_tools.analysis
+    zcu_tools.cfg_model
+    zcu_tools.datafile
+    zcu_tools.device
+    zcu_tools.experiment
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
+    zcu_tools.plotting
+    zcu_tools.program
+    zcu_tools.progress_bar
+    zcu_tools.qick_remote
+    zcu_tools.resources
+    zcu_tools.simulate
 
 [importlinter:contract:mcp-remote-only]
 name = C13: mcp uses only the GUI remote contract

@@ -41,6 +41,8 @@ from zcu_tools.device import DeviceInfo, DeviceManager
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import format_sweep1D, get_single_sweep_name
 from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2.modules import ModuleCfg as NativeModuleCfg
+from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.utils import deepupdate
 
 if TYPE_CHECKING:
@@ -65,7 +67,11 @@ type ExperimentCfgValue = (
 )
 # Assembly adds device models and sweep arrays whose dtype the formatter infers.
 type _AssemblyValue = (
-    ExperimentCfgValue | DeviceInfo | NDArray[np.generic] | Mapping[str, _AssemblyValue]
+    ExperimentCfgValue
+    | DeviceInfo
+    | NativeModuleCfg
+    | NDArray[np.generic]
+    | Mapping[str, _AssemblyValue]
 )
 
 
@@ -152,8 +158,11 @@ def assemble_experiment_cfg(
         if not isinstance(modules, Mapping):
             raise TypeError("Experiment config field 'modules' must be a mapping.")
         assembled["modules"] = {
-            name: ModuleCfgFactory.from_raw(
-                _module_input(value, f"modules.{name}"), context=context
+            name: NativeModuleCfgFactory.from_core(
+                ModuleCfgFactory.from_raw(
+                    _module_input(value, f"modules.{name}"), context=context
+                ),
+                context=context,
             )
             for name, value in modules.items()
         }

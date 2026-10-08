@@ -69,6 +69,8 @@ Formula 寫入方法 `create_from_formula`／`update_formula` 成功返回 `None
 ## 資產與 recipe 約束
 
 Data key 符合 `^[A-Za-z][A-Za-z0-9_]*$`，單一檔案為 `<data_key>.npz`。
+`core.waveform_format` 擁有 NPZ keys、arrays 與 JSON 語法驗證。Resources 管理實體 I/O 與 formula 語意，將格式錯誤轉成既有 ArbWaveformError，保留 reason、diagnostics 與 cause。Program/sim 只播放 samples，不重新驗 formula。
+`bound_info().path_for(key)` 回傳 capture-bound 絕對路徑，只驗 key 與檔存在。切換 global DB 不改這個 capability。Native arb 透過 from_core 取得必填 path，序列化 key/path，不保留 provider、不附帶 NPZ、不凍結 bytes。
 載入拒絕未知 key；若有 `recipe_json` 卻無法解析則直接失敗，不退回 raw asset。
 三條 playback array 同長且長度介於 2 與 `MAX_ARB_WAVEFORM_SAMPLES = 1_000_001`；
 匯入 raw `.npz` 的 time 軸可不等距，但必須從 0 開始並嚴格遞增。
