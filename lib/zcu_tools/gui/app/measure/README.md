@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-06，operation cancellation、feedback UI removal 與共用 interactive contracts
+**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -564,10 +564,9 @@ state persists across `detach()` / `attach()` swaps of the service-owned draft.
 
 Nested `CfgSectionSpec` fields render as tree items with whole-row folding
 (`QTreeWidgetItem` at 10 px indentation, 13 px text, classic connectors); the section header
-is the item label and does not create an additional parent-row label. This keeps grouped forms
-such as autofluxdep Generation overrides from showing duplicated text like `Frequency recovery:`
-next to a second `Frequency recovery` header, and keeps the single tree presentation consistent
-across Run, autofluxdep, and module/waveform editors.
+is the item label and does not create an additional parent-row label. This avoids
+duplicated section labels and keeps the single tree presentation consistent
+across Run and module/waveform editors.
 
 `ChoiceSectionSpec` is the shared selector-driven display contract for sections
 whose fields depend on a local mode/strategy. The section still owns a complete
@@ -603,7 +602,7 @@ controlled fields.
 
 Cancellation is operation-specific through the registered cancel hook. Each run
 owns a fresh RunContext and StopSignal. Adapters pass that context to the core;
-Schedule and executor roots receive its cancel_signal explicitly. Device setup
+Schedule roots receive its cancel_signal explicitly. Device setup
 receives context.devices and cancel_signal.event, so ramps observe the same stop
 request without ambient scopes or a global registry. Run terminal policy treats the cancel hook as
 the source of user cancellation intent; `Schedule` may also set the same stop flag
@@ -689,7 +688,6 @@ dirty selection transaction so the tree reflects the resulting names. Revert
 reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
 New remains a retained non-blocking template catalog dialog; the Modules tree Delete
 key is direct only at the tree focus boundary, while the button confirms.
-Autofluxdep keeps the base presentation and its read-only wrapper.
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the

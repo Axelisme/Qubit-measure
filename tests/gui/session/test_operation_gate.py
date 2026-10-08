@@ -12,12 +12,6 @@ from collections.abc import Callable
 from typing import Protocol, cast
 
 import pytest
-from zcu_tools.gui.app.autofluxdep.operation_gate import (
-    OperationGate as AutoFluxDepOperationGate,
-)
-from zcu_tools.gui.app.autofluxdep.operation_gate import (
-    OperationKind as AutoFluxDepOpKind,
-)
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate as MeasureOperationGate,
 )
@@ -52,13 +46,6 @@ def _register(gate: ExclusionGate, *args, **kwargs) -> None:
         pytest.param(
             lambda: (MeasureOperationGate(BaseEventBus()), MeasureOpKind.RUN),
             id="measure",
-        ),
-        pytest.param(
-            lambda: (
-                AutoFluxDepOperationGate(BaseEventBus()),
-                AutoFluxDepOpKind.RUN,
-            ),
-            id="autofluxdep",
         ),
     ]
 )

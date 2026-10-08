@@ -16,8 +16,7 @@ file holds only the two ends of a single bar:
     query** — every reader (widget render, agent ``run.progress``) asks this
     object, so there is a single source of truth and no stale formatted string.
 
-App-agnostic session-core infra: every measurement-session app (measure /
-autofluxdep) reuses these for per-operation progress.
+App-agnostic session-core infra: measure reuses these for per-operation progress.
 """
 
 from __future__ import annotations

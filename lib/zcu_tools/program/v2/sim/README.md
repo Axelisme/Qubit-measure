@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-10-02 — explicit flux source
+**Last updated:** 2026-10-08，更新 worker GIL yield 說明
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -94,9 +94,9 @@ qubit-drive sweeps also compute distinct chains because their propagators differ
 These readout/evolution/population caches are private `SimEngine` implementation
 details, not seams exposed to callers or sibling modules.
 
-**Mocksim CPU loops yield the process GIL cooperatively.** Autofluxdep RUN work is
-submitted to a dedicated `QThread`, but a Python/C-extension-heavy mock simulator
-still shares the same interpreter and can delay the Qt main thread's Python slots.
+**Mocksim CPU loops yield the process GIL cooperatively.** A Python/C-extension-heavy
+mock simulator shares the interpreter with the Qt main thread even when acquisition
+runs in a worker thread. Its CPU work can delay the main thread's Python slots.
 Long signal-grid loops use a time-based `sleep(0)` yield so queued UI progress and
 redraw events can run while the worker continues computing. This is only a
 responsiveness boundary; it does not make the mocksim path Qt-dependent or change

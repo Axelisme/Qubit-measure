@@ -3,10 +3,8 @@
 An app's composition root provides the shared infrastructure (the exclusion gate,
 the async-operation handles, the off-main executor, the progress hub, the project
 IO adapter, the event bus, the state) and this builds the session services
-(connection / context / device) on top. Each app then constructs its own
-experiment-surface services around the returned bundle (measure:
-``build_app_services`` adds tabs / run / analyze / save / cfg_editor;
-autofluxdep will add its node-sweep surface).
+(connection / context / device) on top. Measure constructs its experiment-surface services around the returned
+bundle: ``build_app_services`` adds tabs / run / analyze / save / cfg_editor.
 
 The app injects concrete infrastructure through the session *ports*
 (``gui/session/ports``), so the session services stay app-agnostic.

@@ -11,7 +11,7 @@ class LightweightProgressBar(QWidget):
     """Small progress bar with a QProgressBar-compatible subset.
 
     Native ``QProgressBar.setValue`` can synchronously spend hundreds of
-    milliseconds in style/update paths during autofluxdep runs. This widget keeps
+    milliseconds in style/update paths during high-frequency progress updates. This widget keeps
     the same narrow API the app uses, but ``setValue`` only stores state and
     schedules a repaint so Qt can coalesce high-frequency updates.
     """
