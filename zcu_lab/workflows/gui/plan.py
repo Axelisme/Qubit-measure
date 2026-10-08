@@ -2,8 +2,9 @@
 
 from collections.abc import Mapping
 
+import numpy as np
 from pydantic import Field, JsonValue
-from zcu_tools.cfg_model import PulseReadoutSpec, PulseSpec
+from zcu_tools.cfg_model import ModuleCfgFactory, PulseReadoutSpec, PulseSpec
 from zcu_tools.datafile.native_models import RunSnapshot
 from zcu_tools.gui.form import (
     ExplicitList,
@@ -12,8 +13,10 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     ModuleInput,
+    ModuleRef,
     RangeInput,
 )
+from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
 from zcu_lab.workflows.t1 import T1Plan
 
@@ -68,4 +71,47 @@ class T1PlanForm(FormModel):
         cfg, tunables, timing/grid generation, capture, submission or extra copy
         layer is involved; Engine owns plan isolation.
         """
-        raise NotImplementedError("Implement the captured module conversion seam")
+        context = env.library.validation_context() if env.library is not None else None
+        errors: dict[FormPath, str] = {}
+        qub_pulse = None
+        readout = None
+        try:
+            drive = ModuleCfgFactory.from_raw(
+                self.qub_pulse.name
+                if isinstance(self.qub_pulse, ModuleRef)
+                else self.qub_pulse.module,
+                context=context,
+            )
+            qub_pulse = PulseCfg.model_validate(drive.model_dump(mode="python"))
+        except ValueError as exc:
+            errors[("qub_pulse",)] = str(exc)
+        try:
+            ro = ModuleCfgFactory.from_raw(
+                self.readout.name
+                if isinstance(self.readout, ModuleRef)
+                else self.readout.module,
+                context=context,
+            )
+            readout = PulseReadoutCfg.model_validate(ro.model_dump(mode="python"))
+        except ValueError as exc:
+            errors[("readout",)] = str(exc)
+        if qub_pulse is None or readout is None:
+            return FormErrors(errors)
+        fluxes = (
+            self.fluxes.values
+            if isinstance(self.fluxes, ExplicitList)
+            else tuple(
+                float(value)
+                for value in np.linspace(
+                    self.fluxes.start, self.fluxes.stop, self.fluxes.n
+                )
+            )
+        )
+        return T1Plan(
+            flux_dev=self.flux_dev,
+            fluxes=fluxes,
+            points=self.points,
+            qub_pulse=qub_pulse,
+            readout=readout,
+            snapshot=snapshot,
+        )

@@ -27,7 +27,7 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1ModuleCfg, T1SweepCfg
 from zcu_lab.workflows.acquire import run_t1
 from zcu_lab.workflows.analysis import analyze_t1
 from zcu_lab.workflows.calibration import (
@@ -137,18 +137,23 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
     """
     if not math.isfinite(lifetime_us) or lifetime_us <= 0:
         raise ValueError("T1 lifetime guess must be positive and finite")
-    cfg = plan.t1.model_copy(deep=True)
-    cfg.reps, cfg.rounds = tun.reps, tun.rounds
-    cfg.relax_delay = tun.relax_factor * lifetime_us
-    cfg.modules.pi_pulse = plan.calibration.rabi.modules.qub_pulse.model_copy(deep=True)
-    cfg.modules.pi_pulse.set_param("freq", cal.f01_mhz)
-    cfg.modules.pi_pulse.set_param("length", cal.pi_length_us)
-    apply_readout_calibration(cfg.modules.readout, cal)
+    pi_pulse = plan.qub_pulse.model_copy(deep=True)
+    pi_pulse.set_param("freq", cal.f01_mhz)
+    pi_pulse.set_param("length", cal.pi_length_us)
+    readout = plan.readout.model_copy(deep=True)
+    apply_readout_calibration(readout, cal)
     stop = tun.sweep_factor * lifetime_us
-    cfg.sweep.length = SweepCfg(
-        start=0.0, stop=stop, expts=plan.points, step=stop / (plan.points - 1)
+    return T1Cfg(
+        reps=tun.reps,
+        rounds=tun.rounds,
+        relax_delay=tun.relax_factor * lifetime_us,
+        modules=T1ModuleCfg(pi_pulse=pi_pulse, readout=readout),
+        sweep=T1SweepCfg(
+            length=SweepCfg(
+                start=0.0, stop=stop, expts=plan.points, step=stop / (plan.points - 1)
+            )
+        ),
     )
-    return cfg
 
 
 @dataclass(frozen=True)

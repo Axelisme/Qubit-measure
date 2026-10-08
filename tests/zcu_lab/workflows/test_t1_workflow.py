@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.datafile import load_run_data
-from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import (
     Actor,
