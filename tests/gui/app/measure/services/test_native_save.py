@@ -25,23 +25,33 @@ from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_saving import ArtifactRef
-from zcu_tools.gui.app.measure.adapter import RunRequest
+from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
 from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
+from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
+from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.services.tab import TabService
+from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+    PointUseRequest,
+)
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     ResultEntry,
+    RoleSpec,
     SavedPayload,
     SaveLayout,
 )
@@ -54,9 +64,23 @@ from tests.gui.app.measure._native_save_support import (
     PaneParams,
     PaneSummary,
     PostSummary,
+    SavingAdapter,
     declare_panes,
     native_save_session,
 )
+from tests.resources.entry.fakes import (
+    register_fakes,
+    registry_state,
+    restore_registry,
+)
+
+
+class RoleSavingAdapter(SavingAdapter):
+    """Use the existing offline saving backend with a declared driver alias."""
+
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Bind driver to the birth focus; allow manual rebinding on the tab."""
+        return {"driver": RoleSpec("fake/drive/*")}
 
 
 @pytest.fixture
@@ -163,6 +187,135 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     assert [event.kind for event in session.entry.ledger.events()] == [
         "acquired",
         "saved",
+        "saved",
+    ]
+
+
+@pytest.fixture
+def role_controller(
+    native_session: NativeSaveSession,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Generator[tuple[State, Controller, BaseEventBus]]:
+    """Compose an offline role-aware application and restore its registry/Qt owners."""
+    before = registry_state()
+    background = native_session.background
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    registry = Registry()
+    registry.register("role_saving", RoleSavingAdapter)
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.app_services.BackgroundRunner",
+        lambda: background,
+    )
+
+    def provenance(*, context: RunContext) -> SoftwareProvenance:
+        return native_session.metadata.provenance
+
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+        provenance,
+    )
+    controller = Controller(
+        state,
+        registry,
+        None,
+        bus,
+        project_root=str(tmp_path),
+        progress_transport=DirectProgressTransport(),
+    )
+    try:
+        register_fakes()
+        installed = registry_state()
+        controller.setup_control.new_entry(EntryRequest("rebound"))
+        context = controller.context_control
+        context.new_point(PointCreateRequest("p", "birth point", GUI_ORIGIN))
+        for name in ("Q1", "Q2"):
+            context.add_component(name, "fake/drive/a", {"rate": 10.0})
+        context.set_component_focus("Q1")
+        yield state, controller, bus
+        assert registry_state() == installed
+    finally:
+        assert background.quiesce()
+        for tab_id in tuple(state.list_tab_ids()):
+            controller.tab_control.close_tab(tab_id)
+        restore_registry(before)
+
+
+@pytest.mark.parametrize("frontend", ["gui", "mcp"])
+def test_native_role_rebind_records_new_alias_and_retains_result_source(
+    role_controller: tuple[State, Controller, BaseEventBus], frontend: str
+) -> None:
+    state, controller, bus = role_controller
+    control = controller.tab_control
+    tab_id = control.new_tab("role_saving")
+    tab = state.get_tab(tab_id)
+    birth = tab.parameters
+    assert (
+        birth is not None
+        and birth.roles is not None
+        and birth.roles.names == {"driver": "Q1"}
+    )
+    storage = birth.capture_storage()
+    control.set_role(tab_id, "driver", "Q2")
+    origin = GUI_ORIGIN if frontend == "gui" else CommandOrigin("mcp")
+    finished: list[RunFinishedPayload] = []
+    loop, timer = QEventLoop(), QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(loop.quit)
+
+    def terminal(payload: RunFinishedPayload) -> None:
+        finished.append(payload)
+        loop.quit()
+
+    subscription = bus.subscribe(RunFinishedPayload, terminal)
+    try:
+        controller.run_analyze_control.start_run(
+            tab_id, tab.cfg.observe().ref, origin=origin
+        )
+        timer.start(5000)
+        if not finished:
+            loop.exec()
+    finally:
+        timer.stop()
+        subscription.unsubscribe()
+    assert len(finished) == 1 and finished[0].outcome == "finished"
+    assert not state.is_tab_busy(tab_id)
+    metadata, parameters = tab.run.metadata, tab.run.parameters
+    assert (
+        metadata is not None and parameters is not None and parameters.roles is not None
+    )
+    assert metadata.snapshot.roles == parameters.roles.names == {"driver": "Q2"}
+    assert (metadata.snapshot.entry_id, metadata.snapshot.point) == (
+        storage.entry_id,
+        storage.point,
+    )
+    (event,) = storage.ledger.events()
+    assert (event.kind, event.origin, event.entry_id) == (
+        "acquired",
+        frontend,
+        str(storage.entry_id),
+    )
+    assert isinstance(event.payload, AcquiredPayload)
+    assert event.payload.run_id == metadata.run_id
+    assert event.payload.roles == {"driver": "Q2"}
+    assert event.payload.point == "p"
+    assert not (storage.database_path / "runs").exists()
+    control.set_role(tab_id, "driver", "Q1")
+    assert (
+        tab.parameters is not None
+        and tab.parameters.roles is not None
+        and tab.parameters.roles.names == {"driver": "Q1"}
+    )
+    assert tab.run.metadata is metadata and tab.run.parameters is parameters
+    assert tab.save_context is birth
+    report = controller.save_control.save_data(tab_id, origin=origin)
+    assert all(output.status == "saved" for output in report.outputs)
+    stored = load_run_data(report.outputs[0].output.path)
+    assert stored.metadata.snapshot == metadata.snapshot
+    assert stored.metadata.run_id == event.payload.run_id
+    assert [event.kind for event in storage.ledger.events()] == [
+        "acquired",
         "saved",
     ]
 

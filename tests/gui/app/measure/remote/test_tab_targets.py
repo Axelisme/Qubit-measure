@@ -382,7 +382,7 @@ def test_role_rebind_invalid_choice_has_no_partial_commit(
     assert events == []
 
 
-@pytest.mark.parametrize("busy", ["running", "analyzing", "saving"])
+@pytest.mark.parametrize("busy", ["running", "analyzing"])
 def test_role_rebind_busy_tab_rejects_but_other_idle_tab_can_change(
     application: TargetApplication,
     busy: str,
@@ -394,10 +394,8 @@ def test_role_rebind_busy_tab_rejects_but_other_idle_tab_can_change(
     capture, observation = tab.parameters, tab.cfg.observe()
     if busy == "running":
         state.set_tab_running(tab_id, running=True)
-    elif busy == "analyzing":
-        state.set_tab_analyzing(tab_id, analyzing=True)
     else:
-        state.set_tab_saving_data(tab_id, saving_data=True)
+        state.set_tab_analyzing(tab_id, analyzing=True)
     try:
         with pytest.raises(FailedPreconditionError):
             control.set_role(tab_id, "driver", "Q2")
@@ -411,7 +409,6 @@ def test_role_rebind_busy_tab_rejects_but_other_idle_tab_can_change(
     finally:
         state.set_tab_running(tab_id, running=False)
         state.set_tab_analyzing(tab_id, analyzing=False)
-        state.set_tab_saving_data(tab_id, saving_data=False)
 
 
 def test_role_rebind_reentrant_command_rejects_before_capture_install(

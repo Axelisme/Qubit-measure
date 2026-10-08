@@ -1100,11 +1100,7 @@ class ExpTabWidget(QWidget):
             )
         interaction = snapshot.interaction
         self._roles_widget.setEnabled(
-            not (
-                interaction.is_running
-                or interaction.is_analyzing
-                or interaction.is_saving_data
-            )
+            not (interaction.is_running or interaction.is_analyzing)
         )
         self._roles_widget.show()
 
