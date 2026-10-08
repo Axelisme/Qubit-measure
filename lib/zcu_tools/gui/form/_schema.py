@@ -18,30 +18,32 @@ from .model import Display, FormEnv, FormModel, FormPath
 class _InputJsonSchema(GenerateJsonSchema):
     """Annotate native tagged schemas, including containers, aliases and definitions.
 
-    Pydantic owns traversal and refs. Its mapping identifies each emitted branch;
-    core choice keys supply intrinsic typed tags before any form choices apply.
+    Pydantic owns traversal and refs. Core choice keys supply intrinsic typed
+    tags; native choice schemas identify branches without string-key collisions.
     """
 
     def tagged_union_schema(
         self, schema: core_schema.TaggedUnionSchema
     ) -> dict[str, JsonValue]:
-        """Add intrinsic JSON tags to discriminator branches; native errors propagate."""
+        """Extend schema's native oneOf with typed tags; generation errors propagate.
+
+        Non-finite/non-JSON tags raise ValueError through the shared JSON codec.
+        """
         generated = copy_object(super().tagged_union_schema(schema))
-        discriminator = generated.get("discriminator")
-        branches = generated.get("oneOf")
-        if isinstance(discriminator, dict) and isinstance(branches, list):
-            mapping = discriminator.get("mapping")
-            if isinstance(mapping, dict):
-                for branch in branches:
-                    if not isinstance(branch, dict):
-                        continue
-                    target = branch.get("$ref", branch)
-                    tags: list[JsonValue] = []
-                    for tag in schema["choices"]:
-                        native_key = tag.value if isinstance(tag, Enum) else tag
-                        if mapping.get(str(native_key)) == target:
-                            tags.append(default_json(native_key))
-                    branch["x-form-discriminator-values"] = tags
+        branches: list[dict[str, JsonValue]] = []
+        identities: list[list[JsonValue]] = []
+        # Group aliases before adding metadata so it does not change schema equality.
+        for tag, choice in schema["choices"].items():
+            branch = copy_object(self.generate_inner(choice))
+            if branch not in branches:
+                branches.append(branch)
+                identities.append([])
+            index = branches.index(branch)
+            native_tag = tag.value if isinstance(tag, Enum) else tag
+            identities[index].append(default_json(native_tag))
+        for branch, tags in zip(branches, identities, strict=True):
+            branch["x-form-discriminator-values"] = tags
+        generated["oneOf"] = [branch for branch in branches]
         return generated
 
 
