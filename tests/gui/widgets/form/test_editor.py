@@ -513,3 +513,183 @@ def test_inactive_branch_discards_only_its_local_unparsed_text(
     assert isinstance(local, FormErrors)
     assert set(local.messages) == {("amount",)}
     assert line(editor, "amount").text() == "-"
+
+
+class NullableNumericForm(FormModel):
+    """Nullable scalar inputs retain numeric syntax and Expr alternatives."""
+
+    optional_float: float | None = None
+    optional_int: int | None = None
+
+
+@pytest.mark.parametrize(
+    ("path", "direct"), [("optional_float", 3.5), ("optional_int", 3)]
+)
+def test_nullable_numeric_direct_partial_null_and_expression(
+    views: list[QWidget], path: str, direct: float | int
+) -> None:
+    env = environment()
+    state = FormState(FormInput(NullableNumericForm, {path: {"expr": "seed"}}))
+    editor = FormEditor(state, env)
+    views.append(editor)
+    text = editor.findChild(QLineEdit, f"form.input.{path}")
+    mode = editor.findChild(QComboBox, f"form.mode.{path}")
+    assert isinstance(text, QLineEdit)
+    assert isinstance(mode, QComboBox)
+    assert mode.currentData() == "expr"
+    assert text.text() == "seed"
+    mode.setCurrentIndex(mode.findData("direct"))
+    text.setText(str(direct))
+    assert state.input.data[path] == direct
+    assert type(state.input.data[path]) is type(direct)
+    before = state.input.data
+    text.setText("-")
+    assert state.input.data == before
+    assert isinstance(editor.local_parse_errors(), FormErrors)
+    text.setText("")
+    assert state.input.data[path] is None
+    assert editor.local_parse_errors() is None
+    mode.setCurrentIndex(mode.findData("expr"))
+    text.setText("seed + 1")
+    assert state.input.data[path] == {"expr": "seed + 1"}
+    notices: list[int] = []
+    state.subscribe(lambda: notices.append(1))
+    before = state.input.data
+    refreshed = environment(8.0)
+    editor.refresh(refreshed)
+    assert state.input.data == before
+    assert notices == []
+    assert text.text() == "seed + 1"
+    result = state.result(refreshed)
+    assert isinstance(result, NullableNumericForm)
+    assert getattr(result, path) == 9
+    value = editor.findChild(QLabel, f"form.value.{path}")
+    assert isinstance(value, QLabel)
+    assert float(value.text()) == 9
+
+
+class EmptyChoiceForm(FormModel):
+    """Static Literal, free text and numeric choice sets may all become empty."""
+
+    literal: Literal["alpha", "beta"] = "alpha"
+    text: str = "alpha"
+    number: float = 2.0
+
+    @classmethod
+    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Use only host-captured data to publish legal option sets."""
+        empty = env.md.get("empty_choices")
+        return {
+            ("literal",): () if empty else ("alpha", "beta"),
+            ("text",): () if empty else ("alpha", "beta"),
+            ("number",): () if empty else (2.0, 4.0),
+        }
+
+
+def test_empty_choices_refresh_preserves_input_and_numeric_expression(
+    views: list[QWidget],
+) -> None:
+    env = environment()
+    state = FormState(EmptyChoiceForm.default_input(env))
+    editor = FormEditor(state, env)
+    views.append(editor)
+    notices: list[int] = []
+    state.subscribe(lambda: notices.append(1))
+    before = state.input.data
+    empty = environment()
+    empty.md.update({"empty_choices": True})
+    for captured, count in ((env, 2), (empty, 0), (env, 2), (empty, 0)):
+        editor.refresh(captured)
+        for path in ("literal", "text", "number"):
+            control = editor.findChild(QComboBox, f"form.input.{path}")
+            assert isinstance(control, QComboBox)
+            assert control.count() == count
+            if count == 0:
+                assert control.currentIndex() == -1
+        assert state.input.data == before
+        assert notices == []
+        errors = editor.errors()
+        if count == 0:
+            assert isinstance(errors, FormErrors)
+        else:
+            assert errors is None
+    mode = editor.findChild(QComboBox, "form.mode.number")
+    assert isinstance(mode, QComboBox)
+    mode.setCurrentIndex(mode.findData("expr"))
+    text = editor.findChild(QLineEdit, "form.input.number")
+    assert isinstance(text, QLineEdit)
+    text.setText("seed / 2")
+    assert state.input.data["number"] == {"expr": "seed / 2"}
+    assert editor.local_parse_errors() is None
+    errors = editor.errors()
+    assert isinstance(errors, FormErrors)
+    assert ("number",) in errors.messages
+    editor.refresh(env)
+    assert editor.errors() is None
+    assert text.text() == "seed / 2"
+
+
+class MultiTagBranch(FormModel):
+    """Two discriminator values select the same branch."""
+
+    kind: Literal["a", "alias"] = "a"
+    shared: float = 1.0
+    a_only: float = 3.0
+
+
+class SingleTagBranch(FormModel):
+    """Another branch preserves same-name input when selected."""
+
+    kind: Literal["b"] = "b"
+    shared: float = 9.0
+    b_only: float = 4.0
+
+
+class MultiTagForm(FormModel):
+    """The branch selector accepts every tag supported by the core."""
+
+    branch: Annotated[MultiTagBranch | SingleTagBranch, Field(discriminator="kind")]
+
+
+@pytest.mark.parametrize("initial_tag", ["a", "alias"])
+def test_multi_tag_discriminator_displays_and_switches_active_branch(
+    views: list[QWidget], initial_tag: str
+) -> None:
+    env = environment()
+    state = FormState(
+        FormInput(MultiTagForm, {"branch": {"kind": initial_tag, "shared": 6.0}})
+    )
+    editor = FormEditor(state, env)
+    views.append(editor)
+    control = editor.findChild(QLineEdit, "form.input.branch.a_only")
+    selector = editor.findChild(QComboBox, "form.input.branch.kind")
+    assert isinstance(control, QLineEdit)
+    assert isinstance(selector, QComboBox)
+    assert selector.currentData() == initial_tag
+    assert {selector.itemData(index) for index in range(selector.count())} == {
+        "a",
+        "alias",
+        "b",
+    }
+    selector.setCurrentIndex(selector.findData("b"))
+    result = state.result(env)
+    assert isinstance(result, MultiTagForm)
+    assert isinstance(result.branch, SingleTagBranch)
+    assert result.branch.shared == 6.0
+    assert editor.findChild(QLineEdit, "form.input.branch.a_only") is None
+    assert isinstance(
+        editor.findChild(QLineEdit, "form.input.branch.b_only"), QLineEdit
+    )
+    for tag in ("alias", "a"):
+        selector = editor.findChild(QComboBox, "form.input.branch.kind")
+        assert isinstance(selector, QComboBox)
+        selector.setCurrentIndex(selector.findData(tag))
+        result = state.result(env)
+        assert isinstance(result, MultiTagForm)
+        assert isinstance(result.branch, MultiTagBranch)
+        assert result.branch.kind == tag
+        assert result.branch.shared == 6.0
+        assert isinstance(
+            editor.findChild(QLineEdit, "form.input.branch.a_only"), QLineEdit
+        )
+        assert editor.findChild(QLineEdit, "form.input.branch.b_only") is None
