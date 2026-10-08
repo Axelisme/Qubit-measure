@@ -72,7 +72,6 @@ def resource(schema: CfgSchema, catalog: ReferenceCatalog | None = None) -> CfgR
             lambda name: 0.0,
             validate_scalar_expr,
         ),
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
 
 
@@ -359,7 +358,9 @@ def test_range_input_submits_subpath_to_owner(
 
     observed = owner.observe()
     assert observed.ref.revision == 1
-    assert owner.accept(observed.ref.revision).values == {"range": (0, 2, 5)}
+    assert owner.accept(observed.ref.revision).values == {
+        "range": {"start": 0, "stop": 2, "expts": 5, "step": 0.5}
+    }
 
 
 @pytest.mark.parametrize("edge", ["start", "stop", "center"])
@@ -426,7 +427,9 @@ def test_pending_sampling_uses_the_last_operation(
     type_text(step, "0.5")
     type_text(points, "7")
     form.submit_pending()
-    assert owner.accept(owner.observe().ref.revision).values == {"range": (0, 2, 7)}
+    assert owner.accept(owner.observe().ref.revision).values == {
+        "range": {"start": 0, "stop": 2, "expts": 7, "step": 1 / 3}
+    }
 
 
 def test_choice_selection_changes_visible_rows_after_publication(
@@ -736,7 +739,6 @@ def test_detach_reopen_discards_only_view_input_without_defaults(
             lambda name: 0.0,
             validate_scalar_expr,
         ),
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
     form.attach(owner)
     type_text(scalar_line(form), "3.5")

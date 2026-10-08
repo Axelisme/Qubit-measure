@@ -92,9 +92,7 @@ class _FakeProgress:
 
 
 def _make_state() -> State:
-    return State(
-        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
-    )
+    return State(SessionEnv(parameters=None, soc=None, soccfg=None, result_dir=""))
 
 
 def _make_svc(

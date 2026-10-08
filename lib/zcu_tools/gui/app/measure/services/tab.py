@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -16,7 +16,9 @@ from zcu_tools.gui.app.measure.state import (
     TabInteractionState,
 )
 from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.resource import CfgObservation
+from zcu_tools.gui.cfg.resource import CfgObservation, CfgResolution
+from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.entry import RoleSpec
 
 from ..adapter import AnalysisMode, WritebackItem
 from .plot_lifecycle import release_retired_plots
@@ -71,20 +73,32 @@ class TabService:
         registry: Registry,
         writeback: WritebackLifecyclePort,
         cfg_resources: TabCfgResources,
+        cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
+        captured_parameters: Callable[
+            [Mapping[str, RoleSpec]], ParameterContext | None
+        ],
     ) -> None:
+        """Inject fixed cfg sources and the current role capture operation.
+
+        captured_parameters resolves declared roles through the context owner;
+        empty declarations return None. Missing context/roles propagate before
+        tab registration. cfg_resolution retains the supplied capture on refresh.
+        """
         self._state = state
         self._registry = registry
         # The tab lifecycle previews pane drafts and tears them down on close via
         # one narrow port, without depending on the concrete sibling service.
         self._writeback = writeback
         self._cfg_resources = cfg_resources
+        self._cfg_resolution = cfg_resolution
+        self._captured_parameters = captured_parameters
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
         populated). The persist/restore form of ``TabSnapshot`` is produced
         elsewhere (codec / restore) with the live fields left empty."""
         tab = self._state.get_tab(tab_id)
-        ctx = self._state.session_env
+        ctx = replace(self._state.session_env, parameters=tab.parameters)
         is_running = self._state.is_tab_running(tab_id)
         interaction = TabInteractionState(
             global_run_active=self._state.is_run_active() and not is_running,
@@ -188,9 +202,13 @@ class TabService:
             tab_id,
             from_dict is not None,
         )
+        parameters = self._captured_parameters(adapter.parameter_roles())
         cfg = self._cfg_resources.create(
             tab_id,
-            lambda: adapter.make_default_cfg(self._state.session_env),
+            lambda: adapter.make_default_cfg(
+                replace(self._state.session_env, parameters=parameters)
+            ),
+            resolution=lambda: self._cfg_resolution(parameters),
             initial=from_dict.cfg_schema if from_dict is not None else None,
         )
         self._state.add_tab(
@@ -199,6 +217,7 @@ class TabService:
                 adapter_name=adapter_name,
                 adapter=adapter,
                 cfg=cfg,
+                parameters=parameters,
             ),
         )
 
@@ -211,8 +230,10 @@ class TabService:
     def make_default_cfg(self, adapter_name: str) -> CfgSchema:
         """The adapter's default cfg under the current context — the base schema
         WorkspaceService needs to decode a persisted raw cfg into a live one."""
-        return self._registry.create(adapter_name).make_default_cfg(
-            self._state.session_env
+        adapter = self._registry.create(adapter_name)
+        parameters = self._captured_parameters(adapter.parameter_roles())
+        return adapter.make_default_cfg(
+            replace(self._state.session_env, parameters=parameters)
         )
 
     def list_adapter_names(self) -> list[str]:
@@ -264,7 +285,8 @@ class TabService:
             return AnalysisPreparation(has_params=False)
         try:
             instance = tab.adapter.get_analyze_params(
-                tab.run.result, self._state.session_env
+                tab.run.result,
+                replace(self._state.session_env, parameters=tab.parameters),
             )
         except Exception as exc:
             logger.exception("Analysis preparation failed for tab %s", tab_id)
@@ -285,7 +307,8 @@ class TabService:
                 "No primary analyze result available to build post-analysis params"
             )
         instance = tab.adapter.get_post_analyze_params(
-            tab.analysis.result, self._state.session_env
+            tab.analysis.result,
+            replace(self._state.session_env, parameters=tab.parameters),
         )
         self._state.update_tab_post_analyze_param_instance(tab_id, instance)
         return instance
@@ -299,11 +322,15 @@ class TabService:
         return self._state.get_tab(tab_id).post_analysis.result
 
     def get_tab_data_path(self, tab_id: str) -> str | None:
-        return self._state.get_tab(tab_id).effective_data_path(self._state.session_env)
+        tab = self._state.get_tab(tab_id)
+        return tab.effective_data_path(
+            replace(self._state.session_env, parameters=tab.parameters)
+        )
 
     def get_tab_image_path(self, tab_id: str, key: ArtifactKey) -> str | None:
-        return self._state.get_tab(tab_id).effective_image_path(
-            self._state.session_env, key
+        tab = self._state.get_tab(tab_id)
+        return tab.effective_image_path(
+            replace(self._state.session_env, parameters=tab.parameters), key
         )
 
     def update_tab_data_path_override(self, tab_id: str, data_path: str | None) -> None:

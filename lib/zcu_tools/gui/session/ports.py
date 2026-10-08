@@ -8,7 +8,7 @@ free of a back-edge to any ``gui.app.*`` package.
 This module holds the **exclusion seam**: the session-core operation-kind
 vocabulary (``OperationKind``), the conflict error, and the ``ExclusionGate``
 port. Each app keeps its own concrete ``OperationGate`` (the conflict *policy*)
-and adds its own app-specific kinds (measure: ``run``; autofluxdep: a sweep kind);
+and adds its own app-specific kinds (measure: ``run``);
 the port is keyed by the kind's wire string so a session service can name a
 session kind without the gate's full vocabulary leaking here (ADR-0066, decision
 3 of the session-core extraction).

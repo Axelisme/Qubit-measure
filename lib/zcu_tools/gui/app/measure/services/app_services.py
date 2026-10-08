@@ -4,12 +4,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.measure.adapter.lowering import make_sweep_range
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgRevision, SourceRevision
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
@@ -26,6 +26,9 @@ from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
+from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.entry import RoleSpec
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from .analyze import AnalyzeService
 from .arb_waveform import ArbWaveformService
@@ -56,7 +59,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.services.io_manager import IOManager
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .cfg_editor import CfgEditorHost
@@ -122,7 +124,6 @@ def build_app_services(
     state: State,
     bus: EventBus,
     registry: Registry,
-    io_manager: IOManager,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
     notify_info: Callable[[str], None],
@@ -155,8 +156,8 @@ def build_app_services(
         handles=handles,
         background=background,
         progress=progress,
-        io_manager=io_manager,
         runner=runner,
+        bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
     )
     context = session.context
@@ -165,9 +166,21 @@ def build_app_services(
 
     bindings = MeasureCfgBindings(cfg_editor_ctrl)
 
-    def cfg_resolution() -> CfgResolution:
+    def captured_parameters(
+        declarations: Mapping[str, RoleSpec],
+    ) -> ParameterContext | None:
+        if not declarations:
+            return None
+        roles = context.capture_roles(
+            declarations, focus=context.get_component_focus().name, explicit={}
+        )
+        return context.read_context(roles=roles)
+
+    def cfg_resolution(parameters: ParameterContext | None) -> CfgResolution:
         captured = session.value_sources.snapshot()
-        source = bindings.snapshot_from_state(state, captured_values=captured.values)
+        source = bindings.snapshot_from_state(
+            state, captured_values=captured.values, parameters=parameters
+        )
         return replace(
             source,
             source_basis=(
@@ -177,8 +190,6 @@ def build_app_services(
         )
 
     tab_cfg = TabCfgResources(
-        resolution=cfg_resolution,
-        make_range=make_sweep_range,
         mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
     )
 
@@ -201,10 +212,16 @@ def build_app_services(
         versions=cfg_editor_ctrl,
         bus=bus,
     )
-    writeback = WritebackService(cfg_editor, write_port=cfg_editor_ctrl)
+    writeback = WritebackService(
+        cfg_editor,
+        write_port=ContextControlFacet(context=context),
+        entry_ledger=context.entry_ledger,
+    )
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).
-    tab = TabService(state, registry, writeback, tab_cfg)
+    tab = TabService(
+        state, registry, writeback, tab_cfg, cfg_resolution, captured_parameters
+    )
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state)
     load = LoadService(state, writeback, provide_options=bindings.provide_options)

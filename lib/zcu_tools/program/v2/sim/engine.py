@@ -208,8 +208,8 @@ _GIL_YIELD_INTERVAL_S = 0.010
 class _CooperativeYield:
     """Release the GIL occasionally during mocksim CPU loops.
 
-    The autofluxdep run already executes in a dedicated QThread, but the mock
-    simulator can still hold Python's process-wide GIL long enough to delay the
+    Even when acquisition executes in a worker thread, the mock simulator can
+    hold Python's process-wide GIL long enough to delay the
     Qt main thread's Python slots. A time-based yield keeps the GUI responsive
     without making the physics path depend on Qt.
     """

@@ -156,7 +156,12 @@ class GuardService:
             ) from exc
 
         req = RunRequest(
-            soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot=device_snapshot
+            soc=ctx.soc,
+            soccfg=ctx.soccfg,
+            device_snapshot=device_snapshot,
+            cfg_context=None
+            if tab.parameters is None
+            else tab.parameters.library.validation_context(),
         )
         if tab.adapter.capabilities.requires_soc:
             try:

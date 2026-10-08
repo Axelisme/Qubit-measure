@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08，唯讀存檔路徑與 Open folder
+**Last updated:** 2026-10-08，唯讀存檔路徑與固定來源的 library editor
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -463,7 +463,7 @@ CfgResource 擁有 input、resolution、revision、publication 與 acceptance。
 Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
 發布 Invalid；拒絕不留下成功前綴。Observe、snapshot 和 Run acceptance 不重新讀取來源。
 `TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
-`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。
+`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。Library editor 保存開啟時的 ParameterContext，並透過 `apply_library_change` 在原 target 提交結構操作。同一 entry 的 point 切換不會改寫目的地；跨 entry 或失效的 DRAFT 拒絕寫入。失敗保留可編輯的 session。
 
 獨立 library／inspect／writeback 的 CfgEditor 在 app seam 解碼 `ValueRef`，
 並依序操作 draft binding target。這個 draft batch 保留 fail-fast/non-atomic 行為，
@@ -477,8 +477,8 @@ renders publications and keeps only unsubmitted input locally:
 
 Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
 remains valid. Run does not reread `MetaDict` or `ModuleLibrary`.
-`schema_to_raw_dict(schema, md, ml)` remains the live lowering boundary for
-non-Run draft consumers. `CfgSchema` stores shared spec/value data and `CfgDraft`
+`schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
+fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
 
@@ -566,10 +566,9 @@ state persists across `detach()` / `attach()` swaps of the service-owned draft.
 
 Nested `CfgSectionSpec` fields render as tree items with whole-row folding
 (`QTreeWidgetItem` at 10 px indentation, 13 px text, classic connectors); the section header
-is the item label and does not create an additional parent-row label. This keeps grouped forms
-such as autofluxdep Generation overrides from showing duplicated text like `Frequency recovery:`
-next to a second `Frequency recovery` header, and keeps the single tree presentation consistent
-across Run, autofluxdep, and module/waveform editors.
+is the item label and does not create an additional parent-row label. This avoids
+duplicated section labels and keeps the single tree presentation consistent
+across Run and module/waveform editors.
 
 `ChoiceSectionSpec` is the shared selector-driven display contract for sections
 whose fields depend on a local mode/strategy. The section still owns a complete
@@ -605,7 +604,7 @@ controlled fields.
 
 Cancellation is operation-specific through the registered cancel hook. Each run
 owns a fresh RunContext and StopSignal. Adapters pass that context to the core;
-Schedule and executor roots receive its cancel_signal explicitly. Device setup
+Schedule roots receive its cancel_signal explicitly. Device setup
 receives context.devices and cancel_signal.event, so ramps observe the same stop
 request without ambient scopes or a global registry. Run terminal policy treats the cancel hook as
 the source of user cancellation intent; `Schedule` may also set the same stop flag
@@ -691,7 +690,6 @@ dirty selection transaction so the tree reflects the resulting names. Revert
 reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
 New remains a retained non-blocking template catalog dialog; the Modules tree Delete
 key is direct only at the tree focus boundary, while the button confirms.
-Autofluxdep keeps the base presentation and its read-only wrapper.
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the

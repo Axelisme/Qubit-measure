@@ -122,6 +122,57 @@ def _select(session: _Session, label: str) -> SavedPoint:
     return session.control.use_point(PointUseRequest(session.entry.entry_id, label))
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_read_target_observes_detached_writes_without_selecting_or_publishing(
+    session: _Session, kind: Kind
+) -> None:
+    first = _select(session, "a")
+    _write(session.control, first, kind, 0.2)
+    capture = session.control.read_context()
+    second = _select(session, "b")
+    _write(session.control, first, kind, 0.3)
+    selected = session.control.read_context()
+    version = session.state.version.get("context")
+    events: list[object] = []
+    session.bus.subscribe(MdChangedPayload, events.append)
+    session.bus.subscribe(MlChangedPayload, events.append)
+    current = session.control.read_target(first)
+    assert current.target == first
+    assert _value(current, kind) == pytest.approx(0.3)
+    assert _value(capture, kind) == pytest.approx(0.2)
+    assert session.control.read_context().target == second
+    assert session.control.read_context().document() == selected.document()
+    assert session.state.version.get("context") == version
+    assert events == []
+
+
+def test_read_target_draft_rejects_replaced_memory_context(session: _Session) -> None:
+    draft = session.control.read_context().target
+    session.control.set_parameter(draft, "general.flux_value", 0.2)
+    assert session.control.read_target(draft).value("general.flux_value") == 0.2
+    selected = _select(session, "a")
+    with pytest.raises(FailedPreconditionError) as error:
+        session.control.read_target(draft)
+    assert error.value.reason_code == "draft_not_selected"
+    assert session.control.read_context().target == selected
+
+
+def test_read_target_rejects_other_entries(session: _Session) -> None:
+    target = SavedPoint(entry_id="other", point="a")
+    before = session.control.read_context()
+    with pytest.raises(FailedPreconditionError) as error:
+        session.control.read_target(target)
+    assert error.value.reason_code == "entry_not_open"
+    assert session.control.read_context().document() == before.document()
+
+
+def test_read_target_missing_point_does_not_create_it(session: _Session) -> None:
+    target = SavedPoint(entry_id=session.entry.entry_id, point="missing")
+    with pytest.raises(FileNotFoundError):
+        session.control.read_target(target)
+    assert session.entry.list_points() == []
+
+
 def _source(entry: ResultEntry) -> Provenance:
     event_id = str(uuid4())
     entry.ledger.append(

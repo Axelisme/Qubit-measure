@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from zcu_tools.cfg_model import AbsModuleCfg as LibraryModuleCfg
+from zcu_tools.cfg_model import AbsWaveformCfg as LibraryWaveformCfg
 from zcu_tools.experiment.cfg_editing import (
     PROGRAM_SHAPES,
     ProgramMaterializationPolicy,
@@ -29,9 +31,13 @@ MAIN_PROGRAM_MATERIALIZATION_POLICY = ProgramMaterializationPolicy(
 def waveform_cfg_to_value(
     cfg_input: Any,
 ) -> tuple[CfgSectionSpec, CfgSectionValue]:
-    """Convert a raw or typed waveform using the main-app spec policy."""
+    """Convert raw, library or runtime waveform data using the main-app policy.
 
-    if isinstance(cfg_input, AbsWaveformCfg):
+    Typed inputs serialize through their owning to_dict contract once. The
+    materializer owns field/default/reference representation and its failures.
+    """
+
+    if isinstance(cfg_input, (AbsWaveformCfg, LibraryWaveformCfg)):
         cfg = cfg_input.to_dict()
     elif isinstance(cfg_input, dict):
         cfg = cfg_input
@@ -43,9 +49,15 @@ def waveform_cfg_to_value(
 def module_cfg_to_value(
     cfg_input: Any,
 ) -> tuple[CfgSectionSpec, CfgSectionValue]:
-    """Convert any of the seven modules or six waveform shapes supported by main."""
+    """Convert raw, library or runtime cfg for main's seven modules/six waveforms.
 
-    if isinstance(cfg_input, (AbsModuleCfg, AbsWaveformCfg)):
+    Typed inputs use their owner's to_dict once. Unsupported input, shape and
+    malformed materialization errors propagate; no resource or hardware I/O.
+    """
+
+    if isinstance(
+        cfg_input, (AbsModuleCfg, AbsWaveformCfg, LibraryModuleCfg, LibraryWaveformCfg)
+    ):
         cfg = cfg_input.to_dict()
     elif isinstance(cfg_input, dict):
         cfg = cfg_input

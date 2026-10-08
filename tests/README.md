@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-07，cfg factory 的 explicit validation context
+**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -48,7 +48,7 @@ import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warnin
 `-n auto` 啟動 pytest-xdist 多進程平行化。`tests/conftest.py` 在每個 worker 進程啟動時
 （偵測到 `PYTEST_XDIST_WORKER`）把 `OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS`
 設為 `"1"`，避免 worker 與多執行緒 BLAS 相互過訂。Serial 跑法不設這些變數，適合 debug。
-Qt GUI 子套件可選 `tests/gui tests/gui/app/autofluxdep tests/gui/app/fluxdep tests/gui/app/dispersive`。
+Qt GUI 子套件可選 `tests/gui tests/gui/app/fluxdep tests/gui/app/dispersive`。
 
 ### BackgroundRunner.quiesce() — 測試 teardown 必要模式
 
@@ -145,15 +145,11 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 
 ### Experiment v2 Schedule runtime tests
 
-`tests/experiment/v2/runtime/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、failed attempt 後 stop 不再 retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression；`test_multi_executor.py` 覆蓋 `MultiMeasurementExecutor` template lifecycle、retry、error/stop partial result、figure close 與 `ComposedMeasurementBundle` delegation。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
+`tests/experiment/v2/runtime/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、failed attempt 後 stop 不再 retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
 `tests/zcu_lab/test_adapter_definition.py` 逐一走過 registry，驗證 adapter conformance、
 empty／rich context 的成品 cfg validation、context-free spec 與 fresh schema。
 `test_definitions.py` 驗證 startup／reload 註冊結果非空且符合框架契約。
-
-### Autofluxdep typed context tests
-
-`tests/zcu_lab/v2/autofluxdep/_support/test_info_tracker.py` 覆蓋 `FluxDepInfoTracker` 的 `current` / `first` / `last` snapshot、mutable value deepcopy、missing required field fast-fail、unknown field fast-fail 與 smoothing helper behavior。這組是純 Python unit test，不觸發 predictor、SoC 或 device setup。
 
 ### Device manager tests
 
@@ -183,11 +179,11 @@ decimated trace 與 branch smoke。效能相關 regression 先找 public simulat
 ### Shared GUI cfg import ownership tests
 
 `tests/experiment/cfg_editing/`鎖定closed 7 module + 6 waveform discriminator/label/order、program/v2
-runtime parity、nested allowed sets、deep-fresh mutable containers、main/autoflux僅兩個policy差異、
+runtime parity、nested allowed sets、deep-fresh mutable containers、main及default policy差異、
 strict root-only Mapping/typed inspection、missing/non-string/unknown。materializer tests 另鎖 spec/value 完整對齊、scalar
 missing、nested complete default、required reference `allowed[0]`、missing style Const、explicit unknown與
 Bath ghost rejection。`tests/gui/cfg/test_materialization.py`只測domain-free Spec walk與policy ports；main
-全7+6及autoflux legal-but-unmaterializable subset由各app cfg tests鎖定。app binding/lowering tests鎖
+全7+6由measure app cfg tests鎖定。app binding/lowering tests鎖
 shape lookup、converter與`to_dict()`精確call count；role tests鎖registration shape/value count、Controller
 value→shape順序，以及既有26-entry metadata/value golden。
 
@@ -197,7 +193,7 @@ legacy zero-mutation replacement、schema collision與production registry covera
 Import ownership、來源依賴與靜態宣告直接審閱，不以 AST 或獨立程序的匯入結果作測試。
 
 measure adapter facade 不 forward `zcu_tools.gui.cfg.__all__` names；generic cfg imports
-應指向 shared owner，autofluxdep app-local barrel 另有自己的 owner。
+應指向 shared owner。
 Import 規則由直接 review 相關檔案確認，對外行為由接縫測試驗證。
 
 `tests/gui/cfg/test_schema_assembler.py`擁有domain-free paired Spec/Value construction contract：
@@ -209,7 +205,7 @@ caller alias隔離與one-shot build。domain role、Seed與app section policy不
 `tests/zcu_lab/v2/_support/measure/test_schema_builder.py` 驗證 context-free
 `MeasureCfgBuilder`／`MeasureCfgDefinition`、ModuleInit、Seed、override 與 definition isolation。
 Role defaults 與 startup policy 有各自的接縫測試。Singleshot joint-fit、classification、
-Notebook flux picker 與 Autofluxdep plotters 也由共用 helper owner 驗證。
+Notebook flux picker 也由共用 helper owner 驗證。
 
 個別實驗不另寫 cfg、fit 或 writeback 行為測試，除非使用者要求特殊邏輯。
 目前保留 AllXY、ZigZag 與 ZigZagScan 的四檔 D142 案例。新增或刪除其他 registry entry
@@ -250,7 +246,7 @@ view product及lifecycle／stdio行為。每個fixture建立自己的session／b
 透過recording Transport觀察RPC，不patch server globals或私有helpers。
 `tests/gui/app/measure/remote/test_remote_mcp_toolchain.py`保留GUI project/device/save／guide
 handler契約；同目錄的事件整合測試保留真socket，驗證EventBus→bridge→session的origin。
-`tests/gui/app/measure/_app_launch.py`啟動真實 `MeasureGuiBehavior`（window、remote adapter、MCP client），`tests/gui/app/measure/test_setup_launch_flow.py`與`ui/test_named_dialog_screenshot.py`用它驗證 Setup 從還原、`after_show`、MCP screenshot、工具列聚焦到關閉重開，以及 project tool 變更後的預填；autofluxdep 對應的還原、顯式 Apply／Connect、run／paused 拒絕與再次保存在 `tests/gui/app/autofluxdep/ui/test_setup_flow.py`。
+`tests/gui/app/measure/_app_launch.py`啟動真實 `MeasureGuiBehavior`（window、remote adapter、MCP client），`tests/gui/app/measure/test_setup_launch_flow.py`與`ui/test_named_dialog_screenshot.py`用它驗證 Setup 從還原、`after_show`、MCP screenshot、工具列聚焦到關閉重開，以及 project tool 變更後的預填。
 Shared exposure policy 的可觀察行為屬於 `tests/gui/remote/`。Schema 文字、tool inventory 與
 script flags 用直接 review，不納入 pytest。
 
@@ -263,26 +259,6 @@ injecting this adapter into the widget under test over monkeypatching
 `QMessageBox`; keep QFileDialog, QInputDialog, QMenu, or method monkeypatches
 only when the tested object has no dialog-presenter boundary for that
 interaction.
-
-### Autofluxdep GUI tests
-
-`tests/gui/app/autofluxdep/test_cfg_schema.py`另外鎖定`NodeSchemaBuilder`抽取到shared
-`CfgSchemaAssembler`前後的spec/value/logical-path/persisted observable parity；autoflux domain
-仍擁有logical projection與generation policy。
-
-`tests/gui/app/autofluxdep/test_cfg_schema.py` 擁有 `NodeSchemaBuilder` public verbs、logical-key 格式、pulse module mutation、transactional build / compound declaration contract，以及 typed node cfg schema、OverridePlan serialization/validation、production registry snapshot leaf coverage、strict declared-patch application、pulse-readout shape restriction、real-acquire node `acquire_retry` generation knob 與 seam invariants。Import ownership 以直接審閱確認。`test_node_defaults_helpers.py` 覆蓋 node module patch、sweep extraction、readout seed 與 timing seed/range helpers 的 owner-level behavior。`test_acquire_helpers.py` 覆蓋 Schedule/ProgramBuilder acquire helper 的 retry knob default/validation、completed/stopped/failed outcome handling，以及run snapshot nested alias、`SweepCfg`與ndarray freeze/thaw隔離。`test_cfg_maker.py` 覆蓋 node builder 的 cfg lowering 與 generation overrides；lenrabi 測試同時鎖定 drive-gain feedback 使用 `expected_pi_length` setpoint、auto sweep range 使用上一點 measured `pi_length`、first-pass fallback 使用 `pi_product_seed`；T1/T2/T2Echo 測試鎖定 auto decay sweep stop 受 generation `max_length` 上限控制。`test_orchestrator.py` 鎖定 `ModuleDep` alias/missing/node-produced precedence、run-start fallback capture 與 consumer mutation isolation；`test_run_body.py` 鎖定 production `RunSession` 以同一 run-local `ModuleLibrary` 做 cfg snapshot lowering 與 module source。`ui/test_node_cfg_form.py` 覆蓋 Default cfg / Generation split form、generated/initial decoration refresh 與 field path collection。`test_lenrabi_acquire.py` 覆蓋 lenrabi real-acquire smoke path 與 node-local fit gate helper：decay/non-decay fit 競賽、預期 candidate fit failure isolation、非預期 fit exception Fast Fail、不可信 fit 不送 feedback Patch、pi2 不可信時不產生成對 drive modules。
-
-`tests/gui/app/autofluxdep/test_labber_browser_export.py` 覆蓋 Labber Browser sidecar contract、fixed-axis sidecar live streaming row writes 與 terminal qubit_freq sidecar export。
-
-Autofluxdep real-acquire smoke tests 依賴 flux-aware `MockSoc` 的物理模型；測試 fixture 要讓
-`connect_mock(..., sim_params=...)`、`mock_flux_predictor(sim_params)` 與 drive pulse calibration
-使用同一個 `SimParams`。π / π/2 drive pulse 優先用 helper 依 `pi_gain_len / gain` 校準；當測試目標是
-real acquire + fit 本身時，將 sweep/gain/relax 的 generation mode 固定，避免 feedback auto mode 覆寫測試輸入。
-
-UI mechanics tests 的 `make_measurement_builder("qubit_freq")` 仍使用 production node type/name，
-因此 fake Result 也必須符合 `qubit_freq` artifact/export contract（`QubitFreqResult`），不能用 generic
-`Sweep1DResult` 冒充；否則 run 會在 terminal Labber Browser export Fast Fail，headless 測試可能卡在
-`QMessageBox.warning` modal dialog。其它 fake 1D measurement type 可繼續用 `Sweep1DResult`。
 
 ### GUI device service tests
 

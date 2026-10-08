@@ -1,6 +1,6 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-05，實驗定義搬遷
+**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
 
 `zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。
 
@@ -14,7 +14,7 @@
 共用 `BaseAdapter` 位於 `gui/app/measure/adapter/base.py`。它的 authoring hook 回傳 `AdapterCfgDefinition`，並呼叫 instantiate 產生 fresh cfg。靜態 spec 留在 authoring contract，framework 不依賴 builder 或 Seed。
 通用 source loader 位於 `gui/app/measure/catalog_loader.py`，由 launcher 宣告來源與重載範圍。
 它支援明確的多個 source package，回傳尚未發布的 Registry。框架契約見
-[Experiment reload](../../lib/zcu_tools/gui/app/measure/README.md#experiment-reload)。組合根重載 `zcu_lab.v2` 與 `zcu_lab.definitions`，包含 package exports。它保留 `zcu_lab.templates`、`_support` 下的 measure／autofluxdep／singleshot 支援家族、autofluxdep／overnight 的 `_support`，以及所有框架 identity。Notebook 的 flux picker helper 引用 core 型別，隨 core 重載。`BaseAdapter` 位於重載範圍之外。新增 adapter 必須明列於 `../definitions.py`，不靠 class 掃描註冊。
+[Experiment reload](../../lib/zcu_tools/gui/app/measure/README.md#experiment-reload)。組合根重載 `zcu_lab.v2` 與 `zcu_lab.definitions`，包含 package exports。它保留 `zcu_lab.templates`、`_support` 下的 measure／singleshot 支援家族，以及所有框架 identity。Notebook 的 flux picker helper 引用 core 型別，隨 core 重載。`BaseAdapter` 位於重載範圍之外。新增 adapter 必須明列於 `../definitions.py`，不靠 class 掃描註冊。
 
 Loader 在 GUI 關閉全部 tabs、排除進行中操作後才清除 owned import cache，從已檢查的 source
 建立新 modules，並驗證 candidate registry。它不重啟硬體，也不交易回滾任意 import side effect；

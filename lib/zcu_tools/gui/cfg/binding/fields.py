@@ -489,7 +489,7 @@ class SweepField(CfgField):
             isinstance(value, EvalValue)
             or value.raw is not None
             or value.error is not None
-            or value.value is None
+            or not isinstance(value.value, (int, float))
         ):
             return value
         return float(value.value)
@@ -683,7 +683,7 @@ class CenteredSweepField(CfgField):
             isinstance(value, EvalValue)
             or value.raw is not None
             or value.error is not None
-            or value.value is None
+            or not isinstance(value.value, (int, float))
         ):
             return value
         return float(value.value)

@@ -16,7 +16,7 @@ from .inheritance import (
 )
 from .lowering import (
     ExpressionResolver,
-    RangeFactory,
+    LoweredData,
     ReferenceResolver,
     lower_finished_cfg,
     validate_finished_cfg,
@@ -88,7 +88,7 @@ __all__ = [
     "LiteralSpec",
     "ReferenceSpec",
     "ReferenceValue",
-    "RangeFactory",
+    "LoweredData",
     "RAW_MISSING",
     "RawMissing",
     "ReferenceMaterialization",

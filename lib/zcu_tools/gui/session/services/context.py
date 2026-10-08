@@ -18,6 +18,7 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceBinding,
     EntryDraft,
     EntryInfo,
+    LibraryChange,
     PointBindingError,
     SavedPoint,
     WorkingPointInfo,
@@ -51,11 +52,13 @@ from zcu_tools.resources.entry.schema import (
     PARAMETER_VERSION,
     PointDocument,
     PointGeneral,
+    SetupDocument,
 )
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformAssetInfo, WaveformSpec
-    from zcu_tools.format_version import YamlValue
+    from zcu_tools.format_version import YamlMap, YamlValue
+    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_types import (
         ContextTarget,
@@ -243,6 +246,86 @@ class ContextService:
         self._points = ()
         self._publish(None, (), ContextReadiness.EMPTY, active_label="")
 
+    def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
+        """Return the cached setup template or current point document without I/O.
+
+        setup=True reads the opened entry template; False reads the published
+        DRAFT/ACTIVE point. No entry/context raises FailedPreconditionError.
+        Returned data is isolated; changing it does not write.
+        """
+        self._owner.assert_owner()
+        if setup:
+            if self._setup is None:
+                raise FailedPreconditionError(
+                    "No entry is opened", reason_code="no_entry"
+                )
+            return snapshot(self._setup)
+        return self.read_context().document()
+
+    def add_component(
+        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+    ) -> None:
+        """Add one component with working-unit fields using its registered kind.
+
+        setup=True edits only the opened entry template. Otherwise edit the
+        current DRAFT in memory or ACTIVE point in one resource transaction.
+        Invalid names/kinds/required fields/duplicates leave content unchanged.
+        Success on the current point publishes one parameter change and updates
+        focus options. Setup edits never change existing points or their captures.
+        No entry/context, schema, conflict and I/O errors propagate.
+        """
+        self._owner.assert_owner()
+        if self._entry is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        if setup:
+            if self._setup is None:
+                raise FailedPreconditionError(
+                    "No setup is opened", reason_code="no_entry"
+                )
+            self._setup.add_component(name, kind=kind, **fields)
+            return
+        parameters = self.read_context()
+        if isinstance(parameters.target, EntryDraft):
+            document = self._entry.updated_component(
+                parameters.document(), name, kind, fields
+            )
+        else:
+            if self._point is None:
+                raise FailedPreconditionError(
+                    "No point is selected", reason_code="no_context"
+                )
+            self._point.add_component(name, kind=kind, **fields)
+            document = snapshot(self._point)
+        self._focus = replace(
+            self._focus,
+            components=tuple(
+                ComponentOption(component_name, component.kind)
+                for component_name, component in document.components.items()
+            ),
+        )
+        self._publish_write(
+            ParameterContext(
+                point=document,
+                library=parameters.library,
+                target=parameters.target,
+                roles=None,
+            ),
+            parameter=True,
+        )
+        self._bus.emit(ComponentFocusChangedPayload(focus=self.get_component_focus()))
+
+    def set_setup_parameter(self, path: str, value: YamlValue) -> None:
+        """Edit an existing concrete setup field in working units.
+
+        Commit through the setup resource, never an existing point. No entry,
+        invalid path/schema, conflict and I/O failures propagate; no retry.
+        """
+        self._owner.assert_owner()
+        if self._setup is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        with self._setup.edit() as draft:
+            draft.set(path, value)
+
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         """Capture published point/library on the owner sequence without I/O.
 
@@ -263,6 +346,31 @@ class ContextService:
             target=parameters.target,
             roles=roles,
             source_faults=parameters.source_faults,
+        )
+
+    def read_target(
+        self, target: ContextTarget, *, roles: RoleBinding | None = None
+    ) -> ParameterContext:
+        """Read current values at a fixed target without changing selection.
+
+        SavedPoint opens independent point/library views in the currently opened
+        entry and may perform file I/O. EntryDraft reads the published memory
+        draft and requires that draft to remain selected. Supplied role names
+        stay fixed. Cross-entry, stale draft, missing point, schema, source and
+        I/O failures propagate. This read publishes no versions or events.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        if isinstance(target, EntryDraft):
+            return self.read_context(roles=roles)
+        point = entry.use_point(target.point)
+        assets = self._bind_assets(entry.database_path / "arb_waveforms")
+        library = entry.module_library(target.point, assets=assets)
+        return ParameterContext(
+            point=snapshot(point),
+            library=library.snapshot(),
+            target=target,
+            roles=roles,
         )
 
     def capture_roles(
@@ -404,6 +512,91 @@ class ContextService:
                 point=parameters.document(), library=library, target=target, roles=None
             ),
             parameter=False,
+        )
+
+    def apply_library_change(
+        self,
+        parameters: ParameterContext,
+        change: LibraryChange,
+        *,
+        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
+        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+    ) -> None:
+        """Apply one structure command to the captured target, lowering before writes.
+
+        parameters supplies fixed expression/reference data and the destination.
+        change uses concrete library roots; it never resolves current focus.
+        App callbacks lower only put/replace schemas, without writing resources.
+        Rename moves Spec and sources; delete does not cascade references.
+        Replace checks source/destination and commits relocation plus value in
+        one library transaction. Draft is memory-only and must remain selected.
+        Same-entry nonselected SavedPoint writes do not select or publish.
+        Cross-entry/stale draft/lowering/schema/source/conflict/I/O failures
+        propagate, leaving this command uncommitted and publishing no events.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(parameters.target)
+        selected = self._published_parameters()
+        if isinstance(parameters.target, EntryDraft):
+            library = self._library_change_candidate(
+                selected.library,
+                parameters,
+                change,
+                lower_module=lower_module,
+                lower_waveform=lower_waveform,
+            )
+            entry.validate_library(library.document())
+        else:
+            handle = self._write_library(entry, parameters.target, selected)
+            with handle.edit() as draft:
+                candidate = self._library_change_candidate(
+                    draft.snapshot(),
+                    parameters,
+                    change,
+                    lower_module=lower_module,
+                    lower_waveform=lower_waveform,
+                )
+                draft.replace_contents(candidate)
+            if parameters.target != selected.target:
+                return
+            library = handle.snapshot()
+        self._publish_write(
+            ParameterContext(
+                point=selected.document(),
+                library=library,
+                target=parameters.target,
+                roles=None,
+            ),
+            parameter=False,
+        )
+
+    def _library_change_candidate(
+        self,
+        library: LibrarySnapshot,
+        parameters: ParameterContext,
+        change: LibraryChange,
+        *,
+        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
+        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+    ) -> LibrarySnapshot:
+        """Prepare one isolated structure change using the resource owner's operations."""
+        destination = change.new_path if change.new_path is not None else change.path
+        if change.action == "delete":
+            return library.deleted(change.path, kind=change.kind)
+        if change.action == "rename":
+            return library.renamed(change.path, destination, kind=change.kind)
+        if change.schema is None:
+            raise InvalidInputError("Library put/replace requires a schema")
+        if change.action == "replace":
+            library.entry_value(change.path, kind=change.kind)
+            if destination != change.path:
+                library = library.renamed(change.path, destination, kind=change.kind)
+        if change.kind == "module":
+            return library.replaced_module(
+                destination, lower_module(change.schema, parameters)
+            )
+        return library.replaced_waveform(
+            destination, lower_waveform(change.schema, parameters)
         )
 
     def entry_ledger(self, entry_id: str) -> RecordsLedger:

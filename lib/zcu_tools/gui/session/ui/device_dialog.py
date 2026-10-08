@@ -49,7 +49,7 @@ from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.device_control import DeviceControlPort
-    from zcu_tools.resources.context import MetaDict
+    from zcu_tools.gui.session.parameters import ParameterContext
 
 
 @runtime_checkable
@@ -71,7 +71,9 @@ class _FakeDevicePanel(QWidget):
     """Info + control panel for FakeDevice."""
 
     def __init__(
-        self, md_provider: Callable[[], MetaDict], parent: QWidget | None = None
+        self,
+        parameter_provider: Callable[[], ParameterContext | None],
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
@@ -87,12 +89,12 @@ class _FakeDevicePanel(QWidget):
         form.addRow("Output:", self._output_combo)
 
         self._value_field = EvalNumericField(
-            minimum=-1e9, maximum=1e9, decimals=6, md_provider=md_provider
+            minimum=-1e9, maximum=1e9, decimals=6, parameter_provider=parameter_provider
         )
         form.addRow("Value:", self._value_field)
 
         self._rampstep_field = EvalNumericField(
-            minimum=1e-9, maximum=1e9, decimals=9, md_provider=md_provider
+            minimum=1e-9, maximum=1e9, decimals=9, parameter_provider=parameter_provider
         )
         form.addRow("Ramp step:", self._rampstep_field)
 
@@ -132,7 +134,9 @@ class _YOKOGS200Panel(QWidget):
     """Info + control panel for YOKOGS200."""
 
     def __init__(
-        self, md_provider: Callable[[], MetaDict], parent: QWidget | None = None
+        self,
+        parameter_provider: Callable[[], ParameterContext | None],
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
@@ -151,7 +155,7 @@ class _YOKOGS200Panel(QWidget):
         form.addRow("Output:", self._output_combo)
 
         self._value_field = EvalNumericField(
-            minimum=-1e9, maximum=1e9, decimals=6, md_provider=md_provider
+            minimum=-1e9, maximum=1e9, decimals=6, parameter_provider=parameter_provider
         )
         form.addRow("Value:", self._value_field)
 
@@ -184,7 +188,9 @@ class _SGS100APanel(QWidget):
     """Info + control panel for SGS100A."""
 
     def __init__(
-        self, md_provider: Callable[[], MetaDict], parent: QWidget | None = None
+        self,
+        parameter_provider: Callable[[], ParameterContext | None],
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         form = QFormLayout(self)
@@ -200,12 +206,12 @@ class _SGS100APanel(QWidget):
         form.addRow("Output:", self._output_combo)
 
         self._freq_field = EvalNumericField(
-            minimum=1e6, maximum=20e9, decimals=3, md_provider=md_provider
+            minimum=1e6, maximum=20e9, decimals=3, parameter_provider=parameter_provider
         )
         form.addRow("Freq (Hz):", self._freq_field)
 
         self._power_field = EvalNumericField(
-            minimum=-120, maximum=30, decimals=2, md_provider=md_provider
+            minimum=-120, maximum=30, decimals=2, parameter_provider=parameter_provider
         )
         form.addRow("Power (dBm):", self._power_field)
 
@@ -269,17 +275,23 @@ class _MemoryDevicePanel(QWidget):
 
 
 class DeviceDialog(QDialog):
-    """Resizable dialog combining device listing (left) and detail control (right)."""
+    """Edit device settings through the supplied DeviceControlPort.
+
+    parameter_provider returns one fixed ParameterContext for each preview or
+    expression-bearing Apply. None permits pure calculations but not parameter
+    paths. Direct-only Apply does not call it. Provider or expression failures
+    display an error and prevent setup; valid Apply delegates setup to device.
+    """
 
     def __init__(
         self,
         device: DeviceControlPort,
-        md_provider: Callable[[], MetaDict],
+        parameter_provider: Callable[[], ParameterContext | None],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._dev = device
-        self._md_provider = md_provider
+        self._parameter_provider = parameter_provider
         self._read_only = False
         self.setWindowTitle("Manage Hardware Devices")
         self.resize(800, 500)
@@ -331,13 +343,13 @@ class DeviceDialog(QDialog):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Panels receive md_provider so their EvalNumericField widgets can show
+        # Panels receive parameter_provider so their EvalNumericField widgets can show
         # a live ghost preview while the user composes an expression.
         self._stack = QStackedWidget()
         self._stack.addWidget(QLabel("Select a device to configure."))  # Page 0: Idle
-        self._stack.addWidget(_FakeDevicePanel(md_provider))  # Page 1
-        self._stack.addWidget(_YOKOGS200Panel(md_provider))  # Page 2
-        self._stack.addWidget(_SGS100APanel(md_provider))  # Page 3
+        self._stack.addWidget(_FakeDevicePanel(parameter_provider))  # Page 1
+        self._stack.addWidget(_YOKOGS200Panel(parameter_provider))  # Page 2
+        self._stack.addWidget(_SGS100APanel(parameter_provider))  # Page 3
         self._memory_panel = _MemoryDevicePanel()
         self._stack.addWidget(self._memory_panel)  # Page 4: memory-only
         right_layout.addWidget(self._stack, stretch=1)
@@ -755,9 +767,9 @@ class DeviceDialog(QDialog):
 
         updates = panel.read()
 
-        # Resolve any EvalRef markers against the current MetaDict (Design 1:
+        # Resolve any EvalRef markers against the current ParameterContext (Design 1:
         # apply-time resolve once, not per-keystroke). Only touch the controller's
-        # MetaDict when at least one field is in eval mode — direct-only applies
+        # ParameterContext when at least one field is in eval mode — direct-only applies
         # do not depend on an active context.
         from zcu_tools.gui.session.expression import (
             EvalRef,
@@ -767,7 +779,7 @@ class DeviceDialog(QDialog):
 
         if any(isinstance(v, EvalRef) for v in updates.values()):
             try:
-                md = self._md_provider()
+                parameters = self._parameter_provider()
             except Exception as exc:
                 self._add_status.setStyleSheet("color: red;")
                 self._add_status.setText(f"{name}: {exc}")
@@ -777,7 +789,7 @@ class DeviceDialog(QDialog):
                 if isinstance(val, EvalRef):
                     try:
                         coerced = coerce_eval_result(
-                            evaluate_numeric_expr(val.expr, md), val.type_
+                            evaluate_numeric_expr(val.expr, parameters), val.type_
                         )
                     except Exception as exc:
                         self._add_status.setStyleSheet("color: red;")
@@ -797,15 +809,11 @@ class DeviceDialog(QDialog):
                 else:
                     resolved_updates[key] = val
         else:
-            # All fields are direct values — pass through unchanged, no md access.
+            # All fields are direct values — pass through unchanged, no parameters access.
             resolved_updates = dict(updates)
 
         info = self._dev.get_device_info(name)
         if info is None:
-            return
-        from zcu_tools.device.base import BaseDeviceInfo
-
-        if not isinstance(info, BaseDeviceInfo):
             return
         new_info = info.with_updates(**resolved_updates)
         self._dev.start_setup_device(SetupDeviceRequest(name=name, info=new_info))

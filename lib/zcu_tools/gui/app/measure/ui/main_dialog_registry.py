@@ -67,7 +67,7 @@ class MainDialogRegistry:
 
             return DeviceDialog(
                 self._ctrl.device_control,
-                md_provider=self._ctrl.context_control.get_current_md,
+                parameter_provider=self._ctrl.context_control.read_context,
                 parent=self._parent,
             )
         if name is DialogName.PREDICTOR:
@@ -77,7 +77,7 @@ class MainDialogRegistry:
                 self._ctrl.predictor_control,
                 parent=self._parent,
                 device=self._ctrl.device_control,
-                md_provider=self._ctrl.context_control.get_current_md,
+                parameter_provider=self._ctrl.context_control.read_context,
                 persistent_on_close=True,
             )
         if name is DialogName.INSPECT:

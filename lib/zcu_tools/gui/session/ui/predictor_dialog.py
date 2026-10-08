@@ -63,8 +63,8 @@ if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.events import DeviceChangedPayload
+    from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
-    from zcu_tools.resources.context import MetaDict
 
 # Default display window in flux (Φ/Φ₀) units (plan spec).
 _DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
@@ -88,7 +88,7 @@ _DEFAULT_EL: float = 1.0
 _DEFAULT_FLUX_HALF: float = 0.0
 _DEFAULT_FLUX_PERIOD: float = 0.005
 _DEFAULT_FLUX_BIAS: float = 0.0
-_DEFAULT_CALIBRATION_EXPR: str = "q_f"
+_DEFAULT_CALIBRATION_EXPR: str = "qubit.freq"
 
 # Column indices for the 4-column tracked-transitions table.
 # Both matrix operators (n and phi) are shown side by side — there is no selector.
@@ -128,14 +128,15 @@ def _normalize_tracked_transitions(
     return tuple(normalized)
 
 
-def _empty_md() -> MetaDict:
-    from zcu_tools.resources.context import MetaDict
-
-    return MetaDict()
-
-
 class PredictorDialog(QDialog):
-    """Modal dialog for loading a FluxoniumPredictor and predicting frequencies."""
+    """Load a fluxonium model and predict or calibrate through predictor.
+
+    device optionally supplies cached/live device values. parameter_provider
+    supplies a fixed ParameterContext for each frequency preview or calibration
+    resolve; omitted or None-returning providers allow only pure calculations.
+    Unresolved frequency paths disable calibration without substituting a value.
+    persistent_on_close hides instead of finishing, retaining the plotted model.
+    """
 
     state_changed = Signal()
 
@@ -145,13 +146,13 @@ class PredictorDialog(QDialog):
         parent: QWidget | None = None,
         *,
         device: DeviceControlPort | None = None,
-        md_provider: Callable[[], MetaDict] | None = None,
+        parameter_provider: Callable[[], ParameterContext | None] | None = None,
         persistent_on_close: bool = False,
     ) -> None:
         super().__init__(parent)
         self._pred = predictor
         self._dev = device
-        self._md_provider = md_provider or _empty_md
+        self._parameter_provider = parameter_provider or (lambda: None)
         self._persistent_on_close = persistent_on_close
         self._live_mode = False
         self._suppress_state_changed = False
@@ -334,7 +335,7 @@ class PredictorDialog(QDialog):
             minimum=-1e9,
             maximum=1e9,
             decimals=6,
-            md_provider=self._md_provider,
+            parameter_provider=self._parameter_provider,
         )
         self._calibration_freq_field.load_expression(
             _DEFAULT_CALIBRATION_EXPR, direct_fallback=0.0
@@ -895,9 +896,9 @@ class PredictorDialog(QDialog):
         if not isinstance(raw, EvalRef):
             return float(raw)
         try:
-            md = self._md_provider()
+            parameters = self._parameter_provider()
             resolved = coerce_eval_result(
-                evaluate_numeric_expr(raw.expr, md), raw.type_
+                evaluate_numeric_expr(raw.expr, parameters), raw.type_
             )
         except Exception as exc:
             if update_status:

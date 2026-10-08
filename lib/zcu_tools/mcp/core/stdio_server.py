@@ -21,6 +21,7 @@ import json
 import sys
 import traceback
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, TextIO
 
@@ -171,12 +172,18 @@ class StdioLoopHooks:
     - ``on_error`` is called from within each ``except`` block with a
       preformatted context message (measure-gui passes ``logger.exception``) so
       the active exception is logged with its traceback.
+    - ``tool_call_scope`` wraps a synchronous tool handler with its native
+      JSON-RPC ID: strings are preserved and integers become decimal strings.
+      With this hook, bool, blank strings and absent/null/other ID types are
+      rejected before the handler. Scope exits on success and exception.
+      Without this hook, the existing dispatch behavior is unchanged.
     """
 
     on_start: Callable[[], None] | None = None
     on_cleanup: Callable[[], None] | None = None
     on_each_reply: Callable[[], list[dict[str, Any]]] | None = None
     on_error: Callable[[str], None] | None = None
+    tool_call_scope: Callable[[str], AbstractContextManager[None]] | None = None
 
 
 def run_stdio_loop(
@@ -286,7 +293,19 @@ def _call_tool(
         return _not_found(rid, name)
     try:
         handler: Callable[[dict[str, Any]], Any] = tool["handler"]
-        res = handler(arguments)
+        if hooks.tool_call_scope is None:
+            res = handler(arguments)
+        else:
+            if isinstance(rid, str) and rid.strip():
+                call_id = rid
+            elif isinstance(rid, int) and not isinstance(rid, bool):
+                call_id = str(rid)
+            else:
+                raise ValueError(
+                    "Native MCP tool ID must be a nonblank string or integer"
+                )
+            with hooks.tool_call_scope(call_id):
+                res = handler(arguments)
         # Compact separators (no indent, no spaces) keep the tool reply
         # token-light. ensure_ascii stays default (True): the outer JSON-RPC
         # envelope re-escapes non-ASCII anyway, so turning it off buys nothing.

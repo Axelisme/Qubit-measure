@@ -393,7 +393,9 @@ class AnalyzeService(_StagedAnalyzeService):
 
         draft: Any | None = None
         try:
-            draft = self._writeback.create_draft(proposal_items)
+            draft = self._writeback.create_draft(
+                proposal_items, parameters=ctx.parameters
+            )
             plots.finish()
             retired = self._state.update_tab_analyze(
                 tab_id,

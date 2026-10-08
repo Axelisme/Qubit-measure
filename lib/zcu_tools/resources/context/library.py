@@ -618,6 +618,18 @@ class LibraryEdit:
         )
         self._install(candidate)
 
+    def replace_contents(self, candidate: LibrarySnapshot) -> None:
+        """Install a complete isolated candidate into this active transaction.
+
+        Validate schema and local provenance before changing the transaction.
+        Candidate may combine the snapshot's pure rename/delete/replacement
+        operations; no references materialize and no files commit until edit
+        exits successfully. Inactive draft, schema and source errors propagate.
+        Subsequent snapshot reads see the replacement; body/conflict/I/O errors
+        still leave the owning ModuleLibrary unpublished.
+        """
+        self._install(candidate.document())
+
     def accept_source(self, path: str, *, provenance: Provenance) -> None:
         """Attach a validated source to an existing entry's leaves, without changing its Spec.
 

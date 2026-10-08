@@ -1,10 +1,9 @@
-"""SessionControllerMixin — shared Controller forwards used by both apps.
+"""SessionControllerMixin — Controller forwards into session services.
 
-Both measurement-session app Controllers (measure: ``gui/app/measure/controller``;
-autofluxdep: ``gui/app/autofluxdep/controller``) expose a wall of one-line
-forwards into the same four session services (soc_connection / context / device /
+The measure Controller (``gui/app/measure/controller``) exposes one-line
+forwards into four session services (soc_connection / context / device /
 settings). Shared dialogs now use explicit control facets; app-local and
-compatibility callers may still use these forwards. The byte-identical
+compatibility callers may still use these forwards. The forwarding
 implementation lives here.
 
 Design (Candidate #14, Option B — abstract service accessors):
@@ -15,10 +14,8 @@ Design (Candidate #14, Option B — abstract service accessors):
   service types. pyright treats each as an attribute the concrete Controller must
   supply, and enforces the declared service type at every forward. Each app
   satisfies them however its own attribute layout already provides the service —
-  both measure and autofluxdep keep the same flat ``self._soc_svc`` etc. they
-  already assign (measure from ``build_app_services``; autofluxdep aliased off its
-  ``SessionServices`` bundle), so NO rename of the controllers' existing
-  attributes is needed. (Annotation-only rather than ``@property``: a ``property``
+  measure keeps the flat ``self._soc_svc`` etc. assigned from
+  ``build_app_services``, so no rename of its existing attributes is needed. (Annotation-only rather than ``@property``: a ``property``
   is a data descriptor whose ``__set__`` raises ``AttributeError``, so the
   controllers' existing ``self._soc_svc = ...`` assignments would crash at
   runtime; a bare annotation gives the identical pyright enforcement with no name

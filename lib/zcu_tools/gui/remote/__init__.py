@@ -1,7 +1,7 @@
 """Shared transport layer for the GUI apps' remote control + MCP bridges.
 
-App-agnostic (no app import); all four apps (``main`` / ``fluxdep`` /
-``dispersive`` / ``autofluxdep``) build on these. This package is not eager —
+App-agnostic (no app import); all three apps (``measure`` / ``fluxdep`` /
+``dispersive``) build on these. This package is not eager —
 each module is imported on demand, so the import-clean primitives stay free of Qt
 even though the transport mechanisms pull it in. Two tiers:
 

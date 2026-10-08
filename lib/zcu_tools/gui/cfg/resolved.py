@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .lowering import RangeFactory, lower_finished_cfg
+from .lowering import LoweredData, lower_finished_cfg
 from .model import (
     CfgNodeValue,
     CfgSchema,
@@ -18,9 +18,7 @@ from .model import (
 from .reference_key import make_custom_reference_key
 
 
-def lower_resolved_cfg(
-    schema: CfgSchema, *, make_range: RangeFactory
-) -> dict[str, object]:
+def lower_resolved_cfg(schema: CfgSchema) -> dict[str, LoweredData]:
     """Lower an isolated copy using only cached resolution and validation state.
 
     Every expression and enabled reference must already be resolved. The local
@@ -35,7 +33,6 @@ def lower_resolved_cfg(
         frozen,
         resolve_expression=None,
         resolve_reference=None,
-        make_range=make_range,
     )
 
 

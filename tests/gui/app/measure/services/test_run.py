@@ -14,6 +14,7 @@ directly (replacing the old `_on_run_*` method calls).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -66,7 +67,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
-from tests.gui.app.measure._cfg_fakes import make_cfg
+from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
 from zcu_lab.v2.fake.stub.core import FakeResult, FakeRunResult
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
@@ -79,14 +80,9 @@ def _make_state(
     *,
     readiness: ContextReadiness = ContextReadiness.EMPTY,
 ) -> tuple[State, str, MagicMock]:
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
-
-    md = MetaDict(None)
-    ml = ModuleLibrary(None)
     state = State(
         SessionEnv(
-            md=md,
-            ml=ml,
+            parameters=parameter_capture(),
             soc=MagicMock(),
             soccfg=MagicMock(),
             readiness=readiness,
@@ -101,6 +97,7 @@ def _make_state(
             adapter_name="any",
             adapter=adapter,
             cfg=make_cfg(_empty_schema(), state=state),
+            parameters=state.session_env.parameters,
         ),
     )
     return state, tab_id, adapter
@@ -112,10 +109,18 @@ def _plots() -> Plots:
 
 def _make_permit(state: State, tab_id: str, adapter: MagicMock) -> RunPermit:
     ctx = state.session_env
+    parameters = state.get_tab(tab_id).parameters
     return RunPermit(
         tab_id=tab_id,
         adapter_name=state.get_tab(tab_id).adapter_name,
-        request=RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
+        request=RunRequest(
+            soc=ctx.soc,
+            soccfg=ctx.soccfg,
+            device_snapshot={},
+            cfg_context=None
+            if parameters is None
+            else parameters.library.validation_context(),
+        ),
         accepted_cfg=state.get_tab(tab_id).cfg.accept(
             state.get_tab(tab_id).cfg.observe().ref.revision
         ),
@@ -158,7 +163,7 @@ class _FakeBg:
                 result = self.last_work()
                 assert self.last_on_done is not None
                 self.last_on_done(result)
-            except Exception as exc:
+            except (RuntimeError, ValueError) as exc:
                 assert self.last_on_error is not None
                 self.last_on_error(exc)
 
@@ -290,10 +295,12 @@ def test_start_run_acquires_lease_and_submits_to_bg():
 
 def test_worker_executes_permit_after_model_changes_and_releases_lease():
     state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
-    state.session_env.md.update(gain=0.25)
+    state.set_context(
+        replace(state.session_env, parameters=parameter_capture(gain=0.25))
+    )
     schema = CfgSchema(
         CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
-        CfgSectionValue(fields={"gain": EvalValue("gain")}),
+        CfgSectionValue(fields={"gain": EvalValue("general.ext.gain")}),
     )
     cfg = make_cfg(schema, state=state)
     state.get_tab(tab_id).cfg = cfg
@@ -307,7 +314,9 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
 
     svc.start_run(permit, plots=plots)
     schema.value.fields["gain"] = DirectValue(0.75)
-    state.session_env.md.update(gain=0.75)
+    state.set_context(
+        replace(state.session_env, parameters=parameter_capture(gain=0.75))
+    )
     state.version.bump("context")
     cfg.refresh(cfg.observe().ref.revision)
     bg.run_work()
@@ -328,18 +337,21 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
 def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
     class RecordingSnapshotAdapter(FakeAdapter):
         def run(
-            self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+            self, req: RunRequest, raw_cfg: Mapping[str, object], *, context: RunContext
         ) -> FakeRunResult:
             # Controlled execution produces an artifact with the real domain cfg builder.
             return RunRecord(
-                cfg=self.build_exp_cfg(raw_cfg, req), result=FakeResult(np.empty(0))
+                cfg=self.build_exp_cfg(dict(raw_cfg), req),
+                result=FakeResult(np.empty(0)),
             )
 
     state, tab_id, _adapter = _make_state(readiness=ContextReadiness.ACTIVE)
     adapter = RecordingSnapshotAdapter()
-    state.session_env.md.update(gain=0.25)
+    state.set_context(
+        replace(state.session_env, parameters=parameter_capture(gain=0.25))
+    )
     schema = adapter.make_default_cfg(state.session_env)
-    schema.value.fields["gain"] = EvalValue("gain")
+    schema.value.fields["gain"] = EvalValue("general.ext.gain")
     cfg = make_cfg(schema, state=state)
     state.get_tab(tab_id).adapter = adapter
     state.get_tab(tab_id).cfg = cfg
@@ -351,7 +363,9 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     service, _gate, background, _handles = _make_run_service(state)
 
     service.start_run(permit, plots=_plots())
-    state.session_env.md.update(gain=0.75)
+    state.set_context(
+        replace(state.session_env, parameters=parameter_capture(gain=0.75))
+    )
     state.version.bump("context")
     after = cfg.refresh(cfg.observe().ref.revision)
     background.run_work()
@@ -382,7 +396,7 @@ def test_start_run_rejects_when_tab_busy():
 
 def test_start_run_releases_lease_when_submit_raises():
     state, tab_id, adapter = _make_state()
-    svc, gate, bg, _ = _make_run_service(state, fail_submit=True)
+    svc, gate, _bg, _ = _make_run_service(state, fail_submit=True)
 
     with pytest.raises(RuntimeError, match="worker boom"):
         svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
@@ -507,7 +521,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
 
 def test_cancel_run_sets_operation_stop_event():
     state, tab_id, adapter = _make_state()
-    svc, gate, bg, handles = _make_run_service(state)
+    svc, gate, _bg, handles = _make_run_service(state)
     token = svc.start_run(_make_permit(state, tab_id, adapter), plots=_plots())
 
     assert handles.poll(token) is None  # still pending before cancel

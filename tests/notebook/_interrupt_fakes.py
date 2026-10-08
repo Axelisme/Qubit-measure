@@ -1,22 +1,16 @@
-"""Synthetic acquisition at real Schedule/program/executor interruption seams."""
+"""Synthetic acquisition at real Schedule/program interruption seams."""
 
 from collections.abc import Callable
 from typing import Literal
 
 import numpy as np
-from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.device import setup_devices
-from zcu_tools.experiment.v2.runtime.multi_executor import MultiMeasurementExecutor
-from zcu_tools.experiment.v2.runtime.result_tree import ResultUpdateEvent
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
-    ScheduleStep,
     SignalBuffer,
 )
-from zcu_tools.experiment.v2.runtime.task import MeasurementTask
-from zcu_tools.plotting.plots import LinePlot, Plots
 from zcu_tools.program.acquisition import CancelFlagProtocol
 from zcu_tools.program.v2 import ProgramV2Cfg
 
@@ -126,107 +120,4 @@ class InterruptedCore(SavingCore):
         return SavingResult(
             frequency=np.array([1000.0, 1001.0, 1002.0]),
             signal=np.asarray(buffer.data, dtype=np.complex128),
-        )
-
-
-class InterruptedMeasurement(
-    MeasurementTask[
-        SavingCfg,
-        RunContext,
-        NDArray[np.complex128],
-        dict[str, LinePlot],
-        NDArray[np.float64],
-    ]
-):
-    """Executor leaf completes point zero and interrupts at point one."""
-
-    def init(self, dynamic_pbar: bool = False) -> None:
-        """No synthetic hardware needs initialization."""
-
-    def cleanup(self) -> None:
-        """No synthetic hardware needs cleanup."""
-
-    def run(self, state: ScheduleStep[SavingCfg, object, RunContext]) -> None:
-        """Write a scalar voltage, or interrupt before writing point one."""
-        index = state.path[0]
-        if index == 1:
-            raise KeyboardInterrupt("executor acquire stopped")
-        state.set_data(np.array(1.0, dtype=np.complex128), flush=True)
-
-    def get_default_result(self) -> NDArray[np.complex128]:
-        """Initialize each unmeasured scalar to NaN volts."""
-        return np.array(np.nan, dtype=np.complex128)
-
-    def num_axes(self) -> dict[str, int]:
-        """The synthetic signal has one plot axis."""
-        return {"signal": 1}
-
-    def make_plotter(
-        self, name: str, axs: dict[str, list[Axes]], *, plots: Plots, figure_name: str
-    ) -> dict[str, LinePlot]:
-        """Create the runtime-owned voltage line on its assigned axis."""
-        return {
-            "signal": plots.liveplot_1d(
-                figure_name, "point", "V", axes=axs["signal"][0]
-            )
-        }
-
-    def update_plotter(
-        self,
-        plotters: dict[str, LinePlot],
-        event: ResultUpdateEvent[RunContext, NDArray[np.complex128]],
-        result: NDArray[np.complex128],
-    ) -> None:
-        """Update the executor's merged partial voltage magnitude."""
-        plotters["signal"].update(
-            np.arange(result.size, dtype=np.float64), np.abs(result), refresh=False
-        )
-
-    def save(
-        self,
-        filepath: str,
-        axis_values: NDArray[np.float64],
-        result: NDArray[np.complex128],
-        comment: str | None,
-        prefix_tag: str,
-    ) -> None:
-        """Unused leaf persistence; the bound Notebook core owns save_run."""
-        raise NotImplementedError
-
-
-class InterruptedExecutorCore(
-    MultiMeasurementExecutor[
-        InterruptedMeasurement, SavingCfg, RunContext, NDArray[np.float64]
-    ],
-    SavingCore,
-):
-    """Saveable core using the real executor's result and stop lifecycle."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.context: RunContext | None = None
-        self.add_measurements({"scan": InterruptedMeasurement()})
-
-    def run(self, config: SavingCfg, *, context: RunContext | None) -> SavingResult:
-        """Run three executor points, retaining the interrupted leaf's partial."""
-        if context is None:
-            raise ValueError("RunContext required")
-        self.context = context
-        frequency = np.array([1000.0, 1001.0, 1002.0])
-
-        def run_loop(sched: Schedule[SavingCfg, RunContext]) -> None:
-            for _, step in sched.scan("point", frequency):
-                self._run_measurement_batch(step, retry_time=0)
-
-        results = self._run(
-            cfg=config,
-            env=context,
-            stop=context.cancel_signal,
-            plots=context.plots,
-            outer_values=frequency,
-            run_loop=run_loop,
-        )
-        return SavingResult(
-            frequency=frequency,
-            signal=np.asarray(results["scan"], dtype=np.complex128),
         )
