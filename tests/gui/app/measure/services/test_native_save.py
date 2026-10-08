@@ -1,7 +1,8 @@
 """Native measurement-data Save through real state, workers, writers and ledger."""
 
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock
@@ -16,15 +17,22 @@ from zcu_tools.datafile import (
     SoftwareProvenance,
     load_run_data,
 )
+from zcu_tools.experiment.acquisition import new_run_id
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.services.guard import GuardService
+from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
+from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.state import Session, State
@@ -38,10 +46,13 @@ from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry, SavedPayload
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
+from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import make_cfg
 from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
@@ -53,7 +64,7 @@ class SavingAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]):
 
     exp_cls = SavingCore
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.NONE, load_data=False
+        analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
     experiment_tag: ClassVar[str | None] = SavingCore().persistence_spec().tag
 
@@ -63,6 +74,17 @@ class SavingAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]):
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "saving"
+
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
+    ) -> RunRecord[SavingCfg, SavingResult]:
+        """Acquire a typed record using only the offline fake backend."""
+        cfg = SavingCfg.model_validate(raw_cfg)
+        return RunRecord(cfg, SavingCore().run(cfg, context=context))
 
 
 @dataclass
@@ -75,6 +97,7 @@ class NativeSaveSession:
     bus: BaseEventBus
     metadata: RunMetadata
     completions: list[SaveDataFinishedPayload]
+    background: BackgroundRunner
 
     def save(self, *, origin: CommandOrigin = GUI_ORIGIN) -> SaveDataFinishedPayload:
         """Wait for the public completion fact, never inspecting private workers."""
@@ -182,7 +205,15 @@ def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSe
     subscription = bus.subscribe(SaveDataFinishedPayload, completions.append)
     try:
         yield NativeSaveSession(
-            entry, context, state, control, handles, bus, metadata, completions
+            entry,
+            context,
+            state,
+            control,
+            handles,
+            bus,
+            metadata,
+            completions,
+            background,
         )
     finally:
         subscription.unsubscribe()
@@ -292,6 +323,78 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
     assert session.completions == []
     assert session.entry.ledger.events() == ()
     assert not (session.entry.database_path / "runs").exists()
+
+
+def test_cancel_during_metadata_preserves_completed_acquisition_when_saved(
+    native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = native_session
+    owner = QtOwnerScheduler()
+    gate = OperationGate(session.bus)
+    progress = ProgressService(DirectProgressTransport())
+    run = RunService(
+        session.state,
+        OperationRunner(
+            gate, session.handles, progress, session.background, session.bus
+        ),
+        session.bus,
+        session.handles,
+        MagicMock(),
+        gate=gate,
+        devices=lambda: {},
+    )
+
+    def historical_provenance(*, context: RunContext) -> SoftwareProvenance:
+        # Host/Git evidence is not the target of the Run -> Save contract.
+        return session.metadata.provenance
+
+    def identity_after_cancel(started_at: datetime) -> str:
+        # This collaborator runs after the offline acquisition has returned.
+        assert owner.call(run.cancel_run)
+        return new_run_id(started_at)
+
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+        historical_provenance,
+    )
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.new_run_id", identity_after_cancel
+    )
+    cfg = session.state.get_tab("tab").cfg
+    permit = GuardService(session.state).acquire_run_permit(
+        "tab", expected_revision=cfg.observe().ref.revision
+    )
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(loop.quit)
+    finished: list[RunFinishedPayload] = []
+
+    def terminal(payload: RunFinishedPayload) -> None:
+        finished.append(payload)
+        loop.quit()
+
+    subscription = session.bus.subscribe(RunFinishedPayload, terminal)
+    try:
+        token = run.start_run(permit, plots=Plots(NonPresentingHost()))
+        timer.start(5000)
+        loop.exec()
+    finally:
+        timer.stop()
+        subscription.unsubscribe()
+    assert len(finished) == 1 and finished[0].outcome == "cancelled"
+    outcome = session.handles.known_outcome(token)
+    assert outcome is not None and outcome.status == "cancelled"
+    metadata = session.state.get_tab("tab").run.metadata
+    assert metadata is not None and metadata.completion == "complete"
+    session.metadata = metadata
+    saved = session.save()
+    assert saved.error is None and saved.report is not None
+    stored = load_run_data(Path(saved.data_path))
+    assert stored.metadata.completion == "complete"
+    assert stored.metadata.run_id == metadata.run_id
+    assert stored.metadata.started_at == metadata.started_at
+    assert stored.metadata.finished_at == metadata.finished_at
 
 
 def test_invalid_record_fails_in_worker_without_writing_or_saved_event(
