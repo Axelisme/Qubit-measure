@@ -32,8 +32,9 @@ from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 from ._plan_inputs import inline_input
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def qapp() -> QApplication:
+    """Keep the Qt application alive with its process-global plotting host."""
     instance = QApplication.instance()
     return instance if isinstance(instance, QApplication) else QApplication([])
 
