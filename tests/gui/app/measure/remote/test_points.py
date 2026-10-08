@@ -1,25 +1,11 @@
 """Point RPCs through real remote dispatch, context and tab owners."""
 
-from collections.abc import Generator, Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping
 from pathlib import Path
-from socket import socket
 
 import pytest
 from zcu_tools.cfg_model import WaveformAssetInfo
-from zcu_tools.gui.app.measure.adapter import SessionEnv
-from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.handlers.point import h_point_new
-from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    EvalValue,
-    ScalarSpec,
-)
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -31,105 +17,10 @@ from zcu_tools.gui.session.context_types import (
     SavedPoint,
 )
 from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.resources.entry import ResultEntry, RoleSpec, source_path
+from zcu_tools.resources.entry import ResultEntry, source_path
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from tests.resources.entry.fakes import (
-    register_fakes,
-    registry_state,
-    restore_registry,
-)
-from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
-
-from ._helpers import open_client, recv_response, send
-
-
-class PointAdapter(T1Adapter):
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        return {"driver": RoleSpec("fake/drive/*")}
-
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        return CfgSchema(
-            CfgSectionSpec(fields={"rate": ScalarSpec("Rate", float)}),
-            CfgSectionValue(fields={"rate": EvalValue("driver.rate")}),
-        )
-
-
-class PointController(Controller):
-    """Give the fixture owned background teardown without exposing app APIs."""
-
-    def quiesce(self) -> None:
-        self._background_svc.quiesce()
-
-
-@dataclass
-class PointApplication:
-    state: State
-    controller: PointController
-    remote: RemoteControlAdapter
-    client: socket
-
-    def rpc(self, method: str, params: Mapping[str, object]) -> dict[str, object]:
-        send(
-            self.client,
-            {"id": "point-contract", "method": method, "params": dict(params)},
-        )
-        return recv_response(self.client, "point-contract")
-
-    def result(self, method: str, params: Mapping[str, object]) -> dict[str, object]:
-        reply = self.rpc(method, params)
-        assert reply["ok"] is True, reply
-        result = reply["result"]
-        assert isinstance(result, dict)
-        return result
-
-    def open_entry(self) -> EntryInfo:
-        self.controller.setup_control.new_entry(EntryRequest("entry"))
-        info = self.controller.context_control.get_entry_info()
-        assert info is not None
-        return info
-
-
-@pytest.fixture(scope="module", autouse=True)
-def entry_models() -> Generator[None]:
-    before = registry_state()
-    try:
-        register_fakes()
-        installed = registry_state()
-        yield
-        assert registry_state() == installed, "point RPC module polluted registries"
-    finally:
-        restore_registry(before)
-
-
-@pytest.fixture(autouse=True)
-def registry_guard(request: pytest.FixtureRequest) -> Generator[None]:
-    before = registry_state()
-    yield
-    assert registry_state() == before, f"registry polluter: {request.node.nodeid}"
-
-
-@pytest.fixture
-def application(qapp, tmp_path: Path) -> Generator[PointApplication]:
-    registry = Registry()
-    registry.register("pointed", PointAdapter)
-    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-    controller = PointController(
-        state, registry, None, BaseEventBus(), project_root=str(tmp_path)
-    )
-    remote = RemoteControlAdapter(
-        controller, ControlOptions(port=0, app_slug=""), controller.owner_scheduler
-    )
-    client = open_client(remote.start())
-    try:
-        yield PointApplication(state, controller, remote, client)
-    finally:
-        client.close()
-        remote.stop()
-        controller.quiesce()
-        for tab_id in tuple(state.list_tab_ids()):
-            controller.tab_control.close_tab(tab_id)
-        qapp.processEvents()
+from ._point_application import PointApplication
 
 
 def new_params(label: str, **extra: object) -> dict[str, object]:

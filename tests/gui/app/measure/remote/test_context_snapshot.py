@@ -1,121 +1,170 @@
-"""Complete active-context projection over the GUI control socket."""
+"""Full native parameter-context reads and per-connection observations."""
 
 from dataclasses import replace
+from pathlib import Path
+from typing import Literal
 
-import numpy as np
 import pytest
-from qick.asm_v2 import QickParam
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec
+from zcu_tools.gui.remote.errors import ErrorCode
+from zcu_tools.gui.session.context_types import ContextSourceFault
+from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.resources.entry import ResultEntry
 
-from ._helpers import Fixture, call, open_client, reset_inbox
-
-pytestmark = pytest.mark.uses_wall_clock
-
-
-@pytest.fixture()
-def fx(qapp):
-    fixture = Fixture(active_label="ctx001")
-    fixture.start()
-    yield fixture
-    fixture.stop()
+from ._helpers import open_client, recv_response, send
+from ._point_application import PointApplication
 
 
-def test_context_snapshot_returns_full_active_md_and_ml_over_the_socket(fx):
-    md = MetaDict()
-    md.update(
-        {"r_f": 6000.0, "peaks": [1, 2], "phase": 1 + 2j, "trace": np.array([3.0, 4.0])}
+def test_snapshot_returns_complete_native_documents_without_materializing_assets(
+    application: PointApplication,
+) -> None:
+    info = application.open_entry()
+    context = application.controller.context_control
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    context.add_component("S1", "fake/sensor", {"rate": 20.0}, setup=True)
+    entry = ResultEntry.open(
+        info.name,
+        result_root=info.result_path.parent,
+        database_root=info.database_path.parent,
     )
-    ml = ModuleLibrary()
-    ml.modules["drive"] = ModuleCfgFactory.from_raw(
-        {
-            "type": "pulse",
-            "ch": 0,
-            "nqz": 1,
-            "freq": 6000.0,
-            "gain": 0.25,
-            "phase": 0.0,
-            "pre_delay": 0.0,
-            "post_delay": 0.0,
-            "waveform": {"style": "const", "length": 0.1},
-        }
+    point = entry.new_point("base", description="native snapshot")
+    point.general.ext = {"nested": {"trace": [1.0, 2.0], "unset": None}}
+    library = entry.module_library("base")
+    with library.edit() as draft:
+        draft.set_waveform(
+            "Q1.waveforms.arbitrary", ArbWaveformCfg(data="missing-asset")
+        )
+        draft.set_module(
+            "Q1.pulses.pi",
+            PulseSpec(
+                ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q1.waveforms.arbitrary"
+            ),
+        )
+    application.result("point.use", {"label": "base"})
+    captured = context.read_context()
+    result = application.result("context.snapshot", {})
+    assert result == {
+        "target": captured.target.model_dump(),
+        "point": captured.document().model_dump(serialize_as_any=True),
+        "library": captured.library.document().model_dump(serialize_as_any=True),
+    }
+    wire_point = result["point"]
+    assert isinstance(wire_point, dict)
+    components = wire_point["components"]
+    assert isinstance(components, dict)
+    q1 = components["Q1"]
+    s1 = components["S1"]
+    assert isinstance(q1, dict) and isinstance(s1, dict)
+    assert q1["rate"] == 10.0 and s1["rate"] == 20.0
+    assert wire_point["provenance"]
+    wire_library = result["library"]
+    assert isinstance(wire_library, dict)
+    assert wire_library["provenance"]
+    # The asset was never created: a full Spec read must still succeed.
+    with pytest.raises(FileNotFoundError):
+        captured.library.get_waveform("Q1.waveforms.arbitrary").length
+
+
+def test_snapshot_reads_the_memory_draft_and_unlocks_only_its_connection(
+    application: PointApplication,
+) -> None:
+    info = application.open_entry()
+    context = application.controller.context_control
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
+    result = application.result("context.snapshot", {})
+    assert result["target"] == {"kind": "entry_draft", "entry_id": info.entry_id}
+    # Empty edits are rejected by the handler only after a valid context seen.
+    params = {"kind": "module", "name": "unused", "edits": []}
+    admitted = application.rpc("context.ml_edit", params)
+    error = admitted["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == ErrorCode.INVALID_PARAMS
+    second = open_client(application.remote.port)
+    try:
+        send(second, {"id": "unseen", "method": "context.ml_edit", "params": params})
+        unseen = recv_response(second, "unseen")["error"]
+        assert isinstance(unseen, dict)
+        assert unseen["reason"] == "stale_version"
+        assert unseen["data"] == {"stale": ["context"]}
+    finally:
+        second.close()
+    context.set_parameter(context.read_context().target, "Q1.rate", 11.0)
+    stale = application.rpc("context.ml_edit", params)["error"]
+    assert isinstance(stale, dict)
+    assert stale["reason"] == "stale_version"
+    application.result("context.snapshot", {})
+    refreshed = application.rpc("context.ml_edit", params)["error"]
+    assert isinstance(refreshed, dict)
+    assert refreshed["code"] == ErrorCode.INVALID_PARAMS
+
+
+def test_empty_snapshot_fails_without_unlocking_context(
+    application: PointApplication,
+) -> None:
+    reply = application.rpc("context.snapshot", {})
+    error = reply["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == ErrorCode.PRECONDITION_FAILED
+    assert error["reason"] == "no_context"
+    guarded = application.rpc(
+        "context.ml_edit", {"kind": "module", "name": "x", "edits": []}
     )
-    ml.waveforms["square"] = WaveformCfgFactory.from_raw(
-        {"style": "const", "length": 0.1}
+    error = guarded["error"]
+    assert isinstance(error, dict)
+    assert error["reason"] == "stale_version"
+
+
+@pytest.mark.parametrize("document", ["point", "module_cfg"])
+def test_source_unavailable_snapshot_does_not_unlock_context(
+    application: PointApplication,
+    document: Literal["point", "module_cfg"],
+    tmp_path: Path,
+) -> None:
+    application.open_entry()
+    captured = application.controller.context_control.read_context()
+    fault = ContextSourceFault(
+        document, tmp_path / f"{document}.yaml", "OSError", "source fault"
     )
-    fx.state.set_context(replace(fx.state.session_env, md=md, ml=ml))
-    sock = open_client(fx.service.port)
-    try:
-        reset_inbox(sock)
-        reply = call(sock, "context.snapshot", rid="full")
-        assert reply["ok"] is True, reply
-        assert reply["result"] == {
-            "label": "ctx001",
-            "md": {
-                "peaks": [1, 2],
-                "phase": {"__complex__": [1.0, 2.0]},
-                "r_f": 6000.0,
-                "trace": [3.0, 4.0],
-            },
-            "ml": {
-                "modules": {"drive": ml.modules["drive"].to_dict()},
-                "waveforms": {"square": ml.waveforms["square"].to_dict()},
-            },
-        }
-        assert call(sock, "context.md_get_attr", {"key": "trace"})["result"] == {
-            "key": "trace",
-            "value": [3.0, 4.0],
-        }
-        assert call(sock, "context.md_get", {"summaries": True})["result"] == {
-            "keys": ["peaks", "phase", "r_f", "trace"],
-            "values": {
-                "peaks": "2 items",
-                "phase": "complex",
-                "r_f": 6000.0,
-                "trace": "2 array",
-            },
-        }
-    finally:
-        reset_inbox(sock)
-        sock.close()
+    unavailable = ParameterContext(
+        point=captured.document(),
+        library=captured.library,
+        target=captured.target,
+        roles=None,
+        source_faults=(fault,),
+    )
+    application.state.set_context(
+        replace(application.state.session_env, parameters=unavailable)
+    )
+    reply = application.rpc("context.snapshot", {})
+    error = reply["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == ErrorCode.PRECONDITION_FAILED
+    assert error["reason"] == "source_unavailable"
+    guarded = application.rpc(
+        "context.ml_edit", {"kind": "module", "name": "x", "edits": []}
+    )
+    error = guarded["error"]
+    assert isinstance(error, dict)
+    assert error["reason"] == "stale_version"
 
 
-@pytest.mark.parametrize(
-    "value",
-    [{"1": "first", 1: "second"}, QickParam(start=1.0, spans={"pulse": 0.1})],
-    ids=["nested-key-collision", "qick-param"],
-)
-def test_context_snapshot_rejects_lossy_md_projection_over_socket(fx, value):
-    md = MetaDict()
-    md.update({"nested": value})
-    fx.state.set_context(replace(fx.state.session_env, md=md, ml=ModuleLibrary()))
-    sock = open_client(fx.service.port)
-    try:
-        reset_inbox(sock)
-        reply = call(sock, "context.snapshot", rid="lossy")
-        assert reply["ok"] is False, reply
-        assert reply["error"]["code"] == "precondition_failed"
-        assert reply["error"]["reason"] == "unserializable_context"
-        attr = call(sock, "context.md_get_attr", {"key": "nested"}, rid="nested")
-        assert attr["ok"] is False
-        assert attr["error"]["code"] == "precondition_failed"
-        assert attr["error"]["reason"] == "unserializable_context"
-    finally:
-        reset_inbox(sock)
-        sock.close()
-
-
-def test_context_snapshot_rejects_opaque_values_instead_of_claiming_full_read(fx):
-    md = MetaDict()
-    md.update({"opaque": object()})
-    fx.state.set_context(replace(fx.state.session_env, md=md, ml=ModuleLibrary()))
-    sock = open_client(fx.service.port)
-    try:
-        reset_inbox(sock)
-        reply = call(sock, "context.snapshot", rid="full")
-        assert reply["ok"] is False
-        assert reply["error"]["code"] == "precondition_failed"
-        assert reply["error"]["reason"] == "unserializable_context"
-    finally:
-        reset_inbox(sock)
-        sock.close()
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_snapshot_never_substitutes_null_or_unlocks_context(
+    application: PointApplication, value: float
+) -> None:
+    application.open_entry()
+    context = application.controller.context_control
+    context.set_parameter(
+        context.read_context().target, "general.ext.nested", {"values": [value]}
+    )
+    reply = application.rpc("context.snapshot", {})
+    error = reply["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == ErrorCode.PRECONDITION_FAILED
+    assert error["reason"] == "unserializable_context"
+    guarded = application.rpc(
+        "context.ml_edit", {"kind": "module", "name": "x", "edits": []}
+    )
+    error = guarded["error"]
+    assert isinstance(error, dict)
+    assert error["reason"] == "stale_version"
