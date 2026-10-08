@@ -115,12 +115,17 @@ def test_setup_dialog_cached_point_list_uses_entry_queries_on_show_and_fact(qapp
         qapp.processEvents()
         lists = dialog.findChildren(QListWidget)
         assert len(lists) == 1
-        assert [lists[0].item(i).text() for i in range(lists[0].count())] == [
-            "base", "next"
-        ]
+        labels = []
+        for index in range(lists[0].count()):
+            item = lists[0].item(index)
+            assert item is not None
+            labels.append(item.text())
+        assert labels == ["base", "next"]
         ctrl.list_points.return_value = (WorkingPointInfo("updated", ""),)
-        bus.emit(ContextSwitchedPayload())
-        assert [lists[0].item(i).text() for i in range(lists[0].count())] == ["updated"]
+        bus.emit(ContextSwitchedPayload(binding_id=None, sources=None))
+        assert lists[0].count() == 1
+        updated = lists[0].item(0)
+        assert updated is not None and updated.text() == "updated"
         dialog.hide()
         ctrl.list_points.return_value = ()
         dialog.show()

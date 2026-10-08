@@ -126,12 +126,6 @@ class SessionControllerMixin:
             unit, value = "none", None
         self._ctx_svc.new_context(value=value, unit=unit, clone_from=clone_from)
 
-    def get_context_labels(self) -> list[str]:
-        return self._ctx_svc.get_context_labels()
-
-    def get_active_context_label(self) -> str | None:
-        return self._ctx_svc.get_active_context_label()
-
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
         return self._ctx_svc.list_value_sources()
 

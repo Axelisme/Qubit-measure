@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 logger = logging.getLogger(__name__)
 
 from qtpy.QtCore import QStringListModel, Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QFont, QShowEvent  # type: ignore[attr-defined]
+from qtpy.QtGui import QShowEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QCheckBox,
     QComboBox,
@@ -518,23 +518,12 @@ class SetupDialog(QDialog):
 
     def _refresh_context_list(self) -> None:
         self._ctx_list.clear()
-        labels = self._ctrl.get_context_labels()
-        active = self._ctrl.get_active_context_label()
-        bold_font = QFont()
-        bold_font.setBold(True)
-        active_idx = -1
-        for i, label in enumerate(labels):
-            is_active = label == active
-            display = f"▶ {label}" if is_active else f"   {label}"
-            item = QListWidgetItem(display)
-            item.setData(Qt.ItemDataRole.UserRole, label)  # type: ignore[attr-defined]
-            if is_active:
-                item.setFont(bold_font)
-                active_idx = i
+        labels = [point.label for point in self._ctrl.list_points()]
+        for label in labels:
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, label)
             self._ctx_list.addItem(item)
-        if active_idx >= 0:
-            self._ctx_list.setCurrentRow(active_idx)
-        elif self._ctx_list.count() > 0:
+        if self._ctx_list.count() > 0:
             self._ctx_list.setCurrentRow(0)
         self._refresh_clone_combo(labels)
 

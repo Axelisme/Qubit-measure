@@ -11,6 +11,7 @@ import numpy as np
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
 from zcu_tools.gui.app.measure.services.ports import CfgEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.value_lookup import ValueInfo
 
 from ._wire_values import context_wire_value
@@ -50,15 +51,23 @@ def h_context_ml_edit(
 def h_context_labels(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    """Return cached point labels in the opened entry, empty without an entry."""
     del params
-    return {"labels": list(adapter.context_control.get_context_labels())}
+    return {"labels": [point.label for point in adapter.context_control.list_points()]}
 
 
 def h_context_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    """Return the published saved-point label, or None for EMPTY/DRAFT.
+
+    Reads only the cached parameter target. Component focus and tab role changes
+    cannot change this session-level source identity. No refresh or I/O occurs.
+    """
     del params
-    return {"label": adapter.context_control.get_active_context_label()}
+    parameters = adapter.ctrl.get_session_env().parameters
+    target = parameters.target if parameters is not None else None
+    return {"label": target.point if isinstance(target, SavedPoint) else None}
 
 
 def h_context_snapshot(
