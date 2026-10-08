@@ -56,7 +56,7 @@ def session(tmp_path: Path, component_kinds):
     )
     context.install_entry(entry)
     control = ContextControlFacet(context=context)
-    control.use_point(PointUseRequest(entry.entry_id, "a"))
+    control.use_point(PointUseRequest("a"))
     control.add_component("Q1", "fake/drive/a", {})
     editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
     service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
@@ -86,7 +86,7 @@ def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(ses
     control.set_parameter(target, "general.ext.other", 7)
     assert service.preview_values(draft)["md-1"].current == 7
     entry.new_point("b")
-    control.use_point(PointUseRequest(entry.entry_id, "b"))
+    control.use_point(PointUseRequest("b"))
     control.set_parameter(control.read_context().target, "general.ext.other", 8)
     assert service.preview_values(draft)["md-1"].current == 7
     assert service.get_all_applied(draft) == {"md-1": False}

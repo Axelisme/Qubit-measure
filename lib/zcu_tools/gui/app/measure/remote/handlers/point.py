@@ -5,9 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal, TypedDict
 
-from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.context_types import PointUseRequest
-
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
@@ -48,7 +45,7 @@ class SavedPointReply(TypedDict):
 
 
 def h_point_list(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
+    adapter: RemoteControlAdapter, _params: Mapping[str, object]
 ) -> PointListReply:
     """Return entry roots and refreshed label/descriptions, not context content.
 
@@ -77,13 +74,13 @@ def h_point_list(
 def h_point_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> SavedPointReply:
-    """Create and select label in the opened entry identified by entry_id.
+    """Create and select label in the currently opened entry.
 
-    Required entry_id/label are strings. description defaults to empty text,
+    Required label is a string. description defaults to empty text,
     explicitly replacing seed/clone metadata. clone_from is None or a same-entry
     label; None copies setup, never the unbound DRAFT.
     Return the SavedPoint destination. Malformed wire input is INVALID_PARAMS.
-    Owner entry mismatch/schema/source/I/O failures retain their classification.
+    Owner no_entry/schema/source/I/O failures retain their classification.
     Created-but-uninstalled PointBindingError becomes CONTROLLER_ERROR with
     reason point_binding_failed and data entry_id/point/created=True. Keep the
     original cause and point; Use is recovery, never retry or delete New.
@@ -95,18 +92,11 @@ def h_point_new(
 def h_point_use(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> SavedPointReply:
-    """Select required label in the opened entry identified by entry_id.
+    """Select required label in the currently opened entry.
 
-    Both params are strings. Return the selected SavedPoint destination.
-    Malformed wire input is INVALID_PARAMS. Owner entry/schema/source/I/O
+    label is a string. Return the selected SavedPoint destination.
+    Malformed wire input is INVALID_PARAMS. Owner no_entry/schema/source/I/O
     failures propagate without fallback and leave the old binding intact.
     Existing tabs retain their parameter capture; new tabs use this point.
     """
-    entry_id = params.get("entry_id")
-    label = params.get("label")
-    if not isinstance(entry_id, str):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'entry_id' must be a string")
-    if not isinstance(label, str):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'label' must be a string")
-    point = adapter.context_control.use_point(PointUseRequest(entry_id, label))
-    return {"kind": point.kind, "entry_id": point.entry_id, "point": point.point}
+    raise NotImplementedError("point.use current-entry owner wiring")

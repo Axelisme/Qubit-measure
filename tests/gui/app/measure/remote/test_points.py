@@ -132,12 +132,8 @@ def application(qapp, tmp_path: Path) -> Generator[PointApplication]:
         qapp.processEvents()
 
 
-def new_params(info: EntryInfo, label: str, **extra: object) -> dict[str, object]:
-    return {
-        "entry_id": info.entry_id,
-        "label": label,
-        **extra,
-    }
+def new_params(label: str, **extra: object) -> dict[str, object]:
+    return {"label": label, **extra}
 
 
 def opened_resource(info: EntryInfo) -> ResultEntry:
@@ -178,7 +174,7 @@ def test_new_uses_setup_not_unbound_draft_and_clone_replaces_description(
     expected = {"kind": "saved_point", "entry_id": info.entry_id, "point": "seed"}
     assert (
         application.result(
-            "point.new", new_params(info, "seed", description="seed description")
+            "point.new", new_params("seed", description="seed description")
         )
         == expected
     )
@@ -187,9 +183,11 @@ def test_new_uses_setup_not_unbound_draft_and_clone_replaces_description(
     assert captured.lookup("Q1.rate").value == 10.0
     assert "draft_only" not in captured.document().components
     context.set_parameter(captured.target, "Q1.rate", 20.0)
-    assert application.result(
-        "point.new", new_params(info, "clone", clone_from="seed")
-    ) == {"kind": "saved_point", "entry_id": info.entry_id, "point": "clone"}
+    assert application.result("point.new", new_params("clone", clone_from="seed")) == {
+        "kind": "saved_point",
+        "entry_id": info.entry_id,
+        "point": "clone",
+    }
     assert context.read_context().lookup("Q1.rate").value == 20.0
     assert context.read_context().document().general.description == ""
     assert application.result("point.list", {})["points"] == [
@@ -206,14 +204,14 @@ def test_switch_keeps_old_tab_capture_and_new_tab_uses_selected_point(
     context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
     entry = opened_resource(info)
     entry.new_point("first")
-    application.result("point.use", {"entry_id": info.entry_id, "label": "first"})
+    application.result("point.use", {"label": "first"})
     context.set_parameter(context.read_context().target, "Q1.rate", 20.0)
     old_tab = application.result(
         "tab.new", {"adapter_name": "pointed", "target": "Q1"}
     )["tab_id"]
     assert isinstance(old_tab, str)
     entry.new_point("second")
-    application.result("point.use", {"entry_id": info.entry_id, "label": "second"})
+    application.result("point.use", {"label": "second"})
     new_tab = application.result(
         "tab.new", {"adapter_name": "pointed", "target": "Q1"}
     )["tab_id"]
@@ -226,9 +224,11 @@ def test_switch_keeps_old_tab_capture_and_new_tab_uses_selected_point(
         "tab.parameter_read",
         {"tab_id": new_tab, "paths": ["driver.rate"], "module_refs": []},
     ) == {"values": {"driver.rate": 10.0}, "modules": {}}
-    assert application.result(
-        "point.use", {"entry_id": info.entry_id, "label": "first"}
-    ) == {"kind": "saved_point", "entry_id": info.entry_id, "point": "first"}
+    assert application.result("point.use", {"label": "first"}) == {
+        "kind": "saved_point",
+        "entry_id": info.entry_id,
+        "point": "first",
+    }
     assert application.result(
         "tab.parameter_read",
         {"tab_id": new_tab, "paths": ["driver.rate"], "module_refs": []},
@@ -238,7 +238,6 @@ def test_switch_keeps_old_tab_capture_and_new_tab_uses_selected_point(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("entry_id", ""),
         ("label", ""),
         ("label", 24),
         ("description", []),
@@ -251,7 +250,7 @@ def test_new_rejects_malformed_wire_without_creating(
     value: object,
 ) -> None:
     info = application.open_entry()
-    params = new_params(info, "invalid")
+    params = new_params("invalid")
     params[field] = value
     reply = application.rpc("point.new", params)
     assert reply["ok"] is False
@@ -262,23 +261,40 @@ def test_new_rejects_malformed_wire_without_creating(
 
 
 @pytest.mark.parametrize("method", ["point.new", "point.use"])
-def test_entry_preconditions_preserve_binding(
+def test_mutations_without_entry_keep_owner_no_entry(
     application: PointApplication,
     method: str,
 ) -> None:
-    reply = application.rpc(method, {"entry_id": "not-open", "label": "base"})
+    reply = application.rpc(method, {"label": "base"})
     error = reply["error"]
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.PRECONDITION_FAILED
     assert error["reason"] == "no_entry"
-    info = application.open_entry()
-    before = application.controller.context_control.read_context().target
-    reply = application.rpc(method, {"entry_id": "other-entry", "label": "base"})
-    error = reply["error"]
-    assert isinstance(error, dict)
-    assert error["reason"] == "entry_not_open"
-    assert application.controller.context_control.read_context().target == before
-    assert opened_resource(info).list_points() == []
+
+
+@pytest.mark.parametrize("method", ["point.new", "point.use"])
+def test_mutations_use_current_entry_after_switch(
+    application: PointApplication,
+    method: str,
+) -> None:
+    previous = application.open_entry()
+    opened_resource(previous).new_point("selected")
+    application.controller.setup_control.new_entry(EntryRequest("other"))
+    current = application.controller.context_control.get_entry_info()
+    assert current is not None
+    if method == "point.use":
+        opened_resource(current).new_point("selected")
+
+    assert application.result(method, {"label": "selected"}) == {
+        "kind": "saved_point",
+        "entry_id": current.entry_id,
+        "point": "selected",
+    }
+    assert application.controller.context_control.read_context().target == SavedPoint(
+        entry_id=current.entry_id, point="selected"
+    )
+    assert opened_resource(previous).list_points() == ["selected"]
+    assert opened_resource(current).list_points() == ["selected"]
 
 
 def test_missing_point_io_is_not_reclassified_or_replaced(
@@ -286,11 +302,9 @@ def test_missing_point_io_is_not_reclassified_or_replaced(
 ) -> None:
     info = application.open_entry()
     opened_resource(info).new_point("good")
-    application.result("point.use", {"entry_id": info.entry_id, "label": "good"})
+    application.result("point.use", {"label": "good"})
     before = application.controller.context_control.read_context().target
-    reply = application.rpc(
-        "point.use", {"entry_id": info.entry_id, "label": "missing"}
-    )
+    reply = application.rpc("point.use", {"label": "missing"})
     error = reply["error"]
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.CONTROLLER_ERROR
@@ -321,7 +335,7 @@ def test_metadata_read_and_point_write_do_not_unlock_context_guard(
     info = application.open_entry()
     application.result("point.list", {})
     opened_resource(info).new_point("base")
-    application.result("point.use", {"entry_id": info.entry_id, "label": "base"})
+    application.result("point.use", {"label": "base"})
     reply = application.rpc(
         "context.ml_edit", {"kind": "module", "name": "unused", "edits": []}
     )
@@ -347,12 +361,12 @@ def test_created_binding_failure_preserves_destination_and_recovers_with_use(
 
     service = ContextService(application.state, BaseEventBus(), bind_assets=bind_assets)
     service.install_entry(entry)
-    service.use_point(PointUseRequest(info.entry_id, "previous"))
+    service.use_point(PointUseRequest("previous"))
     application.remote.context_control = ContextControlFacet(context=service)
     before = service.read_context().target
     fail = True
     with pytest.raises(RemoteError) as failure:
-        h_point_new(application.remote, new_params(info, "retained"))
+        h_point_new(application.remote, new_params("retained"))
     error = failure.value
     assert error.code == ErrorCode.CONTROLLER_ERROR
     assert error.reason == "point_binding_failed"
@@ -366,6 +380,8 @@ def test_created_binding_failure_preserves_destination_and_recovers_with_use(
     assert entry.list_points() == ["previous", "retained"]
     assert service.read_context().target == before
     fail = False
-    assert application.result(
-        "point.use", {"entry_id": info.entry_id, "label": "retained"}
-    ) == {"kind": "saved_point", "entry_id": info.entry_id, "point": "retained"}
+    assert application.result("point.use", {"label": "retained"}) == {
+        "kind": "saved_point",
+        "entry_id": info.entry_id,
+        "point": "retained",
+    }

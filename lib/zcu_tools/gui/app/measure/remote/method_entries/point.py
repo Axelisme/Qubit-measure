@@ -24,14 +24,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "point:h_point_new",
         MethodSpec(
             10.0,
-            "Create and select label in the opened entry UUID. Copies setup when "
+            "Create and select label in the currently opened entry; no_entry if none. Copies setup when "
             "clone_from is omitted, otherwise a same-entry point; never DRAFT. "
             "description defaults to empty and replaces seed/clone description. "
             "Returns {kind: 'saved_point', entry_id, point}. Binding failure retains "
             "the created point and old selection: point_binding_failed with "
             "{entry_id, point, created: true}; recover with point.use, not New.",
             (
-                required_string("entry_id", "UUID obtained from point.list"),
                 required_string("label", "New single-segment point label"),
                 ParamSpec(
                     "description",
@@ -52,13 +51,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "point:h_point_use",
         MethodSpec(
             5.0,
-            "Select label in the opened entry UUID and return "
+            "Select label in the currently opened entry; no_entry if none. Return "
             "{kind: 'saved_point', entry_id, point}. Failure preserves the old "
             "binding. Existing tabs retain their capture; new tabs use this point.",
-            (
-                required_string("entry_id", "UUID obtained from point.list"),
-                required_string("label", "Existing single-segment point label"),
-            ),
+            (required_string("label", "Existing single-segment point label"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),

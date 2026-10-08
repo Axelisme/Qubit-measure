@@ -181,7 +181,7 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     session: WritebackSession,
 ) -> None:
     session.entry.new_point("a")
-    first = session.control.use_point(PointUseRequest(session.entry.entry_id, "a"))
+    first = session.control.use_point(PointUseRequest("a"))
     session.control.add_component("Q1", "fake/drive/a", {"rate": 0.1})
     captured = session.control.read_context().bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
@@ -192,7 +192,7 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     )
     session.control.set_parameter(first, "Q1.rate", 0.6)
     session.entry.new_point("b")
-    second = session.control.use_point(PointUseRequest(session.entry.entry_id, "b"))
+    second = session.control.use_point(PointUseRequest("b"))
     session.control.add_component("Q2", "fake/drive/a", {"rate": 0.8})
     session.control.set_component_focus("Q2")
     selected = session.control.read_context().document()
@@ -331,7 +331,7 @@ def test_stale_draft_target_is_not_replaced_by_selected_point(
         parameters=captured,
     )
     session.entry.new_point("a")
-    selected = session.control.use_point(PointUseRequest(session.entry.entry_id, "a"))
+    selected = session.control.use_point(PointUseRequest("a"))
     events = session.entry.ledger.events()
     perform = (
         partial(session.service.preview_values, draft)

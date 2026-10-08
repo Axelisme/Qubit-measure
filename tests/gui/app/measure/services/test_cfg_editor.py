@@ -50,7 +50,7 @@ def context(tmp_path):
     context = ContextService(state, EventBus(), bind_assets=ArbWaveformDatabase.info_at)
     context.install_entry(entry)
     control = ContextControlFacet(context=context)
-    control.use_point(PointUseRequest(entry.entry_id, "a"))
+    control.use_point(PointUseRequest("a"))
     target = control.read_context().target
     control.set_parameter(target, "general.ext.r_f", 6012.5)
     control.set_module(

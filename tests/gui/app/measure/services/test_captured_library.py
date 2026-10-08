@@ -89,7 +89,7 @@ def session(tmp_path: Path) -> LibrarySession:
 
 def _select(session: LibrarySession, name: str) -> None:
     session.entry.new_point(name)
-    session.control.use_point(PointUseRequest(session.entry.entry_id, name))
+    session.control.use_point(PointUseRequest(name))
 
 
 def _seed(session: LibrarySession, *, saved: bool) -> ParameterContext:

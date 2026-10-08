@@ -103,7 +103,7 @@ def test_rpc_stale_requires_explicit_retry_by_caller(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("method", "params"),
-    [("point.list", {}), ("point.use", {"entry_id": "entry-uuid", "label": "base"})],
+    [("point.list", {}), ("point.use", {"label": "base"})],
 )
 def test_point_reads_and_use_forward_one_request(
     tmp_path: Path,
@@ -133,7 +133,7 @@ def test_point_new_gui_failure_is_preserved_without_retry(tmp_path: Path) -> Non
             "data": data,
         },
     }
-    params = {"entry_id": "entry-uuid", "label": "retained"}
+    params = {"label": "retained"}
     with pytest.raises(GuiRpcError) as failure:
         client.call("rpc_call", {"method": "point.new", "params": params})
     assert failure.value.reason == "point_binding_failed"

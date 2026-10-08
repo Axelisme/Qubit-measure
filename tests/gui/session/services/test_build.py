@@ -42,7 +42,6 @@ def test_shared_build_routes_entry_and_point_commands_to_real_owners(
 
     target = services.setup_control.new_point(
         PointCreateRequest(
-            entry_id=entry.entry_id,
             label="working",
             description="created through Setup",
             origin=CommandOrigin("gui"),
