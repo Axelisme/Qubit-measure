@@ -1,8 +1,14 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-04, fit quality dtype contract
+**Last updated:** 2026-10-07, periodic phase fitting
 
 ## fitting helpers
+
+Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表示，輸出才轉到
+0–360°。週期邊界不是物理限制；把 optimizer 截在 ±360° 會讓靠近邊界的 phase
+誤差轉移到 frequency，連 noiseless trace 都可能產生校準偏差。
+自動初猜先將下降座標轉成上升順序，讓 FFT 的頻率篩選及 decay 初值使用正的
+座標跨度；參數仍以原始座標定義，呼叫者不需翻轉傳入的資料。
 
 `compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 `FitQuality`。三個 array 參數只接受 float64，缺失 covariance 可用 None，不做 dtype conversion。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。dtype、形狀或名稱誤用直接 ValueError。它不重新 fit，也不決定 calibration 或 accept 是否有效。
 

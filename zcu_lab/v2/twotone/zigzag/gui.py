@@ -53,14 +53,18 @@ class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
         ),
         expects_ml=EXPECTS_ML,
         typical_writeback=(
-            "No analysis and no writeback. A flat trace means the repeated "
-            "pulse is calibrated; a zig-zag or drift means it is off."
+            "No analysis and no writeback. Preparation coherence, contrast, "
+            "and drive history can also change the trace; compare controls "
+            "before changing gate calibration."
         ),
         recommended=(
             "Repeat on X180_pulse to check the pi pulse; repeat on X90_pulse "
             "(applied in pairs) to check the pi/2 pulse. About 10 repetitions "
             "usually show a mis-calibration clearly. Use the zig-zag scan "
-            "adapters to sweep the repeated pulse's gain or frequency."
+            "adapters to sweep the repeated pulse's gain or frequency. "
+            "reset_phase_cycle alternates the final reset pi phase by 180 degrees "
+            "between averaging sweeps (even reps, two-pulse/bath reset). It adds "
+            "no RF pulse or programmed wait; verify population and phase witnesses."
         ),
     )
 
@@ -69,7 +73,18 @@ class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
         builder = add_gate_modules(MeasureCfgBuilder()).relax_delay(
             scaled_md("t1", factor=5.0, fallback_value=30.5)
         )
-        return add_repeat_fields(builder, n_times=10).reps(1000).rounds(100).build()
+        return (
+            add_repeat_fields(builder, n_times=10)
+            .bool(
+                "reset_phase_cycle",
+                label="Cycle reset pi phase (0/180)",
+                default=False,
+                tooltip="Alternate the final reset pulse by 180 degrees between averaging sweeps; requires even reps. Does not correct population or repeated-gate errors.",
+            )
+            .reps(1000)
+            .rounds(100)
+            .build()
+        )
 
     def run(
         self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext

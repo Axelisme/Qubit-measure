@@ -1,6 +1,11 @@
 # v2 experiments
 
-**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
+**Last updated:** 2026-10-08，reset phase cycling 與移除舊 Autofluxdep
+
+ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
+`reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
+相位，不新增 RF pulse 或 programmed wait。它平均初始化的橫向相干分量，不修正
+population 或 repeated-gate 誤差；支援 TwoPulse/Bath reset，需獨立驗證相位及初態投影。
 
 每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。`gui.py` 是可選的 measure-gui adapter。Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 
