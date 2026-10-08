@@ -83,7 +83,7 @@ def _scalar(
         if "expr" in value:
             if set(value) != {"expr"} or not isinstance(value["expr"], str):
                 raise ValueError("Numeric expression requires {expr: text}")
-            return evaluate_scalar_expr(value["expr"], env.md)
+            return evaluate_scalar_expr(value["expr"], env.parameters)
         if "__complex__" in value:
             return decode_complex(value)
     except (ExpressionError, ValueError) as exc:
