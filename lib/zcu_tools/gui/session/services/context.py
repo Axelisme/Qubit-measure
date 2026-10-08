@@ -401,7 +401,9 @@ class ContextService:
         """Resolve declared roles once against the published point snapshot.
 
         Explicit choices precede focus/via inference. Empty declarations remain
-        empty. Entry RoleResolutionError propagates. EMPTY/source faults follow
+        empty. Automatic zero/multiple candidates leave roles unbound; actual
+        use fails later. Invalid explicit choices and dangling/wrong-kind
+        references raise RoleResolutionError here. EMPTY/source faults follow
         read_context policy; no YAML/hardware read occurs.
         """
         parameters = self.read_context()
