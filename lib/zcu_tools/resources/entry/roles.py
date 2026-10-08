@@ -119,7 +119,7 @@ def _reference_target(component: ComponentSchema, path: str) -> str | None:
 def _declarations(
     roles: Mapping[str, RoleSpec] | Sequence[str] | None,
     focus: str | None,
-    explicit: Mapping[str, str],
+    explicit: Mapping[str, str | None],
 ) -> dict[str, RoleSpec]:
     """Normalize only registered role names, rejecting undeclared choices."""
     if roles is None:
@@ -192,13 +192,14 @@ def resolve_names(
     components: Mapping[str, ComponentSchema],
     roles: Mapping[str, RoleSpec] | Sequence[str] | None,
     focus: str | None,
-    explicit: Mapping[str, str],
+    explicit: Mapping[str, str | None],
 ) -> dict[str, str]:
     """Infer fixed role aliases from one validated component snapshot.
 
     roles is an ordered registered declaration mapping/sequence; None uses the
-    notebook shorthand. explicit maps declared roles to concrete names and wins
-    over focus/via inference. focus is a concrete name or None for the registry
+    notebook shorthand. explicit maps declared roles to concrete names or None
+    and wins over focus/via inference. None explicitly leaves that role unbound;
+    omitted keys allow inference. focus is a concrete name or None for the registry
     default. Automatic zero/multiple candidates omit the role; missing via
     source roles omit their dependents. Return only bound aliases. Unknown
     declarations/explicit choices and dangling/wrong-kind targets raise

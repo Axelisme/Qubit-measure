@@ -201,6 +201,40 @@ def test_declared_kind_patterns_choose_unique_focus_and_derive_reference(
         assert resolved.beam.detector == "Sensor"
 
 
+@pytest.mark.parametrize(
+    ("explicit", "expected"),
+    [
+        ({"driver": None}, {}),
+        ({"driver": None, "sense": "R2"}, {"sense": "R2"}),
+        ({"sense": None}, {"driver": "Q1"}),
+    ],
+)
+def test_manual_clear_overrides_focus_and_keeps_other_explicit_roles(
+    tmp_path: Path,
+    explicit: dict[str, str | None],
+    expected: dict[str, str],
+) -> None:
+    point = make_point(tmp_path)
+    roles = point.resolve(["driver", "sense"], focus="Q1", **explicit)
+    assert roles.components == expected
+    assert point.Q1.rate == 4300.0
+    for role in ("driver", "sense"):
+        if role not in expected:
+            with pytest.raises(RoleResolutionError) as error:
+                getattr(roles, role)
+            assert error.value.role == role
+    if "sense" in expected:
+        assert roles.sense.rate == 7100.0
+
+
+def test_manual_clear_rejects_undeclared_role(tmp_path: Path) -> None:
+    point = make_point(tmp_path)
+    with pytest.raises(RoleResolutionError) as error:
+        point.resolve(["driver"], focus="Q1", sense=None)
+    assert error.value.role == "sense"
+    assert "declared" in error.value.reason
+
+
 def test_explicit_choice_precedes_matching_focus(tmp_path: Path) -> None:
     point = make_point(tmp_path)
     roles = point.resolve(["driver"], focus="Q1", driver="Q2")
