@@ -203,6 +203,7 @@ class T1WorkflowWindow(QWidget):
         )
         if self._plots is not None:
             self._plots.release()
+        accepted_input = self.tunables_panel.state.input
         token = candidate.start(
             t1_fluxdep,
             plan=plan,
@@ -223,7 +224,7 @@ class T1WorkflowWindow(QWidget):
         self.controller = candidate
         self._plots = plots
         self._run_env = env
-        self._accepted_input = self.tunables_panel.state.input
+        self._accepted_input = accepted_input
         self.plan_panel.setEnabled(False)
         self.tunables_panel.setEnabled(False)
         self._start_button.setEnabled(False)

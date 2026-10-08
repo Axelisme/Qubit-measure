@@ -149,7 +149,18 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
         return Done()
 
     monkeypatch.setattr(window_module, "t1_fluxdep", observe)
-    token = window.start("captured")
+
+    def edit_on_progress_notification() -> None:
+        window.tunables_panel.state.write({("guess_us",): 77.0}, FormEnv())
+
+    detach = harness.progress.attach_by_owner(
+        "t1-workflow", edit_on_progress_notification
+    )
+    try:
+        token = window.start("captured")
+    finally:
+        detach()
+    assert window.tunables_panel.state.input.data["guess_us"] == 77.0
     assert isinstance(token, int)
     controller = window.controller
     assert controller is not None and controller.status() is None
