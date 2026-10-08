@@ -20,7 +20,7 @@ from zcu_tools.gui.cfg.resource import (
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr, validate_scalar_expr
 from zcu_tools.gui.session.state import DEVICE_SET_VERSION_KEY, SessionState
-from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.gui.session.types import ParameterContext, RoleBinding
 from zcu_tools.gui.session.value_lookup import (
     ScalarValue as LookupScalarValue,
 )
@@ -40,7 +40,7 @@ _ARB_WAVEFORMS_SOURCE = "arb_waveforms"
 
 
 class MeasureCfgBindingHost(Protocol):
-    def read_context(self) -> ParameterContext:
+    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         """Return the published fixed point/library capture; no hardware reads."""
         ...
 

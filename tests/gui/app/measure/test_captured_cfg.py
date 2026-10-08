@@ -95,7 +95,7 @@ def test_binding_snapshot_keeps_supplied_capture_after_live_selection_changes(
     host.current = second
     assert source.evaluate_expression("qubit.rate") == 10.0
     draft = bindings.new_draft(expression_schema(), parameters=first)
-    assert draft.valid
+    assert draft.is_valid()
     assert (
         bindings.snapshot(
             (), captured_values={}, parameters=second
