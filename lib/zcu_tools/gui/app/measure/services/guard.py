@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg.resource import AcceptedConfig, CfgRevision
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness
+from zcu_tools.resources.entry import PointStorageBinding
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,13 @@ class RunPermit:
     snapshot fixes the tab's original saved entry/point/roles, or None for
     drafts, unbound tabs or adapters without native evidence. experiment_tag is
     the adapter's persistence declaration tag, or None. Neither is recaptured
-    after admission. This credential requires no release; the operation owns
-    its hardware lease.
+    after admission. storage retains the same saved-point persistence capability
+    used for snapshot, or None for drafts, unbound tabs, missing storage or an
+    adapter without native evidence. With storage=None, Run remains usable but
+    terminal does not append acquired and reports that omission in diagnostics;
+    it must not claim a ledger record. With storage, append failures fail the
+    operation without retry. This credential requires no release; the operation
+    owns its hardware lease.
     """
 
     tab_id: str
@@ -57,6 +63,7 @@ class RunPermit:
     accepted_cfg: AcceptedConfig
     snapshot: RunSnapshot | None = None
     experiment_tag: str | None = None
+    storage: PointStorageBinding | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +191,7 @@ class GuardService:
             ) from exc
 
         snapshot = None
+        storage = None
         experiment_tag = tab.adapter.experiment_tag
         if (
             experiment_tag is not None
@@ -207,6 +215,7 @@ class GuardService:
             accepted_cfg=accepted,
             snapshot=snapshot,
             experiment_tag=experiment_tag,
+            storage=storage,
         )
 
     def acquire_save_permit(self, tab_id: str) -> SavePermit:

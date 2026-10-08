@@ -15,10 +15,12 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.cfg.resource import CfgRef, CfgStaleError
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import CommandOrigin
 
 from .plot_lifecycle import discard_unpublished_plots
 
 logger = logging.getLogger(__name__)
+_GUI_ORIGIN = CommandOrigin("gui")
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
@@ -80,7 +82,12 @@ class RunAnalyzeControlPort(Protocol):
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
-    def start_run(self, tab_id: str, expected: CfgRef) -> int: ...
+    def start_run(
+        self, tab_id: str, expected: CfgRef, *, origin: CommandOrigin = _GUI_ORIGIN
+    ) -> int:
+        """Start the exact publication; attribute acquired to gui/mcp origin."""
+        ...
+
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome: ...
     def cancel_run(self) -> bool: ...
 
@@ -181,8 +188,17 @@ class RunAnalyzeControlFacet:
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
 
-    def start_run(self, tab_id: str, expected: CfgRef) -> int:
-        """Accept exactly the caller's publication, without refresh or substitution."""
+    def start_run(
+        self, tab_id: str, expected: CfgRef, *, origin: CommandOrigin = _GUI_ORIGIN
+    ) -> int:
+        """Start tab_id's exact publication and return an asynchronous token.
+
+        expected is the observed CfgRef; stale refs and unavailable/busy tabs
+        raise before start. origin identifies the initiating gui/mcp frontend for
+        acquired. Native terminal ledger failures settle failed on that token;
+        missing saved-point storage emits a diagnostic instead of an event.
+        No refresh, focus substitution, Save or automatic retry occurs.
+        """
         self._access.require_available()
         actual = self._state.get_tab(tab_id).cfg.observe().ref
         if expected != actual:
@@ -193,7 +209,9 @@ class RunAnalyzeControlFacet:
         self._ensure_tab_idle(tab_id)
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None
-        return self._run.start_run(permit, plots=self._new_plots(live_container))
+        return self._run.start_run(
+            permit, plots=self._new_plots(live_container), origin=origin
+        )
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         self._access.require_available()

@@ -1,8 +1,9 @@
 """Synchronous native Save through real state, writers and ledger."""
 
 import json
+import logging
 import threading
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -20,8 +21,11 @@ from zcu_tools.datafile import (
     load_run_data,
 )
 from zcu_tools.experiment.acquisition import new_run_id
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_saving import ArtifactRef
+from zcu_tools.gui.app.measure.adapter import RunRequest
 from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.services.guard import GuardService
@@ -35,8 +39,14 @@ from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.entry import ResultEntry, SavedPayload, SaveLayout
+from zcu_tools.resources.entry import (
+    AcquiredPayload,
+    ResultEntry,
+    SavedPayload,
+    SaveLayout,
+)
 
+from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
@@ -53,6 +63,183 @@ from tests.gui.app.measure._native_save_support import (
 def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSession]:
     with native_save_session(tmp_path, qapp) as session:
         yield session
+
+
+def _acquire_to_terminal(
+    session: NativeSaveSession,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    origin: CommandOrigin = GUI_ORIGIN,
+) -> tuple[int, RunFinishedPayload]:
+    gate = OperationGate(session.bus)
+    progress = ProgressService(DirectProgressTransport())
+    run = RunService(
+        session.state,
+        OperationRunner(
+            gate, session.handles, progress, session.background, session.bus
+        ),
+        session.bus,
+        session.handles,
+        MagicMock(),
+        gate=gate,
+        devices=lambda: {},
+    )
+
+    def provenance(*, context: RunContext) -> SoftwareProvenance:
+        return session.metadata.provenance
+
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
+    )
+    cfg = session.state.get_tab("tab").cfg
+    permit = GuardService(session.state).acquire_run_permit(
+        "tab", expected_revision=cfg.observe().ref.revision
+    )
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(loop.quit)
+    finished: list[RunFinishedPayload] = []
+
+    def terminal(payload: RunFinishedPayload) -> None:
+        finished.append(payload)
+        loop.quit()
+
+    subscription = session.bus.subscribe(RunFinishedPayload, terminal)
+    try:
+        token = run.start_run(permit, plots=Plots(NonPresentingHost()), origin=origin)
+        timer.start(5000)
+        loop.exec()
+    finally:
+        timer.stop()
+        subscription.unsubscribe()
+    assert len(finished) == 1
+    assert not session.state.is_tab_busy("tab")
+    return token, finished[0]
+
+
+@pytest.mark.parametrize("frontend", ["gui", "mcp"])
+def test_native_run_without_save_records_acquired_at_its_historical_entry(
+    native_session: NativeSaveSession,
+    monkeypatch: pytest.MonkeyPatch,
+    frontend: str,
+    tmp_path: Path,
+) -> None:
+    session = native_session
+    other = ResultEntry.create(
+        "other", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
+    )
+    other.new_point("q")
+    session.context.install_entry(other)
+    ContextControlFacet(context=session.context).use_point(PointUseRequest("q"))
+    origin = GUI_ORIGIN if frontend == "gui" else CommandOrigin("mcp")
+    token, terminal = _acquire_to_terminal(session, monkeypatch, origin=origin)
+    assert terminal.outcome == "finished"
+    outcome = session.handles.known_outcome(token)
+    assert outcome is not None and outcome.status == "finished"
+    tab = session.state.get_tab("tab")
+    metadata = tab.run.metadata
+    record = tab.run.result
+    assert metadata is not None and record is not None and record.cfg is not None
+    events = session.entry.ledger.events()
+    assert len(events) == 1
+    event = events[0]
+    assert event.kind == "acquired" and event.origin == frontend
+    assert event.entry_id == str(session.entry.entry_id)
+    assert event.at == metadata.finished_at
+    assert isinstance(event.payload, AcquiredPayload)
+    assert event.payload.run_id == metadata.run_id
+    assert event.payload.tab == "saving" and event.payload.tab_id == "tab"
+    assert event.payload.experiment == metadata.experiment
+    assert event.payload.cfg_summary == record.cfg.model_dump(mode="json")
+    assert event.payload.point == "p"
+    assert event.payload.roles == dict(metadata.snapshot.roles)
+    assert other.ledger.events() == ()
+    assert tab.run.confirmed_run_id is None
+    assert not (session.entry.database_path / "runs").exists()
+    assert session.completions == []
+    session.save()
+    session.save()
+    assert [event.kind for event in session.entry.ledger.events()] == [
+        "acquired",
+        "saved",
+        "saved",
+    ]
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_native_run_stop_records_usable_result_but_failure_does_not(
+    native_session: NativeSaveSession,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: bool,
+) -> None:
+    session = native_session
+    adapter = session.state.get_tab("tab").adapter
+    original = adapter.run
+
+    def acquire(
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
+    ) -> RunRecord[SavingCfg, SavingResult]:
+        if failure:
+            raise RuntimeError("offline acquisition failed")
+        record = original(req, raw_cfg, context=context)
+        context.cancel_signal.set()
+        return record
+
+    monkeypatch.setattr(adapter, "run", acquire)
+    token, terminal = _acquire_to_terminal(session, monkeypatch)
+    outcome = session.handles.known_outcome(token)
+    assert outcome is not None
+    events = session.entry.ledger.events()
+    if failure:
+        assert terminal.outcome == outcome.status == "failed"
+        assert events == ()
+        assert session.state.get_tab("tab").run.result is None
+    else:
+        assert terminal.outcome == outcome.status == "cancelled"
+        metadata = session.state.get_tab("tab").run.metadata
+        assert metadata is not None and metadata.completion == "stopped"
+        assert len(events) == 1 and isinstance(events[0].payload, AcquiredPayload)
+        assert events[0].payload.run_id == metadata.run_id
+    assert not (session.entry.database_path / "runs").exists()
+
+
+def test_native_run_ledger_failure_settles_failed_without_retry_or_result(
+    native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = native_session
+    (session.entry.result_path / "records" / "ledger.jsonl").mkdir()
+    token, terminal = _acquire_to_terminal(session, monkeypatch)
+    assert terminal.outcome == "failed" and terminal.error_message
+    outcome = session.handles.known_outcome(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert session.state.get_tab("tab").run.result is None
+    assert session.state.get_tab("tab").run.metadata is None
+    assert not (session.entry.database_path / "runs").exists()
+
+
+def test_native_run_without_storage_reports_missing_acquired_destination(
+    native_session: NativeSaveSession,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    session = native_session
+    session.state.get_tab("tab").save_context = None
+    token, terminal = _acquire_to_terminal(session, monkeypatch)
+    assert terminal.outcome == "finished"
+    outcome = session.handles.known_outcome(token)
+    assert outcome is not None and outcome.status == "finished"
+    assert session.state.get_tab("tab").run.result is not None
+    assert session.state.get_tab("tab").run.metadata is None
+    assert session.entry.ledger.events() == ()
+    assert any(
+        record.name == "zcu_tools.gui.app.measure.services.run"
+        and record.levelno >= logging.WARNING
+        for record in caplog.records
+    )
 
 
 def test_data_save_writes_both_formats_and_resave_keeps_run_identity(

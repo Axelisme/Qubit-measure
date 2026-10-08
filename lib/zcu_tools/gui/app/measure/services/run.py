@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionFact,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
     NO_RESULT,
@@ -36,6 +37,7 @@ from .operation_gate import OperationKind
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 
 logger = logging.getLogger(__name__)
+_GUI_ORIGIN = CommandOrigin("gui")
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -59,6 +61,7 @@ class _RunOperation:
     stop_event: threading.Event
     stop_signal: StopSignal
     cancel_requested: threading.Event
+    origin: CommandOrigin
     metadata: RunMetadata | None = None
 
 
@@ -223,7 +226,18 @@ class RunService:
         permit: RunPermit,
         *,
         plots: Plots,
+        origin: CommandOrigin = _GUI_ORIGIN,
     ) -> int:
+        """Start the admitted Run and return its asynchronous operation token.
+
+        permit fixes cfg and saved-point storage; plots is this Run's owned host.
+        origin attributes acquired to the initiating gui/mcp frontend. A usable
+        native result appends acquired at terminal before State publication,
+        without Save or creating a run folder. Missing storage/native evidence
+        leaves Run usable but records a diagnostic, not a fabricated event.
+        Ledger errors settle failed without retry or publishing a new result.
+        Busy, exclusion and submission failures raise before a token is returned.
+        """
         # Static preconditions (context readiness, committed-cfg validity, soc
         # capability) are proven by the RunPermit. Dynamic resource availability
         # (tab busy, hardware exclusion) is checked here at the operation boundary.
@@ -261,7 +275,7 @@ class RunService:
             stop_event.set()
 
         operation = _RunOperation(
-            tab_id, plots, stop_event, stop_signal, cancel_requested
+            tab_id, plots, stop_event, stop_signal, cancel_requested, origin
         )
 
         def work(factory: Any) -> object:

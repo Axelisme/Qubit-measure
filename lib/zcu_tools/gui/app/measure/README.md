@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08, synchronous native Save
+**Last updated:** 2026-10-08, acquired ledger and synchronous native Save
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -10,9 +10,12 @@ framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/bas
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
 lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
 
-Run permit 固定 tab 的歷史 entry／point／roles 與 adapter 的 persistence tag。
-`RunService` 在 adapter 呼叫邊界記錄 UTC 時間、run ID 與 software provenance，
-再由 State 一次發布結果與 `RunPaneState.metadata`。Save request 取用這份歷史
+Run permit 固定 tab 的歷史 entry／point／roles、storage capability 與 adapter 的 persistence tag。
+`RunService` 在 adapter 呼叫邊界記錄 UTC 時間、run ID 與 software provenance。
+可提交的 native 結果在 terminal 追加 acquired，再由 State 一次發布結果與
+`RunPaneState.metadata`。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
+但不建立 run 資料夾。Draft、未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
+Ledger 失敗使 operation failed，不重試或發布新的結果。Save request 取用這份歷史
 metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。未宣告 native evidence
 或沒有 saved origin 時 metadata 為 None；新 Run 清舊 evidence，Load 不製造新的量測歷史。
 

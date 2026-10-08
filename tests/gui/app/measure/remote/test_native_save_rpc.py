@@ -8,10 +8,14 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
+from zcu_tools.gui.cfg.edit_codec import encode_ref
+from zcu_tools.resources.entry import AcquiredPayload
 
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
@@ -70,6 +74,53 @@ def native_save_rpc(
             controller.begin_shutdown(lambda: closed.append(True))
             assert closed == [True]
             qapp.processEvents()
+
+
+def test_native_run_rpc_records_mcp_acquired_without_save(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def offline_soc_info(
+        self: Controller, include_cfg: bool = False
+    ) -> dict[str, object]:
+        # Hardware observation is not this offline Run/ledger contract's target.
+        return {"soccfg": {}}
+
+    monkeypatch.setattr(Controller, "get_soc_info", offline_soc_info)
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+
+        def provenance(*, context: RunContext) -> SoftwareProvenance:
+            return session.metadata.provenance
+
+        monkeypatch.setattr(
+            "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
+            provenance,
+        )
+        soc_info = call(sock, "soc.info", {"include_cfg": True})
+        assert soc_info["ok"] is True, soc_info
+        assert call(sock, "device.list", {})["ok"] is True
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        started = call(
+            sock,
+            "tab.run_start",
+            {
+                "tab_id": "tab",
+                "expected": encode_ref(session.state.get_tab("tab").cfg.observe().ref),
+            },
+        )
+        assert started["ok"] is True, started
+        completed = call(
+            sock,
+            "operation.await",
+            {"operation_id": started["result"]["operation_id"], "timeout": 2},
+        )
+        assert completed["result"]["status"] == "finished"
+        events = session.entry.ledger.events()
+        assert len(events) == 1 and events[0].kind == "acquired"
+        assert events[0].origin == "mcp"
+        assert isinstance(events[0].payload, AcquiredPayload)
+        metadata = session.state.get_tab("tab").run.metadata
+        assert metadata is not None and events[0].payload.run_id == metadata.run_id
+        assert not (session.entry.database_path / "runs").exists()
 
 
 @pytest.mark.parametrize("selection", ["data", "all", "analysis", "post_analysis"])

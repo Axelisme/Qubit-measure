@@ -31,7 +31,7 @@ def h_tab_run_start(
     try:
         expected = decode_ref(params["expected"])
         follow_tab(adapter, tab_id, "run")
-        operation_id = control.start_run(tab_id, expected)
+        operation_id = control.start_run(tab_id, expected, origin=CommandOrigin("mcp"))
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc
     return {"operation_id": operation_id}
