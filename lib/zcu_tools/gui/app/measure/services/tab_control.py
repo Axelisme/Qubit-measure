@@ -6,6 +6,10 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
+from zcu_tools.gui.app.measure.events.tab import (
+    TabContentChangedPayload,
+    TabContentFact,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
@@ -33,6 +37,25 @@ class TabControlPort(Protocol):
         self, adapter_name: str, data_path: str
     ) -> LoadTabResultOutcome:
         """Create/load/focus, cleaning up on failure; cfg backfill is best effort."""
+        ...
+
+    def set_role(self, tab_id: str, role: str, component: str | None) -> None:
+        """Manually bind/clear a declared role on an idle tab's fixed capture.
+
+        None deliberately clears the role. Other non-manual roles re-infer
+        using birth focus. RoleResolutionError rejects unknown roles/components
+        or wrong kinds; FailedPreconditionError rejects busy/roleless tabs;
+        CfgPreconditionError rejects notification reentrancy. Rejection changes
+        nothing. Success preserves cfg inputs/history and publishes ROLES_COMMITTED.
+        """
+        ...
+
+    def reset_role(self, tab_id: str, role: str) -> None:
+        """Remove this role's manual choice and re-infer using birth focus.
+
+        Other manual choices remain. Preconditions/errors and publication are
+        the same as set_role; current session selection is never consulted.
+        """
         ...
 
     def close_tab(self, tab_id: str) -> None: ...
@@ -99,6 +122,22 @@ class TabControlFacet:
                 ) from cleanup_error
             raise
         return outcome
+
+    def set_role(self, tab_id: str, role: str, component: str | None) -> None:
+        """Commit a manual choice; see TabControlPort.set_role for failures."""
+        self._access.require_available()
+        self._tab.set_role(tab_id, role, component)
+        self._bus.emit(
+            TabContentChangedPayload(tab_id=tab_id, fact=TabContentFact.ROLES_COMMITTED)
+        )
+
+    def reset_role(self, tab_id: str, role: str) -> None:
+        """Return a role to captured-focus inference; see TabControlPort.reset_role."""
+        self._access.require_available()
+        self._tab.reset_role(tab_id, role)
+        self._bus.emit(
+            TabContentChangedPayload(tab_id=tab_id, fact=TabContentFact.ROLES_COMMITTED)
+        )
 
     def close_tab(self, tab_id: str) -> None:
         self._access.require_available()

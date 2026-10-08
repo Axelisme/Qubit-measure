@@ -43,7 +43,7 @@ class RunPermit:
 
     Carries detached resolved cfg and observed device settings captured at issue.
     RunService never re-reads State and the adapter never re-lowers a schema.
-    snapshot fixes the tab's original saved entry/point/roles, or None for
+    snapshot fixes the original saved entry/point and admission capture's roles, or None for
     drafts, unbound tabs or adapters without native evidence. experiment_tag is
     the adapter's persistence declaration tag, or None. Neither is recaptured
     after admission. This credential requires no release; the operation owns
@@ -144,6 +144,7 @@ class GuardService:
         self._require_readiness(ContextReadiness.ACTIVE, "run")
 
         ctx = self._state.session_env
+        parameters = tab.parameters
         # Freeze only observed values. Never query devices during permit issue.
         accepted = tab.cfg.accept(expected_revision)
         try:
@@ -169,8 +170,8 @@ class GuardService:
             soccfg=ctx.soccfg,
             device_snapshot=device_snapshot,
             cfg_context=None
-            if tab.parameters is None
-            else tab.parameters.library.validation_context(),
+            if parameters is None
+            else parameters.library.validation_context(),
         )
         if tab.adapter.capabilities.requires_soc:
             try:
@@ -198,7 +199,9 @@ class GuardService:
                 entry_name=storage.entry_name,
                 point=storage.point,
                 description=storage.description,
-                roles=storage.roles,
+                roles={}
+                if parameters is None or parameters.roles is None
+                else parameters.roles.names,
             )
         logger.debug("acquire_run_permit: tab_id=%r", tab_id)
         return RunPermit(
@@ -209,7 +212,7 @@ class GuardService:
             accepted_cfg=accepted,
             snapshot=snapshot,
             experiment_tag=experiment_tag,
-            parameters=tab.parameters,
+            parameters=parameters,
         )
 
     def acquire_save_permit(self, tab_id: str) -> SavePermit:

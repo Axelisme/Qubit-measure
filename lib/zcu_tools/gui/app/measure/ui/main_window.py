@@ -31,6 +31,7 @@ from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 from zcu_tools.resources.entry import RoleResolutionError
 
@@ -226,7 +227,10 @@ class MainWindow(QMainWindow):
         if roles is None:
             return adapter_name
         return " · ".join(
-            [adapter_name, *(f"{role}={name}" for role, name in roles.names.items())]
+            [
+                adapter_name,
+                *(f"{role}={roles.names.get(role, '')}" for role in roles.declarations),
+            ]
         )
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
@@ -442,6 +446,24 @@ class MainWindow(QMainWindow):
         # the run's terminal path drops the container and notifies the tab's
         # listener, which re-renders to empty.
 
+    def refresh_tab_roles(self, tab_id: str, snapshot: TabSnapshot) -> None:
+        """Render committed roles/title from one snapshot, retaining the Run marker.
+
+        Does not refresh results, drafts, figures or selected panes.
+        """
+        tab_w = self._tab_widgets.get(tab_id)
+        if tab_w is None:
+            return
+        tab_w.refresh_roles(snapshot)
+        index = self._tabs.indexOf(tab_w)
+        if index >= 0:
+            self._tabs.setTabText(
+                index, self._captured_tab_label(snapshot.adapter_name, snapshot)
+            )
+            self._set_tab_activity_marker(
+                tab_id, active=self._ctrl.get_running_tab_id() == tab_id
+            )
+
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
@@ -453,29 +475,27 @@ class MainWindow(QMainWindow):
     def refresh_context_panel(self) -> None:
         """Project committed context and component focus without changing captures.
 
-        Focus options include all components grouped by kind. Empty/ambiguous
-        focus remains unselected; rendering must not submit a focus command.
+        The status label uses cached entry identity and the published parameter
+        target, never a focus-derived qubit name. Focus options include all
+        components grouped by kind. Empty/ambiguous focus remains unselected;
+        rendering must not submit a focus command or change tab titles.
         """
         self._render_component_focus()
-        label = self._ctrl.get_active_context_label()
-        if label is not None:
-            # file-backed flux context is active
-            self._ctx_label.setText(label)
-            self._ctx_label.setStyleSheet("")
-        elif self._ctrl.has_draft_context():
-            # draft context (in-memory, no file sync)
-            self._ctx_label.setText(
-                "Draft context (in-memory) — set up project for persistence"
-            )
-            self._ctx_label.setStyleSheet("color: blue;")
-        elif self._ctrl.has_project():
-            self._ctx_label.setText(
-                "Project set — select a context to enable Run/Analyze/Save"
-            )
-            self._ctx_label.setStyleSheet("color: orange;")
-        else:
-            self._ctx_label.setText("No project set — use Project… to configure")
+        entry = self._ctrl.context_control.get_entry_info()
+        parameters = self._ctrl.get_session_env().parameters
+        target = parameters.target if parameters is not None else None
+        if entry is None:
+            self._ctx_label.setText("No entry open — use Setup… to configure")
             self._ctx_label.setStyleSheet("color: gray;")
+        elif isinstance(target, SavedPoint):
+            self._ctx_label.setText(f"{entry.name} / {target.point}")
+            self._ctx_label.setStyleSheet("")
+        elif parameters is not None:
+            self._ctx_label.setText(f"{entry.name} / Draft (in-memory)")
+            self._ctx_label.setStyleSheet("color: blue;")
+        else:
+            self._ctx_label.setText(f"{entry.name} / No point selected")
+            self._ctx_label.setStyleSheet("color: orange;")
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))

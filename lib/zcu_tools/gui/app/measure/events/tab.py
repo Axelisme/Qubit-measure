@@ -48,8 +48,9 @@ class TabInteractionFact(str, Enum):
 
 
 class TabContentFact(str, Enum):
-    """Closed facts for committed tab-owned result content."""
+    """Closed facts for committed tab-owned content and parameter roles."""
 
+    ROLES_COMMITTED = "roles_committed"
     RUN_RESULT_COMMITTED = "run_result_committed"
     LOADED_RESULT_COMMITTED = "loaded_result_committed"
     PRIMARY_ANALYSIS_COMMITTED = "primary_analysis_committed"

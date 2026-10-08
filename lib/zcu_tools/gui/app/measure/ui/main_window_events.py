@@ -59,6 +59,10 @@ class MainWindowEventHost(Protocol):
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
     def clear_tab_plot(self, tab_id: str) -> None: ...
+    def refresh_tab_roles(self, tab_id: str, snapshot: TabSnapshot) -> None:
+        """Project committed roles to rolebar/title, preserving activity and panes."""
+        ...
+
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
@@ -70,6 +74,7 @@ class MainWindowEventHost(Protocol):
 
 
 class _TabReaction(Enum):
+    ROLES = auto()
     ANALYZE_FORM = auto()
     POST_ANALYZE_FORM = auto()
     WRITEBACK = auto()
@@ -130,6 +135,7 @@ _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
 }
 
 _CONTENT_REACTIONS: dict[TabContentFact, tuple[_TabReaction, ...]] = {
+    TabContentFact.ROLES_COMMITTED: (_TabReaction.ROLES, _TabReaction.INTERACTION),
     TabContentFact.RUN_RESULT_COMMITTED: (
         _TabReaction.ANALYZE_FORM,
         _TabReaction.POST_ANALYZE_FORM,
@@ -287,6 +293,7 @@ class MainWindowEventCoordinator:
             return
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
         actions = {
+            _TabReaction.ROLES: lambda: self._host.refresh_tab_roles(tab_id, snapshot),
             _TabReaction.ANALYZE_FORM: lambda: self._host.refresh_tab_analyze_form(
                 tab_id, snapshot
             ),
