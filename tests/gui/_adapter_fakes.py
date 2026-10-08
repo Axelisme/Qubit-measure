@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -22,6 +23,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 
 class DummyExp:
@@ -59,6 +61,11 @@ class DummyAdapter:
     exp_cls = DummyExp
 
     @classmethod
+    def parameter_roles(cls) -> dict[str, RoleSpec]:
+        """This structural fake performs context-free calculations."""
+        return {}
+
+    @classmethod
     def guide(cls) -> AdapterGuide:
         return AdapterGuide(
             behavior="dummy",
@@ -80,10 +87,18 @@ class DummyAdapter:
         del result, ctx
         return DummyAnalyzeParams()
 
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+    def validate_run_request(
+        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
+    ) -> None:
         del req, raw_cfg
 
-    def run(self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext):
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
+    ):
         del req, raw_cfg, context
         return object()
 

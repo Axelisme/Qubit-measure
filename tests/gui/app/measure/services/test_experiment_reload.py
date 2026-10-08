@@ -23,7 +23,7 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
-from tests.gui.app.measure._cfg_fakes import cfg_resources
+from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
 from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
 
 
@@ -43,12 +43,19 @@ class App:
 
 @pytest.fixture
 def app() -> App:
-    state = State(SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None))
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     bus = BaseEventBus()
     registry = Registry()
     registry.register("demo", OldAdapter)
     writeback = MagicMock()
-    tabs = TabService(state, registry, writeback, cfg_resources(state))
+    tabs = TabService(
+        state,
+        registry,
+        writeback,
+        cfg_resources(state),
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        captured_parameters=lambda _roles: None,
+    )
     workspace = WorkspaceService(state, tabs, bus)
     loader = Loader()
     operations = MagicMock(return_value=0)
