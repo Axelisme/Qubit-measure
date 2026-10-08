@@ -10,7 +10,6 @@ from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
 )
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 def test_event_bus_dispatches_by_payload_type() -> None:
@@ -21,7 +20,7 @@ def test_event_bus_dispatches_by_payload_type() -> None:
     bus.subscribe(MdChangedPayload, md_received.append)
     bus.subscribe(MlChangedPayload, ml_received.append)
 
-    bus.emit(MdChangedPayload(md=MetaDict()))
+    bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert len(md_received) == 1
     assert ml_received == []
@@ -38,7 +37,7 @@ def test_event_bus_swallows_subscriber_exceptions() -> None:
     bus.subscribe(MdChangedPayload, later)
 
     # No exception escapes emit.
-    bus.emit(MdChangedPayload(md=MetaDict()))
+    bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert later.called
 
@@ -55,7 +54,7 @@ def test_event_bus_logs_all_subscriber_exceptions(
     bus.subscribe(MdChangedPayload, third)
 
     # emit does not raise even though two subscribers do.
-    bus.emit(MdChangedPayload(md=MetaDict()))
+    bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert first.called
     assert second.called
@@ -72,7 +71,7 @@ def test_event_bus_unsubscribe() -> None:
     bus.subscribe(MlChangedPayload, cb)
     bus.unsubscribe(MlChangedPayload, cb)
 
-    bus.emit(MlChangedPayload(ml=ModuleLibrary()))
+    bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert received == []
 
@@ -83,9 +82,9 @@ def test_event_bus_subscription_handle_unsubscribes_lambda() -> None:
     received: list[str] = []
     handle = bus.subscribe(MlChangedPayload, lambda _p: received.append("hit"))
 
-    bus.emit(MlChangedPayload(ml=ModuleLibrary()))
+    bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
     handle.unsubscribe()
-    bus.emit(MlChangedPayload(ml=ModuleLibrary()))
+    bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert received == ["hit"]
 
@@ -97,7 +96,7 @@ def test_event_bus_subscription_handle_is_idempotent() -> None:
 
     handle.unsubscribe()
     handle.unsubscribe()
-    bus.emit(MlChangedPayload(ml=ModuleLibrary()))
+    bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert received == []
 
@@ -112,8 +111,8 @@ def test_event_subscription_group_unsubscribes_all_repeatedly() -> None:
 
     group.unsubscribe_all("ignored signal payload")
     group.unsubscribe_all()
-    bus.emit(MdChangedPayload(md=MetaDict()))
-    bus.emit(MlChangedPayload(ml=ModuleLibrary()))
+    bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
+    bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert md_received == []
     assert ml_received == []
@@ -130,9 +129,9 @@ def test_event_meta_sequence_is_process_wide_and_strictly_increasing() -> None:
         MdChangedPayload, lambda _p, meta: received.append(meta)
     )
 
-    first_bus.emit(MdChangedPayload(md=MetaDict()))
-    second_bus.emit(MdChangedPayload(md=MetaDict()))
-    first_bus.emit(MdChangedPayload(md=MetaDict()))
+    first_bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
+    second_bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
+    first_bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert [meta.seq for meta in received] == sorted(meta.seq for meta in received)
     assert len({meta.seq for meta in received}) == 3
@@ -145,13 +144,13 @@ def test_event_origin_defaults_and_nested_scopes_restore() -> None:
     outer = EventOrigin(kind="agent", client_id="client-a")
     inner = EventOrigin(kind="system", operation_id="restore")
 
-    bus.emit(MdChangedPayload(md=MetaDict()))
+    bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
     with bus.origin(outer):
-        bus.emit(MdChangedPayload(md=MetaDict()))
+        bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
         with bus.origin(inner):
-            bus.emit(MdChangedPayload(md=MetaDict()))
-        bus.emit(MdChangedPayload(md=MetaDict()))
-    bus.emit(MdChangedPayload(md=MetaDict()))
+            bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
+        bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
+    bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert [meta.origin for meta in received] == [
         EventOrigin(kind="user"),
@@ -168,7 +167,11 @@ def test_event_origin_does_not_propagate_to_new_thread() -> None:
     bus.subscribe_with_meta(MdChangedPayload, lambda _p, meta: received.append(meta))
 
     with bus.origin(EventOrigin(kind="agent", client_id="client-a")):
-        thread = Thread(target=lambda: bus.emit(MdChangedPayload(md=MetaDict())))
+        thread = Thread(
+            target=lambda: bus.emit(
+                MdChangedPayload(binding_id=1, content_changed=True, fault=None)
+            )
+        )
         thread.start()
         thread.join()
 
@@ -187,7 +190,7 @@ def test_legacy_and_meta_subscribers_coexist_with_one_stamp() -> None:
     bus.subscribe_with_meta(
         MdChangedPayload, lambda _payload, meta: second_meta.append(meta)
     )
-    payload = MdChangedPayload(md=MetaDict())
+    payload = MdChangedPayload(binding_id=1, content_changed=True, fault=None)
 
     bus.emit(payload)
 
@@ -198,8 +201,8 @@ def test_legacy_and_meta_subscribers_coexist_with_one_stamp() -> None:
 
 def test_nested_legacy_emit_preserves_meta_causal_order() -> None:
     bus = EventBus()
-    outer = MdChangedPayload(md=MetaDict())
-    inner = MdChangedPayload(md=MetaDict())
+    outer = MdChangedPayload(binding_id=1, content_changed=True, fault=None)
+    inner = MdChangedPayload(binding_id=1, content_changed=True, fault=None)
     meta_trace: list[tuple[str, str, int]] = []
     legacy_trace: list[tuple[str, str]] = []
 
@@ -266,7 +269,7 @@ def test_legacy_and_meta_subscriber_exceptions_are_isolated() -> None:
     )
     bus.subscribe_with_meta(MdChangedPayload, later_meta)
 
-    bus.emit(MdChangedPayload(md=MetaDict()))
+    bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert later_legacy.called
     assert later_meta.called
@@ -287,6 +290,6 @@ def test_meta_subscription_handles_and_group_cleanup_are_idempotent() -> None:
     standalone.unsubscribe()
     group.unsubscribe_all()
     group.unsubscribe_all()
-    bus.emit(MdChangedPayload(md=MetaDict()))
+    bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
 
     assert received == []

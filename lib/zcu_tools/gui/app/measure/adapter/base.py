@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
 
-from zcu_tools.experiment.cfg_assembler import assemble_experiment_cfg
+from zcu_tools.experiment.cfg_assembler import (
+    ExperimentCfgInput,
+    ExperimentCfgValue,
+    assemble_experiment_cfg,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -35,6 +39,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.interactive import PluginDefinition, Session
+from zcu_tools.resources.entry import RoleSpec
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
@@ -287,7 +292,9 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         """
         return cls.guide_text
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T_Cfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> T_Cfg:
         """Build experiment config from the flat GUI raw dict.
 
         Materialize resolved module dictionaries without a live library, using
@@ -299,10 +306,15 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
                 f"{type(self).__name__} must set ExpCfg_cls or override build_exp_cfg"
             )
         return assemble_experiment_cfg(
-            raw_cfg, self.ExpCfg_cls, ml=None, device_snapshot=req.device_snapshot
+            ExperimentCfgInput(raw_cfg),
+            self.ExpCfg_cls,
+            context=req.cfg_context,
+            device_snapshot=req.device_snapshot,
         )
 
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+    def validate_run_request(
+        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
+    ) -> None:
         """Pure run preflight for adapter-specific constraints.
 
         GuardService calls this before opening an async run handle. The default is
@@ -426,10 +438,18 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     # -- shared implementation (provided once) -----------------------------
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Declare ordered required roles; empty means pure calculation.
+
+        The tab owner resolves and captures these once at creation. Changing
+        session focus later does not rebind an existing tab.
+        """
+        return {}
+
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         """Instantiate and validate a fresh cfg from the context-free definition."""
         schema = type(self).cfg_definition().instantiate(ctx)
-        validate_schema(schema, ctx.ml)
+        validate_schema(schema, ctx.parameters)
         return schema
 
     @classmethod
@@ -459,7 +479,11 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         return ret
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> T_Result:
         cfg = self.build_exp_cfg(raw_cfg, req)
         return cast(T_Result, self.exp_cls().run(cfg, context=context))

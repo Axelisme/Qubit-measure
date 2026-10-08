@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-    from zcu_tools.gui.session.services.io_manager import IOManager
 
 RegistryFactory = Callable[
     [], tuple["Registry", "TemplateCatalog", "ExperimentCatalogLoader"]
@@ -34,16 +33,10 @@ RegistryFactory = Callable[
 
 
 def _make_empty_ctx() -> SessionEnv:
-    """Minimal initial context: real empty MetaDict/ModuleLibrary, no file sync."""
+    """EMPTY starts without parameter sources, hardware or file I/O."""
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-    return SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
-        soc=None,
-        soccfg=None,
-    )
+    return SessionEnv(parameters=None, soc=None, soccfg=None)
 
 
 class MeasureGuiBehavior(GuiRuntimeBehavior):
@@ -76,15 +69,12 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         from zcu_tools.gui.app.measure.state import State
-        from zcu_tools.gui.session.services.io_manager import IOManager
 
         state = State(_make_empty_ctx())
-        io_manager = IOManager()
         ctrl, window = _build_window(
             state,
             self._registry,
             self._template_catalog,
-            io_manager,
             self._project_root,
             catalog_loader=self._catalog_loader,
         )
@@ -141,7 +131,6 @@ def _build_window(
     state: State,
     registry: Registry,
     template_catalog: TemplateCatalog,
-    io_manager: IOManager,
     project_root: str | None = None,
     *,
     catalog_loader: ExperimentCatalogLoader | None = None,
@@ -158,7 +147,6 @@ def _build_window(
         state=state,
         registry=registry,
         template_catalog=template_catalog,
-        io_manager=io_manager,
         view=None,
         bus=bus,
         project_root=project_root,

@@ -9,7 +9,7 @@ wrong event. Apps subclass :class:`BasePayload` with their own event enum (each
 narrowing ``EVENT`` to that concrete enum) and alias :class:`BaseEventBus`.
 
 This module owns only the *mechanism*; it knows nothing of any concrete event,
-payload, or app. All four GUI apps — main, fluxdep, dispersive, autofluxdep —
+payload, or app. All three GUI apps — measure, fluxdep, dispersive —
 build on this base, each supplying its own event enum + payloads and aliasing
 ``EventBus = BaseEventBus``.
 """

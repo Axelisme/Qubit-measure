@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
-from zcu_tools.gui.app.measure.adapter.lowering import (
-    schema_to_raw_dict,
-    validate_schema,
-)
 from zcu_tools.gui.cfg import (
+    CfgNodeSpec,
+    CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -19,41 +15,39 @@ from zcu_tools.gui.cfg import (
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
+    lower_finished_cfg,
+    validate_finished_cfg,
 )
-from zcu_tools.resources.context import MetaDict
 
 
 def _schema(
-    spec_fields: dict[str, object], value_fields: dict[str, object]
+    spec_fields: dict[str, CfgNodeSpec], value_fields: dict[str, CfgNodeValue | None]
 ) -> CfgSchema:
     return CfgSchema(
-        spec=CfgSectionSpec(fields=spec_fields),  # type: ignore[arg-type]
-        value=CfgSectionValue(fields=value_fields),  # type: ignore[arg-type]
+        spec=CfgSectionSpec(fields=spec_fields),
+        value=CfgSectionValue(fields=value_fields),
     )
 
 
-def _library(*, modules: dict[str, object] | None = None) -> MagicMock:
-    ml = MagicMock()
-    ml.modules = {} if modules is None else modules
-    ml.waveforms = {}
-    return ml
+def _missing_expression(expr: str) -> float:
+    raise RuntimeError(f"Missing parameter: {expr!r}")
 
 
 def test_complex_live_value_cannot_lower_to_real_scalar() -> None:
-    md = MetaDict()
-    md.frequency = 1 + 2j
     schema = _schema(
         {"frequency": ScalarSpec("Frequency", float)},
         {"frequency": EvalValue("frequency", resolved=5.0)},
     )
     with pytest.raises(RuntimeError, match="cannot target a real field"):
-        schema_to_raw_dict(schema, md, None)
+        lower_finished_cfg(
+            schema, resolve_expression=lambda _: 1 + 2j, resolve_reference=None
+        )
 
 
 def test_static_validation_fast_fails_missing_and_extra_fields() -> None:
     missing = _schema({"count": ScalarSpec("Count", int)}, {})
     with pytest.raises(RuntimeError) as missing_error:
-        validate_schema(missing, None)
+        validate_finished_cfg(missing, resolve_reference=None)
     assert str(missing_error.value) == (
         "Config field 'count' is missing from the value"
     )
@@ -63,7 +57,7 @@ def test_static_validation_fast_fails_missing_and_extra_fields() -> None:
         {"count": DirectValue(1), "extra": DirectValue(2)},
     )
     with pytest.raises(RuntimeError) as extra_error:
-        validate_schema(extra, None)
+        validate_finished_cfg(extra, resolve_reference=None)
     assert str(extra_error.value) == (
         "Config section '<root>' has unknown fields: extra"
     )
@@ -91,12 +85,12 @@ def test_static_validation_fast_fails_missing_and_extra_fields() -> None:
     ],
 )
 def test_static_validation_uses_exact_literal_type_and_choice_errors(
-    spec: object, value: object, message: str
+    spec: CfgNodeSpec, value: CfgNodeValue, message: str
 ) -> None:
     schema = _schema({"value": spec}, {"value": value})
 
     with pytest.raises(RuntimeError) as exc_info:
-        validate_schema(schema, None)
+        validate_finished_cfg(schema, resolve_reference=None)
 
     assert str(exc_info.value) == message
 
@@ -114,7 +108,9 @@ def test_static_error_precedes_expression_error() -> None:
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(schema, MetaDict(), None)
+        lower_finished_cfg(
+            schema, resolve_expression=_missing_expression, resolve_reference=None
+        )
 
     assert str(exc_info.value) == (
         "Config field 'literal' is a locked literal (must be 'fixed'), "
@@ -136,7 +132,9 @@ def test_static_error_precedes_reference_error() -> None:
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(schema, None, _library())
+        lower_finished_cfg(
+            schema, resolve_expression=None, resolve_reference=lambda kind, key: None
+        )
 
     assert str(exc_info.value) == (
         "Config field 'literal' is a locked literal (must be 'fixed'), "
@@ -151,7 +149,9 @@ def test_dynamic_validation_precedes_lowering_error() -> None:
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(schema, MetaDict(), None)
+        lower_finished_cfg(
+            schema, resolve_expression=_missing_expression, resolve_reference=None
+        )
 
     assert str(exc_info.value) == (
         "Config field 'count' (Count) is unset (no value to lower)"
@@ -165,9 +165,11 @@ def test_dynamic_expression_error_uses_exact_path_and_text() -> None:
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(schema, MetaDict(), None)
+        lower_finished_cfg(
+            schema, resolve_expression=_missing_expression, resolve_reference=None
+        )
 
     assert str(exc_info.value) == (
         "Config field 'frequency' (Frequency) expression 'missing' failed: "
-        "Variable 'missing' is not defined in MetaDict"
+        "Missing parameter: 'missing'"
     )

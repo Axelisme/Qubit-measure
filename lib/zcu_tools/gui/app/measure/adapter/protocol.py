@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
 
 if TYPE_CHECKING:
+    from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
     from zcu_tools.experiment.context import RunContext
     from zcu_tools.plotting.plots import Plots
+    from zcu_tools.resources.entry import RoleSpec
 
 from .interactive import InteractivePluginProvider
 from .types import (
@@ -86,6 +88,14 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Return the static human-facing orientation guide (no instance state)."""
         ...
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Declare ordered required roles; empty means pure calculation.
+
+        The tab owner resolves and captures these once at creation. Changing
+        session focus later does not rebind an existing tab.
+        """
+        ...
+
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         """Compose the static spec with context-derived default values."""
         ...
@@ -103,12 +113,18 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Build the analyze parameter instance presented to the user."""
         ...
 
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+    def validate_run_request(
+        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
+    ) -> None:
         """Validate adapter-specific run constraints before opening an operation."""
         ...
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> Any:
         """Execute detached resolved inputs; never resolve from live context."""
         ...

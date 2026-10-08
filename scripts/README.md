@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-10-07，完整 T1 離線 workflow 宿主
+**Last updated:** 2026-10-08，移除舊入口，保留 native workflow simulator
 
 這裡是使用者入口；repo 品質檢查在 [tools/README.md](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
@@ -14,12 +14,11 @@
 
 - `run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。讀取可恢復的 session 與實驗設定；正常關閉會寫回 GUI state，預設在 repo `logs/gui/measure/` 建立 session log。預設啟動 loopback remote-control socket；允許外部連線的選項會改變網路曝露範圍。`--clean` 不恢復先前 session，但不阻止關閉時寫回。量測 GUI 可透過 QICK 連接硬體；啟動器本身只組合 GUI 與 runtime。入口見 `run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
 - `run_fluxdep_gui.py`、`run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑；傳入的 project 與 repo root 交給 GUI runtime。預設各開 remote-control TCP socket（預設 port 8766、8767，未指定時占用會回退到臨時 port）；GUI 的分析或存檔由各自 app 負責，啟動器不直接改寫原始資料。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
-- `run_autofluxdep_gui.py`：工作站 Python 3.13 GUI profile，啟動 autofluxdep workflow GUI；其 runtime 預設寫 `logs/gui/autofluxdep/` 的 session log 並開 read-only remote-control socket（預設 port 8768）。GUI workflow 的資料輸出及執行條件見 [autofluxdep](../lib/zcu_tools/gui/app/autofluxdep/README.md)，不要把入口的啟動誤認為無資料副作用。四個 GUI 的 `.bat` 檔會先切換至腳本目錄，使用 `uv run --extra gui` 啟動相應 Python 檔；repo root 仍由入口檔的 parent 定位。
+- 三個 GUI 的 `.bat` 檔會先切換至腳本目錄，使用 `uv run --extra gui` 啟動相應 Python 檔；repo root 仍由入口檔的 parent 定位。
 - `start_server.py`、`start_server.ipynb`：ZCU 板端 PYNQ Python 3.8 啟動 QICK Pyro nameserver 與 proxy server。Python 腳本接收 daemon port、nameserver port、SoC 版本與網卡；它由自身位置將 repo root 加入 `sys.path`，`lib` 仍需由板端環境提供。Notebook 在 `scripts/` 執行，使用相對路徑 `../`、`../lib/` 與 `../qick/qick_lib/`。兩者均需能 import repo-root [`bitfiles`](../bitfiles/README.md) 與 [`zcu_tools.qick_remote`](../lib/zcu_tools/qick_remote/README.md)，會開網路服務並連接板端 SoC；板端需自行安裝或放置 QICK。板端部署、啟動與資產版本相容性**待核實**，尚未在硬體上測試。不要用工作站 Python 執行。
 
 ## 資料作業
 
-- `export_autofluxdep_sample_table.py`：工作站 Python 3.13 GUI profile，從 autofluxdep run directory、`manifest.json` 或配對的資料 root 匯出 SampleTable CSV。預設目的地在 data root 的 `exports/sample/samples.csv`，已存在時 append；`--overwrite` 改為重建。缺少有效 flux unit 的 artifact 在寫入前失敗。見 [autofluxdep](../lib/zcu_tools/gui/app/autofluxdep/README.md)。
 - `download_result.py`：工作站有 Google Drive client 依賴與 credentials 的環境。輸入 entry 名稱與 `GOOGLE_DRIVE_PARENT_FOLDER_ID`，從 Drive 遞迴下載到 repo `results/<name>/`。本地不存在會建目錄，遠端較新會覆寫本地檔案並設定 mtime。OAuth token 讀取或更新目前工作目錄的 `token.json`，可能啟動認證流程。此腳本會存取網路及使用者資料。
 - `upload_result.py`：同上，但需要 Drive 寫入權限。從 repo `results/<name>/` 建立或更新 Drive 對應 entry 的檔案與目錄。明確選用 `--prune-remote` 時，還會刪除遠端缺少本地對應的檔案。OAuth token 存於目前工作目錄的 `token.json`。此腳本會存取網路與修改使用者的 Drive 資料。
 - `sync.py`：**用途待確認**。觀察到 `md2nb` 在 `notebook_md/` 到 `notebook/` 間同步，`nb2md` 反向同步；使用 Jupytext、Git 與工作站環境。會建立或覆寫對應檔案，`md2nb` 不同步時可互動詢問，`nb2md` 直接覆寫。未確認此流程是否仍為正式的 notebook 發布程序。

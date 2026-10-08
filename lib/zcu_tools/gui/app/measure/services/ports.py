@@ -17,6 +17,9 @@ from typing import (
     runtime_checkable,
 )
 
+from zcu_tools.gui.session.context_types import LibraryChange
+from zcu_tools.gui.session.types import ParameterContext
+
 
 @dataclass(frozen=True, slots=True)
 class SaveDataSubmission:
@@ -209,47 +212,18 @@ class PersistOriginatorPort(Protocol):
 
 @runtime_checkable
 class ContextWritePort(Protocol):
-    """The single authority for ml/md content writes (ADR-0067).
+    """App structure commands, with app schema lowering bound by composition.
 
-    Sources holding an un-lowered ``CfgSchema`` (editor commit, writeback apply,
-    inspect save, create_from_template) write through this port; ContextService
-    lowers (app-local ``schema_to_raw_dict`` with the live md, so callers cannot
-    forget md)
-    + registers, and on success bumps the ``context`` version + emits
-    ML/MD_CHANGED. The only implementer is ContextService.
-
-    ``apply_writes`` is the batch entry: a successful apply (writeback) of md
-    attrs + multiple ml entries lands as **one** version bump and **at most one**
-    ML_CHANGED + one MD_CHANGED (the per-write methods each bump/emit on their
-    own; batching avoids N redundant full-refreshes). A failed batch is not
-    rolled back and publishes nothing; see ``ContextWrites``.
+    ParameterContext fixes the destination and expression/reference data.
+    ContextService owns the resource transaction and publication; no live
+    library handle, batch writeback or implicit target is exposed here.
     """
 
-    def set_ml_module_from_schema(self, name: str, schema: CfgSchema) -> None: ...
-    def set_ml_waveform_from_schema(self, name: str, schema: CfgSchema) -> None: ...
-    def replace_ml_module_from_schema(
-        self, old_name: str, new_name: str, schema: CfgSchema
-    ) -> None: ...
-    def replace_ml_waveform_from_schema(
-        self, old_name: str, new_name: str, schema: CfgSchema
-    ) -> None: ...
-    def set_md_attr(self, key: str, value: Any) -> None: ...
-    def apply_writes(self, writes: ContextWrites) -> None: ...
-
-
-@dataclass(frozen=True)
-class ContextWrites:
-    """A batch of ml/md content writes applied in insertion order.
-
-    On success the owner bumps the context version once and emits one event per
-    touched kind. The batch is not all-or-nothing: a later lower, register or
-    dump failure leaves the earlier live md/ml changes in place without a bump
-    or event. ``md`` maps attr name → value; ``ml_modules`` / ``ml_waveforms``
-    map entry name → its un-lowered ``CfgSchema``."""
-
-    md: dict[str, Any]
-    ml_modules: dict[str, CfgSchema]
-    ml_waveforms: dict[str, CfgSchema]
+    def apply_library_change(
+        self, parameters: ParameterContext, change: LibraryChange
+    ) -> None:
+        """Apply one typed structure command; target/lowering/write errors propagate."""
+        ...
 
 
 @runtime_checkable
@@ -277,7 +251,12 @@ class WritebackLifecyclePort(Protocol):
     removed.
     """
 
-    def create_draft(self, items: Iterable[WritebackItem]) -> Any: ...
+    def create_draft(
+        self,
+        items: Iterable[WritebackItem],
+        *,
+        parameters: ParameterContext | None,
+    ) -> Any: ...
     def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
     def teardown_draft(self, draft: Any) -> None: ...
 
@@ -297,6 +276,7 @@ class CfgEditorPort(Protocol):
         self,
         seed: CfgSchema,
         *,
+        parameters: ParameterContext | None,
         gc: bool = False,
         owner_key: str | None = None,
     ) -> tuple[str, tuple[SettableTarget, ...]]: ...

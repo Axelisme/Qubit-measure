@@ -78,7 +78,6 @@ def reference_resource() -> tuple[CfgResource, Catalog]:
     resource = CfgResource(
         lambda: schema,
         resolution=catalog.snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
     return resource, catalog
 
@@ -233,7 +232,6 @@ def test_nested_edit_detaches_only_ancestors_and_keeps_sibling_link(
     resource = CfgResource(
         lambda: schema,
         resolution=catalog.snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
     changed = resource.edit(
         resource.observe().ref.revision, (CfgEdit(("parent", "left", "x"), written),)
@@ -280,7 +278,6 @@ def test_later_edit_uses_shape_selected_by_earlier_relink() -> None:
     resource = CfgResource(
         lambda: schema,
         resolution=catalog.snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
     changed = resource.edit(
         resource.observe().ref.revision,
@@ -339,7 +336,6 @@ def switchable_resource() -> CfgResource:
                 )
             }
         ).snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
 
 
@@ -386,7 +382,6 @@ def _waveform_resource(
     return CfgResource(
         lambda: schema,
         resolution=resolution or (catalog or Catalog()).snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
 
 
@@ -639,7 +634,6 @@ def test_select_custom_uses_default_label_for_unnamed_shape() -> None:
     resource = CfgResource(
         lambda: schema,
         resolution=Catalog().snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
 
     changed = resource.select_custom_reference(
@@ -679,7 +673,7 @@ def test_complete_shape_switch_uses_new_inputs_and_existing_range_owner(
             "fixed": "locked",
             "number": 3.0,
             "child": {"x": 4.0},
-            "range": (6.0, 14.0, 5),
+            "range": {"start": 6.0, "stop": 14.0, "expts": 5, "step": 2.0},
         }
     }
 
@@ -826,7 +820,6 @@ def test_complete_input_never_fabricates_readonly_values(payload) -> None:
     resource = CfgResource(
         lambda: schema,
         resolution=Catalog().snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
     before = resource.observe()
     with pytest.raises(CfgInputError):
@@ -872,7 +865,6 @@ def test_override_shape_uses_declared_discriminator_not_other_literals() -> None
     resource = CfgResource(
         lambda: schema,
         resolution=Catalog().snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
     observation = resource.observe()
     assert observation.status is CfgStatus.VALID

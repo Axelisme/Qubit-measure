@@ -29,6 +29,17 @@ logger = logging.getLogger(__name__)
 
 ReferenceKind: TypeAlias = str
 
+type LoweredData = (
+    None
+    | bool
+    | int
+    | float
+    | complex
+    | str
+    | list[LoweredData]
+    | dict[str, LoweredData]
+)
+
 _LOCKED_CENTER_ABS_TOL = 1e-12
 
 
@@ -38,10 +49,6 @@ class ExpressionResolver(Protocol):
 
 class ReferenceResolver(Protocol):
     def __call__(self, kind: ReferenceKind, key: str, /) -> str | None: ...
-
-
-class RangeFactory(Protocol):
-    def __call__(self, start: float, stop: float, /, *, expts: int) -> object: ...
 
 
 def validate_reference_kinds(
@@ -101,9 +108,14 @@ def lower_finished_cfg(
     *,
     resolve_expression: ExpressionResolver | None,
     resolve_reference: ReferenceResolver | None,
-    make_range: RangeFactory,
-) -> dict[str, object]:
-    """Lower a finished cfg while preserving static/dynamic/lower ordering."""
+    # Range construction is shared pure-data policy, never caller injection.
+) -> dict[str, LoweredData]:
+    """Lower finished input to working-unit scalar/list/string-key dict data.
+
+    Preserve static/dynamic/lower order. Sweep ranges contain start, stop,
+    expts and step as plain data. Reject unsupported literals, tuples and
+    non-string keys at this boundary, without mutating the schema.
+    """
     validate_finished_cfg(schema, resolve_reference=resolve_reference)
     if resolve_expression is not None:
         _validate_dynamic_section(
@@ -118,7 +130,6 @@ def lower_finished_cfg(
         schema.value,
         resolve_expression=resolve_expression,
         resolve_reference=resolve_reference,
-        make_range=make_range,
         path=[],
     )
 
@@ -202,6 +213,8 @@ def _resolve_sweep_edge(
         _validate_scalar(ScalarSpec(label, float), value, path)
         if value.value is None:
             raise RuntimeError(f"Config field '{path}' ({label}) is incomplete")
+        if not isinstance(value.value, (int, float)):
+            raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")
         return float(value.value)
     if isinstance(value, (int, float)):
         return float(value)
@@ -238,6 +251,8 @@ def _resolve_range_input[T: (int, float)](
     _validate_scalar(ScalarSpec(label, type_), direct, path)
     if direct.value is None:
         raise RuntimeError(f"Config field '{path}' ({label}) is incomplete")
+    if not isinstance(direct.value, (int, float)):
+        raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")
     return type_(direct.value)
 
 
@@ -347,8 +362,7 @@ def _lower_centered_sweep(
     *,
     full_path: str,
     resolve_expression: ExpressionResolver | None,
-    make_range: RangeFactory,
-) -> object:
+) -> dict[str, LoweredData]:
     center = _resolve_sweep_edge(
         value.center,
         resolve_expression,
@@ -360,12 +374,44 @@ def _lower_centered_sweep(
         value.expts, int, path=f"{full_path}.expts", label="Sweep points"
     )
     if points == 1:
-        return make_range(center, center, expts=1)
+        return _lower_range(center, center, expts=1)
     span = _resolve_range_input(
         value.span, float, path=f"{full_path}.span", label="Sweep span"
     )
     half_span = span / 2.0
-    return make_range(center - half_span, center + half_span, expts=points)
+    return _lower_range(center - half_span, center + half_span, expts=points)
+
+
+def _lower_range(start: float, stop: float, *, expts: int) -> dict[str, LoweredData]:
+    if expts < 1:
+        raise RuntimeError("Sweep points must be at least 1")
+    step = 0.0 if expts == 1 else (stop - start) / (expts - 1)
+    stop = start if expts == 1 else start + step * (expts - 1)
+    if not all(math.isfinite(edge) for edge in (start, stop, step)):
+        raise RuntimeError("Sweep bounds and step must be finite")
+    if expts > 1 and math.isclose(step, 0.0, rel_tol=1e-9, abs_tol=1e-12):
+        raise RuntimeError("Sweep step must not be zero for multiple points")
+    return {"start": start, "stop": stop, "expts": expts, "step": step}
+
+
+def _lower_data(value: object, *, path: str) -> LoweredData:
+    if value is None or isinstance(value, (bool, int, float, complex, str)):
+        return value
+    if isinstance(value, list):
+        return [
+            _lower_data(item, path=f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    if isinstance(value, dict):
+        result: dict[str, LoweredData] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise RuntimeError(f"Config field '{path}' contains a non-string key")
+            result[key] = _lower_data(item, path=f"{path}.{key}")
+        return result
+    raise RuntimeError(
+        f"Config field '{path}' contains unsupported data: {type(value).__name__}"
+    )
 
 
 def _lower_section(
@@ -374,10 +420,9 @@ def _lower_section(
     *,
     resolve_expression: ExpressionResolver | None,
     resolve_reference: ReferenceResolver | None,
-    make_range: RangeFactory,
     path: list[str],
-) -> dict[str, object]:
-    result: dict[str, object] = {}
+) -> dict[str, LoweredData]:
+    result: dict[str, LoweredData] = {}
     extra_keys = set(value.fields) - set(spec.fields)
     if extra_keys:
         section = ".".join(path) or "<root>"
@@ -390,7 +435,7 @@ def _lower_section(
         node_value = value.fields.get(key)
         if node_value is None:
             if isinstance(node_spec, LiteralSpec):
-                result[key] = node_spec.value
+                result[key] = _lower_data(node_spec.value, path=full_path)
                 continue
             if isinstance(node_spec, ReferenceSpec) and node_spec.optional:
                 continue
@@ -406,7 +451,7 @@ def _lower_section(
                         raise RuntimeError(
                             f"Config field '{full_path}' ({label}) is unset"
                         )
-                    result[key] = node_value.value
+                    result[key] = _lower_data(node_value.value, path=full_path)
                 else:
                     result[key] = _resolve_eval(
                         node_value,
@@ -416,7 +461,7 @@ def _lower_section(
                         type_=node_spec.type,
                     )
             case LiteralSpec():
-                result[key] = node_spec.value
+                result[key] = _lower_data(node_spec.value, path=full_path)
             case SweepSpec():
                 assert isinstance(node_value, SweepValue)
                 start = _resolve_sweep_edge(
@@ -437,7 +482,7 @@ def _lower_section(
                     path=".".join([*path, key, "expts"]),
                     label="Sweep points",
                 )
-                result[key] = make_range(start, stop, expts=points)
+                result[key] = _lower_range(start, stop, expts=points)
             case CenteredSweepSpec():
                 assert isinstance(node_value, CenteredSweepValue)
                 result[key] = _lower_centered_sweep(
@@ -445,7 +490,6 @@ def _lower_section(
                     node_value,
                     full_path=".".join([*path, key]),
                     resolve_expression=resolve_expression,
-                    make_range=make_range,
                 )
             case ReferenceSpec():
                 assert isinstance(node_value, ReferenceValue)
@@ -454,7 +498,6 @@ def _lower_section(
                     node_value.value,
                     resolve_expression=resolve_expression,
                     resolve_reference=resolve_reference,
-                    make_range=make_range,
                     path=[*path, key],
                 )
             case CfgSectionSpec():
@@ -464,7 +507,6 @@ def _lower_section(
                     node_value,
                     resolve_expression=resolve_expression,
                     resolve_reference=resolve_reference,
-                    make_range=make_range,
                     path=[*path, key],
                 )
             case _:

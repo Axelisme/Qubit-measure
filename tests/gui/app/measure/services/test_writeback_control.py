@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -17,8 +18,12 @@ from zcu_tools.gui.app.measure.services.writeback_control import WritebackContro
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.gui.session.types import ContextReadiness
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._control_fakes import CallLog, call
 
@@ -205,15 +210,24 @@ def test_pane_writeback_rejects_edit_while_tab_is_busy() -> None:
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
 @pytest.mark.parametrize("fails", [False, True])
-def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fails):
-    context = SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
-        soc=None,
-        soccfg=None,
-        readiness=ContextReadiness.ACTIVE,
+def test_batch_write_publishes_shared_draft_even_after_partial_failure(
+    pane, fails, tmp_path: Path
+):
+    entry = ResultEntry.create(
+        "entry", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
     )
-    state = State(context)
+    entry.new_point("a")
+    bus = BaseEventBus()
+    context_service = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        bus,
+        bind_assets=ArbWaveformDatabase.info_at,
+    )
+    context_service.install_entry(entry)
+    control = ContextControlFacet(context=context_service)
+    control.use_point(PointUseRequest(entry.entry_id, "a"))
+    parameters = control.read_context()
+    state = State(SessionEnv(parameters=parameters, soc=None, soccfg=None))
     state.add_tab(
         "tab-1",
         Session(
@@ -222,16 +236,16 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fai
             cfg=MagicMock(),
         ),
     )
-    port = MagicMock()
-    service = WritebackService(MagicMock(), port)
+    service = WritebackService(
+        MagicMock(), control, entry_ledger=context_service.entry_ledger
+    )
     draft = service.create_draft(
-        [
-            MetaDictWriteback(target_name="a", description="d", proposed_value=1),
-        ]
+        [MetaDictWriteback("general.ext.a", "d", proposed_value=1)],
+        parameters=parameters,
     )
     tab = state.get_tab("tab-1")
     getattr(tab, pane).writeback_draft = draft
-    bus = BaseEventBus()
+    accepted_before = len(entry.ledger.events())
     observed = []
     bus.subscribe(
         TabInteractionChangedPayload,
@@ -239,7 +253,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fai
             (
                 event.tab_id,
                 event.fact,
-                service.preview_values(draft, context)["md-1"].proposed,
+                service.preview_values(draft)["md-1"].proposed,
             )
         ),
     )
@@ -259,11 +273,13 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fai
                 pane,
                 (*changes, WritebackEdit("missing")),
             )
-        port.apply_writes.assert_not_called()
+        assert len(entry.ledger.events()) == accepted_before
+        assert not control.read_context().lookup("general.ext.a").present
     else:
         result = facet.write_writeback_for_pane("tab-1", pane, changes)
         assert [item.id for item in result] == ["md-1"]
-        port.apply_writes.assert_called_once()
+        assert len(entry.ledger.events()) == accepted_before + 1
+        assert control.read_context().value("general.ext.a") == 11
     guard.acquire_writeback_permit.assert_called_once_with("tab-1")
     assert observed == [
         ("tab-1", TabInteractionFact.WRITEBACK_DRAFT_CHANGED, 11),

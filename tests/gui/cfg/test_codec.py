@@ -76,13 +76,13 @@ def test_incomplete_sweep_edge_round_trips_and_cannot_be_finished(
         (
             SweepSpec(),
             SweepValue(DirectValue(0.2, raw="0.20"), 1.0, 5),
-            (0.2, 1.0, 5),
+            {"start": 0.2, "stop": 1.0, "expts": 5, "step": 0.2},
             0.2,
         ),
         (
             CenteredSweepSpec(locked_center=0.2),
             CenteredSweepValue(DirectValue(0.2, raw="0.20"), 1.6, 5),
-            (-0.6, 1.0, 5),
+            {"start": -0.6, "stop": 1.0, "expts": 5, "step": 0.4},
             0.4,
         ),
     ],
@@ -102,7 +102,6 @@ def test_direct_sweep_text_round_trips_and_lowers_to_numeric_range(
         restored,
         resolve_expression=None,
         resolve_reference=None,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
     assert raw["axis"] == pytest.approx(expected)
     assert value.step == pytest.approx(expected_step)
@@ -140,7 +139,6 @@ def test_sweep_control_carriers_round_trip_and_block_finished_cfg(
             restored,
             resolve_expression=None,
             resolve_reference=None,
-            make_range=lambda start, stop, *, expts: (start, stop, expts),
         )
 
 
@@ -161,15 +159,12 @@ def test_sweep_control_raw_and_canonical_step_survive_codec_and_lowering():
         restored,
         resolve_expression=None,
         resolve_reference=None,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
-    assert result["axis"] == (0.0, 1.0, 4)
+    assert result["axis"] == {"start": 0.0, "stop": 1.0, "expts": 4, "step": 1 / 3}
 
 
 def test_complex_direct_value_has_lossless_json_codec_and_typed_lowering() -> None:
-    import json
-
-    from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+    from zcu_tools.gui.cfg import lower_finished_cfg
 
     value = DirectValue(0.123456789123456 + 9.876543219876543j)
     schema = CfgSchema(
@@ -178,7 +173,9 @@ def test_complex_direct_value_has_lossless_json_codec_and_typed_lowering() -> No
     )
     restored = raw_to_schema(schema, json.loads(json.dumps(schema_to_raw(schema))))
     assert restored.value.fields["center"] == value
-    assert schema_to_raw_dict(restored, None, None) == {"center": value.value}
+    assert lower_finished_cfg(
+        restored, resolve_expression=None, resolve_reference=None
+    ) == {"center": value.value}
 
 
 def test_decode_eval_wire_carriers() -> None:
@@ -641,7 +638,10 @@ def test_linked_multi_shape_ref_uses_value_discriminator_not_allowed0():
     )
 
     raw = schema_to_raw(schema)  # used to raise SessionCodecError on 'ro_ch'
-    readout_value = cast(dict, cast(dict, raw["readout"])["value"])
+    reference = raw["readout"]
+    assert isinstance(reference, dict)
+    readout_value = reference["value"]
+    assert isinstance(readout_value, dict)
     assert readout_value["type"] == {"__kind": "direct", "value": "readout/pulse"}
 
     restored = raw_to_schema(_empty(spec), raw)
@@ -668,8 +668,10 @@ def test_linked_multi_shape_ref_serializes_when_literal_leaf_omitted():
     )
 
     raw = schema_to_raw(schema)
-
-    readout_value = cast(dict, cast(dict, raw["readout"])["value"])
+    reference = raw["readout"]
+    assert isinstance(reference, dict)
+    readout_value = reference["value"]
+    assert isinstance(readout_value, dict)
     assert readout_value["type"] == {"__kind": "direct", "value": "readout/pulse"}
     assert readout_value["gain"] == {"__kind": "direct", "value": 0.4}
 

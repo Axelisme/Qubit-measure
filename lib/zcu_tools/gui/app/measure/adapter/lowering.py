@@ -13,95 +13,80 @@ from zcu_tools.gui.cfg import (
     validate_finished_cfg,
     validate_reference_kinds,
 )
-from zcu_tools.program.v2 import SweepCfg
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
+    from zcu_tools.gui.cfg.lowering import LoweredData
+    from zcu_tools.gui.session.types import ParameterContext
 
 _REFERENCE_KINDS = frozenset({"module", "waveform"})
 
 
-def _make_expression_resolver(md: MetaDict) -> ExpressionResolver:
+def _make_expression_resolver(
+    parameters: ParameterContext | None,
+) -> ExpressionResolver:
     from zcu_tools.gui.session.expression import evaluate_scalar_expr
 
     def resolve_expression(expr: str, /) -> int | float | complex:
-        return evaluate_scalar_expr(expr, md)
+        return evaluate_scalar_expr(expr, parameters)
 
     return resolve_expression
 
 
-def _make_reference_resolver(ml: ModuleLibrary) -> ReferenceResolver:
+def _make_reference_resolver(parameters: ParameterContext) -> ReferenceResolver:
     from zcu_tools.gui.app.measure.cfg_schemas import (
         module_cfg_to_value,
         waveform_cfg_to_value,
     )
 
     def resolve_reference(kind: str, key: str, /) -> str | None:
+        root = parameters.library_key(key)
+        library = parameters.library
         if kind == "module":
-            if key not in ml.modules:
+            if root not in library.module_keys():
                 return None
-            spec, _ = module_cfg_to_value(ml.modules[key])
-            return spec.label
-        if kind == "waveform":
-            if key not in ml.waveforms:
+            spec, _ = module_cfg_to_value(library.get_module(root))
+        elif kind == "waveform":
+            if root not in library.waveform_keys():
                 return None
-            spec, _ = waveform_cfg_to_value(ml.waveforms[key])
-            return spec.label
-        raise RuntimeError(f"Unsupported reference kind {kind!r}")
+            spec, _ = waveform_cfg_to_value(library.get_waveform(root))
+        else:
+            raise RuntimeError(f"Unsupported reference kind {kind!r}")
+        return spec.label
 
     return resolve_reference
 
 
-def make_sweep_range(start: float, stop: float, /, *, expts: int) -> SweepCfg:
-    if expts == 1:
-        assert stop == start, (
-            f"for expts == 1, stop must equal start, got start={start}, stop={stop}"
-        )
-        step = 0.0
-    else:
-        step = (stop - start) / (expts - 1)
-
-    normalized_stop = start + step * (expts - 1)
-
-    assert expts > 0, f"expts must be greater than 0, but got {expts}"
-    if expts == 1:
-        assert step == 0, f"for expts == 1, step must be 0, but got {step}"
-    else:
-        assert step != 0, f"step must not be zero when expts > 1, but got {step}"
-
-    return SweepCfg(
-        start=start,
-        stop=normalized_stop,
-        expts=expts,
-        step=step,
-    )
-
-
-def validate_schema(schema: CfgSchema, ml: ModuleLibrary | None) -> None:
-    """Validate the static contract using the current measure library."""
+def validate_schema(schema: CfgSchema, parameters: ParameterContext | None) -> None:
+    """Validate against a fixed role-aware capture; None has no references."""
     validate_reference_kinds(schema, _REFERENCE_KINDS)
     validate_finished_cfg(
         schema,
-        resolve_reference=None if ml is None else _make_reference_resolver(ml),
+        resolve_reference=None
+        if parameters is None
+        else _make_reference_resolver(parameters),
     )
 
 
-def schema_to_resolved_dict(schema: CfgSchema) -> dict[str, object]:
-    """Freeze displayed values with measure range policy, without live resolvers."""
+def schema_to_resolved_dict(schema: CfgSchema) -> dict[str, LoweredData]:
+    """Freeze displayed values as pure data, without live resolvers."""
     validate_reference_kinds(schema, _REFERENCE_KINDS)
-    return lower_resolved_cfg(schema, make_range=make_sweep_range)
+    return lower_resolved_cfg(schema)
 
 
 def schema_to_raw_dict(
     schema: CfgSchema,
-    md: MetaDict | None,
-    ml: ModuleLibrary | None,
-) -> dict[str, object]:
-    """Lower through the shared algorithm with measure-owned runtime policy."""
+    parameters: ParameterContext | None,
+) -> dict[str, LoweredData]:
+    """Lower using fixed captured roles and pure-data sweep ranges.
+
+    None allows pure calculation but parameter/library expressions fail.
+    Finished-value, reference and source errors propagate without writes.
+    """
     validate_reference_kinds(schema, _REFERENCE_KINDS)
     return lower_finished_cfg(
         schema,
-        resolve_expression=None if md is None else _make_expression_resolver(md),
-        resolve_reference=None if ml is None else _make_reference_resolver(ml),
-        make_range=make_sweep_range,
+        resolve_expression=_make_expression_resolver(parameters),
+        resolve_reference=None
+        if parameters is None
+        else _make_reference_resolver(parameters),
     )

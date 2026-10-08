@@ -21,6 +21,8 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog, _FakeDevicePanel
 
+from tests.gui.session.ui._parameter_fakes import make_parameters
+
 
 def _entry(
     name: str, type_name: str = "FakeDevice", connected: bool = True
@@ -60,11 +62,12 @@ def _make_ctrl() -> MagicMock:
     ctrl.is_memory_device.return_value = False
     ctrl.get_device_snapshot.return_value = None
     ctrl.try_poll_device_info.return_value = True
+    ctrl.read_context.return_value = None
     return ctrl
 
 
 def _make_dialog(ctrl: MagicMock) -> DeviceDialog:
-    return DeviceDialog(ctrl, md_provider=ctrl.get_current_md)
+    return DeviceDialog(ctrl, parameter_provider=ctrl.read_context)
 
 
 def _connected_snapshot(name: str, info: object) -> DeviceSnapshot:
@@ -796,15 +799,10 @@ def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
 # ---------------------------------------------------------------------------
 
 
-def _make_ctrl_with_md(flx_int: float = 0.5) -> MagicMock:
-    """Build a ctrl mock pre-loaded with a MetaDict containing flx_int."""
-    from zcu_tools.resources.context import MetaDict
-
-    md = MetaDict()
-    md.flx_int = flx_int
-
+def _make_ctrl_with_parameters(flx_int: float = 0.5) -> MagicMock:
+    """Build a device control fake with a separate fixed parameter provider."""
     ctrl = _make_ctrl()
-    ctrl.get_current_md.return_value = md
+    ctrl.read_context.return_value = make_parameters({"flx_int": flx_int})
     return ctrl
 
 
@@ -814,7 +812,7 @@ def test_eval_apply_resolves_expression_to_float(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
     from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
-    ctrl = _make_ctrl_with_md(flx_int=0.5)
+    ctrl = _make_ctrl_with_parameters(flx_int=0.5)
     ctrl.list_devices.return_value = [_entry("fd")]
     info = FakeDeviceInfo(address="none")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
@@ -826,11 +824,12 @@ def test_eval_apply_resolves_expression_to_float(qapp):
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
     # Switch value field to eval mode and type an expression
-    panel._value_field._switch_to_eval()
-    panel._value_field._line_edit.setText("flx_int")
+    panel._value_field.load_expression("general.ext.flx_int")
+    ctrl.read_context.reset_mock()
 
     dialog._apply_btn.click()
 
+    ctrl.read_context.assert_called_once()
     ctrl.start_setup_device.assert_called_once()
     (req,) = ctrl.start_setup_device.call_args.args
     assert isinstance(req, SetupDeviceRequest)
@@ -846,7 +845,7 @@ def test_eval_apply_fast_fails_on_undefined_name(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
     from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
-    ctrl = _make_ctrl_with_md()
+    ctrl = _make_ctrl_with_parameters()
     ctrl.list_devices.return_value = [_entry("fd")]
     info = FakeDeviceInfo(address="none")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
@@ -857,8 +856,7 @@ def test_eval_apply_fast_fails_on_undefined_name(qapp):
 
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
-    panel._value_field._switch_to_eval()
-    panel._value_field._line_edit.setText("missing_var")
+    panel._value_field.load_expression("missing_var")
 
     dialog._apply_btn.click()
 
@@ -872,7 +870,7 @@ def test_eval_apply_fast_fails_on_syntax_error(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
     from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
-    ctrl = _make_ctrl_with_md()
+    ctrl = _make_ctrl_with_parameters()
     ctrl.list_devices.return_value = [_entry("fd")]
     info = FakeDeviceInfo(address="none")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
@@ -883,8 +881,7 @@ def test_eval_apply_fast_fails_on_syntax_error(qapp):
 
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
-    panel._value_field._switch_to_eval()
-    panel._value_field._line_edit.setText("r_f[")
+    panel._value_field.load_expression("r_f[")
 
     dialog._apply_btn.click()
 
@@ -893,12 +890,12 @@ def test_eval_apply_fast_fails_on_syntax_error(qapp):
 
 
 def test_eval_apply_no_context_fast_fails(qapp):
-    """When get_current_md() raises (no active context), apply fast-fails."""
+    """When the parameter provider raises (no active context), apply fast-fails."""
     from zcu_tools.device.fake import FakeDeviceInfo
     from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
     ctrl = _make_ctrl()
-    ctrl.get_current_md.side_effect = RuntimeError("no active context")
+    ctrl.read_context.side_effect = RuntimeError("no active context")
     ctrl.list_devices.return_value = [_entry("fd")]
     info = FakeDeviceInfo(address="none")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
@@ -909,8 +906,7 @@ def test_eval_apply_no_context_fast_fails(qapp):
 
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
-    panel._value_field._switch_to_eval()
-    panel._value_field._line_edit.setText("flx_int")
+    panel._value_field.load_expression("general.ext.flx_int")
 
     dialog._apply_btn.click()
 
@@ -922,7 +918,7 @@ def test_direct_mode_apply_unchanged(qapp):
     """Direct mode (no eval): apply behaviour is identical to the pre-eval baseline."""
     from zcu_tools.device.fake import FakeDeviceInfo
 
-    ctrl = _make_ctrl_with_md()
+    ctrl = _make_ctrl_with_parameters()
     ctrl.list_devices.return_value = [_entry("fd")]
     info = FakeDeviceInfo(address="none", value=3.14)
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
@@ -940,6 +936,7 @@ def test_direct_mode_apply_unchanged(qapp):
     assert isinstance(req.info, FakeDeviceInfo)
     # value should be the float passed through unchanged
     assert req.info.value == pytest.approx(3.14)
+    ctrl.read_context.assert_not_called()
 
 
 def test_eval_apply_out_of_range_fast_fails(qapp):
@@ -951,7 +948,7 @@ def test_eval_apply_out_of_range_fast_fails(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
     from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
-    ctrl = _make_ctrl_with_md(flx_int=0.0)  # flx_int evaluates to 0.0
+    ctrl = _make_ctrl_with_parameters(flx_int=0.0)  # flx_int evaluates to 0.0
     ctrl.list_devices.return_value = [_entry("fd")]
     info = FakeDeviceInfo(address="none")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
@@ -963,8 +960,7 @@ def test_eval_apply_out_of_range_fast_fails(qapp):
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
     # rampstep_field has minimum=1e-9; expression evaluates to 0.0 → below minimum
-    panel._rampstep_field._switch_to_eval()
-    panel._rampstep_field._line_edit.setText("flx_int")
+    panel._rampstep_field.load_expression("general.ext.flx_int")
 
     dialog._apply_btn.click()
 
@@ -978,7 +974,7 @@ def test_eval_apply_in_range_sends_setup(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
     from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
-    ctrl = _make_ctrl_with_md(flx_int=0.001)  # 0.001 is within [1e-9, 1e9]
+    ctrl = _make_ctrl_with_parameters(flx_int=0.001)  # 0.001 is within [1e-9, 1e9]
     ctrl.list_devices.return_value = [_entry("fd")]
     info = FakeDeviceInfo(address="none")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
@@ -989,8 +985,7 @@ def test_eval_apply_in_range_sends_setup(qapp):
 
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
-    panel._rampstep_field._switch_to_eval()
-    panel._rampstep_field._line_edit.setText("flx_int")
+    panel._rampstep_field.load_expression("general.ext.flx_int")
 
     dialog._apply_btn.click()
 
@@ -1008,7 +1003,7 @@ def test_choice_field_unaffected_by_eval_mode(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
     from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
-    ctrl = _make_ctrl_with_md()
+    ctrl = _make_ctrl_with_parameters()
     ctrl.list_devices.return_value = [_entry("fd")]
     info = FakeDeviceInfo(address="none", output="on")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
@@ -1019,8 +1014,7 @@ def test_choice_field_unaffected_by_eval_mode(qapp):
 
     panel = dialog._stack.currentWidget()
     assert isinstance(panel, _FakeDevicePanel)
-    panel._value_field._switch_to_eval()
-    panel._value_field._line_edit.setText("flx_int")
+    panel._value_field.load_expression("general.ext.flx_int")
 
     dialog._apply_btn.click()
 

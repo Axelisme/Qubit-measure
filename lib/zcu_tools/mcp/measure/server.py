@@ -217,7 +217,11 @@ def main(*, recipes: Sequence[RecipeDefinition]) -> None:
         run_stdio_loop(
             _CONFIG,
             build_measure_tools(context, recipes=recipes),
-            hooks=StdioLoopHooks(on_start=_setup_logging, on_error=logger.exception),
+            hooks=StdioLoopHooks(
+                on_start=_setup_logging,
+                on_error=logger.exception,
+                tool_call_scope=session.tool_call_scope,
+            ),
             server_version="1.1.1",
         )
     finally:

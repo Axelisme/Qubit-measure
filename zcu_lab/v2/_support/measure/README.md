@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-05，範本與 cfg authoring 角色邊界
+**Last updated:** 2026-10-08，固定角色路徑與 module seed
 
 # Measure domain support
 
@@ -13,8 +13,10 @@ Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitio
 單一 adapter 的 domain policy 留在其 authoritative file；同一小群組共用但不具全域意義的
 helper 留在群組內 `_shared.py`。
 
-`schema_builder.py` 提供 adapter author可讀的 domain vocabulary；`seeds.py` 延後解析
-MetaDict、value source與智能預設值。`defaults/` 擁有 cfg authoring 的語義角色與 fresh module
+`schema_builder.py` 提供 adapter author可讀的 domain vocabulary。`seeds.py` 的角色路徑 seed
+只讀 tab 的固定 ParameterContext。module seed 按明確的 module 槽或 library root 掛載校準內容，
+缺少校準時使用 caller 指定的 fresh fallback；來源與 materialization 故障仍報錯。
+其他 adapter 的舊 MetaDict／named-library defaults 尚待遷移。`defaults/` 擁有 cfg authoring 的語義角色與 fresh module
 預設值，startup TemplateCatalog 也重用其 shape／blank factories。這些 module 可以依賴 domain-free `zcu_tools.gui.cfg`，但 generic cfg
 core不得反向 import measure domain。
 

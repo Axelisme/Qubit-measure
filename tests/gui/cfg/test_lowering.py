@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
+    CfgNodeSpec,
+    CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -23,28 +22,15 @@ from zcu_tools.gui.cfg import (
     lower_finished_cfg,
     lower_resolved_cfg,
 )
-from zcu_tools.program.v2 import SweepCfg
-from zcu_tools.resources.context import MetaDict
 
 
 def _schema(
-    spec_fields: dict[str, object], value_fields: dict[str, object]
+    spec_fields: dict[str, CfgNodeSpec], value_fields: dict[str, CfgNodeValue | None]
 ) -> CfgSchema:
     return CfgSchema(
-        spec=CfgSectionSpec(fields=spec_fields),  # type: ignore[arg-type]
-        value=CfgSectionValue(fields=value_fields),  # type: ignore[arg-type]
+        spec=CfgSectionSpec(fields=spec_fields),
+        value=CfgSectionValue(fields=value_fields),
     )
-
-
-def _library(
-    *,
-    modules: dict[str, object] | None = None,
-    waveforms: dict[str, object] | None = None,
-) -> MagicMock:
-    ml = MagicMock()
-    ml.modules = {} if modules is None else modules
-    ml.waveforms = {} if waveforms is None else waveforms
-    return ml
 
 
 @pytest.mark.parametrize(
@@ -61,9 +47,7 @@ def test_frozen_lowering_rejects_nonfinite_scalar_before_execution(
 ) -> None:
     schema = _schema({"value": ScalarSpec("Value", type_)}, {"value": value})
     with pytest.raises(RuntimeError, match="finite"):
-        lower_resolved_cfg(
-            schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
-        )
+        lower_resolved_cfg(schema)
 
 
 @pytest.mark.parametrize(
@@ -81,7 +65,6 @@ def test_live_lowering_rejects_nonfinite_expression(
             schema,
             resolve_expression=lambda _: nonfinite,
             resolve_reference=None,
-            make_range=lambda start, stop, *, expts: (start, stop, expts),
         )
 
 
@@ -113,9 +96,7 @@ def test_resolved_lowering_uses_per_node_cached_shapes_and_keeps_sources() -> No
         },
     )
     previous = deepcopy(schema)
-    result = lower_resolved_cfg(
-        schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
-    )
+    result = lower_resolved_cfg(schema)
     assert result == {"first": {"gain": 0.25}, "second": {"count": 3}, "center": 1 + 2j}
     assert schema == previous
 
@@ -135,9 +116,7 @@ def test_resolved_lowering_rejects_unresolved_or_invalid_scalar(value) -> None:
         {"frequency": ScalarSpec("Frequency", float)}, {"frequency": value}
     )
     with pytest.raises(RuntimeError, match="frequency"):
-        lower_resolved_cfg(
-            schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
-        )
+        lower_resolved_cfg(schema)
 
 
 @pytest.mark.parametrize(
@@ -158,9 +137,7 @@ def test_resolved_lowering_requires_valid_cached_reference_shape(label, error) -
         },
     )
     with pytest.raises(RuntimeError):
-        lower_resolved_cfg(
-            schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
-        )
+        lower_resolved_cfg(schema)
 
 
 @pytest.mark.parametrize(
@@ -184,9 +161,7 @@ def test_resolved_lowering_keeps_static_type_and_choice_validation(
 ) -> None:
     schema = _schema({"value": spec}, {"value": value})
     with pytest.raises(RuntimeError, match=message):
-        lower_resolved_cfg(
-            schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
-        )
+        lower_resolved_cfg(schema)
 
 
 def test_resolved_lowering_ranges_keep_cached_edges_and_optional_ref() -> None:
@@ -213,10 +188,11 @@ def test_resolved_lowering_ranges_keep_cached_edges_and_optional_ref() -> None:
         },
     )
     previous = deepcopy(schema)
-    result = lower_resolved_cfg(
-        schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
-    )
-    assert result == {"sweep": (0.0, 1.0, 4), "centered": (3.0, 7.0, 3)}
+    result = lower_resolved_cfg(schema)
+    assert result == {
+        "sweep": {"start": 0.0, "stop": 1.0, "expts": 4, "step": 1 / 3},
+        "centered": {"start": 3.0, "stop": 7.0, "expts": 3, "step": 2.0},
+    }
     assert schema == previous
 
 
@@ -239,22 +215,20 @@ def test_resolved_lowering_rejects_incomplete_step_and_locked_center_mismatch() 
     )
     for schema, message in ((incomplete, "step"), (locked, "locked")):
         with pytest.raises(RuntimeError, match=message):
-            lower_resolved_cfg(
-                schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
-            )
+            lower_resolved_cfg(schema)
 
 
 def test_resolved_lowering_detaches_mutable_literal_results() -> None:
     literal = {"values": [1, 2]}
     schema = _schema({"fixed": LiteralSpec(literal)}, {"fixed": DirectValue(literal)})
-    result = lower_resolved_cfg(
-        schema, make_range=lambda start, stop, *, expts: (start, stop, expts)
-    )
+    result = lower_resolved_cfg(schema)
     literal["values"].append(3)
     assert result == {"fixed": {"values": [1, 2]}}
     fixed = result["fixed"]
     assert isinstance(fixed, dict)
-    fixed["values"].append(4)
+    values = fixed["values"]
+    assert isinstance(values, list)
+    values.append(4)
     assert literal == {"values": [1, 2, 3]}
 
 
@@ -278,7 +252,9 @@ def test_lowers_scalar_literal_optional_section_and_device() -> None:
         },
     )
 
-    assert schema_to_raw_dict(schema, None, None) == {
+    assert lower_finished_cfg(
+        schema, resolve_expression=None, resolve_reference=None
+    ) == {
         "literal": "fixed",
         "count": 3,
         "section": {"enabled": True},
@@ -291,11 +267,11 @@ def test_eval_snapshot_precedes_current_context_and_warns_on_drift(caplog) -> No
         {"frequency": ScalarSpec("Frequency", float)},
         {"frequency": EvalValue("q_f", resolved=5000.0)},
     )
-    md = MetaDict()
-    md.q_f = 6000.0
 
     with caplog.at_level("WARNING"):
-        raw = schema_to_raw_dict(schema, md, None)
+        raw = lower_finished_cfg(
+            schema, resolve_expression=lambda _: 6000.0, resolve_reference=None
+        )
 
     assert raw == {"frequency": 5000.0}
     assert [record.message for record in caplog.records] == [
@@ -311,14 +287,14 @@ def test_unresolved_eval_without_context_uses_exact_error() -> None:
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(schema, None, None)
+        lower_finished_cfg(schema, resolve_expression=None, resolve_reference=None)
 
     assert str(exc_info.value) == (
         "Config field 'frequency' (Frequency) expression 'q_f' is unresolved"
     )
 
 
-def test_lowers_sweep_and_centered_sweep_to_sweep_cfg() -> None:
+def test_lowers_sweep_and_centered_sweep_to_plain_range_data() -> None:
     schema = _schema(
         {
             "linear": SweepSpec("Linear"),
@@ -330,14 +306,12 @@ def test_lowers_sweep_and_centered_sweep_to_sweep_cfg() -> None:
         },
     )
 
-    raw = schema_to_raw_dict(schema, None, None)
+    raw = lower_finished_cfg(schema, resolve_expression=None, resolve_reference=None)
 
     linear = raw["linear"]
     centered = raw["centered"]
-    assert isinstance(linear, SweepCfg)
-    assert linear.model_dump() == {"start": 1.0, "stop": 2.0, "expts": 5, "step": 0.25}
-    assert isinstance(centered, SweepCfg)
-    assert centered.model_dump() == {
+    assert linear == {"start": 1.0, "stop": 2.0, "expts": 5, "step": 0.25}
+    assert centered == {
         "start": 8.0,
         "stop": 12.0,
         "expts": 5,
@@ -368,9 +342,9 @@ def test_custom_reference_flattens_embedded_snapshot() -> None:
         },
     )
 
-    assert schema_to_raw_dict(schema, None, None) == {
-        "module": {"type": "pulse", "gain": 0.25}
-    }
+    assert lower_finished_cfg(
+        schema, resolve_expression=None, resolve_reference=None
+    ) == {"module": {"type": "pulse", "gain": 0.25}}
 
 
 def test_disabled_optional_reference_is_omitted() -> None:
@@ -380,7 +354,10 @@ def test_disabled_optional_reference_is_omitted() -> None:
         {"module": None},
     )
 
-    assert schema_to_raw_dict(schema, None, None) == {}
+    assert (
+        lower_finished_cfg(schema, resolve_expression=None, resolve_reference=None)
+        == {}
+    )
 
 
 @pytest.mark.parametrize(
@@ -410,7 +387,9 @@ def test_missing_library_reference_uses_exact_error(
     schema = _schema({"ref": spec}, {"ref": value})
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(schema, None, _library())
+        lower_finished_cfg(
+            schema, resolve_expression=None, resolve_reference=lambda kind, key: None
+        )
 
     assert str(exc_info.value) == expected
 
@@ -423,7 +402,7 @@ def test_library_reference_without_library_uses_exact_error() -> None:
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(schema, None, None)
+        lower_finished_cfg(schema, resolve_expression=None, resolve_reference=None)
 
     assert str(exc_info.value) == (
         "Cannot resolve library reference 'named' without ModuleLibrary"
@@ -446,7 +425,6 @@ def test_reference_kind_is_forwarded_as_opaque_id() -> None:
         schema,
         resolve_expression=None,
         resolve_reference=resolve_reference,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
 
     assert raw == {"asset": {}}
@@ -464,10 +442,8 @@ def test_library_reference_unsupported_shape_uses_exact_error() -> None:
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(
-            schema,
-            None,
-            _library(modules={"drive": {"type": "pulse"}}),
+        lower_finished_cfg(
+            schema, resolve_expression=None, resolve_reference=lambda kind, key: "Pulse"
         )
 
     assert str(exc_info.value) == (
@@ -496,7 +472,7 @@ def test_invalid_custom_reference_uses_exact_error(
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(schema, None, None)
+        lower_finished_cfg(schema, resolve_expression=None, resolve_reference=None)
 
     assert str(exc_info.value) == expected
 
@@ -528,8 +504,7 @@ def test_shared_ports_preserve_stage_order_without_reference_caching() -> None:
     raw = lower_finished_cfg(
         schema,
         resolve_expression=resolve_expression,
-        resolve_reference=resolve_reference,  # type: ignore[arg-type]
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
+        resolve_reference=resolve_reference,
     )
 
     assert raw == {"module": {"gain": 0.25}}
@@ -540,25 +515,3 @@ def test_shared_ports_preserve_stage_order_without_reference_caching() -> None:
         "reference:module:drive",
         "expression:gain",
     ]
-
-
-def test_shared_range_port_receives_centered_edges() -> None:
-    schema = _schema(
-        {"sweep": CenteredSweepSpec("Sweep")},
-        {"sweep": CenteredSweepValue(center=10.0, span=4.0, expts=5)},
-    )
-    calls: list[tuple[float, float, int]] = []
-
-    def make_range(start: float, stop: float, /, *, expts: int) -> object:
-        calls.append((start, stop, expts))
-        return {"start": start, "stop": stop, "expts": expts}
-
-    raw = lower_finished_cfg(
-        schema,
-        resolve_expression=None,
-        resolve_reference=None,
-        make_range=make_range,
-    )
-
-    assert raw == {"sweep": {"start": 8.0, "stop": 12.0, "expts": 5}}
-    assert calls == [(8.0, 12.0, 5)]

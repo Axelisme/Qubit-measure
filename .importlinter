@@ -117,15 +117,6 @@ forbidden_modules =
     zcu_tools.device
     zcu_tools.notebook
 
-# ADR-0045: autofluxdep consumes shared owners, not the measure app.
-[importlinter:contract:autofluxdep-no-main]
-name = C5: autofluxdep does not depend on the measure app
-type = forbidden
-source_modules =
-    zcu_tools.gui.app.autofluxdep
-forbidden_modules =
-    zcu_tools.gui.app.measure
-
 # lib/zcu_tools/analysis/fluxdep/README.md: notebook and GUI are adapters of the
 # analysis kernel (formerly ADR-0028).
 [importlinter:contract:fluxdep-kernel-no-adapters]
@@ -254,7 +245,6 @@ ignore_imports =
     # Not debt: the shared remote transport and each app's wire specs (ADR-0068).
     zcu_tools.mcp.** -> zcu_tools.gui.remote.**
     zcu_tools.mcp.** -> zcu_tools.gui.app.*.remote.**
-    zcu_tools.mcp.** -> zcu_tools.gui.app.autofluxdep.services.remote.**
     # Debt: logging setup is not part of the remote contract (backlog).
     zcu_tools.mcp.measure.server -> zcu_tools.gui.logging_setup
 

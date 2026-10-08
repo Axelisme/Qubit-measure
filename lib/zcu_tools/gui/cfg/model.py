@@ -136,7 +136,7 @@ def FloatSpec(
 class LiteralSpec:
     """A fixed-value field: no widget shown, value is always spec.value."""
 
-    value: Any
+    value: object
     label: str = ""
 
 
@@ -343,7 +343,7 @@ class DirectValue:
     runtime metadata; persistence stores only the input.
     The wrapper also preserves direct mode while unset or invalid."""
 
-    value: Any | None = None
+    value: object = None
     raw: str | None = field(default=None, kw_only=True)
     error: str | None = field(default=None, kw_only=True)
     validation_error: str | None = field(default=None, kw_only=True, repr=False)
