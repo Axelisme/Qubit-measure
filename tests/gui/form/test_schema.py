@@ -520,6 +520,177 @@ def test_discriminator_identity_survives_dynamic_choices_refresh() -> None:
         assert state.input.data == before
 
 
+type NumericChoice = Annotated[
+    NumericAliasBranch | NumericOtherBranch, Field(discriminator="kind")
+]
+
+
+def identity_input() -> dict[str, JsonValue]:
+    """Return complete wire input for containers and reused exported range aliases."""
+    return {
+        "sequence": [{"kind": 2, "amount": 3.0}, {"kind": 3, "other": 4.0}],
+        "fixed": [{"kind": 1, "amount": 3.0}, {"kind": 3, "other": 4.0}],
+        "mapping": {"drive": {"kind": 2, "amount": 3.0}},
+        "restricted": {"kind": "linrange", "n": 2},
+        "unrestricted": {"kind": "linrange", "n": 4},
+    }
+
+
+class SchemaIdentityForm(FormModel):
+    """Tagged schemas occur inside whole leaves and shared alias definitions."""
+
+    sequence: list[NumericChoice]
+    fixed: tuple[NumericChoice, NumericChoice]
+    mapping: dict[str, NumericChoice]
+    restricted: RangeInput
+    unrestricted: RangeInput
+
+    @classmethod
+    def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Refresh whole-leaf membership and only one range occurrence's n."""
+        empty = env.md.get("empty_containers")
+        data = identity_input()
+        return {
+            ("sequence",): () if empty else (data["sequence"],),
+            ("fixed",): () if empty else (data["fixed"],),
+            ("mapping",): () if empty else (data["mapping"],),
+            ("restricted", "n"): (3,) if env.md.get("three_only") else (2,),
+        }
+
+
+def schema_object(value: JsonValue) -> dict[str, JsonValue]:
+    """Require a public JSON Schema object; fail an assertion otherwise."""
+    assert isinstance(value, dict)
+    return value
+
+
+def identity_values(node: dict[str, JsonValue]) -> list[JsonValue]:
+    """Read each oneOf branch's public identity, retaining None when absent."""
+    branches = node["oneOf"]
+    assert isinstance(branches, list)
+    return [
+        schema_object(branch).get("x-form-discriminator-values") for branch in branches
+    ]
+
+
+def test_container_discriminator_identity_and_retained_discriminator_identity_refresh() -> (
+    None
+):
+    env = FormEnv(md=MetaDict())
+    state = FormState(FormInput(SchemaIdentityForm, identity_input()))
+    before = state.input.data
+    for empty, three_only in (
+        (False, False),
+        (True, False),
+        (False, True),
+        (False, False),
+    ):
+        env.md.update({"empty_containers": empty, "three_only": three_only})
+        schema = SchemaIdentityForm.input_schema(env)
+        fields = schema_object(schema["properties"])
+        definitions = schema_object(schema["$defs"])
+        sequence = schema_object(fields["sequence"])
+        fixed = schema_object(fields["fixed"])
+        mapping = schema_object(fields["mapping"])
+        prefix = fixed["prefixItems"]
+        assert isinstance(prefix, list)
+        observed = {
+            "items": identity_values(schema_object(sequence["items"])),
+            "prefix0": identity_values(schema_object(prefix[0])),
+            "prefix1": identity_values(schema_object(prefix[1])),
+            "additionalProperties": identity_values(
+                schema_object(mapping["additionalProperties"])
+            ),
+            "NumericChoice": identity_values(
+                schema_object(definitions["NumericChoice"])
+            ),
+            "RangeInput": identity_values(schema_object(definitions["RangeInput"])),
+            "restricted": identity_values(schema_object(fields["restricted"])),
+            "unrestricted": identity_values(schema_object(fields["unrestricted"])),
+        }
+        assert observed == {
+            "items": [[1, 2], [3]],
+            "prefix0": [[1, 2], [3]],
+            "prefix1": [[1, 2], [3]],
+            "additionalProperties": [[1, 2], [3]],
+            "NumericChoice": [[1, 2], [3]],
+            "RangeInput": [["linrange"], ["list"]],
+            "restricted": [["linrange"], ["list"]],
+            "unrestricted": [["linrange"], ["list"]],
+        }
+        for location in (
+            "items",
+            "prefix0",
+            "prefix1",
+            "additionalProperties",
+            "NumericChoice",
+        ):
+            for tags in observed[location]:
+                assert isinstance(tags, list)
+                assert all(type(tag) is int for tag in tags)
+        for name, node in (
+            ("sequence", sequence),
+            ("fixed", fixed),
+            ("mapping", mapping),
+        ):
+            if empty:
+                assert node["not"] == {}
+            else:
+                assert node["enum"] == [before[name]]
+        restricted = schema_object(fields["restricted"])
+        branches = restricted["oneOf"]
+        assert isinstance(branches, list)
+        linear = schema_object(branches[0])
+        linear_fields = schema_object(linear["properties"])
+        count_schema = schema_object(linear_fields["n"])
+        alternatives = count_schema["anyOf"]
+        assert isinstance(alternatives, list)
+        allowed_n = 3 if three_only else 2
+        assert schema_object(alternatives[0])["enum"] == [allowed_n]
+        validator = Draft202012Validator(schema)
+        assert validator.is_valid(before) == (not empty and not three_only)
+        candidate: dict[str, JsonValue] = {
+            **before,
+            "restricted": {"kind": "linrange", "n": allowed_n},
+        }
+        if not empty:
+            assert validator.is_valid(candidate)
+            candidate_result = FormState(
+                FormInput(SchemaIdentityForm, candidate)
+            ).result(env)
+            assert isinstance(candidate_result, SchemaIdentityForm)
+            assert isinstance(candidate_result.restricted, LinRange)
+            assert isinstance(candidate_result.unrestricted, LinRange)
+            assert candidate_result.restricted.n == allowed_n
+            assert candidate_result.unrestricted.n == 4
+        result = state.result(env)
+        if empty or three_only:
+            assert isinstance(result, FormErrors)
+            if empty:
+                assert {
+                    ("sequence",),
+                    ("fixed",),
+                    ("mapping",),
+                } <= result.messages.keys()
+            if three_only:
+                assert ("restricted", "n") in result.messages
+        else:
+            assert isinstance(result, SchemaIdentityForm)
+            assert isinstance(result.sequence[0], NumericAliasBranch)
+            assert result.sequence[0].kind == 2
+            assert result.fixed[0].kind == 1
+            assert result.mapping["drive"].kind == 2
+        assert state.input.data == before
+    invalid: dict[str, JsonValue] = {
+        **before,
+        "unrestricted": {"kind": "linrange", "n": 0},
+    }
+    assert not Draft202012Validator(schema).is_valid(invalid)
+    errors = FormState(FormInput(SchemaIdentityForm, invalid)).result(env)
+    assert isinstance(errors, FormErrors)
+    assert ("unrestricted", "n") in errors.messages
+
+
 def test_whole_container_choices_share_json_value_membership() -> None:
     env = FormEnv(md=MetaDict())
     valid: dict[str, JsonValue] = {
