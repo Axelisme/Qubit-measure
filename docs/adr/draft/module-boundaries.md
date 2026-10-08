@@ -24,8 +24,9 @@ status: draft
 | `analysis` | 分析工具 | 檔案讀寫；畫圖 |
 | `plotting` | 畫圖 | 分析計算 |
 | `simulate` | 數值模擬 | 讀取資料容器；呼叫端傳入數值 |
-| `resources` | 各實驗領域的資料容器，以及其 YAML、JSON、CSV、npz 格式 | 量測資料檔；program 的執行機制 |
-| `cfg_model` | 共享核心，見下節 | 執行行為與 I/O |
+| `resources` | 實驗領域資料容器與 YAML、JSON、CSV 的讀寫；waveform 資產的命名、formula 語意與 NPZ 實體 I/O | 量測資料檔；program 的執行機制；重複 waveform codec |
+| `core` | 共用的無狀態型別與格式。`core.waveform_format` 驗證 samples、編解碼 NPZ 與 opaque JSON recipe | 檔案 I/O、formula 語意、GUI、資源 scope 或硬體 |
+| `cfg_model` | 配置 schema 與注入依賴契約，見下節。之後搬進 core | 執行行為與 I/O |
 | `utils` | 無法歸入任何其他類別的雜項 | 任何能歸入其他類別的東西 |
 | `progress_bar`、`qick_remote` | 照字面 | — |
 | `experiment` | 實驗框架：實驗介面、AxesSpec、RunRecord、RunContext、runtime 與註冊機制 | 檔案格式；具體實驗 |
@@ -40,7 +41,7 @@ status: draft
 
 由下往上五層。上層可以依賴下層，下層不知道上層。
 
-1. 能力模組：`datafile`、`device`、`program`、`analysis`、`plotting`、`simulate`、`resources`、`cfg_model`、`utils`、`progress_bar`、`qick_remote`
+1. 能力模組：`datafile`、`device`、`program`、`analysis`、`plotting`、`simulate`、`resources`、`core`、`cfg_model`、`utils`、`progress_bar`、`qick_remote`
 2. 實驗框架：`experiment`
 3. 前端框架：`gui`、`notebook`、`mcp`
 4. 使用者套件：`zcu_lab`
@@ -52,21 +53,23 @@ status: draft
 
 | 類別 | 模組 | 規則 |
 |---|---|---|
-| 穩定工具與值型別 | `cfg_model`、`utils`、`analysis`、`simulate`、`plotting`、`datafile`、`progress_bar` | 任何模組都可以選用。工具之間可以互相依賴，但不得循環 |
+| 穩定工具與值型別 | `core`、`cfg_model`、`utils`、`analysis`、`simulate`、`plotting`、`datafile`、`progress_bar` | 任何模組都可以選用。工具之間可以互相依賴，但不得循環 |
 | 有狀態的能力模組 | `program`、`resources`、`device`、`qick_remote` | 彼此不得 import，只透過 `cfg_model` 的型別與 Protocol 溝通 |
 
 依賴朝向穩定的一方：被很多模組依賴的模組必須少變，常加功能的模組不被別人依賴。純工具接收數值、回傳數值，不自己讀容器、硬體或檔案以外的狀態。
 
-### 共享核心 `cfg_model`
+### 共享核心 core 與 cfg_model
 
-`cfg_model.py` 擴充成 package `zcu_tools.cfg_model/`。
+`zcu_tools.core` 只依賴標準庫、外部函式庫與 repo 的 utils。`core.waveform_format` 擁有 WaveformSamples、NPZ codec 及單一 WaveformFormatError。它只驗 recipe 的 JSON 語法。Resources 解讀 formula 與管理檔案，program/sim 播放 path 指定的 samples。
+
+`cfg_model` 與頂層 `format_version.py` 的搬遷排在 waveform 接線後，目前仍保留原位置。
 
 - **內容**：`ConfigBase`；module 與 waveform 的 cfg schema（欄位、驗證、`set_param`）；有狀態模組之間溝通用的 Protocol，例如 `ModuleResolver`（依名稱取 module 或 waveform cfg）與 `WaveformAssetInfo`（依名稱查波形長度）。
-- **依賴**：只依賴外部函式庫（pydantic、numpy、qick 型別）與 `utils`。
+- **依賴**：cfg_model 只依賴外部函式庫、utils 與 core.waveform_format，不讀寫檔案。
 - **准入**：型別只有在兩個以上有狀態模組都需要時才放進來。
 - **改動**：核心 schema 會寫進檔案，例如每個工作點的 `module_cfg.yaml`。改核心等於改格式，要處理格式版本。
 
-`program` 以 `type`／`style` 對應到執行用的 Module builder，取代 cfg 上的 `build()`。`resources` 的 module library 以核心 schema 作為 DocumentStore 的 model，並實作核心的 Protocol。驗證時的參照解析與波形資產查詢都透過驗證 context 注入。
+`program` 以 `type`／`style` 對應到執行用的 Module builder，取代 cfg 上的 `build()`。`resources` 的 module library 以核心 schema 作為 DocumentStore 的 model，並實作核心的 Protocol。驗證 context 注入固定 library 與 asset capability。Program 的 ModuleCfgFactory.from_core 集中轉換成 native cfg，透過 assets.path_for 取得絕對路徑。Native arb 只保留 data key 與必填 path，不保留 provider，不查 global DB。
 
 ### 模組之間的合作
 
@@ -76,18 +79,19 @@ status: draft
 
 ### 可執行投影
 
-`.importlinter` 的 C8–C13、C15 與 C16 投影本篇規則：
+`.importlinter` 的 C8–C13、C15、C16 與 C19 投影本篇規則：
 
 | contract | 類型 | 內容 |
 |---|---|---|
 | C8 | `layers` | 前端框架 > `experiment` > 能力模組 |
 | C9 | `acyclic_siblings` | `zcu_tools` 的頂層 package 之間沒有循環 |
 | C10 | `independence` | `program`、`resources`、`device`、`qick_remote` 彼此獨立 |
-| C11 | `forbidden` | `cfg_model` 只依賴 `utils` |
-| C12 | `forbidden` | 穩定工具不依賴有狀態模組 |
+| C11 | `forbidden` | `cfg_model` 只依賴 `utils` 與 `core.waveform_format` |
+| C12 | `forbidden` | 穩定工具包含 core，不依賴有狀態模組 |
 | C13 | `forbidden` | `mcp` 只使用 `gui.remote` 與各 app 的 wire spec |
 | C15 | `forbidden` | 使用者實驗的 core 不依賴 GUI framework |
 | C16 | `forbidden` | `zcu_tools` 不 import `zcu_lab` |
+| C19 | `forbidden` | `core` 在 repo 內只依賴 `utils` |
 
 兩個套件都是 import-linter 的 root packages。組合根顯式注入 measure registry、Autofluxdep catalog 與 MCP recipes，framework 不反向載入使用者定義。
 

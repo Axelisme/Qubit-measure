@@ -13,8 +13,9 @@ import sympy as sp
 from numpy.typing import NDArray
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations
 
+from zcu_tools.core.waveform_format import MAX_ARB_WAVEFORM_SAMPLES
+
 from ._waveform_data import (
-    MAX_ARB_WAVEFORM_SAMPLES,
     ArbWaveformData,
     ArbWaveformError,
     coerce_positive_float,

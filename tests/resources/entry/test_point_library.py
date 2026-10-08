@@ -2,7 +2,8 @@
 
 import numpy as np
 import pytest
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec, WaveformSamples
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.core.waveform_format import WaveformSamples
 from zcu_tools.resources.entry import (
     ResultEntry,
 )

@@ -5,7 +5,6 @@ from .dependencies import (
     CfgValidationContext,
     ModuleResolver,
     WaveformAssetInfo,
-    WaveformSamples,
 )
 from .inputs import CfgInputMap, CfgInputValue
 from .materialization import (
@@ -58,7 +57,6 @@ __all__ = [
     "CfgValidationContext",
     "ModuleResolver",
     "WaveformAssetInfo",
-    "WaveformSamples",
     "CfgInputMap",
     "CfgInputValue",
     "ModuleCfgFactory",
