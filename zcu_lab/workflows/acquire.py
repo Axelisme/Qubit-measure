@@ -32,6 +32,7 @@ from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiResult
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainCfg, FreqGainResult
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Result
+from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoResult
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,20 @@ class T1Acquisition(T1Result):
     times is the one-dimensional microsecond coordinate. signals is complex IQ
     of the same shape. evidence contains UTC boundaries and provenance, with
     complete/stopped determined by the Run signal at normal return.
+    """
+
+    evidence: AcquisitionEvidence
+
+
+@dataclass(frozen=True, kw_only=True)
+class T2EchoAcquisition(T2EchoResult):
+    """Native zero-detune echo trace with acquisition-time evidence.
+
+    times is the one-dimensional total echo delay in microseconds, rounded
+    through the native half-delay sweep. signals is complex IQ of that shape.
+    true_activate_detune is 0.0 for this decay-only callback. evidence holds
+    UTC acquisition boundaries and software provenance; complete/stopped is
+    determined by the Run signal on return, not by an Engine commit.
     """
 
     evidence: AcquisitionEvidence
@@ -279,3 +294,60 @@ def run_t1(run: Run[T1Cfg]) -> T1Acquisition:
         provenance=provenance,
     )
     return T1Acquisition(times=times, signals=buffer.array, evidence=evidence)
+
+
+def run_t2echo(run: Run[T2EchoCfg]) -> T2EchoAcquisition:
+    """Acquire a native uniform, zero-detune Hahn-echo decay using Run.
+
+    Supply a complete T2EchoCfg with its SweepCfg total length and native
+    pi/2, pi, reset and readout modules, and Run soc/soccfg capabilities.
+    Nonzero detune raises ValueError before acquisition; fringe acquisition
+    is outside this callback's contract. Native half-delay rounding preserves
+    the canonical T2EchoResult time coordinate. Return complex IQ, zero
+    activated detune and acquisition evidence, with partial data on stop.
+    Capability/metadata errors propagate. Schedule failures remain in
+    Run.outcome for Engine interpretation. No setup, fitting, plotting,
+    saving, context capture or connection occurs, and cfg is not modified.
+    """
+    cfg = run.cfg
+    if cfg.detune != 0.0:
+        raise ValueError("T2echo decay acquisition requires zero detune")
+    soc, soccfg = run.soc, run.soccfg
+    times = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg, "scaler": 0.5})
+    buffer = run.buffer((len(times),), axes=(times,))
+    provenance = capture_software_provenance(context=None)
+    started_at = datetime.now(UTC)
+    run_id = new_run_id(started_at)
+
+    with run.schedule(buffer) as sched:
+        modules = sched.cfg.modules
+        length_sweep = cfg.sweep.length
+        length_param = sweep2param("length", length_sweep)
+        (
+            sched.prog_builder(soc, soccfg)
+            .add(
+                Reset("reset", modules.reset),
+                Pulse("pi2_pulse1", modules.pi2_pulse),
+                Delay("t2e_delay1", delay=0.5 * length_param),
+                Pulse("pi_pulse", modules.pi_pulse),
+                Delay("t2e_delay2", delay=0.5 * length_param),
+                Pulse("pi2_pulse2", modules.pi2_pulse),
+                Readout("readout", modules.readout),
+            )
+            .declare_sweep("length", length_sweep)
+            .build_and_acquire()
+        )
+
+    evidence = AcquisitionEvidence(
+        run_id=run_id,
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        completion="stopped" if run.cancel_signal.is_set() else "complete",
+        provenance=provenance,
+    )
+    return T2EchoAcquisition(
+        times=times,
+        signals=buffer.array,
+        true_activate_detune=0.0,
+        evidence=evidence,
+    )
