@@ -77,8 +77,8 @@ class LookbackAdapter(
             "Resonator frequency seeds the readout pulse and ADC at once; "
             "resonator wiring supplies drive and ADC channels. Trigger offset "
             "is resonator.ext.time_of_fly - 0.1 us, with fallback 0.4 us. "
-            "Missing or null calibration uses fallback; unbound roles remain "
-            "Invalid until supplied."
+            "Missing or null calibration uses fallback; an unbound resonator "
+            "leaves cfg Invalid until supplied."
         ),
         expects_ml=(
             "Readout always starts as a fresh inline pulse-readout, even "
@@ -115,8 +115,9 @@ class LookbackAdapter(
 
         Reset and init start disabled. Readout always starts inline on the fixed
         resonator capture, with trigger offset time_of_fly minus 0.1 us or 0.4 us
-        for absent/null calibration. Unbound roles remain cfg Invalid, while
-        source and materialization faults propagate without fallback.
+        for absent/null calibration. An unbound resonator leaves cfg Invalid;
+        unused qubit binding is not required. Source and materialization faults
+        propagate without fallback.
         """
         return (
             MeasureCfgBuilder()
