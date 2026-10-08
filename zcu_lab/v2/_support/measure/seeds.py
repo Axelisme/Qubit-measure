@@ -127,6 +127,9 @@ def module_seed(
     Missing direct roots also use fallback. Invalid paths, unavailable captures,
     malformed modules and asset/materialization failures propagate. A mounted
     reference retains path so later lowering resolves it on the same capture.
+    A declared unbound role instead returns a linked empty section without lookup
+    or fallback, even when fallback is None. Cfg publishes missing-reference Invalid;
+    refresh can supply the bound catalog shape, while reset reruns fallback policy.
     """
     if not path.strip():
         raise ValueError("module seed path must not be empty")

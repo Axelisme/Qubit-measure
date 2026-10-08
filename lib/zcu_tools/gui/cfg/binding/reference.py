@@ -52,7 +52,17 @@ def _binding_state_for_key(chosen_key: str) -> LibraryBindingState:
 
 
 class ReferenceField(CfgField):
-    """Reference binding with recoverable linked, modified, and missing states."""
+    """Reference binding with recoverable linked, modified, and missing states.
+
+    spec defines kind, allowed shapes, discriminator and optionality. The supplied
+    evaluator, option provider and catalog resolve this fixed binding source.
+    initial_val is a ReferenceValue or None (disabled when optional). An empty
+    section on a linked, non-overridden key may await its catalog shape; a missing
+    entry is Invalid; an unknown shape has no fabricated children. Custom,
+    modified and nonempty
+    values still require a compatible shape and declared fields. Malformed values
+    or failed catalog calls raise rather than falling back.
+    """
 
     spec: ReferenceSpec
 
