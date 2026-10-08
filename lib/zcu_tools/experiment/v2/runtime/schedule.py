@@ -12,7 +12,7 @@ from collections.abc import (
     Sized,
 )
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import TracebackType
 from typing import Any, Generic, Protocol, Self, TypeAlias, cast, overload
 
@@ -32,7 +32,7 @@ from zcu_tools.experiment.v2.runtime.outcome import (
 from zcu_tools.experiment.v2.runtime.outcome import (
     exception_reason,
 )
-from zcu_tools.program.acquisition import CancelFlagProtocol
+from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Module,
@@ -335,9 +335,16 @@ class Schedule(Generic[T_Cfg, T_Env]):
                 "Schedule operations must run inside 'with Schedule(...)'"
             )
 
-    def _mark_stopped(self, reason: str) -> None:
+    def _mark_stopped(self, reason: str, *, exception: Exception | None = None) -> None:
         self._stop.set()
-        self._set_outcome("stopped", reason=reason)
+        self._set_outcome("stopped", reason=reason, exception=exception)
+        if (
+            exception is not None
+            and self._outcome.status == "stopped"
+            and self._outcome.exception is None
+        ):
+            # Enrich a prior stop without replacing its status or an earlier cause.
+            self._outcome = replace(self._outcome, exception=exception)
 
     def _mark_interrupted(self, exc: BaseException) -> None:
         reason = exception_reason(exc)
@@ -371,9 +378,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._outcome = ScheduleOutcome()
         self._stop.clear_stop()
 
-    def _check_stop_requested(self) -> bool:
+    def _check_stop_requested(self, *, exception: Exception | None = None) -> bool:
         if self.is_stop():
-            self._mark_stopped("stop requested")
+            self._mark_stopped("stop requested", exception=exception)
             return True
         return False
 
@@ -957,7 +964,7 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                 self._schedule._mark_interrupted(exc)
                 return slot.view
             except Exception as exc:
-                if self._schedule._check_stop_requested():
+                if self._schedule._check_stop_requested(exception=exc):
                     return slot.view
                 if attempt == retry:
                     self._schedule._mark_failed(exc)
@@ -1027,7 +1034,9 @@ class ProgramBuilder(ModuleFacade, Generic[T_Program]):
                     self._schedule._mark_interrupted(exc)
                     break
                 except Exception as exc:
-                    if self._schedule._check_stop_requested():
+                    # The producer reports first-round cancellation with an exception.
+                    cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
+                    if self._schedule._check_stop_requested(exception=cause):
                         break
                     if attempt == retry:
                         self._schedule._mark_failed(exc)

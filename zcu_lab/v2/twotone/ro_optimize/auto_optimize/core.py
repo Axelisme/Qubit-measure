@@ -299,19 +299,23 @@ class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
             ax.lines[0].set_linestyle("None")
             ax.lines[0].set_marker("o")
 
+        figure, initial_ax = context.plots.subplots("measurement", figsize=(8, 5))
+        initial_ax.remove()
+        figure.suptitle("Readout Auto Optimization")
+        grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
         viewers = [
             context.plots.liveplot_1d(
-                name,
+                "measurement",
                 xlabel,
                 "SNR (a.u.)",
-                title="Readout Auto Optimization",
                 configure_axes=configure_scatter,
+                axes=figure.add_subplot(cell),
             )
-            for name, xlabel in (
-                ("measurement.iteration", "Iteration"),
-                ("measurement.freq", "Frequency (MHz)"),
-                ("measurement.gain", "Readout Gain (a.u.)"),
-                ("measurement.length", "Readout Length (us)"),
+            for xlabel, cell in (
+                ("Iteration", grid[:, 0]),
+                ("Frequency (MHz)", grid[0, 1]),
+                ("Readout Gain (a.u.)", grid[1, 1]),
+                ("Readout Length (us)", grid[2, 1]),
             )
         ]
         current_index = 0
@@ -324,12 +328,14 @@ class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
                 f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), "
                 f"Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
             )
-            for viewer, xs in zip(
+            for viewer, xs, viewer_title in zip(
                 viewers,
                 (point_indices, params[:, 0], params[:, 1], params[:, 2]),
+                (title, None, None, None),
                 strict=True,
             ):
-                viewer.update(xs, snrs, title=title)
+                viewer.update(xs, snrs, title=viewer_title, refresh=False)
+            context.plots.refresh("measurement")
 
         signals_buffer = SignalBuffer(
             (num_points,),
