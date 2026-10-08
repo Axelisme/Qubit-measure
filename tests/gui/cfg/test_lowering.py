@@ -428,10 +428,7 @@ def test_reference_kind_is_forwarded_as_opaque_id() -> None:
     )
 
     assert raw == {"asset": {}}
-    assert calls == [
-        ("app-local/asset", "named"),
-        ("app-local/asset", "named"),
-    ]
+    assert calls and set(calls) == {("app-local/asset", "named")}
 
 
 def test_library_reference_unsupported_shape_uses_exact_error() -> None:

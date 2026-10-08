@@ -39,6 +39,7 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
     EvalValue,
+    ReferenceValue,
     ScalarSpec,
 )
 from zcu_tools.gui.cfg.resource import (
@@ -65,11 +66,50 @@ from tests.resources.entry.fakes import (
     registry_state,
     restore_registry,
 )
+from zcu_lab.v2._support.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_lab.v2._support.measure.seeds import module_seed
+from zcu_lab.v2._support.measure.spec_helpers import make_pulse_module_spec
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 
 
 class LibraryDriver(Driver):
     module: dict[str, str]
+
+
+class DefaultReferenceAdapter(
+    BaseAdapter[ExpCfgModel, RunRecord[ExpCfgModel, dict[str, ExperimentCfgValue]]]
+):
+    """Generic adapter exercising inherited defaults and real cfg publication."""
+
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        requires_soc=False, analysis=AnalysisMode.NONE, load_data=False
+    )
+
+    @classmethod
+    def cfg_definition(cls) -> MeasureCfgDefinition:
+        return (
+            MeasureCfgBuilder()
+            .field(
+                "modules.reset",
+                spec=make_pulse_module_spec(optional=True),
+                default=module_seed("driver.module.pi", fallback=None),
+            )
+            .field(
+                "modules.readout",
+                spec=make_pulse_module_spec(),
+                default=module_seed("driver.module.pi", fallback=None),
+            )
+            .build()
+        )
+
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        return {"driver": RoleSpec("fake/drive/*")}
+
+    def make_filename_stem(self, ctx: SessionEnv) -> str:
+        return "default-reference"
 
 
 class TargetAdapter(T1Adapter):
@@ -193,6 +233,7 @@ def application(
         component_registry.register("fake/drive/library", LibraryDriver)
         installed = registry_state()
         registry = Registry()
+        registry.register("default_reference", DefaultReferenceAdapter)
         registry.register("targeted", TargetAdapter)
         registry.register("dependent", DependentTargetAdapter)
         registry.register("roleless", RolelessAdapter)
@@ -502,6 +543,84 @@ def test_role_rebind_keeps_historical_panes_and_next_run_snapshot(
     assert metadata.snapshot == permit.snapshot
     assert tab.run.parameters is not None and tab.run.parameters.roles is not None
     assert tab.run.parameters.roles.names == metadata.snapshot.roles
+
+
+def test_inherited_defaults_open_unbound_tab_and_recover_without_focus_rebinding(
+    application: TargetApplication,
+) -> None:
+    context = application.controller.context_control
+    control = application.controller.tab_control
+    context.new_point(PointCreateRequest("default-reference", "", CommandOrigin("gui")))
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
+    context.add_component("Q2", "fake/drive/a", {"rate": 20.0})
+    context.add_component(
+        "QL",
+        "fake/drive/library",
+        {"rate": 40.0, "module": {"pi": "driver.pulses.pi"}},
+    )
+    context.set_module(
+        context.read_context().target,
+        "QL.pulses.pi",
+        PulseSpec(
+            ch=0, nqz=1, freq=100.0, gain=0.25, waveform=ConstWaveformCfg(length=0.05)
+        ),
+    )
+    context.set_component_focus(None)
+    tab_id = control.new_tab("default_reference")
+    tab = application.state.get_tab(tab_id)
+    cfg = tab.cfg
+    assert tab.parameters is not None and tab.parameters.roles is not None
+    assert tab.parameters.roles.names == {}
+    modules = cfg.snapshot_inputs().value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    for name in ("reset", "readout"):
+        value = modules.fields[name]
+        assert isinstance(value, ReferenceValue)
+        assert value.chosen_key == "driver.module.pi" and not value.value.fields
+    observation = cfg.observe()
+    assert observation.status is CfgStatus.INVALID
+    assert any("driver.module.pi" in item.message for item in observation.diagnostics)
+    with pytest.raises(CfgPreconditionError):
+        GuardService(application.state).acquire_run_permit(
+            tab_id, expected_revision=observation.ref.revision
+        )
+    context.set_component_focus("Q2")
+    assert tab.parameters.roles.names == {}
+    assert cfg.observe().status is CfgStatus.INVALID
+    control.set_role(tab_id, "driver", "QL")
+    assert cfg.observe().status is CfgStatus.VALID
+    accepted = cfg.accept(cfg.observe().ref.revision)
+    raw_modules = accepted.values["modules"]
+    assert isinstance(raw_modules, dict)
+    raw_readout = raw_modules["readout"]
+    assert isinstance(raw_readout, dict) and raw_readout["freq"] == 100.0
+    context.new_point(
+        PointCreateRequest(
+            "other-point", "", CommandOrigin("gui"), clone_from="default-reference"
+        )
+    )
+    assert tab.parameters.roles.names == {"driver": "QL"}
+    assert cfg.observe().status is CfgStatus.VALID
+    cfg.edit(
+        cfg.observe().ref.revision, (CfgEdit(("modules", "reset", "__ref"), None),)
+    )
+    control.set_role(tab_id, "driver", None)
+    assert cfg.observe().status is CfgStatus.INVALID
+    control.set_role(tab_id, "driver", "QL")
+    assert cfg.observe().status is CfgStatus.VALID
+    modules = cfg.snapshot_inputs().value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue) and modules.fields["reset"] is None
+    application.controller.cfg_resources.lookup(tab_id).reset(
+        cfg.observe().ref.revision
+    )
+    modules = cfg.snapshot_inputs().value.fields["modules"]
+    assert isinstance(modules, CfgSectionValue)
+    assert isinstance(modules.fields["reset"], ReferenceValue)
+    permit = GuardService(application.state).acquire_run_permit(
+        tab_id, expected_revision=cfg.observe().ref.revision
+    )
+    assert permit.parameters is not None and permit.parameters.roles is not None
+    assert permit.parameters.roles.names == {"driver": "QL"}
 
 
 def test_auto_partial_alias_creates_invalid_tab_without_focus_fallback(
