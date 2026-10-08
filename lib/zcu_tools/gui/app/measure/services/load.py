@@ -90,7 +90,7 @@ class LoadService:
         request = LoadDataRequest(data_path=data_path, parameters=tab.parameters)
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
-            result = tab.adapter.load(request)
+            result, metadata = tab.adapter.load(request)
         except NotImplementedError as exc:
             raise LoadDataError(
                 f"This tab does not support loading data files.\n\nDetails: {exc}",
@@ -108,7 +108,9 @@ class LoadService:
             ) from exc
 
         snapshot = getattr(result, "cfg", None)
-        retired = self._state.update_tab_loaded_result(tab_id, result, data_path)
+        retired = self._state.update_tab_loaded_result(
+            tab_id, result, data_path, metadata=metadata
+        )
         self._teardown_retired(retired)
         return LoadTabResultOutcome(
             tab_id=tab_id,

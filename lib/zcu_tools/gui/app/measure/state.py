@@ -70,8 +70,8 @@ class RunPaneState(Generic[T_Result]):
 
     result is the adapter-owned record or None. source_path identifies loaded
     data, not an acquisition destination. source_operation_id identifies the
-    publishing GUI operation. metadata is evidence from Run, or None when no
-    native evidence was acquired; Load must not manufacture new run timing.
+    publishing GUI operation. metadata is evidence from Run or native Load, or
+    None when no native evidence exists; Load retains the file's original history.
     confirmed_run_id is None until a complete Save report confirms at least one
     persistent output. It survives failed resaves of this Run, but replacement
     or a new Run resets it; it is identity, not a successful-output history.
@@ -449,8 +449,19 @@ class State(SessionState):
         )
 
     def update_tab_loaded_result(
-        self, tab_id: str, result: object, source_path: str
+        self,
+        tab_id: str,
+        result: object,
+        source_path: str,
+        *,
+        metadata: RunMetadata,
     ) -> RetiredPaneResources:
+        """Replace a tab's run with loaded data and its original native history.
+
+        source_path is the exact loaded file, not a saving destination. Clear
+        dependent panes and Save confirmation; return their resources for caller
+        cleanup. Do not emit acquired or recapture metadata. Owner thread only.
+        """
         self._assert_owner()
         logger.debug(
             "update_tab_loaded_result: tab_id=%r source_path=%r result_type=%s",

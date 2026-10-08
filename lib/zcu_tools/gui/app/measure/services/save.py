@@ -83,7 +83,9 @@ class SaveService:
 
         permit identifies an idle guarded tab with historical storage/metadata.
         comment=None retains its annotation; origin attributes this command.
-        Missing evidence/busy raises FailedPreconditionError before mutation.
+        Missing evidence, busy or an entry/point mismatch between file history
+        and captured storage raises FailedPreconditionError before mapping or I/O.
+        Mismatch diagnostics identify both sources; no automatic rebinding occurs.
         Output failures appear in the complete report; mapping or ledger errors
         propagate without a report. State publication completes before return.
         """
@@ -104,8 +106,10 @@ class SaveService:
 
         Call on State's owner thread. None selects all declarations, including
         Saved; explicit refs are ordered, unique and nonempty. Unknown refs,
-        missing storage/metadata or busy raise FailedPreconditionError before
-        annotation mutation. Invalid pane content raises TypeError/ValueError.
+        missing storage/metadata, busy or history/captured entry/point mismatch
+        raise FailedPreconditionError before mapping, I/O or annotation mutation.
+        Mismatch diagnostics identify both sources; no automatic rebinding occurs.
+        Invalid pane content raises TypeError/ValueError.
         comment=None retains the annotation. origin attributes this command.
         All mapping, PNG encoding, writes and ledger append finish before return.
         Output failures retain diagnostics and do not stop independent outputs;

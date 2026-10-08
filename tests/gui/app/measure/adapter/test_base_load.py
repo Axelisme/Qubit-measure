@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+from qtpy.QtWidgets import QApplication
+from zcu_tools.datafile import load_run_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -20,6 +23,11 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
+from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
+    native_save_session,
+)
 from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 
@@ -36,8 +44,7 @@ _LoadedRecord: TypeAlias = RunRecord[_Cfg, _LoadedResult]
 
 
 class _LoadExp:
-    def load(self, filepath: Path) -> _LoadedRecord:
-        return RunRecord(cfg=None, result=_LoadedResult(path=filepath))
+    pass
 
 
 class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, NoAnalysisResult, NoAnalyzeParams]):
@@ -52,15 +59,6 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, NoAnalysisResult, NoAnalyzeP
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return "load"
-
-
-class _InvalidCanonicalExp:
-    def load(self, filepath: Path) -> _LoadedRecord:
-        raise ValueError(f"invalid canonical data: {filepath}")
-
-
-class _InvalidCanonicalAdapter(_LoadAdapter):
-    exp_cls = _InvalidCanonicalExp
 
 
 class _NeedsArgsExp:
@@ -84,9 +82,6 @@ class _InternalTypeErrorExp:
     def __init__(self) -> None:
         raise TypeError("constructor bug")
 
-    def load(self, filepath: Path) -> _LoadedRecord:
-        return RunRecord(cfg=None, result=_LoadedResult(path=filepath))
-
 
 class _InternalTypeErrorAdapter(_LoadAdapter):
     exp_cls = _InternalTypeErrorExp
@@ -96,31 +91,21 @@ def _request(path: str = "/tmp/result.hdf5") -> LoadDataRequest:
     return LoadDataRequest(data_path=path, parameters=None)
 
 
-def test_base_adapter_load_calls_canonical_experiment_load() -> None:
-    result = _LoadAdapter().load(_request("/tmp/canonical.hdf5"))
-
-    assert result == RunRecord(
-        cfg=None, result=_LoadedResult(path=Path("/tmp/canonical.hdf5"))
-    )
-
-
-def test_base_adapter_load_preserves_canonical_validation_error() -> None:
-    with pytest.raises(ValueError, match="invalid canonical data: /tmp/invalid.hdf5"):
-        _InvalidCanonicalAdapter().load(_request("/tmp/invalid.hdf5"))
-
-
-def test_base_adapter_reports_canonical_axis_error(
-    monkeypatch: pytest.MonkeyPatch,
+def test_base_adapter_load_reads_native_record_and_full_history(
+    tmp_path: Path, qapp: QApplication
 ) -> None:
-    error = ValueError("canonical axis 1 label")
+    with native_save_session(tmp_path, qapp) as session:
+        session.save()
+        path = (
+            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+        )
 
-    def reject_axis(self: _LoadExp, filepath: Path) -> _LoadedRecord:
-        raise error
+        record, metadata = AnalysisSavingAdapter().load(_request(str(path)))
 
-    monkeypatch.setattr(_LoadExp, "load", reject_axis)
-    with pytest.raises(ValueError, match="canonical axis 1 label") as caught:
-        _LoadAdapter().load(_request())
-    assert caught.value is error
+        assert isinstance(record.cfg, SavingCfg)
+        assert isinstance(record.result, SavingResult)
+        np.testing.assert_array_equal(record.result.frequency, [1000, 1001, 1002])
+        assert metadata == load_run_data(path).metadata
 
 
 @pytest.mark.parametrize("adapter_cls", [_NeedsArgsAdapter, _NoLoadAdapter])

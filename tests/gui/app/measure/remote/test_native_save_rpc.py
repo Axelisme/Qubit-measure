@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.datafile import SoftwareProvenance, load_run_data
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -18,6 +19,7 @@ from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.resources.entry import AcquiredPayload
 
 from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
     NativeSaveSession,
     declare_panes,
     native_save_session,
@@ -74,6 +76,49 @@ def native_save_rpc(
             controller.begin_shutdown(lambda: closed.append(True))
             assert closed == [True]
             qapp.processEvents()
+
+
+@pytest.mark.parametrize("analysis_failure", [False, True])
+def test_native_load_rpc_retains_history_on_analysis_partial_failure(
+    tmp_path: Path,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+    analysis_failure: bool,
+) -> None:
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        session.save()
+        path = (
+            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+        )
+        stored = load_run_data(path)
+        events = session.entry.ledger.events()
+        if analysis_failure:
+
+            def unavailable(
+                self: AnalysisSavingAdapter, result: object, ctx: SessionEnv
+            ) -> None:
+                raise ValueError("analysis parameters unavailable")
+
+            monkeypatch.setattr(
+                AnalysisSavingAdapter, "get_analyze_params", unavailable
+            )
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+
+        session.state.set_context(replace(session.state.session_env, parameters=None))
+        reply = call(sock, "tab.load_data", {"tab_id": "tab", "data_path": str(path)})
+
+        assert reply["ok"] is True, reply
+        assert reply["result"]["has_run_result"] is True
+        assert reply["result"]["has_analyze_params"] is not analysis_failure
+        assert reply["result"]["analysis_error"] == (
+            "analysis parameters unavailable" if analysis_failure else None
+        )
+        tab = session.state.get_tab("tab")
+        assert tab.run.metadata == stored.metadata
+        assert tab.run.source_path == str(path)
+        assert tab.run.confirmed_run_id is None
+        assert tab.post_analysis.result is None
+        assert session.entry.ledger.events() == events
 
 
 def test_native_run_rpc_records_mcp_acquired_without_save(

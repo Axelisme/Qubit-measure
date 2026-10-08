@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-08, synchronous native Save
+**Last updated:** 2026-10-09, native Load with tab-captured context
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -231,9 +231,10 @@ version zero, are stale. Wire methods do not accept `expected_versions`.
 Run uses the explicit cfg ref and observed device snapshots, not live md/ml.
 Cfg admission uses only the resource identity and revision. A ref observed by
 another connection is valid, but tab, SoC and device seen guards still belong to
-the requesting connection. Run does not require exporting the entire context. Load, editor commit and writeback still
-use live context and retain their context guard; Run's change does not authorize
-removing those dependencies.
+the requesting connection. Run and existing-tab native Load do not require exporting
+active context. Load reads the tab capture and preserves the file's original metadata;
+it guards tab/result/analysis revisions, not session focus. Editor commit and writeback
+retain their existing context guards.
 
 GUI owns observation and write tracking:
 
@@ -289,7 +290,9 @@ failure into an HTTP-specific status without changing the wire enum (ADR-0068).
 including cfg backfill, cleanup on load failure and focus restoration. It requires
 an explicitly observed context, not observations of a tab that does not yet exist.
 Backfill failure retains the result and reports `not_applied`; cleanup failure
-reports `cleanup_failed`. Existing-tab `tab.load_data` keeps its stricter guards.
+reports `cleanup_failed`. Existing-tab `tab.load_data` requires an observed tab snapshot,
+not active context. Native Load restores historical metadata without acquired events
+or Save confirmation. Save rejects an entry/point mismatch before mapping or output I/O.
 
 ## Method Surface
 

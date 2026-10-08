@@ -28,6 +28,7 @@ from zcu_tools.gui.expected_error import (
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import make_cfg
+from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
 
@@ -67,7 +68,10 @@ def test_load_uses_tab_capture_after_active_context_changes(context_free: bool) 
     state.set_context(
         replace(state.session_env, parameters=make_parameters({"rate": 2.0}))
     )
-    adapter.load.return_value = RunRecord(cfg=None, result=object())
+    adapter.load.return_value = (
+        RunRecord(cfg=None, result=object()),
+        historical_metadata(),
+    )
     service, _emit, _writeback = _service(state)
 
     service.load_result(LoadPermit(tab_id), "result.h5")
@@ -87,7 +91,8 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     state, tab_id, adapter = _make_state()
     stale_result = object()
     loaded = RunRecord(cfg=None if missing_cfg else ExpCfgModel(), result=object())
-    adapter.load.return_value = loaded
+    metadata = historical_metadata()
+    adapter.load.return_value = (loaded, metadata)
     tab = state.get_tab(tab_id)
     tab.run.result = stale_result
     tab.run.source_path = "/tmp/old.hdf5"
@@ -112,6 +117,8 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     outcome = svc.load_result(LoadPermit(tab_id), "/tmp/new.hdf5")
 
     assert tab.run.result is loaded
+    assert tab.run.metadata == metadata
+    assert tab.run.confirmed_run_id is None
     assert tab.run.source_path == "/tmp/new.hdf5"
     assert tab.analysis.result is None
     assert tab.analysis.plots is None

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08, acquired ledger and synchronous native Save
+**Last updated:** 2026-10-09, native Load history and Save source checks
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -18,7 +18,7 @@ Run permit 固定 tab 的歷史 entry／point／roles、storage capability 與 a
 Ledger 失敗使 operation failed 並記錄 ERROR，但保留已發布的結果供 Save。
 不重試、回滾或釋放已發布的結果資源。Save request 取用這份歷史
 metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。未宣告 native evidence
-或沒有 saved origin 時 metadata 為 None；新 Run 清舊 evidence，Load 不製造新的量測歷史。
+或沒有 saved origin 時 metadata 為 None；新 Run 清舊 evidence。Native Load 保留檔案的完整歷史 metadata，不製造 acquired 事件或 Save confirmation。
 
 ## 局部設計與閱讀入口
 
@@ -160,7 +160,9 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   Qt 顯示本次輸出的 path/status/error，包含實際 Labber path。
   Mapping／ledger 錯誤直接傳遞，不偽造 report 或回滾已寫文件。
   保存不產生 acquisition identity，也不重讀 live point。
-  RPC 直接投影回傳報告；MCP consumer、acquired event 與 ledger-based Load 尚待遷移。
+  RPC／MCP 直接投影回傳報告。Native Load 讀回 typed record 與原 RunMetadata。
+  Save 在 mapping 或輸出 I/O 前比對歷史 entry／point 與 tab captured storage。
+  不符時顯示雙方來源並拒絕，不重綁 tab 或寫回 Load 來源。Ledger-based Load 清單尚待接線。
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane
   is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
@@ -241,7 +243,7 @@ giant `Controller` surface. `OperationControlPort` / `OperationControlFacet`
 expose the op-agnostic handle/progress surface used by generic `operation.*`
 handlers, including device setup handles. `SaveControlPort` / `SaveControlFacet`
 以 `GuardService`、`SaveService` 與 `State` 組合 native Save 與 annotation commands。
-Qt 直接呼 facet；remote consumer 的 native wire 遷移仍在進行。 `WritebackControlPort` /
+Qt 與 remote 直接呼 facet；remote 投影同步 native Save report。 `WritebackControlPort` /
 `WritebackControlFacet` expose persistent writeback draft read/edit/apply by
 composing `GuardService`, `WritebackService`, `State`, and a resource-version
 provider; remote writeback handlers use this facet instead of the giant

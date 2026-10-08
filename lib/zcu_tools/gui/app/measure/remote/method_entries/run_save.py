@@ -47,7 +47,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_load_data",
         MethodSpec(
             30.0,
-            "Load a canonical result file into an already-open adapter tab. The tab "
+            "Load an exact native result file and its original history into an "
+            "already-open adapter tab. The tab "
             "then has a run result and can be analyzed without a SoC connection. "
             "Compatible snapshot values backfill Config automatically, replacing "
             "unsubmitted edits. cfg_backfill reports applied or not_applied; a "
@@ -56,7 +57,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "has_analyze_params is false until preparation succeeds.",
             (
                 required_string("tab_id"),
-                required_string("data_path", "Canonical HDF5 result file to load"),
+                required_string("data_path", "Exact native data.h5 file to load"),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -64,7 +65,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}",
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:analyze",
-                "context",
             ),
             refresh_after_write=True,
         ),

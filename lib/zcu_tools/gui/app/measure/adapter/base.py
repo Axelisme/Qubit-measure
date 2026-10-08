@@ -8,7 +8,7 @@ from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
 
-from zcu_tools.datafile import AnalysisDocument
+from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.cfg_assembler import (
     ExperimentCfgInput,
     ExperimentCfgValue,
@@ -497,7 +497,17 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         cfg = self.build_exp_cfg(raw_cfg, req)
         return cast(T_Result, self.exp_cls().run(cfg, context=context))
 
-    def load(self, req: LoadDataRequest) -> T_Result:
+    def load(
+        self, req: LoadDataRequest
+    ) -> tuple[RunRecord[T_Cfg, object], RunMetadata]:
+        """Read req.data_path as an exact native file using this core's spec.
+
+        Return the typed cfg/Result record and its full historical metadata.
+        req.parameters is the tab capture, not a replacement for file history.
+        Missing persistence declarations or required constructor arguments raise
+        NotImplementedError. Native validation raises ValueError; I/O and core
+        constructor failures propagate. No Labber fallback or history recapture.
+        """
         if not _can_construct_without_args(self.exp_cls):
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading canonical result files"

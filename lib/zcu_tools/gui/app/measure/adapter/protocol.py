@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_chec
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
 
 if TYPE_CHECKING:
-    from zcu_tools.datafile import AnalysisDocument
+    from zcu_tools.datafile import AnalysisDocument, RunMetadata
     from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
     from zcu_tools.experiment.context import RunContext
     from zcu_tools.experiment.native_persistence import PreparedRunData
@@ -149,8 +149,15 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """
         ...
 
-    def load(self, req: LoadDataRequest) -> Any:
-        """Load a canonical result file and return its run-result object."""
+    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
+        """Read the exact native req.data_path and return (record, history).
+
+        The record stays adapter-owned and opaque to the framework. History is
+        the original RunMetadata, including identity, times and source. Do not
+        recapture it from req.parameters. Raise NotImplementedError for an
+        unsupported core, ValueError for invalid native data and OSError for
+        unreadable files; other core failures propagate.
+        """
         ...
 
     def analyze(self, req: AnalyzeRequest[Any, Any], *, plots: Plots) -> Any:
