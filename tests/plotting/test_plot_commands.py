@@ -160,6 +160,89 @@ def test_unknown_names_and_finished_draw_do_not_execute_callback(
     plots.release()
 
 
+@pytest.mark.parametrize("kind", ["point", "line"])
+@pytest.mark.parametrize("removal", ["marker", "cla", "axes", "figure"])
+def test_marker_reports_draw_removal(kind: str, removal: str) -> None:
+    host = OwnerHost()
+    plots = Plots(host)
+    if kind == "point":
+        heatmap = plots.liveplot_2d("live", "x", "y")
+
+        def mark() -> None:
+            heatmap.mark_point(0.5, 0.75)
+    else:
+        combined = plots.liveplot_2d_with_line("live", "x", "y")
+
+        def mark() -> None:
+            combined.mark_line(0.5)
+
+    mark()
+
+    def remove(target: Figure) -> None:
+        assert host.in_call
+        axes = target.axes[0 if kind == "point" else 1]
+        if removal == "marker":
+            if kind == "point":
+                marker = next(
+                    item
+                    for item in axes.collections
+                    if item.get_label() == "Best Point"
+                )
+                marker.remove()
+            else:
+                axes.lines[-1].remove()
+        elif removal == "cla":
+            axes.cla()
+        elif removal == "axes":
+            target.delaxes(axes)
+        else:
+            target.clear()
+
+    plots.draw("live", remove)
+    host.refreshed.clear()
+    with pytest.raises(RuntimeError, match="removed from.*axes"):
+        mark()
+    assert host.refreshed == []
+    plots.finish()
+    plots.release()
+
+
+@pytest.mark.parametrize("kind", ["point", "line"])
+def test_marker_keeps_valid_overlay_after_draw(kind: str) -> None:
+    host = OwnerHost()
+    plots = Plots(host)
+    if kind == "point":
+        heatmap = plots.liveplot_2d("live", "x", "y")
+
+        def mark(value: float) -> None:
+            heatmap.mark_point(value, value)
+    else:
+        combined = plots.liveplot_2d_with_line("live", "x", "y")
+
+        def mark(value: float) -> None:
+            combined.mark_line(value)
+
+    mark(0.25)
+
+    def overlay(target: Figure) -> None:
+        axes = target.axes[0 if kind == "point" else 1]
+        axes.set_title("overlay")
+        axes.text(0.0, 0.0, "reference")
+
+    plots.draw("live", overlay)
+    mark(0.75)
+    figures = plots.finish()
+    axes = figures["live"].axes[0 if kind == "point" else 1]
+    if kind == "point":
+        marker = next(
+            item for item in axes.collections if item.get_label() == "Best Point"
+        )
+        assert np.array_equal(marker.get_offsets(), [[0.75, 0.75]])
+    else:
+        assert np.array_equal(axes.lines[-1].get_xdata(), [0.75])
+    plots.release()
+
+
 def _remove_template_artists(target: Figure, template: str, removal: str) -> None:
     axes = target.axes[1 if template == "scan_line" else 0]
     if removal == "clear_figure":
