@@ -183,7 +183,9 @@ class ParameterContext:
 
         Declarations are ordered kind/via rules. Explicit concrete names win
         over focus/via inference. Empty declarations remain empty. Entry
-        RoleResolutionError propagates for invalid names or failed inference.
+        Auto inference with zero/multiple candidates leaves roles unbound;
+        their use raises RoleResolutionError. Invalid explicit choices and
+        dangling/wrong-kind references still raise during binding.
         target and source data are retained; live session state is never read.
         """
         self._ensure_readable()

@@ -200,8 +200,10 @@ class TabService:
 
         target=None uses current GUI focus. A non-empty component name explicitly
         binds the adapter's first declared role; dependent roles still use their
-        declared inference. It never changes GUI focus. Missing/wrong-kind roles
-        raise RoleResolutionError before tab registration. An empty target or a
+        declared inference. It never changes GUI focus. Automatic inference with
+        zero/multiple choices leaves aliases unbound and still creates the tab.
+        Cfgs that use them publish Invalid. Explicit invalid choices and actual
+        dangling/wrong-kind references raise before tab registration. An empty target or a
         target on a roleless adapter raises InvalidInputError.
 
         ``from_dict is None`` → a fresh tab with the adapter's default cfg.
@@ -298,7 +300,13 @@ class TabService:
         return self._state.get_tab(tab_id).adapter_name
 
     def prepare_result_analysis(self, tab_id: str) -> AnalysisPreparation:
-        """Prepare analysis without turning a committed result into a failure."""
+        """Seed params from this Run/Load result and its saved source.
+
+        tab_id selects a tab with a result. Use its publication parameters,
+        including context-free None, never current tab/session bindings.
+        Publish returned params; adapter failure becomes AnalysisPreparation.error
+        without changing the result. Missing result raises RuntimeError.
+        """
         tab = self._state.get_tab(tab_id)
         if tab.run.result is None:
             raise RuntimeError("No run result available to build analyze params")
@@ -307,7 +315,7 @@ class TabService:
         try:
             instance = tab.adapter.get_analyze_params(
                 tab.run.result,
-                replace(self._state.session_env, parameters=tab.parameters),
+                replace(self._state.session_env, parameters=tab.run.parameters),
             )
         except Exception as exc:
             logger.exception("Analysis preparation failed for tab %s", tab_id)
@@ -319,9 +327,12 @@ class TabService:
         self._state.update_tab_analyze_param_instance(tab_id, instance)
 
     def initialize_tab_post_analyze_params(self, tab_id: str) -> object:
-        """Build + store the post-analysis param instance once the primary analyze
-        result exists. Fast-fails if
-        there is no primary analyze result to seed from."""
+        """Seed and store Post params from the primary result and result source.
+
+        tab_id selects a tab with a primary analysis result. Its Run/Load saved
+        parameters supply the source, including None without fallback. Return
+        the stored params. Missing primary result or adapter failure raises.
+        """
         tab = self._state.get_tab(tab_id)
         if tab.analysis.result is None:
             raise RuntimeError(
@@ -329,7 +340,7 @@ class TabService:
             )
         instance = tab.adapter.get_post_analyze_params(
             tab.analysis.result,
-            replace(self._state.session_env, parameters=tab.parameters),
+            replace(self._state.session_env, parameters=tab.run.parameters),
         )
         self._state.update_tab_post_analyze_param_instance(tab_id, instance)
         return instance

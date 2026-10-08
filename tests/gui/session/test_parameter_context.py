@@ -170,6 +170,21 @@ def test_bind_roles_uses_only_fixed_point_and_detaches_mappings(
     assert context.roles is None
 
 
+def test_bind_roles_returns_partial_aliases_after_ambiguous_inference(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    context = capture(source)
+    partial = context.bind_roles(declarations(), focus=None, explicit={})
+    assert partial.roles is not None
+    assert partial.roles.names == {}
+    assert partial.roles.declarations == declarations()
+    assert partial.value("Q1.rate") == 4300.0
+    assert partial.target == context.target
+    for role in declarations():
+        with pytest.raises(RoleResolutionError, match=f"{role}.*not bound"):
+            partial.value(f"{role}.rate")
+
+
 @pytest.mark.parametrize("same_name_component", [False, True])
 def test_partial_capture_reports_unbound_role_only_when_read(
     source: tuple[PointDocument, LibrarySnapshot], same_name_component: bool

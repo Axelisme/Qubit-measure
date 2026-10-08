@@ -3,10 +3,11 @@
 from collections.abc import Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -14,6 +15,7 @@ from zcu_tools.gui.app.measure.remote.handlers.tab import (
     h_tab_new,
     h_tab_parameter_read,
 )
+from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg import (
     CfgSchema,
@@ -23,9 +25,14 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
+from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgStatus
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.context_types import EntryRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.resources.entry import RoleSpec, component_registry
 
 from tests.resources.entry.fakes import (
@@ -87,6 +94,15 @@ class RolelessAdapter(TargetAdapter):
         )
 
 
+class UnusedAliasAdapter(RolelessAdapter):
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
+        requires_soc=False
+    )
+
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        return {"driver": RoleSpec("fake/drive/*")}
+
+
 @dataclass
 class TargetApplication:
     state: State
@@ -105,6 +121,7 @@ def application(qapp, tmp_path: Path) -> Generator[TargetApplication]:
         registry.register("targeted", TargetAdapter)
         registry.register("dependent", DependentTargetAdapter)
         registry.register("roleless", RolelessAdapter)
+        registry.register("unused_alias", UnusedAliasAdapter)
         state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
         controller = Controller(
             state, registry, None, BaseEventBus(), project_root=str(tmp_path)
@@ -149,6 +166,53 @@ def rate(application: TargetApplication, tab_id: str) -> object:
     return cfg.accept(cfg.observe().ref.revision).values["rate"]
 
 
+def test_auto_partial_alias_creates_invalid_tab_without_focus_fallback(
+    application: TargetApplication,
+) -> None:
+    context = application.controller.context_control
+    context.set_component_focus(None)
+    reply = h_tab_new(application.remote, {"adapter_name": "targeted"})
+    tab_id = reply["tab_id"]
+    assert isinstance(tab_id, str)
+    tab = application.state.get_tab(tab_id)
+    assert application.state.list_tab_ids() == [tab_id]
+    assert tab.parameters is not None and tab.parameters.roles is not None
+    assert tab.parameters.roles.names == {}
+    assert "driver" in tab.parameters.roles.declarations
+    observation = tab.cfg.observe()
+    assert observation.status is CfgStatus.INVALID
+    assert any("driver" in item.message for item in observation.diagnostics)
+    with pytest.raises(CfgPreconditionError):
+        tab.cfg.accept(observation.ref.revision)
+    context.set_component_focus("Q2")
+    assert tab.parameters.roles.names == {}
+    assert tab.cfg.observe().status is CfgStatus.INVALID
+
+
+def test_auto_partial_unused_alias_can_acquire_run_permit(
+    application: TargetApplication,
+) -> None:
+    context = application.controller.context_control
+    context.new_point(PointCreateRequest("unbound", "", CommandOrigin("gui")))
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
+    context.add_component("Q2", "fake/drive/a", {"rate": 20.0})
+    context.set_component_focus(None)
+    reply = h_tab_new(application.remote, {"adapter_name": "unused_alias"})
+    tab_id = reply["tab_id"]
+    assert isinstance(tab_id, str)
+    tab = application.state.get_tab(tab_id)
+    assert tab.parameters is not None and tab.parameters.roles is not None
+    assert tab.parameters.roles.names == {}
+    observation = tab.cfg.observe()
+    assert observation.status is CfgStatus.VALID
+    permit = GuardService(application.state).acquire_run_permit(
+        tab_id, expected_revision=observation.ref.revision
+    )
+    assert permit.parameters is tab.parameters
+    assert permit.accepted_cfg.values == {"rate": 1.0}
+    assert permit.request.soc is None
+
+
 def test_explicit_target_uses_other_component_without_changing_focus(
     application: TargetApplication,
 ) -> None:
@@ -180,21 +244,20 @@ def test_explicit_target_consumes_focus_and_resolves_same_kind_peer_via(
     assert application.controller.context_control.get_component_focus().name == "Q1"
 
 
-def test_explicit_target_does_not_hide_missing_same_kind_peer_reference(
+def test_explicit_target_allows_unbound_same_kind_peer_reference(
     application: TargetApplication,
 ) -> None:
-    with pytest.raises(RemoteError) as caught:
-        h_tab_new(application.remote, {"adapter_name": "dependent", "target": "Q1"})
-    error = caught.value
-    assert error.code is ErrorCode.PRECONDITION_FAILED
-    assert error.reason == "role_resolution_failed"
-    assert error.data is not None
-    assert error.data["role"] == "target"
-    assert error.data["focus"] == "Q1"
-    assert error.data["required_kind"] == "fake/drive/*"
-    assert error.data["detail"]
-    assert application.state.list_tab_ids() == []
-    assert application.state.active_tab_id is None
+    reply = h_tab_new(application.remote, {"adapter_name": "dependent", "target": "Q1"})
+    tab_id = reply["tab_id"]
+    assert isinstance(tab_id, str)
+    tab = application.state.get_tab(tab_id)
+    assert tab.parameters is not None and tab.parameters.roles is not None
+    assert tab.parameters.roles.names == {"driver": "Q1"}
+    observation = tab.cfg.observe()
+    assert observation.status is CfgStatus.INVALID
+    assert any("target" in item.message for item in observation.diagnostics)
+    with pytest.raises(CfgPreconditionError):
+        tab.cfg.accept(observation.ref.revision)
     assert application.controller.context_control.get_component_focus().name == "Q1"
 
 
