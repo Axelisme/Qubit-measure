@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
+from qtpy.QtWidgets import QApplication, QTabWidget
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
@@ -499,6 +500,60 @@ def test_role_rebind_keeps_historical_panes_and_next_run_snapshot(
     assert metadata.snapshot == inputs.snapshot
     assert tab.run.parameters is not None and tab.run.parameters.roles is not None
     assert tab.run.parameters.roles.names == metadata.snapshot.roles
+
+
+def test_real_window_context_focus_preserves_captured_titles_and_role_facts(
+    application: TargetApplication,
+    qapp: QApplication,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Project committed tab roles in Qt while session focus changes separately."""
+    import logging
+
+    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+
+    caplog.set_level(logging.ERROR)
+    controller = application.controller
+    context = controller.context_control
+    context.new_point(PointCreateRequest("saved", "", CommandOrigin("gui")))
+    for name, sense in (("Q1", "R1"), ("Q2", "R2")):
+        context.add_component(name, "fake/drive/a", {"rate": 10.0, "sense": sense})
+    for name in ("R1", "R2"):
+        context.add_component(name, "fake/sensor", {"rate": 30.0})
+    context.set_component_focus("Q1")
+    window = MainWindow(controller)
+    try:
+        first = controller.tab_control.new_tab("rebind")
+        context.set_component_focus("Q2")
+        second = controller.tab_control.new_tab("rebind")
+        tabs = window.findChild(QTabWidget)
+        assert tabs is not None and tabs.count() == 2
+        assert "driver=Q1" in tabs.tabText(0)
+        assert "sense=R1" in tabs.tabToolTip(0)
+        assert "driver=Q2" in tabs.tabText(1)
+        assert "sense=R2" in tabs.tabToolTip(1)
+        first_capture = application.state.get_tab(first).parameters
+        second_capture = application.state.get_tab(second).parameters
+        for focus in ("Q1", "Q2", None):
+            context.set_component_focus(focus)
+            window.refresh_run_lock(first)
+            assert "driver=Q1" in tabs.tabText(0)
+            assert "sense=R1" in tabs.tabToolTip(0)
+            assert "driver=Q2" in tabs.tabText(1)
+            window.refresh_run_lock(None)
+            assert "driver=Q1" in tabs.tabText(0)
+            assert application.state.get_tab(first).parameters is first_capture
+            assert application.state.get_tab(second).parameters is second_capture
+        controller.tab_control.set_role(first, "driver", "Q2")
+        assert "driver=Q2" in tabs.tabText(0)
+        assert "sense=R2" in tabs.tabToolTip(0)
+        assert "driver=Q2" in tabs.tabText(1)
+        assert not caplog.records, (
+            "Context/focus/role facts must not fail Qt subscribers"
+        )
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
 
 
 def test_auto_partial_alias_creates_invalid_tab_without_focus_fallback(
