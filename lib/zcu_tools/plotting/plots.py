@@ -375,6 +375,9 @@ class Plots(FigureCollection):
             raise ValueError("Live axes must belong to the named figure")
         if any(ax in self._live_axes for ax in resolved):
             raise ValueError("Axes already belong to a live plot")
+        self._live_axes.intersection_update(
+            ax for current in self.values() for ax in current.axes
+        )
         self._live_axes.update(resolved)
         return figure, resolved
 

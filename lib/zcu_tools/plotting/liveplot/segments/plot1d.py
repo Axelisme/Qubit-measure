@@ -74,9 +74,14 @@ class Plot1DSegment(AbsSegment):
     ) -> None:
         if self.lines is None:
             raise RuntimeError("Lines not initialized.")
-        if any(line not in ax.lines for line in self.lines):
+        figure = ax.get_figure()
+        if (
+            figure is None
+            or ax not in figure.axes
+            or any(line not in ax.lines for line in self.lines)
+        ):
             raise RuntimeError(
-                "Live plot lines were removed from their axes; "
+                "Live plot lines were removed from their axes or figure; "
                 "do not clear or remove template artists before updating."
             )
         if np.iscomplexobj(signals):

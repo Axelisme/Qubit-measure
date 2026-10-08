@@ -55,6 +55,33 @@ def test_draw_shares_template_axes_and_refreshes_after_callback() -> None:
     plots.release()
 
 
+def test_draw_rebuilds_same_named_figure_for_successive_live_templates() -> None:
+    host = OwnerHost()
+    plots = Plots(host)
+    previous = plots.liveplot_1d("decay", "Time", "Signal")
+    figure = plots["decay"]
+    xs = np.array([0.0, 1.0])
+    previous.update(xs, xs)
+
+    def rebuild(target: Figure) -> None:
+        assert host.in_call
+        target.clear()
+        target.subplots()
+
+    for attempt in range(3):
+        plots.draw("decay", rebuild)
+        current = plots.liveplot_1d("decay", "Time", "Signal", axes=figure.axes[0])
+        current.update(xs, xs + attempt)
+        assert plots["decay"] is figure
+        assert len(figure.axes) == 1
+        np.testing.assert_array_equal(figure.axes[0].lines[0].get_ydata(), xs + attempt)
+        with pytest.raises(RuntimeError, match="removed from.*axes"):
+            previous.update(xs, xs)
+        previous = current
+    plots.finish()
+    plots.release()
+
+
 def test_draw_failure_preserves_cause_without_refresh_or_rollback() -> None:
     host = OwnerHost()
     plots = Plots(host)
@@ -133,13 +160,34 @@ def test_unknown_names_and_finished_draw_do_not_execute_callback(
     plots.release()
 
 
+def _remove_template_artists(target: Figure, template: str, removal: str) -> None:
+    axes = target.axes[1 if template == "scan_line" else 0]
+    if removal == "clear_figure":
+        target.clear()
+    elif removal == "remove_axes":
+        target.delaxes(axes)
+    elif removal == "detach_axes":
+        axes.remove()
+    elif removal == "clear_axes":
+        axes.cla()
+    elif template in ("line", "scan_line"):
+        axes.lines[0].remove()
+    elif template == "scatter":
+        axes.collections[0].remove()
+    else:
+        axes.images[0].remove()
+
+
 @pytest.mark.parametrize(
     "template",
     ["line", "scatter", "heatmap", "nonuniform", "heatmap_line", "scan_line"],
 )
-@pytest.mark.parametrize("remove_one", [False, True])
+@pytest.mark.parametrize(
+    "removal",
+    ["clear_axes", "remove_artist", "clear_figure", "remove_axes", "detach_axes"],
+)
 def test_template_update_reports_artists_removed_by_draw(
-    template: str, remove_one: bool
+    template: str, removal: str
 ) -> None:
     host = OwnerHost()
     plots = Plots(host)
@@ -170,15 +218,7 @@ def test_template_update_reports_artists_removed_by_draw(
 
     def remove(target: Figure) -> None:
         assert host.in_call
-        axes = target.axes[1 if template == "scan_line" else 0]
-        if not remove_one:
-            axes.cla()
-        elif template in ("line", "scan_line"):
-            axes.lines[0].remove()
-        elif template == "scatter":
-            axes.collections[0].remove()
-        else:
-            axes.images[0].remove()
+        _remove_template_artists(target, template, removal)
 
     plots.draw("live", remove)
     host.refreshed.clear()

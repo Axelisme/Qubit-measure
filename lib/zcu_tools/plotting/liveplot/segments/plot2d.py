@@ -66,9 +66,10 @@ class Plot2DSegment(AbsSegment):
         if self.im is None:
             raise RuntimeError("Image not initialized.")
         im = self.im
-        if im not in ax.images:
+        figure = ax.get_figure()
+        if figure is None or ax not in figure.axes or im not in ax.images:
             raise RuntimeError(
-                "Live plot image was removed from its axes; "
+                "Live plot image was removed from its axes or figure; "
                 "do not clear or remove template artists before updating."
             )
 
@@ -141,9 +142,10 @@ class PlotNonUniform2DSegment(AbsSegment):
         if self.im is None:
             raise RuntimeError("Image not initialized.")
         im = self.im
-        if im not in ax.images:
+        figure = ax.get_figure()
+        if figure is None or ax not in figure.axes or im not in ax.images:
             raise RuntimeError(
-                "Live plot image was removed from its axes; "
+                "Live plot image was removed from its axes or figure; "
                 "do not clear or remove template artists before updating."
             )
 
