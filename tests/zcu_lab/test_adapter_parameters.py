@@ -208,19 +208,25 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
         assert isinstance(modules, dict)
         for pulse_key, pulse_spec in pulses:
             pulse = read_value_path(cfg.value, f"modules.{pulse_key}")
-            assert isinstance(pulse, ReferenceValue)
-            inline_probe = isinstance(pulse_spec.allowed[0].fields["freq"], LiteralSpec)
-            assert is_custom_reference_key(pulse.chosen_key) == (
-                not calibrated or inline_probe
-            )
-            references.append(pulse)
-            lowered_pulse = modules[pulse_key]
-            assert isinstance(lowered_pulse, dict)
-            assert lowered_pulse["ch"] == capture.lookup("qubit.wiring.L01.ch").value
+            if pulse is None:
+                assert pulse_spec.optional
+            else:
+                assert isinstance(pulse, ReferenceValue)
+                inline_probe = isinstance(
+                    pulse_spec.allowed[0].fields["freq"], LiteralSpec
+                )
+                assert is_custom_reference_key(pulse.chosen_key) == (
+                    not calibrated or inline_probe
+                )
+                references.append(pulse)
+                lowered_pulse = modules[pulse_key]
+                assert isinstance(lowered_pulse, dict)
+                assert (
+                    lowered_pulse["ch"] == capture.lookup("qubit.wiring.L01.ch").value
+                )
         for ref in references:
             if not is_custom_reference_key(ref.chosen_key):
-                assert ref.chosen_key.startswith("qubit.module.")
-                assert (
+                assert ref.chosen_key.startswith("qubit.module.") and (
                     capture.library_key(ref.chosen_key)
                     == capture.lookup(ref.chosen_key).value
                 )
