@@ -14,7 +14,11 @@ class ScheduleOutcome:
 
     status is completed, stopped, interrupted, or failed. reason is a readable
     explanation, or None when no reason was recorded. exception retains the
-    interruption/failure cause, or None when no exception was recorded.
+    interruption/failure cause, or None when no exception was recorded. A stopped
+    outcome may retain the first acquire/build exception observed after stop;
+    status and StopSignal.error still represent cancellation, without retry.
+    Pure cancellation, including first-round stopped-partial acquisition, has
+    no exception.
     """
 
     status: RunStatus = "completed"

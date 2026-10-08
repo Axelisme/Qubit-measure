@@ -141,20 +141,24 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                 line.set_label(label)
             ax.legend()
 
+        figure, _ = plots.subplots("measurement", ncols=2, figsize=(12, 5))
+        ax_g, ax_e = figure.axes
         return (
             plots.liveplot_1d(
-                "measurement_ground",
+                "measurement",
                 "Time (us)",
                 "Amplitude",
                 num_lines=3,
                 configure_axes=configure_axes,
+                axes=ax_g,
             ),
             plots.liveplot_1d(
-                "measurement_excited",
+                "measurement",
                 "Time (us)",
                 "Amplitude",
                 num_lines=3,
                 configure_axes=configure_axes,
+                axes=ax_e,
             ),
         )
 

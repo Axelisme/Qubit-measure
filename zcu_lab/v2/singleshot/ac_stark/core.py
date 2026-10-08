@@ -198,23 +198,33 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
                 line.set_label(label)
             ax.legend()
 
+        figure, _ = context.plots.subplots(
+            "measurement", nrows=2, ncols=2, figsize=(8, 6)
+        )
+        ax_ground, ax_excited, ax_other, ax_current = figure.axes
         g_2d, e_2d, o_2d = (
             context.plots.liveplot_2d(
-                f"measurement_{state}",
+                "measurement",
                 "Stark Pulse Gain (a.u.)",
                 "Probe Frequency (MHz)",
                 title=state.capitalize(),
                 uniform=False,
                 clim=(0.0, 1.0),
+                axes=ax,
             )
-            for state in ("ground", "excited", "other")
+            for state, ax in (
+                ("ground", ax_ground),
+                ("excited", ax_excited),
+                ("other", ax_other),
+            )
         )
         cur_1d = context.plots.liveplot_1d(
-            "measurement_current",
+            "measurement",
             "Probe Frequency (MHz)",
             "Population",
             num_lines=3,
             configure_axes=configure_axes,
+            axes=ax_current,
         )
         current_index = 0
 

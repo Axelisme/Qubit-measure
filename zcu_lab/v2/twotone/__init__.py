@@ -31,6 +31,8 @@ from zcu_lab.v2.twotone.freq.core import (
     FreqCfg,
     FreqExp,
 )
+from zcu_lab.v2.twotone.irb.analysis import IRBAnalysis
+from zcu_lab.v2.twotone.irb.core import IRB_Exp, IRBCfg, IRBResult
 from zcu_lab.v2.twotone.power_dep.core import PowerCfg, PowerExp
 from zcu_lab.v2.twotone.rb.core import RB_Exp, RBAnalysis, RBCfg
 from zcu_lab.v2.twotone.zigzag.core import ZigZagCfg, ZigZagExp
@@ -84,6 +86,10 @@ __all__ = [
     "RB_Exp",
     "RBCfg",
     "RBAnalysis",
+    "IRB_Exp",
+    "IRBCfg",
+    "IRBResult",
+    "IRBAnalysis",
     # zigzag
     "ZigZagExp",
     "ZigZagCfg",
