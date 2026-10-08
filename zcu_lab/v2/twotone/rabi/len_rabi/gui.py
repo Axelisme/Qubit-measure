@@ -26,6 +26,9 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
 )
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import RoleSpec
@@ -35,7 +38,19 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import (
+    SweepDefault,
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiAnalyzeOptions,
     LenRabiCfg,
@@ -44,6 +59,35 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import (
 )
 
 LenRabiRunResult: TypeAlias = RunRecord[LenRabiCfg, LenRabiResult]
+
+
+def _blank_rabi_pulse(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.3)
+    value.with_field("waveform.length", 1.0)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field("ro_cfg.trig_offset", 0.55)
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -144,24 +188,42 @@ class LenRabiAdapter(
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
-            .reset(optional=True)
-            .pulse(
-                "qub_pulse",
-                role_id="rabi_pulse",
-                label="Rabi Pulse",
-                locked={"waveform.length": 1.0},
-                blank_overrides={"gain": 0.3},
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("qubit.module.reset", fallback=None),
             )
-            .readout()
+            .field(
+                "modules.qub_pulse",
+                spec=make_pulse_module_spec(label="Rabi Pulse").lock_literal(
+                    "waveform.length", 1.0
+                ),
+                default=module_seed(
+                    "qubit.module.x180",
+                    fallback=custom(_blank_rabi_pulse, description="inline rabi pulse"),
+                ),
+            )
+            .field(
+                "modules.readout",
+                spec=make_readout_module_spec(),
+                default=module_seed(
+                    "qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
             .relax_delay(
-                scaled_md("t1", factor=5.0, fallback_value=30.5),
+                scaled_path_seed("qubit.t1", factor=5.0, fallback_value=30.5),
             )
             .sweep(
                 "length",
                 label="Length (us)",
                 default=SweepDefault(
                     start=0.03,
-                    stop=scaled_md("pi_len", factor=4.0, fallback_value=0.3),
+                    stop=scaled_path_seed(
+                        "qubit.module.x180.waveform.length",
+                        factor=4.0,
+                        fallback_value=0.3,
+                    ),
                     expts=101,
                 ),
             )

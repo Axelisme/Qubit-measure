@@ -20,15 +20,30 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import qub_freq_range
+from zcu_lab.v2._support.measure.seeds import (
+    custom,
+    module_seed,
+    path_seed,
+    qub_freq_range,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.twotone.freq.core import (
     FreqAnalyzeOptions,
     FreqCfg,
@@ -37,6 +52,35 @@ from zcu_lab.v2.twotone.freq.core import (
 )
 
 FreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
+
+
+def _blank_probe(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", 0.0)
+    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.1)
+    value.with_field("waveform.length", 5.0)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field("ro_cfg.trig_offset", 0.55)
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -127,16 +171,26 @@ class FreqAdapter(
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
-            .reset(optional=True)
-            .pulse(
-                "qub_pulse",
-                role_id="qub_probe",
-                label="Probe Pulse",
-                init=ModuleInit.INLINE,
-                locked={"freq": 0.0},
-                overrides={"waveform.length": 5.0, "gain": 0.1},
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("qubit.module.reset", fallback=None),
             )
-            .readout()
+            .field(
+                "modules.qub_pulse",
+                spec=make_pulse_module_spec(label="Probe Pulse").lock_literal(
+                    "freq", 0.0
+                ),
+                default=custom(_blank_probe, description="inline probe pulse"),
+            )
+            .field(
+                "modules.readout",
+                spec=make_readout_module_spec(),
+                default=module_seed(
+                    "qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
             .relax_delay(1.0)
             .sweep(
                 "freq",
