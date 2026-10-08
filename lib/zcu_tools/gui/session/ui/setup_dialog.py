@@ -258,7 +258,7 @@ class SetupDialog(QDialog):
         bus.unsubscribe(DeviceChangedPayload, self._on_bus_device_changed)
         self._bus_subs_active = False
 
-    def showEvent(self, a0: QShowEvent | None) -> None:  # noqa: N802
+    def showEvent(self, a0: QShowEvent | None) -> None:
         """Re-seed the project form from State on every programmatic show.
 
         Reopening the dialog after a close (``show()`` on the kept instance)

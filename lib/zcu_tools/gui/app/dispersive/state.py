@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # (project / onetone / preprocess / fit) is documented beside the *_VERSION_KEY
 # constants below.
 from zcu_tools.gui.version_table import (
-    VersionTable as VersionTable,  # noqa: E402  (re-export)
+    VersionTable as VersionTable,  # (re-export)
 )
 
 # Version-table resource keys (see VersionTable docstring for the bump↔drop map).
