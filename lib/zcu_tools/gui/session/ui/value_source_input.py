@@ -103,7 +103,7 @@ class ValueSourceInputController(QObject):
         self._install_popup_event_filters()
         self._completer.activated[str].connect(self._on_completion_activated)  # type: ignore[index]
 
-    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:  # noqa: N802
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
         if a0 is None or a1 is None:
             return super().eventFilter(a0, a1)
         if (
