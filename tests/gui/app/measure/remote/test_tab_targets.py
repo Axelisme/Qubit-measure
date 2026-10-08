@@ -330,6 +330,11 @@ def test_role_rebind_preserves_cfg_handle_inputs_and_reseeds_defaults(
 def test_role_rebind_clear_publishes_invalid_but_unused_alias_can_run(
     application: TargetApplication,
 ) -> None:
+    context = application.controller.context_control
+    context.new_point(PointCreateRequest("role-clear", "", CommandOrigin("gui")))
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0, "sense": "R1"})
+    context.add_component("R1", "fake/sensor", {"rate": 30.0})
+    context.set_component_focus("Q1")
     control = application.controller.tab_control
     tab_id = control.new_tab("rebind")
     control.set_role(tab_id, "driver", None)
