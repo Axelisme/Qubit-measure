@@ -128,11 +128,21 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
         if repeat_pulse is None:
             raise ValueError(f"Repeat on pulse {repeat_on} not found")
 
-        values = sweep2array(
-            x_sweep,
-            x_key,
-            {"soccfg": soccfg, "gen_ch": repeat_pulse.ch},
-        )
+        if x_key == "freq":
+            values = sweep2array(
+                x_sweep,
+                "freq",
+                {
+                    "soccfg": soccfg,
+                    "gen_ch": repeat_pulse.ch,
+                    "ro_ch": repeat_pulse.ro_ch,
+                    "mixer_freq": repeat_pulse.mixer_freq,
+                },
+            )
+        else:
+            values = sweep2array(
+                x_sweep, "gain", {"soccfg": soccfg, "gen_ch": repeat_pulse.ch}
+            )
 
         viewer = context.plots.liveplot_2d("measurement", "Times", x_info["name"])
         signals_buffer = SignalBuffer(

@@ -39,9 +39,11 @@ from zcu_lab.v2.twotone.allxy.gui import AllXYAdapter
 from zcu_lab.v2.twotone.ckp.gui import CKPAdapter
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
 from zcu_lab.v2.twotone.freq.gui import FreqAdapter
+from zcu_lab.v2.twotone.irb.gui import IRBAdapter
 from zcu_lab.v2.twotone.power_dep.gui import PowerDepAdapter
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import AmpRabiAdapter
 from zcu_lab.v2.twotone.rabi.len_rabi.gui import LenRabiAdapter
+from zcu_lab.v2.twotone.rb.gui import RBAdapter
 from zcu_lab.v2.twotone.reset.bath.freq.gui import BathFreqGainAdapter
 from zcu_lab.v2.twotone.reset.bath.length.gui import BathLengthAdapter
 from zcu_lab.v2.twotone.reset.bath.phase.gui import BathPhaseAdapter
@@ -98,6 +100,8 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "twotone/zigzag_scan/gain": ZigZagScanGainAdapter,
     "twotone/zigzag_scan/freq": ZigZagScanFreqAdapter,
     "twotone/allxy": AllXYAdapter,
+    "twotone/rb": RBAdapter,
+    "twotone/irb": IRBAdapter,
     "singleshot/ge": GEAdapter,
     "singleshot/check": CheckAdapter,
     "singleshot/reset_check": SsResetCheckAdapter,

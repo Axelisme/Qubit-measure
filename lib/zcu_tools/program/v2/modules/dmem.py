@@ -134,15 +134,23 @@ class LoadValue(Module):
                 prog.inc_reg(addr_reg, self.offset)
             prog.read_dmem(dst=word_reg, addr=addr_reg)
 
-            # shift = (idx AND #slot_mask) [SL #bits_shift]
+            # tProc v2 uses only B[3:0] as the shift count, including register
+            # operands. Split the desired 0..31-bit shift into two equal
+            # 0..15-bit shifts, plus one odd bit for 1-bit packed values.
             # addr_reg is safe to reuse here: read_dmem above has already
             # consumed it as the address, and word_reg now holds the fetched
             # word, so addr_reg's value is dead.
             shift_reg = addr_reg
             prog.write_reg_op(shift_reg, self.idx_reg, "AND", self._slot_mask)
-            if self._bits_shift > 0:
-                prog.write_reg_op(shift_reg, shift_reg, "SL", self._bits_shift)
+            if self._bits_shift == 0:
+                prog.write_reg_op(shift_reg, shift_reg, "ASR", 1)
+            elif self._bits_shift > 1:
+                prog.write_reg_op(shift_reg, shift_reg, "SL", self._bits_shift - 1)
             prog.write_reg_op(self.val_reg, word_reg, "SR", shift_reg)
+            prog.write_reg_op(self.val_reg, self.val_reg, "SR", shift_reg)
+            if self._bits_shift == 0:
+                prog.write_reg_op(shift_reg, self.idx_reg, "AND", 1)
+                prog.write_reg_op(self.val_reg, self.val_reg, "SR", shift_reg)
 
             prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
 

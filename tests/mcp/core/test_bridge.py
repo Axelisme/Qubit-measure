@@ -274,6 +274,39 @@ def test_launch_reports_early_exit_without_connecting(
     connect.assert_not_called()
 
 
+def test_launched_child_can_fill_stderr_after_parent_returns(tmp_path: Path) -> None:
+    """A real child must not stall when startup warnings exceed pipe capacity."""
+    config = _config(tmp_path)
+    script = tmp_path / "scripts" / config.run_script_name
+    script.parent.mkdir()
+    script.write_text(
+        "import socket, sys, time\n"
+        "from pathlib import Path\n"
+        "port = int(sys.argv[sys.argv.index('--control-port') + 1])\n"
+        "with socket.socket() as server:\n"
+        "    server.bind(('127.0.0.1', port))\n"
+        "    server.listen()\n"
+        "    deadline = time.monotonic() + 10\n"
+        "    while not Path('release').exists():\n"
+        "        if time.monotonic() > deadline: raise TimeoutError('release')\n"
+        "        time.sleep(0.01)\n"
+        "    sys.stderr.write('warning\\n' * 262144)\n"
+        "    sys.stderr.flush()\n"
+        "    Path('completed').touch()\n",
+        encoding="utf8",
+    )
+    bridge = McpBridge(config)
+    try:
+        bridge.launch(tmp_path, _find_free_port(), auto_connect=False)
+        pid = int(config.pid_file.read_text())
+        (tmp_path / "release").touch()
+        assert bridge.wait_for_gui_exit(pid, timeout=5)
+        assert (tmp_path / "completed").exists()
+    finally:
+        if bridge.launched_gui:
+            bridge.stop()
+
+
 def test_launch_timeout_retains_process_without_claiming_connection(
     launch_bridge: tuple[McpBridge, _ChildStderr, Mock, Mock],
     tmp_path: Path,
