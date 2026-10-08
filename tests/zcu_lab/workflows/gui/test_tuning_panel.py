@@ -15,12 +15,12 @@ from zcu_tools.experiment.workflows import (
     RunPaths,
 )
 from zcu_tools.gui.form import FormEnv, FormErrors, FormState
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.experiment.workflows._engine_fakes import (
     ManualClock,
     RecordingBar,
     RecordingDevices,
-    RecordingPlots,
 )
 from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan, seed_from_inputs
 from zcu_lab.workflows.calibration import Calibrated
@@ -51,7 +51,7 @@ def tuning(
     assert isinstance(result, T1TunablesForm)
     engine = Engine(
         EnginePorts(
-            RecordingPlots(),
+            Plots(NonPresentingHost()),
             RecordingBar,
             ManualClock(),
             context=seed_from_inputs(inputs),
