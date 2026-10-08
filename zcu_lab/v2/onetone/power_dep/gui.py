@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -13,17 +15,29 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import SweepValue
+from zcu_tools.gui.cfg import ReferenceValue, SweepValue
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import res_freq_range
+from zcu_lab.v2._support.measure.seeds import custom, res_freq_range
+from zcu_lab.v2._support.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_lab.v2.onetone.power_dep.core import PowerDepCfg, PowerDepExp, PowerDepResult
 
 OneTonePowerDepRunResult: TypeAlias = RunRecord[PowerDepCfg, PowerDepResult]
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    """Seed fresh inline readout from the tab's fixed resonator role.
+
+    Sweep-owned generator/ADC frequencies and gain stay zero; const pulse length
+    stays 1 us and nqz stays 2. Captured wiring channels fall back to zero;
+    ext.default_probe_length minus 0.1 us and ext.time_of_fly plus 0.05 us use
+    absent/null fallbacks 0.9 and 0.55 us. Role/source errors propagate.
+    """
+    raise NotImplementedError("captured power-dependence readout defaults")
 
 
 class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult]):
@@ -42,16 +56,16 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
             "Runs on real hardware; requires a SoC connection."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' — resonator "
-            "frequency, centring the frequency sweep and setting the readout / "
-            "ADC frequency (~4000–8000 MHz); 'rf_w' — linewidth, setting the "
-            "span as r_f ± 1.5*rf_w (~5–50 MHz; falls back to ±30 MHz when "
-            "absent); 'res_ch' / 'ro_ch' — drive / ADC channels; 'timeFly' — "
-            "cable time-of-flight for the trigger offset."
+            "Reads fixed tab parameters: resonator.freq and resonator.kappa "
+            "seed the frequency sweep; resonator.wiring.ch/ro_ch seed the "
+            "generator/ADC channels. Captured resonator.ext.default_probe_length "
+            "minus 0.1 us seeds the ADC window, and resonator.ext.time_of_fly "
+            "plus 0.05 us seeds trigger timing. Missing/null calibrations use "
+            "the declared bring-up fallbacks; source and role errors propagate."
         ),
         expects_ml=(
-            "Needs a pulse-readout module, and references a ModuleLibrary "
-            "waveform named 'ro_waveform' when present (optional)."
+            "Starts with a fresh inline pulse readout and const waveform. "
+            "It does not adopt a library module or named waveform."
         ),
         typical_writeback=(
             "No writeback — this adapter has no analysis step (the underlying "
@@ -61,7 +75,7 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         ),
         recommended=(
             "No analysis. Typical sweep: gain ~0.001 to 0.5 over ~101 points "
-            "(low to high power), frequency r_f ± a couple of linewidths over "
+            "(low to high power), frequency resonator.freq ± linewidths over "
             "~201 points. 'earlystop_snr' enters the run config (0 disables): "
             "set it positive to stop a column early once a signal-to-noise "
             "target is reached, speeding up the scan. Narrow the gain range "
@@ -69,18 +83,24 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         ),
     )
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Declare the chosen qubit and its resonator for fixed tab capture."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
-            .readout(
-                pulse_only=True,
-                init=ModuleInit.INLINE,
-                locked={
-                    "pulse_cfg.freq": 0.0,
-                    "ro_cfg.ro_freq": 0.0,
-                    "pulse_cfg.gain": 0.0,
-                },
+            .field(
+                "modules.readout",
+                spec=make_pulse_readout_module_spec()
+                .lock_literal("pulse_cfg.freq", 0.0)
+                .lock_literal("ro_cfg.ro_freq", 0.0)
+                .lock_literal("pulse_cfg.gain", 0.0),
+                default=custom(_blank_readout, description="inline power readout"),
             )
             .relax_delay(1.0)
             .sweep(
@@ -104,14 +124,22 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> PowerDepCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> PowerDepCfg:
+        """Assemble accepted cfg values with req's captured device snapshot.
+
+        raw_cfg is the resolved experiment tree from cfg acceptance. Positive
+        numeric earlystop_snr enables stopping; nonpositive values disable it.
+        Return the typed cfg without hardware I/O; assembly errors propagate.
+        """
         cfg_raw = dict(raw_cfg)
         cfg_raw.pop("earlystop_snr", None)
         cfg = super().build_exp_cfg(cfg_raw, req)
         cfg.earlystop_snr = self._earlystop_snr(raw_cfg)
         return cfg
 
-    def _earlystop_snr(self, raw_cfg: dict[str, object]) -> float | None:
+    def _earlystop_snr(self, raw_cfg: Mapping[str, ExperimentCfgValue]) -> float | None:
         value = raw_cfg.get("earlystop_snr")
         if not isinstance(value, (int, float)):
             return None
@@ -121,8 +149,18 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         return snr
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> OneTonePowerDepRunResult:
+        """Acquire a power/frequency map from accepted cfg values.
+
+        req supplies captured device settings for assembly; context supplies
+        live SoC/device handles, cancellation and plots for acquisition.
+        Return this run's typed cfg and result. Acquisition errors propagate.
+        """
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = PowerDepExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
