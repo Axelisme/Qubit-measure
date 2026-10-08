@@ -143,13 +143,21 @@ def scaled_path_seed(
 ) -> Seed[float | EvalValue]:
     """Seed factor * path, or the already scaled fallback when absent.
 
-    Empty paths raise ValueError. Capture faults propagate; no focus rebind.
+    Unset/dangling module slots count as absent calibration. Empty paths raise
+    ValueError. Capture, role and materialization faults propagate; no rebind.
     """
     if not path.strip():
         raise ValueError("scaled parameter seed path must not be empty")
 
     def resolve(ctx: SessionEnv) -> float | EvalValue:
-        if ctx.parameters is not None and ctx.parameters.lookup(path).present:
+        if ctx.parameters is None:
+            return fallback_value
+        try:
+            calibration = ctx.parameters.lookup(path)
+        except AttributeError:
+            # The parameter owner reports unset/dangling module slots this way.
+            return fallback_value
+        if calibration.present:
             return EvalValue(expr=f"{factor} * {path}")
         return fallback_value
 
