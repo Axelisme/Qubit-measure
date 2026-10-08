@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from zcu_tools.gui.app.measure.adapter import PostAnalyzeRequest, PostWritebackRequest
@@ -89,12 +89,12 @@ class PostAnalyzeService(_StagedAnalyzeService):
                 f"Tab {tab_id!r} has no primary analyze result to post-analyze"
             )
 
-        ctx = self._state.session_env
+        ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         req = PostAnalyzeRequest(
             run_result=tab.run.result,
             analyze_result=analyze_result,
             post_analyze_params=post_analyze_params_instance,
-            parameters=tab.run.parameters,
+            parameters=ctx.parameters,
             predictor=ctx.predictor,
         )
         logger.info(
@@ -112,7 +112,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
             plots=plots,
         )
 
-        def work(factory: Any) -> Any:  # factory is None (wants_progress=False)
+        def work(_factory: Any) -> Any:  # factory is None (wants_progress=False)
             return adapter.post_analyze(req, plots=plots)
 
         # The tab is marked analyzing for the duration so concurrent run/analyze is

@@ -492,6 +492,7 @@ class State(SessionState):
                 result=result,
                 source_operation_id=source_operation_id,
                 metadata=metadata,
+                parameters=parameters,
             ),
         )
 
@@ -518,7 +519,8 @@ class State(SessionState):
             type(result).__name__,
         )
         retired = self._replace_run_pane(
-            tab_id, RunPaneState(result=result, source_path=source_path)
+            tab_id,
+            RunPaneState(result=result, source_path=source_path, parameters=parameters),
         )
         self.tabs[tab_id].artifacts.reset_for_load()
         return retired
