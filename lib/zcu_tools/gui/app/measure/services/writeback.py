@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import logging
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -17,6 +17,10 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.context_control import ContextControlPort
+from zcu_tools.gui.session.context_types import CommandOrigin
+from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.entry.ledger import RecordsLedger
 
 from .ports import CfgEdit, CfgEditorPort, ContextWrites
 
@@ -117,6 +121,7 @@ class WritebackDraft:
         service: WritebackService,
         identity: str,
         entries: list[_DraftEntry],
+        parameters: ParameterContext | None,
     ) -> None:
         self._service = service
         self._identity = identity
@@ -153,7 +158,12 @@ class WritebackDraft:
             edits=edits,
         )
 
-    def apply(self, *, item_ids: tuple[str, ...] | None = None) -> dict[str, Any]:
+    def apply(
+        self,
+        *,
+        item_ids: tuple[str, ...] | None = None,
+        origin: CommandOrigin = CommandOrigin("gui", None),
+    ) -> dict[str, Any]:
         return self._service.apply_draft(self, item_ids=item_ids)
 
     def teardown(self) -> None:
@@ -187,16 +197,23 @@ class WritebackService:
     def __init__(
         self,
         cfg_editor: CfgEditorPort,
-        write_port: ContextWritePort,
+        write_port: ContextControlPort,
+        entry_ledger: Callable[[str], RecordsLedger],
     ) -> None:
         self._cfg_editor = cfg_editor
         self._write = write_port
+        self._entry_ledger = entry_ledger
 
     # ------------------------------------------------------------------
     # Opaque draft lifecycle
     # ------------------------------------------------------------------
 
-    def create_draft(self, items: Iterable[WritebackItem]) -> WritebackDraft:
+    def create_draft(
+        self,
+        items: Iterable[WritebackItem],
+        *,
+        parameters: ParameterContext | None,
+    ) -> WritebackDraft:
         """Create a draft and all item-local cfg sessions transactionally.
 
         The input is a proposal collection, not an adapter or stage. Items are
@@ -205,10 +222,10 @@ class WritebackService:
         fails to open, every session opened for this draft is torn down before the
         original exception is re-raised; no partially-created draft escapes.
 
-        S2 — captures a display-only baseline from the destination context at
-        creation time (read-only, one owner, not persisted/wire). Scalar
-        MetaDict items show concrete current vs proposed values; module/waveform
-        items show bounded target/change summaries.
+        parameters fixes both expression/library resolution and destination
+        target for the draft lifetime. None is valid for an empty/context-free
+        proposal, but nonempty application fails without a destination. Baseline
+        display uses this capture; no live selection provider is retained.
         """
         identity = uuid.uuid4().hex
         entries: list[_DraftEntry] = []
@@ -361,12 +378,21 @@ class WritebackService:
         return self._cfg_editor.get_draft(entry.editor_id)
 
     def apply_draft(
-        self, draft: WritebackDraft, *, item_ids: tuple[str, ...] | None = None
+        self,
+        draft: WritebackDraft,
+        *,
+        item_ids: tuple[str, ...] | None = None,
+        origin: CommandOrigin = CommandOrigin("gui", None),
     ) -> dict[str, Any]:
-        """Apply explicit IDs, or GUI selection, through one context write.
+        """Lower against the draft capture, append accepted, then set in order.
 
-        Explicit IDs never change selection. Unknown or repeated IDs fail before
-        writing; an empty tuple is a no-op. Writes retain draft order.
+        Role paths resolve through the creation capture, never current focus.
+        All selected values lower before the ledger append. Append failure writes
+        nothing; setter failure stops immediately, retaining accepted evidence
+        and successful writes. Empty selection is a no-op without context.
+        Nonempty writes require a capture and its still-open entry. GUI defaults
+        to a native GUI origin; MCP callers supply the native call ID explicitly.
+        Unknown/duplicate IDs or concrete destinations fail before any write.
         """
         self._require_draft(draft)
         applied_ids: list[str] = []

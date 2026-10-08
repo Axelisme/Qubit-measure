@@ -17,6 +17,8 @@ from typing import (
     runtime_checkable,
 )
 
+from zcu_tools.gui.session.types import ParameterContext
+
 
 @dataclass(frozen=True, slots=True)
 class SaveDataSubmission:
@@ -277,7 +279,12 @@ class WritebackLifecyclePort(Protocol):
     removed.
     """
 
-    def create_draft(self, items: Iterable[WritebackItem]) -> Any: ...
+    def create_draft(
+        self,
+        items: Iterable[WritebackItem],
+        *,
+        parameters: ParameterContext | None,
+    ) -> Any: ...
     def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
     def teardown_draft(self, draft: Any) -> None: ...
 
@@ -297,6 +304,7 @@ class CfgEditorPort(Protocol):
         self,
         seed: CfgSchema,
         *,
+        parameters: ParameterContext | None,
         gc: bool = False,
         owner_key: str | None = None,
     ) -> tuple[str, tuple[SettableTarget, ...]]: ...

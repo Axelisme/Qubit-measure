@@ -9,6 +9,7 @@ from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgRevision, SourceRevision
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
@@ -212,7 +213,11 @@ def build_app_services(
         versions=cfg_editor_ctrl,
         bus=bus,
     )
-    writeback = WritebackService(cfg_editor, write_port=cfg_editor_ctrl)
+    writeback = WritebackService(
+        cfg_editor,
+        write_port=ContextControlFacet(context=context),
+        entry_ledger=context.entry_ledger,
+    )
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).
     tab = TabService(

@@ -172,7 +172,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
                     )
                 )
             )
-            draft = writeback.create_draft(proposal_items)
+            draft = writeback.create_draft(proposal_items, parameters=ctx.parameters)
             plots.finish()
             retired = self._state.update_tab_post_analyze(
                 tab_id,

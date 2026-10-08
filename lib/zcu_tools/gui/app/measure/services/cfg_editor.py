@@ -80,6 +80,7 @@ from zcu_tools.gui.expected_error import (
     InvalidInputError,
 )
 from zcu_tools.gui.session.ports import ContextReadPort
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
 from .ports import (
@@ -419,10 +420,16 @@ class CfgEditorService:
         self,
         seed: CfgSchema,
         *,
+        parameters: ParameterContext | None,
         gc: bool = False,
         owner_key: str | None = None,
     ) -> tuple[str, tuple[SettableTarget, ...]]:
-        """Open a session seeded from an existing ``CfgSchema`` (no item_kind).
+        """Open a session seeded from a CfgSchema and fixed parameter capture.
+
+        parameters is the owner-supplied capture used for every expression and
+        reference refresh. None permits context-free inputs only. Never rebind
+        to the live selection; invalid referenced data remains an editor error.
+        The session has no item_kind and cannot commit to a library root.
 
         Used by inspect and writeback surfaces that own an independent draft,
         such as a writeback item's ``edit_schema``. Tab cfg editing uses its
