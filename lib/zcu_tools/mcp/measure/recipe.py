@@ -1188,14 +1188,15 @@ class RecipeTab:
             )
         return unit
 
-    def use_flux_device(
-        self, name: str | None = None, *, unit: str | None = None
-    ) -> None:
-        """Select explicit name or device.flux.name; assert unit without conversion.
+    def use_flux_device(self, name: str, *, unit: str) -> None:
+        """Select a registered flux device and assert units without conversion.
 
-        Missing default source raises RecipeNeedsParameters. Unknown devices and
-        unit mismatches fail as invalid_device. native is allowed only for a
-        confirmed FakeDevice with original unit none and explicit unit="native".
+        name and unit must be non-empty strings; null or blanks raise ValueError.
+        No GUI-observed default is selected. Unknown devices and mismatched units
+        fail as invalid_device. Physical units must match the device snapshot;
+        native requires confirmed FakeDevice type and snapshot unit none.
+        Selection edits dev.flux_dev only after validation and records the unit
+        for the subsequent Run snapshot. This method never connects a device.
         """
         if name is not None and (not name or not name.strip()):
             raise ValueError("flux device name must be non-empty")
