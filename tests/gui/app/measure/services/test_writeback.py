@@ -69,7 +69,7 @@ def session(tmp_path: Path):
         )
         context.install_entry(entry)
         control = ContextControlFacet(context=context)
-        control.use_point(PointUseRequest(entry.entry_id, "a"))
+        control.use_point(PointUseRequest("a"))
         control.add_component("Q1", "fake/drive/a", {})
         editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
         service = WritebackService(editor, control, entry_ledger=context.entry_ledger)

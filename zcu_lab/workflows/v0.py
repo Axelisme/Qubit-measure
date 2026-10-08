@@ -441,10 +441,7 @@ def init_echo(env: InitEnv[DemoContext], plan: FluxPlan) -> T2EchoState:
     "T2echo_fluxdep",
     plan=FluxPlan,
     tunables=T2EchoTunables,
-    state=T2EchoState,
-    record=T2EchoPoint,
     init=init_echo,
-    requires=("devices", "context"),
 )
 def t2echo_fluxdep(
     env: WorkflowEnv[DemoContext],
@@ -458,6 +455,9 @@ def t2echo_fluxdep(
     and save offline traces. Return Done after the fixed setpoints are exhausted.
     Adapter, plotting, analysis, and saver errors propagate to the engine.
     """
+    # Check required ports before plots or any hardware effect.
+    _ = env.devices
+    _ = env.context
     index = len(plan.fluxes) - len(state.remaining)
     env.pbar("echo points", total=len(plan.fluxes)).set_progress(index)
     redraw(env, "t2echo/vs_flux", state.t2echo_by_flux)
@@ -571,10 +571,7 @@ def init_overnight(env: InitEnv[DemoContext], _plan: OvernightPlan) -> Overnight
     "T1_overnight",
     plan=OvernightPlan,
     tunables=OvernightTunables,
-    state=OvernightState,
-    record=T1Round,
     init=init_overnight,
-    requires=("devices", "context"),
 )
 def t1_overnight(
     env: WorkflowEnv[DemoContext],
@@ -589,6 +586,9 @@ def t1_overnight(
     reason. Return Done after plan.rounds. Adapter, analysis, and saver errors
     propagate to the engine.
     """
+    # Check required ports before plots, waits, or any hardware effect.
+    _ = env.devices
+    _ = env.context
     env.pbar("rounds", total=plan.rounds).set_progress(state.index)
     if state.index >= plan.rounds:
         return Done()

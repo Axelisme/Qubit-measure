@@ -113,9 +113,8 @@ class WorkingPointInfo:
 
 @dataclass(frozen=True)
 class PointUseRequest:
-    """Select label in the currently opened entry identified by its UUID."""
+    """Select label, a safe single path segment, in the currently opened entry."""
 
-    entry_id: str
     label: str
 
 
@@ -138,13 +137,12 @@ class CommandOrigin:
 class PointCreateRequest:
     """Create a point in the opened entry, independently of its memory DRAFT.
 
-    entry_id is the opened entry UUID. label is a safe single path segment.
+    label is a safe single path segment in the currently opened entry.
     description replaces the seed/clone description, including empty text.
     origin attributes the resource command. clone_from is a same-entry label;
     None copies setup components and uses an empty library.
     """
 
-    entry_id: str
     label: str
     description: str
     origin: CommandOrigin

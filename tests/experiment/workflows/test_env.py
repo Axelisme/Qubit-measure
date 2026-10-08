@@ -1,7 +1,7 @@
 """Environment capability and display contracts, without executing requests."""
 
 from collections.abc import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,9 +10,17 @@ import pytest
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from zcu_tools.experiment.workflows import InitEnv, MissingCapability, WorkflowEnv
+from qick import QickConfig
+from zcu_tools.experiment.workflows import (
+    EnginePorts,
+    InitEnv,
+    MissingCapability,
+    WorkflowEnv,
+)
 from zcu_tools.experiment.workflows.env import Displays
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
+
+from ._engine_fakes import ManualClock, RecordingDevices
 
 START = datetime(2026, 10, 6, tzinfo=UTC)
 
@@ -49,8 +57,15 @@ class RecordingBar(TQDMProgressBar):
 
 
 @pytest.fixture
-def displays() -> Generator[Displays, None, None]:
-    owner = Displays(RecordingPlots(), RecordingBar)
+def ports() -> EnginePorts[str]:
+    return EnginePorts(
+        RecordingPlots(), RecordingBar, ManualClock(), context="snapshot"
+    )
+
+
+@pytest.fixture
+def displays(ports: EnginePorts[str]) -> Generator[Displays, None, None]:
+    owner = Displays(ports.plots, ports.progress)
     try:
         yield owner
     finally:
@@ -58,8 +73,10 @@ def displays() -> Generator[Displays, None, None]:
 
 
 @pytest.fixture
-def env(tmp_path: Path, displays: Displays) -> WorkflowEnv[str]:
-    return WorkflowEnv(START, "snapshot", tmp_path, displays)
+def env(
+    tmp_path: Path, displays: Displays, ports: EnginePorts[str]
+) -> WorkflowEnv[str]:
+    return WorkflowEnv(START, ports, tmp_path, displays)
 
 
 def test_init_exposes_original_start_and_context() -> None:
@@ -83,13 +100,35 @@ def test_naive_and_non_utc_start_are_rejected(start: datetime) -> None:
 def test_absent_context_is_not_silently_returned(
     displays: Displays,
     tmp_path: Path,
+    ports: EnginePorts[str],
 ) -> None:
     initial: InitEnv[str] = InitEnv(START, None)
-    step: WorkflowEnv[str] = WorkflowEnv(START, None, tmp_path, displays)
+    step: WorkflowEnv[str] = WorkflowEnv(
+        START, replace(ports, context=None), tmp_path, displays
+    )
     with pytest.raises(MissingCapability, match="context"):
         _ = initial.context
     with pytest.raises(MissingCapability, match="context"):
         _ = step.context
+
+
+@pytest.mark.parametrize("port", ["soc", "devices"])
+def test_absent_native_port_raises_on_accessor(
+    env: WorkflowEnv[str], port: str
+) -> None:
+    with pytest.raises(MissingCapability, match=port):
+        _ = env.soc if port == "soc" else env.devices
+
+
+def test_native_accessors_return_injected_handles_without_operating(
+    ports: EnginePorts[str], displays: Displays, tmp_path: Path
+) -> None:
+    soc, devices = object(), RecordingDevices()
+    native = replace(ports, soc=soc, soccfg=QickConfig({}), devices=devices)
+    env = WorkflowEnv(START, native, tmp_path, displays)
+    assert env.soc is soc
+    assert env.devices is devices
+    assert devices.values == []
 
 
 @pytest.mark.parametrize(
@@ -131,10 +170,11 @@ def test_axes_are_stable_across_step_environments(
     env: WorkflowEnv[str],
     displays: Displays,
     tmp_path: Path,
+    ports: EnginePorts[str],
 ) -> None:
     axes = env.axes("main")
     (line,) = axes.plot([0.0, 1.0], [2.0, 3.0])
-    next_step = WorkflowEnv(START, "snapshot", tmp_path / "next", displays)
+    next_step = WorkflowEnv(START, ports, tmp_path / "next", displays)
     assert next_step.axes("main") is axes
     np.testing.assert_array_equal(
         next_step.axes("main").lines[0].get_ydata(), [2.0, 3.0]
@@ -145,10 +185,11 @@ def test_axes_are_stable_across_step_environments(
 
 def test_display_refresh_publishes_current_figure_data(
     tmp_path: Path,
+    ports: EnginePorts[str],
 ) -> None:
     plots = RecordingPlots()
     owner = Displays(plots, RecordingBar)
-    env = WorkflowEnv(START, "snapshot", tmp_path, owner)
+    env = WorkflowEnv(START, ports, tmp_path, owner)
     axes = env.axes("main")
     (line,) = axes.plot([0.0, 1.0], [2.0, 3.0])
     owner.refresh()
@@ -162,10 +203,11 @@ def test_bar_progress_and_identity_are_retained_until_owner_closes(
     env: WorkflowEnv[str],
     displays: Displays,
     tmp_path: Path,
+    ports: EnginePorts[str],
 ) -> None:
     bar = env.pbar("points", 10)
     bar.set_progress(3)
-    next_step = WorkflowEnv(START, "snapshot", tmp_path / "next", displays)
+    next_step = WorkflowEnv(START, ports, tmp_path / "next", displays)
     assert next_step.pbar("points", 10) is bar
     assert next_step.pbar("points", 10).n == 3
     assert isinstance(bar, RecordingBar)

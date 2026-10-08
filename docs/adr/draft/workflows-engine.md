@@ -28,9 +28,11 @@ overnight 也需要校準、單次實驗、間隔等待與存檔，但不需要 
 
 ### Workflow 與 experiment
 
-一個 workflow 是具名宣告加 `step(env, plan, tun, state)` generator。宣告附在原函式上，不寫入全域 registry。catalog 的 `register_all(registry)` 在宿主啟動或重載時明確登記。engine 每次重新呼叫 step，不知道迭代的是 flux、輪次或其他領域資料。
+一個 workflow 是 `workflow(name, *, plan, tunables, init)` 宣告加 `step(env, plan, tun, state)` generator。State 與 record 型別由 init 回傳及 step 簽名推導。宣告附在原函式上，不寫入全域 registry。catalog 的 `register_all(registry)` 在宿主啟動或重載時明確登記。engine 每次重新呼叫 step，不知道迭代的是 flux、輪次或其他領域資料。
 
-plan 是 frozen pydantic model。tunables 是可由 JSON 驗證的巢狀 pydantic model。state 是純資料 dataclass，可包含陣列。record 是步驟摘要，不含量測曲線。engine 在呼叫前複製 plan、tunables、state，在提交時再複製 record、state。
+plan 是 frozen pydantic model。tunables 是可由 JSON 驗證的巢狀 pydantic model。state 是可 deepcopy 的資料，可包含陣列，不限定 dataclass。record 是步驟摘要，不含量測曲線。engine 在呼叫前複製 plan、tunables、state，在提交時再複製 record、state。
+
+Engine 不在啟動前檢查 capability，也不記錄 requires。WorkflowEnv 提供 soc／devices 唯讀存取，定義者可在步驟開頭自檢，缺 port 在首次存取時失敗。硬體操作應經 effect；框架信任定義者，不強制限制直接存取。
 
 experiment 是 `run_t1(run: Run[T1Cfg]) -> T1Result` 這類普通函式。分析也是普通函式。兩者沒有共同的 Experiment wrapper 或 GUI 基底類別。workflow 明確傳入 saver，engine 在交還 Completed 前保存 cfg 與 Result。期 0 使用測試替身，期 1 接 storage-redesign 4b 的 native saver。
 

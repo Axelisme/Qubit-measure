@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-07，native device mapping
+**Last updated:** 2026-10-08，native software provenance
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -10,15 +10,17 @@
 
 `Next` 配對步驟摘要與下一步 state。`Done` 不新增點 record，`Aborted` 表達明確的業務終止。`Completed` 配對 experiment 返回時的 Run.cfg 副本與 Result，saver 決定單次檔案格式。`Failed` 表達可由 workflow 處理的 Schedule 失敗，不包含部分 Result。
 
-`workflow` 將具名宣告附在原函式，不執行 init，也不建立全域 catalog。`WorkflowRegistry` 由宿主顯式填入，每次重載建立新 instance。Tunables 宣告檢查 JSON schema，dot path 的 leaf／model 判定也由宣告 owner 提供。Package 內的 TunableValues 集中完整 model 驗證、deepcopy capture 與 revision，整批 journal append 成功後才發布新值。Engine 擁有 run_id 與 lifecycle 政策。當前 step 的 capture 不受新 revision 影響。
+`workflow(name, *, plan, tunables, init)` 將具名宣告附在原函式，不執行 init，也不建立全域 catalog。State／record 型別由 init 與 step 簽名推導，state 只需支援 deepcopy，不限定 dataclass。`WorkflowRegistry` 由宿主顯式填入，每次重載建立新 instance。Tunables 宣告檢查 JSON schema，dot path 的 leaf／model 判定也由宣告 owner 提供。Package 內的 TunableValues 集中完整 model 驗證、deepcopy capture 與 revision，整批 journal append 成功後才發布新值。Engine 擁有 run_id 與 lifecycle 政策。當前 step 的 capture 不受新 revision 影響。
 
-`InitEnv` 只提供原始 UTC start 與 detached context。`WorkflowEnv` 的 typed helpers 使用 `yield from`，把 request 與回應的型別交接留在核心。環境共用 engine-owned 顯示資源；缺少 context capability 時存取立即 raise。
+`InitEnv` 只提供原始 UTC start 與 detached context。`WorkflowEnv` 的 typed helpers 使用 `yield from`，把 request 與回應的型別交接留在核心。環境共用 engine-owned 顯示資源。WorkflowEnv 的 soc／devices 與 context 存取在缺 port 時立即 raise，供定義者在步驟開頭自檢。Engine 不做 capability admission，也不記錄 requires。硬體操作應經 effect 保留 journal 與取消；框架信任定義者，不強制阻擋直接操作。
 
 `Run` 為 experiment 複製 dataclass 或 Pydantic model instance cfg，將同一個 StopSignal 與明確 env 接入既有 Schedule。型別本身與無結構輸入在入口失敗。cfg.dev 使用 native `Mapping[str, DeviceInfo]`／None；device adapter 重用既有 manager／driver 的驗證與取消。DeviceSnapshot 使用同一種 ordered mapping，Engine 在 start／resume 捕捉 detached provenance，不宣稱硬體之後保持不變。Schedule 的局部 cfg 不倒灌回 Run，後一個 completed outcome 不覆蓋前一個非 completed。Run 保留 live callback 的原始 failure cause，Engine 依來源區分可恢復的 Schedule Failed、宿主 Stop 與核心失敗。即使 experiment 重拋本次 signal.error，來源也不改變。
 
 Record encoder 將摘要投影成 detached JSON。非有限數字變成 null，曲線陣列與過大 record 會警告。只有摘要序列化可降級為 repr；deepcopy、必要 journal 欄位與檔案 I/O 不能借用此降級規則。
 
 Package 內的保存 seam 集中 typed journal、manifest、iteration 路徑與單次檔案發布，不另建公開宿主 API。Journal 使用 Engine 的同一把 control lock，逐行追加並 flush，不宣稱 fsync 或崩潰接續。Manifest 只摘要生命週期，不保存每點 record 或 state。單次 saver 寫入同目錄 temporary，關閉後以 hard link 原子發布 final，再 unlink temporary。data_root 的檔案系統須支援 hard link；不支援時保留原始 I/O cause，不覆蓋、不自動 retry。發布後清除失敗會保留 final 與 temporary，兩個路徑指向同一檔案，不是獨立備份。Engine 只在 final 發布及 temporary 清理完成後交回 Completed。
+
+RunIdentity 持有宿主傳入的 native SoftwareProvenance。Manifest 與 run_started journal 在 provenance 底下保存同一份資訊，unknown 保留 None，不以預設 False 或字串代替。
 
 Engine.start 只驗證並保存啟動資料。第一次 execute 才執行 init；每次 execute 在呼叫執行緒同步跑到 paused 或 terminal。宿主安排 worker 與 lease。核心以同一把 control lock 序列化控制、revision 與不可中斷的提交，不在 effect 執行期間持有這把鎖。Pause／Stop 不等待 effect，取消時關閉並丟棄 step generator。Next 已返回時仍先提交；Resume 使用已提交 state 與最新 tunables 重做未提交步驟。內部 typed run 保留宣告的泛型配對，Engine 只持有 detached control view。Terminal run 只有在 execute 真正返回後才能被新 run 取代。
 

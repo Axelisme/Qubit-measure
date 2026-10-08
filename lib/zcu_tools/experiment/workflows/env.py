@@ -14,7 +14,7 @@ from ...progress_bar import BaseProgressBar
 from .display import Live1D, Live2D, Live2DRow
 from .effects import DeviceEffect, RunEffect, WaitEffect
 from .models import Completed, Effect, Failed, MissingCapability, ProgressSnapshot
-from .ports import PlotPort, ProgressFactory
+from .ports import DevicePort, EnginePorts, PlotPort, ProgressFactory
 from .run import Run
 
 
@@ -116,19 +116,52 @@ class WorkflowEnv[C](InitEnv[C]):
     started_at is the run's aware UTC start, unchanged by Resume. context is
     host-owned deeply read-only data. iter_dir is this invocation's files/
     directory, not the run root. displays is the engine's retained display owner.
+    soc/devices are read-only accessors for author-owned availability checks.
+    Hardware operations should still use effects to retain journal and cancellation
+    behavior; the framework trusts authors and does not enforce that restriction.
     Use yield from for every effect; the engine discards the generator on cancel.
     """
 
     def __init__(
         self,
         started_at: datetime,
-        context: C | None,
+        ports: EnginePorts[C],
         iter_dir: Path,
         displays: Displays,
     ) -> None:
-        super().__init__(started_at, context)
+        """Bind host ports and retained displays to one step's files directory.
+
+        ports supplies detached context and native handles without copying or
+        connecting them. iter_dir is the current invocation's files/ path.
+        displays retains axes/bars across steps. started_at obeys InitEnv's UTC
+        contract. Missing ports are checked only when their accessor is used.
+        """
+        super().__init__(started_at, ports.context)
         self.iter_dir = iter_dir
+        self._ports = ports
         self._displays = displays
+
+    @property
+    def soc(self) -> object:
+        """Return the native SoC, or raise MissingCapability('soc').
+
+        Use this for availability checks. Hardware operations should go through
+        effects; direct access bypasses engine journaling and cancellation.
+        """
+        if self._ports.soc is None:
+            raise MissingCapability("soc")
+        return self._ports.soc
+
+    @property
+    def devices(self) -> DevicePort:
+        """Return the injected adapter, or raise MissingCapability('devices').
+
+        Use this for availability checks. Hardware operations should go through
+        effects; direct access bypasses engine journaling and cancellation.
+        """
+        if self._ports.devices is None:
+            raise MissingCapability("devices")
+        return self._ports.devices
 
     def run[Cfg, Result](
         self,

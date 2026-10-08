@@ -15,8 +15,6 @@ def _ctrl_with_context_control(context_control: MagicMock) -> SimpleNamespace:
         context_control=context_control, resources_versions=lambda: {}
     )
     for name in (
-        "use_context",
-        "new_context",
         "get_current_md",
         "get_current_ml",
         "set_md_attr",
@@ -30,32 +28,6 @@ def _ctrl_with_context_control(context_control: MagicMock) -> SimpleNamespace:
     ):
         setattr(ctrl, name, MagicMock())
     return ctrl
-
-
-def test_context_switch_and_create_use_context_control_facet() -> None:
-    ctx = MagicMock()
-    ctx.has_project.return_value = True
-    ctx.get_context_labels.return_value = ["base"]
-    ctx.get_active_context_label.return_value = "base"
-    ctrl = _ctrl_with_context_control(ctx)
-
-    assert _dispatch(ctrl, "context.use", {"label": "base"}) == {
-        "label": "base",
-        "has_active_context": True,
-    }
-    ctx.use_context.assert_called_once_with("base")
-    ctrl.use_context.assert_not_called()
-
-    assert _dispatch(
-        ctrl, "context.new", {"bind_device": None, "clone_from": None}
-    ) == {
-        "label": "base",
-        "has_active_context": True,
-    }
-    ctx.new_context.assert_called_once_with(
-        label=None, bind_device=None, clone_from=None
-    )
-    ctrl.new_context.assert_not_called()
 
 
 def test_context_md_ml_and_value_handlers_use_context_control_facet() -> None:

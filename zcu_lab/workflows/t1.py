@@ -186,10 +186,7 @@ def _save_plot(ax: Axes, destination: Path) -> None:
     "T1_fluxdep",
     plan=T1Plan,
     tunables=T1Tunables,
-    state=T1State,
-    record=T1Point,
     init=init_t1,
-    requires=("soc", "devices", "context"),
 )
 def t1_fluxdep(
     env: WorkflowEnv[Calibrated],
@@ -209,6 +206,10 @@ def t1_fluxdep(
     Pause/stop discards the current step through Engine. Native adapter, fitting,
     plotting and saver errors propagate; already published files remain.
     """
+    # Check required ports before plots or any hardware effect.
+    _ = env.soc
+    _ = env.devices
+    _ = env.context
     index = len(plan.fluxes) - len(state.remaining)
     env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
     summary = env.axes("t1/vs_flux")

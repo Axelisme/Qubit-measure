@@ -9,6 +9,7 @@ from threading import Event
 
 import pytest
 from pydantic import ValidationError
+from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
     DeviceSnapshot,
@@ -18,9 +19,9 @@ from zcu_tools.experiment.workflows import (
     EnginePorts,
     InitEnv,
     InvalidRunState,
-    MissingCapability,
     Next,
     RevisionConflict,
+    Run,
     RunIdentity,
     RunMismatch,
     RunPaths,
@@ -31,7 +32,7 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 
-from ._engine_fakes import START, Plan, RecordingBar, Rig, State, Tunables
+from ._engine_fakes import START, Cfg, Plan, RecordingBar, Rig, State, Tunables
 
 
 @pytest.fixture
@@ -93,8 +94,6 @@ def start_replacement(rig: Rig) -> RunStatus:
         "replacement",
         plan=Plan,
         tunables=Tunables,
-        state=State,
-        record=int,
         init=rig.init,
     )(replacement)
     return rig.engine.start(
@@ -102,7 +101,18 @@ def start_replacement(rig: Rig) -> RunStatus:
         plan=Plan(count=1),
         tunables=Tunables(),
         paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity("new", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "new",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
 
 
@@ -567,8 +577,6 @@ def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
         "replacement",
         plan=Plan,
         tunables=Tunables,
-        state=State,
-        record=int,
         init=rig.init,
     )(replacement)
     rig.engine.start(
@@ -576,41 +584,25 @@ def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
         plan=Plan(count=1),
         tunables=Tunables(),
         paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity("new", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "new",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     with pytest.raises(RunMismatch):
         rig.engine.records("run")
     assert rig.engine.execute("new").committed_seq == 1
 
 
-def test_start_revalidates_constructed_model_and_requires_before_creating_paths(
-    rig: Rig,
-) -> None:
-    def requires_soc(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        return points(env, plan, tun, state)
-
-    declared = workflow(
-        "requires-soc",
-        plan=Plan,
-        tunables=Tunables,
-        state=State,
-        record=int,
-        init=rig.init,
-        requires=("soc",),
-    )(requires_soc)
-    with pytest.raises(MissingCapability, match="soc"):
-        rig.engine.start(
-            declared,
-            plan=Plan(),
-            tunables=Tunables(),
-            paths=rig.paths,
-            identity=RunIdentity("run", DeviceSnapshot({}), "offline"),
-        )
-    assert not rig.paths.metadata_root.exists()
-    assert rig.engine.status() is None
-
+def test_start_revalidates_constructed_model_before_creating_paths(rig: Rig) -> None:
     def fresh(
         env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
     ) -> Step[State, int]:
@@ -619,6 +611,73 @@ def test_start_revalidates_constructed_model_and_requires_before_creating_paths(
     with pytest.raises(ValidationError):
         rig.start(fresh, plan=Plan.model_construct(count=-1, values=[]))
     assert not rig.paths.data_root.exists()
+
+
+def test_scalar_state_and_inferred_record_type_commit_normally(rig: Rig) -> None:
+    def init(_env: InitEnv[int], _plan: Plan) -> int:
+        return 0
+
+    @workflow("scalar-state", plan=Plan, tunables=Tunables, init=init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: int
+    ) -> Step[int, str]:
+        if state == plan.count:
+            return Done()
+        yield from env.wait_until(START)
+        return Next(f"point-{state}", state + 1)
+
+    rig.engine.start(
+        step,
+        plan=Plan(count=2),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=RunIdentity(
+            "run",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
+    )
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "done", status.reason
+    assert [record.encoded_record.value for record in rig.engine.records("run")] == [
+        "point-0",
+        "point-1",
+    ]
+
+
+@pytest.mark.parametrize("port", ["soc", "devices"])
+def test_missing_port_fails_only_when_used_during_execute(rig: Rig, port: str) -> None:
+    def needs_soc(run: Run[Cfg]) -> int:
+        _ = run.soc
+        return 1
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        if port == "soc":
+            yield from env.run(needs_soc, Cfg(), save=lambda _source, _path: None)
+        else:
+            yield from env.set_device("flux", 1.0)
+        return Done()
+
+    rig.engine = Engine(EnginePorts(rig.plots, rig.progress, rig.clock, context=7))
+    rig.start(step)
+    assert rig.initialized == []
+    status = rig.engine.status()
+    assert status is not None and status.lifecycle == "running"
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "failed"
+    assert f"Missing workflow capability: {port}" in str(status.reason)
+    assert rig.engine.records("run") == ()
+    assert rig.devices.values == []
+    assert not tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))
 
 
 def test_init_failure_is_failed_without_step_or_commit(rig: Rig) -> None:
@@ -634,8 +693,6 @@ def test_init_failure_is_failed_without_step_or_commit(rig: Rig) -> None:
         "bad-init",
         plan=Plan,
         tunables=Tunables,
-        state=State,
-        record=int,
         init=broken_init,
     )(step)
     rig.engine.start(
@@ -643,7 +700,18 @@ def test_init_failure_is_failed_without_step_or_commit(rig: Rig) -> None:
         plan=Plan(),
         tunables=Tunables(),
         paths=rig.paths,
-        identity=RunIdentity("run", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "run",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     status = rig.engine.execute("run")
     assert status.lifecycle == "failed"

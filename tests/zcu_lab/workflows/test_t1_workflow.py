@@ -1,13 +1,14 @@
 """Native T1 declaration through Engine, simulator, publication and typed loading."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.datafile import load_run_data
+from zcu_tools.datafile import SoftwareProvenance, load_run_data
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import (
     Actor,
@@ -61,7 +62,18 @@ def start_t1(
         plan=make_plan(inputs),
         tunables=tun,
         paths=RunPaths(root / "metadata", root / "data"),
-        identity=RunIdentity("workflow", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "workflow",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     return engine
 
@@ -71,6 +83,55 @@ def tunables() -> T1Tunables:
     return T1Tunables(
         cal=CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125), rounds=2
     )
+
+
+@pytest.mark.parametrize("port", ["soc", "devices", "context"])
+def test_native_t1_checks_ports_before_hardware_effects(
+    inputs: Inputs, tmp_path: Path, port: str
+) -> None:
+    devices, plots = RecordingDevices(), RecordingPlots()
+    ports = EnginePorts(
+        plots,
+        RecordingBar,
+        ManualClock(),
+        context=seed_from_inputs(inputs),
+        soc=inputs.soc,
+        soccfg=inputs.soccfg,
+        devices=devices,
+    )
+    if port == "soc":
+        ports = replace(ports, soc=None, soccfg=None)
+    elif port == "devices":
+        ports = replace(ports, devices=None)
+    else:
+        ports = replace(ports, context=None)
+    engine = Engine(ports)
+    paths = RunPaths(tmp_path / "metadata", tmp_path / "data")
+    engine.start(
+        t1_fluxdep,
+        plan=make_plan(inputs),
+        tunables=tunables(),
+        paths=paths,
+        identity=RunIdentity(
+            "workflow",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
+    )
+    status = engine.execute("workflow")
+    assert status.lifecycle == "failed"
+    assert f"Missing workflow capability: {port}" in str(status.reason)
+    assert devices.values == []
+    assert plots.snapshots == []
+    assert engine.records("workflow") == ()
+    assert not tuple(paths.data_root.glob("iter/*/runs/*.h5"))
 
 
 def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
@@ -212,7 +273,18 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
         plan=plan,
         tunables=tun,
         paths=RunPaths(roots.result, roots.database),
-        identity=RunIdentity("flux-bound", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "flux-bound",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     inputs.soc.set_flux_source(lambda: devices.values[-1][1])
     try:

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, is_dataclass
+from dataclasses import dataclass
 from inspect import isfunction
 from typing import Protocol
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from .env import InitEnv, WorkflowEnv
-from .models import Capability, Step
+from .models import Step
 
 _METADATA_ATTRIBUTE = "__workflow_definition__"
 
@@ -32,43 +32,37 @@ class WorkflowDefinition[P: BaseModel, T: BaseModel, S, R, C]:
     """Declaration-owner metadata retaining the callable's generic pairing.
 
     name is the nonempty catalog name. plan/tunables are validated model types.
-    state is a dataclass type; record is the declared summary type, not an
-    encoder. init builds state from InitEnv and plan without effects. requires
-    lists optional soc/devices/context capabilities. step is the original
+    init builds deepcopy-able state from InitEnv and plan without effects.
+    Its return and step's signature supply the state/record generic pairing;
+    no runtime state or record type declaration is required. step is the original
     decorated function. The owner retrieves metadata; callers never cast it.
     """
 
     name: str
     plan: type[P]
     tunables: type[T]
-    state: type[S]
-    record: type[R]
     init: Callable[[InitEnv[C], P], S]
-    requires: tuple[Capability, ...]
     step: WorkflowStep[P, T, S, R, C]
 
 
-# Arguments after name are keyword-only and preserve generic type pairings (D12).
-def workflow[P: BaseModel, T: BaseModel, S, R, C](  # noqa: PLR0913
+def workflow[P: BaseModel, T: BaseModel, S, R, C](
     name: str,
     *,
     plan: type[P],
     tunables: type[T],
-    state: type[S],
-    record: type[R],
     init: Callable[[InitEnv[C], P], S],
-    requires: tuple[Capability, ...] = (),
 ) -> Callable[[WorkflowStep[P, T, S, R, C]], WorkflowStep[P, T, S, R, C]]:
     """Declare a workflow without wrapping its function or running init.
 
     name must be nonempty. plan must be a frozen extra-forbid Pydantic model.
     All tunables model layers must forbid extras and contain only JSON scalar
-    leaves, nested models, lists, or tuples. state must be a dataclass type.
-    record is retained without serialization checks. requires accepts only
-    soc/devices/context, without duplicates. Invalid declarations raise ValueError;
+    leaves, nested models, lists, or tuples. init's return and step's signature
+    infer state/record types; state only needs to support deepcopy at runtime.
+    Port availability is not guaranteed: authors may check it at step entry,
+    and missing ports fail when accessed. Invalid declarations raise ValueError;
     a non-function step raises TypeError. No global catalog is populated.
     """
-    _validate_declaration(name, plan, tunables, state, requires)
+    _validate_declaration(name, plan, tunables)
 
     def decorate(
         step: WorkflowStep[P, T, S, R, C],
@@ -77,9 +71,7 @@ def workflow[P: BaseModel, T: BaseModel, S, R, C](  # noqa: PLR0913
             raise TypeError("Workflow step must be a Python function")
         if getattr(step, _METADATA_ATTRIBUTE, None) is not None:
             raise ValueError("Workflow step is already declared")
-        definition = WorkflowDefinition(
-            name, plan, tunables, state, record, init, requires, step
-        )
+        definition = WorkflowDefinition(name, plan, tunables, init, step)
         setattr(step, _METADATA_ATTRIBUTE, definition)
         return step
 
@@ -193,8 +185,6 @@ def _validate_declaration(
     name: str,
     plan: type[object],
     tunables: type[object],
-    state: object,
-    requires: tuple[Capability, ...],
 ) -> None:
     if not name.strip():
         raise ValueError("Workflow name must not be empty")
@@ -208,12 +198,6 @@ def _validate_declaration(
         or tunables.model_config.get("extra") != "forbid"
     ):
         raise ValueError("Workflow tunables must be an extra-forbid model")
-    if not isinstance(state, type) or not is_dataclass(state):
-        raise ValueError("Workflow state must be a dataclass type")
-    if len(set(requires)) != len(requires) or any(
-        capability not in ("soc", "devices", "context") for capability in requires
-    ):
-        raise ValueError("Workflow requires must contain unique known capabilities")
     schema = TypeAdapter(JsonValue).validate_python(tunables.model_json_schema())
     if not isinstance(schema, dict):
         raise ValueError("Tunables schema must be an object")

@@ -229,6 +229,117 @@ def test_flux_rejects_unknown_explicit_device_without_selecting_default(tmp_path
         assert not any(m == "value.read" for m, _ in client.transport.sent)
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"flux_device": "coil"},
+        {"flux_unit": "A"},
+        {"flux_device": None, "flux_unit": "A"},
+        {"flux_device": "coil", "flux_unit": None},
+    ],
+)
+def test_flux_requires_device_and_unit_before_gui_preparation(tmp_path, arguments):
+    gui = FluxGui()
+    with recipe_client(tmp_path, gui) as client:
+        reply = full_execution_reply(
+            client, client.call("onetone_spectrum_over_flux", arguments)
+        )
+        assert reply.is_error, reply.data
+        assert not gui.ran
+        assert not client.transport.sent
+
+
+@pytest.mark.parametrize(
+    "device_type,snapshot_unit,requested_unit",
+    [
+        ("YOKOGS200", "A", "A"),
+        ("YOKOGS200", "V", "V"),
+        ("FakeDevice", "none", "native"),
+    ],
+)
+def test_flux_explicit_assertion_preserves_coordinates_and_unit(
+    tmp_path, device_type, snapshot_unit, requested_unit
+):
+    gui = FluxGui(
+        snapshot={
+            "name": "coil",
+            "type_name": device_type,
+            "unit": snapshot_unit,
+            "info": {"type": device_type},
+        }
+    )
+    with recipe_client(tmp_path, gui) as client:
+        question = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {
+                    "flux_device": "coil",
+                    "flux_unit": requested_unit,
+                    "center_mhz": 6100.0,
+                    "span_mhz": 8.0,
+                    "flux_range": [0.005, -0.001],
+                },
+            ),
+        )
+        reply = full_execution_reply(client, skip_writeback(client, question))
+        assert reply.data["status"] == "finished", reply.data
+        fields = reply.data["actual"]["fields"]
+        assert fields["dev.flux_dev"] == {
+            "value": "coil",
+            "source": "explicit",
+            "unit": requested_unit,
+        }
+        assert fields["sweep.flux"]["value"] == {
+            "start": 0.005,
+            "stop": -0.001,
+            "expts": 19,
+        }
+        assert fields["sweep.flux"]["unit"] == requested_unit
+        assert gui.ran
+
+
+@pytest.mark.parametrize(
+    "device_type,snapshot_unit,requested_unit",
+    [
+        ("YOKOGS200", "A", "V"),
+        ("YOKOGS200", "V", "A"),
+        ("YOKOGS200", "A", "native"),
+        ("FakeDevice", "none", "A"),
+        ("FakeDevice", "none", "V"),
+    ],
+)
+def test_flux_explicit_unit_mismatch_fails_before_run(
+    tmp_path, device_type, snapshot_unit, requested_unit
+):
+    gui = FluxGui(
+        snapshot={
+            "name": "coil",
+            "type_name": device_type,
+            "unit": snapshot_unit,
+            "info": {"type": device_type},
+        }
+    )
+    with recipe_client(tmp_path, gui) as client:
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {
+                    "flux_device": "coil",
+                    "flux_unit": requested_unit,
+                    "center_mhz": 6100.0,
+                    "span_mhz": 8.0,
+                    "flux_range": [0.005, -0.001],
+                },
+            ),
+        )
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["error"]["reason"] == "invalid_device"
+        assert not gui.ran
+
+
 class OnetoneGui(LookbackGui):
     def __init__(self, md=None, experiment="onetone/freq"):
         super().__init__()

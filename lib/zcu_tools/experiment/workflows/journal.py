@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import JsonValue
 
-from .models import Actor, Capability, CommittedRecord, RunIdentity, RunPaths
+from .models import Actor, CommittedRecord, RunIdentity, RunPaths
 from .ports import DeviceSnapshot
 
 
@@ -19,7 +19,7 @@ class RunMetadata:
 
     identity is host-supplied provenance. workflow is the declared name. plan
     and tunables are complete, validated JSON model projections at revision 0.
-    requires lists declared capabilities. roots are absolute run directories.
+    roots are absolute run directories.
     started_at is the original timezone-aware UTC start time.
     """
 
@@ -27,7 +27,6 @@ class RunMetadata:
     workflow: str
     plan: JsonValue
     tunables: JsonValue
-    requires: tuple[Capability, ...]
     roots: RunPaths
     started_at: datetime
 

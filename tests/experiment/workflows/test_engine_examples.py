@@ -1,9 +1,11 @@
 """Offline v0 workflow functions exercise the real Engine/Run/IO seam."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
+from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     CommittedRecord,
     DeviceSnapshot,
@@ -52,7 +54,18 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
         plan=plan,
         tunables=tunables,
         paths=RunPaths(root / "metadata", root / "data"),
-        identity=RunIdentity("example", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "example",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     status = engine.execute("example")
     assert status.lifecycle == "done", status.reason
@@ -65,6 +78,65 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
     assert len(tuple((root / "data/iter").iterdir())) == len(records) + 1
     assert not tuple((root / "data").glob("iter/*/runs/.*.tmp.h5"))
     return records, clock, devices
+
+
+@pytest.mark.parametrize("name", ["echo", "overnight"])
+@pytest.mark.parametrize("port", ["devices", "context"])
+def test_demo_workflows_check_ports_before_effects(
+    tmp_path: Path, name: str, port: str
+) -> None:
+    clock, devices, plots = ManualClock(), RecordingDevices(), RecordingPlots()
+    ports = EnginePorts(
+        plots,
+        RecordingBar,
+        clock,
+        devices=devices,
+        context=DemoContext(5000.0, 0.05, 7000.0),
+    )
+    if port == "devices":
+        ports = replace(ports, devices=None)
+    else:
+        ports = replace(ports, context=None)
+    engine = Engine(ports)
+    paths = RunPaths(tmp_path / "metadata", tmp_path / "data")
+    identity = RunIdentity(
+        "example",
+        DeviceSnapshot({}),
+        SoftwareProvenance(
+            software_versions={},
+            git_commit=None,
+            git_dirty=None,
+            qick_version=None,
+            soc_fingerprint=None,
+            hostname="offline",
+        ),
+    )
+    if name == "echo":
+        engine.start(
+            t2echo_fluxdep,
+            plan=FluxPlan(flux_dev="flux", fluxes=(0.1,), points=7),
+            tunables=T2EchoTunables(),
+            paths=paths,
+            identity=identity,
+        )
+    else:
+        engine.start(
+            t1_overnight,
+            plan=OvernightPlan(
+                flux_dev="flux", flux=0.2, period_s=10, rounds=1, points=7
+            ),
+            tunables=OvernightTunables(),
+            paths=paths,
+            identity=identity,
+        )
+    status = engine.execute("example")
+    assert status.lifecycle == "failed"
+    assert f"Missing workflow capability: {port}" in str(status.reason)
+    assert devices.values == []
+    assert clock.targets == []
+    assert plots.snapshots == []
+    assert engine.records("example") == ()
+    assert not tuple(paths.data_root.glob("iter/*/runs/*.h5"))
 
 
 def test_t2echo_fluxdep_uses_the_same_core_with_its_own_typed_record(

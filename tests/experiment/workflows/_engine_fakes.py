@@ -11,6 +11,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import DeviceInfo, DeviceManager
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
@@ -204,8 +205,6 @@ class Rig:
             "example",
             plan=Plan,
             tunables=Tunables,
-            state=State,
-            record=int,
             init=self.init,
         )(invoke)
         self.engine.start(
@@ -214,7 +213,16 @@ class Rig:
             tunables=Tunables(),
             paths=self.paths,
             identity=RunIdentity(
-                "run", DeviceSnapshot({}) if devices is None else devices, "offline"
+                "run",
+                DeviceSnapshot({}) if devices is None else devices,
+                SoftwareProvenance(
+                    software_versions={},
+                    git_commit=None,
+                    git_dirty=None,
+                    qick_version=None,
+                    soc_fingerprint=None,
+                    hostname="offline",
+                ),
             ),
         )
 

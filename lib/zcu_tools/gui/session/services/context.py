@@ -46,7 +46,7 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 from zcu_tools.resources.entry import snapshot, source_path
-from zcu_tools.resources.entry.roles import resolve_names
+from zcu_tools.resources.entry.roles import resolve_names, role_registry
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -186,12 +186,12 @@ class ContextService:
     def use_point(self, request: PointUseRequest) -> SavedPoint:
         """Prepare point/library/assets, then install ACTIVE and publish facts.
 
-        No opened entry raises FailedPreconditionError(no_entry); a different
-        entry_id raises entry_not_open. Preparation failure retains the old
-        binding. The returned target has no session selection generation.
+        No opened entry raises FailedPreconditionError(no_entry). Preparation
+        failure retains the old binding. The returned target has no session
+        selection generation.
         """
         self._owner.assert_owner()
-        entry = self._require_entry(request.entry_id)
+        entry = self._require_open_entry()
         point = entry.use_point(request.label)
         parameters, library, sources, info = self._prepare_point(
             entry, request.label, point
@@ -202,13 +202,13 @@ class ContextService:
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
         """Create from setup or a same-entry clone, then install ACTIVE.
 
-        Validate opened entry UUID before creation. Pass description and origin
-        unchanged to ResultEntry.new_point; never copy DRAFT. Resource errors
+        No opened entry raises FailedPreconditionError(no_entry). Pass description
+        and origin unchanged to ResultEntry.new_point; never copy DRAFT. Resource errors
         propagate. Post-creation binding failure raises PointBindingError from
         its cause, retaining the point and old binding without retry/deletion.
         """
         self._owner.assert_owner()
-        entry = self._require_entry(request.entry_id)
+        entry = self._require_open_entry()
         clone = (
             entry.use_point(request.clone_from)
             if request.clone_from is not None
@@ -271,7 +271,9 @@ class ContextService:
         current DRAFT in memory or ACTIVE point in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point publishes one parameter change and updates
-        focus options. Setup edits never change existing points or their captures.
+        focus options. If no focus is selected, the registry's sole candidate is
+        selected; existing focus is retained. Setup edits never change existing
+        points or their captures.
         No entry/context, schema, conflict and I/O errors propagate.
         """
         self._owner.assert_owner()
@@ -298,6 +300,9 @@ class ContextService:
             document = snapshot(self._point)
         self._focus = replace(
             self._focus,
+            name=self._focus.name
+            if self._focus.name is not None
+            else role_registry.default_focus(document.components),
             components=tuple(
                 ComponentOption(component_name, component.kind)
                 for component_name, component in document.components.items()
@@ -660,14 +665,18 @@ class ContextService:
             )
         return self.get_component_focus()
 
-    def _require_entry(self, entry_id: str) -> ResultEntry:
+    def _require_open_entry(self) -> ResultEntry:
         if self._entry is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
-        if entry_id != self._entry.entry_id:
+        return self._entry
+
+    def _require_entry(self, entry_id: str) -> ResultEntry:
+        entry = self._require_open_entry()
+        if entry_id != entry.entry_id:
             raise FailedPreconditionError(
                 f"Entry {entry_id!r} is not opened", reason_code="entry_not_open"
             )
-        return self._entry
+        return entry
 
     def _require_write_target(self, target: ContextTarget) -> ResultEntry:
         """Reject cross-entry and stale memory targets before opening a resource."""
@@ -761,15 +770,14 @@ class ContextService:
         *,
         active_label: str,
     ) -> None:
+        components = parameters.document().components if parameters is not None else {}
         self._focus = ComponentFocus(
             target=parameters.target if parameters is not None else None,
-            name=None,
+            name=role_registry.default_focus(components),
             components=tuple(
                 ComponentOption(name, component.kind)
-                for name, component in parameters.document().components.items()
-            )
-            if parameters is not None
-            else (),
+                for name, component in components.items()
+            ),
         )
         if parameters is None:
             self._source_binding = None
