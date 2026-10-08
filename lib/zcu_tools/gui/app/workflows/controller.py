@@ -68,8 +68,13 @@ class WorkflowController[C]:
         Resume reuses it, without consulting ambient progress or ports.progress.
         on_finished receives
         the authoritative status (None if startup was never accepted) and the
-        original startup/worker error when present. It runs before handle settle
-        and lease release; reentrant Start remains blocked until cleanup.
+        original startup/worker error when present. Producer owner delivery runs
+        the callback before handle settle and lease release; reentrant Start
+        remains blocked until that segment cleanup. Synchronous Resume admission
+        failure has no producer: begin has already unwound any segment resources.
+        If Stop terminated the native run during admission, on_finished then
+        receives that stopped status with error=None, retained progress is
+        discarded, and the original admission error is reraised to the caller.
         The callback also reports each paused segment; the caller keeps plan,
         plots and run inputs alive and locked in that case. Terminal run callbacks
         may finish plots; release belongs to the caller. No rollback is promised.
