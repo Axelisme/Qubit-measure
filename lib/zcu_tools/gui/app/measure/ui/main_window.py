@@ -609,10 +609,12 @@ class MainWindow(QMainWindow):
         return self._ctrl.get_adapter_names()
 
     def create_tab(self, adapter_name: str) -> None:
-        """Create from session focus; present role failures without retry or Run.
+        """Create from focus, allowing unresolved automatic aliases.
 
-        adapter_name is a registered measure adapter key. Expected role errors
-        appear through the dialog presenter and leave the tab list unchanged.
+        adapter_name is a registered measure adapter key. Automatic ambiguity
+        leaves roles unbound and still creates the tab. Invalid explicit choices
+        or dangling/wrong-kind references appear through the dialog presenter
+        and leave the tab list unchanged.
         Other failures propagate to the existing UI error boundary.
         """
         try:

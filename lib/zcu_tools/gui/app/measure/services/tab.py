@@ -200,8 +200,10 @@ class TabService:
 
         target=None uses current GUI focus. A non-empty component name explicitly
         binds the adapter's first declared role; dependent roles still use their
-        declared inference. It never changes GUI focus. Missing/wrong-kind roles
-        raise RoleResolutionError before tab registration. An empty target or a
+        declared inference. It never changes GUI focus. Automatic inference with
+        zero/multiple choices leaves aliases unbound and still creates the tab.
+        Cfgs that use them publish Invalid. Explicit invalid choices and actual
+        dangling/wrong-kind references raise before tab registration. An empty target or a
         target on a roleless adapter raises InvalidInputError.
 
         ``from_dict is None`` → a fresh tab with the adapter's default cfg.
