@@ -102,10 +102,10 @@ class ParameterContext:
         self._storage = storage
         if self._roles is not None and not self._source_faults:
             for role, spec in self._roles.declarations.items():
-                name = self._roles.names.get(role)
-                component = (
-                    self._point.components.get(name) if name is not None else None
-                )
+                if role not in self._roles.names:
+                    continue
+                name = self._roles.names[role]
+                component = self._point.components.get(name)
                 if component is None or not fnmatchcase(component.kind, spec.kind):
                     raise RoleResolutionError(
                         role,
@@ -205,6 +205,15 @@ class ParameterContext:
         namespace errors propagate.
         """
         self._ensure_readable()
+        if self._roles is not None:
+            prefix = path.split(".", 1)[0]
+            if prefix in self._roles.declarations and prefix not in self._roles.names:
+                raise RoleResolutionError(
+                    prefix,
+                    self._roles.focus,
+                    self._roles.declarations[prefix].kind,
+                    "Role is not bound",
+                )
         names = self._roles.names if self._roles is not None else {}
         return resolve_path(self._point, path, roles=names)
 

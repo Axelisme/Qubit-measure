@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-08，Inspect 元件樹與參數 owner
+**Last updated:** 2026-10-09，固定 capture 的未綁角色
 
 # gui/session/ — 量測 session core
 
@@ -14,7 +14,7 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 ## Context、session environment 與 Run snapshot
 
 - **Entry 與 point** 的持久資源由 [`resources.entry`](../../resources/entry/README.md) 管理，module library 由 [`resources.context`](../../resources/context/README.md) 管理。Session 不重建文件版面，也不在清除選取時刪除資源。
-- **ParameterContext** 是隔離的 point/library 讀取投影。`EntryDraft` 與 `SavedPoint` 明確標識來源 entry 與目的地，捕捉的 roles 不因焦點或 point 切換重解析。資料 getter 不 refresh 或讀 YAML。
+- **ParameterContext** 是隔離的 point/library 讀取投影。`EntryDraft` 與 `SavedPoint` 明確標識來源 entry 與目的地，捕捉的 roles 不因焦點或 point 切換重解析。固定 capture 可以保留未綁的宣告角色；實際讀取才指名失敗，不改讀同名 concrete 元件。已綁名稱仍須存在且符合 kind。資料 getter 不 refresh 或讀 YAML。
 - **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，DRAFT／ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC、predictor 與 cached value sources 保持各自 owner。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。
 

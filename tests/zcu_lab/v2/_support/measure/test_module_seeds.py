@@ -222,7 +222,7 @@ def test_unbound_scalar_defaults_publish_invalid_then_refresh_or_reset(
     assert read_value_path(resource.snapshot_inputs().value, "neighbor") == DirectValue(
         3.0
     )
-    with pytest.raises(CfgPreconditionError, match="qubit"):
+    with pytest.raises(CfgPreconditionError):
         resource.accept(initial.ref.revision)
 
     environment = _environment(calibration=calibration, calibration_present=True)

@@ -101,6 +101,14 @@ def path_seed(
 
     def resolve(ctx: SessionEnv) -> ScalarLeafInput:
         if ctx.parameters is not None:
+            roles = ctx.parameters.roles
+            prefix = path.split(".", 1)[0]
+            if (
+                roles is not None
+                and prefix in roles.declarations
+                and prefix not in roles.names
+            ):
+                return EvalValue(expr=expr if expr is not None else path)
             calibration = ctx.parameters.lookup(path)
             if calibration.present and calibration.value is not None:
                 return EvalValue(expr=expr if expr is not None else path)
@@ -162,6 +170,14 @@ def scaled_path_seed(
     def resolve(ctx: SessionEnv) -> float | EvalValue:
         if ctx.parameters is None:
             return fallback_value
+        roles = ctx.parameters.roles
+        prefix = path.split(".", 1)[0]
+        if (
+            roles is not None
+            and prefix in roles.declarations
+            and prefix not in roles.names
+        ):
+            return EvalValue(expr=f"{factor} * {path}")
         try:
             calibration = ctx.parameters.lookup(path)
         except AttributeError:
