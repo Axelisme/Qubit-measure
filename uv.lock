@@ -2930,12 +2930,14 @@ gui = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "h5netcdf" },
     { name = "import-linter" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "xarray" },
     { name = "zcu-tools", extra = ["gui"] },
 ]
 quality = [
@@ -2943,10 +2945,6 @@ quality = [
     { name = "pip-audit" },
     { name = "pytest-randomly" },
     { name = "radon" },
-]
-test = [
-    { name = "h5netcdf" },
-    { name = "xarray" },
 ]
 
 [package.metadata]
@@ -3006,12 +3004,14 @@ provides-extras = ["client", "gdrive", "design", "gui", "all", "development"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "h5netcdf" },
     { name = "import-linter", specifier = ">=2.15" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "xarray" },
     { name = "zcu-tools", extras = ["gui"] },
 ]
 quality = [
@@ -3019,8 +3019,4 @@ quality = [
     { name = "pip-audit" },
     { name = "pytest-randomly" },
     { name = "radon", specifier = ">=6.0.1,<7" },
-]
-test = [
-    { name = "h5netcdf" },
-    { name = "xarray" },
 ]

@@ -73,11 +73,11 @@ dev = [
   "pyright",
   "ruff",
   "import-linter>=2.15",
+  "xarray",
+  "h5netcdf",
 ]
 # Development diagnostics; include this group when bootstrapping dev environments.
 quality = ["pytest-randomly", "deptry", "pip-audit", "radon>=6.0.1,<7"]
-# Optional native data.h5 interoperability tests; not a runtime dependency.
-test = ["xarray", "h5netcdf"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
