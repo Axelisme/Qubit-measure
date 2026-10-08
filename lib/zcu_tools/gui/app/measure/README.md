@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，tab 角色改綁、歷史來源與 Primary/Post accepted identity
+**Last updated:** 2026-10-09，domain checks 與 Run admission inputs
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -10,7 +10,7 @@ framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/bas
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
 lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
 
-Run permit 固定 tab 的歷史 entry／point、admission 的角色、storage capability 與 adapter 的 persistence tag。
+RunInputs 固定 tab 的歷史 entry／point、admission 的角色、storage capability 與 adapter 的 persistence tag。
 `RunService` 在 adapter 呼叫邊界記錄 UTC 時間、run ID 與 software provenance。
 可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
 再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
@@ -20,7 +20,7 @@ Ledger 失敗使 operation failed 並記錄 ERROR，但保留已發布的結果�
 metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。未宣告 native evidence
 或沒有 saved origin 時 metadata 為 None；新 Run 清舊 evidence。Native Load 保留檔案的完整歷史 metadata，不製造 acquired 事件或 Save confirmation。
 
-Run permit 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
+RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
 Load 保存 LoadDataRequest 的 capture 與 native 檔案的原 metadata，不新增 Run token 或量測歷史。
 純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。predictor 仍跨 tab 共享。
@@ -29,10 +29,11 @@ Load 保存 LoadDataRequest 的 capture 與 native 檔案的原 metadata，不�
 
 此 app 的 View（Qt UI）與 `RemoteControlAdapter`（`remote/`）共用可用的
 application commands，但 capability 驗證尚未覆蓋全部入口。`GuardService` 對
-run、load、save、analyze、writeback 的既有檢查發放不同型別的 Permit；
+load、save、analyze、writeback 提供 `check_*`，成功返回 None，失敗 raise
+`GuardError`。Run admission 檢查並捕捉 `RunInputs`，不把資料型別當 proof。
 analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬體互斥
-由 owning service 或 app-local `OperationGate` 處理。Permit、lease、handle
-各有不同的生命週期，不以 handle 推斷取得硬體 lease。詳見
+由 owning service 或 app-local `OperationGate` 處理。Inputs 不需釋放，lease
+須在終局釋放，handle 只追蹤 operation，不證明持有硬體。詳見
 [Operation ADR](../../../../../docs/adr/0066-operation-lifecycle.md) 與
 [capability draft](../../../../../docs/adr/draft/gui-adapter-capability-guards.md)。
 
@@ -296,10 +297,11 @@ Key ownership rules:
   once; failures leave the live entry untouched.
 - `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
   happen on the owner thread and return retired resources for post-commit cleanup.
-- `GuardService` checks the static preconditions it implements and returns typed
-  permits for run/save/analyze/writeback. The analyze permit does not check adapter
-  capability, and post-analyze has no capability permit; Qt and remote entry points
-  keep their own checks (see the GUI capability draft).
+- `GuardService` owns the implemented domain checks. Qt and remote controls
+  call `check_save/load/analyze/writeback` before the service command on the
+  same owner thread. Run uses `capture_run_inputs` once for the exact cfg and
+  observed inputs. Analyze capability and post-analyze checks remain at their
+  existing entry points (see the GUI capability draft).
 - `OperationGate` is the app-local thin wrapper over the shared
   `RunBlocksHardwareGate` hardware exclusion policy。active lease另投影captured
   origin、domain note與duration；`state.hardware_gate`是read-only internal RPC，

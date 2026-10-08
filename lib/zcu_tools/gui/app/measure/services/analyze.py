@@ -15,7 +15,6 @@ from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import OperationRunner
 
-from .guard import AnalyzePermit
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 from .staged_analyze import _StagedAnalyzeService
 
@@ -87,14 +86,19 @@ class AnalyzeService(_StagedAnalyzeService):
 
     def start_analyze(
         self,
-        permit: AnalyzePermit,
+        tab_id: str,
         analyze_params_instance: object,
         *,
         plots: Plots,
     ) -> int:
-        # Context + run-result preconditions are proven by the AnalyzePermit;
-        # tab-busy is the dynamic check that stays at the operation boundary.
-        # Returns the operation token (handle) so the caller can await it.
+        """Start Primary analysis and return its asynchronous operation token.
+
+        tab_id identifies an existing tab; analyze_params_instance is the
+        adapter's parameter instance and plots is the operation-owned host.
+        Call after GuardService.check_analyze in the same owner-thread command.
+        Capture the historical Run source, not current tab bindings. Busy or
+        submission failures raise; worker failures settle the returned token.
+        """
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
@@ -149,14 +153,22 @@ class AnalyzeService(_StagedAnalyzeService):
 
     def start_plugin(
         self,
-        permit: AnalyzePermit,
+        tab_id: str,
         plugin: PluginDefinition[Any, Any],
         owner: OwnerScheduler,
         *,
         analyze_params_instance: object,
         plots: Plots,
     ) -> int:
-        """Capture operation inputs and register one service-owned session."""
+        """Open plugin and return its service-owned interactive operation token.
+
+        tab_id identifies an existing tab checked by GuardService.check_analyze
+        in the same owner-thread command. plugin is its adapter's definition;
+        owner schedules commits, analyze_params_instance supplies parameters and
+        plots is its owned host. Capture the historical Run source once. Busy,
+        plugin opening or handle admission failures raise without a live session.
+        The owning service disposes the session on terminal paths.
+        """
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")

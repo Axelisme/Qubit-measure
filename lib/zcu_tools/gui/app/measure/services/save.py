@@ -29,8 +29,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.resources.entry import ArtifactKey, SaveLayout
 
-from .guard import SavePermit
-
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -77,11 +75,12 @@ class SaveService:
         self._require_tab_idle(tab_id)
 
     def save_data(
-        self, permit: SavePermit, comment: str | None = None, *, origin: CommandOrigin
+        self, tab_id: str, comment: str | None = None, *, origin: CommandOrigin
     ) -> SaveReport:
         """Synchronously save native HDF5 and a fresh Labber file on the owner thread.
 
-        permit identifies an idle guarded tab with historical storage/metadata.
+        tab_id identifies an existing idle tab with historical storage/metadata.
+        Call after GuardService.check_save on the same owner-thread command.
         comment=None retains its annotation; origin attributes this command.
         Missing evidence, busy or an entry/point mismatch between file history
         and captured storage raises FailedPreconditionError before mapping or I/O.
@@ -96,7 +95,7 @@ class SaveService:
 
     def save_artifacts(
         self,
-        permit: SavePermit,
+        tab_id: str,
         artifacts: tuple[ArtifactRef, ...] | None = None,
         comment: str | None = None,
         *,
@@ -104,7 +103,8 @@ class SaveService:
     ) -> SaveReport:
         """Synchronously save whole artifacts and publish their complete report.
 
-        Call on State's owner thread. None selects all declarations, including
+        tab_id identifies an existing tab. Call after GuardService.check_save on
+        the same owner-thread command. None selects all declarations, including
         Saved; explicit refs are ordered, unique and nonempty. Unknown refs,
         missing storage/metadata, busy or history/captured entry/point mismatch
         raise FailedPreconditionError before mapping, I/O or annotation mutation.

@@ -13,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     LoadDataRequest,
     NoAnalyzeParams,
 )
-from zcu_tools.gui.app.measure.services.guard import LoadPermit
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.cfg import (
@@ -87,7 +86,7 @@ def test_load_retains_request_source_and_native_history(
 
     adapter.load.side_effect = load_and_rebind
     service, _emit, _writeback = _service(state)
-    service.load_result(LoadPermit(tab_id), "result.h5")
+    service.load_result(tab_id, "result.h5")
 
     request = adapter.load.call_args.args[0]
     assert isinstance(request, LoadDataRequest)
@@ -133,7 +132,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     save_path_version = state.version.get(f"tab:{tab_id}:save_path")
     svc, emit, writeback = _service(state)
 
-    outcome = svc.load_result(LoadPermit(tab_id), "/tmp/new.hdf5")
+    outcome = svc.load_result(tab_id, "/tmp/new.hdf5")
 
     assert tab.run.result is loaded
     assert tab.run.metadata == metadata
@@ -166,7 +165,7 @@ def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
     svc, _emit, writeback = _service(state)
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
-        svc.load_result(LoadPermit(tab_id), "/tmp/new.hdf5")
+        svc.load_result(tab_id, "/tmp/new.hdf5")
 
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
@@ -183,7 +182,7 @@ def test_load_result_error_leaves_state_unchanged() -> None:
     svc, _emit, writeback = _service(state)
 
     with pytest.raises(LoadDataError, match="Cannot load this data file") as exc_info:
-        svc.load_result(LoadPermit(tab_id), "/tmp/bad.hdf5")
+        svc.load_result(tab_id, "/tmp/bad.hdf5")
 
     assert exc_info.value.reason_code == "invalid_data_file"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
@@ -199,7 +198,7 @@ def test_load_result_wraps_unsupported_adapter() -> None:
     svc, _emit, writeback = _service(state)
 
     with pytest.raises(LoadDataError, match="does not support loading") as exc_info:
-        svc.load_result(LoadPermit(tab_id), "/tmp/file.hdf5")
+        svc.load_result(tab_id, "/tmp/file.hdf5")
 
     assert exc_info.value.reason_code == "unsupported_load"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION

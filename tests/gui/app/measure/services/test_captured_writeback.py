@@ -26,7 +26,6 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
 )
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
-from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.writeback import (
     WritebackDraft,
@@ -205,14 +204,14 @@ def test_analysis_draft_uses_start_run_identity(
                 "pick", 2, (), lambda _state: None, lambda _state: PaneSummary()
             )
             service.start_plugin(
-                AnalyzePermit("tab"),
+                "tab",
                 plugin,
                 ManualOwnerScheduler(),
                 analyze_params_instance="submitted",
                 plots=plots,
             )
         else:
-            service.start_analyze(AnalyzePermit("tab"), object(), plots=plots)
+            service.start_analyze("tab", object(), plots=plots)
         tab.run.metadata = replace(native.metadata, run_id="later-run")
         if interactive:
             assert service.finish_plugin("tab")

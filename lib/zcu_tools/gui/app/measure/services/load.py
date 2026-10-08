@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
 from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
-from .guard import LoadPermit
 from .plot_lifecycle import release_retired_plots
 
 if TYPE_CHECKING:
@@ -75,7 +74,15 @@ class LoadService:
         caps = getattr(adapter, "capabilities", None)
         return isinstance(caps, AdapterCapabilities) and caps.load_data
 
-    def load_result(self, permit: LoadPermit, data_path: str) -> LoadTabResultOutcome:
+    def load_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
+        """Load data_path into an existing tab after GuardService.check_load.
+
+        Call in the same owner-thread command; data_path is the selected file.
+        Preserve native history and the request's tab source without acquisition.
+        Return committed result details and cfg backfill status. Busy or cfg
+        notification reentrancy rejects before loading; adapter file/capability
+        failures raise LoadDataError without replacing the previous result.
+        """
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")

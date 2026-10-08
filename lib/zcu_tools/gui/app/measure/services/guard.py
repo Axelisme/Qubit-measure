@@ -29,7 +29,7 @@ class GuardError(FailedPreconditionError):
     """Raised when a protected operation's static precondition is not met.
 
     This is the single failure mode both clients (View and remote) see when a
-    Permit cannot be issued. It is a domain-readiness failure, never a dynamic
+    domain check fails. It is a domain-readiness failure, never a dynamic
     resource conflict (that is OperationGate's OperationConflictError).
 
     ``reason_code`` is a stable machine-readable tag (e.g. ``"no_run_result"``)
@@ -39,11 +39,14 @@ class GuardError(FailedPreconditionError):
 
 
 @dataclass(frozen=True)
-class RunPermit:
-    """Proof that a run request is statically valid for ``tab_id``.
+class RunInputs:
+    """Run admission data captured by GuardService.capture_run_inputs.
 
-    Carries detached resolved cfg and observed device settings captured at issue.
-    RunService never re-reads State and the adapter never re-lowers a schema.
+    tab_id identifies the admitted tab. adapter_name is its registered adapter
+    name; adapter is the instance that executes this Run. request holds the
+    observed SoC handles, device settings and fixed cfg context. accepted_cfg is
+    the exact accepted publication with detached resolved values and provenance.
+    RunService never re-reads these inputs from State or re-lowers a schema.
     snapshot fixes the original saved entry/point and admission capture's roles, or None for
     drafts, unbound tabs or adapters without native evidence. experiment_tag is
     the adapter's persistence declaration tag, or None. Neither is recaptured
@@ -54,7 +57,8 @@ class RunPermit:
     it must not claim a ledger record. With storage, terminal publishes the
     usable result before append. Append failures fail the operation with an
     ERROR diagnostic, but retain the published result for Save, without retry.
-    This credential requires no release; the operation owns its hardware lease.
+    These inputs need no release and are not a readiness proof or lease.
+    The operation owns its hardware lease.
     parameters is the fixed source used at admission, or None for context-free
     work; Run publishes it with the result for later analysis.
     """
@@ -70,47 +74,19 @@ class RunPermit:
     parameters: ParameterContext | None = None
 
 
-@dataclass(frozen=True)
-class SavePermit:
-    """Proof that a tab is eligible to save data/image (ACTIVE + has result)."""
-
-    tab_id: str
-
-
-@dataclass(frozen=True)
-class LoadPermit:
-    """Proof that a tab may load a canonical result into the current context."""
-
-    tab_id: str
-
-
-@dataclass(frozen=True)
-class AnalyzePermit:
-    """Proof that a tab is eligible to analyze (context + has run result)."""
-
-    tab_id: str
-
-
-@dataclass(frozen=True)
-class WritebackPermit:
-    """Proof that a tab is eligible to write back (context + analyze result)."""
-
-    tab_id: str
-
-
 class GuardService:
-    """Central issuer of typed Permits for the implemented domain guards.
+    """Shared domain checks and Run admission capture over State.
 
-    Pure query service over ``State`` and ``SessionEnv.readiness`` — no side
-    effects, no event emission. View and remote share the available permits
-    for protected operations, but not every capability is checked here:
-    analyze does not reject NONE and post-analyze has no capability permit yet
-    (see the GUI capability draft).
+    View and remote controls call these checks on the owner thread before the
+    corresponding service command. Successful checks return None, except
+    capture_run_inputs which accepts the exact cfg revision and returns data.
+    Checks reject unknown tabs or unmet domain conditions with GuardError and
+    its stable reason_code; cfg revision/validity failures keep their cfg errors.
+    Checks do not emit events, acquire leases or start operations.
 
-    Permits cover *static* preconditions per operation (context readiness,
-    committed cfg validity, run SoC requirement or load capability). *Dynamic*
-    resource availability (tab busy, hardware exclusion) is checked at the
-    operation boundary by the owning service or OperationGate — see ADR-0066.
+    Analyze does not reject analysis capability NONE; post-analyze has no check
+    here (see the GUI capability draft). Busy and hardware exclusion stay at
+    the owning operation boundary — see ADR-0066.
     """
 
     def __init__(self, state: State) -> None:
@@ -146,15 +122,24 @@ class GuardService:
                 reason_code="no_context",
             )
 
-    def acquire_run_permit(
+    def capture_run_inputs(
         self, tab_id: str, *, expected_revision: CfgRevision
-    ) -> RunPermit:
+    ) -> RunInputs:
+        """Check tab_id and capture the exact cfg revision and observed inputs.
+
+        Requires ACTIVE context and the adapter's Run preconditions, including
+        SoC when declared. Unknown tab, readiness, device settings and adapter
+        validation failures raise GuardError; stale or invalid publications keep
+        their cfg errors. Device settings are cached observations, not live reads.
+        Captures current tab.parameters once for cfg context and snapshot roles;
+        birth save_context supplies entry/point/storage. No Run or lease starts.
+        """
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "run")
 
         ctx = self._state.session_env
         parameters = tab.parameters
-        # Freeze only observed values. Never query devices during permit issue.
+        # Freeze only observed values. Never query devices during admission.
         accepted = tab.cfg.accept(expected_revision)
         try:
             raw_cfg = accepted.values
@@ -213,8 +198,8 @@ class GuardService:
                 if parameters is None or parameters.roles is None
                 else parameters.roles.names,
             )
-        logger.debug("acquire_run_permit: tab_id=%r", tab_id)
-        return RunPermit(
+        logger.debug("capture_run_inputs: tab_id=%r", tab_id)
+        return RunInputs(
             tab_id=tab_id,
             adapter_name=tab.adapter_name,
             request=req,
@@ -226,15 +211,19 @@ class GuardService:
             parameters=parameters,
         )
 
-    def acquire_save_permit(self, tab_id: str) -> SavePermit:
+    def check_save(self, tab_id: str) -> None:
+        """Require an existing tab, ACTIVE context and a Run result.
+
+        Raise GuardError on rejection; return None without mutation on success.
+        Busy and native evidence checks remain at the Save service boundary.
+        """
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "save")
         if not tab.has_run_result():
             raise GuardError(
                 "No run result available to save.", reason_code="no_run_result"
             )
-        logger.debug("acquire_save_permit: tab_id=%r", tab_id)
-        return SavePermit(tab_id=tab_id)
+        logger.debug("check_save: tab_id=%r", tab_id)
 
     @staticmethod
     def _supports_load_data(adapter: Any) -> bool:
@@ -242,7 +231,12 @@ class GuardService:
         caps = getattr(adapter, "capabilities", None)
         return isinstance(caps, AdapterCapabilities) and caps.load_data
 
-    def acquire_load_permit(self, tab_id: str) -> LoadPermit:
+    def check_load(self, tab_id: str) -> None:
+        """Require an existing tab, editable context and load_data capability.
+
+        DRAFT and ACTIVE are editable. No SoC or result is required. Raise
+        GuardError on rejection; return None without mutation on success.
+        """
         tab = self._require_tab(tab_id)
         self._require_context("load data")
         if not self._supports_load_data(tab.adapter):
@@ -250,20 +244,28 @@ class GuardService:
                 "This tab does not support loading data files.",
                 reason_code="unsupported_load",
             )
-        logger.debug("acquire_load_permit: tab_id=%r", tab_id)
-        return LoadPermit(tab_id=tab_id)
+        logger.debug("check_load: tab_id=%r", tab_id)
 
-    def acquire_analyze_permit(self, tab_id: str) -> AnalyzePermit:
+    def check_analyze(self, tab_id: str) -> None:
+        """Require an existing tab, editable context and a Run result.
+
+        Raise GuardError on rejection; return None without mutation on success.
+        This check does not validate the adapter's analysis capability.
+        """
         tab = self._require_tab(tab_id)
         self._require_context("analyze")
         if not tab.has_run_result():
             raise GuardError(
                 "No run result available to analyze.", reason_code="no_run_result"
             )
-        logger.debug("acquire_analyze_permit: tab_id=%r", tab_id)
-        return AnalyzePermit(tab_id=tab_id)
+        logger.debug("check_analyze: tab_id=%r", tab_id)
 
-    def acquire_writeback_permit(self, tab_id: str) -> WritebackPermit:
+    def check_writeback(self, tab_id: str) -> None:
+        """Require an existing tab, editable context and a Primary result.
+
+        Raise GuardError on rejection; return None without mutation on success.
+        This shared check does not select, apply or tear down a draft.
+        """
         tab = self._require_tab(tab_id)
         self._require_context("write back")
         if not tab.has_analyze_result():
@@ -271,5 +273,4 @@ class GuardService:
                 "No analyze result available for writeback.",
                 reason_code="no_analyze_result",
             )
-        logger.debug("acquire_writeback_permit: tab_id=%r", tab_id)
-        return WritebackPermit(tab_id=tab_id)
+        logger.debug("check_writeback: tab_id=%r", tab_id)

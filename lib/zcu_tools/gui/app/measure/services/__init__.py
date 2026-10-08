@@ -34,13 +34,9 @@ if TYPE_CHECKING:
         create_persistence_caretaker,
     )
     from .guard import (
-        AnalyzePermit,
         GuardError,
         GuardService,
-        LoadPermit,
-        RunPermit,
-        SavePermit,
-        WritebackPermit,
+        RunInputs,
     )
     from .load import LoadService, LoadTabResultOutcome
     from .operation_gate import OperationGate, OperationKind
@@ -89,11 +85,7 @@ __all__ = [
     "PostAnalyzeService",
     "GuardError",
     "GuardService",
-    "LoadPermit",
-    "RunPermit",
-    "SavePermit",
-    "AnalyzePermit",
-    "WritebackPermit",
+    "RunInputs",
     "LoadService",
     "LoadTabResultOutcome",
     "RunService",
@@ -146,11 +138,7 @@ _EXPORT_MODULES: dict[str, str] = {
     "PostAnalyzeService": ".post_analyze",
     "GuardError": ".guard",
     "GuardService": ".guard",
-    "LoadPermit": ".guard",
-    "RunPermit": ".guard",
-    "SavePermit": ".guard",
-    "AnalyzePermit": ".guard",
-    "WritebackPermit": ".guard",
+    "RunInputs": ".guard",
     "LoadService": ".load",
     "LoadTabResultOutcome": ".load",
     "RunService": ".run",

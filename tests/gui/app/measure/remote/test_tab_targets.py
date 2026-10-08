@@ -343,18 +343,18 @@ def test_role_rebind_clear_publishes_invalid_but_unused_alias_can_run(
     assert observation.status is CfgStatus.INVALID
     assert any("driver" in item.message for item in observation.diagnostics)
     with pytest.raises(CfgPreconditionError):
-        GuardService(application.state).acquire_run_permit(
+        GuardService(application.state).capture_run_inputs(
             tab_id, expected_revision=observation.ref.revision
         )
     unused = control.new_tab("unused_alias")
     control.set_role(unused, "driver", None)
     cfg = application.state.get_tab(unused).cfg
-    permit = GuardService(application.state).acquire_run_permit(
+    inputs = GuardService(application.state).capture_run_inputs(
         unused, expected_revision=cfg.observe().ref.revision
     )
-    assert permit.parameters is not None and permit.parameters.roles is not None
-    assert permit.parameters.roles.names == {}
-    assert permit.accepted_cfg.values == {"rate": 1.0}
+    assert inputs.parameters is not None and inputs.parameters.roles is not None
+    assert inputs.parameters.roles.names == {}
+    assert inputs.accepted_cfg.values == {"rate": 1.0}
 
 
 @pytest.mark.parametrize(
@@ -474,13 +474,13 @@ def test_role_rebind_keeps_historical_panes_and_next_run_snapshot(
     assert tab.run.parameters is birth and tab.run.result is historical_result
     assert tab.analysis.result is historical_analysis
     assert tab.save_context is birth
-    permit = GuardService(application.state).acquire_run_permit(
+    inputs = GuardService(application.state).capture_run_inputs(
         tab_id, expected_revision=tab.cfg.observe().ref.revision
     )
-    assert permit.parameters is tab.parameters and permit.snapshot is not None
-    assert permit.snapshot.roles == {"driver": "Q2", "sense": "R2"}
-    assert permit.snapshot.entry_id == birth.storage.entry_id
-    assert permit.snapshot.point == birth.storage.point
+    assert inputs.parameters is tab.parameters and inputs.snapshot is not None
+    assert inputs.snapshot.roles == {"driver": "Q2", "sense": "R2"}
+    assert inputs.snapshot.entry_id == birth.storage.entry_id
+    assert inputs.snapshot.point == birth.storage.point
     token = application.controller.start_run(tab_id, tab.cfg.observe().ref)
     loop, poll, deadline = QEventLoop(), QTimer(), QTimer()
     poll.timeout.connect(
@@ -496,7 +496,7 @@ def test_role_rebind_keeps_historical_panes_and_next_run_snapshot(
     assert not application.state.is_tab_running(tab_id)
     metadata = tab.run.metadata
     assert metadata is not None and tab.run.source_operation_id == token
-    assert metadata.snapshot == permit.snapshot
+    assert metadata.snapshot == inputs.snapshot
     assert tab.run.parameters is not None and tab.run.parameters.roles is not None
     assert tab.run.parameters.roles.names == metadata.snapshot.roles
 
@@ -524,7 +524,7 @@ def test_auto_partial_alias_creates_invalid_tab_without_focus_fallback(
     assert tab.cfg.observe().status is CfgStatus.INVALID
 
 
-def test_auto_partial_unused_alias_can_acquire_run_permit(
+def test_auto_partial_unused_alias_can_capture_run_inputs(
     application: TargetApplication,
 ) -> None:
     context = application.controller.context_control
@@ -540,12 +540,12 @@ def test_auto_partial_unused_alias_can_acquire_run_permit(
     assert tab.parameters.roles.names == {}
     observation = tab.cfg.observe()
     assert observation.status is CfgStatus.VALID
-    permit = GuardService(application.state).acquire_run_permit(
+    inputs = GuardService(application.state).capture_run_inputs(
         tab_id, expected_revision=observation.ref.revision
     )
-    assert permit.parameters is tab.parameters
-    assert permit.accepted_cfg.values == {"rate": 1.0}
-    assert permit.request.soc is None
+    assert inputs.parameters is tab.parameters
+    assert inputs.accepted_cfg.values == {"rate": 1.0}
+    assert inputs.request.soc is None
 
 
 def test_explicit_target_uses_other_component_without_changing_focus(

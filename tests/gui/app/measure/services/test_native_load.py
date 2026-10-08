@@ -10,7 +10,6 @@ import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import load_run_data
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.services.guard import LoadPermit
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -54,7 +53,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
         )
         service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
 
-        outcome = service.load_result(LoadPermit("tab"), str(path))
+        outcome = service.load_result("tab", str(path))
 
         tab = session.state.get_tab("tab")
         record = tab.run.result
@@ -113,7 +112,7 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
         tab.save_context = tab.parameters
         captured = tab.save_context.capture_storage()
         service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
-        service.load_result(LoadPermit("tab"), str(source))
+        service.load_result("tab", str(source))
         assert tab.run.metadata == load_run_data(source).metadata
         before = {
             p.relative_to(tmp_path): p.read_bytes()
@@ -170,7 +169,7 @@ def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
         events = session.entry.ledger.events()
         service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
 
-        outcome = service.load_result(LoadPermit("tab"), str(path))
+        outcome = service.load_result("tab", str(path))
 
         assert outcome.result_type == "RunRecord"
         assert isinstance(tab.run.result, RunRecord)
@@ -212,7 +211,7 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
         service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
 
         with pytest.raises(LoadDataError) as error:
-            service.load_result(LoadPermit("tab"), str(path))
+            service.load_result("tab", str(path))
 
         assert error.value.reason_code == "invalid_data_file"
         assert "test/different" in str(error.value)
@@ -228,7 +227,7 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
         service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
 
         with pytest.raises(LoadDataError) as error:
-            service.load_result(LoadPermit("tab"), str(tmp_path / "missing.h5"))
+            service.load_result("tab", str(tmp_path / "missing.h5"))
 
         assert error.value.reason_code == "data_file_read_failed"
         assert tab.run is old_run

@@ -192,9 +192,9 @@ class SaveControlFacet:
         """Execute SaveControlPort.save_data's synchronous command contract."""
         if run_operation_id is not None:
             self._state.require_run_operation(tab_id, run_operation_id)
-        permit = self._guard.acquire_save_permit(tab_id)
+        self._guard.check_save(tab_id)
         self._save.require_save_available(tab_id)
-        return self._save.save_data(permit, comment=comment, origin=origin)
+        return self._save.save_data(tab_id, comment=comment, origin=origin)
 
     def save_artifacts(
         self,
@@ -205,8 +205,8 @@ class SaveControlFacet:
         origin: CommandOrigin,
     ) -> SaveReport:
         """Execute SaveControlPort.save_artifacts's whole-artifact contract."""
-        permit = self._guard.acquire_save_permit(tab_id)
+        self._guard.check_save(tab_id)
         self._save.require_save_available(tab_id)
         return self._save.save_artifacts(
-            permit, artifacts, comment=comment, origin=origin
+            tab_id, artifacts, comment=comment, origin=origin
         )

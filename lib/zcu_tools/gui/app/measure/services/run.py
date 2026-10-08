@@ -34,7 +34,7 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, PointStorageBinding
 
-from .guard import RunPermit
+from .guard import RunInputs
 from .operation_gate import OperationKind
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 
@@ -285,14 +285,16 @@ class RunService:
 
     def start_run(
         self,
-        permit: RunPermit,
+        inputs: RunInputs,
         *,
         plots: Plots,
         origin: CommandOrigin = _GUI_ORIGIN,
     ) -> int:
         """Start the admitted Run and return its asynchronous operation token.
 
-        permit fixes cfg and saved-point storage; plots is this Run's owned host.
+        inputs must come from GuardService.capture_run_inputs and fix the exact
+        cfg, device settings, source and saved-point storage. plots is this Run's
+        owned host. Call on State's owner thread after admission.
         origin attributes acquired to the initiating gui/mcp frontend. A usable
         native result publishes to State before terminal appends acquired,
         without Save or creating a run folder. Missing storage/native evidence
@@ -301,9 +303,8 @@ class RunService:
         published result and metadata for Save, without retry or rollback.
         Busy, exclusion and submission failures raise before a token is returned.
         """
-        # Static preconditions (context readiness, committed-cfg validity, soc
-        # capability) are proven by the RunPermit. Dynamic resource availability
-        # (tab busy, hardware exclusion) is checked here at the operation boundary.
+        # Admission checks precede this call; inputs are data, not a proof.
+        # Busy and hardware exclusion remain operation-boundary checks.
         tab_id = permit.tab_id
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")

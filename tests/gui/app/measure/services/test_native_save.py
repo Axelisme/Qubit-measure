@@ -116,7 +116,7 @@ def _acquire_to_terminal(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
     cfg = session.state.get_tab("tab").cfg
-    permit = GuardService(session.state).acquire_run_permit(
+    inputs = GuardService(session.state).capture_run_inputs(
         "tab", expected_revision=cfg.observe().ref.revision
     )
     loop = QEventLoop()
@@ -131,7 +131,7 @@ def _acquire_to_terminal(
 
     subscription = session.bus.subscribe(RunFinishedPayload, terminal)
     try:
-        token = run.start_run(permit, plots=Plots(NonPresentingHost()), origin=origin)
+        token = run.start_run(inputs, plots=Plots(NonPresentingHost()), origin=origin)
         timer.start(5000)
         loop.exec()
     finally:
@@ -552,7 +552,7 @@ def test_cancel_during_metadata_preserves_completed_acquisition_when_saved(
         "zcu_tools.gui.app.measure.services.run.new_run_id", identity_after_cancel
     )
     cfg = session.state.get_tab("tab").cfg
-    permit = GuardService(session.state).acquire_run_permit(
+    inputs = GuardService(session.state).capture_run_inputs(
         "tab", expected_revision=cfg.observe().ref.revision
     )
     loop = QEventLoop()
@@ -567,7 +567,7 @@ def test_cancel_during_metadata_preserves_completed_acquisition_when_saved(
 
     subscription = session.bus.subscribe(RunFinishedPayload, terminal)
     try:
-        token = run.start_run(permit, plots=Plots(NonPresentingHost()))
+        token = run.start_run(inputs, plots=Plots(NonPresentingHost()))
         timer.start(5000)
         loop.exec()
     finally:
