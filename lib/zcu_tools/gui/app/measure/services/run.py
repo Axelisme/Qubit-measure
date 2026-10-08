@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.device.base import BaseDevice
@@ -31,6 +32,7 @@ from zcu_tools.gui.session.operation_runner import (
     SettleFn,
 )
 from zcu_tools.gui.session.scopes import progress_ambient
+from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, PointStorageBinding
 
 from .guard import RunPermit
 from .operation_gate import OperationKind
@@ -62,6 +64,8 @@ class _RunOperation:
     stop_signal: StopSignal
     cancel_requested: threading.Event
     origin: CommandOrigin
+    adapter_name: str
+    storage: PointStorageBinding | None
     metadata: RunMetadata | None = None
 
 
@@ -162,7 +166,62 @@ class RunService:
             return False
         self._view_plots[op.tab_id] = op.plots
         self._teardown_retired(retired)
+        try:
+            self._append_acquired(op, result)
+        except Exception as error:
+            logger.exception("Acquired ledger append failed: tab_id=%r", op.tab_id)
+            # Publication succeeded; keep its result and view resources for Save.
+            self._clear_running(op.tab_id)
+            settle(OperationOutcome("failed", str(error)))
+            self._bus.emit(
+                RunFinishedPayload(
+                    tab_id=op.tab_id,
+                    outcome="failed",
+                    error_message=str(error),
+                )
+            )
+            return False
         return True
+
+    def _append_acquired(self, op: _RunOperation, result: object) -> None:
+        if result is NO_RESULT:
+            return
+        if op.storage is None:
+            logger.warning(
+                "Acquired omitted: tab_id=%r has no saved-point storage "
+                "(draft, unbound, missing storage or no native evidence)",
+                op.tab_id,
+            )
+            return
+        metadata = op.metadata
+        if metadata is None:
+            logger.warning(
+                "Acquired omitted: tab_id=%r has no native acquisition evidence",
+                op.tab_id,
+            )
+            return
+        if not isinstance(result, RunRecord) or result.cfg is None:
+            raise ValueError("Acquired requires a native RunRecord with cfg")
+        if metadata.finished_at is None:
+            raise ValueError("Acquired requires an acquisition finish timestamp")
+        op.storage.ledger.append(
+            LedgerEvent(
+                id=str(uuid4()),
+                kind="acquired",
+                at=metadata.finished_at,
+                entry_id=str(metadata.snapshot.entry_id),
+                origin=op.origin.origin,
+                payload=AcquiredPayload(
+                    run_id=metadata.run_id,
+                    tab=op.adapter_name,
+                    tab_id=op.tab_id,
+                    experiment=metadata.experiment,
+                    cfg_summary=result.cfg.model_dump(mode="json"),
+                    point=metadata.snapshot.point,
+                    roles=dict(metadata.snapshot.roles),
+                ),
+            )
+        )
 
     def _clear_running(self, tab_id: str) -> None:
         self._state.set_tab_running(tab_id, running=False)
@@ -276,7 +335,14 @@ class RunService:
             stop_event.set()
 
         operation = _RunOperation(
-            tab_id, plots, stop_event, stop_signal, cancel_requested, origin
+            tab_id=tab_id,
+            plots=plots,
+            stop_event=stop_event,
+            stop_signal=stop_signal,
+            cancel_requested=cancel_requested,
+            origin=origin,
+            adapter_name=permit.adapter_name,
+            storage=permit.storage,
         )
 
         def work(factory: Any) -> object:
