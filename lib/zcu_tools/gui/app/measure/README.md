@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08，Native Save All 與 section/member/output 模型
+**Last updated:** 2026-10-08, synchronous native Save
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -256,8 +256,8 @@ previous canonical pane for failure recovery; success shows the new pane's figur
 and draft, failure/cancel restores the retained pane (primary failure restores
 primary then post). Save/Guide show a placeholder and never borrow another pane's
 figure. Local analyze/post parameter edits keep synchronous State commit timing.
-Save 路徑由已提交的 artifact outputs 投影，不是 editor draft。Save 的 started／terminal
-facts 觸發同一 Data pane 的 status 與 path 更新，不替換整個 pane。
+Save 路徑由已提交的 artifact outputs 投影，不是 editor draft。Save 同步完成後的 domain facts
+更新同一 Data pane 的 status 與 path，不替換整個 pane。
 Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
 not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.
@@ -590,6 +590,9 @@ controlled fields.
 ## Operation Model
 
 - Run, device setup, and SoC connect use hardware exclusion.
+- GUI Save and Save All complete synchronously on the owner thread. They have
+  no worker, operation handle or save-busy state. The existing SaveReport carries
+  every attempted output, including failures; RPC returns its complete projection.
 - Analyze and post-analyze use async handles but no hardware exclusion.
 - `OperationChannel` is the ordered cross-thread channel for terminal state
   and Stop requests with optional cancellation reasons.

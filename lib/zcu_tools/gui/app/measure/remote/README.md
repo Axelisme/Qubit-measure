@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-06, shared resource observation ownership
+**Last updated:** 2026-10-08, synchronous native Save
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -382,6 +382,12 @@ Agent-created sessions are garbage-collected on commit/discard/client drop;
 UI-owned independent drafts follow their own owner lifetime.
 
 ## Operation Handles
+
+`tab.save_data` and `tab.save_artifacts` complete synchronously on the GUI owner
+thread. They return the current complete Save report with confirmed `run_id`
+and every output path/status/error. They do not return a Save handle or require
+`operation.await` followed by `tab.snapshot`. Optional Run/Analyze source IDs
+still bind the result being saved; they are not Save IDs.
 
 Start methods return GUI-local operation ids on the wire. The GUI projects active
 run, analyze and device ids from their owners, regardless of who started them.
