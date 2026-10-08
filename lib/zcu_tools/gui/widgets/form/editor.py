@@ -35,6 +35,8 @@ class FormEditor[F: FormModel](QWidget):
     whole-container input; a QCheckBox for bool; or a QComboBox for choices and
     discriminators. Combo item data is the ordinary input value.
     form.mode.<path> is a numeric/complex QComboBox with data "direct" and "expr".
+    Discriminators offer only ordinary typed tags and have no expression mode.
+    Empty choices keep the current branch visible without changing its input.
     form.enabled.<path> is a nullable-model activation QCheckBox.
     form.value.<path> is a QLabel with the current evaluated value.
     form.error.<path> is a QLabel with current field errors; form.error displays

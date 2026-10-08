@@ -75,6 +75,18 @@ def _variants(schema: dict[str, JsonValue]) -> tuple[dict[str, JsonValue], ...]:
     )
 
 
+def _direct(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    # Numeric selector constraints are inside the ordinary Expr alternative.
+    return next(
+        (
+            node
+            for node in _variants(schema)
+            if "expr" not in _properties(node) and node.get("type") != "null"
+        ),
+        schema,
+    )
+
+
 def _options(schema: dict[str, JsonValue]) -> tuple[JsonValue, ...] | None:
     if schema.get("not") == {}:
         return ()
@@ -119,12 +131,17 @@ def _branch(
     options: list[JsonValue] = []
     selected: dict[str, JsonValue] = {}
     for branch in _objects(schema.get("oneOf")):
+        tags = branch.get("x-form-discriminator-values")
+        if not isinstance(tags, list):
+            raise ValueError(
+                "Tagged branch schema requires x-form-discriminator-values"
+            )
+        if raw.get(key) in tags:
+            selected = branch
         selector = _properties(branch).get(key)
         if isinstance(selector, dict):
-            tags = _options(selector) or ()
-            options.extend(tags)
-            if raw.get(key) in tags:
-                selected = branch
+            allowed = _options(_direct(selector))
+            options.extend(tag for tag in tags if allowed is None or tag in allowed)
     return selected, key, tuple(options)
 
 
@@ -135,14 +152,7 @@ def _field(
     preview: FormPreview,
 ) -> FieldView:
     variants = _variants(schema)
-    direct = next(
-        (
-            node
-            for node in variants
-            if "expr" not in _properties(node) and node.get("type") != "null"
-        ),
-        schema,
-    )
+    direct = _direct(schema)
     metadata = {**direct, **schema}
     raw = data.get(path[-1])
     kind = _kind(variants)
@@ -181,7 +191,9 @@ def _field(
     else:
         properties = _properties(direct)
     children = tuple(
-        replace(child, options=choices) if child.path[-1] == selector else child
+        replace(child, options=choices, expression=False)
+        if child.path[-1] == selector
+        else child
         for name, node in properties.items()
         if isinstance(node, dict)
         for child in (_field(node, (*path, name), nested, preview),)
