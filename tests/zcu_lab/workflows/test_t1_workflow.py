@@ -192,10 +192,13 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
             devices=devices,
         )
     )
+    tun = tunables()
+    # Cover the full line before comparing small flux-induced center shifts.
+    tun.cal.span_mhz = 10.0
     engine.start(
         t1_fluxdep,
         plan=plan,
-        tunables=tunables(),
+        tunables=tun,
         paths=RunPaths(roots.result, roots.database),
         identity=RunIdentity("flux-bound", DeviceSnapshot({}), "offline"),
     )

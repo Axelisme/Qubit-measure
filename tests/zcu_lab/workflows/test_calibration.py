@@ -231,7 +231,17 @@ def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
 ) -> None:
     rig = Rig(inputs, tmp_path)
     original = rig.plan.model_copy(deep=True)
-    rig.start(CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125))
+    # Align clocks while sim/lowering.py::_resolve_scalar uses unquantized lengths.
+    channel = rig.plan.qub_pulse.ch
+    start = inputs.soccfg.cycles2us(24, gen_ch=channel)
+    stop = inputs.soccfg.cycles2us(24 + 50 * 8, gen_ch=channel)
+    rig.start(
+        CalibrationTunables(
+            span_mhz=2.0,
+            rabi_start_factor=start / rig.seed.pi_length_us,
+            rabi_stop_factor=stop / rig.seed.pi_length_us,
+        )
+    )
     status = rig.engine.execute("calibration")
     assert status.lifecycle == "done", status.reason
     assert len(rig.results) == 1
@@ -376,8 +386,14 @@ def test_readout_rejection_does_not_commit_partial_frequency_or_pi(
         == [CalibrationFailed("readout", "No readout SNR meets threshold")] * 2
     )
     assert rig.carries == [CalCarry(rig.seed), CalCarry(rig.seed)]
-    assert len(rig.frequencies) == len(rig.rabis) == len(rig.readouts) == 2
-    assert len(rig.engine.records("calibration")) == 2
+    assert len(rig.rabis) == len(rig.readouts) == 2
+    # Each rejected readout follows one accepted frequency fit, possibly widened.
+    assert 2 <= len(rig.frequencies) <= 2 * len(CalibrationTunables().qf_widen)
+    records = rig.engine.records("calibration")
+    assert len(records) == 2
+    assert sum(len(record.run_files) for record in records) == (
+        len(rig.frequencies) + len(rig.rabis) + len(rig.readouts)
+    )
 
 
 def test_pause_discards_calibration_and_resume_uses_new_tunables(
