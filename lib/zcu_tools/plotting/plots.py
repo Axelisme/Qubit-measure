@@ -383,6 +383,47 @@ class Plots(FigureCollection):
             self._host.present(figure)
             self._live.append(figure)
 
+    def draw(self, name: str, callback: Callable[[Figure], None]) -> None:
+        """Draw on an existing named figure, then refresh on the host owner.
+
+        Execution is synchronous on the host owner thread and blocks the calling
+        worker thread until callback and refresh return. With a GUI host it
+        occupies the GUI thread; heavy drawing can freeze the interface.
+        The callback may freely modify axes shared with live templates, but must
+        not retain artists for later worker-side mutation. Calling cla() in the
+        callback removes same-axes template artists; their next update raises
+        RuntimeError. Callback exceptions propagate back to the caller without
+        rollback or refresh. Unknown names raise KeyError; finished plots raise
+        RuntimeError. Host errors also propagate.
+        """
+        self._ensure_active()
+        figure = self[name]
+
+        def draw_frame() -> None:
+            self._ensure_active()
+            callback(figure)
+            self._host.refresh(figure)
+
+        self._host.call(draw_frame)
+
+    def save(self, name: str, path: str | Path) -> None:
+        """Save an existing named figure on the host owner without refreshing.
+
+        Execution is synchronous on the host owner thread and blocks the calling
+        worker thread until saving completes. With a GUI host it occupies the
+        GUI thread; expensive rendering can freeze the interface. This method
+        invokes no callback and does not refresh. In draw(), callback exceptions
+        propagate to its caller, and callback cla() invalidates same-axes
+        templates whose next update raises RuntimeError; saving does not restore
+        those artists.
+        Use native Figure.savefig defaults and infer format from path. Saving is
+        allowed before or after finish. Parent directories are not created and
+        existing files follow native savefig overwrite behavior. Unknown names
+        raise KeyError; host, rendering and I/O errors propagate.
+        """
+        figure = self[name]
+        self._host.call(lambda: figure.savefig(path))
+
     def refresh(self, name: str) -> None:
         """Refresh a complete live frame after a batch of typed updates."""
         self._ensure_active()

@@ -62,6 +62,11 @@ class ScatterSegment(AbsSegment):
     ) -> None:
         if self.scatter is None:
             raise RuntimeError("Scatter not initialized.")
+        if self.scatter not in ax.collections:
+            raise RuntimeError(
+                "Live plot scatter was removed from its axes; "
+                "do not clear or remove template artists before updating."
+            )
 
         offsets = np.c_[xs.flatten(), ys.flatten()]
         self.scatter.set_offsets(offsets)

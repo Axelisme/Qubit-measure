@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.liveplot` 模組重點筆記
 
-**Last updated:** 2026-10-02, standalone backend 與 explicit plots
+**Last updated:** 2026-10-09, 自由繪圖與模板失效
 
 此模組提供 standalone live plotters 與只接受 Axes 的 segments。Standalone plotter 以 typed `update()` 更新 segment，再透過 active backend 刷新 figure。Operation-owned Plots 使用 explicit axes 與 host，不透過 standalone backend 呈現。家族定位見 [plotting/README.md](../README.md)。
 
@@ -79,6 +79,7 @@ with MultiLivePlot(fig, {
 
 ## 注意事項
 
+- Segment update 檢查自身 artists 是否仍在原 axes。自由繪圖清除 axes 或移除模板 artist 後，update 明確 raise，不靜默更新已脫離 axes 的 artist。保留模板 artists 的任意疊圖可繼續共用同一 axes。
 - `Plot1DSegment.update` 只接受 real-valued `signals`；複數輸入會 fast-fail，呼叫端需先取 `abs/real/imag`。
 - `segments/` 內的 matplotlib artist 欄位在 `init_ax()` 前是 `None`。`update()` 先 fast-fail，再把 artist 存到 local 變數後使用；不要在 None check 後反覆透過 `self.im` 等 optional 屬性呼叫方法。
 - LivePlot 類若要保留圖（例如後續 `savefig`），請設定 `auto_close=False`。
