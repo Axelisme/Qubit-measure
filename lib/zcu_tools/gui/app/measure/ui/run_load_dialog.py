@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QPushButton,
     QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -113,8 +114,34 @@ class RunLoadDialog(QDialog):
         )
 
     def _refresh(self) -> None:
-        # The internal writer implements the settled projection/filter contract.
-        pass
+        point = self._point.currentText() if self._point.currentIndex() > 0 else None
+        experiment = (
+            self._experiment.currentText()
+            if self._experiment.currentIndex() > 0
+            else None
+        )
+        recorded_at = self._time.text()
+        self._visible_runs = tuple(
+            run
+            for run in self._runs
+            if (point is None or run.point == point)
+            and (experiment is None or run.experiment == experiment)
+            and recorded_at in run.recorded_at
+        )
+        self._selected_path = None
+        self._table.setRowCount(0)
+        self._table.setRowCount(len(self._visible_runs))
+        for row, run in enumerate(self._visible_runs):
+            values = (
+                run.run_id,
+                run.point if run.point is not None else "",
+                run.experiment,
+                run.recorded_at,
+                str(run.data_path) if run.data_path is not None else "",
+            )
+            for column, value in enumerate(values):
+                self._table.setItem(row, column, QTableWidgetItem(value))
+        self._selection_changed()
 
     def _selection_changed(self) -> None:
         row = self._table.currentRow()

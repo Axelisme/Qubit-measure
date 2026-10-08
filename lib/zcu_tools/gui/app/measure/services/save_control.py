@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.resources.entry import AcquiredPayload, SavedPayload
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.resources.entry import RecordsLedger
 
     from .guard import GuardService
     from .save import SaveService
@@ -90,6 +93,31 @@ class SaveControlPort(Protocol):
         ...
 
 
+def _saved_run_info(
+    ledger: RecordsLedger, event_id: str, payload: SavedPayload, recorded_at: str
+) -> SavedRunInfo:
+    record = ledger.get(event_id).record
+    if record is None:
+        raise ValueError(f"Saved event {event_id} has no record")
+    point = record.get("point")
+    experiment = record.get("experiment")
+    if "point" not in record or (point is not None and not isinstance(point, str)):
+        raise ValueError(
+            f"Saved event {event_id} record point must be a string or None"
+        )
+    if not isinstance(experiment, str):
+        raise ValueError(f"Saved event {event_id} record experiment must be a string")
+    data_path = next(
+        (
+            Path(output.path)
+            for output in reversed(payload.outputs)
+            if output.format == "data_h5" and output.status == "saved"
+        ),
+        None,
+    )
+    return SavedRunInfo(payload.run_id, point, experiment, recorded_at, data_path)
+
+
 class SaveControlFacet:
     """Compose existing guards and synchronous native Save commands."""
 
@@ -109,7 +137,36 @@ class SaveControlFacet:
 
     def list_saved_runs(self, *, point: str | None = None) -> tuple[SavedRunInfo, ...]:
         """Read the ledger under SaveControlPort.list_saved_runs's contract."""
-        raise NotImplementedError("Ledger run aggregation is not implemented")
+        entry = self._context.get_entry_info()
+        if entry is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        ledger = self._context.entry_ledger(entry.entry_id)
+        runs: dict[str, SavedRunInfo] = {}
+        acquired: set[str] = set()
+        for event in ledger.events():
+            payload = event.payload
+            if isinstance(payload, AcquiredPayload):
+                if payload.run_id in acquired:
+                    continue
+                previous = runs.get(payload.run_id)
+                runs[payload.run_id] = SavedRunInfo(
+                    run_id=payload.run_id,
+                    point=payload.point,
+                    experiment=payload.experiment,
+                    recorded_at=event.at,
+                    data_path=previous.data_path if previous is not None else None,
+                )
+                acquired.add(payload.run_id)
+            elif isinstance(payload, SavedPayload):
+                saved = _saved_run_info(ledger, event.id, payload, event.at)
+                previous = runs.get(payload.run_id)
+                if previous is None:
+                    runs[payload.run_id] = saved
+                elif saved.data_path is not None:
+                    runs[payload.run_id] = replace(previous, data_path=saved.data_path)
+        return tuple(
+            run for run in runs.values() if point is None or run.point == point
+        )
 
     def has_tab(self, tab_id: str) -> bool:
         """Return whether tab_id is a current State resource."""
