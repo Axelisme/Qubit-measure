@@ -44,7 +44,7 @@ def fit_singleshot2d(
         形狀為(m, 4)的擬合結果，每行包含一個高斯分佈的參數 [x0, y0, sigma, n]，
         其中m是擬合的高斯分佈數量，可能小於等於num_gauss。
     """
-    # 獲取信號的實部和虛部 (I和Q)
+    # Use the real part of the signal for I and the imaginary part for Q.
     if signals.ndim == 1:
         signals = signals.reshape(1, -1)
 
