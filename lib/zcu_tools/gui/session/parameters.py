@@ -57,6 +57,8 @@ class ParameterContext:
 
     Construction accepts validated point and library snapshots, a SavedPoint
     or EntryDraft destination, and an optional fixed consumer RoleBinding.
+    Binding declarations may omit names for unbound roles. Their data reads
+    raise RoleResolutionError naming the role; concrete paths remain readable.
     source_faults contains only point/module_cfg diagnostics, not setup faults.
     The target, roles, and diagnostics remain readable on an unavailable
     capture; all data reads then raise ContextSourceUnavailableError.
@@ -76,7 +78,8 @@ class ParameterContext:
     ) -> None:
         """Detach input data and retain the immutable library projection.
 
-        RoleResolutionError reports missing/wrong-kind captured destinations.
+        RoleResolutionError reports missing/wrong-kind explicitly bound destinations.
+        Declared roles absent from names are unbound, not constructor failures.
         A setup diagnostic is outside this capture contract and raises
         ValueError. storage optionally retains a resource-owned saved-point
         capability with matching target identity; omit it for drafts or synthetic
@@ -197,7 +200,9 @@ class ParameterContext:
         """Expand only the captured role prefix, preserving the remaining path.
 
         Accepts direct components, captured roles, and general.* paths.
-        Entry syntax/collision/unknown-namespace errors propagate.
+        Reading a declared unbound role raises RoleResolutionError even if a
+        concrete component shares its name. Other entry syntax/collision/unknown
+        namespace errors propagate.
         """
         self._ensure_readable()
         names = self._roles.names if self._roles is not None else {}

@@ -170,6 +170,31 @@ def test_bind_roles_uses_only_fixed_point_and_detaches_mappings(
     assert context.roles is None
 
 
+@pytest.mark.parametrize("same_name_component", [False, True])
+def test_partial_capture_reports_unbound_role_only_when_read(
+    source: tuple[PointDocument, LibrarySnapshot], same_name_component: bool
+) -> None:
+    point, library = source
+    if same_name_component:
+        point.components["capture_driver"] = point.components["Q2"].model_copy(
+            deep=True
+        )
+    context = ParameterContext(
+        point=point,
+        library=library,
+        target=EntryDraft(entry_id="entry"),
+        roles=RoleBinding(None, declarations(), {"capture_sensor": "R1"}),
+    )
+    assert context.value("capture_sensor.rate") == 6500.0
+    assert context.value("Q1.rate") == 4300.0
+    assert context.roles is not None
+    assert "capture_driver" not in context.roles.names
+    with pytest.raises(RoleResolutionError, match="capture_driver.*not bound"):
+        context.value("capture_driver.rate")
+    with pytest.raises(RoleResolutionError, match="capture_driver.*not bound"):
+        context.library_key("capture_driver.module.x180")
+
+
 def test_draft_projection_keeps_its_entry_target(
     source: tuple[PointDocument, LibrarySnapshot],
 ) -> None:
