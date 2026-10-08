@@ -5,6 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal, TypedDict
 
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    PointBindingError,
+    PointCreateRequest,
+    PointUseRequest,
+)
+
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
@@ -86,7 +94,33 @@ def h_point_new(
     original cause and point; Use is recovery, never retry or delete New.
     Existing tabs retain their parameter capture; new tabs use this point.
     """
-    raise NotImplementedError("point.new owner wiring")
+    label = params.get("label")
+    description = params.get("description", "")
+    clone_from = params.get("clone_from")
+    if not isinstance(label, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'label' must be a string")
+    if not isinstance(description, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'description' must be a string")
+    if clone_from is not None and not isinstance(clone_from, str):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "'clone_from' must be a string or null"
+        )
+    request = PointCreateRequest(
+        label=label,
+        description=description,
+        origin=CommandOrigin("mcp"),
+        clone_from=clone_from,
+    )
+    try:
+        point = adapter.context_control.new_point(request)
+    except PointBindingError as exc:
+        raise RemoteError(
+            ErrorCode.CONTROLLER_ERROR,
+            str(exc),
+            reason="point_binding_failed",
+            data={"entry_id": exc.entry_id, "point": exc.label, "created": True},
+        ) from exc
+    return {"kind": point.kind, "entry_id": point.entry_id, "point": point.point}
 
 
 def h_point_use(
@@ -99,4 +133,8 @@ def h_point_use(
     failures propagate without fallback and leave the old binding intact.
     Existing tabs retain their parameter capture; new tabs use this point.
     """
-    raise NotImplementedError("point.use current-entry owner wiring")
+    label = params.get("label")
+    if not isinstance(label, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'label' must be a string")
+    point = adapter.context_control.use_point(PointUseRequest(label))
+    return {"kind": point.kind, "entry_id": point.entry_id, "point": point.point}
