@@ -10,4 +10,4 @@ T1TunablesForm 與 nested CalibrationTunablesForm 定義使用者可編輯的普
 
 T1TunablesPanel 用 host 提供的 env 建立 state，嵌入通用 FormEditor，並公開 state 與 editor。Host 提交前檢查 editor.local_parse_errors。Panel 不提供 native preview、Apply／Discard／Start 或 live source capture。
 
-FormState 處理 draft、驗證與原文差異。to_cfg 只把合法普通值轉成 native T1Tunables。Host 決定何時提交，以及如何把 FormChange.original 交給 Engine；表單不更新 owner revision，也不操作設備。
+FormState 處理 draft、驗證與 input 差異。to_cfg 只把合法普通值轉成 native T1Tunables。Expression 留在 FormInput，Engine journal 只記普通值。Host 決定何時提交；表單不更新 owner revision，也不操作設備。

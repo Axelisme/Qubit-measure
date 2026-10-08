@@ -61,7 +61,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
-- [Pydantic 表單、輸入原文與宿主提交](draft/pydantic-form-tool.md)：D197 定稿工具的 F0 候選。Qt-free core 與 editor 分離，重用 evaluator／complex codec，Engine 保存 tunables 原文。需 sr-advisor 與使用者核准後才進 F1／F2，不遷移 CfgSchema／Measure。
+- [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。不遷移 CfgSchema／Measure。
 
 - [具名 workflows 與可丟棄的步驟執行](draft/workflows-engine.md)：新 engine、workflow／experiment、宿主、取消與保存分工的期 0 候選。顧問 review 與使用者 CP-A 通過前不實作，不取代既有 autofluxdep 契約。
 

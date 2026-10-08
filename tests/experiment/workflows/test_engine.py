@@ -178,6 +178,14 @@ def test_revision_is_captured_once_and_nested_inputs_are_detached(rig: Rig) -> N
         (1, 8),
     ]
     assert rig.kinds().index("tunables_changed") < rig.kinds().index("step_committed")
+    event = next(event for event in rig.events() if event["kind"] == "tunables_changed")
+    assert event["revision"] == 1
+    changes = event["changes"]
+    assert isinstance(changes, list)
+    assert len(changes) == 1
+    change = changes[0]
+    assert isinstance(change, dict)
+    assert (change["path"], change["old"], change["new"]) == ("value", 1, 8)
 
 
 def test_pause_discards_mutated_copy_and_resume_repeats_deadline(rig: Rig) -> None:

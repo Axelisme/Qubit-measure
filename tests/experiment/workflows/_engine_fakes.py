@@ -193,7 +193,6 @@ class Rig:
         *,
         plan: Plan | None = None,
         devices: DeviceSnapshot | None = None,
-        tunables_originals: Mapping[str, str] | None = None,
     ) -> None:
         # A fresh declared wrapper avoids mutating shared module-level callables.
         def invoke(
@@ -213,7 +212,6 @@ class Rig:
             declared,
             plan=Plan() if plan is None else plan,
             tunables=Tunables(),
-            tunables_originals=tunables_originals,
             paths=self.paths,
             identity=RunIdentity(
                 "run", DeviceSnapshot({}) if devices is None else devices, "offline"

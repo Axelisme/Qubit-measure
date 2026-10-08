@@ -237,7 +237,7 @@ def test_nullable_section_activation_child_edit_and_deactivation() -> None:
     assert state.input.data["section"] is None
 
 
-def test_result_evaluates_input_against_each_env_without_replacing_original() -> None:
+def test_result_evaluates_input_against_each_env_without_replacing_input() -> None:
     state = FormState(
         FormInput(
             DraftForm,
@@ -286,16 +286,13 @@ def test_write_changes_and_reset_preserve_input_value_and_whole_sequence() -> No
     assert set(by_path) == {("amount",), ("samples",), ("offsets",)}
     assert by_path[("amount",)].input == {"expr": "general.ext.seed / 2"}
     assert by_path[("amount",)].value == 2.0
-    assert by_path[("amount",)].original == "general.ext.seed / 2"
     assert by_path[("samples",)].input == [2.0, 3.0]
     assert by_path[("samples",)].value == (2.0, 3.0)
-    assert by_path[("samples",)].original is None
     assert by_path[("offsets",)].input == {
         "rack.left": {"expr": "general.ext.seed"},
         "expr": 1.0,
     }
     assert by_path[("offsets",)].value == {"rack.left": 4.0, "expr": 1.0}
-    assert by_path[("offsets",)].original is None
     detached_mapping = by_path[("offsets",)].input
     assert isinstance(detached_mapping, dict)
     detached_mapping.clear()
@@ -422,7 +419,6 @@ def test_mapping_replacement_is_a_leaf_but_key_and_model_patches_are_rejected() 
     assert changes[0].path == ("offsets",)
     assert changes[0].input == {"renamed": 3.0}
     assert changes[0].value == {"renamed": 3.0}
-    assert changes[0].original is None
 
     mapping.write({("offsets",): {}}, env)
     cleared = mapping.result(env)
@@ -467,7 +463,6 @@ def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
     assert changes[0].path == ("section",)
     assert changes[0].input is None
     assert changes[0].value is None
-    assert changes[0].original is None
 
 
 def test_discriminator_first_factory_inheritance_and_explicit_content_order() -> None:

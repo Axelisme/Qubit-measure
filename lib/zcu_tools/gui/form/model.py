@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, final
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from pydantic_core import PydanticCustomError
@@ -107,9 +107,7 @@ class FormChange:
 
     path is a model-field leaf path, never a sequence index or mapping key.
     input is detached JSON including expression/complex envelopes. value is
-    ordinary evaluated data. original is scalar expression text without its
-    envelope, or None for direct input and whole containers; it is suitable
-    for the Engine's opaque original. Empty typed mappings remain whole leaves.
+    ordinary evaluated data. Empty typed mappings remain whole leaves.
     Only current active input leaves are reported. Removed branch fields have
     no tombstone; structural changes retain their discriminator or null leaf.
     Ordinary model containers are not leaves.
@@ -118,7 +116,6 @@ class FormChange:
     path: FormWritePath
     input: JsonValue
     value: FormValue
-    original: str | None
 
 
 def field_error(path: FormPath, message: str) -> PydanticCustomError:
@@ -136,8 +133,8 @@ def field_error(path: FormPath, message: str) -> PydanticCustomError:
 class FormModel(BaseModel):
     """Ordinary values with typed class-level input hooks.
 
-    Override default_input for domain defaults (including Expr), choices for
-    dynamic path-to-options mappings, and defaults for a branch-switch factory.
+    Override defaults for initial and branch defaults (including Expr), and
+    choices for dynamic path-to-options mappings. default_input is final.
     No instances carry input, environment, revision or editing state. Ordinary
     nested BaseModel types remain supported without inheriting FormModel.
     """
@@ -145,10 +142,12 @@ class FormModel(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     @classmethod
+    @final
     def default_input(cls, env: FormEnv) -> FormInput[Self]:
         """Build isolated input from declared defaults; required keys stay absent.
 
-        Domain overrides may include Expr/complex JSON. Used missing library or
+        Calls defaults(env, {}) before checking sources and assembling input.
+        defaults may include Expr/complex JSON. Used missing library or
         device sources raise field_error with the consuming path. No I/O occurs.
         """
         from ._sources import check_sources
@@ -161,9 +160,9 @@ class FormModel(BaseModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Return new-branch defaults before same-name inputs are inherited.
+        """Return initial or new-branch defaults before input inheritance.
 
-        previous is detached old-branch JSON. The fallback uses Pydantic static
+        previous is empty for initial input, otherwise detached old-branch JSON. The fallback uses Pydantic static
         defaults and leaves required keys absent; it does not validate a partial
         model or replace missing keys with None. Domain factories may use env
         and previous; source failures propagate with the consuming field path.

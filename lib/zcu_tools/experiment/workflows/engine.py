@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from threading import RLock
 from typing import Protocol
 
@@ -74,26 +73,19 @@ class Engine[C]:
         tunables: T,
         paths: RunPaths,
         identity: RunIdentity,
-        tunables_originals: Mapping[str, str] | None = None,
     ) -> RunStatus:
         """Validate a declared step and persist revision-zero startup.
 
         plan/tunables are revalidated against the declaration and copied. paths
         are distinct, non-overlapping, nonexistent directories; identity is
         host-supplied provenance. Missing requires raise MissingCapability.
-        tunables_originals maps legal leaf dot paths to opaque expression text
-        at revision zero. None means no originals. Unknown/model paths or
-        non-text originals raise ValueError before startup I/O or replacing a
-        previous run. No expression evaluation occurs.
         An active run raises InvalidRunState. init waits for first execute.
         """
         with self._lock:
             if self._run is not None:
                 self._run.allow_replacement()
             run = WorkflowRun(workflow_definition(step), self._ports, self._lock)
-            run.start(
-                plan, tunables, paths, identity, tunables_originals=tunables_originals
-            )
+            run.start(plan, tunables, paths, identity)
             self._run = run
             return run.status()
 
@@ -154,9 +146,8 @@ class Engine[C]:
         names; replace lists/tuples as wholes. Empty/overlapping/unknown paths
         raise ValueError, stale versions RevisionConflict, invalid models
         ValidationError. The current step keeps its captured copy. Journal
-        failure publishes neither values nor originals, requests run failure,
-        and re-raises. Each change's original is opaque text or None to clear
-        its previous text. Same-value text edits still create a revision.
+        failure publishes no values, requests run failure, and re-raises.
+        Every accepted batch creates a revision, including same-value edits.
         """
         with self._lock:
             return self._current(run_id).update_tunables(

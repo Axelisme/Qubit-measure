@@ -2,6 +2,7 @@
 
 import pytest
 from jsonschema import Draft202012Validator
+from pydantic import JsonValue
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -36,6 +37,20 @@ def environment(
             roles=None,
         )
     )
+
+
+@pytest.mark.parametrize("previous", [{}, {"guess_us": 7.0}, {"reps": 200}])
+def test_defaults_use_expression_only_for_initial_input(
+    previous: dict[str, JsonValue],
+) -> None:
+    env = environment()
+    before = dict(previous)
+    data = T1TunablesForm.defaults(env, previous)
+    assert data["guess_us"] == (
+        {"expr": "general.ext.guess_us"} if not previous else 20.0
+    )
+    assert previous == before
+    assert FormInput(T1TunablesForm, data).data == data
 
 
 def test_defaults_expression_state_changes_and_native_conversion() -> None:
@@ -74,9 +89,9 @@ def test_defaults_expression_state_changes_and_native_conversion() -> None:
         ("reps",),
     }
     assert by_path[("guess_us",)].value == native.guess_us
-    assert by_path[("guess_us",)].original == "general.ext.guess_us * 1.2"
-    assert by_path[("cal", "span_mhz")].original == "general.ext.guess_us * 2"
-    assert by_path[("cal", "qf_widen")].original is None
+    assert by_path[("guess_us",)].input == {"expr": "general.ext.guess_us * 1.2"}
+    assert by_path[("cal", "span_mhz")].input == {"expr": "general.ext.guess_us * 2"}
+    assert by_path[("cal", "qf_widen")].input == [1.0, 3.0]
     assert base.data["guess_us"] == {"expr": "general.ext.guess_us"}
 
     native.cal.span_mhz = 70.0
@@ -105,7 +120,9 @@ def test_context_fallback_and_invalid_referenced_value_are_distinct(
     assert ("guess_us",) in result.messages
 
 
-def test_integer_expression_validation_and_direct_same_value_clear_original() -> None:
+def test_integer_expression_validation_and_direct_same_value_replaces_expression() -> (
+    None
+):
     env = environment()
     state = FormState(T1TunablesForm.default_input(env))
     state.write({("reps",): {"expr": "general.ext.guess_us / 10"}}, env)
@@ -121,9 +138,9 @@ def test_integer_expression_validation_and_direct_same_value_clear_original() ->
     changes = state.changes(env)
     assert not isinstance(changes, FormErrors)
     by_path = {change.path: change for change in changes}
-    assert by_path[("reps",)].original == "general.ext.guess_us / 5"
+    assert by_path[("reps",)].input == {"expr": "general.ext.guess_us / 5"}
     assert by_path[("guess_us",)].value == 25.0
-    assert by_path[("guess_us",)].original is None
+    assert by_path[("guess_us",)].input == 25.0
 
 
 def test_nested_rabi_error_is_directed_and_invalid_draft_can_be_repaired() -> None:

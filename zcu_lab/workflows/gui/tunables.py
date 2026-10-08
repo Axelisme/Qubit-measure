@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, Self
 
-from pydantic import Field, model_validator
-from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, field_error
+from pydantic import Field, JsonValue, model_validator
+from zcu_tools.gui.form import Display, FormEnv, FormModel, field_error
 
 from zcu_lab.workflows.calibration import CalibrationTunables
 from zcu_lab.workflows.t1 import T1Tunables
@@ -143,31 +144,34 @@ class T1TunablesForm(FormModel):
     )
 
     @classmethod
-    def default_input(cls, env: FormEnv) -> FormInput[Self]:
-        """Build native-equivalent defaults, retaining a captured guess expression.
+    def defaults(
+        cls, env: FormEnv, previous: Mapping[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        """Build defaults, retaining a captured guess expression for initial input.
 
-        When parameters contain general.ext.guess_us (even explicit null),
+        When previous is empty and parameters contain general.ext.guess_us
+        (even explicit null),
         retain that path as an expression rather than copying its value. With
         no capture or an absent leaf, keep the provisional ordinary 20 us.
         Invalid referenced values remain result errors, not a fallback. Reads
         use the fixed point only, never materialization, devices or I/O.
         Unavailable captured sources propagate their source error.
         """
-        base = FormInput.from_json(cls, cls().model_dump_json())
-        data = base.data
+        data = super().defaults(env, previous)
         if (
-            env.parameters is not None
+            not previous
+            and env.parameters is not None
             and env.parameters.lookup_point("general.ext.guess_us").present
         ):
             data["guess_us"] = {"expr": "general.ext.guess_us"}
-        return FormInput(cls, data)
+        return data
 
     def to_cfg(self) -> T1Tunables:
         """Copy validated ordinary form values to native T1Tunables.
 
-        Expression input is not forwarded as a value; the host separately uses
-        FormChange.original for Engine audit. No owner update or source access
-        occurs. Native validation failures propagate after invalid direct edits.
+        Expression input stays in FormInput, not in the native values or Engine
+        journal. No owner update or source access occurs. Native validation
+        failures propagate after invalid direct edits.
         """
         return T1Tunables(
             cal=self.cal.to_cfg(),
