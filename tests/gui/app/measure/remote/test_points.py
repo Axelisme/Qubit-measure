@@ -1,6 +1,5 @@
 """Point RPCs through real remote dispatch, context and tab owners."""
 
-from collections.abc import Mapping
 from pathlib import Path
 
 import pytest

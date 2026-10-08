@@ -10,6 +10,7 @@ from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.context_types import ContextSourceFault
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformError
 
 from ._helpers import open_client, recv_response, send
 from ._point_application import PointApplication
@@ -28,11 +29,12 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
         database_root=info.database_path.parent,
     )
     point = entry.new_point("base", description="native snapshot")
-    point.general.ext = {"nested": {"trace": [1.0, 2.0], "unset": None}}
+    with point.edit() as draft:
+        draft.set("general.ext.nested", {"trace": [1.0, 2.0], "unset": None})
     library = entry.module_library("base")
     with library.edit() as draft:
         draft.set_waveform(
-            "Q1.waveforms.arbitrary", ArbWaveformCfg(data="missing-asset")
+            "Q1.waveforms.arbitrary", ArbWaveformCfg(data="missing_asset")
         )
         draft.set_module(
             "Q1.pulses.pi",
@@ -61,8 +63,8 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     assert isinstance(wire_library, dict)
     assert wire_library["provenance"]
     # The asset was never created: a full Spec read must still succeed.
-    with pytest.raises(FileNotFoundError):
-        captured.library.get_waveform("Q1.waveforms.arbitrary").length
+    with pytest.raises(ArbWaveformError):
+        _ = captured.library.get_waveform("Q1.waveforms.arbitrary").length
 
 
 def test_snapshot_reads_the_memory_draft_and_unlocks_only_its_connection(
