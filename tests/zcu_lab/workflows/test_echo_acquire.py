@@ -17,6 +17,7 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoSweepCfg,
 )
 from zcu_lab.workflows.acquire import run_t2echo
+from zcu_lab.workflows.analysis import analyze_t2echo
 
 from ._sim_inputs import Inputs
 
@@ -66,6 +67,21 @@ def test_echo_uses_native_total_delay_and_acquisition_evidence(inputs: Inputs) -
     assert result.evidence.completion == "complete"
     assert cfg.model_dump_json() == original_json
     assert run.cfg.model_dump_json() == original_json
+
+
+def test_native_echo_acquisition_has_analyzable_decay(inputs: Inputs) -> None:
+    run = Run(echo_cfg(inputs), StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    result = run_t2echo(run)
+
+    fit = analyze_t2echo(result)
+
+    assert run.outcome.status == "completed"
+    assert fit.lifetime_us == pytest.approx(10.0, abs=1.0)
+    assert np.isfinite(fit.error_us)
+    assert fit.fitted.shape == result.times[1:].shape
+    assert fit.quality.normalized_residual_rms is not None
+    # Simulator IQ is not an exact exponential; this is not an acceptance policy.
+    assert fit.quality.normalized_residual_rms < 0.1
 
 
 def test_echo_stop_preserves_native_partial_result(inputs: Inputs) -> None:

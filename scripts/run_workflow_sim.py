@@ -2,7 +2,8 @@
 
 Provide --sim with current SimParams JSON and --cfg with the selected callback's
 current native cfg JSON (dev must be None; this host has no device adapter).
-This is the acquisition-only host, not the complete T1 fluxdep workflow.
+Completed zero-detune echo also reports its native decay fit in microseconds.
+Other callbacks report acquisition metadata only. This is not a full workflow.
 No instruments are connected and no old-format alias/fallback is supported.
 """
 
@@ -35,6 +36,7 @@ from zcu_lab.workflows.acquire import (
     run_t1,
     run_t2echo,
 )
+from zcu_lab.workflows.analysis import analyze_t2echo
 
 
 class _Arguments(argparse.Namespace):
@@ -57,6 +59,13 @@ def _execute[
         run.devices.setup(settings, run.cancel_signal)
     result = experiment(run)
     run.cancel_signal.raise_if_error()
+    fit_metrics: dict[str, float] = {}
+    if isinstance(result, T2EchoAcquisition) and run.outcome.status == "completed":
+        fit = analyze_t2echo(result)
+        fit_metrics = {
+            "lifetime_us": fit.lifetime_us,
+            "lifetime_error_us": fit.error_us,
+        }
     print(
         json.dumps(
             {
@@ -65,6 +74,7 @@ def _execute[
                 "started_at": result.evidence.started_at.isoformat(),
                 "finished_at": result.evidence.finished_at.isoformat(),
                 "shape": list(result.signals.shape),
+                **fit_metrics,
             }
         )
     )

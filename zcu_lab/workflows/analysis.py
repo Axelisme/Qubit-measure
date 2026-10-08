@@ -21,6 +21,7 @@ from zcu_tools.analysis.fitting import (
 from zcu_lab.v2.twotone.freq.core import FreqResult, qubfreq_signal2real
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiResult, rabi_signal2real
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Result, t1_signal2real
+from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoResult, t2echo_signal2real
 
 
 @dataclass(frozen=True)
@@ -64,10 +65,11 @@ class RabiFit:
 
 @dataclass(frozen=True)
 class DecayFit:
-    """Single-exponential T1 estimate without an acceptance decision.
+    """Single-exponential decay estimate without an acceptance decision.
 
     lifetime_us/error_us are the decay constant and its marginal standard
-    error. observed/fitted are float64 vectors aligned with source.times.
+    error. observed/fitted are float64 vectors aligned with source.times for
+    T1, or source.times[1:] for T2echo (the native first-sample exclusion).
     quality contains residual diagnostics with no parameter-error entries.
     Native nonfinite values or unavailable diagnostics remain visible.
     """
@@ -138,5 +140,39 @@ def analyze_t1(result: T1Result) -> DecayFit:
     observed = t1_signal2real(result.signals)
     lifetime, error, fitted, _optimizer = fit_decay(result.times, observed)
     # Preserve the native estimate and error; residual diagnostics do not refit.
+    quality = compute_fit_quality(observed, fitted, {}, None)
+    return DecayFit(float(lifetime), float(error), observed, fitted, quality)
+
+
+def analyze_t2echo(result: T2EchoResult) -> DecayFit:
+    """Fit a native zero-detune echo trace with a single exponential.
+
+    Supply matching 1-D float64 times in microseconds and complex128 IQ.
+    true_activate_detune must explicitly be 0.0, not None or a fringe value.
+    Exclude the first sample before projection/fitting, as native analysis
+    does. The remaining trace needs at least four finite samples with
+    strictly increasing times; invalid inputs raise ValueError.
+    Return lifetime, marginal uncertainty and residual curves aligned with
+    result.times[1:]. Do not mutate result or acquire, plot, save, or apply
+    an acceptance threshold. Native errors and optimizer warnings propagate;
+    native nonfinite estimates and unavailable diagnostics remain visible.
+    """
+    if result.true_activate_detune != 0.0:
+        raise ValueError("T2echo decay analysis requires explicit zero detune")
+    if (
+        result.times.ndim != 1
+        or result.signals.ndim != 1
+        or result.times.shape != result.signals.shape
+    ):
+        raise ValueError("T2echo times and signals must have matching 1-D shape")
+    times, signals = result.times[1:], result.signals[1:]
+    if len(times) < 4:
+        raise ValueError("T2echo needs at least four samples after the first")
+    if not np.isfinite(times).all() or not np.isfinite(signals).all():
+        raise ValueError("T2echo retained samples must be finite")
+    if not np.all(np.diff(times) > 0.0):
+        raise ValueError("T2echo retained times must be strictly increasing")
+    observed = t2echo_signal2real(signals)
+    lifetime, error, fitted, _optimizer = fit_decay(times, observed)
     quality = compute_fit_quality(observed, fitted, {}, None)
     return DecayFit(float(lifetime), float(error), observed, fitted, quality)
