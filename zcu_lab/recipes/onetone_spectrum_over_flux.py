@@ -20,8 +20,8 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     center_mhz: float | None = None,
     span_mhz: float | None = None,
     gain: float | None = None,
-    flux_device: str | None = None,
-    flux_unit: str | None = None,
+    flux_device: str,
+    flux_unit: str,
     freq_points: int | None = None,
     flux_points: int | None = None,
     flux_range: list[float] | None = None,
@@ -37,18 +37,25 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     readout_ref selects a library; None retains the selection. center/span use MHz
     and default to resonator/linewidth calibration. flux_range has two distinct
     device-native endpoints, or None for the GUI's calibrated range. flux_device
-    defaults to the observed flux device; flux_unit asserts units without conversion.
-    FakeDevice requires explicit native units. Other None values retain GUI defaults.
-    All missing frequency/device/range sources share one needs_parameters handoff.
+    is a required registered device name. flux_unit is a required assertion, not
+    a conversion: physical A/V must match the snapshot; a confirmed FakeDevice
+    with snapshot unit none requires native. Neither argument accepts null.
+    Other None values retain GUI defaults. Missing frequency/range sources share
+    one needs_parameters handoff; invalid device/unit fails before Run.
     Invalid cfg/native failures throw at their author step. Cancelled yields return;
     finish_early saves usable data. Accepted answer triggers explicit current-draft
     writeback; skipped does not write.
     """
+    if (
+        not flux_device
+        or not flux_device.strip()
+        or not flux_unit
+        or not flux_unit.strip()
+    ):
+        raise ValueError("flux_device and flux_unit must be non-empty strings")
     for name, value in (
         ("reuse_tab_id", reuse_tab_id),
         ("readout_ref", readout_ref),
-        ("flux_device", flux_device),
-        ("flux_unit", flux_unit),
     ):
         if value is not None and not value.strip():
             raise ValueError(f"{name} must be a non-empty string or null")
@@ -68,10 +75,7 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
-    try:
-        tab.use_flux_device(flux_device, unit=flux_unit)
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
+    tab.use_flux_device(flux_device, unit=flux_unit)
     try:
         tab.set_flux_sweep(
             "sweep.flux",
@@ -107,6 +111,7 @@ DEFINITION = RecipeDefinition(
     input_schema={
         "type": "object",
         "additionalProperties": False,
+        "required": ["flux_device", "flux_unit"],
         "properties": {
             "target": {"type": ["string", "null"], "minLength": 1},
             **{
@@ -119,11 +124,11 @@ DEFINITION = RecipeDefinition(
             },
             **{name: {"type": ["integer", "null"]} for name in ("reps", "rounds")},
             "gain": {"type": ["number", "null"]},
-            "flux_device": {"type": ["string", "null"], "minLength": 1},
+            "flux_device": {"type": "string", "minLength": 1},
             "flux_unit": {
-                "type": ["string", "null"],
+                "type": "string",
                 "minLength": 1,
-                "description": "Optional device-unit assertion. FakeDevice requires explicit native coordinates.",
+                "description": "Required device-unit assertion without conversion. Physical A/V must match; confirmed FakeDevice with snapshot unit none requires native.",
             },
             "freq_points": {"type": ["integer", "null"]},
             "flux_points": {"type": ["integer", "null"]},
