@@ -344,7 +344,7 @@ def test_A6_Analyze_full_width_below_params_before_writeback(qapp, exp_tab_widge
         return False
 
     assert is_descendant(tab.analyze_btn, inner), "Analyze should be inside scroll"
-    # Order: params < analyze < writeback
+    # Place Analyze after the parameters and before Writeback.
     layout = inner.layout()
     assert layout is not None
     widgets = []
