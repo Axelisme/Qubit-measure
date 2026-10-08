@@ -122,7 +122,9 @@ class Join(Module):
         def find_next_branch() -> int | None:
             min_i = None
             min_t = 0.0
-            for i, (t, mod_list) in enumerate(zip(cur_t_list, list_modules)):
+            for i, (t, mod_list) in enumerate(
+                zip(cur_t_list, list_modules, strict=False)
+            ):
                 if len(mod_list) == 0:
                     continue  # skip empty branch
                 if isinstance(t, QickParam):
@@ -149,9 +151,7 @@ class Join(Module):
 
                 cur_t_list[i] = mod.run(prog, cur_t)
 
-        end_t = merge_max_length(*cur_t_list)
-
-        return end_t
+        return merge_max_length(*cur_t_list)
 
     def allow_rerun(self) -> bool:
         return all(m.allow_rerun() for mlist in self.join_modules for m in mlist)

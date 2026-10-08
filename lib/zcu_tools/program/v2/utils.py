@@ -62,8 +62,7 @@ def param2str(param: float | QickParam) -> str:
             )
         if param.is_sweep():
             return f"sweep({param.minval():.3f}, {param.maxval():.3f})"
-        else:
-            return f"{param.start:.3f}"
+        return f"{param.start:.3f}"
     return f"{float(param):.3f}"
 
 
