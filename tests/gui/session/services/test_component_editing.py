@@ -69,9 +69,7 @@ def test_component_reference_is_an_ordinary_string(component_session):
 def test_setup_edits_do_not_change_existing_points(component_session):
     control, entry = component_session
     control.add_component("Q1", "fake/drive/a", {"rate": 4300.0}, setup=True)
-    target = control.new_point(
-        PointCreateRequest(entry.entry_id, "a", "", CommandOrigin("gui"))
-    )
+    target = control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
     capture = control.read_context()
     control.set_setup_parameter("Q1.rate", 5100.0)
     assert (
@@ -86,7 +84,7 @@ def test_setup_edits_do_not_change_existing_points(component_session):
 
 def test_add_saved_component_updates_focus_options_and_persists(component_session):
     control, entry = component_session
-    control.new_point(PointCreateRequest(entry.entry_id, "a", "", CommandOrigin("gui")))
+    control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
     control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     assert entry.use_point("a").Q1.rate == 4300.0
     control.set_component_focus("Q1")

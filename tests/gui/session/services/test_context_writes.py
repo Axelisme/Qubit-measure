@@ -119,7 +119,7 @@ def _meta(capture: ParameterContext, kind: Kind) -> Provenance | None:
 
 def _select(session: _Session, label: str) -> SavedPoint:
     session.entry.new_point(label)
-    return session.control.use_point(PointUseRequest(session.entry.entry_id, label))
+    return session.control.use_point(PointUseRequest(label))
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -256,7 +256,7 @@ def test_detached_saved_point_write_keeps_current_point_and_publication(
     )
     assert session.state.version.get("context") == before_version
     assert events == []
-    session.control.use_point(PointUseRequest(session.entry.entry_id, "a"))
+    session.control.use_point(PointUseRequest("a"))
     assert _value(session.control.read_context(), kind) == pytest.approx(0.2)
     _write(session.control, first, kind, 0.3)
     assert _value(session.control.read_context(), kind) == pytest.approx(0.3)

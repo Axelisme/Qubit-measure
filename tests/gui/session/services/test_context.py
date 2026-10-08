@@ -95,21 +95,15 @@ def _entry(tmp_path: Path, name: str = "entry") -> ResultEntry:
     )
 
 
-def _new_request(
-    entry: ResultEntry, label: str, *, clone: str | None = None
-) -> PointCreateRequest:
-    return PointCreateRequest(
-        entry.entry_id, label, "session description", CommandOrigin("gui"), clone
-    )
+def _new_request(label: str, *, clone: str | None = None) -> PointCreateRequest:
+    return PointCreateRequest(label, "session description", CommandOrigin("gui"), clone)
 
 
 def _entry_command(context: ContextService, command: str, entry_id: str) -> object:
     if command == "use":
-        return context.use_point(PointUseRequest(entry_id, "new"))
+        return context.use_point(PointUseRequest("new"))
     if command == "new":
-        return context.new_point(
-            PointCreateRequest(entry_id, "new", "", CommandOrigin("gui"))
-        )
+        return context.new_point(PointCreateRequest("new", "", CommandOrigin("gui")))
     return context.entry_ledger(entry_id)
 
 
@@ -118,7 +112,7 @@ def test_parameter_write_preserves_selected_component_focus(
     rich_entry: ResultEntry,
 ) -> None:
     context.install_entry(rich_entry)
-    target = context.new_point(_new_request(rich_entry, "a"))
+    target = context.new_point(_new_request("a"))
     focus = context.set_component_focus("Q1")
     context.set_parameter(target, "Q1.rate", 4500.0)
     assert context.get_component_focus() == focus
@@ -179,13 +173,13 @@ def test_use_point_detaches_capture_and_uses_same_entry_library(
     first = entry.new_point("first", description="first point")
     entry.new_point("second", description="second point")
     context.install_entry(entry)
-    target = context.use_point(PointUseRequest(entry.entry_id, "first"))
+    target = context.use_point(PointUseRequest("first"))
     capture = context.read_context()
     assert target == SavedPoint(entry_id=entry.entry_id, point="first")
     assert capture.document().general.description == "first point"
     with first.edit() as edit:
         edit.general.description = "changed outside publication"
-    context.use_point(PointUseRequest(entry.entry_id, "second"))
+    context.use_point(PointUseRequest("second"))
     assert capture.document().general.description == "first point"
     assert capture.target == target
     assert context.read_context().document().general.description == "second point"
@@ -196,16 +190,15 @@ def test_use_point_detaches_capture_and_uses_same_entry_library(
     }
 
 
-@pytest.mark.parametrize("command", ["use", "new", "ledger"])
-def test_cross_entry_commands_reject_before_changing_binding(
-    context: ContextService, tmp_path: Path, command: str
+def test_cross_entry_ledger_rejects_before_changing_binding(
+    context: ContextService, tmp_path: Path
 ) -> None:
     entry = _entry(tmp_path)
     other = _entry(tmp_path, "other")
     context.install_entry(entry)
     before = context.read_context().target
     with pytest.raises(FailedPreconditionError) as error:
-        _entry_command(context, command, other.entry_id)
+        _entry_command(context, "ledger", other.entry_id)
     assert error.value.reason_code == "entry_not_open"
     assert context.read_context().target == before
     assert entry.list_points() == [] and other.list_points() == []
@@ -217,9 +210,9 @@ def test_failed_point_read_keeps_previous_capture(
     entry = _entry(tmp_path)
     entry.new_point("good", description="retained")
     context.install_entry(entry)
-    before = context.use_point(PointUseRequest(entry.entry_id, "good"))
+    before = context.use_point(PointUseRequest("good"))
     with pytest.raises(FileNotFoundError):
-        context.use_point(PointUseRequest(entry.entry_id, "missing"))
+        context.use_point(PointUseRequest("missing"))
     assert context.read_context().target == before
     assert context.read_context().document().general.description == "retained"
 
@@ -252,7 +245,7 @@ def test_new_point_uses_seed_or_clone_and_request_description(
     with source.edit() as edit:
         edit.set("general.ext.marker", 7.0)
     context.install_entry(entry)
-    target = context.new_point(_new_request(entry, "destination", clone=clone))
+    target = context.new_point(_new_request("destination", clone=clone))
     assert target == SavedPoint(entry_id=entry.entry_id, point="destination")
     document = context.read_context().document()
     assert document.general.description == "session description"
@@ -273,7 +266,7 @@ def test_created_point_binding_failure_retains_point_and_previous_binding(
     context.install_entry(entry)
     assets.fail = True
     with pytest.raises(PointBindingError) as error:
-        context.new_point(_new_request(entry, "retained"))
+        context.new_point(_new_request("retained"))
     assert error.value.entry_id == entry.entry_id and error.value.label == "retained"
     assert isinstance(error.value.__cause__, OSError)
     assert entry.list_points() == ["retained"]
@@ -297,7 +290,7 @@ def test_clear_context_returns_empty_without_deleting_entry(
 ) -> None:
     entry = _entry(tmp_path)
     context.install_entry(entry)
-    context.new_point(_new_request(entry, "working"))
+    context.new_point(_new_request("working"))
     context.clear_context()
     assert context.get_session_env().parameters is None
     assert context.get_session_env().readiness is ContextReadiness.EMPTY
@@ -318,7 +311,7 @@ def test_cross_entry_clone_rejects_before_destination_or_ledger_changes(
     other_events = other.ledger.events()
 
     with pytest.raises(ValueError, match="name"):
-        context.new_point(_new_request(entry, "destination", clone="other/source"))
+        context.new_point(_new_request("destination", clone="other/source"))
 
     assert entry.list_points() == []
     assert other.list_points() == ["source"]
@@ -337,7 +330,7 @@ def test_service_roles_and_reads_preserve_fixed_nonempty_names_without_source_io
         edit.set("Q1.rate", 4700.0)
     ledger_before = rich_entry.ledger.events()
     context.install_entry(rich_entry)
-    context.use_point(PointUseRequest(rich_entry.entry_id, "first"))
+    context.use_point(PointUseRequest("first"))
     declarations = {
         "driver": RoleSpec("fake/drive/*"),
         "sense": RoleSpec("fake/sensor", "driver.sense"),
@@ -355,7 +348,7 @@ def test_service_roles_and_reads_preserve_fixed_nonempty_names_without_source_io
 
     context.set_component_focus("Q2")
     assert context.read_context(roles=binding).roles == binding
-    context.use_point(PointUseRequest(rich_entry.entry_id, "second"))
+    context.use_point(PointUseRequest("second"))
     source_path(first).unlink()
     source_path(second).unlink()
     assert capture.target == SavedPoint(entry_id=rich_entry.entry_id, point="first")
@@ -416,11 +409,11 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
     try:
         assert state.version.get("context") == 0 and observations == []
         info = context.install_entry(rich_entry)
-        context.use_point(PointUseRequest(rich_entry.entry_id, "first"))
+        context.use_point(PointUseRequest("first"))
         context.set_component_focus("Q1")
         context.set_component_focus("Q1")
         assert state.version.get("context") == 2
-        context.new_point(_new_request(rich_entry, "second"))
+        context.new_point(_new_request("second"))
         assert state.version.get("context") == 3
         context.clear_context()
         assert [(kind, version) for kind, version, *_ in observations] == [
@@ -490,16 +483,16 @@ def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
     focused = bus.subscribe(ComponentFocusChangedPayload, events.append)
     try:
         context.install_entry(rich_entry)
-        target = context.use_point(PointUseRequest(rich_entry.entry_id, "first"))
+        target = context.use_point(PointUseRequest("first"))
         version = state.version.get("context")
         events.clear()
         with pytest.raises(FileNotFoundError):
-            context.use_point(PointUseRequest(rich_entry.entry_id, "missing"))
+            context.use_point(PointUseRequest("missing"))
         assets.fail = True
         with pytest.raises(OSError, match="asset binding"):
             context.install_entry(_entry(tmp_path, "other"))
         with pytest.raises(PointBindingError):
-            context.new_point(_new_request(rich_entry, "retained"))
+            context.new_point(_new_request("retained"))
         assert events == []
         assert state.version.get("context") == version
         assert context.read_context().target == target
