@@ -66,7 +66,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
         writeback,
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: state.session_env.parameters,
+        captured_parameters=lambda _roles, _target: state.session_env.parameters,
     )
 
     snapshot = service.get_snapshot("tab")
@@ -104,7 +104,7 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
         writeback,
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: state.session_env.parameters,
+        captured_parameters=lambda _roles, _target: state.session_env.parameters,
     ).get_snapshot("tab")
 
     assert snapshot.analysis is not None
@@ -134,7 +134,7 @@ def test_snapshot_propagates_writeback_preview_failure() -> None:
             writeback,
             cfg_resources(state),
             cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-            captured_parameters=lambda _roles: state.session_env.parameters,
+            captured_parameters=lambda _roles, _target: state.session_env.parameters,
         ).get_snapshot("tab")
 
 
@@ -158,7 +158,7 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
         writeback,
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: state.session_env.parameters,
+        captured_parameters=lambda _roles, _target: state.session_env.parameters,
     )
 
     running = service.get_snapshot("running").interaction
@@ -213,7 +213,7 @@ def test_snapshot_carries_post_analyze_fields() -> None:
         writeback,
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: state.session_env.parameters,
+        captured_parameters=lambda _roles, _target: state.session_env.parameters,
     )
 
     snapshot = service.get_snapshot("tab")
@@ -248,7 +248,7 @@ def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:
         MagicMock(),
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: state.session_env.parameters,
+        captured_parameters=lambda _roles, _target: state.session_env.parameters,
     )
 
     out = service.initialize_tab_post_analyze_params("tab")
@@ -277,7 +277,7 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
         MagicMock(),
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: state.session_env.parameters,
+        captured_parameters=lambda _roles, _target: state.session_env.parameters,
     )
 
     with pytest.raises(RuntimeError, match="primary analyze result"):
@@ -308,7 +308,7 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record() -> None:
         MagicMock(),
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: state.session_env.parameters,
+        captured_parameters=lambda _roles, _target: state.session_env.parameters,
     ).get_snapshot("tab")
 
     assert snapshot.run is not None and snapshot.run.source_path == "existing.hdf5"
@@ -342,7 +342,7 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift() -> None:
         MagicMock(),
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: state.session_env.parameters,
+        captured_parameters=lambda _roles, _target: state.session_env.parameters,
     )
     assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
 
@@ -386,7 +386,7 @@ def test_artifact_failure_preserves_previous_success_but_does_not_mark_new_draft
         MagicMock(),
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles: state.session_env.parameters,
+        captured_parameters=lambda _roles, _target: state.session_env.parameters,
     )
     assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
     tracker = state.get_tab("tab").artifacts

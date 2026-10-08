@@ -19,8 +19,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_new",
         MethodSpec(
             10.0,
-            "Create a new tab for the named adapter. Returns {tab_id}.",
-            (required_string("adapter_name", "Adapter to instantiate"),),
+            "Create a new tab for the named adapter. Optional target binds its "
+            "first declared role to a concrete component without changing GUI "
+            "focus. Omission uses current focus. Unresolved roles return "
+            "precondition_failed/role_resolution_failed with role, focus, "
+            "required_kind and detail. Returns {tab_id}.",
+            (
+                required_string("adapter_name", "Adapter to instantiate"),
+                optional_string("target", "Concrete component for the primary role"),
+            ),
         ),
         agent=AgentMethodPolicy(
             refresh_after_write=True,
@@ -112,6 +119,25 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
             reveals_when_nonempty=("tab_id",),
         ),
+    ),
+    method_entry(
+        "tab.parameter_read",
+        "tab:h_tab_parameter_read",
+        MethodSpec(
+            5.0,
+            "Read only requested paths and module_refs from this tab's fixed "
+            "parameter capture. Returns {values, modules}: absent values are "
+            "omitted, null is retained; each module ref maps to an existing "
+            "canonical library root or null for missing/custom. Invalid paths, "
+            "unknown roles and source failures propagate. Does not observe "
+            "or refresh the live context guard.",
+            (
+                required_string("tab_id"),
+                ParamSpec("paths", JsonType.ARRAY, required=True),
+                ParamSpec("module_refs", JsonType.ARRAY, required=True),
+            ),
+        ),
+        agent=AgentMethodPolicy(),
     ),
     method_entry(
         "tab.get_cfg",

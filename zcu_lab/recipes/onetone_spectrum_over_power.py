@@ -12,6 +12,7 @@ from zcu_tools.mcp.measure.recipe import (
 def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords.
     session: RecipeSession,
     *,
+    target: str | None = None,
     reuse_tab_id: str | None = None,
     readout_ref: str | None = None,
     center_mhz: float | None = None,
@@ -23,6 +24,9 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
     rounds: int | None = None,
 ) -> RecipeGenerator:
     """Run/save one power survey and capture its Run PNG, with no analysis/write.
+
+    target binds the new tab's primary role without changing GUI focus.
+    Omission uses focus. Do not pass target when reusing an existing tab.
 
     session is driver-supplied. reuse_tab_id resets an idle onetone/power_dep tab.
     readout_ref selects a library; None retains the selection. center/span use MHz
@@ -37,7 +41,7 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
             raise ValueError(f"{name} must be a non-empty string or null")
     if span_mhz is not None and span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
-    tab = session.open_tab("onetone/power_dep", reuse=reuse_tab_id)
+    tab = session.open_tab("onetone/power_dep", target=target, reuse=reuse_tab_id)
     tab.use_library("modules.readout", readout_ref)
     tab.set_frequency_sweep(
         "sweep.freq",
@@ -70,6 +74,7 @@ DEFINITION = RecipeDefinition(
         "type": "object",
         "additionalProperties": False,
         "properties": {
+            "target": {"type": ["string", "null"], "minLength": 1},
             **{
                 name: {"type": ["string", "null"], "minLength": 1}
                 for name in ("reuse_tab_id", "readout_ref")

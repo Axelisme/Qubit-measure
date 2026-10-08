@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.state import (
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.resource import CfgObservation, CfgResolution
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import RoleSpec
 
@@ -75,13 +76,14 @@ class TabService:
         cfg_resources: TabCfgResources,
         cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
         captured_parameters: Callable[
-            [Mapping[str, RoleSpec]], ParameterContext | None
+            [Mapping[str, RoleSpec], str | None], ParameterContext | None
         ],
     ) -> None:
         """Inject fixed cfg sources and the current role capture operation.
 
-        captured_parameters resolves declared roles through the context owner;
-        empty declarations return None. Missing context/roles propagate before
+        captured_parameters receives ordered role declarations and an optional
+        explicit target for the first role. It resolves through the context owner;
+        empty declarations return None only when target is omitted. Missing context/roles propagate before
         tab registration. cfg_resolution retains the supplied capture on refresh.
         """
         self._state = state
@@ -184,16 +186,31 @@ class TabService:
                 post_analysis_images=post_image_paths,
             ),
             artifacts=self._state.get_artifact_snapshots(tab_id),
+            parameters=tab.parameters,
         )
 
-    def new_tab(self, adapter_name: str, from_dict: TabSnapshot | None = None) -> str:
-        """Single tab-creation entry.
+    def new_tab(
+        self,
+        adapter_name: str,
+        from_dict: TabSnapshot | None = None,
+        *,
+        target: str | None = None,
+    ) -> str:
+        """Create a tab with roles and cfg sources captured once.
+
+        target=None uses current GUI focus. A non-empty component name explicitly
+        binds the adapter's first declared role; dependent roles still use their
+        declared inference. It never changes GUI focus. Missing/wrong-kind roles
+        raise RoleResolutionError before tab registration. An empty target or a
+        target on a roleless adapter raises InvalidInputError.
 
         ``from_dict is None`` → a fresh tab with the adapter's default cfg.
         ``from_dict`` given (restore) → rebuild the tab from the snapshot's
         detached ``cfg_schema`` input memento. Path overrides are process-local and not
         persisted, so restore creates fresh panes.
         """
+        if target is not None and not target.strip():
+            raise InvalidInputError("target must be a non-empty component name")
         adapter = self._registry.create(adapter_name)
         tab_id = f"{_slug(adapter_name)}-{uuid.uuid4().hex[:8]}"
         logger.info(
@@ -202,7 +219,10 @@ class TabService:
             tab_id,
             from_dict is not None,
         )
-        parameters = self._captured_parameters(adapter.parameter_roles())
+        parameters = self._captured_parameters(adapter.parameter_roles(), target)
+        save_context = (
+            parameters if parameters is not None else self._state.session_env.parameters
+        )
         cfg = self._cfg_resources.create(
             tab_id,
             lambda: adapter.make_default_cfg(
@@ -218,6 +238,7 @@ class TabService:
                 adapter=adapter,
                 cfg=cfg,
                 parameters=parameters,
+                save_context=save_context,
             ),
         )
 
@@ -231,7 +252,7 @@ class TabService:
         """The adapter's default cfg under the current context — the base schema
         WorkspaceService needs to decode a persisted raw cfg into a live one."""
         adapter = self._registry.create(adapter_name)
-        parameters = self._captured_parameters(adapter.parameter_roles())
+        parameters = self._captured_parameters(adapter.parameter_roles(), None)
         return adapter.make_default_cfg(
             replace(self._state.session_env, parameters=parameters)
         )

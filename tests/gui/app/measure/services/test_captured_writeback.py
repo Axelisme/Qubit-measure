@@ -165,17 +165,13 @@ def test_setter_failure_retains_accepted_and_successful_prefix(
 
     monkeypatch.setattr(session.control, "set_parameter", fail_second)
     with pytest.raises(OSError, match="point unavailable"):
-        session.service.apply_draft(draft, origin=CommandOrigin("mcp", "native-call"))
+        session.service.apply_draft(draft, origin=CommandOrigin("mcp"))
     current = session.control.read_context()
     assert current.value("general.flux_value") == 2.0
     assert not current.lookup("general.description").present
     assert not current.lookup("general.flux_unit").present
     event = session.entry.ledger.events()[-1]
-    assert (
-        event.kind == "accepted"
-        and event.origin == "mcp"
-        and event.call_id == "native-call"
-    )
+    assert event.kind == "accepted" and event.origin == "mcp"
     assert isinstance(event.payload, AcceptedPayload) and len(event.payload.writes) == 3
     source = current.meta("general.flux_value")
     assert source is not None and source.source == event.id
@@ -203,7 +199,7 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     assert session.service.preview_values(draft)["md-1"].current == 0.6
     draft.edit("md-1", selected=False)
     written = session.service.write_draft(
-        draft, (WritebackEdit("md-1"),), origin=CommandOrigin("mcp", "native-receipt")
+        draft, (WritebackEdit("md-1"),), origin=CommandOrigin("mcp")
     )
     assert written == [WritebackWritten("md-1", "md", "Q1.rate", 0.6, 0.2)]
     assert captured.value("driver.rate") == 0.1
@@ -213,7 +209,7 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     assert not draft.items[0].selected
     assert session.service.get_all_applied(draft) == {"md-1": True}
     event = session.entry.ledger.events()[-1]
-    assert event.origin == "mcp" and event.call_id == "native-receipt"
+    assert event.origin == "mcp"
     source = session.control.read_target(first).meta("Q1.rate")
     assert source is not None and source.source == event.id and source.stderr == 0.05
 

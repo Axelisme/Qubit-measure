@@ -5,9 +5,7 @@ from __future__ import annotations
 import math
 import tempfile
 import uuid
-from collections.abc import Callable, Generator, Mapping, Sequence
-from contextlib import AbstractContextManager, contextmanager
-from contextvars import ContextVar
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -214,7 +212,6 @@ class MeasureMcpSession:
         from zcu_tools.mcp.measure.recipe_execution import RecipeExecutions
 
         self._config = config
-        self._call_id: ContextVar[str | None] = ContextVar("mcp_call_id", default=None)
         self._rpc_lock = RLock()
         self._resource_lock = RLock()
         self._close_lock = Lock()
@@ -236,37 +233,6 @@ class MeasureMcpSession:
         self._versions: dict[str, int] = {}
         self._launched = False
         self._png_directory: tempfile.TemporaryDirectory[str] | None = None
-
-    def tool_call_scope(self, call_id: str) -> AbstractContextManager[None]:
-        """Bind a native MCP tool ID to this session and execution context.
-
-        Nonblank strings are preserved exactly. Blank IDs raise ValueError.
-        Nested scopes restore their predecessor even when the handler raises.
-        Other sessions and independent contexts retain their own scope.
-        Scope is synchronous; continuations must capture the ID explicitly.
-        """
-        if not call_id.strip():
-            raise ValueError("Native MCP call ID must not be blank")
-        return self._bind_call_id(call_id)
-
-    @contextmanager
-    def _bind_call_id(self, call_id: str) -> Generator[None]:
-        token = self._call_id.set(call_id)
-        try:
-            yield
-        finally:
-            self._call_id.reset(token)
-
-    def current_call_id(self) -> str:
-        """Return this session/context's active native MCP ID.
-
-        Raise RuntimeError outside tool_call_scope. Never synthesize an ID or
-        borrow another session/context's latest call.
-        """
-        call_id = self._call_id.get()
-        if call_id is None:
-            raise RuntimeError("No native MCP tool call scope is active")
-        return call_id
 
     def new_png_path(self) -> Path:
         """Reserve a fresh session-owned path; the GUI writes the image."""

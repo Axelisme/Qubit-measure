@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 from unittest.mock import Mock
 from uuid import UUID
 
@@ -91,16 +92,20 @@ def artifacts() -> tuple[SaveArtifact, ...]:
     )
 
 
-def test_all_outputs_share_content_context_and_one_saved_event(tmp_path: Path) -> None:
+@pytest.mark.parametrize("origin", ["gui", "notebook", "mcp"])
+def test_all_outputs_share_content_context_and_one_saved_event(
+    tmp_path: Path,
+    origin: Literal["gui", "notebook", "mcp"],
+) -> None:
     metadata, layout, ledger = storage(tmp_path)
     report = save_artifacts(
         artifacts(),
         layout=layout,
         metadata=metadata,
         ledger=ledger,
-        origin="notebook",
-        call_id=None,
+        origin=origin,
     )
+    assert ledger.events()[-1].origin == origin
     assert report.run_id == metadata.run_id
     assert len(report.outputs) == 5
     assert all(item.status == "saved" and item.error is None for item in report.outputs)
@@ -138,7 +143,6 @@ def test_one_failed_destination_does_not_block_other_outputs(tmp_path: Path) -> 
         metadata=metadata,
         ledger=ledger,
         origin="notebook",
-        call_id=None,
     )
     failed = [item for item in report.outputs if item.status == "failed"]
     assert len(failed) == 1
@@ -172,7 +176,6 @@ def test_figure_is_encoded_once_for_equivalent_destinations(
         metadata=metadata,
         ledger=ledger,
         origin="notebook",
-        call_id=None,
     )
     assert all(item.status == "saved" for item in report.outputs)
     pngs = [item.output.path for item in report.outputs if item.output.format == "png"]
@@ -212,7 +215,6 @@ def test_encoding_failure_isolates_the_member_and_records_other_outputs(
         metadata=metadata,
         ledger=ledger,
         origin="notebook",
-        call_id=None,
     )
     failed = [item for item in report.outputs if item.status == "failed"]
     assert len(failed) == (2 if failing_member == "figure" else 1)
