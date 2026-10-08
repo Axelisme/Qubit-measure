@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.services.ports import TabPathsSnapshot
+from zcu_tools.gui.cfg import is_custom_reference_key
 from zcu_tools.gui.cfg.edit_codec import decode_edits, decode_ref, encode_ref
 from zcu_tools.gui.cfg.resource import (
     CfgInputError,
@@ -225,6 +226,21 @@ class TabParameterRead(TypedDict):
     modules: dict[str, str | None]
 
 
+def _parameter_query_strings(params: Mapping[str, object], name: str) -> list[str]:
+    """Validate a requested parameter path/reference array at the wire boundary."""
+    items = params.get(name)
+    if not isinstance(items, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"{name} must be a string array")
+    strings: list[str] = []
+    for item in items:
+        if not isinstance(item, str) or not item.strip():
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, f"{name} must contain non-empty strings"
+            )
+        strings.append(item)
+    return strings
+
+
 def h_tab_parameter_read(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> TabParameterRead:
@@ -238,7 +254,37 @@ def h_tab_parameter_read(
     A source-free tab accepts empty arrays only; otherwise precondition_failed.
     This read does not refresh any live-context or operation observation guard.
     """
-    raise NotImplementedError("Fixed tab parameter read is not wired yet")
+    tab_id = params.get("tab_id")
+    if not isinstance(tab_id, str) or not adapter.tab_control.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    paths = _parameter_query_strings(params, "paths")
+    module_refs = _parameter_query_strings(params, "module_refs")
+    parameters = adapter.tab_control.get_tab_snapshot(tab_id).parameters
+    if parameters is None:
+        if paths or module_refs:
+            raise RemoteError(
+                ErrorCode.PRECONDITION_FAILED, "Tab has no parameter capture"
+            )
+        return {"values": {}, "modules": {}}
+    values: dict[str, YamlValue] = {}
+    for path in paths:
+        result = parameters.lookup(path)
+        if result.present:
+            values[path] = result.value
+    modules: dict[str, str | None] = {}
+    module_keys = parameters.library.module_keys() if module_refs else ()
+    for reference in module_refs:
+        if is_custom_reference_key(reference):
+            modules[reference] = None
+            continue
+        try:
+            root = parameters.library_key(reference)
+        except AttributeError:
+            # library_key reports only unset/dangling captured module slots here.
+            modules[reference] = None
+        else:
+            modules[reference] = root if root in module_keys else None
+    return {"values": values, "modules": modules}
 
 
 def h_tab_get_cfg(
