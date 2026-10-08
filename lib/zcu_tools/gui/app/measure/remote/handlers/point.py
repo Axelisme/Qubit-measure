@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal, TypedDict
 
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.context_types import PointUseRequest
+
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
@@ -53,7 +56,22 @@ def h_point_list(
     Owner refresh/schema/I/O errors propagate; never fall back to cached success.
     This metadata-only read establishes no full-context observation.
     """
-    raise NotImplementedError("point.list owner wiring")
+    info = adapter.context_control.get_entry_info()
+    points = adapter.context_control.list_points(refresh=True)
+    entry: PointEntry | None = None
+    if info is not None:
+        entry = {
+            "entry_id": info.entry_id,
+            "name": info.name,
+            "result_path": str(info.result_path),
+            "database_path": str(info.database_path),
+        }
+    return {
+        "entry": entry,
+        "points": [
+            {"label": point.label, "description": point.description} for point in points
+        ],
+    }
 
 
 def h_point_new(
@@ -84,4 +102,11 @@ def h_point_use(
     failures propagate without fallback and leave the old binding intact.
     Existing tabs retain their parameter capture; new tabs use this point.
     """
-    raise NotImplementedError("point.use owner wiring")
+    entry_id = params.get("entry_id")
+    label = params.get("label")
+    if not isinstance(entry_id, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'entry_id' must be a string")
+    if not isinstance(label, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'label' must be a string")
+    point = adapter.context_control.use_point(PointUseRequest(entry_id, label))
+    return {"kind": point.kind, "entry_id": point.entry_id, "point": point.point}
