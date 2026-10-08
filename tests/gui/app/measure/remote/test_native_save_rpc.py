@@ -1,44 +1,86 @@
-"""Native Save RPC reports backed by real writers, ledger and State."""
+"""Native Save RPC reports through the real connection-owned dispatcher."""
 
+import socket
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.gui.app.measure.remote.handlers.run_save import (
-    h_tab_save_artifacts,
-    h_tab_save_data,
-)
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
-from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from tests.gui.app.measure._native_save_support import (
+    NativeSaveSession,
     declare_panes,
     native_save_session,
 )
+
+from ._helpers import call, open_client, reset_inbox
+
+pytestmark = pytest.mark.uses_wall_clock
+
+
+@contextmanager
+def native_save_rpc(
+    tmp_path: Path, qapp: QApplication
+) -> Generator[tuple[NativeSaveSession, socket.socket]]:
+    """Serve the native session over loopback with production dispatch and guards.
+
+    The session already owns a fixed cfg capture and real SaveControl. Bind these
+    existing resources to the adapter's public facets; Controller supplies the
+    remaining real controls, owner scheduler and current resource versions.
+    Close the socket inbox and server before releasing the native session.
+    """
+    with native_save_session(tmp_path, qapp) as session:
+        tab = session.state.get_tab("tab")
+        session.state.update_tab_result(
+            "tab", tab.run.result, source_operation_id=101, metadata=session.metadata
+        )
+        declare_panes(session)
+        post = tab.post_analysis
+        session.state.swap_analysis_pane(
+            "tab", replace(tab.analysis, source_operation_id=201)
+        )
+        session.state.swap_post_analysis_pane(
+            "tab", replace(post, source_operation_id=301)
+        )
+        controller = Controller(
+            session.state, Registry(), None, session.bus, project_root=str(tmp_path)
+        )
+        remote = RemoteControlAdapter(
+            controller, ControlOptions(port=0), controller.owner_scheduler
+        )
+        remote.cfg_lookup = lambda tab_id: session.state.get_tab(tab_id).cfg
+        remote.save_control = session.control
+        remote.start()
+        try:
+            sock = open_client(remote.port)
+            try:
+                yield session, sock
+            finally:
+                reset_inbox(sock)
+                sock.close()
+        finally:
+            remote.stop()
+            closed: list[bool] = []
+            controller.begin_shutdown(lambda: closed.append(True))
+            assert closed == [True]
+            qapp.processEvents()
 
 
 @pytest.mark.parametrize("selection", ["data", "all", "analysis", "post_analysis"])
 def test_save_rpc_returns_the_current_complete_report(
     tmp_path: Path, qapp: QApplication, selection: str
 ) -> None:
-    with native_save_session(tmp_path, qapp) as session:
-        declare_panes(session)
-        adapter = MagicMock()
-        adapter.render_view = None
-        adapter.save_control = session.control
-        adapter.tab_control.get_tab_snapshot.side_effect = TabService(
-            session.state,
-            MagicMock(),
-            MagicMock(),
-            MagicMock(),
-            MagicMock(),
-            MagicMock(),
-        ).get_snapshot
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
         if selection == "data":
-            reply = h_tab_save_data(
-                adapter, {"tab_id": "tab", "comment": None, "run_operation_id": None}
+            reply = call(
+                sock, "tab.save_data", {"tab_id": "tab", "run_operation_id": 101}
             )
             expected = {"run": {"measurement_data": 2}}
         else:
@@ -47,13 +89,19 @@ def test_save_rpc_returns_the_current_complete_report(
                 if selection == "all"
                 else [{"section": selection, "name": "results"}]
             )
-            reply = h_tab_save_artifacts(
-                adapter,
+            reply = call(
+                sock,
+                "tab.save_artifacts",
                 {
                     "tab_id": "tab",
-                    "comment": None,
-                    "run_operation_id": None,
-                    "operation_id": None,
+                    "run_operation_id": 101,
+                    "operation_id": (
+                        None
+                        if selection == "all"
+                        else 201
+                        if selection == "analysis"
+                        else 301
+                    ),
                     "artifacts": refs,
                 },
             )
@@ -66,8 +114,10 @@ def test_save_rpc_returns_the_current_complete_report(
                 if selection == "all"
                 else {selection: {"results": 5 if selection == "analysis" else 1}}
             )
-        report = SaveSnapshotWire.model_validate(reply)
+        assert reply["ok"] is True
+        report = SaveSnapshotWire.model_validate(reply["result"])
         assert report.run_id == session.metadata.run_id
+        assert session.state.get_tab("tab").run.confirmed_run_id == report.run_id
         assert {
             section: {
                 name: sum(len(outputs) for outputs in artifact.members.values())
@@ -89,7 +139,7 @@ def test_save_rpc_returns_the_current_complete_report(
 def test_save_rpc_reports_partial_and_initial_all_failed_identity(
     tmp_path: Path, qapp: QApplication, block_native: bool
 ) -> None:
-    with native_save_session(tmp_path, qapp) as session:
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
         (session.entry.database_path / "Labber").write_text("blocked")
         if block_native:
             (
@@ -98,21 +148,10 @@ def test_save_rpc_reports_partial_and_initial_all_failed_identity(
                 / session.metadata.run_id
                 / "data.h5"
             ).mkdir(parents=True)
-        adapter = MagicMock()
-        adapter.save_control = session.control
-        adapter.tab_control.get_tab_snapshot.side_effect = TabService(
-            session.state,
-            MagicMock(),
-            MagicMock(),
-            MagicMock(),
-            MagicMock(),
-            MagicMock(),
-        ).get_snapshot
-        report = SaveSnapshotWire.model_validate(
-            h_tab_save_data(
-                adapter, {"tab_id": "tab", "comment": None, "run_operation_id": None}
-            )
-        )
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        reply = call(sock, "tab.save_data", {"tab_id": "tab"})
+        assert reply["ok"] is True
+        report = SaveSnapshotWire.model_validate(reply["result"])
         assert report.run_id == (None if block_native else session.metadata.run_id)
         artifact = report.artifacts["run"]["measurement_data"]
         outputs = artifact.members["data"]
@@ -123,15 +162,140 @@ def test_save_rpc_reports_partial_and_initial_all_failed_identity(
         assert all(output.error for output in outputs if output.status == "failed")
 
 
-def test_data_save_rpc_rejects_a_replaced_run_before_writes(
+@pytest.mark.parametrize("method", ["tab.save_data", "tab.save_artifacts"])
+def test_save_rpc_requires_each_connections_own_snapshot(
+    tmp_path: Path, qapp: QApplication, method: str
+) -> None:
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        session.state.update_tab_comment("tab", "unchanged")
+        params = {
+            "tab_id": "tab",
+            "comment": "must not publish",
+            "run_operation_id": 101,
+        }
+        unseen = call(sock, method, params)
+        assert unseen["ok"] is False
+        assert unseen["error"]["code"] == "precondition_failed"
+        assert unseen["error"]["reason"] == "stale_version"
+        assert "tab:tab:result" in unseen["error"]["data"]["stale"]
+        assert "tab:tab:save" in unseen["error"]["data"]["stale"]
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        fresh = open_client(sock.getpeername()[1])
+        try:
+            rejected = call(fresh, method, params)
+            assert rejected["ok"] is False
+            assert rejected["error"]["reason"] == "stale_version"
+        finally:
+            reset_inbox(fresh)
+            fresh.close()
+        assert session.state.get_tab("tab").save.comment == "unchanged"
+        assert session.entry.ledger.events() == ()
+        assert not (session.entry.database_path / "runs").exists()
+        assert not (session.entry.database_path / "Labber").exists()
+        assert call(sock, method, params)["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("method", "resource"),
+    [
+        ("tab.save_data", "save"),
+        ("tab.save_data", "result"),
+        ("tab.save_artifacts", "save"),
+        ("tab.save_artifacts", "result"),
+        ("tab.save_artifacts", "analyze"),
+        ("tab.save_artifacts", "post_analyze"),
+    ],
+)
+def test_save_rpc_rejects_stale_snapshot_without_publishing_comment_or_outputs(
+    tmp_path: Path, qapp: QApplication, method: str, resource: str
+) -> None:
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        session.state.update_tab_comment("tab", "local note")
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        tab = session.state.get_tab("tab")
+        if resource == "save":
+            session.state.update_tab_comment("tab", "new local note")
+        elif resource == "result":
+            session.state.update_tab_result(
+                "tab",
+                tab.run.result,
+                source_operation_id=101,
+                metadata=session.metadata,
+            )
+        elif resource == "analyze":
+            session.state.swap_analysis_pane("tab", replace(tab.analysis))
+        else:
+            session.state.swap_post_analysis_pane("tab", replace(tab.post_analysis))
+        reply = call(sock, method, {"tab_id": "tab", "comment": "must not publish"})
+        assert reply["ok"] is False
+        assert reply["error"]["code"] == "precondition_failed"
+        assert reply["error"]["reason"] == "stale_version"
+        assert f"tab:tab:{resource}" in reply["error"]["data"]["stale"]
+        assert session.state.get_tab("tab").save.comment == (
+            "new local note" if resource == "save" else "local note"
+        )
+        assert session.entry.ledger.events() == ()
+        assert not (session.entry.database_path / "runs").exists()
+        assert not (session.entry.database_path / "Labber").exists()
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        assert call(sock, method, {"tab_id": "tab"})["ok"] is True
+
+
+@pytest.mark.parametrize("selection", ["data", "all", "analysis", "post_analysis"])
+def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
+    tmp_path: Path, qapp: QApplication, selection: str
+) -> None:
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        tab = session.state.get_tab("tab")
+        if selection in ("data", "all"):
+            session.state.update_tab_result(
+                "tab",
+                tab.run.result,
+                source_operation_id=102,
+                metadata=session.metadata,
+            )
+            params = {
+                "tab_id": "tab",
+                "comment": "must not publish",
+                "run_operation_id": 101,
+            }
+        else:
+            if selection == "analysis":
+                session.state.swap_analysis_pane(
+                    "tab", replace(tab.analysis, source_operation_id=202)
+                )
+            else:
+                session.state.swap_post_analysis_pane(
+                    "tab", replace(tab.post_analysis, source_operation_id=302)
+                )
+            params = {
+                "tab_id": "tab",
+                "comment": "must not publish",
+                "artifacts": [{"section": selection, "name": "results"}],
+                "operation_id": 201 if selection == "analysis" else 301,
+            }
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        method = "tab.save_data" if selection == "data" else "tab.save_artifacts"
+        reply = call(sock, method, params)
+        assert reply["ok"] is False
+        assert reply["error"]["code"] == "precondition_failed"
+        assert reply["error"]["reason"] == "result_superseded"
+        assert session.state.get_tab("tab").save.comment == ""
+        assert session.entry.ledger.events() == ()
+        assert not (session.entry.database_path / "runs").exists()
+        assert not (session.entry.database_path / "Labber").exists()
+
+
+def test_save_rpc_rejects_invalid_source_token_at_request_admission(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    with native_save_session(tmp_path, qapp) as session:
-        adapter = MagicMock()
-        adapter.save_control = session.control
-        with pytest.raises(FailedPreconditionError, match="no longer contains"):
-            h_tab_save_data(
-                adapter, {"tab_id": "tab", "comment": None, "run_operation_id": 42}
-            )
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        reply = call(
+            sock, "tab.save_data", {"tab_id": "tab", "run_operation_id": "bad"}
+        )
+        assert reply["ok"] is False
+        assert reply["error"]["code"] == "invalid_params"
         assert session.entry.ledger.events() == ()
         assert not (session.entry.database_path / "runs").exists()
