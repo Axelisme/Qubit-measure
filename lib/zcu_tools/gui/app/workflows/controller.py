@@ -3,18 +3,30 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
+from threading import RLock
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Engine,
     EnginePorts,
+    InvalidRunState,
     RunIdentity,
     RunPaths,
     RunStatus,
 )
 from zcu_tools.experiment.workflows.declaration import WorkflowStep
+from zcu_tools.gui.session.operation_handles import OperationOutcome
+from zcu_tools.gui.session.operation_runner import (
+    BgResult,
+    ExclusionRequest,
+    OperationSpec,
+    SettleFn,
+)
+from zcu_tools.gui.session.services.progress import BoundProgressFactory
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -49,17 +61,26 @@ class WorkflowController[C]:
         The caller owns connections and finishes/releases ports.plots only after
         this callback or a synchronous begin failure. No rollback is promised.
         """
-        raise NotImplementedError
+        self._runner = runner
+        self._ports = ports
+        self._owner_id = owner_id
+        self._on_finished = on_finished
+        self._lock = RLock()
+        self._stop_signal = StopSignal()
+        self._started = False
+        self._operation_id: int | None = None
+        self._engine: Engine[C] | None = None
 
     @property
     def engine(self) -> Engine[C] | None:
         """Return the accepted native engine, or None before accepted startup."""
-        raise NotImplementedError
+        with self._lock:
+            return self._engine
 
     @property
     def operation_id(self) -> int | None:
         """Return the pending runner token, or None after terminal delivery."""
-        raise NotImplementedError
+        return self._operation_id
 
     def start[P: BaseModel, T: BaseModel, S, R](
         self,
@@ -82,11 +103,71 @@ class WorkflowController[C]:
         startup is delivered before execute calls init/step. Terminal is not
         reported until the worker has returned. No retry or hardware cleanup.
         """
-        raise NotImplementedError
+        if self._started:
+            status = self.status()
+            raise InvalidRunState(
+                "start", "running" if status is None else status.lifecycle
+            )
+        self._started = True
+
+        def opened(token: int) -> None:
+            self._operation_id = token
+
+        def work(factory: BoundProgressFactory) -> RunStatus | None:
+            if self._stop_signal.is_set():
+                return None
+            engine = Engine(replace(self._ports, progress=factory))
+            status = engine.start(
+                step, plan=plan, tunables=tunables, paths=paths, identity=identity
+            )
+            # Startup stays unpublished so Stop never waits for startup I/O.
+            with self._lock:
+                self._engine = engine
+                if self._stop_signal.is_set():
+                    engine.stop(status.run_id)
+            return engine.execute(status.run_id)
+
+        def cancel() -> None:
+            self.stop()
+
+        def terminal(bg: BgResult, settle: SettleFn) -> None:
+            try:
+                status = self.status()
+                self._on_finished(status, bg.error)
+                if not bg.ok:
+                    outcome = OperationOutcome("failed", str(bg.error))
+                elif status is None or status.lifecycle == "stopped":
+                    outcome = OperationOutcome("cancelled")
+                elif status.lifecycle == "failed":
+                    outcome = OperationOutcome("failed", status.reason)
+                else:
+                    outcome = OperationOutcome("finished")
+                settle(outcome)
+            finally:
+                self._operation_id = None
+
+        try:
+            return self._runner.begin(
+                OperationSpec(
+                    exclusion=ExclusionRequest("run", self._owner_id, "workflow run"),
+                    owner_id=self._owner_id,
+                    wants_progress=True,
+                    cancel_hook=cancel,
+                    work=work,
+                    run_in_pool=False,
+                    on_terminal=terminal,
+                    on_opened=opened,
+                )
+            )
+        except Exception:
+            self._operation_id = None
+            self._started = False
+            raise
 
     def status(self) -> RunStatus | None:
         """Read accepted native status; None distinguishes pending startup."""
-        raise NotImplementedError
+        engine = self.engine
+        return None if engine is None else engine.status()
 
     def stop(self) -> RunStatus | None:
         """Request cooperative Stop without waiting for worker terminal delivery.
@@ -96,4 +177,11 @@ class WorkflowController[C]:
         It cannot free the run lease; the worker's terminal callback does that.
         Native failures propagate and no hardware rollback/cleanup occurs.
         """
-        raise NotImplementedError
+        with self._lock:
+            self._stop_signal.set()
+            if self._engine is None:
+                return None
+            status = self._engine.status()
+            if status is None:
+                raise RuntimeError("accepted engine has no run status")
+            return self._engine.stop(status.run_id)

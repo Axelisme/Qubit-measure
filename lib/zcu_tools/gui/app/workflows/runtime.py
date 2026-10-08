@@ -6,7 +6,9 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.utils.device import setup_devices
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import DeviceService
@@ -22,7 +24,7 @@ class SessionDevices:
 
     def __init__(self, service: DeviceService) -> None:
         """Borrow the session's public driver facet without lifecycle ownership."""
-        raise NotImplementedError
+        self._service = service
 
     def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
         """Apply absolute flux in native units with cooperative cancellation.
@@ -32,7 +34,16 @@ class SessionDevices:
         Unknown/disconnected names, unsupported flux, limits and I/O raise with
         the native cause. Do not use the Start-time cached snapshot as live info.
         """
-        raise NotImplementedError
+        devices = self._service.get_connected_devices()
+        if name not in devices:
+            raise ValueError(f"Devices not found: {name}")
+        info = devices[name].get_info()
+        info.set_flux(value)
+        setup_devices(
+            ExpCfgModel.model_validate({"dev": {name: info}}),
+            devices,
+            cancel_signal=cancel_signal,
+        )
 
     def setup(
         self, settings: Mapping[str, DeviceInfo], cancel_signal: StopSignal
@@ -43,4 +54,8 @@ class SessionDevices:
         validation. Pass the same StopSignal; cancellation returns normally.
         This adapter does not expand the batch setup policy slated for removal.
         """
-        raise NotImplementedError
+        setup_devices(
+            ExpCfgModel(dev=settings),
+            self._service.get_connected_devices(),
+            cancel_signal=cancel_signal,
+        )

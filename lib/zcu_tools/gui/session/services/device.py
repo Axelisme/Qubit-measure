@@ -664,7 +664,15 @@ class DeviceService:
         native models for FormEnv and startup DeviceSnapshot; drivers and their
         lifecycle remain session-owned. No setup or hardware read occurs.
         """
-        raise NotImplementedError
+        captured: dict[str, DeviceInfo] = {}
+        for device in self._state.list_devices():
+            if not device.is_live():
+                continue
+            info = device.info
+            if not isinstance(info, DeviceInfo):
+                raise ValueError(f"Device {device.name!r} has no native cached info")
+            captured[device.name] = info.model_copy(deep=True)
+        return captured
 
     def list_device_snapshots(self) -> tuple[DeviceSnapshot, ...]:
         return tuple(self._project(dev) for dev in self._state.list_devices())
