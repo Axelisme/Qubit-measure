@@ -19,16 +19,24 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import RoleSpec
 
-from zcu_lab.v2._support.measure.defaults.helpers import make_trig_offset
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import custom
+from zcu_lab.v2._support.measure.seeds import custom, path_seed
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.lookback.core import (
     LookbackAnalyzeOptions,
     LookbackCfg,
@@ -37,6 +45,45 @@ from zcu_lab.v2.lookback.core import (
 )
 
 LookbackRunResult: TypeAlias = RunRecord[LookbackCfg, LookbackResult]
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    """Seed a fresh inline pulse-readout from the fixed resonator capture.
+
+    Frequency defaults to 6000 MHz, wiring channels to zero, and trigger offset
+    to 0.4 us when calibration is absent/null. Bound calibration stays expressed
+    on the capture; unbound roles and source faults do not become fallback.
+    """
+    spec = make_pulse_readout_module_spec().allowed[0]
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    return (
+        ReferenceValue(
+            make_custom_reference_key(spec.label or "Readout"),
+            make_default_value(spec),
+        )
+        .with_field("pulse_cfg.freq", frequency)
+        .with_field("pulse_cfg.gain", 1.0)
+        .with_field("pulse_cfg.nqz", 2)
+        .with_field("pulse_cfg.waveform.length", 1.0)
+        .with_field(
+            "pulse_cfg.ch",
+            path_seed("resonator.wiring.ch", fallback=0).resolve(ctx),
+        )
+        .with_field("ro_cfg.ro_freq", frequency)
+        .with_field(
+            "ro_cfg.ro_ch",
+            path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx),
+        )
+        .with_field("ro_cfg.ro_length", 1.5)
+        .with_field(
+            "ro_cfg.trig_offset",
+            path_seed(
+                "resonator.ext.time_of_fly",
+                expr="resonator.ext.time_of_fly - 0.1",
+                fallback=0.4,
+            ).resolve(ctx),
+        )
+    )
 
 
 @dataclass
@@ -121,28 +168,20 @@ class LookbackAdapter(
         """
         return (
             MeasureCfgBuilder()
-            .reset(optional=True, init=ModuleInit.DISABLED)
-            .pulse(
-                "init_pulse",
-                role_id="pi_pulse",
-                optional=True,
-                init=ModuleInit.DISABLED,
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=None,
             )
-            .readout(
-                pulse_only=True,
-                init=ModuleInit.INLINE,
-                overrides={
-                    "pulse_cfg.gain": 1.0,
-                    "ro_cfg.ro_length": 1.5,
-                    "ro_cfg.trig_offset": custom(
-                        lambda ctx: make_trig_offset(
-                            ctx,
-                            trig_expr="timeFly - 0.1",
-                            trig_fallback=0.4,
-                        ),
-                        description="lookback trigger offset",
-                    ),
-                },
+            .field(
+                "modules.init_pulse",
+                spec=make_pulse_module_spec(optional=True),
+                default=None,
+            )
+            .field(
+                "modules.readout",
+                spec=make_pulse_readout_module_spec(),
+                default=custom(_blank_readout, description="inline lookback readout"),
             )
             .relax_delay(0.0)
             .reps(1, locked=True)
@@ -187,7 +226,7 @@ class LookbackAdapter(
         """
         return [
             MetaDictWriteback(
-                target_name="timeFly",
+                target_name="resonator.ext.time_of_fly",
                 description="Readout trigger offset prediction (us)",
                 proposed_value=req.analyze_result.predict_offset,
             )
