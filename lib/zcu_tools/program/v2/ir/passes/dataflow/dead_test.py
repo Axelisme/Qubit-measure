@@ -88,8 +88,7 @@ class DeadTestEliminationPass(BlockChunkPass):
                 pending = None  # opaque boundary may observe flags outside this block
 
         # After all insts, check the block's branch.
-        if pending is not None:
-            if branch is not None and branch.if_cond is None:
-                dead.add(pending)  # flag never consumed before block exit
+        if pending is not None and branch is not None and branch.if_cond is None:
+            dead.add(pending)  # flag never consumed before block exit
 
         return dead
