@@ -8,13 +8,14 @@ Templates are copied before applying calibration and generation tunables.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.workflows import (
     Completed,
     Effect,
@@ -23,7 +24,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
 )
 from zcu_tools.program.v2 import SweepCfg
-from zcu_tools.program.v2.modules import PulseReadoutCfg, ReadoutCfg
+from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
 
 from zcu_lab.v2.twotone.freq.core import FreqCfg
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg
@@ -37,23 +38,6 @@ from zcu_lab.workflows.acquire import (
     run_ro_landscape,
 )
 from zcu_lab.workflows.analysis import analyze_len_rabi, analyze_qubit_freq
-
-
-class CalibrationPlan(BaseModel):
-    """Fixed complete native templates and scan resolutions for calibration.
-
-    frequency/rabi/readout supply hardware modules, timing and optional dev.
-    Frequency and Rabi grids are replaced using the seed/history and tunables;
-    readout retains its complete frequency/gain grid. Every cfg is deep-copied.
-    The frozen outer plan does not make nested native cfg models read-only.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    frequency: FreqCfg = Field(description="Complete native spectroscopy template")
-    rabi: LenRabiCfg = Field(description="Complete const/flat_top Rabi template")
-    readout: FreqGainCfg = Field(description="Complete native readout landscape")
-    frequency_points: int = Field(default=101, ge=5, description="Frequency samples")
-    rabi_points: int = Field(default=51, ge=5, description="Length-Rabi samples")
 
 
 class CalibrationTunables(BaseModel):
@@ -201,6 +185,26 @@ def apply_readout_calibration(readout: ReadoutCfg, cal: Calibrated) -> None:
         readout.set_param("ro_freq", cal.readout_freq_mhz)
 
 
+@dataclass(frozen=True)
+class _CalibrationDefaults:
+    """Captured native acquisition defaults supplied by the adapter owner.
+
+    initial_delay/relax_delay use microseconds. dev is the adapter-owned native
+    device mapping or None, not a flux override. No fallback values are stored.
+    """
+
+    initial_delay: float
+    relax_delay: float
+    dev: Mapping[str, DeviceInfo] | None
+
+
+def _calibration_defaults(
+    stage: Literal["frequency", "rabi", "readout"],
+) -> _CalibrationDefaults:
+    """Use one acquisition-default seam; await accepted role-path adapters."""
+    raise NotImplementedError(f"Captured {stage} adapter defaults are not available")
+
+
 def _frequency_cfg(
     plan: CalibrationPlan,
     tun: CalibrationTunables,
@@ -256,7 +260,8 @@ def _readout_cfg(
 
 def calibrate(
     env: WorkflowEnv[Calibrated],
-    plan: CalibrationPlan,
+    qub_pulse: PulseCfg,
+    readout: PulseReadoutCfg,
     tun: CalibrationTunables,
     flux: float,
     carry: CalCarry,
@@ -266,12 +271,21 @@ def calibrate(
     """Acquire native calibration stages and update carry only on full success.
 
     Use yield from inside a workflow step. env supplies SoC through Engine
-    ports. plan provides complete native cfg; tun controls grids, averaging
-    and acceptance. flux must be finite and labels accepted frequency history.
+    ports. qub_pulse is the shared host-resolved drive; readout is the shared
+    pulse-backed module. Routing/waveform/gain come from these fixed selections.
+    tun controls grids, averaging and acceptance. flux must be finite and labels accepted frequency history.
     carry is the current step's mutable copy, seeded with a valid Calibrated.
     savers groups three explicit writers, avoiding callable context/registry;
     each writer
     writes/closes its exact Engine temporary path before Completed is returned.
+
+    Each stage builds its native cfg from the two selected modules, captured
+    defaults and this call's tunables/history. Frequency/Rabi resolutions are
+    fixed at 101/51; readout scans a fixed 10 MHz/51-point frequency window
+    around the current accepted center. Calibration defaults are not available
+    until the three Measure adapters' role-path source is received; that
+    missing acquisition path raises NotImplementedError rather than using
+    fabricated timing/device values.
 
     Frequency uses EWMA(alpha=0.5) history and the declared widening sequence.
     Reject nonpositive/nonfinite center/FWHM, negative/nonfinite error, excessive

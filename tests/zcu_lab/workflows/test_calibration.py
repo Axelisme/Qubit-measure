@@ -25,7 +25,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
-from zcu_tools.program.v2.modules import DirectReadoutCfg
+from zcu_tools.program.v2.modules import PulseReadoutCfg
 
 from tests.experiment.workflows._engine_fakes import (
     ManualClock,
@@ -47,13 +47,13 @@ from zcu_lab.workflows.calibration import (
     CalCarry,
     Calibrated,
     CalibrationFailed,
-    CalibrationPlan,
     CalibrationSavers,
     CalibrationTunables,
     calibrate,
 )
+from zcu_lab.workflows.t1 import T1Plan
 
-from ._sim_inputs import Inputs
+from ._sim_inputs import Inputs, make_plan
 
 
 @dataclass
@@ -72,7 +72,7 @@ class Record:
 class Rig:
     inputs: Inputs
     root: Path
-    plan: CalibrationPlan = field(init=False)
+    plan: T1Plan = field(init=False)
     seed: Calibrated = field(init=False)
     engine: Engine[Calibrated] = field(init=False)
     frequencies: list[Completed[FreqCfg, FrequencyAcquisition]] = field(
@@ -87,7 +87,6 @@ class Rig:
     pause_frequency: bool = False
 
     def __post_init__(self) -> None:
-        frequency = self.inputs.freq
         pi_pulse = self.inputs.rabi.modules.qub_pulse
         readout = self.inputs.readout.modules.readout
         assert isinstance(pi_pulse.freq, float)
@@ -96,13 +95,7 @@ class Rig:
         self.seed = Calibrated(
             pi_pulse.freq, 0.4, readout.pulse_cfg.freq, readout.pulse_cfg.gain
         )
-        self.plan = CalibrationPlan(
-            frequency=frequency,
-            rabi=self.inputs.rabi,
-            readout=self.inputs.readout,
-            frequency_points=101,
-            rabi_points=9,
-        )
+        self.plan = make_plan(self.inputs)
         self.engine = Engine(
             EnginePorts(
                 RecordingPlots(),
@@ -137,12 +130,12 @@ class Rig:
         path.write_text(source.result.evidence.run_id, encoding="utf-8")
 
     def start(self, tun: CalibrationTunables, *, count: int = 1) -> None:
-        def init(env: InitEnv[Calibrated], _plan: CalibrationPlan) -> State:
+        def init(env: InitEnv[Calibrated], _plan: T1Plan) -> State:
             return State(CalCarry(env.context))
 
         @workflow(
             "calibration",
-            plan=CalibrationPlan,
+            plan=T1Plan,
             tunables=CalibrationTunables,
             state=State,
             record=Record,
@@ -151,7 +144,7 @@ class Rig:
         )
         def step(
             env: WorkflowEnv[Calibrated],
-            plan: CalibrationPlan,
+            plan: T1Plan,
             tun: CalibrationTunables,
             state: State,
         ) -> Step[State, Record]:
@@ -159,7 +152,8 @@ class Rig:
                 return Done()
             result = yield from calibrate(
                 env,
-                plan,
+                plan.qub_pulse,
+                plan.readout,
                 tun,
                 float(state.index),
                 state.carry,
@@ -179,6 +173,18 @@ class Rig:
             paths=RunPaths(self.root / "metadata", self.root / "data"),
             identity=RunIdentity("calibration", DeviceSnapshot({}), "offline"),
         )
+
+
+def test_unavailable_calibration_defaults_fail_before_acquisition(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    rig = Rig(inputs, tmp_path)
+    rig.start(CalibrationTunables())
+    status = rig.engine.execute("calibration")
+    assert status.lifecycle == "failed"
+    assert status.reason is not None and "adapter defaults" in status.reason
+    assert not rig.frequencies and not rig.rabis and not rig.readouts
+    assert not rig.engine.records("calibration")
 
 
 def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
@@ -201,8 +207,8 @@ def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
     assert result.readout_gain == readout.gains[col]
     assert rig.rabis[0].cfg.modules.qub_pulse.freq == result.f01_mhz
     rabi_readout = rig.rabis[0].cfg.modules.readout
-    assert isinstance(rabi_readout, DirectReadoutCfg)
-    assert rabi_readout.ro_freq == rig.seed.readout_freq_mhz
+    assert isinstance(rabi_readout, PulseReadoutCfg)
+    assert rabi_readout.ro_cfg.ro_freq == rig.seed.readout_freq_mhz
     assert rig.readouts[0].cfg.modules.qub_pulse.freq == result.f01_mhz
     assert rig.carries[0].last == result
     assert rig.carries[0].f01_by_flux == [(0.0, result.f01_mhz)]
@@ -219,11 +225,6 @@ def test_readout_scan_uses_the_calibrated_rabi_drive(
     inputs: Inputs, tmp_path: Path
 ) -> None:
     rig = Rig(inputs, tmp_path)
-    readout_drive = rig.plan.readout.modules.qub_pulse.model_copy(deep=True)
-    readout_drive.gain = 0.5
-    readout_drive.phase = 37.0
-    readout_drive.set_param("length", 0.7)
-    rig.plan.readout.modules.qub_pulse = readout_drive
     original = rig.plan.model_copy(deep=True)
     rig.start(CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125))
 
@@ -237,13 +238,20 @@ def test_readout_scan_uses_the_calibrated_rabi_drive(
     assert readout_cfg.modules.qub_pulse.phase == rabi_drive.phase
     result = rig.results[0]
     assert isinstance(result, Calibrated), result
-    expected_drive = original.rabi.modules.qub_pulse.model_copy(deep=True)
+    expected_drive = original.qub_pulse.model_copy(deep=True)
     expected_drive.set_param("freq", result.f01_mhz)
     expected_drive.set_param("length", result.pi_length_us)
     assert readout_cfg.modules.qub_pulse == expected_drive
-    assert readout_cfg.modules.readout == original.readout.modules.readout
-    assert readout_cfg.modules.reset == original.readout.modules.reset
-    assert readout_cfg.sweep == original.readout.sweep
+    assert isinstance(readout_cfg.modules.readout, PulseReadoutCfg)
+    assert readout_cfg.modules.readout.pulse_cfg.ch == original.readout.pulse_cfg.ch
+    assert readout_cfg.modules.readout.ro_cfg.ro_ch == original.readout.ro_cfg.ro_ch
+    assert readout_cfg.sweep.freq.expts == 51
+    assert readout_cfg.sweep.freq.stop - readout_cfg.sweep.freq.start == pytest.approx(
+        10.0
+    )
+    assert (
+        readout_cfg.sweep.freq.start + readout_cfg.sweep.freq.stop
+    ) / 2 == pytest.approx(rig.seed.readout_freq_mhz)
     assert rig.plan == original
 
 
@@ -300,7 +308,6 @@ def test_rabi_schedule_failure_retains_frequency_file_but_not_calibration(
     tmp_path: Path,
 ) -> None:
     rig = Rig(inputs, tmp_path)
-    rig.plan = rig.plan.model_copy(update={"rabi_points": 51})
     # The initial pulse rounds to zero; valid grid spacing still reaches Schedule.
     rig.start(CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.001))
     status = rig.engine.execute("calibration")

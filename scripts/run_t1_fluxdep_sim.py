@@ -119,7 +119,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     """Run the shipped T1 declaration with explicit offline inputs and paths.
 
     None selects process arguments. JSON inputs use current public models,
-    including a historical RunSnapshot in the plan and scalar Calibrated seed.
+    including host-resolved qub_pulse/readout module cfgs and a historical
+    RunSnapshot in the plan, with a scalar Calibrated seed. Native experiment
+    templates are not accepted. Calibration defaults await the migrated
+    adapters; missing stage defaults fail explicitly, never use fake values.
     The result/database paths are exact isolated entry directories. A missing
     run_id is generated once, without collision retries.
 
