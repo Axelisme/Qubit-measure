@@ -53,7 +53,7 @@ class TestGetDispersiveFallback:
 
         # search_proper_g calls get_dispersive(g_init, bare_rf) at construction
         # time — the mocks are already in place via the surrounding patch context.
-        close_fn = search_proper_g(
+        return search_proper_g(
             _PARAMS,
             _BARE_RF * 1e3,  # bare_rf expected in MHz by the widget slider
             _FLUXS,
@@ -62,7 +62,6 @@ class TestGetDispersiveFallback:
             g_bound=(_G * 0.5, _G * 2.0),
             g_init=_G,
         )
-        return close_fn
 
     def test_fast_path_used_when_no_error(self):
         """Fast path is called and its result is returned (no DressedLabelingError)."""

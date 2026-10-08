@@ -47,8 +47,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
 
 
 def _make_ml() -> MagicMock:
-    ml = MagicMock()
-    return ml
+    return MagicMock()
 
 
 def _schema(spec_fields: dict, val_fields: dict | None = None) -> CfgSchema:

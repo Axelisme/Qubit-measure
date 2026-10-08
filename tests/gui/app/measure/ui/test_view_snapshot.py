@@ -58,7 +58,7 @@ def _make_snapshot_shell(
     tab_count = 1 if current_widget is not None else 0
     tabs_stub = _FakeQTabWidget(current=current_widget, count=tab_count)
 
-    shell = types.SimpleNamespace(
+    return types.SimpleNamespace(
         _ctrl=ctrl,
         _tab_widgets=tab_widgets,
         _tabs=tabs_stub,
@@ -68,7 +68,6 @@ def _make_snapshot_shell(
         _status_bar=None,
         list_open_dialogs=lambda: list(open_dialogs or []),
     )
-    return shell
 
 
 def _snapshot(shell: Any) -> dict[str, object]:
