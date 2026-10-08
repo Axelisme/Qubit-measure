@@ -22,27 +22,34 @@ from zcu_lab.v2.twotone.freq.core import FreqCfg
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainCfg
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
+from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg
 from zcu_lab.workflows.acquire import (
     FrequencyAcquisition,
     RabiAcquisition,
     ReadoutAcquisition,
     T1Acquisition,
+    T2EchoAcquisition,
     run_len_rabi,
     run_qubit_freq,
     run_ro_landscape,
     run_t1,
+    run_t2echo,
 )
 
 
 class _Arguments(argparse.Namespace):
-    experiment: Literal["qubit_freq", "len_rabi", "ro_landscape", "t1"]
+    experiment: Literal["qubit_freq", "len_rabi", "ro_landscape", "t1", "t2echo"]
     cfg: Path
     sim: Path
 
 
 def _execute[
     C,
-    R: FrequencyAcquisition | RabiAcquisition | ReadoutAcquisition | T1Acquisition,
+    R: FrequencyAcquisition
+    | RabiAcquisition
+    | ReadoutAcquisition
+    | T1Acquisition
+    | T2EchoAcquisition,
 ](experiment: Callable[[Run[C]], R], cfg: C, soc: object, soccfg: QickConfig) -> None:
     run = Run(cfg, StopSignal(), soc=soc, soccfg=soccfg)
     settings = run.device_setup
@@ -72,7 +79,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "experiment", choices=("qubit_freq", "len_rabi", "ro_landscape", "t1")
+        "experiment", choices=("qubit_freq", "len_rabi", "ro_landscape", "t1", "t2echo")
     )
     parser.add_argument("--cfg", type=Path, required=True)
     parser.add_argument("--sim", type=Path, required=True)
@@ -89,8 +96,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         _execute(
             run_ro_landscape, FreqGainCfg.model_validate_json(cfg_json), soc, soccfg
         )
-    else:
+    elif args.experiment == "t1":
         _execute(run_t1, T1Cfg.model_validate_json(cfg_json), soc, soccfg)
+    else:
+        _execute(run_t2echo, T2EchoCfg.model_validate_json(cfg_json), soc, soccfg)
 
 
 if __name__ == "__main__":

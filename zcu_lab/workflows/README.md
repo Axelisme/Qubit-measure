@@ -1,10 +1,12 @@
 # `zcu_lab.workflows` — 使用者 workflow
 
-**Last updated:** 2026-10-07，原生 T1 declaration、saver 與離線讀回
+**Last updated:** 2026-10-08，原生零 detune T2echo acquisition
 
 本 package 擁有具體 workflow 的校準、cfg 組裝、分析、record 與 state。通用迭代、取消、提交與保存路徑由 `zcu_tools.experiment.workflows` 負責。宿主建立 catalog，再明確注入框架；import 不啟動 run。
 
 `v0` 提供 T2echo fluxdep 與 T1 overnight 的期 0 離線示範。Experiment 使用真實 Run／Schedule seam，但 trace 與校準值都是 deterministic 假值，不操作硬體，也不代表物理策略。JSON saver 只驗證 exact-path 契約，不是 native 資料格式。T2echo／overnight 在期 3 替換，退役前移除假校準。原示範的 T1_fluxdep 已由 `t1` 的 native declaration 取代。
+
+`acquire.run_t2echo` 提供原生 uniform、零 detune 的 Hahn-echo acquisition，直接使用 Run／Schedule 與 native cfg／Result。它保留半延遲的原生 rounding、取消後的部分資料與 acquisition evidence，不捕捉 context，也不連儀器。完整 T2echo workflow、fringe acquisition 與 saver 尚未由這個 callback 完成。`scripts/run_workflow_sim.py` 可選 `t2echo`，只讀 current native cfg 與 simulator 設定。
 
 `analysis` 提供純資料的 frequency、length-Rabi 與 T1 fits。它重用 native signal projections 與 fitting helpers，保留原生單位、estimate、uncertainty 與 residual 診斷，不操作硬體、不畫圖、不保存或決定 calibration 接受度。Fit residual 不是 readout SNR，兩者由 workflow policy 分開判斷。Length-Rabi 使用既有 native free-phase/no-decay 路線；phase 固定為零會在已觀察的 simulator trace 陷入 optimizer fallback。
 
