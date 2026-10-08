@@ -168,6 +168,7 @@ def build_app_services(
 
     def captured_parameters(
         declarations: Mapping[str, RoleSpec],
+        target: str | None,
     ) -> ParameterContext | None:
         if not declarations:
             return None

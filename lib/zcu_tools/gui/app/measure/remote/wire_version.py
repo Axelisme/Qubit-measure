@@ -124,7 +124,8 @@ from __future__ import annotations
 # v82: expose device units and bind Run pane previews to their original Run.
 # v83: analysis result summaries replace nonfinite values with null and list invalid paths.
 # v84: shared string enum schemas declare and validate interactive flux-line roles.
-WIRE_VERSION = 85
+# WIRE 86 adds optional tab.new(target) and structured role-resolution errors.
+WIRE_VERSION = 86
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -184,4 +185,5 @@ WIRE_VERSION = 85
 # v114: guard Run preview provenance and preserve partial frequency calibration.
 # v115: project nonfinite analysis results without changing generic context serialization.
 # v116: flux-line commands derive enum choices from their domain role type.
-GUI_VERSION = 117
+# GUI 118 captures an explicit primary-role target without changing focus.
+GUI_VERSION = 118
