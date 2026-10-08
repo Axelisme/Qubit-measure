@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
@@ -27,6 +28,7 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.schema_builder import (
@@ -121,11 +123,22 @@ class LenRabiAdapter(
     )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> LenRabiRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = LenRabiExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
+
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Capture the qubit and its referenced resonator when opening a tab."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
@@ -157,7 +170,9 @@ class LenRabiAdapter(
             .build()
         )
 
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+    def validate_run_request(
+        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
+    ) -> None:
         cfg = self.build_exp_cfg(raw_cfg, req)
         _, soccfg = require_soc_handles(req)
         sweep2array(
