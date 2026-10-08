@@ -62,7 +62,7 @@ class T1PlanPanel(QWidget):
     def __init__(self, env: FormEnv, parent: QWidget | None = None) -> None:
         """Create a partial draft on the GUI thread with an existing QApplication.
 
-        Required native templates remain absent until host/user input supplies
+        Required module selections remain absent until host/user input supplies
         them. env is borrowed unchanged. Source/editor failures propagate and
         parent controls Qt lifetime. No Engine or live resource is accessed.
         """
@@ -86,7 +86,7 @@ class T1PlanPanel(QWidget):
         result = self.state.result(self._env)
         if isinstance(result, FormErrors):
             return result
-        return result.to_cfg(snapshot)
+        return result.to_cfg(self._env, snapshot)
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         """Detach the editor subscriptions before normal Qt close handling."""

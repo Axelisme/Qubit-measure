@@ -7,7 +7,7 @@ import pytest
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.experiment.workflows import InitEnv, Run
-from zcu_tools.program.v2.modules import DirectReadoutCfg, PulseReadoutCfg
+from zcu_tools.program.v2.modules import PulseReadoutCfg
 from zcu_tools.program.v2.sweep import SweepCfg
 
 from zcu_lab.workflows.acquire import run_t1
@@ -39,17 +39,10 @@ def test_init_t1_detaches_remaining_setpoints_and_each_runs_history(
     assert first.remaining == [1.1]
 
 
-@pytest.mark.parametrize("pulse_readout", [False, True])
 def test_generated_cfg_acquires_t1_with_calibrated_drive_and_native_readout(
-    inputs: Inputs, pulse_readout: bool
+    inputs: Inputs,
 ) -> None:
     inputs.rabi.modules.qub_pulse.set_param("gain", 0.5)
-    # An unrelated T1 drive must not replace the drive used to calibrate pi.
-    inputs.t1.modules.pi_pulse = inputs.t1.modules.pi_pulse.model_copy(deep=True)
-    inputs.t1.modules.pi_pulse.set_param("gain", 0.1)
-    inputs.t1.modules.pi_pulse.set_param("length", 0.1)
-    if pulse_readout:
-        inputs.t1.modules.readout = inputs.readout.modules.readout.model_copy(deep=True)
     plan = make_plan(inputs)
     original = plan.model_copy(deep=True)
     cal = seed_from_inputs(inputs, pi_length_us=0.8)
@@ -64,14 +57,10 @@ def test_generated_cfg_acquires_t1_with_calibrated_drive_and_native_readout(
     assert cfg.modules.pi_pulse.freq == cal.f01_mhz
     assert cfg.modules.pi_pulse.waveform.length == cal.pi_length_us
     readout = cfg.modules.readout
-    if pulse_readout:
-        assert isinstance(readout, PulseReadoutCfg)
-        assert readout.pulse_cfg.freq == cal.readout_freq_mhz
-        assert readout.ro_cfg.ro_freq == cal.readout_freq_mhz
-        assert readout.pulse_cfg.gain == cal.readout_gain
-    else:
-        assert isinstance(readout, DirectReadoutCfg)
-        assert readout.ro_freq == cal.readout_freq_mhz
+    assert isinstance(readout, PulseReadoutCfg)
+    assert readout.pulse_cfg.freq == cal.readout_freq_mhz
+    assert readout.ro_cfg.ro_freq == cal.readout_freq_mhz
+    assert readout.pulse_cfg.gain == cal.readout_gain
 
     run = Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
     result = run_t1(run)
@@ -86,9 +75,7 @@ def test_generated_cfg_acquires_t1_with_calibrated_drive_and_native_readout(
     assert plan == original
 
     cfg.modules.pi_pulse.set_param("freq", cal.f01_mhz + 10.0)
-    cfg.modules.readout.set_param(
-        "freq" if pulse_readout else "ro_freq", cal.readout_freq_mhz + 10.0
-    )
+    cfg.modules.readout.set_param("freq", cal.readout_freq_mhz + 10.0)
     again = t1_cfg(plan, tun, cal, 20.0)
     assert again.modules.pi_pulse.freq == cal.f01_mhz
     assert plan == original

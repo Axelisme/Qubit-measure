@@ -12,7 +12,7 @@ from functools import partial
 from pathlib import Path
 
 from matplotlib.axes import Axes
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
     Done,
@@ -25,15 +25,15 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1ModuleCfg, T1SweepCfg
 from zcu_lab.workflows.acquire import run_t1
 from zcu_lab.workflows.analysis import analyze_t1
 from zcu_lab.workflows.calibration import (
     CalCarry,
     Calibrated,
     CalibrationFailed,
-    CalibrationPlan,
     CalibrationSavers,
     CalibrationTunables,
     apply_readout_calibration,
@@ -43,17 +43,17 @@ from zcu_lab.workflows.saving import save_frequency, save_rabi, save_readout, sa
 
 
 class T1Plan(BaseModel):
-    """Fixed native setpoints, calibration inputs and uniform T1 template.
+    """Fixed setpoints, two resolved module choices and historical capture.
 
-    flux_dev names the connected device. fluxes are ordered absolute setpoints
-    in that device's units. points is the delay-grid sample count.
-    calibration provides complete native calibration templates, including the
-    Rabi drive whose waveform/gain determines the measured pi duration.
-    t1 provides reset, readout routing, optional dev and other native settings;
-    its pi drive and length grid are replaced by t1_cfg. uniform must be True.
-    snapshot is the host-captured entry identity, work point and roles retained
-    with every acquisition. It does not choose destinations or read live state.
-    The frozen outer plan still contains mutable cfg; Engine deep-copies it.
+    flux_dev names the connected device. fluxes retain absolute device units
+    and order; points >= 5 controls each uniform delay grid. qub_pulse/readout
+    are the shared host-resolved drive and pulse-backed readout selections.
+    Drive routing/waveform/gain are fixed; runtime overwrites frequency/pi
+    duration and applies accepted readout frequency/gain on shared routing.
+    snapshot retains the captured entry identity, work point and roles for
+    each acquisition; it does not choose destinations or read live state.
+    No complete native cfg, averaging, timing policy or sweep lives in plan.
+    Engine copies the plan before runtime constructs per-acquisition cfgs.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -62,15 +62,11 @@ class T1Plan(BaseModel):
         description="Ordered absolute setpoints in native device units"
     )
     points: int = Field(default=51, ge=5, description="Uniform T1 delay samples")
-    calibration: CalibrationPlan = Field(description="Complete calibration inputs")
-    t1: T1Cfg = Field(description="Complete uniform native T1 template")
+    qub_pulse: PulseCfg = Field(
+        description="Resolved shared spectroscopy/Rabi/pi drive"
+    )
+    readout: PulseReadoutCfg = Field(description="Resolved shared pulse-backed readout")
     snapshot: RunSnapshot = Field(description="Host-captured historical entry state")
-
-    @model_validator(mode="after")
-    def _validate_uniform(self) -> T1Plan:
-        if not self.t1.uniform:
-            raise ValueError("T1 flux dependence requires uniform T1 acquisition")
-        return self
 
 
 class T1Tunables(BaseModel):
@@ -132,25 +128,32 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
     invalid values raise ValueError. Delay ranges from zero through
     tun.sweep_factor * lifetime_us, with plan.points samples. Relax delay is
     tun.relax_factor * lifetime_us. reps/rounds come from tun.
-    Pi drive uses the calibration Rabi template's waveform/gain with cal's
-    accepted frequency/duration. Readout uses cal's frequency/gain on the T1
-    template's routing. Reset, optional dev and other native settings survive.
+    Pi drive uses plan.qub_pulse waveform/gain and cal's accepted frequency
+    and duration. Readout uses cal's frequency/gain on plan.readout routing.
+    Native initial_delay/dev defaults remain owned by the native cfg model;
+    no reset or extra module role is selected. Flux is set by the workflow,
+    never patched into a cfg device mapping.
     Inputs are unchanged; native cfg construction/set_param errors propagate.
     """
     if not math.isfinite(lifetime_us) or lifetime_us <= 0:
         raise ValueError("T1 lifetime guess must be positive and finite")
-    cfg = plan.t1.model_copy(deep=True)
-    cfg.reps, cfg.rounds = tun.reps, tun.rounds
-    cfg.relax_delay = tun.relax_factor * lifetime_us
-    cfg.modules.pi_pulse = plan.calibration.rabi.modules.qub_pulse.model_copy(deep=True)
-    cfg.modules.pi_pulse.set_param("freq", cal.f01_mhz)
-    cfg.modules.pi_pulse.set_param("length", cal.pi_length_us)
-    apply_readout_calibration(cfg.modules.readout, cal)
+    pi_pulse = plan.qub_pulse.model_copy(deep=True)
+    pi_pulse.set_param("freq", cal.f01_mhz)
+    pi_pulse.set_param("length", cal.pi_length_us)
+    readout = plan.readout.model_copy(deep=True)
+    apply_readout_calibration(readout, cal)
     stop = tun.sweep_factor * lifetime_us
-    cfg.sweep.length = SweepCfg(
-        start=0.0, stop=stop, expts=plan.points, step=stop / (plan.points - 1)
+    return T1Cfg(
+        reps=tun.reps,
+        rounds=tun.rounds,
+        relax_delay=tun.relax_factor * lifetime_us,
+        modules=T1ModuleCfg(pi_pulse=pi_pulse, readout=readout),
+        sweep=T1SweepCfg(
+            length=SweepCfg(
+                start=0.0, stop=stop, expts=plan.points, step=stop / (plan.points - 1)
+            )
+        ),
     )
-    return cfg
 
 
 @dataclass(frozen=True)
@@ -218,19 +221,10 @@ def t1_fluxdep(
 
     flux = state.remaining.pop(0)
     yield from env.set_device(plan.flux_dev, flux)
-    point_plan = plan.model_copy(deep=True)
-    # Native setup must retain this point's flux rather than the template value.
-    for cfg in (
-        point_plan.calibration.frequency,
-        point_plan.calibration.rabi,
-        point_plan.calibration.readout,
-        point_plan.t1,
-    ):
-        if cfg.dev is not None and plan.flux_dev in cfg.dev:
-            cfg.dev[plan.flux_dev].set_flux(flux)
     cal = yield from calibrate(
         env,
-        point_plan.calibration,
+        plan.qub_pulse,
+        plan.readout,
         tun.cal,
         flux,
         state.cal,
@@ -251,7 +245,7 @@ def t1_fluxdep(
     (line,) = ax.plot([], [])
     outcome = yield from env.run(
         run_t1,
-        t1_cfg(point_plan, tun, cal, guess),
+        t1_cfg(plan, tun, cal, guess),
         save=partial(save_t1, snapshot=plan.snapshot),
         live=Live1D(line, y=lambda signals: signals.real),
     )

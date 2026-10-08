@@ -25,7 +25,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainSweepCfg,
 )
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1ModuleCfg, T1SweepCfg
-from zcu_lab.workflows.calibration import Calibrated, CalibrationPlan
+from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.t1 import T1Plan
 
 
@@ -160,12 +160,8 @@ def make_plan(inputs: Inputs) -> T1Plan:
         flux_dev="flux",
         fluxes=(1.0, 1.1),
         points=21,
-        calibration=CalibrationPlan(
-            frequency=inputs.freq,
-            rabi=inputs.rabi,
-            readout=inputs.readout,
-        ),
-        t1=inputs.t1,
+        qub_pulse=inputs.rabi.modules.qub_pulse,
+        readout=inputs.readout.modules.readout,
         snapshot=make_snapshot(),
     )
 
