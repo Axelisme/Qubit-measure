@@ -13,6 +13,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 from .staged_analyze import _StagedAnalyzeService
+from .writeback import WritebackDraft
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 class _PostAnalyzeCapture:
     run_result: object | None
     analyze_result: object
+    run_id: str | None
     context: SessionEnv
     adapter: ExpAdapterProtocol
     params: object
@@ -95,6 +97,11 @@ class PostAnalyzeService(_StagedAnalyzeService):
                 f"Tab {tab_id!r} has no primary analyze result to post-analyze"
             )
 
+        primary_draft = tab.analysis.writeback_draft
+        if primary_draft is not None and not isinstance(primary_draft, WritebackDraft):
+            raise TypeError("Primary writeback draft must be WritebackDraft")
+        run_id = primary_draft.run_id if primary_draft is not None else None
+
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         req = PostAnalyzeRequest(
             run_result=tab.run.result,
@@ -112,6 +119,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
         captured_inputs = _PostAnalyzeCapture(
             run_result=req.run_result,
             analyze_result=req.analyze_result,
+            run_id=run_id,
             context=ctx,
             adapter=adapter,
             params=post_analyze_params_instance,
@@ -177,7 +185,11 @@ class PostAnalyzeService(_StagedAnalyzeService):
                     )
                 )
             )
-            draft = writeback.create_draft(proposal_items, parameters=ctx.parameters)
+            draft = writeback.create_draft(
+                proposal_items,
+                parameters=ctx.parameters,
+                run_id=captured_inputs.run_id,
+            )
             plots.finish()
             retired = self._state.update_tab_post_analyze(
                 tab_id,
