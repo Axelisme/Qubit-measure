@@ -219,7 +219,6 @@ class ContextService:
             clone_from=clone,
             description=request.description,
             origin=request.origin.origin,
-            call_id=request.origin.call_id,
         )
         try:
             parameters, library, sources, info = self._prepare_point(

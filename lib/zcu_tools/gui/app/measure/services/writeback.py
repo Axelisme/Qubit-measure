@@ -422,7 +422,7 @@ class WritebackService:
         nothing; setter failure stops immediately, retaining accepted evidence
         and successful writes. Empty selection is a no-op without context.
         Nonempty writes require a capture and its still-open entry. GUI defaults
-        to a native GUI origin; MCP callers supply the native call ID explicitly.
+        to the GUI origin; MCP callers explicitly identify the MCP frontend.
         Unknown/duplicate IDs or concrete destinations fail before any write.
         """
         self._require_draft(draft)
@@ -469,7 +469,6 @@ class WritebackService:
             at=datetime.now(timezone.utc).isoformat(),
             entry_id=parameters.target.entry_id,
             origin=origin.origin,
-            call_id=origin.call_id,
             payload=AcceptedPayload(writes=tuple(writes), analysis_summary={}),
         )
         ledger.append(event)

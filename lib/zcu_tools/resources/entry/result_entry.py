@@ -230,16 +230,14 @@ class ResultEntry:
         No source files, data or images change. Failure removes only the new point;
         completed imports may remain orphaned. No cross-file transaction is provided.
         """
-        validate_origin(origin, call_id)
+        validate_origin(origin)
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )
         destination.mkdir()
         try:
             if clone_from is not None:
-                self._clone_point(
-                    destination, clone_from, origin=origin, call_id=call_id
-                )
+                self._clone_point(destination, clone_from, origin=origin)
             else:
                 self._seed_point(destination)
             point = self.use_point(label)
@@ -318,7 +316,6 @@ class ResultEntry:
         clone_from: str | PointView,
         *,
         origin: Origin,
-        call_id: str | None,
     ) -> None:
         source_entry, source = self._clone_source(clone_from)
         store = source_entry._point_store(source / "point.yaml")
@@ -367,9 +364,7 @@ class ResultEntry:
         )
         imports: dict[str, str] = {}
         if source_entry is not self:
-            imports = self._import_sources(
-                event_ids, source_entry, origin=origin, call_id=call_id
-            )
+            imports = self._import_sources(event_ids, source_entry, origin=origin)
         cloned_store = self._point_store(destination / "point.yaml")
         with cloned_store.edit() as draft:
             draft.components = point_document.components
@@ -423,7 +418,6 @@ class ResultEntry:
         source_entry: ResultEntry,
         *,
         origin: Origin,
-        call_id: str | None,
     ) -> dict[str, str]:
         imports: dict[str, str] = {}
         source_ledger = source_entry.ledger
@@ -441,7 +435,6 @@ class ResultEntry:
                 at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 entry_id=self.entry_id,
                 origin=origin,
-                call_id=call_id,
                 payload=ImportPayload(
                     source_entry_id=source_entry.entry_id,
                     source_event_id=event_id,
