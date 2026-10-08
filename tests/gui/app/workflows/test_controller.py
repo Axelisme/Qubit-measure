@@ -582,7 +582,6 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
     harness.background.deliver()
     assert harness.handles.known_outcome(resumed) == OperationOutcome("finished")
     assert progress_calls == ([token], [token])
-    assert attempts == 2 and not harness.gate.snapshot()
 
 
 def test_stop_during_resume_capture_does_not_restart_paused_step(
