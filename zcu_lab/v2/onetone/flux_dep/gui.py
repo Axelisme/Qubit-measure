@@ -23,10 +23,15 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import ReferenceValue
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.resources.entry import RoleSpec
 
+from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2._support.measure.flux_pick_frontend import make_flux_pick_frontend
 from zcu_lab.v2._support.measure.flux_pick_plugin import (
     FluxPickPlugin,
@@ -40,7 +45,12 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import custom, flux_range, res_freq_range
+from zcu_lab.v2._support.measure.seeds import (
+    custom,
+    flux_range,
+    path_seed,
+    res_freq_range,
+)
 from zcu_lab.v2._support.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepExp, FluxDepResult
 
@@ -56,7 +66,35 @@ OneToneFluxDepRunResult: TypeAlias = RunRecord[FluxDepCfg, FluxDepResult]
 
 def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     """Build fresh inline readout defaults from the tab's fixed roles."""
-    raise NotImplementedError("captured flux readout defaults")
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    value.with_field("pulse_cfg.freq", 0.0)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.05)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", 0.0)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field(
+        "ro_cfg.ro_length",
+        path_seed(
+            "resonator.ext.default_probe_length",
+            fallback=0.9,
+            expr="resonator.ext.default_probe_length - 0.1",
+        ).resolve(ctx),
+    )
+    value.with_field(
+        "ro_cfg.trig_offset",
+        path_seed(
+            "resonator.ext.time_of_fly",
+            fallback=0.55,
+            expr="resonator.ext.time_of_fly + 0.05",
+        ).resolve(ctx),
+    )
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 class OneToneFluxDepAdapter(
@@ -189,11 +227,18 @@ class OneToneFluxDepAdapter(
     ) -> FluxPickPlugin:
         result = req.run_result.result
         inputs = FluxPickInputs(result.signals, result.values, result.freqs)
-        half, integer = fold_initial_lines(
-            inputs.dev_values,
-            req.md.get("flx_half"),
-            req.md.get("flx_int"),
+        parameters = req.parameters
+        flux_half = (
+            None
+            if parameters is None
+            else optional_parameter_float(parameters, "qubit.flux_half")
         )
+        flux_int = (
+            None
+            if parameters is None
+            else optional_parameter_float(parameters, "qubit.flux_int")
+        )
+        half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
         # One-tone resonator spectra have uninformative phase.
         return FluxPickPlugin(
             inputs,
