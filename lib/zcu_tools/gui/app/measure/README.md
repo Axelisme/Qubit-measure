@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08，固定 acquisition completion 與單項 native Data Save
+**Last updated:** 2026-10-08，Native Save All 與 section/member/output 模型
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -133,35 +133,29 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   retargets the worker (ADR-0067). Run terminal reactions refresh canonical
   presentation without selecting a subtab; Analysis remains an explicit user
   selection. `ExpTabWidget` delegates the Data pane to an
-  internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
-  action row放在`Measurement data`card之前，並從`TabSnapshot`呈現DATA與目前每張
-  具名圖的status、saveability與已發布路徑。路徑欄位唯讀，仍可選取與複製；每列的
-  `Open folder`開啟最新路徑的父目錄，不建立目錄，無路徑時不開啟。
-  每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
-  `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
-  單項 Data Save 直接走 SaveControlFacet、SaveService 與 shared saver，使用 tab 的
-  固定 storage、歷史 RunMetadata 及本次 CommandOrigin。Worker 準備 typed record，
-  寫 canonical `runs/<run_id>/data.h5` 與新的 Labber 檔案，再追加一筆 saved ledger
-  事件。兩個輸出失敗各自隔離，terminal fact 帶完整 SaveReport，handle 在發布前
-  已 settled。Save 不建立 acquisition 身分或重讀 live point。
-  Data save 使用既有 OperationRunner/Handles，不可取消、不持硬體 lease。
-  SaveDataSubmission 包含 operation ID 與 canonical reserved path，不代表成功。
-  內部 run_id 與完整 outputs 留在同次 terminal SaveReport。GUI 直接用 facet，不經 Controller
-  純轉發。Save All、舊 tracker 與 remote/MCP consumer 尚未遷移至完整 native
-  多輸出投影，以下 Save All 說明仍是既有路徑。
-  Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 path/comment 變更。
-  同次請求的新 DATA draft 先參與選取預檢，驗證成功後才發布草稿。
-  `ArtifactSnapshot.needs_save` 同時供 facade 選取與 Qt 按鈕 gating 使用；全數已保存時
-  Save All 停用，明確單項匯出仍可再次保存。GUI 不提供手動修改圖形目的地。
-  SaveService 依 analysis逐圖→post逐圖→data 順序，以單一 operation 執行並 Fast Fail，
-  不回滾已完成的存檔；再次 Save All 省略成功項。Qt 按鈕不編排各項存檔。
-  AppServices獨立注入OwnerScheduler，image export回owner thread，data I/O在worker。
-  Batch completion在State/handle terminal之後發布，Controller沿既有diagnostic port呈現結果。
-  GUI只警告尚未儲存的measurement data；`MainWindow`在使用者關閉tab/app前
-  查詢其投影，並將app關閉的資料流失與active-operation風險合併確認。
-  Programmatic RPC shutdown不彈互動式確認。
-  Save All updates that center in place: terminal status updates do not replace the Data
-  pane or its widgets, and published snapshots update the read-only path fields.
+  `ArtifactSaveCenter`。State 在 Run、Analysis、Post-analysis 的成功 terminal
+  宣告目前可保存的 sections。每個 artifact 可以包含 data、具名 Figure 與窗格 JSON。
+  沒有結果就沒有佔位 artifact；沒有圖的成功分析仍可以保存 JSON。
+  Session 的 Qt-free `ArtifactTracker` 是保存狀態的唯一來源。
+  TabService 與 Qt 讀取相同的 section/member/output 快照，不在 getter 計畫路徑。
+  新 Run 清空全部 sections，Primary replacement 清除舊 Post。
+  Save 按鈕提交整個 artifact ref，Save All 提交全部宣告，包含 Saved。
+  每個 output 列顯示唯讀路徑、最新 status 與 error，刷新保留已有 widgets 與文字選取。
+  `Open folder` 開啟該列最新路徑的父目錄，不建立目錄。
+  GUI 不接受手動保存目的地。Comment 變更只把已有成功輸出的 run artifact 標為
+  Unsaved changes。部分成功顯示 Partially saved，重存失敗不沿用前次成功狀態。
+  關閉警告只看 measurement data 是否完整 Saved，不因圖片或 JSON 未存而阻擋。
+
+  GUI 直接呼 SaveControlFacet。SaveService 捕捉 tab 的固定 storage、歷史
+  RunMetadata、窗格結果與 result_params，再用一次 shared saver 保存全部選集。
+  Data 寫 canonical `runs/<run_id>/data.h5`，每次保存另取新的 Labber filename。
+  Worker 負責 data mapping、檔案 I/O 與一次 saved ledger event。
+  Figure 編碼經 OwnerScheduler 回 owner thread，shared saver 隔離逐輸出失敗。
+  這個 operation 不可取消、不持硬體 lease，保存中拒絕同 tab 的 Run、Load 與分析。
+  Terminal 先提交完整 report、清 busy，再 settle handle，最後發布 completion fact。
+  Qt 顯示同一份 report，包含本次實際 Labber path。Submission 的 paths 只是預約，
+  不是成功證據。保存不產生 acquisition identity，也不重讀 live point。
+  Remote/MCP 保存 consumer、acquired event 與 ledger-based Load 尚待遷移。
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane
   is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
@@ -231,7 +225,7 @@ for setup/context/device/predictor/progress domains.
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
-active/running identity, tab read model, cfg resource lookup, save path overrides)
+active/running identity, tab read model, cfg resource lookup)
 by composing `WorkspaceService`, `TabService`, `State`, and `EventBus`; remote
 tab handlers use this facet instead of the giant `Controller` surface.
 `RunAnalyzeControlPort` / `RunAnalyzeControlFacet` expose the run/load/analyze
@@ -241,9 +235,8 @@ render-host provider. Remote run/analyze handlers use this facet instead of the
 giant `Controller` surface. `OperationControlPort` / `OperationControlFacet`
 expose the op-agnostic handle/progress surface used by generic `operation.*`
 handlers, including device setup handles. `SaveControlPort` / `SaveControlFacet`
-expose save artifact creation and save-path mutation by composing `GuardService`,
-`TabService`, `SaveService`, `State`, and `EventBus`; remote save handlers use
-this facet instead of the giant `Controller` surface. `WritebackControlPort` /
+以 `GuardService`、`SaveService` 與 `State` 組合 native Save 與 annotation commands。
+Qt 直接呼 facet；remote consumer 的 native wire 遷移仍在進行。 `WritebackControlPort` /
 `WritebackControlFacet` expose persistent writeback draft read/edit/apply by
 composing `GuardService`, `WritebackService`, `State`, and a resource-version
 provider; remote writeback handlers use this facet instead of the giant
@@ -262,10 +255,9 @@ Operation start clears only the affected pane's presentation while retaining the
 previous canonical pane for failure recovery; success shows the new pane's figure
 and draft, failure/cancel restores the retained pane (primary failure restores
 primary then post). Save/Guide show a placeholder and never borrow another pane's
-figure. Local analyze/post/save-path edits keep synchronous State commit timing
-but have no Qt reaction. Explicit image destinations committed by a save command
-publish a separate save-draft fact. The coordinator projects those State paths
-into open editors before export, including when export subsequently fails.
+figure. Local analyze/post parameter edits keep synchronous State commit timing.
+Save 路徑由已提交的 artifact outputs 投影，不是 editor draft。Save 的 started／terminal
+facts 觸發同一 Data pane 的 status 與 path 更新，不替換整個 pane。
 Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
 not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.

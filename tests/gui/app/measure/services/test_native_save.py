@@ -2,7 +2,7 @@
 
 import json
 import threading
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -46,9 +46,15 @@ from zcu_tools.gui.app.measure.events.completion import (
     SaveDataFinishedPayload,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
+from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.guard import GuardService
+from zcu_tools.gui.app.measure.services.load import LoadService
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
+from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.run import RunService
+from zcu_tools.gui.app.measure.services.run_analyze_control import (
+    RunAnalyzeControlFacet,
+)
 from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.services.tab import TabService
@@ -125,7 +131,7 @@ class AnalysisSavingAdapter(SavingAdapter):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT,
         post_analysis=True,
-        load_data=False,
+        load_data=True,
         requires_soc=False,
     )
 
@@ -880,3 +886,183 @@ def test_tab_snapshot_reads_committed_sections_without_payload_or_path_planning(
         and actual.post_analysis.result_params == PaneParams(4.0)
     )
     assert session.state.get_artifact_snapshots("tab") == expected
+
+
+class StartupBackground:
+    """Deliver work inline or reject submit at the runner's public background seam."""
+
+    def __init__(self, on_submit: Callable[[], None], *, fail: bool) -> None:
+        self.on_submit = on_submit
+        self.fail = fail
+
+    def submit(
+        self,
+        work: Callable[[], object],
+        *,
+        run_in_pool: bool,
+        on_done: Callable[[object], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        self.on_submit()
+        if self.fail:
+            raise RuntimeError("submission rejected")
+        try:
+            result = work()
+        except (OSError, ValueError, TypeError, RuntimeError) as error:
+            on_error(error)
+        else:
+            on_done(result)
+
+
+@pytest.mark.parametrize("command_kind", ["data", "artifacts"])
+@pytest.mark.parametrize("fail_submit", [False, True])
+def test_inline_terminal_and_submission_failure_clear_admission_once(
+    native_session: NativeSaveSession, command_kind: str, fail_submit: bool
+) -> None:
+    session = native_session
+    tokens: list[int] = []
+
+    def opened() -> None:
+        active = service.active_save_operations()
+        assert len(active) == 1 and active[0].tab_id == "tab"
+        assert session.state.is_tab_busy("tab")
+        tokens.append(active[0].operation_id)
+
+    service = SaveService(
+        session.state,
+        OperationRunner(
+            None,
+            session.handles,
+            None,
+            StartupBackground(opened, fail=fail_submit),
+            session.bus,
+        ),
+        session.bus,
+        owner_scheduler=QtOwnerScheduler(),
+    )
+    control = SaveControlFacet(
+        state=session.state, guard=GuardService(session.state), save=service
+    )
+    observations: list[tuple[bool, bool, bool]] = []
+
+    def terminal(
+        _payload: SaveDataFinishedPayload | SaveArtifactsFinishedPayload,
+    ) -> None:
+        observations.append(
+            (
+                not session.state.is_tab_busy("tab"),
+                service.active_save_operations() == (),
+                session.handles.known_outcome(tokens[0]) is not None,
+            )
+        )
+
+    subscription = (
+        session.bus.subscribe(SaveDataFinishedPayload, terminal)
+        if command_kind == "data"
+        else session.bus.subscribe(SaveArtifactsFinishedPayload, terminal)
+    )
+    command = control.save_data if command_kind == "data" else control.save_artifacts
+    try:
+        if fail_submit:
+            with pytest.raises(RuntimeError, match="submission rejected"):
+                command("tab", origin=GUI_ORIGIN)
+        else:
+            submission = command("tab", origin=GUI_ORIGIN)
+            assert submission.operation_id == tokens[0]
+    finally:
+        subscription.unsubscribe()
+    assert observations == [(True, True, True)]
+    assert service.active_save_operations() == ()
+    assert not session.state.is_tab_busy("tab")
+    assert session.handles.live_count() == 0
+    outcome = session.handles.known_outcome(tokens[0])
+    assert outcome is not None
+    assert outcome.status == ("failed" if fail_submit else "finished")
+    completed = (
+        session.completions if command_kind == "data" else session.artifact_completions
+    )
+    assert len(completed) == 1
+    if fail_submit:
+        assert completed[0].report is None
+        assert completed[0].error == "submission rejected"
+        assert session.entry.ledger.events() == ()
+    else:
+        assert completed[0].report is not None and completed[0].error is None
+        assert len(session.entry.ledger.events()) == 1
+
+
+def test_pending_save_rejects_driving_run_load_and_analysis_without_replacing_panes(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    declare_panes(session, ())
+    runner = OperationRunner(
+        None, session.handles, None, session.background, session.bus
+    )
+    writeback = MagicMock()
+    tab_service = TabService(
+        session.state,
+        registry=MagicMock(),
+        writeback=writeback,
+        cfg_resources=MagicMock(),
+        cfg_resolution=MagicMock(),
+        captured_parameters=MagicMock(),
+    )
+    run = RunService(
+        session.state,
+        runner,
+        session.bus,
+        session.handles,
+        writeback,
+        gate=OperationGate(session.bus),
+        devices=lambda: {},
+    )
+    control = RunAnalyzeControlFacet(
+        state=session.state,
+        bus=session.bus,
+        guard=GuardService(session.state),
+        tab=tab_service,
+        load=LoadService(session.state, writeback, provide_options=lambda _name: ()),
+        run=run,
+        analyze=AnalyzeService(
+            session.state, runner, session.bus, writeback, session.handles
+        ),
+        post_analyze=PostAnalyzeService(
+            session.state, runner, session.bus, session.handles, writeback
+        ),
+        render_host=lambda: None,
+        owner_scheduler=QtOwnerScheduler(),
+    )
+    before = session.state.get_artifact_snapshots("tab")
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(loop.quit)
+    subscription = session.bus.subscribe(
+        SaveArtifactsFinishedPayload, lambda _payload: loop.quit()
+    )
+    try:
+        submission = session.control.save_artifacts("tab", origin=GUI_ORIGIN)
+        cfg_ref = session.state.get_tab("tab").cfg.observe().ref
+        with pytest.raises(FailedPreconditionError, match="busy"):
+            control.start_run("tab", cfg_ref)
+        with pytest.raises(FailedPreconditionError, match="busy"):
+            control.load_tab_result("tab", "never-read.h5")
+        with pytest.raises(FailedPreconditionError, match="busy"):
+            control.analyze("tab", PaneParams(99.0))
+        with pytest.raises(FailedPreconditionError, match="busy"):
+            control.start_post_analyze("tab", PaneParams(99.0))
+        assert session.state.get_artifact_snapshots("tab") == before
+        assert session.state.get_tab("tab").analysis.result_params == PaneParams(2.0)
+        session.handles.cancel(submission.operation_id)
+        timer.start(5000)
+        loop.exec()
+    finally:
+        timer.stop()
+        subscription.unsubscribe()
+    assert len(session.artifact_completions) == 1
+    assert session.artifact_completions[0].report is not None
+    assert session.artifact_completions[0].error is None
+    outcome = session.handles.known_outcome(submission.operation_id)
+    assert outcome is not None and outcome.status == "finished"
+    assert session.handles.live_count() == 0
