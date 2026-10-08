@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-06，operation cancellation、feedback UI removal 與共用 interactive contracts
+**Last updated:** 2026-10-08，cfg form 即時送出所有輸入
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -447,14 +447,10 @@ bar. Active and running tabs are identified by tab id, not visual index.
 ## Config Model
 
 Measure Config uses `ResourceCfgFormWidget` and a State-owned cfg resource.
-The form keeps text input local and captures its first publication ref. Run
-submits that input once, then starts only with a Valid returned publication ref.
-Invalid, Stale, Unavailable or failed submission never runs the previous values.
-Pending input can repair an Invalid publication, but cannot bypass busy,
-context or SoC gates. External updates preserve local text, focus and selection.
-Discard uses the latest delivered publication. Reapply asks for confirmation of
-the differences and submits against the revision shown in that confirmation.
-Library editors and writeback keep their existing `CfgDraft` binding behavior.
+The form submits every input change at once, so it always shows the published
+cfg. Run starts with the shown publication ref and only when it is Valid; an
+Invalid input never runs the previous values. Input that repairs an Invalid
+publication still cannot bypass busy, context or SoC gates. Library editors and writeback keep their existing `CfgDraft` binding behavior.
 
 `Session.cfg` 只引用該 tab 的 `CfgResource`，不保存另一份 live schema。
 CfgResource 擁有 input、resolution、revision、publication 與 acceptance。

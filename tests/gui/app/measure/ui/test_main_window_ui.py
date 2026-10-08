@@ -2398,7 +2398,6 @@ class RunFormFixture:
     tab: ExpTabWidget
     line: QLineEdit
     runs: list[tuple[CfgRef, AcceptedConfig]]
-    source_fault: list[bool]
 
 
 @pytest.fixture
@@ -2419,11 +2418,8 @@ def run_form(
         SessionEnv(md=MetaDict(None), ml=ModuleLibrary(None), soc=None, soccfg=None)
     )
     bindings = MeasureCfgBindings(PublishedHost(sources))
-    source_fault = [False]
 
     def resolution() -> CfgResolution:
-        if source_fault[0]:
-            raise RuntimeError("Source snapshot failed")
         return bindings.snapshot_from_state(sources, captured_values={})
 
     schema = CfgSchema(
@@ -2474,7 +2470,7 @@ def run_form(
     line = widget.findChild(QLineEdit)
     assert line is not None
     try:
-        yield RunFormFixture(window, ctrl, owner, tab, line, runs, source_fault)
+        yield RunFormFixture(window, ctrl, owner, tab, line, runs)
     finally:
         window.remove_tab_widget("pending-tab")
         window.deleteLater()
@@ -2491,25 +2487,23 @@ def edit_run_input(fx: RunFormFixture, text: str) -> None:
             )
 
 
-def test_run_submits_local_input_and_uses_returned_ref(
+def test_run_uses_the_input_published_while_typing(
     run_form: RunFormFixture,
 ) -> None:
     fx = run_form
     base = fx.owner.observe().ref
     edit_run_input(fx, "3.5")
-    assert fx.owner.observe().ref == base
+    assert fx.owner.observe().ref.revision == base.revision + 3
     assert fx.tab.run_btn.isEnabled()
     fx.tab.run_btn.click()
     assert len(fx.runs) == 1
     ref, accepted = fx.runs[0]
     assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
-    assert ref.revision == base.revision + 1
     assert accepted.values == {"value": 3.5}
-    assert not fx.tab.cfg_form.has_pending()
 
 
 @pytest.mark.parametrize("run_form", ["endpoints", "center-span"], indirect=True)
-def test_run_uses_the_last_pending_sampling_operation(
+def test_run_uses_the_last_sampling_operation(
     run_form: RunFormFixture,
 ) -> None:
     fx = run_form
@@ -2531,7 +2525,6 @@ def test_run_uses_the_last_pending_sampling_operation(
     ref, accepted = fx.runs[0]
     assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
     assert accepted.values == {"value": 2.0, "range": (0, 2, 7)}
-    assert not fx.tab.cfg_form.has_pending()
 
 
 @pytest.mark.parametrize("text", ["-", "nan"], ids=["incomplete", "nonfinite"])
@@ -2547,48 +2540,20 @@ def test_run_publishes_invalid_input_but_never_runs_old_values(
     assert fx.line.text() == text
 
 
-def test_run_stale_keeps_input_focus_selection_and_does_not_retry(
+def test_run_uses_the_external_update_shown_in_the_form(
     run_form: RunFormFixture,
 ) -> None:
     fx = run_form
     edit_run_input(fx, "3.51")
-    fx.line.setSelection(1, 2)
     current = fx.owner.edit(
         fx.owner.observe().ref.revision, (CfgEdit(("value",), DirectValue(8.0)),)
     )
+    assert fx.line.text() == "8.0"
     fx.window.run_or_stop_tab("pending-tab")
-    assert fx.runs == []
-    assert fx.owner.observe().ref == current.ref
-    assert fx.tab.cfg_form.has_pending()
-    assert fx.line.text() == "3.51"
-    assert fx.line.hasFocus() and fx.line.selectedText() == ".5"
-
-
-def test_run_unavailable_stops_without_discarding_input(
-    run_form: RunFormFixture,
-) -> None:
-    fx = run_form
-    edit_run_input(fx, "3.5")
-    fx.owner.revoke()
-    fx.window.run_or_stop_tab("pending-tab")
-    assert fx.runs == []
-    assert fx.tab.cfg_form.has_pending()
-    assert fx.line.text() == "3.5"
-
-
-def test_run_submission_fault_propagates_without_using_old_values(
-    run_form: RunFormFixture,
-) -> None:
-    fx = run_form
-    edit_run_input(fx, "3.5")
-    base = fx.owner.observe().ref
-    fx.source_fault[0] = True
-    with pytest.raises(RuntimeError, match="Source snapshot failed"):
-        fx.window.run_or_stop_tab("pending-tab")
-    assert fx.owner.observe().ref == base
-    assert fx.runs == []
-    assert fx.tab.cfg_form.has_pending()
-    assert fx.line.text() == "3.5"
+    assert len(fx.runs) == 1
+    ref, accepted = fx.runs[0]
+    assert ref == current.ref
+    assert accepted.values == {"value": 8.0}
 
 
 def test_run_can_submit_a_repair_to_invalid_published_config(
@@ -2608,7 +2573,7 @@ def test_run_can_submit_a_repair_to_invalid_published_config(
 
 
 @pytest.mark.parametrize("block", ["busy", "context", "soc", "global-run"])
-def test_pending_input_does_not_bypass_other_run_gates(
+def test_valid_input_does_not_bypass_other_run_gates(
     run_form: RunFormFixture,
     block: str,
 ) -> None:
@@ -2629,7 +2594,7 @@ def test_pending_input_does_not_bypass_other_run_gates(
     assert fx.runs == []
 
 
-def test_stop_does_not_submit_local_input(run_form: RunFormFixture) -> None:
+def test_stop_does_not_publish_or_run(run_form: RunFormFixture) -> None:
     fx = run_form
     edit_run_input(fx, "3.5")
     base = fx.owner.observe().ref
@@ -2640,14 +2605,14 @@ def test_stop_does_not_submit_local_input(run_form: RunFormFixture) -> None:
     )
     fx.window.run_or_stop_tab("pending-tab")
     assert fx.owner.observe().ref == base
-    assert fx.tab.cfg_form.has_pending()
     assert fx.runs == []
     fx.ctrl.cancel_run.assert_called_once_with()
 
 
-def test_reset_explicitly_discards_pending_input(run_form: RunFormFixture) -> None:
+def test_reset_replaces_published_input_with_defaults(
+    run_form: RunFormFixture,
+) -> None:
     fx = run_form
-    # Reset's confirmation is the explicit authorization to discard local input.
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     # Reopen through the public view lifecycle using the same cfg owner.
     fx.window.remove_tab_widget("pending-tab")
@@ -2667,7 +2632,7 @@ def test_reset_explicitly_discards_pending_input(run_form: RunFormFixture) -> No
             line,
             QKeyEvent(QEvent.Type.KeyRelease, 0, Qt.KeyboardModifier.NoModifier, char),
         )
-    assert tab.cfg_form.has_pending()
+    assert fx.owner.accept(tab.cfg_form.current_ref().revision).values == {"value": 3.5}
     tab.reset_btn.click()
-    assert not tab.cfg_form.has_pending()
+    assert line.text() == "2.0"
     assert fx.owner.accept(tab.cfg_form.current_ref().revision).values == {"value": 2.0}

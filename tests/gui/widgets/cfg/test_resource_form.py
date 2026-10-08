@@ -11,7 +11,6 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QPushButton,
     QTreeWidget,
     QWidget,
 )
@@ -35,11 +34,14 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.cfg.binding.ports import ReferenceCatalog, ResolvedReference
 from zcu_tools.gui.cfg.resource import (
     CfgEdit,
+    CfgObservation,
+    CfgPath,
     CfgResolution,
     CfgResource,
-    CfgStaleError,
+    CfgRevision,
     CfgStatus,
 )
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.expression import validate_scalar_expr
 from zcu_tools.gui.widgets.cfg import ResourceCfgFormWidget
 from zcu_tools.gui.widgets.cfg.fields.common import (
@@ -48,8 +50,6 @@ from zcu_tools.gui.widgets.cfg.fields.common import (
     SweepInputWidget,
 )
 from zcu_tools.gui.widgets.cfg.fields.reference_shared import NONE_KEY
-
-from tests.gui._dialog_fakes import DialogCall, RecordingDialogPresenter
 
 
 class EmptyCatalog:
@@ -97,7 +97,7 @@ class OneGaussCatalog:
 
 @pytest.fixture
 def form(qapp: QApplication) -> Iterator[ResourceCfgFormWidget]:
-    widget = ResourceCfgFormWidget(dialog_presenter=RecordingDialogPresenter())
+    widget = ResourceCfgFormWidget()
     widget.resize(600, 450)
     widget.show()
     qapp.processEvents()
@@ -160,7 +160,7 @@ def choose_input_mode(line: QLineEdit, action_text: str) -> None:
     assert chosen == [action_text]
 
 
-def test_scalar_input_submits_one_batch(form: ResourceCfgFormWidget) -> None:
+def test_scalar_input_publishes_each_keystroke(form: ResourceCfgFormWidget) -> None:
     owner = resource(
         CfgSchema(
             CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
@@ -169,56 +169,29 @@ def test_scalar_input_submits_one_batch(form: ResourceCfgFormWidget) -> None:
     )
     form.attach(owner)
     base = form.current_ref()
-    line = scalar_line(form)
-    type_text(line, "3.5")
-    assert form.has_pending()
-    assert owner.observe().ref == base
-    submitted = form.submit_pending()
-    assert submitted == owner.observe().ref == form.current_ref()
-    assert submitted.revision == base.revision + 1
-    assert not form.has_pending()
-    assert owner.accept(submitted.revision).values == {"value": 3.5}
+    type_text(scalar_line(form), "3.5")
+    assert form.current_ref() == owner.observe().ref
+    assert form.current_ref().revision == base.revision + 3
+    assert owner.accept(form.current_ref().revision).values == {"value": 3.5}
+    assert not any(
+        isinstance(label, QLabel) and label.isVisible() and label.text()
+        for label in form.findChildren(QLabel, "cfgSubmitError")
+    )
 
 
-@pytest.mark.parametrize(
-    "shape_change", [False, True], ids=["stable-shape", "changed-shape"]
-)
-def test_external_update_and_stale_keep_text_focus_selection(
+def test_external_update_keeps_typed_text_focus_selection(
     form: ResourceCfgFormWidget,
     qapp: QApplication,
-    shape_change: bool,
 ) -> None:
-    a = ScalarSpec("A", float)
-    b = ScalarSpec("B", float)
-    choice = ChoiceSectionSpec(
-        fields={"mode": ScalarSpec("Mode", str), "a": a, "b": b},
-        bindings=(
-            ChoiceBinding(
-                "mode",
-                {
-                    "a": CfgSectionSpec(fields={"a": a}),
-                    "b": CfgSectionSpec(fields={"b": b}),
-                },
-            ),
-        ),
-    )
     owner = resource(
         CfgSchema(
             CfgSectionSpec(
-                fields={"value": ScalarSpec("Value", float), "choice": choice}
-            ),
-            CfgSectionValue(
-                {
-                    "value": DirectValue(2.0),
-                    "choice": CfgSectionValue(
-                        {
-                            "mode": DirectValue("a"),
-                            "a": DirectValue(1.0),
-                            "b": DirectValue(2.0),
-                        }
-                    ),
+                fields={
+                    "value": ScalarSpec("Value", float),
+                    "b": ScalarSpec("B", float),
                 }
             ),
+            CfgSectionValue({"value": DirectValue(2.0), "b": DirectValue(1.0)}),
         )
     )
     form.attach(owner)
@@ -227,31 +200,15 @@ def test_external_update_and_stale_keep_text_focus_selection(
     type_text(line, "3.51")
     line.setSelection(1, 2)
     assert line.hasFocus() and line.selectedText() == ".5"
-    base = form.current_ref()
-    path = ("choice", "mode") if shape_change else ("value",)
     current = owner.edit(
-        base.revision, (CfgEdit(path, DirectValue("b" if shape_change else 8.0)),)
+        owner.observe().ref.revision, (CfgEdit(("b",), DirectValue(8.0)),)
     )
     qapp.processEvents()
 
     assert form.current_ref() == current.ref
+    assert scalar_line(form, "b").text() == "8.0"
     assert line.text() == "3.51" and line.hasFocus() and line.selectedText() == ".5"
-    assert any(
-        "changed externally" in label.text() for label in form.findChildren(QLabel)
-    )
-    with pytest.raises(CfgStaleError):
-        form.submit_pending()
-    assert owner.observe().ref == current.ref
-    assert form.has_pending()
-    assert line.text() == "3.51" and line.hasFocus() and line.selectedText() == ".5"
-
-    form.discard_pending()
-    qapp.processEvents()
-    assert not form.has_pending()
-    assert owner.observe().ref == current.ref
-    assert scalar_line(form).text() == ("2.0" if shape_change else "8.0")
-    if shape_change:
-        assert form.findChild(ScalarInputWidget, "cfgInput:choice.b") is not None
+    assert owner.accept(current.ref.revision).values == {"value": 3.51, "b": 8.0}
 
 
 def test_invalid_input_reflects_published_status_and_reason(
@@ -270,8 +227,6 @@ def test_invalid_input_reflects_published_status_and_reason(
     assert line is not None
 
     type_text(line, "-")
-    assert owner.observe().status is CfgStatus.VALID
-    form.submit_pending()
 
     assert owner.observe().status is CfgStatus.INVALID
     assert not form.is_valid()
@@ -326,11 +281,10 @@ def test_reference_shape_switch_rebuilds_after_qt_signal(
     combo = tree.findChild(QComboBox)
     assert combo is not None
     type_text(scalar_line(form, "ref.length"), "1.6")
-    assert form.has_pending()
+    assert owner.observe().ref.revision == 4
     combo.setCurrentIndex(combo.findData(NONE_KEY))
     qapp.processEvents()
-    assert not form.has_pending()
-    assert owner.observe().ref.revision == 3
+    assert owner.observe().ref.revision == 5
     assert owner.observe().tree.children["ref"].value is None
     assert form.findChild(ScalarInputWidget, "cfgInput:ref.delta") is None
 
@@ -354,11 +308,9 @@ def test_range_input_submits_subpath_to_owner(
     assert step is not None
 
     type_text(step, "0.5")
-    assert owner.observe().ref.revision == 0
-    form.submit_pending()
 
     observed = owner.observe()
-    assert observed.ref.revision == 1
+    assert observed.ref.revision == 3
     assert owner.accept(observed.ref.revision).values == {"range": (0, 2, 5)}
 
 
@@ -385,8 +337,6 @@ def test_range_local_mode_changes_reach_the_nested_scalar(
     line = scalar.findChild(QLineEdit)
     assert line is not None
     type_text(line, "1 + 2")
-    assert owner.observe().ref.revision == 0
-    form.submit_pending()
     authored = owner.observe().tree.children["range"].value
     assert isinstance(authored, (SweepValue, CenteredSweepValue))
     assert getattr(authored, edge) == EvalValue("1 + 2", resolved=0.0)
@@ -399,14 +349,13 @@ def test_range_local_mode_changes_reach_the_nested_scalar(
     line = scalar.findChild(QLineEdit)
     assert line is not None
     type_text(line, "1.5")
-    form.submit_pending()
     authored = owner.observe().tree.children["range"].value
     assert isinstance(authored, (SweepValue, CenteredSweepValue))
     assert getattr(authored, edge) == DirectValue(1.5, raw="1.5")
 
 
 @pytest.mark.parametrize("centered", [False, True], ids=["endpoints", "center-span"])
-def test_pending_sampling_uses_the_last_operation(
+def test_range_sampling_uses_the_last_operation(
     form: ResourceCfgFormWidget, centered: bool
 ) -> None:
     spec = CenteredSweepSpec() if centered else SweepSpec()
@@ -425,7 +374,6 @@ def test_pending_sampling_uses_the_last_operation(
     type_text(points, "9")
     type_text(step, "0.5")
     type_text(points, "7")
-    form.submit_pending()
     assert owner.accept(owner.observe().ref.revision).values == {"range": (0, 2, 7)}
 
 
@@ -472,12 +420,10 @@ def test_choice_selection_changes_visible_rows_after_publication(
     assert line is not None
 
     type_text(scalar_line(form, "choice.a"), "4.25")
-    assert form.has_pending()
     type_text(line, "b")
     qapp.processEvents()
 
-    assert not form.has_pending()
-    assert owner.observe().ref.revision == 2
+    assert owner.observe().ref.revision == 5
     assert owner.accept(form.current_ref().revision).values["choice"] == {
         "mode": "b",
         "a": 4.25,
@@ -572,149 +518,13 @@ def test_singleton_reference_wrapper_elision_keeps_real_edit_path(
     assert line is not None
 
     type_text(line, "5")
-    form.submit_pending()
 
     assert owner.accept(owner.observe().ref.revision).values == {
         "ref": {"shape": {"x": 5.0}}
     }
 
 
-class DeferredDialogs(RecordingDialogPresenter):
-    def __init__(self) -> None:
-        super().__init__()
-        self.decide: Callable[[bool], None] | None = None
-
-    def confirm_async(
-        self,
-        parent: QWidget,
-        title: str,
-        message: str,
-        *,
-        on_decision: Callable[[bool], None],
-        default: bool = False,
-    ) -> None:
-        self.calls.append(DialogCall("confirm", title, message, default=default))
-        self.decide = on_decision
-
-
-@pytest.mark.parametrize(
-    "race", [False, True], ids=["shown-revision", "newer-revision"]
-)
-@pytest.mark.parametrize("confirm", [False, True], ids=["cancel", "confirm"])
-def test_reapply_uses_the_revision_shown_in_confirmation(
-    qapp: QApplication,
-    race: bool,
-    confirm: bool,
-) -> None:
-    dialogs = DeferredDialogs()
-    form = ResourceCfgFormWidget(dialog_presenter=dialogs)
-    owner = resource(
-        CfgSchema(
-            CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
-            CfgSectionValue({"value": DirectValue(2.0)}),
-        )
-    )
-    try:
-        form.attach(owner)
-        type_text(scalar_line(form), "3.5")
-        shown = owner.edit(
-            owner.observe().ref.revision, (CfgEdit(("value",), DirectValue(8.0)),)
-        )
-        button = form.findChild(QPushButton, "cfgReapplyPending")
-        assert button is not None
-        button.click()
-        assert dialogs.decide is not None
-        assert "8.0" in dialogs.calls[0].message and "3.5" in dialogs.calls[0].message
-        assert str(shown.ref.revision) in dialogs.calls[0].message
-        current = (
-            owner.edit(shown.ref.revision, (CfgEdit(("value",), DirectValue(9.0)),))
-            if race
-            else shown
-        )
-        dialogs.decide(confirm)
-        if confirm and not race:
-            assert not form.has_pending()
-            assert owner.accept(form.current_ref().revision).values == {"value": 3.5}
-        else:
-            assert owner.observe().ref == current.ref
-            assert form.has_pending()
-            assert scalar_line(form).text() == "3.5"
-    finally:
-        form.detach()
-        form.deleteLater()
-        qapp.processEvents()
-
-
-@pytest.mark.parametrize("nested", [False, True], ids=["direct-leaf", "nested-leaf"])
-def test_removed_reference_keeps_collecting_input_and_rejects_reapply(
-    qapp: QApplication, nested: bool
-) -> None:
-    leaf = ScalarSpec("X", float)
-    shape = CfgSectionSpec(
-        label="Shape",
-        fields={"shape": CfgSectionSpec(fields={"x": leaf})} if nested else {"x": leaf},
-    )
-    shape_value = (
-        CfgSectionValue({"shape": CfgSectionValue({"x": DirectValue(2.0)})})
-        if nested
-        else CfgSectionValue({"x": DirectValue(2.0)})
-    )
-    owner = resource(
-        CfgSchema(
-            CfgSectionSpec(
-                fields={
-                    "ref": ReferenceSpec(
-                        "reference",
-                        [shape],
-                        optional=True,
-                    )
-                }
-            ),
-            CfgSectionValue({"ref": ReferenceValue("<Custom:Shape>", shape_value)}),
-        )
-    )
-    dialogs = DeferredDialogs()
-    form = ResourceCfgFormWidget(dialog_presenter=dialogs)
-    form.resize(600, 450)
-    form.show()
-    try:
-        form.attach(owner)
-        qapp.processEvents()
-        line = scalar_line(form, "ref.shape.x" if nested else "ref.x")
-        type_text(line, "3.5")
-        current = owner.edit(
-            owner.observe().ref.revision, (CfgEdit(("ref", "__ref"), None),)
-        )
-        qapp.processEvents()
-        # This control represents the old rendered tree, not the new publication.
-        type_text(line, "4.75")
-        line.setSelection(1, 2)
-        assert line.text() == "4.75" and line.hasFocus() and line.selectedText() == ".7"
-        with pytest.raises(CfgStaleError):
-            form.submit_pending()
-        button = form.findChild(QPushButton, "cfgReapplyPending")
-        assert button is not None
-        button.click()
-        assert dialogs.decide is not None
-        dialogs.decide(True)
-        assert owner.observe().ref == current.ref
-        assert form.has_pending()
-        assert line.text() == "4.75" and line.hasFocus() and line.selectedText() == ".7"
-        assert any(
-            "Config changed externally" not in label.text() and "ref" in label.text()
-            for label in form.findChildren(QLabel)
-        )
-        form.discard_pending()
-        qapp.processEvents()
-        assert not form.has_pending()
-        assert owner.observe().tree.children["ref"].value is None
-    finally:
-        form.detach()
-        form.deleteLater()
-        qapp.processEvents()
-
-
-def test_detach_reopen_discards_only_view_input_without_defaults(
+def test_detach_reopen_shows_owner_publication_without_defaults(
     form: ResourceCfgFormWidget,
 ) -> None:
     calls: list[str] = []
@@ -745,13 +555,41 @@ def test_detach_reopen_discards_only_view_input_without_defaults(
     assert owner.observe().ref == base
     current = owner.edit(base.revision, (CfgEdit(("value",), DirectValue(9.0)),))
     form.attach(owner)
-    assert not form.has_pending()
     assert form.current_ref() == current.ref
     assert scalar_line(form).text() == "9.0"
     assert calls == ["defaults"]
 
 
-def test_failed_selector_keeps_pending_and_restores_published_selection(
+class RejectingEditor:
+    """Publish like the owner, but reject every edit as a stale precondition."""
+
+    def __init__(self, owner: CfgResource) -> None:
+        self.owner = owner
+
+    def observe(self) -> CfgObservation:
+        return self.owner.observe()
+
+    def watch(self, callback: Callable[[CfgObservation], None]) -> Callable[[], None]:
+        return self.owner.watch(callback)
+
+    def edit(
+        self, expected_revision: CfgRevision, edits: tuple[CfgEdit, ...]
+    ) -> CfgObservation:
+        raise FailedPreconditionError("rejected")
+
+    def select_custom_reference(
+        self, expected_revision: CfgRevision, path: CfgPath, label: str
+    ) -> CfgObservation:
+        raise FailedPreconditionError("rejected")
+
+    def reset(self, expected_revision: CfgRevision) -> CfgObservation:
+        raise FailedPreconditionError("rejected")
+
+    def refresh(self, expected_revision: CfgRevision) -> CfgObservation:
+        raise FailedPreconditionError("rejected")
+
+
+def test_rejected_input_shows_error_and_restores_published_values(
     form: ResourceCfgFormWidget,
     qapp: QApplication,
 ) -> None:
@@ -766,25 +604,27 @@ def test_failed_selector_keeps_pending_and_restores_published_selection(
             CfgSectionValue({"value": DirectValue(2.0), "mode": DirectValue("a")}),
         )
     )
-    form.attach(owner)
-    type_text(scalar_line(form), "3.5")
-    current = owner.edit(
-        owner.observe().ref.revision, (CfgEdit(("value",), DirectValue(8.0)),)
-    )
+    form.attach(RejectingEditor(owner))
+    base = owner.observe().ref
+    error = form.findChild(QLabel, "cfgSubmitError")
+    assert error is not None and not error.isVisible()
+
+    type_text(scalar_line(form), "3")
     selector = form.findChild(ScalarInputWidget, "cfgInput:mode")
     assert selector is not None
     combo = selector.findChild(QComboBox)
     assert combo is not None
     combo.setCurrentIndex(combo.findText("b"))
     qapp.processEvents()
-    assert owner.observe().ref == current.ref
-    assert form.has_pending()
-    assert scalar_line(form).text() == "3.5"
+
+    assert owner.observe().ref == base == form.current_ref()
+    assert error.isVisible() and error.text() == "mode: rejected"
+    assert scalar_line(form).text() == "2.0"
     assert combo.currentText() == "a"
 
 
 @pytest.mark.parametrize("centered", [False, True], ids=["endpoints", "center-span"])
-def test_pending_range_keeps_focus_and_selection_on_external_update(
+def test_range_keeps_typed_text_focus_selection_on_external_update(
     form: ResourceCfgFormWidget,
     centered: bool,
     qapp: QApplication,
@@ -793,8 +633,8 @@ def test_pending_range_keeps_focus_and_selection_on_external_update(
     value = CenteredSweepValue(1.0, 2.0, 3) if centered else SweepValue(0.0, 2.0, 3)
     owner = resource(
         CfgSchema(
-            CfgSectionSpec(fields={"range": spec}),
-            CfgSectionValue({"range": value}),
+            CfgSectionSpec(fields={"range": spec, "other": ScalarSpec("Other", float)}),
+            CfgSectionValue({"range": value, "other": DirectValue(1.0)}),
         )
     )
     form.attach(owner)
@@ -806,11 +646,8 @@ def test_pending_range_keeps_focus_and_selection_on_external_update(
     type_text(step, "0.51")
     step.setSelection(2, 1)
     current = owner.edit(
-        owner.observe().ref.revision, (CfgEdit(("range", "expts"), DirectValue(7)),)
+        owner.observe().ref.revision, (CfgEdit(("other",), DirectValue(0.5)),)
     )
     qapp.processEvents()
-    assert step.text() == "0.51" and step.hasFocus() and step.selectedText() == "5"
-    with pytest.raises(CfgStaleError):
-        form.submit_pending()
-    assert owner.observe().ref == current.ref
+    assert form.current_ref() == current.ref
     assert step.text() == "0.51" and step.hasFocus() and step.selectedText() == "5"

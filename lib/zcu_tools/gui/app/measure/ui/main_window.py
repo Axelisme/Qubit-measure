@@ -715,11 +715,6 @@ class MainWindow(QMainWindow):
             self._ctrl.cancel_run()
             return
         logger.info("run_or_stop_tab: run requested tab_id=%r", tab_id)
-        try:
-            submitted_ref = tab_w.cfg_form.submit_pending()
-        except ExpectedError as exc:
-            self.show_status_message(f"Config submission failed: {exc}")
-            return
         if not tab_w.cfg_form.is_valid():
             reason = tab_w.cfg_form.first_invalid_reason()
             if reason:
@@ -729,7 +724,7 @@ class MainWindow(QMainWindow):
             logger.warning("run_or_stop_tab: blocked — %s", msg)
             self.show_status_message(msg)
             return
-        self._ctrl.start_run(tab_id, submitted_ref)
+        self._ctrl.start_run(tab_id, tab_w.cfg_form.current_ref())
 
     def analyze_tab(self, tab_id: str) -> None:
         logger.info("analyze_tab: tab_id=%r", tab_id)
