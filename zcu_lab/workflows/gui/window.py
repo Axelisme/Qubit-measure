@@ -156,6 +156,21 @@ class T1WorkflowWindow(QWidget):
             parameters=parameters, library=parameters.library, devices=devices
         )
 
+    def _ensure_can_start(self) -> None:
+        """Reject replacement until the native run and owner delivery both end."""
+        if self.controller is None:
+            return
+        status = self.controller.status()
+        if self.controller.operation_id is not None:
+            raise InvalidRunState("start", "running")
+        if status is not None and status.lifecycle in {
+            "running",
+            "pausing",
+            "paused",
+            "stopping",
+        }:
+            raise InvalidRunState("start", status.lifecycle)
+
     def start(self, run_id: str) -> int | FormErrors:
         """Capture/validate and submit T1, returning a token or directed errors.
 
@@ -167,8 +182,7 @@ class T1WorkflowWindow(QWidget):
         form's required pi_length_us and selected native module scalars.
         Expressions remain in the accepted FormInput used for later tuning.
         """
-        if self.controller is not None and self.controller.operation_id is not None:
-            raise InvalidRunState("start", "running")
+        self._ensure_can_start()
         env = self._capture_env()
         parameters = env.parameters
         if parameters is None:
@@ -299,6 +313,12 @@ class T1WorkflowWindow(QWidget):
         if status is None:
             return
         self._message.setText(status.lifecycle)
+        self._pause_button.setEnabled(
+            controller.operation_id is not None and status.lifecycle == "running"
+        )
+        self._resume_button.setEnabled(
+            controller.operation_id is None and status.lifecycle == "paused"
+        )
         engine = controller.engine
         if (
             self.tuning_panel is None
@@ -316,8 +336,16 @@ class T1WorkflowWindow(QWidget):
             )
 
     def _finished(self, status: RunStatus | None, error: Exception | None) -> None:
-        self._poll.stop()
         self._refresh_run()
+        self._pause_button.setEnabled(False)
+        self._resume_button.setEnabled(
+            error is None and status is not None and status.lifecycle == "paused"
+        )
+        if error is None and status is not None and status.lifecycle == "paused":
+            # Keep polling across segments; admission still guards owner delivery.
+            self._poll.start()
+            return
+        self._poll.stop()
         self.plan_panel.setEnabled(True)
         self.tunables_panel.setEnabled(True)
         self._start_button.setEnabled(True)
@@ -359,6 +387,10 @@ class T1WorkflowWindow(QWidget):
             if a0 is not None:
                 a0.ignore()
             return
+        if self.controller is not None:
+            status = self.controller.status()
+            if status is not None and status.lifecycle == "paused":
+                self.stop()
         self._poll.stop()
         if self._plots is not None:
             self._plots.release()

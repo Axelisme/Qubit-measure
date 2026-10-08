@@ -79,6 +79,8 @@ class WorkflowController[C]:
         self._stop_signal = StopSignal()
         self._started = False
         self._operation_id: int | None = None
+        self._progress_token: int | None = None
+        self._factory: BoundProgressFactory | None = None
         self._engine: Engine[C] | None = None
 
     @property
@@ -122,10 +124,16 @@ class WorkflowController[C]:
 
         def opened(token: int) -> None:
             self._operation_id = token
+            # Retain the existing Start token, not a new run tracking identity.
+            self._progress_token = token
+            self._factory = self._progress.make_factory(token, self._owner_id)
 
-        def work(factory: BoundProgressFactory) -> RunStatus | None:
+        def work(_factory: None) -> RunStatus | None:
             if self._stop_signal.is_set():
                 return None
+            factory = self._factory
+            if factory is None:
+                raise RuntimeError("Start requires its bound progress factory")
             engine = Engine(replace(self._ports, progress=factory))
             status = engine.start(
                 step, plan=plan, tunables=tunables, paths=paths, identity=identity
@@ -140,39 +148,57 @@ class WorkflowController[C]:
         def cancel() -> None:
             self.stop()
 
-        def terminal(bg: BgResult, settle: SettleFn) -> None:
-            try:
-                status = self.status()
-                self._on_finished(status, bg.error)
-                if not bg.ok:
-                    outcome = OperationOutcome("failed", str(bg.error))
-                elif status is None or status.lifecycle == "stopped":
-                    outcome = OperationOutcome("cancelled")
-                elif status.lifecycle == "failed":
-                    outcome = OperationOutcome("failed", status.reason)
-                else:
-                    outcome = OperationOutcome("finished")
-                settle(outcome)
-            finally:
-                self._operation_id = None
-
         try:
             return self._runner.begin(
                 OperationSpec(
                     exclusion=ExclusionRequest("run", self._owner_id, "workflow run"),
                     owner_id=self._owner_id,
-                    wants_progress=True,
+                    wants_progress=False,
                     cancel_hook=cancel,
                     work=work,
                     run_in_pool=False,
-                    on_terminal=terminal,
+                    on_terminal=self._segment_finished,
                     on_opened=opened,
                 )
             )
         except Exception:
-            self._operation_id = None
-            self._started = False
+            try:
+                self._discard_progress()
+            finally:
+                self._operation_id = None
+                self._started = False
             raise
+
+    def _discard_progress(self) -> None:
+        """Discard the retained Start-token container once, including on unwind."""
+        token = self._progress_token
+        self._progress_token = None
+        self._factory = None
+        if token is not None:
+            self._progress.discard_operation(token)
+
+    def _segment_finished(self, bg: BgResult, settle: SettleFn) -> None:
+        """Report a returned producer before releasing its segment resources."""
+        status = self.status()
+        try:
+            try:
+                self._on_finished(status, bg.error)
+            finally:
+                # The callback may synchronously Stop a newly paused run.
+                status = self.status()
+                if not bg.ok or status is None or status.lifecycle != "paused":
+                    self._discard_progress()
+            if not bg.ok:
+                outcome = OperationOutcome("failed", str(bg.error))
+            elif status is None or status.lifecycle == "stopped":
+                outcome = OperationOutcome("cancelled")
+            elif status.lifecycle == "failed":
+                outcome = OperationOutcome("failed", status.reason)
+            else:
+                outcome = OperationOutcome("finished")
+            settle(outcome)
+        finally:
+            self._operation_id = None
 
     def status(self) -> RunStatus | None:
         """Read accepted native status; None distinguishes pending startup."""
@@ -187,21 +213,78 @@ class WorkflowController[C]:
         follow Engine.pause. The lease stays held until producer return and owner
         delivery; Pause does not discard progress, plots or submitted inputs.
         """
-        raise NotImplementedError("Pause segment control is not implemented")
+        with self._lock:
+            engine = self._engine
+            status = None if engine is None else engine.status()
+            if engine is None or status is None:
+                raise RuntimeError("Pause requires an accepted workflow run")
+            if self._operation_id is None or status.lifecycle not in {
+                "running",
+                "pausing",
+            }:
+                raise InvalidRunState("pause", status.lifecycle)
+            return engine.pause(status.run_id)
 
     def resume(self, *, devices: Callable[[], DeviceSnapshot]) -> int:
         """Submit the paused run again, returning the new segment token.
 
         No accepted run raises RuntimeError. Only paused with previous owner
-        delivery complete is admitted; other states raise InvalidRunState. After obtaining the RUN lease, invoke devices once
+        delivery complete is admitted; other states raise InvalidRunState.
+        After obtaining the RUN lease, invoke devices once
         on the owner thread to capture current cached native device provenance.
         Engine.resume and execute run on the worker with the original progress
         factory, state and inputs. No init or Start is repeated. Capture, lease or
         submission failure propagates, leaves the run paused and retains progress;
-        native worker failure reports the original error and discards progress.
+        Native failed status retains Engine's reason; exceptions escaping the
+        worker reach on_finished unchanged. Either failure discards progress.
         Stop while this segment is pending prevents its step from restarting.
         """
-        raise NotImplementedError("Resume segment control is not implemented")
+        with self._lock:
+            engine = self._engine
+            status = None if engine is None else engine.status()
+            if engine is None or status is None:
+                raise RuntimeError("Resume requires an accepted paused workflow run")
+            if status.lifecycle != "paused" or self._operation_id is not None:
+                raise InvalidRunState("resume", status.lifecycle)
+
+        captured: DeviceSnapshot | None = None
+
+        def opened(token: int) -> None:
+            nonlocal captured
+            self._operation_id = token
+            captured = devices()
+
+        def work(_factory: None) -> RunStatus:
+            with self._lock:
+                if self._stop_signal.is_set():
+                    stopped = engine.status()
+                    if stopped is None:
+                        raise RuntimeError("accepted engine has no run status")
+                    return stopped
+                if captured is None:
+                    raise RuntimeError("Resume requires captured devices")
+                engine.resume(status.run_id, devices=captured)
+            return engine.execute(status.run_id)
+
+        def cancel() -> None:
+            self.stop()
+
+        try:
+            return self._runner.begin(
+                OperationSpec(
+                    exclusion=ExclusionRequest("run", self._owner_id, "workflow run"),
+                    owner_id=self._owner_id,
+                    wants_progress=False,
+                    cancel_hook=cancel,
+                    work=work,
+                    run_in_pool=False,
+                    on_terminal=self._segment_finished,
+                    on_opened=opened,
+                )
+            )
+        except Exception:
+            self._operation_id = None
+            raise
 
     def stop(self) -> RunStatus | None:
         """Request cooperative Stop without waiting for worker terminal delivery.
@@ -220,4 +303,10 @@ class WorkflowController[C]:
             status = self._engine.status()
             if status is None:
                 raise RuntimeError("accepted engine has no run status")
-            return self._engine.stop(status.run_id)
+            stopped = self._engine.stop(status.run_id)
+        if status.lifecycle == "paused" and self._operation_id is None:
+            try:
+                self._on_finished(stopped, None)
+            finally:
+                self._discard_progress()
+        return stopped
