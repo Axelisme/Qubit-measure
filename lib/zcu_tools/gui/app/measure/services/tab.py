@@ -298,7 +298,13 @@ class TabService:
         return self._state.get_tab(tab_id).adapter_name
 
     def prepare_result_analysis(self, tab_id: str) -> AnalysisPreparation:
-        """Prepare analysis without turning a committed result into a failure."""
+        """Seed params from this Run/Load result and its saved source.
+
+        tab_id selects a tab with a result. Use its publication parameters,
+        including context-free None, never current tab/session bindings.
+        Publish returned params; adapter failure becomes AnalysisPreparation.error
+        without changing the result. Missing result raises RuntimeError.
+        """
         tab = self._state.get_tab(tab_id)
         if tab.run.result is None:
             raise RuntimeError("No run result available to build analyze params")
@@ -319,9 +325,12 @@ class TabService:
         self._state.update_tab_analyze_param_instance(tab_id, instance)
 
     def initialize_tab_post_analyze_params(self, tab_id: str) -> object:
-        """Build + store the post-analysis param instance once the primary analyze
-        result exists. Fast-fails if
-        there is no primary analyze result to seed from."""
+        """Seed and store Post params from the primary result and result source.
+
+        tab_id selects a tab with a primary analysis result. Its Run/Load saved
+        parameters supply the source, including None without fallback. Return
+        the stored params. Missing primary result or adapter failure raises.
+        """
         tab = self._state.get_tab(tab_id)
         if tab.analysis.result is None:
             raise RuntimeError(
