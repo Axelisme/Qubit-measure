@@ -35,43 +35,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "context.use",
-        "context:h_context_use",
-        MethodSpec(
-            5.0,
-            "Switch the active context to 'label'. Echoes {label, has_active_context}. "
-            "An unknown label fails fast (invalid_params) with the available labels; no "
-            "applied project fails with precondition_failed.",
-            (required_string("label", "Context label to switch to"),),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
-        "context.new",
-        "context:h_context_new",
-        MethodSpec(
-            10.0,
-            "Create a new context and make it active. Optional label names it; "
-            "otherwise the GUI derives a label from bind_device value/unit. "
-            "clone_from='current' copies the active context (or starts empty when "
-            "none is active); null starts empty. An unknown clone source fails "
-            "without changing active/labels. Echoes {label, has_active_context}.",
-            (
-                optional_string("label", "Optional explicit context label"),
-                optional_string(
-                    "bind_device",
-                    "Connected flux device to bind: its current value/unit name the "
-                    "context (whitelist: FakeDevice->none, YOKOGS200->A). Omit for an "
-                    "unbound context (unit=none, no value).",
-                ),
-                optional_string(
-                    "clone_from", "Label of an existing context to clone ml/md from"
-                ),
-            ),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
         "context.labels",
         "context:h_context_labels",
         MethodSpec(
