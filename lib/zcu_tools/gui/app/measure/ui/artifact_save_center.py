@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
-from contextlib import contextmanager, suppress
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
@@ -310,19 +309,6 @@ class ArtifactSaveCenter(QWidget):
     def get_comment(self) -> str:
         return self._comment_edit.toPlainText()
 
-    @contextmanager
-    def retain_local_path_edit(self, key: ArtifactKey) -> Generator[None]:
-        """Project save status without overwriting an in-flight editor change.
-
-        A cleared override resolves to the default path in State, but the blank
-        editor must remain blank until the next independent refresh.
-        """
-        self._local_path_edits.add(key)
-        try:
-            yield
-        finally:
-            self._local_path_edits.discard(key)
-
     def _set_path_preserving_editor_state(self, key: ArtifactKey, path: str) -> None:
         if key in self._local_path_edits:
             return
@@ -361,16 +347,8 @@ class ArtifactSaveCenter(QWidget):
             finally:
                 self._comment_edit.blockSignals(blocked)
 
-    def bind_data_path_changed(self, handler: Callable[[str], None]) -> None:
-        self._path_edits[_DATA].textChanged.connect(handler)
-
     def bind_comment_changed(self, handler: Callable[[str], None]) -> None:
         self._comment_edit.textChanged.connect(lambda: handler(self.get_comment()))
-
-    def bind_image_path_changed(
-        self, handler: Callable[[ArtifactKey, str], None]
-    ) -> None:
-        self._image_path_handler = handler
 
     def bind_image_save(self, handler: Callable[[ArtifactKey], None]) -> None:
         self._image_save_handler = handler
@@ -477,13 +455,6 @@ class ArtifactSaveCenter(QWidget):
     def status_color(self, key: ArtifactKey) -> str:
         style = self._status_labels[key].styleSheet()
         return style.split("color:", 1)[-1].strip().strip(";").strip()
-
-    def unbind_data_path_changed(self, handler: Callable[[str], None]) -> None:
-        with suppress(TypeError, RuntimeError):
-            self._path_edits[_DATA].textChanged.disconnect(handler)
-
-    def unbind_image_path_changed(self) -> None:
-        self._image_path_handler = None
 
     def save_button(self, key: ArtifactKey) -> QPushButton:
         return self._save_btns[key]

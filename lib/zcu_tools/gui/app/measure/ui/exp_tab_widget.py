@@ -30,7 +30,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
+from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
@@ -1170,24 +1170,8 @@ class ExpTabWidget(QWidget):
         def validity_cb(_valid: bool) -> None:
             actions.refresh_interaction(tab_id)
 
-        def data_path_cb(_text: str) -> None:
-            with self._save_center.retain_local_path_edit(
-                ArtifactKey(ArtifactKind.DATA)
-            ):
-                data_path = self.get_data_path()
-                self._ctrl.update_tab_data_path(
-                    tab_id, data_path if data_path else None
-                )
-                self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
-
-        def image_path_cb(key: ArtifactKey, text: str) -> None:
-            with self._save_center.retain_local_path_edit(key):
-                self._ctrl.update_tab_image_path(tab_id, key, text if text else None)
-                self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
-
         self.cfg_form.validity_changed.connect(validity_cb)
 
-        self._save_center.bind_data_path_changed(data_path_cb)
         if self._has_analysis:
             self.analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_analyze_param_instance(
@@ -1200,7 +1184,6 @@ class ExpTabWidget(QWidget):
                     tab_id, instance
                 )
             )
-        self._save_center.bind_image_path_changed(image_path_cb)
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
         if self._capabilities.load_data:
@@ -1222,7 +1205,6 @@ class ExpTabWidget(QWidget):
         self._save_center.bind_save_data(lambda: actions.save_data(tab_id))
 
         self._validity_cb = validity_cb
-        self._data_path_cb = data_path_cb
 
     def _on_progress_changed(self) -> None:
         models = tuple(m for _, m in self._progress_control.progress_bars(self.tab_id))
@@ -1233,8 +1215,6 @@ class ExpTabWidget(QWidget):
         if self._actions is None:
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
         self.cfg_form.validity_changed.disconnect(self._validity_cb)
-        self._save_center.unbind_data_path_changed(self._data_path_cb)
-        self._save_center.unbind_image_path_changed()
         self._progress_unsub()
         self.cfg_form.detach()
         self._actions = None

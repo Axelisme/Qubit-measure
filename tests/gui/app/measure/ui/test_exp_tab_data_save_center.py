@@ -17,7 +17,6 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QTabWidget,
     QTextEdit,
 )
 from zcu_tools.gui.app.measure.adapter import (
@@ -306,7 +305,7 @@ def test_measurement_always_post_conditional(exp_tab_factory):
     _require_qapp().processEvents()
 
 
-def test_artifact_rows_have_status_path_browse_save_and_comment(exp_tab_factory):
+def test_artifact_rows_have_status_path_save_and_comment(exp_tab_factory):
     ctrl = _mock_ctrl()
     caps = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
@@ -480,157 +479,6 @@ def test_status_text_renders_shared_snapshot(exp_tab_factory):
         assert center.status_text(_DATA) == label
     tab.deleteLater()
     _require_qapp().processEvents()
-
-
-def test_save_all_preserves_data_pane_editor_state(qapp):
-    from qtpy.QtCore import QEvent, QPointF, Qt
-    from qtpy.QtGui import QMouseEvent
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-
-    ctrl = _mock_ctrl()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 0
-    ctrl.has_tab.return_value = True
-    ctrl.save_data = MagicMock(return_value="/tmp/data.h5")
-    ctrl.save_image = MagicMock(return_value="/tmp/a.png")
-    ctrl.save_post_image = MagicMock(return_value="/tmp/p.png")
-    window = MainWindow(ctrl)
-
-    snap = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        has_post=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=True,
-        has_active_context=True,
-    )
-    ctrl.get_tab_snapshot.return_value = snap
-    window.add_tab_widget("tab-1", "fake")
-    tab = window.findChild(ExpTabWidget)
-    assert tab is not None
-    center = tab.findChild(ArtifactSaveCenter)
-    assert center is not None
-    left_tabs = next(
-        widget
-        for widget in tab.findChildren(QTabWidget)
-        if any(widget.tabText(i) == "Data" for i in range(widget.count()))
-    )
-    data_index = next(
-        i for i in range(left_tabs.count()) if left_tabs.tabText(i) == "Data"
-    )
-    left_tabs.setCurrentIndex(data_index)
-    window.show()
-    qapp.processEvents()
-    data_edit = next(
-        edit
-        for edit in center.findChildren(QLineEdit)
-        if edit.text() == center.get_data_path()
-    )
-    data_edit.setFocus()
-    qapp.processEvents()
-    assert qapp.focusWidget() is data_edit
-    data_edit.setCursorPosition(4)
-    data_edit.cursorBackward(True, 3)
-    before = (
-        data_edit.hasFocus(),
-        data_edit.cursorPosition(),
-        data_edit.selectionStart(),
-        data_edit.selectedText(),
-    )
-
-    # A state refresh with identical text must not clear the user's selection.
-    center.set_data_path(data_edit.text())
-    assert (
-        data_edit.hasFocus(),
-        data_edit.cursorPosition(),
-        data_edit.selectionStart(),
-        data_edit.selectedText(),
-    ) == before
-
-    selected_pane = left_tabs.currentWidget()
-    button = center.save_all_button
-    position = button.rect().center()
-    for event_type, buttons in (
-        (QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
-        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
-    ):
-        event = QMouseEvent(
-            event_type,
-            QPointF(position),
-            QPointF(button.mapToGlobal(position)),
-            Qt.MouseButton.LeftButton,
-            buttons,
-            Qt.KeyboardModifier.NoModifier,
-        )
-        QApplication.sendEvent(button, event)
-    qapp.processEvents()
-    ctrl.save_artifacts.assert_called_once()
-
-    # This fake controller does not publish terminal State snapshots; dispatch
-    # alone must not mark any artifact as saved.
-    assert all(center.status_text(key) == "○ NOT SAVED" for key in center.artifact_keys)
-
-    window.handle_save_data_finished(
-        SaveDataFinishedPayload(tab_id="tab-1", data_path="/tmp/data.h5")
-    )
-    qapp.processEvents()
-
-    assert left_tabs.currentWidget() is selected_pane
-    assert tab.findChild(ArtifactSaveCenter) is center
-    assert data_edit in center.findChildren(QLineEdit)
-    assert (
-        data_edit.hasFocus(),
-        data_edit.cursorPosition(),
-        data_edit.selectionStart(),
-        data_edit.selectedText(),
-    ) == before
-    assert center.status_text(_DATA) == "○ NOT SAVED"
-    window.deleteLater()
-    tab.deleteLater()
-    qapp.processEvents()
-
-
-def test_changed_path_refresh_preserves_reverse_data_editor_state(
-    exp_tab_factory, qapp
-):
-    ctrl = _mock_ctrl()
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
-    )
-    snap = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-    )
-    tab = exp_tab_factory("tab-1", ctrl, caps)
-    tab.attach(snap, MagicMock())
-    tab.show()
-    qapp.processEvents()
-
-    center = tab._save_center
-    data_edit = center._path_edits[_DATA]
-    data_edit.setFocus()
-    qapp.processEvents()
-    data_edit.setCursorPosition(4)
-    data_edit.cursorBackward(True, 3)
-    assert data_edit.cursorPosition() == 1
-    assert data_edit.selectionStart() == 1
-    assert data_edit.selectionLength() == 3
-    assert data_edit.selectedText() == "tmp"
-
-    center.set_data_path("/tmp/changed-data.h5")
-
-    assert data_edit.hasFocus()
-    assert data_edit.cursorPosition() == 1
-    assert data_edit.selectionStart() == 1
-    assert data_edit.selectionLength() == 3
-    assert data_edit.selectedText() == "tmp"
-    tab.deleteLater()
-    qapp.processEvents()
 
 
 def test_save_all_disabled_when_no_result(exp_tab_factory):
@@ -964,79 +812,6 @@ def test_live_comment_typing_preserves_undo_through_state_projection(
     finally:
         window.deleteLater()
         qapp.processEvents()
-
-
-@pytest.mark.parametrize("button", ["single", "all"])
-def test_cleared_gui_data_path_saves_to_state_default(
-    exp_tab_factory, qapp, tmp_path: Path, button: str
-) -> None:
-    window, state, tabs, save, tab_id, _ctrl = _live_save_ui(tmp_path)
-    try:
-        default = tabs.get_tab_data_path(tab_id)
-        assert default is not None and default.startswith(str(tmp_path / "database"))
-        center = window.findChild(ArtifactSaveCenter)
-        assert center is not None
-        data_edit = next(
-            edit for edit in center.findChildren(QLineEdit) if edit.text() == default
-        )
-        data_edit.clear()
-        qapp.processEvents()
-        assert center.get_data_path() == ""
-        assert state.get_tab(tab_id).save.data_path_override is None
-        target = (
-            center.save_button(_DATA) if button == "single" else center.save_all_button
-        )
-        assert target.isEnabled()
-        target.click()
-        if button == "single":
-            assert save.start_save_data.call_args.args[1] == default
-        else:
-            save.start_save_artifacts.assert_called_once()
-            assert save.start_save_artifacts.call_args.args[1][0].path == default
-        assert state.get_tab(tab_id).save.data_path_override is None
-        state.get_tab(tab_id).artifacts.started(_DATA).succeed(default)
-        window.refresh_tab_interaction(tab_id)
-        assert center.status_text(_DATA) == "✓ SAVED"
-    finally:
-        window.deleteLater()
-        qapp.processEvents()
-
-
-def test_cleared_named_image_path_keeps_editor_blank_and_saves_to_default(
-    exp_tab_factory, qapp, tmp_path: Path
-) -> None:
-    window, state, tabs, save, tab_id, _ctrl = _live_save_ui(tmp_path)
-    try:
-        state.update_tab_analyze(tab_id, object(), _plots_for(Figure()))
-        window.refresh_tab_interaction(tab_id)
-        center = window.findChild(ArtifactSaveCenter)
-        assert center is not None
-        default = center.path_for(_FIT)
-        assert default
-        state.update_tab_image_path_override(tab_id, _FIT, str(tmp_path / "custom.png"))
-        window.refresh_tab_interaction(tab_id)
-        assert center.path_for(_FIT) != default
-        image_edit = next(
-            edit
-            for edit in center.findChildren(QLineEdit)
-            if edit.text() == str(tmp_path / "custom.png")
-        )
-        image_edit.clear()
-        qapp.processEvents()
-        assert center.path_for(_FIT) == ""
-        snapshot = tabs.get_snapshot(tab_id)
-        assert snapshot.paths is not None
-        assert snapshot.paths.analysis_images["fit"].override is None
-        center.save_button(_FIT).click()
-        assert save.save_image_sync.call_args.args[1:] == (_FIT, default)
-    finally:
-        window.deleteLater()
-        qapp.processEvents()
-
-
-# ---------------------------------------------------------------------------
-# Figure gating (correction 2)
-# ---------------------------------------------------------------------------
 
 
 def test_analysis_save_requires_figure(exp_tab_factory):
