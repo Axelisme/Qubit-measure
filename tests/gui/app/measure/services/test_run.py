@@ -958,8 +958,9 @@ def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
     assert outcome is not None and outcome.status == "finished"
 
 
+@pytest.mark.parametrize("cancel_during_identity", [False, True])
 def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidence(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, cancel_during_identity: bool
 ) -> None:
     state, tab_id, adapter = _make_state()
     adapter.run.return_value = RunRecord(
@@ -976,9 +977,21 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
     )
     service, _gate, background, handles = _make_run_service(state)
     token = service.start_run(permit, plots=_plots())
+    if cancel_during_identity:
+        from zcu_tools.experiment.acquisition import new_run_id
+
+        def identity_after_cancel(started_at: datetime) -> str:
+            # The identity collaborator runs after acquisition has returned.
+            assert service.cancel_run()
+            return new_run_id(started_at)
+
+        monkeypatch.setattr(
+            "zcu_tools.gui.app.measure.services.run.new_run_id", identity_after_cancel
+        )
     assert background.last_work is not None
     acquired = background.last_work()
-    assert service.cancel_run()
+    if not cancel_during_identity:
+        assert service.cancel_run()
     assert background.last_on_done is not None
     background.last_on_done(acquired)
     metadata = state.get_tab(tab_id).run.metadata

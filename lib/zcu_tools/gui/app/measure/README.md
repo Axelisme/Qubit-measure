@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08，cfg 固定 capture 與 Run metadata
+**Last updated:** 2026-10-08，Run acquisition completion 與 evidence 契約
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -347,8 +347,8 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    Only progress remains ambient. Driver lookup does not refresh accepted cfg.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
    terminal callbacks back to the main thread.
-6. Run/analyze services depend on narrow State ports (`RunStatePort` /
-   `AnalyzeStatePort`) for busy checks, request-building reads, and result writes.
+6. RunService uses State directly for busy checks and atomic result/evidence
+   publication. AnalyzeService retains its narrow `AnalyzeStatePort`.
 7. Writeback items are generated from analysis results and edited through the same
    cfg-editor machinery before commit; `WritebackService.create_draft` snapshots
    the destination `SessionEnv` at creation and the ledger shows
