@@ -17,7 +17,7 @@ from simpleeval import DEFAULT_OPERATORS, InvalidExpression, SimpleEval, safe_po
 from zcu_tools.gui.expected_error import InvalidInputError
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.context import MetaDict
+    from zcu_tools.gui.session.types import ParameterContext
 
 
 class ExpressionError(InvalidInputError):
@@ -79,9 +79,13 @@ class EvalRef:
     maximum: float
 
 
-def evaluate_numeric_expr(expr: str, md: MetaDict) -> float:
-    """Evaluate a real-valued expression for device and real-only inputs."""
-    value = evaluate_scalar_expr(expr, md)
+def evaluate_numeric_expr(expr: str, parameters: ParameterContext | None) -> float:
+    """Evaluate finite real arithmetic over captured parameter paths.
+
+    None permits pure calculation only; parameter/library paths raise
+    ExpressionError. Numeric source, grammar and real-domain failures raise.
+    """
+    value = evaluate_scalar_expr(expr, parameters)
     if isinstance(value, complex):
         raise ExpressionError("Expression must resolve to a real number")
     try:
@@ -92,12 +96,13 @@ def evaluate_numeric_expr(expr: str, md: MetaDict) -> float:
         ) from exc
 
 
-def evaluate_scalar_expr(expr: str, md: MetaDict) -> Scalar:
-    """Evaluate finite arithmetic, preserving integers and complex values.
+def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scalar:
+    """Evaluate finite arithmetic using captured role/component/general paths.
 
-    ``**`` is power; ``^`` keeps simpleeval's native integer XOR semantics.
-    Functions use math's real domains except abs, which also accepts complex.
-    Only referenced reserved names are checked for MetaDict collisions.
+    None permits pure calculation only; parameter/library references raise
+    ExpressionError. Resolve paths through ParameterContext, never the live
+    session. Retain numeric limits, math functions, constants and XOR semantics.
+    Invalid grammar, missing/non-numeric paths and arithmetic failures raise.
     """
     tree = _parse_expression(expr)
     for node in ast.walk(tree):

@@ -21,7 +21,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from .binding.draft import CfgDraft
 from .binding.observation import CfgNodeObservation
 from .binding.ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
-from .lowering import RangeFactory
+from .lowering import LoweredData
 from .model import (
     CfgNodeSpec,
     CfgSchema,
@@ -164,7 +164,7 @@ class CfgObservation:
 class AcceptedConfig:
     ref: CfgRef
     source_basis: SourceBasis
-    values: dict[str, object]
+    values: dict[str, LoweredData]
 
 
 class CfgStaleError(CfgPreconditionError):
@@ -233,14 +233,12 @@ class CfgResource:
         defaults: Callable[[], CfgSchema],
         *,
         resolution: Callable[[], CfgResolution],
-        make_range: RangeFactory,
         initial: CfgSchema | None = None,
         mutation_allowed: Callable[[], bool] = lambda: True,
         notification_active: Callable[[], bool] = lambda: False,
     ) -> None:
         self._defaults = defaults
         self._resolution = resolution
-        self._make_range = make_range
         self._mutation_allowed = mutation_allowed
         self._notification_active = notification_active
         self._closed = False
@@ -379,7 +377,7 @@ class CfgResource:
             raise CfgPreconditionError(
                 CfgPreconditionReason.NOT_VALID, "cfg is not valid"
             )
-        values = lower_resolved_cfg(self._draft.snapshot(), make_range=self._make_range)
+        values = lower_resolved_cfg(self._draft.snapshot())
         return AcceptedConfig(
             self._observation.ref, self._observation.source_basis, deepcopy(values)
         )

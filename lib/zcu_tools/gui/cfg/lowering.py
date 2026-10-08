@@ -29,6 +29,17 @@ logger = logging.getLogger(__name__)
 
 ReferenceKind: TypeAlias = str
 
+type LoweredData = (
+    None
+    | bool
+    | int
+    | float
+    | complex
+    | str
+    | list[LoweredData]
+    | dict[str, LoweredData]
+)
+
 _LOCKED_CENTER_ABS_TOL = 1e-12
 
 
@@ -38,10 +49,6 @@ class ExpressionResolver(Protocol):
 
 class ReferenceResolver(Protocol):
     def __call__(self, kind: ReferenceKind, key: str, /) -> str | None: ...
-
-
-class RangeFactory(Protocol):
-    def __call__(self, start: float, stop: float, /, *, expts: int) -> object: ...
 
 
 def validate_reference_kinds(
@@ -101,9 +108,14 @@ def lower_finished_cfg(
     *,
     resolve_expression: ExpressionResolver | None,
     resolve_reference: ReferenceResolver | None,
-    make_range: RangeFactory,
-) -> dict[str, object]:
-    """Lower a finished cfg while preserving static/dynamic/lower ordering."""
+    # Range construction is shared pure-data policy, never caller injection.
+) -> dict[str, LoweredData]:
+    """Lower finished input to working-unit scalar/list/string-key dict data.
+
+    Preserve static/dynamic/lower order. Sweep ranges contain start, stop,
+    expts and step as plain data. Reject unsupported literals, tuples and
+    non-string keys at this boundary, without mutating the schema.
+    """
     validate_finished_cfg(schema, resolve_reference=resolve_reference)
     if resolve_expression is not None:
         _validate_dynamic_section(

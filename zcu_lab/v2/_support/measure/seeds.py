@@ -82,6 +82,27 @@ def md(
     return Seed(resolve, description=f"md:{key}")
 
 
+def path_seed(
+    path: str, *, fallback: ScalarLeafInput, expr: str | None = None
+) -> Seed[ScalarLeafInput]:
+    """Use a role/component parameter path when present, else explicit fallback.
+
+    Resolve only at fresh defaults. Empty paths raise ValueError; source faults
+    propagate rather than becoming fallback. expr overrides the live expression.
+    """
+    raise NotImplementedError
+
+
+def scaled_path_seed(
+    path: str, *, factor: float, fallback_value: float
+) -> Seed[float | EvalValue]:
+    """Seed factor * path, or the already scaled fallback when absent.
+
+    Empty paths raise ValueError. Capture faults propagate; no focus rebind.
+    """
+    raise NotImplementedError
+
+
 def scaled_md(
     key: str,
     *,
