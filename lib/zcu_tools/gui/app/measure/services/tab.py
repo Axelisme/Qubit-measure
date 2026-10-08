@@ -16,10 +16,16 @@ from zcu_tools.gui.app.measure.state import (
     TabInteractionState,
 )
 from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.resource import CfgObservation, CfgResolution
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.cfg.resource import (
+    CfgObservation,
+    CfgPreconditionError,
+    CfgPreconditionReason,
+    CfgResolution,
+    CfgResource,
+)
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import RoleSpec
+from zcu_tools.resources.entry import RoleResolutionError, RoleSpec
 
 from ..adapter import AnalysisMode, WritebackItem
 from .plot_lifecycle import release_retired_plots
@@ -198,11 +204,42 @@ class TabService:
         rejects any tab cfg notification reentrancy. Preserve resource identity,
         cfg inputs and historical pane/save captures. Facet publishes the fact.
         """
-        raise NotImplementedError("Tab role rebinding is not implemented")
+        self._commit_role_change(tab_id, role, {role: component})
 
     def reset_role(self, tab_id: str, role: str) -> None:
         """Remove one manual choice, re-infer and refresh; set_role errors apply."""
-        raise NotImplementedError("Tab role reset is not implemented")
+        self._commit_role_change(tab_id, role, {})
+
+    def _commit_role_change(
+        self, tab_id: str, role: str, manual_choice: Mapping[str, str | None]
+    ) -> None:
+        # An empty choice removes the manual key; None is a deliberate clear.
+        resources = tuple(
+            self._state.get_tab(key).cfg for key in self._state.list_tab_ids()
+        )
+        if CfgResource.notifications_active(resources):
+            raise CfgPreconditionError(
+                CfgPreconditionReason.REENTRANT_MUTATION,
+                "Role mutation is forbidden during cfg notification",
+            )
+        tab = self._state.get_tab(tab_id)
+        if self._state.is_tab_busy(tab_id):
+            raise FailedPreconditionError(f"Cannot rebind roles on busy tab {tab_id!r}")
+        parameters = tab.parameters
+        roles = parameters.roles if parameters is not None else None
+        if parameters is None or roles is None or not roles.declarations:
+            raise FailedPreconditionError("Tab has no declared roles")
+        if role not in roles.declarations:
+            raise RoleResolutionError(role, roles.focus, None, "Role is not declared")
+        explicit = dict(roles.explicit)
+        explicit.pop(role, None)
+        explicit.update(manual_choice)
+        candidate = parameters.bind_roles(
+            roles.declarations, focus=roles.focus, explicit=explicit
+        )
+        revision = tab.cfg.observe().ref.revision
+        self._state.update_tab_parameters(tab_id, candidate)
+        tab.cfg.refresh(revision)
 
     def new_tab(
         self,
@@ -240,12 +277,19 @@ class TabService:
         save_context = (
             parameters if parameters is not None else self._state.session_env.parameters
         )
+
+        def current_parameters() -> ParameterContext | None:
+            # Creation precedes registration; later refresh/reset uses the tab capture.
+            if self._state.has_tab(tab_id):
+                return self._state.get_tab(tab_id).parameters
+            return parameters
+
         cfg = self._cfg_resources.create(
             tab_id,
             lambda: adapter.make_default_cfg(
-                replace(self._state.session_env, parameters=parameters)
+                replace(self._state.session_env, parameters=current_parameters())
             ),
-            resolution=lambda: self._cfg_resolution(parameters),
+            resolution=lambda: self._cfg_resolution(current_parameters()),
             initial=from_dict.cfg_schema if from_dict is not None else None,
         )
         self._state.add_tab(

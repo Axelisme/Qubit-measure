@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，Run/Load result source 與晚開分析
+**Last updated:** 2026-10-09，tab 角色改綁與歷史來源
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -443,6 +443,12 @@ threshold) is presentation-only and never moves figure ownership, adds a second
 canvas, or changes ADR-0067 reactions. No competing state owner is introduced.
 
 ## Tab Lifecycle And Ordering
+
+Tab 角色列只呈現該 tab 的固定 capture；改綁不讀目前 session 的焦點或工作點。
+手動指定（包含清空）保留在 capture，其他角色依開啟時焦點與手動選擇重新推論。
+逐角色重設只移除該角色的手動選擇。改綁限本 tab idle，保留 cfg resource、輸入
+與既有 Run/Analyze/WB/artifact；cfg 與下一次 Run 使用新的角色，歷史結果仍使用
+當次來源。角色列、標題與完整 tooltip 由同一 committed fact 更新，不重畫結果。
 
 New tabs are pure GUI configuration surfaces: creating one builds the adapter's
 default cfg from the current context but does not start hardware work. The toolbar

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from fnmatch import fnmatchcase
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
@@ -272,6 +274,14 @@ class ExpTabWidget(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
         root_layout.setSpacing(2)
+
+        self._roles_widget = QWidget(self)
+        self._roles_widget.setObjectName("tab-roles")
+        self._roles_layout = QVBoxLayout(self._roles_widget)
+        self._roles_layout.setContentsMargins(0, 0, 0, 0)
+        self._role_controls: dict[str, tuple[QComboBox, QLabel, QPushButton]] = {}
+        self._roles_widget.hide()
+        root_layout.addWidget(self._roles_widget)
 
         # --- main content area: [splitter] ---
         self._content_widget = QWidget()
@@ -1076,13 +1086,78 @@ class ExpTabWidget(QWidget):
         (or explicitly no birth focus). Roleless tabs hide the row. Busy state
         comes only from snapshot.interaction. User activation invokes tab_control.
         """
-        del snapshot
+        parameters = snapshot.parameters
+        roles = parameters.roles if parameters is not None else None
+        if parameters is None or roles is None or not roles.declarations:
+            self._roles_widget.hide()
+            return
+        if snapshot.interaction is None:
+            raise RuntimeError(
+                f"render snapshot for tab {self.tab_id!r} has no interaction"
+            )
+        components = parameters.document().components
+        for alias, spec in roles.declarations.items():
+            if alias not in self._role_controls:
+                self._build_role_row(alias)
+            selector, manual, reset = self._role_controls[alias]
+            selector.clear()
+            selector.addItem("（空）", None)
+            for name, component in components.items():
+                if fnmatchcase(component.kind, spec.kind):
+                    selector.addItem(name, name)
+            selector.setCurrentIndex(selector.findData(roles.names.get(alias)))
+            manual.setVisible(alias in roles.explicit)
+            reset.setText(
+                f"回到開啟時焦點 {roles.focus}"
+                if roles.focus is not None
+                else "回到開啟時設定（沒有開啟時焦點）"
+            )
+        interaction = snapshot.interaction
+        self._roles_widget.setEnabled(
+            not (
+                interaction.is_running
+                or interaction.is_analyzing
+                or interaction.is_saving_data
+            )
+        )
+        self._roles_widget.show()
+
+    def _build_role_row(self, alias: str) -> None:
+        row = QHBoxLayout()
+        row.addWidget(QLabel(alias))
+        selector = QComboBox()
+        selector.setObjectName(f"role-{alias}")
+        row.addWidget(selector, stretch=1)
+        manual = QLabel("手動指定")
+        manual.setObjectName(f"role-manual-{alias}")
+        row.addWidget(manual)
+        reset = QPushButton()
+        reset.setObjectName(f"role-reset-{alias}")
+        row.addWidget(reset)
+        self._roles_layout.addLayout(row)
+        self._role_controls[alias] = selector, manual, reset
+        selector.activated.connect(partial(self._on_role_activated, alias, selector))
+        reset.clicked.connect(lambda _checked=False: self._on_role_reset(alias))
+
+    def _on_role_activated(self, role: str, selector: QComboBox, index: int) -> None:
+        component = selector.itemData(index)
+        if component is not None and not isinstance(component, str):
+            raise TypeError("Role selector data must be a component name or None")
+        self._on_role_selected(role, component)
 
     def _on_role_selected(self, role: str, component: str | None) -> None:
-        self._ctrl.tab_control.set_role(self.tab_id, role, component)
+        try:
+            self._ctrl.tab_control.set_role(self.tab_id, role, component)
+        except Exception as exc:
+            logger.exception("Role selection failed: tab=%s role=%s", self.tab_id, role)
+            self._dialog_presenter.critical(self, "Role selection failed", str(exc))
 
     def _on_role_reset(self, role: str) -> None:
-        self._ctrl.tab_control.reset_role(self.tab_id, role)
+        try:
+            self._ctrl.tab_control.reset_role(self.tab_id, role)
+        except Exception as exc:
+            logger.exception("Role reset failed: tab=%s role=%s", self.tab_id, role)
+            self._dialog_presenter.critical(self, "Role reset failed", str(exc))
 
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
         assert snapshot.interaction is not None
@@ -1150,6 +1225,7 @@ class ExpTabWidget(QWidget):
         idle = not local_busy
         self.cfg_form.set_editing_enabled(idle)
         self.reset_btn.setEnabled(idle)
+        self._roles_widget.setEnabled(idle)
 
         # Capability is already enforced by conditional construction; no tab visibility toggling.
         # Branch inner controls only for present panes.

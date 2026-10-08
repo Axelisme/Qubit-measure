@@ -765,7 +765,9 @@ class State(SessionState):
         Preserve run/analysis/post/save captures, results, drafts and artifacts.
         Missing tab raises KeyError. Caller owns admission and cfg publication.
         """
-        raise NotImplementedError("Tab parameter commit is not implemented")
+        self._assert_owner()
+        self.tabs[tab_id].parameters = parameters
+        self.version.bump(f"tab:{tab_id}")
 
     def update_tab_comment(self, tab_id: str, comment: str) -> None:
         """Publish the Data comment draft shared by GUI and remote saves."""

@@ -226,7 +226,10 @@ class MainWindow(QMainWindow):
         if roles is None:
             return adapter_name
         return " · ".join(
-            [adapter_name, *(f"{role}={name}" for role, name in roles.names.items())]
+            [
+                adapter_name,
+                *(f"{role}={roles.names.get(role, '')}" for role in roles.declarations),
+            ]
         )
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
