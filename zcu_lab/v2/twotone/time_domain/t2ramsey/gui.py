@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.detune import (
@@ -86,29 +87,27 @@ class T2RamseyAdapter(
             "frequency offset."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional, seeding defaults): 't2r' — "
-            "prior T2-Ramsey estimate (us); the delay sweep spans up to "
-            "1.5*t2r (fallback ~0.4 us). 't1' seeds relax_delay (5*t1, fallback ~100 "
-            "us). The pi/2 pulse pulls 'q_f' (~2000–6000 MHz) and 'qub_ch'. "
-            "Readout pulls 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
-            "'timeFly' for the readout trigger offset (~0–1 us)."
+            "Defaults use the tab's fixed qubit and referenced resonator. "
+            "Delay ends at 1.5 * qubit.t2r (us, fallback 0.4 us); relax_delay "
+            "is 5 * qubit.t1 (fallback 100 us). Inline pi/2 reads qubit.freq "
+            "and qubit.wiring.L01.ch. Inline readout reads resonator.freq, "
+            "resonator.wiring.ch/ro_ch, and resonator.ext.time_of_fly + "
+            "0.05 us (fallback 0.55 us). Missing or null calibration uses "
+            "fallback; unbound roles remain Invalid until supplied."
         ),
         expects_ml=(
-            "Needs a qubit pi/2-pulse module — references a calibrated library "
-            "entry ('pi2_amp' / 'pi2_len') when present, else a blank inline "
-            "pulse — and a readout module "
-            "(calibrated 'readout_dpm' / 'readout_rf' / 'readout' / "
-            "'res_readout', else a blank pulse-readout referencing "
-            "'ro_waveform' when present). Optional reset references a library "
-            "reset ('reset_bath' / 'reset_10' / 'reset_120') when present."
+            "Uses captured qubit.module.x90 and qubit.module.readout. Missing "
+            "or dangling slots seed fresh inline pulse/readout defaults. "
+            "Optional qubit.module.reset stays disabled when absent. Verify "
+            "the inline pulse values and readout timing before Run."
         ),
         typical_writeback=(
-            "Proposes the fitted T2-Ramsey time into MetaDict 't2r' (us). When "
-            "the fringe fit ran (the default), also proposes the corrected "
-            "qubit frequency into MetaDict 'q_f' (MHz), computed as the pi/2 "
-            "pulse frequency + the realized applied detune − the fitted fringe "
-            "detune (mirrors the notebook). A pure decay fit proposes only "
-            "'t2r'. No ModuleLibrary writeback."
+            "Proposes fitted qubit.t2r (us) to the captured qubit and working "
+            "point. A fringe fit with source cfg and known realized detune "
+            "also proposes qubit.freq (MHz): source pi/2 frequency + realized "
+            "detune - fitted fringe detune. A pure decay fit or a loaded "
+            "source without realized detune proposes only qubit.t2r. "
+            "No module writeback; later focus changes do not retarget it."
         ),
         recommended=(
             "Enable Fit phase offset to fit a free fringe phase; it defaults to "
@@ -120,14 +119,27 @@ class T2RamseyAdapter(
             "Ramsey signal oscillates at that detuning. The analysis 'Fit "
             "fringe' option (on by default, matching the nonzero default ratio) "
             "fits the fringe frequency to read back the true qubit-frequency "
-            "offset and write 'q_f'. Set the ratio to 0 and turn 'Fit fringe' "
+            "offset and write qubit.freq. Set the ratio to 0 and turn 'Fit fringe' "
             "off for a pure decay fit when driving on resonance. A delay sweep "
             "reaching a few T2* captures enough fringe periods and decay."
         ),
     )
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Declare the qubit and its referenced resonator for tab capture."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
+        """Declare shape and fresh defaults resolved on the supplied capture.
+
+        Instantiate with SessionEnv.parameters. Bound missing/null calibration
+        uses the documented fallback; unbound roles remain cfg Invalid. Source
+        or module materialization faults propagate without reading live md/ml.
+        """
         return (
             MeasureCfgBuilder()
             .reset(optional=True)
@@ -194,6 +206,15 @@ class T2RamseyAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[T2RamseyRunResult, T2RamseyAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose captured qubit.t2r, plus qubit.freq for a sourced fringe fit.
+
+        req supplies the committed fit, source record and captured context.
+        Frequency is source pi/2 frequency + realized detune - fitted detune;
+        it is omitted for decay fits, cfg=None or unknown realized detune.
+        Non-scalar source frequency raises ValueError. WritebackService resolves
+        destinations on req.ctx.parameters and rejects missing captures/unbound
+        roles. No live calibration lookup or write occurs here.
+        """
         result = req.analyze_result
         items: list[WritebackItem] = [
             MetaDictWriteback(
