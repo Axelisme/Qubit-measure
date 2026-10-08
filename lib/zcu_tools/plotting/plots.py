@@ -194,7 +194,10 @@ class HeatmapPlot:
         self._marker: PathCollection | None = None
 
     def mark_point(self, x: float, y: float) -> None:
-        """Set the red best-point overlay; NaN coordinates hide it."""
+        """Set the red best-point overlay; NaN coordinates hide it.
+
+        Raise RuntimeError if draw removed this marker or its original axes.
+        """
         self._ensure_active()
         point = np.array([[x, y]], dtype=np.float64)
 
@@ -254,7 +257,10 @@ class HeatmapLinePlot:
         self._marker: Line2D | None = None
 
     def mark_line(self, x: float) -> None:
-        """Set a red dashed reference on the scan-line axes; NaN hides it."""
+        """Set a red dashed reference on the scan-line axes; NaN hides it.
+
+        Raise RuntimeError if draw removed this marker or its original axes.
+        """
         self._ensure_active()
         position = float(x)
 
