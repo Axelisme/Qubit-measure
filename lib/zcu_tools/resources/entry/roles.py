@@ -66,6 +66,13 @@ class RoleView:
         try:
             name = self._components[role]
         except KeyError as cause:
+            if role in self._declarations:
+                raise RoleResolutionError(
+                    role,
+                    self._focus,
+                    self._declarations[role].kind,
+                    "Role is not bound",
+                ) from cause
             raise AttributeError(f"Unknown resolved role {role!r}") from cause
         return self._component(name)
 
@@ -134,13 +141,32 @@ def _declarations(
     return declarations
 
 
+def _validate_target(
+    components: Mapping[str, ComponentSchema],
+    name: str,
+    role: str,
+    spec: RoleSpec,
+    focus: str | None,
+) -> None:
+    """Reject unknown or wrong-kind targets before binding or ambiguity omission."""
+    if name not in components:
+        raise RoleResolutionError(role, focus, spec.kind, f"Unknown component {name!r}")
+    if not fnmatchcase(components[name].kind, spec.kind):
+        raise RoleResolutionError(
+            role,
+            focus,
+            spec.kind,
+            f"Component {name!r} has kind {components[name].kind!r}",
+        )
+
+
 def _derived_name(
     components: Mapping[str, ComponentSchema],
     resolved: Mapping[str, str],
     role: str,
     spec: RoleSpec,
     focus: str | None,
-) -> str:
+) -> str | None:
     if spec.via is not None:
         source_role, separator, path = spec.via.partition(".")
         target = (
@@ -155,13 +181,10 @@ def _derived_name(
             for name in resolved.values()
             if (target := _reference_target(components[name], role)) is not None
         }
+    for target in sorted(candidates):
+        _validate_target(components, target, role, spec, focus)
     if len(candidates) != 1:
-        reason = (
-            f"Ambiguous references: {sorted(candidates)}"
-            if candidates
-            else f"No component choice via {spec.via!r} or same-name reference"
-        )
-        raise RoleResolutionError(role, focus, spec.kind, reason)
+        return None
     return candidates.pop()
 
 
@@ -201,17 +224,9 @@ def resolve_names(
             focus_used = True
         else:
             name = _derived_name(components, resolved, role, spec, focus)
-        if name not in components:
-            raise RoleResolutionError(
-                role, focus, spec.kind, f"Unknown component {name!r}"
-            )
-        if not fnmatchcase(components[name].kind, spec.kind):
-            raise RoleResolutionError(
-                role,
-                focus,
-                spec.kind,
-                f"Component {name!r} has kind {components[name].kind!r}",
-            )
+            if name is None:
+                continue
+        _validate_target(components, name, role, spec, focus)
         resolved[role] = name
     return resolved
 
