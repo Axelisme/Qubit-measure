@@ -123,12 +123,14 @@ class PointView:
         roles: Mapping[str, RoleSpec] | Sequence[str] | None = None,
         *,
         focus: str | None = None,
-        **explicit: str,
+        **explicit: str | None,
     ) -> RoleView:
         """Resolve only declared roles from this point's cached components.
 
         Explicit choices precede one matching focus, then RoleSpec.via or a
-        role-name string field on already resolved components.
+        role-name string field on already resolved components. An explicit None
+        means deliberately unbound, not inference; reading that declared role
+        raises RoleResolutionError.
         None uses the caller-registered notebook shorthand. Automatic inference
         with zero/multiple choices omits the role; its use then raises
         RoleResolutionError. Explicit invalid choices and dangling/wrong-kind

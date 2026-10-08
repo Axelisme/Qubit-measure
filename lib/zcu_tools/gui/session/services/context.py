@@ -396,12 +396,14 @@ class ContextService:
         declarations: Mapping[str, RoleSpec],
         *,
         focus: str | None,
-        explicit: Mapping[str, str],
+        explicit: Mapping[str, str | None],
     ) -> RoleBinding:
         """Resolve declared roles once against the published point snapshot.
 
-        Explicit choices precede focus/via inference. Empty declarations remain
-        empty. Automatic zero/multiple candidates leave roles unbound; actual
+        Explicit choices precede focus/via inference; None explicitly leaves
+        that role unbound. Omitted explicit keys allow inference. Return a
+        RoleBinding preserving the supplied focus and explicit manual choices.
+        Empty declarations remain empty. Automatic zero/multiple candidates leave roles unbound; actual
         use fails later. Invalid explicit choices and dangling/wrong-kind
         references raise RoleResolutionError here. EMPTY/source faults follow
         read_context policy; no YAML/hardware read occurs.
@@ -410,7 +412,7 @@ class ContextService:
         names = resolve_names(
             parameters.document().components, declarations, focus, explicit
         )
-        return RoleBinding(focus, declarations, names)
+        return RoleBinding(focus, declarations, names, explicit)
 
     def set_parameter(
         self,

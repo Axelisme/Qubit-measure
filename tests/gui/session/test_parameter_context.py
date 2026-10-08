@@ -142,6 +142,54 @@ def test_point_capture_is_detached_and_preserves_target(
     assert context.source_faults == ()
 
 
+@pytest.mark.parametrize(
+    ("explicit", "expected"),
+    [
+        ({}, {"capture_driver": "Q1", "capture_sensor": "R1"}),
+        (
+            {"capture_driver": "Q2"},
+            {"capture_driver": "Q2", "capture_sensor": "R2"},
+        ),
+        ({"capture_driver": None}, {}),
+        (
+            {"capture_driver": None, "capture_sensor": "R2"},
+            {"capture_sensor": "R2"},
+        ),
+        (
+            {"capture_sensor": "R2"},
+            {"capture_driver": "Q1", "capture_sensor": "R2"},
+        ),
+        ({"capture_sensor": None}, {"capture_driver": "Q1"}),
+    ],
+)
+def test_manual_capture_reinfers_only_nonmanual_roles_from_fixed_focus(
+    source: tuple[PointDocument, LibrarySnapshot],
+    explicit: dict[str, str | None],
+    expected: dict[str, str],
+) -> None:
+    original = capture(source).bind_roles(declarations(), focus="Q1", explicit={})
+    updated = original.bind_roles(declarations(), focus="Q1", explicit=explicit)
+    binding = updated.roles
+    assert binding is not None
+    assert binding.focus == "Q1"
+    assert dict(binding.explicit) == explicit
+    assert dict(binding.names) == expected
+    assert updated.target == original.target
+    assert updated.value("Q1.rate") == 4300.0
+    previous = original.roles
+    assert previous is not None
+    assert dict(previous.names) == {"capture_driver": "Q1", "capture_sensor": "R1"}
+    assert dict(previous.explicit) == {}
+    for role in declarations():
+        if role not in expected:
+            with pytest.raises(RoleResolutionError) as error:
+                updated.resolve_path(f"{role}.rate")
+            assert error.value.role == role
+    restored = updated.bind_roles(declarations(), focus=binding.focus, explicit={})
+    assert restored.resolve_path("capture_driver.rate") == "Q1.rate"
+    assert restored.resolve_path("capture_sensor.rate") == "R1.rate"
+
+
 def test_bind_roles_uses_only_fixed_point_and_detaches_mappings(
     source: tuple[PointDocument, LibrarySnapshot],
 ) -> None:
