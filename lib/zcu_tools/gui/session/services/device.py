@@ -12,6 +12,7 @@ from typing import (
     runtime_checkable,
 )
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
@@ -652,6 +653,18 @@ class DeviceService:
     def get_connected_devices(self) -> dict[str, BaseDevice[Any]]:
         """Borrow the registered drivers without transferring lifecycle ownership."""
         return dict(self._registry.get_all_devices())
+
+    def capture_native_device_info(self) -> dict[str, DeviceInfo]:
+        """Capture ordered native info for live registered devices without I/O.
+
+        Call on the session owner thread. Values come only from State's cached
+        info, not driver get_info or a poll. Remembered-only devices are absent.
+        Missing info or a cached model outside the native DeviceInfo union raises
+        ValueError instead of silently omitting a live device. Return detached
+        native models for FormEnv and startup DeviceSnapshot; drivers and their
+        lifecycle remain session-owned. No setup or hardware read occurs.
+        """
+        raise NotImplementedError
 
     def list_device_snapshots(self) -> tuple[DeviceSnapshot, ...]:
         return tuple(self._project(dev) for dev in self._state.list_devices())
