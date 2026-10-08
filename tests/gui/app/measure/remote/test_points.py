@@ -219,16 +219,19 @@ def test_switch_keeps_old_tab_capture_and_new_tab_uses_selected_point(
     )["tab_id"]
     assert isinstance(new_tab, str)
     assert application.result(
-        "tab.parameter_read", {"tab_id": old_tab, "paths": ["driver.rate"]}
+        "tab.parameter_read",
+        {"tab_id": old_tab, "paths": ["driver.rate"], "module_refs": []},
     ) == {"values": {"driver.rate": 20.0}, "modules": {}}
     assert application.result(
-        "tab.parameter_read", {"tab_id": new_tab, "paths": ["driver.rate"]}
+        "tab.parameter_read",
+        {"tab_id": new_tab, "paths": ["driver.rate"], "module_refs": []},
     ) == {"values": {"driver.rate": 10.0}, "modules": {}}
     assert application.result(
         "point.use", {"entry_id": info.entry_id, "label": "first"}
     ) == {"kind": "saved_point", "entry_id": info.entry_id, "point": "first"}
     assert application.result(
-        "tab.parameter_read", {"tab_id": new_tab, "paths": ["driver.rate"]}
+        "tab.parameter_read",
+        {"tab_id": new_tab, "paths": ["driver.rate"], "module_refs": []},
     )["values"] == {"driver.rate": 10.0}
 
 
@@ -319,7 +322,9 @@ def test_metadata_read_and_point_write_do_not_unlock_context_guard(
     application.result("point.list", {})
     opened_resource(info).new_point("base")
     application.result("point.use", {"entry_id": info.entry_id, "label": "base"})
-    reply = application.rpc("context.md_set_attr", {"key": "rate", "value": 1.0})
+    reply = application.rpc(
+        "context.ml_edit", {"kind": "module", "name": "unused", "edits": []}
+    )
     error = reply["error"]
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.PRECONDITION_FAILED
