@@ -36,7 +36,7 @@ Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server �
 
 Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` 的流程先確認可用，再 reset、套本次 cfg 與 Run。關閉由 `tab_close` 明確指定。
 
-Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與 confirmed run_id。Author handle 使用這份保存契約。
+Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與 confirmed run_id。Author handle 使用這份保存契約。Raw report 為 null 時不代表 Save 未送出：尚無 Run source handle 才標 not_started；已有固定 Run handle 而無報告則標 unknown，表示沒有保存結果可確認，不表示一定已送出。框架不以 generic recipe phase 或 error 猜 Save admission。
 
 Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExecution`，在 recipe 的 worker 完成分析、圖像與候選 capture。Recipe-local close 和 session close 都能停止接續。寫回提問只篩選已捕捉的 stable names，不重讀 GUI 或寫入。`recipe_execution.py` 擁有 generator、單一 recipe admission、一次性取消、captured question 與 typed snapshot。它以同一 worker 完成 author handles；analysis 共用 driver 的本地 condition 交付進度。Session 與 tool table 使用必填的同一份注入 definitions。Guide 與 analysis-only scalar estimates 也讀 owning registry。單一 recipe 包含 interactive 與 awaiting_answer；terminal 之後才放行下一個呼叫。
 

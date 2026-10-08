@@ -318,3 +318,48 @@ def test_raw_save_rejects_malformed_native_report_at_the_wire_boundary(
             run.save_raw()
         assert error.value.reason == "incompatible_wire"
         assert run.snapshot().raw_save is None
+
+
+@pytest.mark.parametrize(
+    "scenario,expected_status",
+    [
+        ("before_run", "not_started"),
+        ("without_save", "unknown"),
+        ("uncertain_save", "unknown"),
+    ],
+)
+def test_recipe_raw_step_does_not_infer_save_admission_from_missing_report(
+    tmp_path, scenario, expected_status
+):
+    def sample(session: RecipeSession) -> RecipeGenerator:
+        if scenario == "before_run":
+            return
+        run, status = yield session.open_tab("lookback").run()
+        assert isinstance(run, RecipeRun) and status == "completed"
+        if scenario == "uncertain_save":
+            run.save_raw()
+
+    client = make_client(tmp_path, LookbackGui(), recipes=(definition(sample),))
+    client.transport.replies["tab.save_data"] = {
+        "ok": False,
+        "error": {
+            "code": "internal_error",
+            "reason": "response_encoding_failed",
+            "message": "Save report delivery failed",
+        },
+    }
+    with closing(client.context.session):
+        reply = client.call("sample", {})
+        assert reply.data["status"] == (
+            "failed" if scenario == "uncertain_save" else "finished"
+        )
+        assert reply.data["steps"]["raw_save"]["status"] == expected_status
+        if scenario == "uncertain_save":
+            assert reply.data["error"]["reason"] == "response_encoding_failed"
+        before = list(client.transport.sent)
+        full = client.call(
+            "status", {"execution": reply.data["execution"], "detail": "full"}
+        )
+        assert full["raw_save"] is None
+        assert (full["run_op"] is None) == (scenario == "before_run")
+        assert client.transport.sent == before
