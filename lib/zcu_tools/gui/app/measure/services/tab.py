@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
@@ -16,7 +16,8 @@ from zcu_tools.gui.app.measure.state import (
     TabInteractionState,
 )
 from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.resource import CfgObservation
+from zcu_tools.gui.cfg.resource import CfgObservation, CfgResolution
+from zcu_tools.gui.session.types import ParameterContext
 
 from ..adapter import AnalysisMode, WritebackItem
 from .plot_lifecycle import release_retired_plots
@@ -71,6 +72,7 @@ class TabService:
         registry: Registry,
         writeback: WritebackLifecyclePort,
         cfg_resources: TabCfgResources,
+        cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
     ) -> None:
         self._state = state
         self._registry = registry
@@ -78,6 +80,7 @@ class TabService:
         # one narrow port, without depending on the concrete sibling service.
         self._writeback = writeback
         self._cfg_resources = cfg_resources
+        self._cfg_resolution = cfg_resolution
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields

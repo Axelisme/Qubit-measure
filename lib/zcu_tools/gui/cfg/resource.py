@@ -548,9 +548,14 @@ class CfgResource:
     def refresh_group(
         resources: Sequence[CfgResource],
         *,
-        resolution: Callable[[], CfgResolution],
+        resolution: Callable[[], CfgResolution] | None = None,
     ) -> tuple[CfgObservation, ...]:
-        """Prepare all affected publications, install all, then notify subscribers."""
+        """Prepare all publications, install all, then notify subscribers.
+
+        A supplied resolution is one shared source. None uses each resource\'s
+        own source factory, preserving fixed consumer captures. Source failures
+        publish Unavailable per affected resource; notification is never partial.
+        """
         members = tuple(resources)
         if not members:
             return ()

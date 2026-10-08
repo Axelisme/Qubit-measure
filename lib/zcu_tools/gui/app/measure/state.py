@@ -26,7 +26,7 @@ from zcu_tools.gui.session.state import (
 from zcu_tools.gui.session.state import (
     SessionState,
 )
-from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.gui.version_table import (
     VersionTable as VersionTable,
 )
@@ -162,6 +162,8 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter: ExpAdapterProtocol
     # A handle to the tab's sole cfg authority, not a second input tree.
     cfg: CfgResource
+    # Fixed role/target capture from tab creation; None for context-free adapters.
+    parameters: ParameterContext | None = None
 
     # Canonical pane-owned resources.
     run: RunPaneState[T_Result] = field(

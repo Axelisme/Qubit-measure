@@ -22,6 +22,7 @@ from zcu_tools.gui.cfg.resource import (
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr, validate_scalar_expr
 from zcu_tools.gui.session.state import DEVICE_SET_VERSION_KEY, SessionState
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.gui.session.value_lookup import (
     ScalarValue as LookupScalarValue,
 )
@@ -31,8 +32,7 @@ from zcu_tools.gui.session.value_lookup import (
     ValueTypeError,
     name_from_type,
 )
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
-from zcu_tools.resources.context.content import snapshot_context_contents
+from zcu_tools.resources.context import ModuleLibrary
 
 from .arb_waveform import ArbWaveformKeys
 from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
@@ -44,9 +44,9 @@ _ReferenceConverter = Callable[[object], tuple[CfgSectionSpec, CfgSectionValue]]
 
 
 class MeasureCfgBindingHost(Protocol):
-    def get_current_md(self) -> MetaDict: ...
-
-    def get_current_ml(self) -> ModuleLibrary: ...
+    def read_context(self) -> ParameterContext:
+        """Return the published fixed point/library capture; no hardware reads."""
+        ...
 
     def list_device_names(self) -> list[str]: ...
 
@@ -69,6 +69,7 @@ class MeasureCfgBindings:
         source_basis: SourceBasis,
         *,
         captured_values: Mapping[str, object],
+        parameters: ParameterContext | None,
     ) -> CfgResolution:
         """Freeze published local data on the owner sequence, never read hardware.
 
@@ -121,6 +122,7 @@ class MeasureCfgBindings:
         state: SessionState,
         *,
         captured_values: Mapping[str, object],
+        parameters: ParameterContext | None,
     ) -> CfgResolution:
         """Bind the content snapshot to context and device-set provenance.
 
@@ -145,7 +147,14 @@ class MeasureCfgBindings:
         )
         return self.snapshot(basis, captured_values=captured_values)
 
-    def new_draft(self, schema: CfgSchema) -> CfgDraft:
+    def new_draft(
+        self, schema: CfgSchema, *, parameters: ParameterContext | None
+    ) -> CfgDraft:
+        """Bind an independent editor to this fixed capture, never live selection.
+
+        None allows pure math but parameter/library references fail. Device and
+        asset options use the published host catalog. Data-source errors propagate.
+        """
         return CfgDraft(
             schema,
             evaluate_expression=self.evaluate_expression,

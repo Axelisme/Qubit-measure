@@ -28,10 +28,8 @@ class TabCfgResources:
     def __init__(
         self,
         *,
-        resolution: Callable[[], CfgResolution],
         mutation_allowed: Callable[[str], bool],
     ) -> None:
-        self._resolution = resolution
         self._mutation_allowed = mutation_allowed
         self._resources: dict[str, CfgResource] = {}
 
@@ -40,10 +38,13 @@ class TabCfgResources:
         tab_id: str,
         defaults: Callable[[], CfgSchema],
         *,
+        resolution: Callable[[], CfgResolution],
         initial: CfgSchema | None = None,
     ) -> CfgResource:
         """Prepare before registering; restore does not execute defaults.
 
+        resolution returns published options with this tab's fixed parameter
+        capture. Refresh never substitutes the current session selection.
         The concrete result belongs to the creating application flow, not the
         frontend. A failed preparation leaves no tab association behind.
         """
