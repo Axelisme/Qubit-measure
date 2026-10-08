@@ -20,8 +20,6 @@ if TYPE_CHECKING:
     from zcu_tools.device import DeviceInfo
     from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.gui.session.parameters import ParameterContext
-    from zcu_tools.resources.context import ModuleLibrary
-    from zcu_tools.resources.context.metadict import MetaDict
     from zcu_tools.resources.entry.storage import PointStorageBinding
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -190,7 +188,8 @@ class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     """Inputs accepted for one primary analysis, independent of later session edits.
 
     run_result is the selected run data. analyze_params holds adapter-specific
-    inputs. parameters is the tab-opening capture, or None for pure calculation.
+    inputs. parameters is the Run/Load result's fixed source, or None for pure
+    calculation.
     predictor is the operation-start model, or None when no model is loaded.
     """
 
@@ -232,16 +231,17 @@ T_PostAnalyzeParams = TypeVar("T_PostAnalyzeParams", default=NoAnalyzeParams)
 class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]):
     """Mirror of :class:`AnalyzeRequest` for the post-analysis layer.
 
-    Carries the raw ``run_result`` AND the primary ``analyze_result`` (the
-    post-analysis depends on the primary fit being present), plus the
-    post-analysis params and the md/ml/predictor context.
+    run_result is the selected run data. analyze_result is the required primary
+    analysis result. post_analyze_params are adapter-specific inputs. parameters is the Run/Load
+    result's fixed source, or None for pure calculation. predictor is the shared
+    operation-start model, or None when no model is loaded. Later tab bindings
+    and session edits do not replace these request inputs.
     """
 
     run_result: T_Result
     analyze_result: T_AnalyzeResult
     post_analyze_params: T_PostAnalyzeParams
-    md: MetaDict
-    ml: ModuleLibrary
+    parameters: ParameterContext | None
     predictor: FluxoniumPredictor | None
 
 

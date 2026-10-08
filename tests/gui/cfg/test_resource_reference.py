@@ -780,6 +780,120 @@ def test_shape_switch_accepts_complete_but_unfinished_text(
     assert number.raw == "-"
 
 
+def _two_shape_schema(reference: ReferenceValue) -> CfgSchema:
+    """Two discriminator-selected shapes for unresolved-reference contracts."""
+    first = CfgSectionSpec(
+        fields={"type": LiteralSpec("first"), "x": ScalarSpec("X", float)},
+        label="First",
+    )
+    second = CfgSectionSpec(
+        fields={"type": LiteralSpec("second"), "y": ScalarSpec("Y", float)},
+        label="Second",
+    )
+    return CfgSchema(
+        CfgSectionSpec(
+            fields={"ref": ReferenceSpec("test", [first, second], discriminator="type")}
+        ),
+        CfgSectionValue({"ref": reference}),
+    )
+
+
+@pytest.mark.parametrize("second", [False, True], ids=["first", "second"])
+def test_empty_linked_reference_waits_for_catalog_shape(second: bool) -> None:
+    key = "alias.module.slot"
+    schema = _two_shape_schema(ReferenceValue(key, CfgSectionValue()))
+    catalog = Catalog()
+    resource = CfgResource(lambda: schema, resolution=catalog.snapshot)
+    initial = resource.observe()
+    assert initial.status is CfgStatus.INVALID
+    node = initial.tree.children["ref"]
+    assert node.children == {}
+    assert isinstance(node.value, ReferenceValue)
+    assert node.value.value == CfgSectionValue()
+    assert any(
+        diagnostic.path == ("ref",) and key in diagnostic.message
+        for diagnostic in initial.diagnostics
+    )
+    with pytest.raises(CfgPreconditionError):
+        resource.accept(initial.ref.revision)
+    field_name = "y" if second else "x"
+    type_name = "second" if second else "first"
+    catalog.entries[key] = ResolvedReference(
+        "Second" if second else "First",
+        CfgSectionValue({"type": DirectValue(type_name), field_name: DirectValue(2.0)}),
+    )
+    refreshed = resource.refresh(initial.ref.revision)
+    assert refreshed.status is CfgStatus.VALID
+    assert resource.accept(refreshed.ref.revision).values == {
+        "ref": {"type": type_name, field_name: 2.0}
+    }
+
+
+def test_missing_reference_diagnostic_survives_valid_cached_children(
+    reference_resource,
+) -> None:
+    resource, catalog = reference_resource
+    del catalog.entries["first"]
+    missing = resource.refresh(resource.observe().ref.revision)
+    assert missing.status is CfgStatus.INVALID
+    node = missing.tree.children["ref"]
+    assert isinstance(node.value, ReferenceValue)
+    assert node.children["x"].valid
+    assert any(
+        diagnostic.path == ("ref",)
+        and diagnostic.message == node.value.error
+        and "first" in diagnostic.message
+        for diagnostic in missing.diagnostics
+    )
+
+
+@pytest.mark.parametrize(
+    ("reference", "error"),
+    [
+        (
+            ReferenceValue("linked", CfgSectionValue({"type": DirectValue("unknown")})),
+            RuntimeError,
+        ),
+        (
+            ReferenceValue(
+                "linked",
+                CfgSectionValue(
+                    {
+                        "type": DirectValue("first"),
+                        "x": DirectValue(1.0),
+                        "unknown": DirectValue(2.0),
+                    }
+                ),
+            ),
+            KeyError,
+        ),
+        (ReferenceValue("linked", CfgSectionValue(), is_overridden=True), RuntimeError),
+    ],
+    ids=["linked-bad-type", "linked-extra-field", "modified-empty"],
+)
+def test_only_unresolved_linked_empty_payload_defers_shape_selection(
+    reference: ReferenceValue, error: type[Exception]
+) -> None:
+    schema = _two_shape_schema(reference)
+    with pytest.raises(error):
+        CfgResource(lambda: schema, resolution=Catalog().snapshot)
+
+
+def test_custom_empty_reference_keeps_explicit_shape_and_defaults() -> None:
+    schema = _two_shape_schema(ReferenceValue("<Custom:First>", CfgSectionValue()))
+    resource = CfgResource(lambda: schema, resolution=Catalog().snapshot)
+    initial = resource.observe()
+    assert initial.status is CfgStatus.VALID
+    node = initial.tree.children["ref"]
+    assert set(node.children) == {"type", "x"}
+    assert isinstance(node.value, ReferenceValue)
+    assert node.value.error is None
+    selected = resource.accept(initial.ref.revision).values["ref"]
+    assert isinstance(selected, dict)
+    assert selected["type"] == "first"
+    assert "x" in selected
+
+
 def test_missing_reference_does_not_offer_stale_children_for_partial_edit(
     reference_resource,
 ) -> None:

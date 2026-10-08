@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.ports import ExclusionGate
+    from zcu_tools.gui.session.types import ParameterContext
     from zcu_tools.plotting.plots import Plots
 
     from ..state import RetiredPaneResources, State
@@ -59,6 +60,7 @@ class _RunOperation:
     stop_event: threading.Event
     stop_signal: StopSignal
     cancel_requested: threading.Event
+    parameters: ParameterContext | None
     metadata: RunMetadata | None = None
 
 
@@ -153,6 +155,7 @@ class RunService:
                 result,
                 source_operation_id=self._active_token,
                 metadata=op.metadata,
+                parameters=op.parameters,
             )
         except Exception as error:  # noqa: BLE001 - settle host/State failures on the owner loop
             self._run_failed(op, error, settle)
@@ -261,7 +264,7 @@ class RunService:
             stop_event.set()
 
         operation = _RunOperation(
-            tab_id, plots, stop_event, stop_signal, cancel_requested
+            tab_id, plots, stop_event, stop_signal, cancel_requested, permit.parameters
         )
 
         def work(factory: Any) -> object:

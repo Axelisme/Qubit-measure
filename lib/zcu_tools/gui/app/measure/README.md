@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-08，Run acquisition completion 與 evidence 契約
+**Last updated:** 2026-10-09，Run/Load result source 與晚開分析
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -15,6 +15,11 @@ Run permit 固定 tab 的歷史 entry／point／roles 與 adapter 的 persistenc
 再由 State 一次發布結果與 `RunPaneState.metadata`。Save request 取用這份歷史
 metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。未宣告 native evidence
 或沒有 saved origin 時 metadata 為 None；新 Run 清舊 evidence，Load 不製造新的量測歷史。
+
+Run permit 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
+晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
+Load 保存 LoadDataRequest 的 capture，但不新增 Run token 或 metadata。
+純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。predictor 仍跨 tab 共享。
 
 ## 局部設計與閱讀入口
 

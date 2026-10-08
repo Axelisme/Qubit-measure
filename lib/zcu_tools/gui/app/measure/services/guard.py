@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.cfg.resource import AcceptedConfig, CfgRevision
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.types import ContextReadiness
+from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,8 @@ class RunPermit:
     drafts, unbound tabs or adapters without native evidence. experiment_tag is
     the adapter's persistence declaration tag, or None. Neither is recaptured
     after admission. This credential requires no release; the operation owns
-    its hardware lease.
+    its hardware lease. parameters is the fixed source used at admission, or
+    None for context-free work; Run publishes it with the result for later analysis.
     """
 
     tab_id: str
@@ -57,6 +58,7 @@ class RunPermit:
     accepted_cfg: AcceptedConfig
     snapshot: RunSnapshot | None = None
     experiment_tag: str | None = None
+    parameters: ParameterContext | None = None
 
 
 @dataclass(frozen=True)
@@ -207,6 +209,7 @@ class GuardService:
             accepted_cfg=accepted,
             snapshot=snapshot,
             experiment_tag=experiment_tag,
+            parameters=tab.parameters,
         )
 
     def acquire_save_permit(self, tab_id: str) -> SavePermit:

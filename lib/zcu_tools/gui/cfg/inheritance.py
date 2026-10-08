@@ -20,7 +20,11 @@ from .model import (
     SweepValue,
     default_value_for_type,
 )
-from .reference_key import make_custom_reference_key, parse_custom_reference_key
+from .reference_key import (
+    is_custom_reference_key,
+    make_custom_reference_key,
+    parse_custom_reference_key,
+)
 
 
 def _default_reference(spec: ReferenceSpec) -> ReferenceValue | None:
@@ -146,6 +150,13 @@ def align_locked_literals(
         elif isinstance(node_spec, ReferenceSpec) and isinstance(
             node_val, ReferenceValue
         ):
+            if (
+                not node_val.is_overridden
+                and not node_val.value.fields
+                and not is_custom_reference_key(node_val.chosen_key)
+            ):
+                # An unresolved linked input has no shape to align yet.
+                continue
             chosen_spec = select_ref_value_spec(node_spec, node_val)
             align_locked_literals(chosen_spec, node_val.value)
     return value

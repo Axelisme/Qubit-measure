@@ -27,6 +27,7 @@ from ..model import (
     SweepValue,
     resolved_direct_number,
 )
+from ..reference_key import is_custom_reference_key
 from ..scalar import coerce_scalar_result, parse_scalar_text, validate_direct_scalar
 from .ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
 from .range import CenteredSweepEditor, SweepEditor
@@ -902,6 +903,13 @@ def validate_section_keys(
         elif isinstance(child_spec, ReferenceSpec) and isinstance(
             child_value, ReferenceValue
         ):
+            if (
+                not child_value.is_overridden
+                and not child_value.value.fields
+                and not is_custom_reference_key(child_value.chosen_key)
+            ):
+                # The reference binding can await its catalog shape.
+                continue
             child_path = f"{path}.{key}" if path else key
             chosen_spec = select_ref_value_spec(child_spec, child_value)
             validate_section_keys(

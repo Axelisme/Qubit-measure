@@ -5,13 +5,19 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.cfg_model import (
+    ConstWaveformCfg,
+    DirectReadoutCfg,
+    PulseReadoutSpec,
+    PulseSpec,
+)
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.cfg_binding import (
     MeasureCfgBindingHost,
     MeasureCfgBindings,
 )
 from zcu_tools.gui.cfg import (
+    CfgSectionValue,
     DirectValue,
     EvalValue,
     ReferenceValue,
@@ -19,7 +25,12 @@ from zcu_tools.gui.cfg import (
     make_default_value,
     read_value_path,
 )
-from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgResource, CfgStatus
+from zcu_tools.gui.cfg.resource import (
+    CfgEdit,
+    CfgPreconditionError,
+    CfgResource,
+    CfgStatus,
+)
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
@@ -41,7 +52,10 @@ from zcu_lab.v2._support.measure.seeds import (
     path_seed,
     scaled_path_seed,
 )
-from zcu_lab.v2._support.measure.spec_helpers import make_pulse_module_spec
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_readout_module_spec,
+)
 
 
 class ModuleOwner(ComponentSchema):
@@ -244,6 +258,240 @@ def test_unbound_scalar_defaults_publish_invalid_then_refresh_or_reset(
         reset = resource.reset(refreshed.ref.revision)
         assert reset.status is CfgStatus.VALID
         assert resource.accept(reset.ref.revision).values["value"] == 8.0
+
+
+def test_unbound_pulse_default_preserves_empty_link_and_refreshes_calibration() -> None:
+    environment = _environment(bound=False)
+    definition = (
+        MeasureCfgBuilder()
+        .field(
+            "modules.drive",
+            spec=make_pulse_module_spec(),
+            default=module_seed("qubit.module.x180", fallback=literal(_fallback())),
+        )
+        .float("neighbor", label="Neighbor", default=3.0)
+        .build()
+    )
+    host = MagicMock(spec=MeasureCfgBindingHost)
+    host.list_device_names.return_value = []
+    host.arb_waveforms.list_data_keys.return_value = []
+    bindings = MeasureCfgBindings(host)
+    resource = CfgResource(
+        defaults=lambda: definition.instantiate(environment),
+        resolution=lambda: bindings.snapshot(
+            (), captured_values={}, parameters=environment.parameters
+        ),
+    )
+    initial = resource.observe()
+    assert initial.status is CfgStatus.INVALID
+    value = read_value_path(resource.snapshot_inputs().value, "modules.drive")
+    assert isinstance(value, ReferenceValue)
+    assert value.chosen_key == "qubit.module.x180"
+    assert value.value == CfgSectionValue()
+    assert any(
+        diagnostic.path == ("modules", "drive")
+        and "qubit.module.x180" in diagnostic.message
+        for diagnostic in initial.diagnostics
+    )
+    with pytest.raises(CfgPreconditionError):
+        resource.accept(initial.ref.revision)
+    edited = resource.edit(initial.ref.revision, (CfgEdit(("neighbor",), 4.0),))
+    assert edited.status is CfgStatus.INVALID
+    environment = _environment()
+    refreshed = resource.refresh(edited.ref.revision)
+    assert refreshed.status is CfgStatus.VALID
+    assert refreshed.ref.cfg_id == initial.ref.cfg_id
+    assert refreshed.ref.revision > initial.ref.revision
+    raw = resource.accept(refreshed.ref.revision).values
+    assert raw["neighbor"] == 4.0
+    modules = raw["modules"]
+    assert isinstance(modules, dict)
+    drive = modules["drive"]
+    assert isinstance(drive, dict)
+    assert drive["gain"] == 0.3
+    assert drive["freq"] == 4300.0
+
+
+def _readout_environment(
+    readout: DirectReadoutCfg | PulseReadoutSpec, *, bound: bool
+) -> SessionEnv:
+    """Capture one readout slot and its concrete library family without I/O."""
+    base = _environment()
+    assert base.parameters is not None
+    point = base.parameters.document()
+    owner = point.components["Q1"]
+    assert isinstance(owner, ModuleOwner)
+    owner.module["readout"] = "Q1.readout.cal"
+    return SessionEnv(
+        parameters=ParameterContext(
+            point=point,
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library",
+                    format_version="1.0",
+                    components={"Q1": ComponentLibrary(readout={"cal": readout})},
+                )
+            ),
+            target=EntryDraft(entry_id="entry"),
+            roles=RoleBinding(
+                "Q1",
+                {"readout": RoleSpec("seed/module_owner")},
+                {"readout": "Q1"} if bound else {},
+            ),
+        ),
+        soc=None,
+        soccfg=None,
+    )
+
+
+@pytest.mark.parametrize("pulse", [False, True], ids=["direct", "pulse"])
+def test_unbound_readout_default_takes_catalog_shape_after_binding(pulse: bool) -> None:
+    direct = DirectReadoutCfg(ro_ch=0, ro_freq=200.0, ro_length=2.0)
+    readout = (
+        PulseReadoutSpec(
+            ro_cfg=direct,
+            pulse_cfg=PulseSpec(
+                waveform=ConstWaveformCfg(length=2.0),
+                ch=1,
+                nqz=2,
+                freq=200.0,
+                gain=0.3,
+            ),
+        )
+        if pulse
+        else direct
+    )
+    environment = _readout_environment(readout, bound=False)
+    definition = (
+        MeasureCfgBuilder()
+        .field(
+            "modules.readout",
+            spec=make_readout_module_spec(),
+            default=module_seed("readout.module.readout", fallback=None),
+        )
+        .build()
+    )
+    host = MagicMock(spec=MeasureCfgBindingHost)
+    host.list_device_names.return_value = []
+    host.arb_waveforms.list_data_keys.return_value = []
+    bindings = MeasureCfgBindings(host)
+    resource = CfgResource(
+        defaults=lambda: definition.instantiate(environment),
+        resolution=lambda: bindings.snapshot(
+            (), captured_values={}, parameters=environment.parameters
+        ),
+    )
+    initial = resource.observe()
+    assert initial.status is CfgStatus.INVALID
+    value = read_value_path(resource.snapshot_inputs().value, "modules.readout")
+    assert isinstance(value, ReferenceValue)
+    assert value.value == CfgSectionValue()
+    assert initial.tree.children["modules"].children["readout"].children == {}
+    assert any(
+        diagnostic.path == ("modules", "readout")
+        and "readout.module.readout" in diagnostic.message
+        for diagnostic in initial.diagnostics
+    )
+    with pytest.raises(CfgPreconditionError):
+        resource.accept(initial.ref.revision)
+
+    environment = _readout_environment(readout, bound=True)
+    refreshed = resource.refresh(initial.ref.revision)
+    assert refreshed.status is CfgStatus.VALID
+    raw = resource.accept(refreshed.ref.revision).values["modules"]
+    assert isinstance(raw, dict)
+    selected = raw["readout"]
+    assert isinstance(selected, dict)
+    assert selected["type"] == ("readout/pulse" if pulse else "readout/direct")
+    if pulse:
+        pulse_cfg = selected["pulse_cfg"]
+        assert isinstance(pulse_cfg, dict)
+        assert pulse_cfg["gain"] == 0.3
+    else:
+        assert selected["ro_freq"] == 200.0
+
+
+def test_unbound_optional_module_is_invalid_until_explicitly_disabled() -> None:
+    environment = _environment(bound=False)
+    definition = (
+        MeasureCfgBuilder()
+        .field(
+            "modules.drive",
+            spec=make_pulse_module_spec(optional=True),
+            default=module_seed("qubit.module.x180", fallback=None),
+        )
+        .build()
+    )
+    host = MagicMock(spec=MeasureCfgBindingHost)
+    host.list_device_names.return_value = []
+    host.arb_waveforms.list_data_keys.return_value = []
+    bindings = MeasureCfgBindings(host)
+    resource = CfgResource(
+        defaults=lambda: definition.instantiate(environment),
+        resolution=lambda: bindings.snapshot(
+            (), captured_values={}, parameters=environment.parameters
+        ),
+    )
+    initial = resource.observe()
+    assert initial.status is CfgStatus.INVALID
+    assert isinstance(
+        read_value_path(resource.snapshot_inputs().value, "modules.drive"),
+        ReferenceValue,
+    )
+    disabled = resource.edit(
+        initial.ref.revision, (CfgEdit(("modules", "drive", "__ref"), None),)
+    )
+    assert disabled.status is CfgStatus.VALID
+    assert read_value_path(resource.snapshot_inputs().value, "modules.drive") is None
+    environment = _environment()
+    refreshed = resource.refresh(disabled.ref.revision)
+    assert refreshed.status is CfgStatus.VALID
+    assert read_value_path(resource.snapshot_inputs().value, "modules.drive") is None
+    assert resource.accept(refreshed.ref.revision).values == {"modules": {}}
+
+
+@pytest.mark.parametrize("slot", [None, "Q1.pulses.missing"], ids=["unset", "dangling"])
+def test_unbound_module_keeps_missing_link_until_reset_uses_bound_fallback(
+    slot: str | None,
+) -> None:
+    environment = _environment(bound=False)
+    definition = (
+        MeasureCfgBuilder()
+        .field(
+            "modules.drive",
+            spec=make_pulse_module_spec(),
+            default=module_seed("qubit.module.x180", fallback=literal(_fallback())),
+        )
+        .build()
+    )
+    host = MagicMock(spec=MeasureCfgBindingHost)
+    host.list_device_names.return_value = []
+    host.arb_waveforms.list_data_keys.return_value = []
+    bindings = MeasureCfgBindings(host)
+    resource = CfgResource(
+        defaults=lambda: definition.instantiate(environment),
+        resolution=lambda: bindings.snapshot(
+            (), captured_values={}, parameters=environment.parameters
+        ),
+    )
+    initial = resource.observe()
+    assert initial.status is CfgStatus.INVALID
+    environment = _environment(slot=slot)
+    refreshed = resource.refresh(initial.ref.revision)
+    assert refreshed.status is CfgStatus.INVALID
+    value = read_value_path(resource.snapshot_inputs().value, "modules.drive")
+    assert isinstance(value, ReferenceValue)
+    assert value.chosen_key == "qubit.module.x180"
+    assert value.value == CfgSectionValue()
+    with pytest.raises(CfgPreconditionError):
+        resource.accept(refreshed.ref.revision)
+    reset = resource.reset(refreshed.ref.revision)
+    assert reset.status is CfgStatus.VALID
+    modules = resource.accept(reset.ref.revision).values["modules"]
+    assert isinstance(modules, dict)
+    drive = modules["drive"]
+    assert isinstance(drive, dict)
+    assert drive["gain"] == 0.1
 
 
 def _fallback() -> ReferenceValue:

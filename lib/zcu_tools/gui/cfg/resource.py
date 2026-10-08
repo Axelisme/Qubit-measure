@@ -29,6 +29,7 @@ from .model import (
     DirectValue,
     EvalValue,
     ReferenceSpec,
+    ReferenceValue,
 )
 from .resolved import lower_resolved_cfg
 
@@ -639,8 +640,10 @@ def _validate_definition(spec: CfgNodeSpec) -> None:
 
 
 def _diagnostics(tree: CfgNodeObservation, path: CfgPath = ()):
-    if not tree.valid and not tree.children:
-        value = tree.value
+    value = tree.value
+    if isinstance(value, ReferenceValue) and value.error:
+        yield CfgDiagnostic(path, "invalid_input", value.error)
+    elif not tree.valid and not tree.children:
         message = "input is incomplete or invalid"
         if isinstance(value, (DirectValue, EvalValue)):
             message = value.error or value.validation_error or message
