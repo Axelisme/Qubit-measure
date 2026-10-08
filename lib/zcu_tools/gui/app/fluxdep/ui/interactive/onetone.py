@@ -1,148 +1,132 @@
-"""OneToneWidget — one-tone point selection by threshold (no mouse interaction).
-
-The simplest interactive tool: a threshold slider drives automatic peak
-detection on the most-dispersive frequency slice. The numerical rules live in
-``zcu_tools.analysis.fluxdep``; this widget only renders Qt controls/canvas.
-"""
+"""One-tone Qt controls and disposable presentation of an app-owned Session."""
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
+
 import numpy as np
 from numpy.typing import NDArray
-from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QLabel, QSlider, QWidget  # type: ignore[attr-defined]
+from qtpy import QtCore, QtWidgets
 
-from zcu_tools.analysis.fluxdep import (
-    detect_peaks,
-    max_dispersion_freq_index,
-    smoothed_slice,
-)
+from zcu_tools.analysis.fluxdep.onetone import analyze_onetone_pick
+from zcu_tools.gui.app.fluxdep.interactive import OneTonePickContext
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.plotting.fluxdep.onetone import OneTonePickPlot
 
 from .base import InteractiveMplWidget
 
-# FloatSlider(0..5, step 0.01) emulated on an int QSlider scaled by 100.
-_THRESHOLD_SCALE = 100
-_THRESHOLD_MAX = 5.0
+logger = logging.getLogger(__name__)
 
 
 class OneToneWidget(InteractiveMplWidget):
-    """Threshold-driven peak picking on a one-tone flux spectrum."""
+    """Present one committed threshold/peak Session with Undo and Finish requests.
 
-    def __init__(
-        self,
-        signals: NDArray[np.complex128],
-        dev_values: NDArray[np.float64],
-        freqs: NDArray[np.float64],
-        threshold: float = 1.0,
-        flux_half: float | None = None,
-        flux_int: float | None = None,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._signals = signals
-        self._dev_values = dev_values
-        self._freqs = freqs
-        self._flux_half = flux_half
-        self._flux_int = flux_int
+    Controls use context.plugin.set_threshold and Session.undo. Finish is a
+    request to the app owner; get_result never reads artist or slider caches.
+    """
 
-        self._max_freq_idx = max_dispersion_freq_index(signals, freqs)
-        self._smoothed = smoothed_slice(signals, self._max_freq_idx)
-        self._s_dev_values: NDArray[np.float64] = np.empty(0, dtype=np.float64)
-        self._s_freqs: NDArray[np.float64] = np.empty(0, dtype=np.float64)
+    def __init__(self, context: OneTonePickContext) -> None:
+        """Attach an open context without taking domain ownership.
 
-        # Debounce the (whole-figure) redraw so rapid slider ticks coalesce.
-        self._redraw_timer = QTimer(self)
+        Teardown detaches only presentation. The owner controls cancellation,
+        spectrum invalidation and terminal publication. Closed input raises
+        FailedPreconditionError before attachment.
+        """
+        context.session.ensure_input_open()
+        super().__init__()
+        self._context = context
+        self._detached = False
+        self._plot = OneTonePickPlot(
+            self.figure,
+            context.plugin.inputs,
+            flux_half=context.flux_half,
+            flux_int=context.flux_int,
+        )
+        self._redraw_timer = QtCore.QTimer(self)
         self._redraw_timer.setSingleShot(True)
         self._redraw_timer.setInterval(50)
         self._redraw_timer.timeout.connect(self.redraw)
-
-        self._build_controls(threshold)
-        self._init_plots()
-        self.update_peaks(threshold)
-
-    # --- controls --------------------------------------------------------
-
-    def _build_controls(self, threshold: float) -> None:
-        self.controls_layout.addWidget(QLabel("Threshold"))
-        self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
-        self._threshold_slider.setMinimum(0)
-        self._threshold_slider.setMaximum(int(_THRESHOLD_MAX * _THRESHOLD_SCALE))
-        self._threshold_slider.setValue(int(threshold * _THRESHOLD_SCALE))
-        self._threshold_slider.valueChanged.connect(self._on_threshold_change)
+        self.controls_layout.addWidget(QtWidgets.QLabel("Threshold"))
+        self._threshold_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self._threshold_slider.setRange(0, 500)
+        self._threshold_slider.valueChanged.connect(
+            lambda value: self._execute(
+                lambda: context.plugin.set_threshold.execute(
+                    context.session, value / 100
+                )
+            )
+        )
         self.controls_layout.addWidget(self._threshold_slider)
-        self.add_finish_button()
+        self._undo = QtWidgets.QPushButton("Undo")
+        self._undo.clicked.connect(lambda: self._execute(context.session.undo))
+        self.controls_layout.addWidget(self._undo)
+        self._info = QtWidgets.QLabel()
+        self._info.setWordWrap(True)
+        self.controls_layout.addWidget(self._info)
+        self._finish = self.add_finish_button()
+        self._finish.clicked.disconnect()
+        self._finish.clicked.connect(self._request_finish)
+        self._unsubscribe = context.session.subscribe(self._show_committed)
+        self._show_committed()
 
-    def _threshold(self) -> float:
-        return self._threshold_slider.value() / _THRESHOLD_SCALE
+    def _input_open(self) -> bool:
+        if self._detached:
+            return False
+        try:
+            self._context.session.ensure_input_open()
+        except FailedPreconditionError:
+            for control in (self._threshold_slider, self._undo, self._finish):
+                control.setEnabled(False)
+            return False
+        return True
 
-    # --- plotting --------------------------------------------------------
+    def _execute(self, operation: Callable[[], object]) -> None:
+        if not self._input_open():
+            return
+        try:
+            operation()
+        except (InvalidInputError, FailedPreconditionError) as exc:
+            self._show_committed()
+            self._info.setText(str(exc))
+        except Exception as exc:
+            # Isolate Qt callback failures while preserving a visible error.
+            logger.exception("one-tone control failed")
+            self._show_committed()
+            self._info.setText(str(exc))
 
-    def _init_plots(self) -> None:
-        # add_subplot (vs figure.subplots) gives a precise Axes type to pyright,
-        # avoiding the subplots() overload's "not iterable" unpacking error.
-        self._ax_img = self.figure.add_subplot(2, 1, 1)
-        self._ax_curve = self.figure.add_subplot(2, 1, 2)
-        real_signals = np.abs(self._signals)
-        self._ax_img.imshow(
-            real_signals.T,
-            aspect="auto",
-            origin="lower",
-            extent=(
-                self._dev_values[0],
-                self._dev_values[-1],
-                self._freqs[0],
-                self._freqs[-1],
-            ),
+    def _show_committed(self) -> None:
+        if self._detached:
+            return
+        state = self._context.session.snapshot()
+        self._plot.show_state(state)
+        self._threshold_slider.blockSignals(True)
+        self._threshold_slider.setValue(round(state.threshold * 100))
+        self._threshold_slider.blockSignals(False)
+        if self._input_open():
+            self._undo.setEnabled(self._context.session.can_undo())
+        self._info.setText(
+            f"Threshold: {state.threshold:g}, points: {len(state.peak_indices)}"
         )
-        self._ax_img.axhline(
-            self._freqs[self._max_freq_idx], color="red", label="max freqs"
-        )
-        # Half-flux (red) / integer-flux (blue) vertical markers from the
-        # line-picker, on both panels (read-only reference for point selection).
-        for ax in (self._ax_img, self._ax_curve):
-            if self._flux_half is not None:
-                ax.axvline(self._flux_half, color="red", linestyle="--", linewidth=1)
-            if self._flux_int is not None:
-                ax.axvline(self._flux_int, color="blue", linestyle="--", linewidth=1)
-        self._ax_curve.plot(self._dev_values, self._smoothed)
-        self._ax_curve.set_xlim(self._dev_values[0], self._dev_values[-1])
-        self._ax_img.set_ylabel("Frequency (GHz)")
-        self._ax_curve.set_xlabel("Device value")
-        self._ax_curve.set_ylabel("Normalized Amplitude")
-        # Pre-create the peak scatters once; update_peaks just moves the offsets
-        # (rebuilding the artist every slider tick was the cost, not the O(N)
-        # find_peaks which is ~0.1ms).
-        self._scatter_img = self._ax_img.scatter([], [], color="red", s=30, zorder=5)
-        self._scatter_curve = self._ax_curve.scatter(
-            [], [], color="red", s=30, zorder=5
-        )
-
-    def update_peaks(self, threshold: float) -> None:
-        peaks = detect_peaks(self._smoothed, threshold)
-        self._s_dev_values = self._dev_values[peaks]
-        self._s_freqs = np.full_like(
-            self._s_dev_values, self._freqs[self._max_freq_idx]
-        )
-
-        def _offsets(xs, ys):
-            return np.column_stack((xs, ys)) if len(xs) else np.empty((0, 2))
-
-        self._scatter_img.set_offsets(_offsets(self._s_dev_values, self._s_freqs))
-        self._scatter_curve.set_offsets(
-            _offsets(self._s_dev_values, self._smoothed[peaks])
-        )
-        self._schedule_redraw()
-
-    def _schedule_redraw(self) -> None:
-        # Coalesce rapid slider ticks: redrawing the whole figure (large imshow)
-        # is the slow part, so debounce it rather than redraw on every tick.
         self._redraw_timer.start()
 
-    def _on_threshold_change(self, _value: int) -> None:
-        self.update_peaks(self._threshold())
-
-    # --- result ----------------------------------------------------------
+    def _request_finish(self) -> None:
+        if self._input_open():
+            self.finished.emit()
 
     def get_result(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """Selected (dev_values, freqs) — all at the max-dispersion frequency."""
-        return self._s_dev_values, self._s_freqs
+        """Return committed native device/GHz points, including an empty result."""
+        result = analyze_onetone_pick(
+            self._context.plugin.inputs, self._context.session.snapshot()
+        )
+        return result.dev_values, result.freqs
+
+    def teardown(self) -> None:
+        """Idempotently stop redraw and detach controls without closing input."""
+        if self._detached:
+            return
+        self._detached = True
+        self._redraw_timer.stop()
+        self._unsubscribe()
+        for control in (self._threshold_slider, self._undo, self._finish):
+            control.setEnabled(False)

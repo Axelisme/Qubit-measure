@@ -12,6 +12,8 @@ Domain guard 檢查請求所需的前置條件。measure 的 `GuardService` 向 
 
 `OperationRunner` 集中啟動檢查、handle 建立、可選 lease／progress 配置、背景提交與終局清理。各 operation 提供 work 與 terminal policy，決定 State 寫入、partial result、失敗與 cancelled 的解讀。Runner 不讀寫 State，也不決定實驗停止、device rollback 或 figure policy。`BackgroundExecutor` 僅執行 work 並將 terminal callback 交回 owner；需要的 figure、progress 和 stop scope 由 operation 的 work 組裝，而非由通用 executor 猜測 domain。互動式工作可由使用者動作推進 handle，並非每個 handle 都對應 worker thread。終局 policy 在必要的 domain commit 後才 settle handle；progress discard、settle 與 lease release 分別作 best-effort 清理，失敗會記錄，不能推導跨 State、channel 和硬體的原子交易。
 
+純分析 operation 不需要注入硬體 gate。Runner 在開 handle 前拒絕缺少的必要 facet。Optional on_opened hook 在 progress notification 與 submit 前交出 token，domain owner 可先保留 admission，並在 startup failure 後發布同一 token 的 terminal activity。Fluxdep search 由 app owner capture detached input 與來源版本，worker 成功後只提交仍有效的結果。GUI 與 remote caller 共用這份 owner policy，細節見 [fluxdep owner](../../lib/zcu_tools/gui/app/fluxdep/README.md)。
+
 State 的語意寫入由單一 owner loop 序列執行。Qt queued delivery 和 headless owner scheduler 是不同 adapter；worker 不直接提交 State。能阻塞的 await 位於 off-owner caller，owner loop 用通知或非阻塞 poll 推進，不能阻塞等待需要 owner callback 的完成。Await 的期限到達只表示這一次等待結束，不改變 operation outcome。Operation Handle 回報 finished／failed／cancelled 等終局，不承載完整實驗結果；結果由 domain owner 保存，progress 由獨立 read surface 提供。Resource version guard 與 agent 的 handle 呈現屬 [GUI／Remote 契約](0068-remote-transport.md)，不等同於 lease。
 
 ## 取消與互動

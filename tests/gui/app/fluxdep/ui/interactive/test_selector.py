@@ -1,115 +1,224 @@
-"""Tests for SelectorWidget (headless)."""
+"""Selector controls/canvas and injected preview delivery through public seams."""
 
-from __future__ import annotations
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 import pytest
-from zcu_tools.analysis.fluxdep.models import PointsData, SpectrumResult
-from zcu_tools.analysis.spectrum import SpectrumData
+from matplotlib.backend_bases import MouseButton, MouseEvent
+from qtpy import QtCore, QtWidgets
+from zcu_tools.analysis.fluxdep.cross_selection import CrossSelectionView
+from zcu_tools.analysis.fluxdep.stroke import BrushPoint, BrushStroke, BrushTool
 from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
+from zcu_tools.gui.expected_error import FailedPreconditionError
 
 
-def _spectrum_result(n_pts=5) -> SpectrumResult:
-    fluxs = np.linspace(0.1, 0.4, n_pts).astype(np.float64)
-    freqs = np.linspace(4.2, 4.6, n_pts).astype(np.float64)
-    grid_flux = np.linspace(0.0, 0.5, 8).astype(np.float64)
-    grid_freq = np.linspace(4.0, 5.0, 6).astype(np.float64)
-    return SpectrumResult(
-        flux_half=0.0,
-        flux_int=0.25,
-        flux_period=0.5,
-        spectrum=SpectrumData(
-            dev_values=grid_flux.copy(),
-            fluxs=grid_flux,
-            freqs=grid_freq,
-            signals=np.ones((8, 6), dtype=np.complex128),
-        ),
-        points=PointsData(dev_values=fluxs.copy(), fluxs=fluxs, freqs=freqs),
+@dataclass
+class PreviewJob:
+    compute: Callable[[], CrossSelectionView]
+    on_done: Callable[[CrossSelectionView], None]
+    on_error: Callable[[Exception], None]
+
+
+def wait_for_debounce():
+    loop = QtCore.QEventLoop()
+    QtCore.QTimer.singleShot(100, loop.quit)
+    loop.exec()
+
+
+def control[Control: QtWidgets.QWidget](
+    widget: QtWidgets.QWidget, kind: type[Control], name: str
+) -> Control:
+    return next(
+        item for item in widget.findChildren(kind) if item.accessibleName() == name
     )
 
 
-def _spectrums() -> dict[str, SpectrumResult]:
-    return {"a": _spectrum_result(), "b": _spectrum_result()}
-
-
 @pytest.fixture
-def widget(qapp):
-    w = SelectorWidget(_spectrums(), brush_width=0.05)
-    yield w
-    # Some tests call apply_filter() / _on_perform_all() which starts the 80 ms
-    # debounce that submits a pool worker. Stop the timer so no NEW worker starts,
-    # then quiesce the runner: it joins any in-flight worker AND flushes its queued
-    # main-thread delivery, so deleting the widget can't leave a stale QMetaCallEvent.
-    w._debounce.stop()
-    w._runner.quiesce()
-    w.deleteLater()
+def selector(qapp, cross_controller):
+    context = cross_controller.interactive.begin_cross_selection()
+    jobs: list[PreviewJob] = []
+
+    def submit(compute, on_done, on_error):
+        jobs.append(PreviewJob(compute, on_done, on_error))
+
+    widget = SelectorWidget(
+        context,
+        on_apply=cross_controller.interactive.apply_cross_selection,
+        submit_preview=submit,
+    )
+    yield widget, context, jobs
+    widget.teardown()
+    widget.deleteLater()
     qapp.processEvents()
 
 
-def test_widget_builds_all_selected_by_default(widget):
-    fluxs, freqs, selected = widget.get_result()
-    # default: everything selected (10 points across two spectra)
-    assert selected.sum() == 10
-    assert fluxs.shape == freqs.shape == (10,)
+def test_controls_share_state_tool_undo_and_nonterminal_apply(
+    selector, cross_controller
+):
+    widget, context, _ = selector
+    width = control(widget, QtWidgets.QSlider, "Brush width")
+    distance = control(widget, QtWidgets.QSlider, "Min distance")
+    mode = control(widget, QtWidgets.QComboBox, "Operation")
+    width.setValue(20)
+    distance.setValue(60)
+    mode.setCurrentText("Erase")
+    assert (
+        context.session.snapshot().width,
+        context.session.snapshot().min_distance,
+    ) == (0.02, 0.06)
+    control(widget, QtWidgets.QPushButton, "Perform on all").click()
+    assert not widget.get_result().selected.any()
+    control(widget, QtWidgets.QPushButton, "Apply").click()
+    assert not cross_controller.state.selection.selected.any()
+    assert cross_controller.interactive.current_cross_selection() is context
+    control(widget, QtWidgets.QPushButton, "Undo").click()
+    assert widget.get_result().selected.all()
+    mode.setCurrentText("Select")
+    control(widget, QtWidgets.QPushButton, "Clear").click()
+    assert not context.session.snapshot().selected.any()
 
 
-def test_perform_all_erase_clears(widget):
-    widget._operation.setCurrentText("Erase")
-    widget._on_perform_all()
-    _fluxs, _freqs, selected = widget.get_result()
-    assert selected.sum() == 0
+def test_pointer_only_preview_release_once_and_outside_axes(selector):
+    widget, context, _ = selector
+    context.plugin.set_tool.execute(context.session, BrushTool(0.02, "erase"))
+    widget.canvas.draw()
+    axes = widget.figure.axes[0]
+    start = axes.transData.transform((0.5, 4.5))
+    notifications = []
+    context.session.subscribe(lambda: notifications.append(context.session.snapshot()))
+    press = MouseEvent(
+        "button_press_event", widget.canvas, *start, button=MouseButton.LEFT
+    )
+    widget.canvas.callbacks.process("button_press_event", press)
+    assert context.session.snapshot().selected.all()
+    outside = MouseEvent(
+        "button_release_event", widget.canvas, -10, -10, button=MouseButton.LEFT
+    )
+    widget.canvas.callbacks.process("button_release_event", outside)
+    assert len(notifications) == 1
+    np.testing.assert_array_equal(
+        widget.get_result().selected, [True, False, True, False]
+    )
 
 
-def test_perform_all_select_restores(widget):
-    widget._operation.setCurrentText("Erase")
-    widget._on_perform_all()
-    widget._operation.setCurrentText("Select")
-    widget._on_perform_all()
-    _fluxs, _freqs, selected = widget.get_result()
-    assert selected.sum() == 10
+def test_failed_zero_width_moving_gesture_is_atomic_and_restores_controls(selector):
+    widget, context, _ = selector
+    context.plugin.set_tool.execute(context.session, BrushTool(0.0, "erase"))
+    widget.canvas.draw()
+    axes = widget.figure.axes[0]
+    for event_name, point in (
+        ("button_press_event", (0.1, 4.1)),
+        ("motion_notify_event", (0.9, 4.9)),
+        ("button_release_event", (0.9, 4.9)),
+    ):
+        position = axes.transData.transform(point)
+        event = MouseEvent(
+            event_name, widget.canvas, *position, button=MouseButton.LEFT
+        )
+        widget.canvas.callbacks.process(event_name, event)
+    assert context.session.snapshot().selected.all()
+    assert not context.session.can_undo()
+    assert control(widget, QtWidgets.QSlider, "Brush width").value() == 0
+    assert control(widget, QtWidgets.QLabel, "Status").text()
 
 
-def test_finished_signal(widget):
-    # the cross-spectrum filter's commit button is "Apply" (not terminal Finish)
-    fired = []
-    widget.finished.connect(lambda: fired.append(True))
-    assert widget.apply_button.text() == "Apply"
-    widget.apply_button.click()
-    assert fired == [True]
+def test_tool_only_commit_updates_controls_without_resubmitting_downsample(selector):
+    widget, context, jobs = selector
+    wait_for_debounce()
+    count = len(jobs)
+    context.plugin.set_tool.execute(context.session, BrushTool(0.03, "erase"))
+    wait_for_debounce()
+    assert len(jobs) == count
+    assert control(widget, QtWidgets.QSlider, "Brush width").value() == 30
+    assert control(widget, QtWidgets.QComboBox, "Operation").currentText() == "Erase"
 
 
-def test_apply_filter_is_debounced_async(widget):
-    g0 = widget._generation
-    widget.apply_filter()
-    assert widget._generation == g0 + 1
-    assert widget._debounce.isActive()
+def test_preview_presents_current_stroke_and_undo_inverse_geometry(selector):
+    widget, context, jobs = selector
+    vertices = (BrushPoint(0.5, 4.5),)
+    context.plugin.stroke.execute(context.session, BrushStroke(vertices, 0.02, "erase"))
+    wait_for_debounce()
+    jobs[-1].on_done(jobs[-1].compute())
+    view = widget.preview_view()
+    assert view is not None
+    assert view.stroke_vertices == vertices and view.stroke_width == 0.02
+    np.testing.assert_array_equal(view.removed_points, [[0.5, 4.5], [0.5, 4.5]])
+    control(widget, QtWidgets.QPushButton, "Undo").click()
+    wait_for_debounce()
+    jobs[-1].on_done(jobs[-1].compute())
+    inverse = widget.preview_view()
+    assert inverse is not None
+    assert inverse.stroke_vertices == vertices and inverse.stroke_width == 0.02
+    np.testing.assert_array_equal(inverse.added_points, [[0.5, 4.5], [0.5, 4.5]])
 
 
-def test_stale_downsample_result_is_dropped(widget):
-    widget._generation = 9
-    before = widget._filter_mask.copy()
-    n = widget._selected.sum()
-    widget._on_worker_done(4, np.zeros(n, dtype=bool))  # stale generation
-    np.testing.assert_array_equal(widget._filter_mask, before)
+def test_undo_after_opposite_strokes_uses_reverted_gesture(selector):
+    widget, context, jobs = selector
+    context.plugin.stroke.execute(
+        context.session, BrushStroke((BrushPoint(0.5, 4.5),), 0.02, "erase")
+    )
+    reverted = (BrushPoint(0.51, 4.5),)
+    context.plugin.stroke.execute(
+        context.session, BrushStroke(reverted, 0.04, "select")
+    )
+    assert context.session.snapshot().selected.all()
+    control(widget, QtWidgets.QPushButton, "Undo").click()
+    wait_for_debounce()
+    jobs[-1].on_done(jobs[-1].compute())
+    inverse = widget.preview_view()
+    assert inverse is not None
+    assert inverse.stroke_vertices == reverted
+    assert inverse.stroke_width == 0.04
+    np.testing.assert_array_equal(inverse.removed_points, [[0.5, 4.5], [0.5, 4.5]])
+    assert inverse.added_points.shape == (0, 2)
 
 
-def test_fresh_downsample_result_applied(widget):
-    widget._generation = 9
-    n = int(widget._selected.sum())
-    fresh = np.ones(n, dtype=bool)
-    widget._on_worker_done(9, fresh)  # current generation
-    np.testing.assert_array_equal(widget._filter_mask, fresh)
+def test_latest_success_discards_old_error_and_old_success(selector):
+    widget, context, jobs = selector
+    wait_for_debounce()
+    old = jobs[-1]
+    context.plugin.clear.execute(context.session, None)
+    wait_for_debounce()
+    latest = jobs[-1]
+    latest.on_done(latest.compute())
+    assert widget.preview_view() is not None
+    old.on_error(RuntimeError("obsolete error"))
+    old.on_done(old.compute())
+    view = widget.preview_view()
+    assert view is not None and not view.result.selected.any()
+    status = control(widget, QtWidgets.QLabel, "Status")
+    assert "obsolete error" not in status.text()
 
 
-def test_starts_with_everything_selected(qapp):
-    # the brush selection is NOT inherited — all points start selected
-    w = SelectorWidget(_spectrums())
-    assert w._selected.all()
-    w.deleteLater()
+def test_latest_error_is_visible_and_cannot_block_synchronous_apply(
+    selector, cross_controller
+):
+    widget, context, jobs = selector
+    wait_for_debounce()
+    context.plugin.clear.execute(context.session, None)
+    wait_for_debounce()
+    jobs[-1].on_error(RuntimeError("latest failure"))
+    assert widget.preview_view() is None
+    assert "latest failure" in control(widget, QtWidgets.QLabel, "Status").text()
+    control(widget, QtWidgets.QPushButton, "Apply").click()
+    assert not cross_controller.state.selection.selected.any()
+    assert context.session.can_undo()
 
 
-def test_inherits_min_distance(qapp):
-    w = SelectorWidget(_spectrums(), min_distance=0.05)
-    assert abs(w._thresh_val() - 0.05) < 1e-9
-    assert abs(w.min_distance() - 0.05) < 1e-9
-    w.deleteLater()
+def test_teardown_rejects_stale_apply_and_late_preview_without_cancelling_owner(
+    selector, cross_controller
+):
+    widget, context, jobs = selector
+    wait_for_debounce()
+    job = jobs[-1]
+    apply_button = control(widget, QtWidgets.QPushButton, "Apply")
+    widget.teardown()
+    job.on_done(job.compute())
+    job.on_error(RuntimeError("late failure"))
+    assert widget.preview_view() is None
+    apply_button.click()
+    assert cross_controller.state.selection.selected is None
+    assert cross_controller.interactive.current_cross_selection() is context
+    with pytest.raises(FailedPreconditionError):
+        widget.get_result()

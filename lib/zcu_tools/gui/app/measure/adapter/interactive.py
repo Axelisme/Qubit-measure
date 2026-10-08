@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
-from zcu_tools.gui.app.measure.interactive import PluginDefinition, Session
+from zcu_tools.gui.interactive import PluginDefinition, Session
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (

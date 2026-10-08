@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from matplotlib.figure import Figure
 
-from zcu_tools.gui.app.measure.figure_export import render_figure_png
-from zcu_tools.gui.app.measure.interactive import PluginDefinition
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.interactive import PluginDefinition
+from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.param_spec import build_input_schema, validate_params
 

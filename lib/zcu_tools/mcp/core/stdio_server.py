@@ -57,19 +57,14 @@ class McpServerConfig:
 # ---------------------------------------------------------------------------
 
 
-# JSON-decoded tool arguments are untyped; each converter accepts what the JSON
-# decoder can produce for that declared type (e.g. "4" or 4 for INTEGER).
-_SCALAR_COERCERS: dict[JsonType, Callable[[Any], object]] = {
-    JsonType.STRING: str,
-    JsonType.INTEGER: int,
-    JsonType.NUMBER: float,
-    JsonType.BOOLEAN: bool,
-    JsonType.OBJECT: dict,
-}
-
-
+# GUI admission owns scalar validation; forwarding retains original JSON types.
 def coerce_arg(value: Any, json_type: JsonType) -> object:
-    """Project one JSON-decoded tool argument onto its declared wire type."""
+    """Preserve decoded JSON types for GUI-owned primitive validation.
+
+    ARRAY must be a list and is detached; all other values pass through, including
+    invalid scalar types. The GUI rejects them rather than accepting a lossy MCP
+    conversion (for example bool to integer identity or string to boolean).
+    """
     if value is None:
         return None
     if json_type is JsonType.ARRAY:
@@ -80,8 +75,7 @@ def coerce_arg(value: Any, json_type: JsonType) -> object:
                 f"expected list for ARRAY param, got {type(value).__name__!r}"
             )
         return list(value)
-    coerce = _SCALAR_COERCERS.get(json_type)
-    return value if coerce is None else coerce(value)  # JSON: pass through
+    return value
 
 
 def generated_rpc_timeout_seconds(spec: Any) -> float:
@@ -93,9 +87,9 @@ def generated_rpc_timeout_seconds(spec: Any) -> float:
 def make_forwarder(method: str, spec, send_fn: SendFn):
     """Build an MCP forwarder that projects arguments into RPC params per spec.
 
-    ``send_fn`` issues the RPC: read-only apps pass a thin error-raising wrapper
-    over :meth:`McpBridge.send_rpc_raw`; measure-gui passes its guarded
-    ``send_gui_rpc``.
+    ``send_fn`` issues the RPC through the app's error-raising bridge wrapper.
+    Parameter defaults and primitive validation remain with the GUI owner;
+    forwarded scalar values are not normalized to another JSON type.
     """
     rpc_timeout = generated_rpc_timeout_seconds(spec)
 

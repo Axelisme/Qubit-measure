@@ -1,35 +1,17 @@
-"""RemoteControlServiceBase — shared scaffolding for each app's RemoteControlAdapter.
+"""Shared GUI-side dispatch, resource observations and event subscriptions.
 
-The app-agnostic skeleton of every GUI app's *second View* (driving adapter,
-ADR-0068): the RPC face onto a ``Controller``, peer to the Qt ``MainWindow``.
-Pure transport — the socket lifecycle, NDJSON framing, the per-client writer, the
-``wire.version`` / ``auth`` handshakes, and the push fan-out primitive — lives one
-layer down in :class:`NdjsonRpcEndpoint`. This base owns the *dispatch
-scaffolding* that all three apps share:
+RemoteControlServiceBase routes parsed NDJSON requests to app-provided handlers.
+OwnerScheduler serializes State work; bounded waits may run off-main. Apps inject
+method registries, wire metadata, event serializers and optional resource-version
+policies. Guard, handler and successful observation share one owner turn. The
+dispatch handshake prevents timed-out requests from establishing observations,
+and unsuccessful reply delivery rolls back only those observations.
 
-  - the :class:`EndpointRouter` seam: ``route`` (events.* state-owning handlers,
-    then a ``_route_extra`` hook, then METHOD_REGISTRY lookup + ParamSpec
-    validation + owner-thread dispatch), ``on_client_open`` / ``on_client_close``;
-  - ``_dispatch_on_owner``: the marshal onto the State owner loop (via an injected
-    ``OwnerScheduler``, timeout-bounded), composed with the
-    ``off_main_thread`` blocking branch and two policy seams (``_guard`` before
-    the handler, ``_after_success`` after) — both no-ops by default;
-  - EventBus push: subscribe one callback per serialised event key and lazily
-    serialize/encode once only when at least one matching subscriber is live.
-
-Each app supplies its domain via ``__init__`` (the method registry, the event
-serializers + their wire-name accessor, the wire/gui versions, the server name)
-and overrides only the narrow policy seams it needs. The read-only apps
-(``fluxdep`` / ``dispersive``) override nothing but ``_get_bus``; ``measure-gui``
-adds editor sessions, a version guard, off-main handlers and a diagnostic
-channel by overriding the seams.
-
-The event key is a payload ``type`` for all three apps: the base never inspects
-the key, it only passes it to ``bus.subscribe`` and the injected
-``wire_event_name``; each app supplies ``wire_event_name=lambda p: p.EVENT.value``
-so the wire name comes from the payload's own domain enum.
-
-Qt-free and app-free: the composition root injects the concrete owner scheduler.
+NdjsonRpcEndpoint owns socket lifecycle, framing, authentication, per-client
+queues and push delivery. Apps own resource keys, version producers, method
+dependencies and domain effects. Measure additionally owns editor lifetime,
+diagnostics and writeback pane aliases through the existing narrow hooks.
+Qt-free and app-free. See ADR-0068 for transport and policy ownership.
 """
 
 from __future__ import annotations
@@ -51,6 +33,7 @@ from zcu_tools.gui.remote.errors import (
 )
 from zcu_tools.gui.remote.framing import encode_line
 from zcu_tools.gui.remote.method_spec import BoundMethod
+from zcu_tools.gui.remote.observation import ResourceObservationPolicy
 from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.remote.rpc_endpoint import (
     ClientLink,
@@ -83,16 +66,18 @@ def _store_expected_error(
 class SubscriptionCtx:
     """Per-connection semantic state attached to ``link.app_ctx``.
 
-    The base only needs the set of wire event names this connection subscribed
-    to. Subclasses (measure-gui) extend it with extra per-connection resources
-    (e.g. CfgEditor session ids) by subclassing and declaring more ``__slots__``.
+    ``client_id`` is a stable opaque connection identity; ``subscribed`` contains
+    wire event names. ``seen`` maps observed resource keys to their versions and
+    is accessed only on the State owner thread. Subclasses add app-owned resources,
+    such as editor session ids, by declaring additional ``__slots__``.
     """
 
-    __slots__ = ("client_id", "subscribed")
+    __slots__ = ("client_id", "subscribed", "seen")
 
     def __init__(self) -> None:
         self.client_id = uuid4().hex
         self.subscribed: set[str] = set()
+        self.seen: dict[str, int] = {}
 
 
 def _ctx(link: ClientLink) -> SubscriptionCtx:
@@ -124,7 +109,32 @@ class RemoteControlServiceBase:
         method_registry: Mapping[str, BoundMethod],
         event_serializers: Mapping[Any, Serializer],
         wire_event_name: Callable[[Any], str],
+        resource_versions: Callable[[], Mapping[str, int]] | None = None,
+        observation_policies: Mapping[str, ResourceObservationPolicy] | None = None,
     ) -> None:
+        """Bind app dispatch and optional owner-thread observation policies.
+
+        controller exposes the app bus and commands used by method_registry.
+        opts configures the socket; owner_scheduler serializes State work.
+        wire_version, gui_version and server_name identify the endpoint.
+        event_serializers and wire_event_name project subscribed domain events.
+        resource_versions returns a complete current key-to-version snapshot on
+        the owner thread; observation_policies declares every registry method.
+        Omit both for an app without resource observations. Supplying only one,
+        mismatched method keys, or an off-main observation raises ValueError.
+        Construction opens no socket; start() begins serving requests.
+        """
+        if (resource_versions is None) != (observation_policies is None):
+            raise ValueError("resource versions and observation policies are paired")
+        if observation_policies is not None:
+            if observation_policies.keys() != method_registry.keys():
+                raise ValueError("observation policies must match registered methods")
+            for method, policy in observation_policies.items():
+                policy.validate_owner_thread(
+                    off_main_thread=method_registry[method].off_main_thread
+                )
+        self._resource_versions = resource_versions
+        self._observation_policies = dict(observation_policies or {})
         self.ctrl = controller
         self._opts = opts
         self._wire_version = wire_version
@@ -166,18 +176,65 @@ class RemoteControlServiceBase:
         del link, req
         return False
 
+    @staticmethod
+    def _resource_key(template: str, values: Mapping[str, object]) -> str:
+        """Expand a declared resource key; apps may supply domain-specific aliases."""
+        return template.format_map(values)
+
     def _guard(
         self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
     ) -> None:
-        """Pre-handler check on the State owner thread (e.g. version guard)."""
-        del ctx, method, params
+        """Reject missing or stale declared resources before the owner handler."""
+        if self._resource_versions is None:
+            return
+        deps = self._observation_policies[method].guard_deps
+        if not deps:
+            return
+        current = self._resource_versions()
+        required: set[str] = set()
+        for template in deps:
+            if template.endswith("*"):
+                prefix = self._resource_key(template[:-1], params)
+                required.update(key for key in current if key.startswith(prefix))
+                required.update(key for key in ctx.seen if key.startswith(prefix))
+            else:
+                required.add(self._resource_key(template, params))
+        stale = sorted(
+            key
+            for key in required
+            if key not in ctx.seen or ctx.seen[key] != current.get(key, 0)
+        )
+        if stale:
+            raise RemoteError(
+                ErrorCode.PRECONDITION_FAILED,
+                "a resource you depend on was changed in the GUI since you last "
+                "saw it; review then retry",
+                reason="stale_version",
+                data={"stale": stale},
+            )
 
     def _before_handler(
         self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
     ) -> dict[str, int] | None:
-        """Sample app-owned state before the handler, on the State owner thread."""
-        del ctx, method, params
+        """Capture write before-versions on the owner thread, when declared."""
+        del ctx, params
+        if (
+            self._resource_versions is not None
+            and self._observation_policies[method].refresh_after_write
+        ):
+            return dict(self._resource_versions())
         return None
+
+    @staticmethod
+    def _self_write_updates(
+        seen: Mapping[str, int], before: Mapping[str, int], current: Mapping[str, int]
+    ) -> dict[str, int]:
+        updates: dict[str, int] = {}
+        for key in before.keys() | current.keys():
+            old, new = before.get(key, 0), current.get(key, 0)
+            if old != new and key in seen and seen[key] == old:
+                updates[key] = new
+        return updates
 
     def _owner_success(
         self,
@@ -187,9 +244,50 @@ class RemoteControlServiceBase:
         result: Mapping[str, object],
         before: dict[str, int] | None,
     ) -> Callable[[], None] | None:
-        """Complete an owner-thread observation; return a reply-failure undo action."""
-        del ctx, method, params, result, before
-        return None
+        """Record successful reads/writes and return an observation-only rollback."""
+        if self._resource_versions is None:
+            return None
+        policy = self._observation_policies[method]
+        current = self._resource_versions()
+        updates = (
+            self._self_write_updates(ctx.seen, before, current)
+            if before is not None
+            else {}
+        )
+        if (
+            before is not None
+            and policy.created_resource is not None
+            and policy.created_identity is not None
+        ):
+            identity = result.get(policy.created_identity)
+            if isinstance(identity, str) and identity:
+                key = self._resource_key(policy.created_resource, result)
+                if before.get(key, 0) == 0 and current.get(key, 0) == 1:
+                    updates[key] = 1
+        if (
+            policy.reveals
+            and all(name not in params for name in policy.reveals_without)
+            and all(params.get(name) for name in policy.reveals_when_nonempty)
+        ):
+            for template in policy.reveals:
+                key = self._resource_key(template, params)
+                updates[key] = current.get(key, 0)
+        if not updates:
+            return None
+        previous = {key: ctx.seen.get(key) for key in updates}
+        ctx.seen.update(updates)
+
+        def _rollback() -> None:
+            for key, version in updates.items():
+                if ctx.seen.get(key) != version:
+                    continue
+                old = previous[key]
+                if old is None:
+                    ctx.seen.pop(key, None)
+                else:
+                    ctx.seen[key] = old
+
+        return _rollback
 
     def _after_success(
         self,

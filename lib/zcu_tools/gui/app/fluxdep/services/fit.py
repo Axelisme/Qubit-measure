@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -27,9 +29,11 @@ from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
     ParamBounds,
+    SearchExecution,
     search_database,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.resources.qubit_params import (
     FluxDepFit,
@@ -50,6 +54,23 @@ def default_params_path(result_dir: str) -> str:
     (``ProjectInfo`` derives it from chip/qubit eagerly).
     """
     return params_path_for_result_dir(result_dir)
+
+
+@dataclass(frozen=True)
+class SearchInput:
+    """Detached numeric input, captured on the State owner before worker use.
+
+    database_path is the HDF5 database filename. fluxs is a copied 1-D cloud
+    in Φ/Φ0; freqs is its copied GHz cloud. transitions is a deep copy with
+    optional r_f/sample_f GHz values injected. bounds holds EJ/EC/EL GHz limits.
+    The arrays and transition lists belong to this snapshot, never live State.
+    """
+
+    database_path: str
+    fluxs: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    transitions: TransitionDict
+    bounds: ParamBounds
 
 
 class FitService:
@@ -83,70 +104,91 @@ class FitService:
         Concatenates every spectrum's selected points (insertion order), then
         applies the cross-spectrum selection mask. With no mask set, every point
         is included (the selector defaults to all-selected). Fast-fails if a
-        stored mask disagrees with the current cloud size.
+        stored mask disagrees with the current cloud size, raising
+        FailedPreconditionError (selection_stale) without mutation.
         """
         flux_parts: list[NDArray[np.float64]] = []
         freq_parts: list[NDArray[np.float64]] = []
         for entry in self._state.spectrums.values():
             flux_parts.append(np.asarray(entry.points["fluxs"], dtype=np.float64))
             freq_parts.append(np.asarray(entry.points["freqs"], dtype=np.float64))
-        if not flux_parts:
-            empty = np.empty(0, dtype=np.float64)
-            return empty, empty.copy()
-        fluxs = np.concatenate(flux_parts)
-        freqs = np.concatenate(freq_parts)
+        if flux_parts:
+            fluxs = np.concatenate(flux_parts)
+            freqs = np.concatenate(freq_parts)
+        else:
+            fluxs = np.empty(0, dtype=np.float64)
+            freqs = np.empty(0, dtype=np.float64)
 
         mask = self._state.selection.selected
         if mask is None:
             return fluxs, freqs
         if mask.shape[0] != fluxs.shape[0]:
-            raise ValueError(
+            raise FailedPreconditionError(
                 f"selection mask length {mask.shape[0]} != joint point cloud "
-                f"size {fluxs.shape[0]} (re-run the cross-spectrum filter)"
+                f"size {fluxs.shape[0]} (re-run the cross-spectrum filter)",
+                reason_code="selection_stale",
             )
         return fluxs[mask], freqs[mask]
 
     # --- search ----------------------------------------------------------
 
-    def compute_search(
-        self,
-        *,
-        pbar_factory: PbarFactory | None = None,
-    ) -> DatabaseSearchResult:
-        """Run the database search and return its result — WITHOUT touching State.
+    def capture_search(self) -> SearchInput:
+        """Capture detached inputs on the State owner.
 
-        This is the pure, runnable-anywhere core: it snapshots the inputs and the
-        selected point cloud off State *before* doing any work (a fast read on the
-        caller's thread), then calls ``search_database``. It performs NO State
-        write, so it is safe to run on a worker thread — the result is recorded
-        separately on the main thread via ``record_result``.
-
-        The result includes numeric diagnostics, not a Figure. Rendering belongs
-        to the caller after recording the result. ``pbar_factory`` installs a
-        custom progress-bar factory for the duration; without one, tqdm is used.
-        Fast-fails when no database path is set or the selected cloud is empty.
+        Rejects foreign threads, missing database path, empty selected cloud
+        and a selection mask inconsistent with the cloud. Kernel validation of
+        bounds, transitions and database contents happens during compute_search.
+        FailedPreconditionError reasons are no_database_path, no_selected_points
+        or selection_stale. Foreign threads raise RuntimeError.
         """
+        self._state.assert_owner_thread()
         fit = self._state.fit
         if not fit.database_path:
-            raise ValueError("no database path set (call set_params first)")
-        s_fluxs, s_freqs = self.selected_pointcloud()
-        if s_fluxs.size == 0:
-            raise ValueError("no selected points to fit (select points first)")
+            raise FailedPreconditionError(
+                "no database path set (call set_params first)",
+                reason_code="no_database_path",
+            )
+        fluxs, freqs = self.selected_pointcloud()
+        if fluxs.size == 0:
+            raise FailedPreconditionError(
+                "no selected points to fit (select points first)",
+                reason_code="no_selected_points",
+            )
+        return SearchInput(
+            database_path=fit.database_path,
+            fluxs=fluxs.copy(),
+            freqs=freqs.copy(),
+            transitions=deepcopy(
+                transitions_with_freqs(fit.transitions, fit.r_f, fit.sample_f)
+            ),
+            bounds=ParamBounds(EJ=fit.EJb, EC=fit.ECb, EL=fit.ELb),
+        )
 
-        # Snapshot every State-derived input now (this call may run on a worker
-        # thread; reading State here is fine, writing it is not). Inject the
-        # r_f / sample_f keys the transition model needs (only when provided).
-        database_path = fit.database_path
-        transitions = transitions_with_freqs(fit.transitions, fit.r_f, fit.sample_f)
-        EJb, ECb, ELb = fit.EJb, fit.ECb, fit.ELb
+    def compute_search(
+        self,
+        inputs: SearchInput,
+        *,
+        pbar_factory: PbarFactory | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> DatabaseSearchResult:
+        """Compute from explicit detached inputs without reading or writing State.
+
+        inputs comes from capture_search on the owner. Safe on a worker thread;
+        result carries numeric diagnostics, never a Figure. pbar_factory installs
+        worker progress (None uses tqdm). cancel_requested is a quick thread-safe
+        predicate; True at a kernel checkpoint raises SearchCancelled without a
+        result. None disables cancellation. Other kernel failures propagate.
+        In-flight HDF5/Numba work may delay the next cancellation checkpoint.
+        """
 
         def _run() -> DatabaseSearchResult:
             return search_database(
-                s_fluxs,
-                s_freqs,
-                database_path,
-                transitions,
-                ParamBounds(EJ=EJb, EC=ECb, EL=ELb),
+                inputs.fluxs,
+                inputs.freqs,
+                inputs.database_path,
+                inputs.transitions,
+                inputs.bounds,
+                execution=SearchExecution(cancel_requested=cancel_requested),
             )
 
         if pbar_factory is not None:
@@ -179,15 +221,22 @@ class FitService:
         from the first aligned spectrum (the notebook stores a single
         flux_half/int/period; in a multi-spectrum session every spectrum is
         aligned to the same flux coordinate, so the first aligned one is
-        representative). Fast-fails if no spectrum is aligned.
+        representative). Before file I/O, FailedPreconditionError reports
+        no_fit_result or no_aligned_spectrum. Native I/O failures propagate.
         """
         fit = self._state.fit
         if fit.params is None:
-            raise ValueError("no fit result to export (run search first)")
+            raise FailedPreconditionError(
+                "no fit result to export (run search first)",
+                reason_code="no_fit_result",
+            )
 
         aligned = next((e for e in self._state.spectrums.values() if e.aligned), None)
         if aligned is None:
-            raise ValueError("no aligned spectrum (align one before exporting)")
+            raise FailedPreconditionError(
+                "no aligned spectrum (align one before exporting)",
+                reason_code="no_aligned_spectrum",
+            )
 
         project = self._state.project
         path = (

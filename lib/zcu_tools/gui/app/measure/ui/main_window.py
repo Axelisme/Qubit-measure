@@ -944,7 +944,7 @@ class MainWindow(QMainWindow):
     def take_figure_screenshot_for_subtab(self, tab_id: str, subtab_id: str) -> bytes:
         """Pane-qualified figure PNG (run|analysis|post_analysis)."""
         from zcu_tools.gui.app.measure.adapter import AnalysisMode
-        from zcu_tools.gui.app.measure.figure_export import render_figure_png
+        from zcu_tools.gui.plotting.figure_export import render_figure_png
 
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:

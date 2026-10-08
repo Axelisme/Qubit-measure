@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
+from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
 from zcu_tools.utils.process import smooth_signal1d
 
 
@@ -95,3 +98,111 @@ def onetone_peak_points(
     s_dev_values = dev_values[peaks]
     s_freqs = np.full_like(s_dev_values, freqs[freq_idx])
     return s_dev_values, s_freqs, freq_idx, smoothed, peaks
+
+
+@dataclass(frozen=True, slots=True)
+class OneToneInputs:
+    """Captured, validated spectrum and reusable one-tone preprocessing.
+
+    spectrum owns read-only signals/device values/GHz frequencies.
+    max_freq_index identifies the maximum-dispersion frequency in spectrum.
+    smoothed is its read-only, normalized inverted amplitude over the device axis.
+    Construction raises ValueError for invalid spectrum dimensions or axes.
+    """
+
+    spectrum: FluxPickInputs
+    max_freq_index: int = field(init=False)
+    smoothed: NDArray[np.float64] = field(init=False)
+
+    def __post_init__(self) -> None:
+        spectrum = self.spectrum
+        freq_index = max_dispersion_freq_index(spectrum.signals, spectrum.freqs)
+        smoothed = smoothed_slice(spectrum.signals, freq_index)
+        smoothed.setflags(write=False)
+        object.__setattr__(self, "max_freq_index", freq_index)
+        object.__setattr__(self, "smoothed", smoothed)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OneTonePickState:
+    """Complete committed peak selection against one captured OneToneInputs.
+
+    threshold is finite prominence in [0, 5], dimensionless.
+    peak_indices are unique ascending nonnegative indices into the device axis.
+    Invalid threshold or index structure raises ValueError at construction.
+    Input-dependent index bounds are checked by analyze_onetone_pick.
+    """
+
+    threshold: float
+    peak_indices: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        _require_threshold(self.threshold)
+        _require_peak_indices(self.peak_indices)
+
+
+@dataclass(frozen=True, slots=True)
+class OneTonePickResult:
+    """Uncalibrated selected points, including a valid empty selection.
+
+    dev_values and freqs are equal-length 1D float64 arrays in captured axis order.
+    dev_values uses native device units; freqs uses GHz at the captured slice.
+    Flux calibration and sorting belong to the app's PointsService.
+    """
+
+    dev_values: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+
+
+def pick_onetone_state(inputs: OneToneInputs, threshold: float) -> OneTonePickState:
+    """Compute complete peak indices at finite dimensionless threshold [0, 5].
+
+    Reuse captured preprocessing without writes; ValueError rejects invalid
+    threshold before computation. No worker or presentation side effects.
+    """
+    _require_threshold(threshold)
+    peaks = detect_peaks(inputs.smoothed, threshold)
+    return OneTonePickState(
+        threshold=threshold, peak_indices=tuple(int(index) for index in peaks)
+    )
+
+
+def analyze_onetone_pick(
+    inputs: OneToneInputs, state: OneTonePickState
+) -> OneTonePickResult:
+    """Project committed indices to detached device/GHz point arrays.
+
+    ValueError rejects indices outside the captured device axis. Empty selection
+    is valid; does not sort, calibrate flux, mutate inputs or decide publication.
+    """
+    spectrum = inputs.spectrum
+    if state.peak_indices and state.peak_indices[-1] >= spectrum.dev_values.size:
+        raise ValueError("peak_indices must be within the captured device axis")
+    indices = np.asarray(state.peak_indices, dtype=np.intp)
+    dev_values = spectrum.dev_values[indices]
+    freqs = np.full(
+        dev_values.shape, spectrum.freqs[inputs.max_freq_index], dtype=np.float64
+    )
+    return OneTonePickResult(dev_values, freqs)
+
+
+def _require_peak_indices(indices: object) -> None:
+    if not isinstance(indices, tuple):
+        raise ValueError("peak_indices must be an immutable tuple")
+    previous = -1
+    for index in indices:
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError("peak_indices must contain integers")
+        if index <= previous:
+            raise ValueError("peak_indices must be nonnegative and strictly increasing")
+        previous = index
+
+
+def _require_threshold(threshold: object) -> None:
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not 0 <= threshold <= 5
+        or not np.isfinite(threshold)
+    ):
+        raise ValueError("threshold must be a finite number in [0, 5]")
