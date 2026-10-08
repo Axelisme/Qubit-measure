@@ -17,7 +17,6 @@ from zcu_tools.cfg_model import (
 from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
     ModuleWriteback,
-    SessionEnv,
     WaveformWriteback,
     WritebackItem,
 )
@@ -76,23 +75,30 @@ class WritebackWritten:
     after: object
 
 
-def _destination_value(item: WritebackItem, context: SessionEnv) -> object:
+def _destination_path(item: WritebackItem, parameters: ParameterContext) -> str:
     if isinstance(item, MetaDictWriteback):
-        value = context.md.get(item.target_name, None)
-    else:
-        collection = (
-            context.ml.modules
-            if isinstance(item, ModuleWriteback)
-            else context.ml.waveforms
-        )
-        target = collection.get(item.target_name)
-        value = None if target is None else target.to_dict()
-    return copy.deepcopy(value)
+        return parameters.resolve_path(item.target_name)
+    return parameters.library_key(item.target_name)
+
+
+def _destination_value(
+    item: WritebackItem, parameters: ParameterContext, path: str
+) -> object:
+    if isinstance(item, MetaDictWriteback):
+        result = parameters.lookup(path)
+        return result.value if result.present else None
+    kind = "module" if isinstance(item, ModuleWriteback) else "waveform"
+    keys = (
+        parameters.library.module_keys()
+        if kind == "module"
+        else parameters.library.waveform_keys()
+    )
+    return parameters.library.entry_value(path, kind=kind) if path in keys else None
 
 
 @dataclass(frozen=True)
 class WritebackValues:
-    """Complete values at the active destination and in the current draft."""
+    """Current fixed-target value and capture-lowered proposal; missing is None."""
 
     current: object
     proposed: object
@@ -289,37 +295,43 @@ class WritebackService:
         self._require_draft(draft)
         return list(draft.items)
 
-    def preview_values(
-        self, draft: WritebackDraft, context: SessionEnv
-    ) -> dict[str, WritebackValues]:
-        """Read live destination values; do not reuse presentation baselines.
+    def preview_values(self, draft: WritebackDraft) -> dict[str, WritebackValues]:
+        """Read actual current values at the captured target, without selecting it.
 
-        Missing targets have current=None. Missing context or invalid cfg raises;
-        this is not a promise that later writes will see the same context.
+        Proposed cfg values lower against the creation capture, never current
+        focus, point, or slot references. Missing destinations have current=None.
+        Empty drafts return {}; nonempty drafts require a still-readable target.
+        Target/source/I/O and proposal validation errors propagate.
         """
         self._require_draft(draft)
-        md, ml = context.md, context.ml
-        if not context.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        values = {}
+        if not draft.items:
+            return {}
+        parameters = self._require_parameters(draft)
+        current = self._write.read_target(parameters.target, roles=parameters.roles)
+        values: dict[str, WritebackValues] = {}
         for item in draft.items:
-            if isinstance(item, MetaDictWriteback):
-                current = md.get(item.target_name, None)
-                proposed = item.proposed_value
-            elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
-                collection = (
-                    ml.modules if isinstance(item, ModuleWriteback) else ml.waveforms
+            path = _destination_path(item, parameters)
+            proposed = (
+                AcceptedWrite.model_validate(
+                    {"path": path, "value": item.proposed_value}
+                ).value
+                if isinstance(item, MetaDictWriteback)
+                else schema_to_raw_dict(
+                    self._entry_schema(self._find_draft_entry(draft, item.session_id)),
+                    parameters,
                 )
-                target = collection.get(item.target_name)
-                current = None if target is None else target.to_dict()
-                schema = self.get_item_draft(draft, item.session_id).snapshot()
-                proposed = schema_to_raw_dict(schema, md, ml)
-            else:
-                raise RuntimeError(f"Unsupported writeback item type: {type(item)}")
+            )
             values[item.session_id] = WritebackValues(
-                current=copy.deepcopy(current), proposed=copy.deepcopy(proposed)
+                current=_destination_value(item, current, path), proposed=proposed
             )
         return values
+
+    @staticmethod
+    def _require_parameters(draft: WritebackDraft) -> ParameterContext:
+        parameters = draft.parameters
+        if parameters is None:
+            raise FailedPreconditionError("Writeback requires a captured context.")
+        return parameters
 
     def edit_draft(
         self,
@@ -418,9 +430,7 @@ class WritebackService:
         written: dict[str, list[str]] = {"md": [], "ml_modules": [], "ml_waveforms": []}
         if not selected_entries:
             return {"applied_ids": [], "written": written}
-        parameters = draft.parameters
-        if parameters is None:
-            raise FailedPreconditionError("Writeback requires a captured context.")
+        parameters = self._require_parameters(draft)
         ledger = self._entry_ledger(parameters.target.entry_id)
         destinations: set[str] = set()
         writes: list[AcceptedWrite] = []
@@ -463,16 +473,16 @@ class WritebackService:
             payload=AcceptedPayload(writes=tuple(writes), analysis_summary={}),
         )
         ledger.append(event)
-        source = Provenance(
-            source=event.id,
-            kind=event.kind,
-            run_id=None,
-            at=event.at,
-            stderr=None,
-        )
         applied_ids: list[str] = []
         for entry, write in zip(selected_entries, writes, strict=True):
             item = entry.item
+            source = Provenance(
+                source=event.id,
+                kind=event.kind,
+                run_id=None,
+                at=event.at,
+                stderr=item.stderr,
+            )
             if isinstance(item, MetaDictWriteback):
                 self._write.set_parameter(
                     parameters.target, write.path, write.value, source=source
@@ -493,17 +503,23 @@ class WritebackService:
         self,
         draft: WritebackDraft,
         changes: tuple[WritebackEdit, ...],
-        context: SessionEnv,
+        *,
+        origin: CommandOrigin = _GUI_ORIGIN,
     ) -> list[WritebackWritten]:
-        """Edit sequentially, then apply only these IDs once.
+        """Edit sequentially and return actual fixed-target before/after values.
 
-        An edit failure keeps the successful draft prefix but starts no context
-        write. Context write failures retain the existing write-port semantics.
-        The caller supplies the live context on the owner thread.
+        The owner reads the captured destination before and after application;
+        no current selection or stale capture substitutes for the receipt.
+        Targets in receipts are concrete paths resolved from the creation capture.
+        Empty changes are a no-op. Edit failures retain the successful draft
+        prefix without writes. Read/append/setter failures propagate; accepted
+        evidence and any successful writes remain. MCP supplies its native
+        call ID in origin; GUI uses the default.
         """
         self._require_draft(draft)
-        if not context.has_context():
-            raise FailedPreconditionError("No experiment context.")
+        if not changes:
+            return []
+        parameters = self._require_parameters(draft)
         ids = tuple(change.session_id for change in changes)
         if len(set(ids)) != len(ids):
             raise InvalidInputError("Repeated writeback IDs")
@@ -521,8 +537,14 @@ class WritebackService:
                     f"Invalid writeback draft: {change.session_id!r}"
                 )
             items.append(self._find_draft_entry(draft, change.session_id).item)
-        before = [_destination_value(item, context) for item in items]
-        self.apply_draft(draft, item_ids=ids)
+        paths = [_destination_path(item, parameters) for item in items]
+        current = self._write.read_target(parameters.target, roles=parameters.roles)
+        before = [
+            _destination_value(item, current, path)
+            for item, path in zip(items, paths, strict=True)
+        ]
+        self.apply_draft(draft, item_ids=ids, origin=origin)
+        after = self._write.read_target(parameters.target, roles=parameters.roles)
         return [
             WritebackWritten(
                 id=item.session_id,
@@ -533,11 +555,11 @@ class WritebackService:
                     if isinstance(item, ModuleWriteback)
                     else "waveform"
                 ),
-                target=item.target_name,
+                target=path,
                 before=previous,
-                after=_destination_value(item, context),
+                after=_destination_value(item, after, path),
             )
-            for item, previous in zip(items, before, strict=True)
+            for item, path, previous in zip(items, paths, before, strict=True)
         ]
 
     def teardown_draft(self, draft: WritebackDraft) -> None:

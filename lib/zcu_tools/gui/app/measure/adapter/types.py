@@ -268,6 +268,13 @@ class PostWritebackRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeResul
 
 @dataclass
 class WritebackItem(ABC):
+    """Mutable proposal; stderr is its standard error in working units, or None.
+
+    The destination is a direct container path or captured role path. Selection
+    and session identity belong to the service, not the proposing adapter.
+    """
+
+    stderr: float | None = field(default=None, kw_only=True)
     # ``target_name`` is the apply destination name (md attr / ml module / ml
     # waveform — the item subtype names which namespace). It is mutable: agent/UI
     # may retarget the writeback before applying.

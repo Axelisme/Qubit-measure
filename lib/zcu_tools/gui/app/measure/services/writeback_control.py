@@ -152,7 +152,7 @@ class WritebackControlFacet:
         if not isinstance(draft, WritebackDraft):
             raise InvalidInputError("unknown writeback draft")
         try:
-            return self._writeback.write_draft(draft, changes, self._state.session_env)
+            return self._writeback.write_draft(draft, changes)
         finally:
             # Failed batches may have changed the shared draft's prefix.
             self._emit_draft_changed(tab_id)
@@ -163,7 +163,7 @@ class WritebackControlFacet:
         draft = self._draft_for_pane(tab_id, pane)
         if not isinstance(draft, WritebackDraft):
             raise InvalidInputError("unknown writeback draft")
-        return self._writeback.preview_values(draft, self._state.session_env)
+        return self._writeback.preview_values(draft)
 
     def get_writeback_summaries_for_pane(
         self, tab_id: str, pane: WritebackPane
