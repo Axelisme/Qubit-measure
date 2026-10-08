@@ -10,6 +10,7 @@ from typing import Annotated, Any, ClassVar, Literal
 
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -196,7 +197,8 @@ class FakeFreqAdapter(
         Labber fallback. Invalid native data raises ValueError; I/O errors
         propagate. The tab parameter capture does not replace file history.
         """
-        return FakeFreqExp(self._model_type, self._params).load(Path(req.data_path))
+        spec = FakeFreqExp(self._model_type, self._params).persistence_spec()
+        return load_run_with_metadata(Path(req.data_path), spec=spec)
 
     def analyze(
         self,

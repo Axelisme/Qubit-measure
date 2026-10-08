@@ -703,7 +703,9 @@ class State(SessionState):
         """Plan against captured historical storage, never the current focus."""
         if metadata is None or tab.save_context is None:
             return None
-        storage = tab.save_context.capture_storage()
+        storage = tab.save_context.storage
+        if storage is None:
+            return None
         return SaveLayout(
             result_path=storage.result_path,
             database_path=storage.database_path,
