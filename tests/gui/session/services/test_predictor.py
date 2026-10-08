@@ -25,9 +25,7 @@ from zcu_tools.gui.session.services.predictor import (
 
 
 def _make_svc() -> PredictorService:
-    state = State(
-        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
-    )
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None, result_dir=""))
     return PredictorService(state, EventBus())
 
 
