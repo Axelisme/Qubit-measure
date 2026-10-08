@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-02 — instance manager
+**Last updated:** 2026-10-08 — YOKO setup validation
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -170,7 +170,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 ### `YOKOGS200`（`yoko.py:34`）— DC 電流／電壓源
 
-**Info 欄位**：`output ∈ {on, off} = "off"`、`mode ∈ {voltage, current} = "voltage"`、`value: float = 0.0`、`rampstep: float = DEFAULT_RAMPSTEP["voltage"]`。
+**Info 欄位**：`output ∈ {on, off} = "off"`、`mode ∈ {voltage, current} = "voltage"`、`value: float = 0.0`。`rampstep` 依 mode 預設為 1e-3 V 或 1e-6 A，必須為正且有限。`max_voltage_rampstep` 與 `max_current_rampstep` 是正且有限的步長上限，預設 1e-2 V 與 1e-5 A。`max_voltage` 與 `max_current` 是正且有限的輸出絕對值上限，預設 20 V 與 20 mA。
 
 **SCPI 對應**：
 
@@ -178,9 +178,9 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 - 模式：`:SOURce:FUNCtion?` / `:SOURce:FUNCtion {VOLT|CURR}`
 - 位準：`:SOURce:LEVel?` / `:SOURce:LEVel:AUTO {value:.8f}`
 
-**安全上限（寫死）**：電壓 `|V| ≤ 20 V`（`_check_voltage`）、電流 `|I| ≤ 20 mA`（`_check_current`）。超過會 `RuntimeError`。
+**安全上限**：`YOKOGS200Info` 依 mode 驗證 `value` 不超過設定上限；GUI、RPC 更新與 saved setup 共用這項驗證。Driver 在 setup 採用上限，後續直接 setter 也遵守，超過會 `RuntimeError`。上限可依 sample 設定，不代表儀器或線路能力的自動判定。
 
-**Smart ramp**：`set_voltage` / `set_current` 不直接跳值，而是以 `_rampstep` 為實際步長在 `np.linspace` 上逐點下發，步間 sleep `_rampinterval = 0.01s`。`DEFAULT_RAMPSTEP = {voltage: 1e-3 V, current: 1e-6 A}`；這個預設值保留原本有效步長，舊的 `10 * _rampstep` 補償不再存在。線性 stepping、progress 與 `stop_event` check 由 module-private shared ramp helper 處理；mode/output/safety guard 保留在 YOKO public setter 與 direct setter。YOKO ramp 保留起始點也下發一次的硬體 I/O/timing 行為。`progress=True` 時跑 make_pbar。若 output 為 off 且目標值非零，setter 會 `RuntimeError`，不自動開輸出。兩者均接受 `stop_event: Optional[threading.Event]`，每步前 check `stop_event.is_set()` 協作中止。
+**Smart ramp**：`set_voltage` / `set_current` 不直接跳值，而是以 `_rampstep` 為實際步長在 `np.linspace` 上逐點下發，步間 sleep `_rampinterval = 0.01s`。`DEFAULT_RAMPSTEP = {voltage: 1e-3 V, current: 1e-6 A}`。線性 stepping、progress 與 `stop_event` check 由 module-private shared ramp helper 處理；mode/output/safety guard 保留在 YOKO public setter 與 direct setter。YOKO ramp 保留起始點也下發一次的硬體 I/O/timing 行為。`progress=True` 時跑 make_pbar。若 output 為 off 且目標值非零，setter 會 `RuntimeError`，不自動開輸出。兩者均接受 `stop_event: Optional[threading.Event]`，每步前 check `stop_event.is_set()` 協作中止。
 
 **模式切換**：`set_mode(mode, force=False, rampstep=None)` 若當前 level 非零會擋下來，需 `force=True`。切完自動換 `_rampstep` 為新模式的預設（或呼叫端給的）。
 
@@ -188,7 +188,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 1. 若裝置 output 為 off 而 cfg 要 on → `warnings.warn`（不自動開，怕暴衝）。
 2. **不自動切模式**：cfg mode 與當前不一致直接 `RuntimeError`，明示「切模式要手動先歸零」。
-3. 更新 `self._rampstep = cfg.rampstep`。
+3. 採用 cfg 的 rampstep，以及兩種模式的輸出與步長上限。
 4. 照 mode 呼叫 `set_voltage` / `set_current`（smart ramp，透傳 `stop_event`）。
 
 **`get_voltage` / `get_current`**：呼叫 `get_mode()` 檢查 mode 是否符合（否則 raise），然後直接讀 `_get_level()`（即 `:SOURce:LEVel?`），無 re-write 副作用。
@@ -231,7 +231,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 | ---- | ----------- | --------------------- | ------------ |
 | Smart ramp | ✔（防止突變） | ✘ | ✔（模擬） |
 | 協作取消（stop_event） | ✔ | 簽名對齊，不使用 | ✔ |
-| 安全上限硬編碼 | ✔（20 V / 20 mA） | 頻率/功率範圍檢查 | ✘ |
+| 安全上限 | Info 可設定（預設 20 V / 20 mA） | 頻率/功率範圍檢查 | ✘ |
 | 自動切模式 | ✘（明確 raise） | N/A | N/A |
 | output 自動開關 | 僅 warn | 依 cfg 直接設 | 依 cfg 直接設 |
 | make_pbar 進度 | ✔（ramp 長時用） | ✘ | ✔ |
@@ -293,7 +293,7 @@ snapshot = manager.get_all_info()
 - 預設 `BaseDevice._open_session()` 直接 import `pyvisa`（lazy import）；執行環境需先裝 `pyvisa` 與對應 VISA backend（NI-VISA / pyvisa-py）。`FakeDevice` override `_open_session()`，不需要 pyvisa。
 - manager 不在 destructor 關閉設備；建立者明確執行 disconnect，成功後才關閉其 ResourceManager。
 - `YOKOGS200.set_voltage/set_current` 在 output off 且目標值非零時會拒絕執行；呼叫端要先明確開啟 output。
-- 安全上限是**硬編碼**在程式內，若更換樣品 / 線路需直接改 `_check_voltage` / `_check_current`。
+- YOKO 輸出與步長上限由 setup 設定。預設步長上限為模式預設步長的 10 倍，caller 必須按 sample 與線路條件選擇適用上限。
 - `RohdeSchwarzSGS100A` 沒有 ramp，改功率是瞬態——必要時呼叫端自行步進。
 - `BaseDeviceInfo.with_updates()` 保護 `type` 和 `address` 欄位不可修改；嘗試修改會 `ValueError`。
 

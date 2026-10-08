@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import math
 import threading
 import time
 import warnings
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Self
 
-from pydantic import field_validator
+from pydantic import Field, field_validator, model_validator
 
 from ._ramp import ramp_linear
 from .base import BaseDevice, BaseDeviceInfo, device_operation
@@ -26,11 +27,82 @@ MODE_MAPS_INV = {v: k for k, v in MODE_MAPS.items()}
 
 
 class YOKOGS200Info(BaseDeviceInfo):
+    """Validated GS200 setup and readback, with sample-specific output limits.
+
+    Value and rampstep use V in voltage mode and A in current mode. Invalid
+    numeric values, non-positive steps/limits, and values or steps outside the
+    active mode's output/rampstep limits raise Pydantic ValidationError.
+    """
+
     type: Literal["YOKOGS200"] = "YOKOGS200"
-    output: Literal["on", "off"] = "off"
-    mode: Literal["voltage", "current"] = "voltage"
-    value: float = 0.0
-    rampstep: float = DEFAULT_RAMPSTEP["voltage"]
+    output: Literal["on", "off"] = Field(
+        default="off", description="Output enable state."
+    )
+    mode: Literal["voltage", "current"] = Field(
+        default="voltage",
+        description="Source mode; determines value and rampstep units.",
+    )
+    value: float = Field(
+        default=0.0, allow_inf_nan=False, description="Output level in V or A."
+    )
+    rampstep: float = Field(
+        default=DEFAULT_RAMPSTEP["voltage"],
+        gt=0,
+        allow_inf_nan=False,
+        description="Positive ramp increment in V or A; defaults to 1e-3 V or 1e-6 A.",
+    )
+    max_voltage: float = Field(
+        default=20.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Maximum absolute output voltage in V.",
+    )
+    max_current: float = Field(
+        default=20e-3,
+        gt=0,
+        allow_inf_nan=False,
+        description="Maximum absolute output current in A.",
+    )
+
+    max_voltage_rampstep: float = Field(
+        default=1e-2,
+        gt=0,
+        allow_inf_nan=False,
+        description="Maximum ramp increment in voltage mode, in V.",
+    )
+    max_current_rampstep: float = Field(
+        default=1e-5,
+        gt=0,
+        allow_inf_nan=False,
+        description="Maximum ramp increment in current mode, in A.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_rampstep(cls, data: object) -> object:
+        if (
+            isinstance(data, dict)
+            and "rampstep" not in data
+            and data.get("mode") == "current"
+        ):
+            return {**data, "rampstep": DEFAULT_RAMPSTEP["current"]}
+        return data
+
+    @model_validator(mode="after")
+    def _validate_output_limit(self) -> Self:
+        limit = self.max_voltage if self.mode == "voltage" else self.max_current
+        if abs(self.value) > limit:
+            raise ValueError(f"value exceeds {self.mode} output limit {limit}")
+        step_limit = (
+            self.max_voltage_rampstep
+            if self.mode == "voltage"
+            else self.max_current_rampstep
+        )
+        if self.rampstep > step_limit:
+            raise ValueError(
+                f"rampstep exceeds {self.mode} rampstep limit {step_limit}"
+            )
+        return self
 
     @field_validator("value", mode="before")
     @classmethod
@@ -43,7 +115,12 @@ class YOKOGS200Info(BaseDeviceInfo):
         return value
 
     def set_flux(self, value: float) -> None:
-        self.value = value
+        """Set the output level in the active mode's units, enforcing its limit.
+
+        ValidationError leaves the previous level unchanged.
+        """
+        updated = self.with_updates(value=value)
+        self.value = updated.value
 
 
 class YOKOGS200(BaseDevice[YOKOGS200Info]):
@@ -56,7 +133,12 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
         mode = self.get_mode()
 
-        self._rampstep = DEFAULT_RAMPSTEP[mode]
+        defaults = YOKOGS200Info(address=address, mode=mode)
+        self._rampstep = defaults.rampstep
+        self._max_voltage = defaults.max_voltage
+        self._max_current = defaults.max_current
+        self._max_voltage_rampstep = defaults.max_voltage_rampstep
+        self._max_current_rampstep = defaults.max_current_rampstep
         self._rampinterval = 0.01
 
     # ==========================================================================#
@@ -81,10 +163,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
     # ==========================================================================#
 
     def _check_voltage(self, voltage: float) -> None:
-        CHECK_VOLTAGE_LIMIT = 20
-        if abs(voltage) > CHECK_VOLTAGE_LIMIT:
+        if not math.isfinite(voltage) or abs(voltage) > self._max_voltage:
             raise RuntimeError(
-                f"Try to set voltage to over {CHECK_VOLTAGE_LIMIT}V, are you sure you want to do this?"
+                f"Voltage must be finite and not over {self._max_voltage:g}V in magnitude"
             )
 
     def _set_voltage_direct(self, voltage: float) -> None:
@@ -136,10 +217,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         return self.get_voltage()
 
     def _check_current(self, current: float) -> None:
-        CHECK_CURRENT_LIMIT = 20e-3
-        if abs(current) > CHECK_CURRENT_LIMIT:
+        if not math.isfinite(current) or abs(current) > self._max_current:
             raise RuntimeError(
-                f"Try to set current to over {CHECK_CURRENT_LIMIT}A, are you sure you want to do this?"
+                f"Current must be finite and not over {self._max_current:g}A in magnitude"
             )
 
     def _set_current_direct(self, current: float) -> None:
@@ -201,6 +281,19 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         force: bool = False,
         rampstep: float | None = None,
     ) -> None:
+        """Select source mode and a positive finite ramp step (V or A).
+
+        Omitted rampstep uses the mode's default. ValidationError rejects invalid
+        or over-limit steps before I/O. RuntimeError rejects a nonzero mode switch unless force
+        is true; force does not change the configured output limits.
+        """
+        cfg = YOKOGS200Info(
+            address=self.address,
+            mode=mode,
+            rampstep=DEFAULT_RAMPSTEP[mode] if rampstep is None else rampstep,
+            max_voltage_rampstep=self._max_voltage_rampstep,
+            max_current_rampstep=self._max_current_rampstep,
+        )
         cur_mode = self.get_mode()
 
         if cur_mode != mode:
@@ -214,11 +307,8 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
                     "Or set force=True to override, make sure you know what you are doing"
                 )
 
-        if rampstep is None:
-            rampstep = DEFAULT_RAMPSTEP[mode]
-
         self.write(f":SOURce:FUNCtion {MODE_MAPS[mode]}")
-        self._rampstep = rampstep
+        self._rampstep = cfg.rampstep
 
     # Returns the mode (voltage or current)
     def get_mode(self) -> Literal["voltage", "current"]:
@@ -273,6 +363,10 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             )
 
         self._rampstep = cfg.rampstep
+        self._max_voltage = cfg.max_voltage
+        self._max_current = cfg.max_current
+        self._max_voltage_rampstep = cfg.max_voltage_rampstep
+        self._max_current_rampstep = cfg.max_current_rampstep
 
         value = cfg.value
         if cur_mode == "current":
@@ -289,4 +383,8 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             mode=self.get_mode(),
             value=self._get_level(),
             rampstep=self._rampstep,
+            max_voltage=self._max_voltage,
+            max_current=self._max_current,
+            max_voltage_rampstep=self._max_voltage_rampstep,
+            max_current_rampstep=self._max_current_rampstep,
         )

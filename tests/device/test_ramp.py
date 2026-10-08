@@ -4,8 +4,9 @@ import threading
 from typing import Any, Literal, cast
 
 import pytest
+from pydantic import ValidationError
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
-from zcu_tools.device.yoko import YOKOGS200
+from zcu_tools.device.yoko import YOKOGS200, YOKOGS200Info
 
 
 class DummyYokoSession:
@@ -73,7 +74,6 @@ def _make_yoko(
     )
     rm = DummyYokoResourceManager(session)
     dev = YOKOGS200("YOKO::INSTR", cast(Any, rm))
-    dev._rampinterval = 0.0
     return dev, session
 
 
@@ -99,17 +99,17 @@ def test_fake_device_rejects_non_positive_rampstep() -> None:
 
 def test_yoko_voltage_ramp_preserves_include_start_behavior() -> None:
     dev, session = _make_yoko(mode="voltage", output="on", level=0.0)
-    dev._rampstep = 0.25
+    dev.set_mode("voltage", rampstep=1e-3)
 
-    result = dev.set_voltage(1.0, progress=False)
+    result = dev.set_voltage(4e-3, progress=False)
 
-    assert result == pytest.approx(1.0)
-    assert session.level_writes == pytest.approx([0.0, 0.25, 0.5, 0.75, 1.0])
+    assert result == pytest.approx(4e-3)
+    assert session.level_writes == pytest.approx([0.0, 1e-3, 2e-3, 3e-3, 4e-3])
 
 
 def test_yoko_current_ramp_preserves_include_start_behavior() -> None:
     dev, session = _make_yoko(mode="current", output="on", level=0.0)
-    dev._rampstep = 1e-6
+    dev.set_mode("current", rampstep=1e-6)
 
     result = dev.set_current(4e-6, progress=False)
 
@@ -132,4 +132,87 @@ def test_yoko_voltage_safety_raises_without_level_write() -> None:
     with pytest.raises(RuntimeError, match="over 20V"):
         dev.set_voltage(20.1, progress=False)
 
+    assert session.level_writes == []
+
+
+@pytest.mark.parametrize("mode, limit", [("voltage", 0.1), ("current", 1e-4)])
+def test_yoko_setup_limits_apply_to_subsequent_setters(
+    mode: Literal["voltage", "current"],
+    limit: float,
+) -> None:
+    dev, session = _make_yoko(mode=mode)
+    cfg = YOKOGS200Info(
+        address=dev.address,
+        output="on",
+        mode=mode,
+        max_voltage=0.1,
+        max_current=1e-4,
+    )
+    dev.setup(cfg, progress=False)
+    assert dev.get_info() == cfg
+    session.level_writes.clear()
+    setter = dev.set_voltage if mode == "voltage" else dev.set_current
+    for value in (-1.1 * limit, 1.1 * limit):
+        with pytest.raises(RuntimeError, match="in magnitude"):
+            setter(value, progress=False)
+    assert session.level_writes == []
+
+
+@pytest.mark.parametrize("mode, target", [("voltage", 2e-3), ("current", 2e-6)])
+def test_yoko_setup_uses_mode_default_rampstep(
+    mode: Literal["voltage", "current"],
+    target: float,
+) -> None:
+    dev, session = _make_yoko(mode=mode)
+    dev.setup(
+        YOKOGS200Info(address=dev.address, output="on", mode=mode, value=target),
+        progress=False,
+    )
+    assert session.level_writes == pytest.approx([0.0, target / 2, target])
+
+
+@pytest.mark.parametrize("mode, limit", [("voltage", 2e-3), ("current", 2e-6)])
+def test_yoko_setup_rampstep_limits_persist_across_mode_changes(
+    mode: Literal["voltage", "current"],
+    limit: float,
+) -> None:
+    dev, session = _make_yoko(mode=mode)
+    cfg = YOKOGS200Info(
+        address=dev.address,
+        output="on",
+        mode=mode,
+        rampstep=limit,
+        max_voltage_rampstep=2e-3,
+        max_current_rampstep=2e-6,
+    )
+    dev.setup(cfg, progress=False)
+    assert dev.get_info() == cfg
+    dev.set_mode("voltage" if mode == "current" else "current")
+    dev.set_mode(mode, rampstep=limit)
+    session.level_writes.clear()
+    with pytest.raises(ValidationError, match="rampstep limit"):
+        dev.set_mode(mode, rampstep=limit * 1.01)
+    assert dev.get_info() == cfg
+    assert session.level_writes == []
+
+
+@pytest.mark.parametrize("step", [0.0, -1.0, float("inf"), float("nan")])
+def test_yoko_set_mode_rejects_invalid_step_before_mode_change(step: float) -> None:
+    dev, session = _make_yoko(mode="voltage")
+    with pytest.raises(ValidationError, match="rampstep"):
+        dev.set_mode("current", rampstep=step)
+    assert session.mode == "VOLT"
+    assert session.level_writes == []
+
+
+@pytest.mark.parametrize("mode", ["voltage", "current"])
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_yoko_setter_rejects_nonfinite_level_without_write(
+    mode: Literal["voltage", "current"],
+    value: float,
+) -> None:
+    dev, session = _make_yoko(mode=mode)
+    setter = dev.set_voltage if mode == "voltage" else dev.set_current
+    with pytest.raises(RuntimeError, match="finite"):
+        setter(value, progress=False)
     assert session.level_writes == []
