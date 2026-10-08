@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication, QLineEdit
+from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
     DeviceSnapshot,
@@ -64,7 +65,18 @@ def tuning(
         plan=make_plan(inputs),
         tunables=result.to_cfg(),
         paths=RunPaths(tmp_path / "metadata", tmp_path / "data"),
-        identity=RunIdentity("tuning", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "tuning",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     widget = T1TuningPanel(engine, "tuning", env, accepted)
     yield widget, engine

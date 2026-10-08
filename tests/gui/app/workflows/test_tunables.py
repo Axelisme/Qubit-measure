@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
+from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
     DeviceSnapshot,
@@ -165,8 +166,6 @@ def test_whole_tuple_leaf_is_submitted_as_json_array(tmp_path: Path) -> None:
         "arrays",
         plan=Plan,
         tunables=ArrayTunables,
-        state=State,
-        record=int,
         init=rig.init,
     )
     def arrays(
@@ -184,7 +183,18 @@ def test_whole_tuple_leaf_is_submitted_as_json_array(tmp_path: Path) -> None:
         plan=Plan(),
         tunables=ArrayTunables(),
         paths=rig.paths,
-        identity=RunIdentity("arrays", DeviceSnapshot({}), "offline"),
+        identity=RunIdentity(
+            "arrays",
+            DeviceSnapshot({}),
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     env = FormEnv()
     state = FormState(ArrayForm.default_input(env))
