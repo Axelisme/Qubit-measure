@@ -15,7 +15,11 @@ from zcu_tools.experiment.cfg_assembler import (
     assemble_experiment_cfg,
 )
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import PreparedRunData, prepare_run_data
+from zcu_tools.experiment.native_persistence import (
+    PreparedRunData,
+    load_run_with_metadata,
+    prepare_run_data,
+)
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -510,15 +514,21 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         """
         if not _can_construct_without_args(self.exp_cls):
             raise NotImplementedError(
-                f"{type(self).__name__} does not support loading canonical result files"
+                f"{type(self).__name__} does not support loading native result files"
             )
         exp = self.exp_cls()
-        load = getattr(exp, "load", None)
-        if not callable(load):
+        persistence_spec = getattr(exp, "persistence_spec", None)
+        if not callable(persistence_spec):
             raise NotImplementedError(
-                f"{type(self).__name__} does not support loading canonical result files"
+                f"{type(self).__name__} does not support loading native result files"
             )
-        return cast(T_Result, load(Path(req.data_path)))
+        try:
+            spec = exp.persistence_spec()
+        except NotImplementedError as exc:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support loading native result files"
+            ) from exc
+        return load_run_with_metadata(Path(req.data_path), spec=spec)
 
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]

@@ -142,6 +142,13 @@ class SaveService:
         except ValueError as exc:
             raise FailedPreconditionError(str(exc)) from exc
         storage = tab.save_context.capture_storage()
+        history = metadata.snapshot
+        if history.entry_id != storage.entry_id or history.point != storage.point:
+            raise FailedPreconditionError(
+                f"Historical run entry_id={history.entry_id!r}, point={history.point!r} "
+                f"does not match tab entry_id={storage.entry_id!r}, point={storage.point!r}; "
+                "save from a tab captured at the matching historical entry and point."
+            )
         layout = SaveLayout(
             result_path=storage.result_path,
             database_path=storage.database_path,

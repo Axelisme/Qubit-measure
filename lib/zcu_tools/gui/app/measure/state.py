@@ -470,7 +470,8 @@ class State(SessionState):
             type(result).__name__,
         )
         return self._replace_run_pane(
-            tab_id, RunPaneState(result=result, source_path=source_path)
+            tab_id,
+            RunPaneState(result=result, source_path=source_path, metadata=metadata),
         )
 
     def swap_analysis_pane(
