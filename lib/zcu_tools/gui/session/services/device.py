@@ -666,7 +666,16 @@ class DeviceService:
         have refreshed State when a later read fails; there is no rollback.
         Driver I/O can block, and a ramp can expose an intermediate value.
         """
-        raise NotImplementedError("live native device capture seed")
+        captured: dict[str, DeviceInfo] = {}
+        for name in self.get_connected_devices():
+            try:
+                info = self.get_device_info(name)
+            except Exception as error:
+                raise RuntimeError(f"Device {name!r} live read failed") from error
+            if not isinstance(info, DeviceInfo):
+                raise RuntimeError(f"Device {name!r} has no native live info")
+            captured[name] = info.model_copy(deep=True)
+        return captured
 
     def capture_native_device_info(self) -> dict[str, DeviceInfo]:
         """Capture ordered native info for live registered devices without I/O.
