@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from qtpy.QtCore import QBuffer, QIODevice  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from qtpy.QtCore import QBuffer, QIODevice
+from qtpy.QtWidgets import QWidget
 
 
 def widget_to_png_bytes(widget: QWidget, *, subject: str = "widget") -> bytes:
@@ -12,4 +12,4 @@ def widget_to_png_bytes(widget: QWidget, *, subject: str = "widget") -> bytes:
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     if not widget.grab().save(buffer, "PNG"):
         raise RuntimeError(f"Failed to encode {subject} screenshot as PNG")
-    return bytes(buffer.data().data())  # type: ignore[arg-type]
+    return bytes(buffer.data().data())

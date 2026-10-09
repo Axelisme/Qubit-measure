@@ -56,22 +56,21 @@ def get_ip_address(iface: str) -> str:
                     if addr.family == socket.AF_INET:
                         return addr.address
         raise OSError(f"Interface {iface} not found or has no IPv4 address.")
-    else:
-        # Linux 系統
-        import fcntl
-        import struct
+    # Linux 系統
+    import fcntl
+    import struct
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            return socket.inet_ntoa(
-                fcntl.ioctl(  # type: ignore
-                    s.fileno(),
-                    0x8915,  # SIOCGIFADDR
-                    struct.pack("256s", bytes(iface[:15], "utf-8")),
-                )[20:24]
-            )
-        except OSError:
-            raise OSError(f"Interface {iface} not found or has no IPv4 address.")
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        return socket.inet_ntoa(
+            fcntl.ioctl(  # type: ignore
+                s.fileno(),
+                0x8915,  # SIOCGIFADDR
+                struct.pack("256s", bytes(iface[:15], "utf-8")),
+            )[20:24]
+        )
+    except OSError:
+        raise OSError(f"Interface {iface} not found or has no IPv4 address.")
 
 
 def savefig(fig: Figure, filepath: str, close_after: bool = True, **kwargs) -> None:

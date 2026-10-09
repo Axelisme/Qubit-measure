@@ -27,7 +27,7 @@ def calculate_eff_t1_with(
         t1s = fluxonium.t1_effective(
             noise_channels=noise_channels,
             common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
-            esys=esys,  # type: ignore
+            esys=esys,
         )
 
     # scqubits returns t1 in units of ns/rad, so we need to convert to ns

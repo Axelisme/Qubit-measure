@@ -34,7 +34,7 @@ def effective_temperature(population: list[tuple[float, float]]) -> tuple[float,
             "At least two qubits are required to calculate effective temperature."
         )
 
-    pops, freqs = zip(*population)
+    pops, freqs = zip(*population, strict=False)
     pops, freqs = np.array(pops), np.array(freqs)
 
     # directly calculate from two points

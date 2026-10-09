@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -41,6 +41,6 @@ def fit_qubit_freq(
         freq_err = np.sqrt(np.diag(pCov))[3]
         fwhm_err = 1.2067 * np.sqrt(np.diag(pCov))[4]
 
-    pOpt = cast(tuple[float, float, float, float, float], tuple(pOpt))
+    pOpt = tuple(pOpt)
 
     return freq, freq_err, fwhm, fwhm_err, fit_singals, (pOpt, pCov)

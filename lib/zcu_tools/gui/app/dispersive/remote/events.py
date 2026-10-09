@@ -20,7 +20,8 @@ from zcu_tools.gui.app.dispersive.event_bus import (
     ProjectChangedPayload,
 )
 from zcu_tools.gui.event_bus import BasePayload
-from zcu_tools.gui.remote.events import EventSerializer, WirePayload, wire_event_name
+from zcu_tools.gui.remote.events import EventSerializer, WirePayload
+from zcu_tools.gui.remote.events import wire_event_name as wire_event_name
 
 
 def _ser_project_changed(payload: BasePayload) -> WirePayload:

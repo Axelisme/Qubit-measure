@@ -365,7 +365,7 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
     )
     fig.update_traces(marker=dict(size=3))
 
-    # 預設隱藏valid=False的點
+    # Hide invalid traces by default while keeping them in the legend.
     fig.for_each_trace(
         lambda trace: (
             trace.update(visible="legendonly") if trace.name == "False" else ()

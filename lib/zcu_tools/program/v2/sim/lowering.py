@@ -207,6 +207,42 @@ def _resolve_scalar(
     return float(np.asarray(array)[index])
 
 
+def _resolve_time(
+    value: float | QickParam,
+    loop_counts: dict[str, int],
+    point: dict[str, int],
+    soccfg: QickConfig | None,
+    *,
+    gen_ch: int | None = None,
+    ro_ch: int | None = None,
+) -> float:
+    """Resolve microseconds on the generator, readout, or default tProcessor clock.
+
+    Rebuild swept parameters before conversion so lowering neither mutates the
+    source nor depends on conversions left by compilation. QICK quantizes both
+    the start and the per-loop increments, not each requested point separately.
+    Conversion and zero-step errors propagate from QICK.
+    """
+    if soccfg is None:
+        # Uncompiled lowering callers have no clock configuration to quantize with.
+        return _resolve_scalar(value, loop_counts, point)
+    if not isinstance(value, QickParam):
+        return float(
+            soccfg.cycles2us(
+                soccfg.us2cycles(value, gen_ch=gen_ch, ro_ch=ro_ch),
+                gen_ch=gen_ch,
+                ro_ch=ro_ch,
+            )
+        )
+    if not is_qick_param(value):
+        raise TypeError(f"unsupported QickParam implementation: {type(value).__name__}")
+    param = QickParam(value.start, dict(value.spans))
+    soccfg.us2cycles(param, gen_ch=gen_ch, ro_ch=ro_ch)
+    array = param.get_actual_values(loop_counts)
+    index = tuple(point[name] if name in value.spans else 0 for name in loop_counts)
+    return float(np.asarray(array)[index])
+
+
 def _segment_midpoints(length: float, n: int) -> np.ndarray:
     """The ``n`` piecewise-constant sub-segment midpoints over ``[0, length]``.
 
@@ -339,6 +375,7 @@ def _pulse_segments(
     detune_offset: float,
     loop_counts: dict[str, int],
     point: dict[str, int],
+    soccfg: QickConfig | None,
 ) -> list[Segment]:
     """Lower one Pulse cfg to drive segments (with pre/post idle) at one point.
 
@@ -355,9 +392,11 @@ def _pulse_segments(
     ensemble — lowering only shifts the frame.
     """
 
-    pre_delay = _resolve_scalar(cfg.pre_delay, loop_counts, point)
-    post_delay = _resolve_scalar(cfg.post_delay, loop_counts, point)
-    length = _resolve_scalar(cfg.waveform.length, loop_counts, point)
+    pre_delay = _resolve_time(cfg.pre_delay, loop_counts, point, soccfg)
+    post_delay = _resolve_time(cfg.post_delay, loop_counts, point, soccfg)
+    length = _resolve_time(
+        cfg.waveform.length, loop_counts, point, soccfg, gen_ch=cfg.ch
+    )
     gain = _resolve_scalar(cfg.gain, loop_counts, point)
     freq_mhz = _resolve_scalar(cfg.freq, loop_counts, point)
     phase_deg = _resolve_scalar(cfg.phase, loop_counts, point)
@@ -423,6 +462,7 @@ def _reset_segments(
     detune_offset: float,
     loop_counts: dict[str, int],
     point: dict[str, int],
+    soccfg: QickConfig | None,
 ) -> list[Segment]:
     """Lower a reset module to its unconditional pulse sequence.
 
@@ -449,6 +489,7 @@ def _reset_segments(
             detune_offset,
             loop_counts,
             point,
+            soccfg,
         )
 
     if isinstance(module, TwoPulseReset):
@@ -465,6 +506,7 @@ def _reset_segments(
             detune_offset,
             loop_counts,
             point,
+            soccfg,
         ) + _pulse_segments(
             module.cfg.pulse2_cfg,
             sim,
@@ -474,6 +516,7 @@ def _reset_segments(
             detune_offset,
             loop_counts,
             point,
+            soccfg,
         )
 
     if isinstance(module, BathReset):
@@ -487,6 +530,7 @@ def _reset_segments(
                 detune_offset,
                 loop_counts,
                 point,
+                soccfg,
             )
             + _pulse_segments(
                 module.cfg.qubit_tone_cfg,
@@ -497,6 +541,7 @@ def _reset_segments(
                 detune_offset,
                 loop_counts,
                 point,
+                soccfg,
             )
             + _pulse_segments(
                 module.cfg.pi2_cfg,
@@ -507,6 +552,7 @@ def _reset_segments(
                 detune_offset,
                 loop_counts,
                 point,
+                soccfg,
             )
         )
 
@@ -524,6 +570,7 @@ def _delay_segment(
     point: dict[str, int],
     dmem_tables: dict[str, DmemTable],
     cycles2us: Callable[[int], float],
+    soccfg: QickConfig | None,
 ) -> Segment:
     """Lower a delay module to one free-evolution segment.
 
@@ -555,7 +602,7 @@ def _delay_segment(
         raw_t = module.t
     else:
         raw_t = module.delay
-    t = _resolve_scalar(raw_t, loop_counts, point)
+    t = _resolve_time(raw_t, loop_counts, point, soccfg)
     return _idle_segment(sim, equilibrium_pop, t, idle_detuning)
 
 
@@ -615,8 +662,10 @@ def _readout_plan(
         ro_length = module.cfg.ro_length
         trig_offset = module.cfg.trig_offset
         f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
-        ro_length_us = _resolve_scalar(ro_length, loop_counts, point)
-        trig_offset_us = _resolve_scalar(trig_offset, loop_counts, point)
+        ro_length_us = _resolve_time(
+            ro_length, loop_counts, point, soccfg, ro_ch=module.cfg.ro_ch
+        )
+        trig_offset_us = _resolve_time(trig_offset, loop_counts, point, soccfg)
         return ReadoutPlan(
             f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ,
             ro_length_us=ro_length_us,
@@ -627,12 +676,6 @@ def _readout_plan(
         ro_length = module.cfg.ro_cfg.ro_length
         trig_offset = module.cfg.ro_cfg.trig_offset
         readout_gain = _resolve_scalar(module.cfg.pulse_cfg.gain, loop_counts, point)
-        pulse_length_us = _resolve_scalar(
-            module.cfg.pulse_cfg.waveform.length, loop_counts, point
-        )
-        pulse_pre_delay_us = _resolve_scalar(
-            module.cfg.pulse_cfg.pre_delay, loop_counts, point
-        )
         f_ro_mhz = _resolve_scalar(ro_freq, loop_counts, point)
         if isinstance(module, TablePulseReadout):
             if module.idx_reg not in point:
@@ -696,8 +739,20 @@ def _readout_plan(
                 ro_ch=module.cfg.ro_cfg.ro_ch,
                 reference_freq_mhz=f_ro_mhz,
             )
-        ro_length_us = _resolve_scalar(ro_length, loop_counts, point)
-        trig_offset_us = _resolve_scalar(trig_offset, loop_counts, point)
+        pulse_length_us = _resolve_time(
+            module.cfg.pulse_cfg.waveform.length,
+            loop_counts,
+            point,
+            soccfg,
+            gen_ch=module.cfg.pulse_cfg.ch,
+        )
+        pulse_pre_delay_us = _resolve_time(
+            module.cfg.pulse_cfg.pre_delay, loop_counts, point, soccfg
+        )
+        ro_length_us = _resolve_time(
+            ro_length, loop_counts, point, soccfg, ro_ch=module.cfg.ro_cfg.ro_ch
+        )
+        trig_offset_us = _resolve_time(trig_offset, loop_counts, point, soccfg)
         return ReadoutPlan(
             f_ro_ghz=f_ro_mhz / _GHZ_TO_MHZ,
             ro_length_us=ro_length_us,
@@ -935,8 +990,9 @@ def lower_point(
         ``soccfg.cycles2us`` callable, used only to convert dmem cycle counts
         (non-uniform T1 path) into µs delays.
     soccfg
-        Optional QICK config object used to decode raw LoadWord frequency words
-        consumed by PulseReadout runtime registers.
+        Optional QICK config used to quantize scalar and swept times on their
+        hardware clocks and decode PulseReadout runtime LoadWord frequencies.
+        Without it, semantic times remain unquantized.
     detune_offset
         A static, global rotating-frame shift in rad/µs (same unit as
         ``Segment.delta``), added to every segment's detuning — both drives and
@@ -981,6 +1037,7 @@ def lower_point(
                 dmem_tables,
                 cycles2us,
                 segments,
+                soccfg,
             )
 
     for module in modules:
@@ -1059,6 +1116,7 @@ def _lower_module(
     dmem_tables: dict[str, DmemTable],
     cycles2us: Callable[[int], float],
     segments: list[Segment],
+    soccfg: QickConfig | None,
 ) -> None:
     """Lower one evolution module (pulse / delay / reset / dmem) into ``segments``.
 
@@ -1084,6 +1142,7 @@ def _lower_module(
                 detune_offset,
                 loop_counts,
                 point,
+                soccfg,
             )
         )
         return
@@ -1100,6 +1159,7 @@ def _lower_module(
                 detune_offset,
                 loop_counts,
                 point,
+                soccfg,
             )
         )
         return
@@ -1127,6 +1187,7 @@ def _lower_module(
                 detune_offset,
                 loop_counts,
                 point,
+                soccfg,
             )
         )
         return
@@ -1141,6 +1202,7 @@ def _lower_module(
                 point,
                 dmem_tables,
                 cycles2us,
+                soccfg,
             )
         )
         return

@@ -15,7 +15,7 @@ def merge_result_list(results: Sequence[T_Result]) -> T_Result:
     assert isinstance(results, list) and len(results) > 0
     if isinstance(results[0], dict):
         return {
-            name: merge_result_list([r[name] for r in results])  # type: ignore
+            name: merge_result_list([r[name] for r in results])  # pyright: ignore[reportReturnType]
             for name in results[0]
         }
-    return np.asarray(results)  # type: ignore
+    return np.asarray(results)  # pyright: ignore[reportReturnType]

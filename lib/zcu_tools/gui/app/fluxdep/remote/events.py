@@ -24,7 +24,8 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumRemovedPayload,
 )
 from zcu_tools.gui.event_bus import BasePayload
-from zcu_tools.gui.remote.events import EventSerializer, WirePayload, wire_event_name
+from zcu_tools.gui.remote.events import EventSerializer, WirePayload
+from zcu_tools.gui.remote.events import wire_event_name as wire_event_name
 
 # Wire payload type: a JSON-friendly mapping (never None for fluxdep — every
 # event carries something useful, but the type stays Optional for parity).

@@ -95,10 +95,6 @@ def _flatten_root(root: BlockNode) -> list[Instruction]:
     return lexer.flatten(parser.unparse(root))
 
 
-def _count_fixed_blocks(root: BlockNode) -> int:
-    return sum(1 for bb in _walk_basic_blocks(root) if bb.disable_opt)
-
-
 def _counter_update(reg: str) -> BasicBlockNode:
     """Standard counter increment for tests."""
     return BasicBlockNode(

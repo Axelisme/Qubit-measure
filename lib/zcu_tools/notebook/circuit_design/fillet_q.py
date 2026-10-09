@@ -177,7 +177,8 @@ class Fillet_Qubit(BaseQubit):
         )
         if p.pad_fillet > max_pad_fillet:
             warnings.warn(
-                f"pad_fillet is larger than the maximum fillet size. Setting it to {max_pad_fillet}"
+                f"pad_fillet is larger than the maximum fillet size. Setting it to {max_pad_fillet}",
+                stacklevel=1,
             )
             p.pad_fillet = max_pad_fillet
         rect1 = draw.rectangle(p.pad_width, p.pad_height - 2 * p.pad_fillet)
@@ -190,7 +191,8 @@ class Fillet_Qubit(BaseQubit):
         )
         if p.arm_fillet > max_arm_fillet:
             warnings.warn(
-                f"arm_fillet is larger than the maximum fillet size. Setting it to {max_arm_fillet}"
+                f"arm_fillet is larger than the maximum fillet size. Setting it to {max_arm_fillet}",
+                stacklevel=1,
             )
             p.arm_fillet = max_arm_fillet
         arm_fillet = p.arm_fillet

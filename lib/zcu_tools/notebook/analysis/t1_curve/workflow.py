@@ -15,6 +15,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.notebook.analysis.fit_tools import (
+    ErrorResolutionResult,
     FluxResidualWeighting,
     MeasurementErrorPolicy,
     align_flux_to_window,
@@ -1586,18 +1587,6 @@ def t1_parameter_text(
     return "\n".join(lines)
 
 
-def _purcell_parameter_text_lines(
-    purcell: PurcellEffectParams | None,
-) -> tuple[str, ...]:
-    if purcell is None:
-        return ()
-    return (
-        f"Purcell kappa = {purcell.kappa_ghz:.3e} GHz",
-        f"Purcell bare_rf = {purcell.bare_rf:.6g} GHz",
-        f"Purcell g = {purcell.g:.3e} GHz",
-    )
-
-
 def run_t1_curve_analysis(
     config: T1CurveAnalysisConfig,
 ) -> T1CurveAnalysisResult:
@@ -2292,7 +2281,7 @@ def _fit_params_table(init: T1FitParams, fit_result: T1FitResult) -> pd.DataFram
                 "init": init_value,
                 "fit": fit_value,
                 "stderr": stderr,
-                "display": _format_parameter(cast(ParameterName, name), fit_value),
+                "display": _format_parameter(name, fit_value),
             }
         )
     return pd.DataFrame(rows)
@@ -2310,12 +2299,12 @@ def _param_value(params: T1FitParams, name: str) -> float | None:
     raise ValueError(f"unknown T1 parameter: {name}")
 
 
-def _error_fill_summary(result: object | None) -> str:
+def _error_fill_summary(result: ErrorResolutionResult | None) -> str:
     if result is None:
         return "no error column"
-    bin_fill_mask = getattr(result, "bin_fill_mask")
-    global_fill_mask = getattr(result, "global_fill_mask")
-    fallback_fill_mask = getattr(result, "fallback_fill_mask")
+    bin_fill_mask = result.bin_fill_mask
+    global_fill_mask = result.global_fill_mask
+    fallback_fill_mask = result.fallback_fill_mask
     filled = int(
         np.count_nonzero(bin_fill_mask | global_fill_mask | fallback_fill_mask)
     )

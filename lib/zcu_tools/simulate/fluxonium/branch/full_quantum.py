@@ -150,7 +150,8 @@ def calc_branch_population_over_flux(
         def _calc_branch_populations(
             paramsweep: ParameterSweep, paramindex_tuple: tuple, **kwargs
         ) -> NDArray[np.float64]:
-            # (qub_dim * res_dim, (qub_dim * res_dim, 1))
+            # There are qub_dim * res_dim eigenvectors, each with shape
+            # (qub_dim * res_dim, 1).
             evecs = paramsweep["evecs"][paramindex_tuple]
 
             def _calc_population(b, n) -> float:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QLineEdit
 
 from zcu_tools.gui.session.ui.value_source_input import (
     SessionValueSourceInputHost,
@@ -26,7 +26,7 @@ def make_value_source_input_enhancer(
             source_host,
             parent=line_edit,
         )
-        controller.resolve_failed.connect(line_edit.setToolTip)  # type: ignore[attr-defined]
+        controller.resolve_failed.connect(line_edit.setToolTip)
         return controller
 
     return enhance

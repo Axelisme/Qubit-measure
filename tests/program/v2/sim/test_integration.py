@@ -29,13 +29,11 @@ The engine drives the qubit at the f_qubit it computes from the same SimParams
 maximise |g>/|e> contrast — i.e. each test plays an experimenter who has already
 located the qubit and resonator, exactly as the real path requires.
 
-len_rabi note: the mock soccfg's const/flat_top pulse-length *register* grid is
-too coarse for a hard length sweep to compile, so len_rabi is driven with a
-gauss pulse (the soft-sweep path that recompiles per length).  A gauss envelope's
-rotation angle is area-weighted, so the absolute const formula
-``pi_len == pi_gain_len/gain`` does not hold; instead the gain *scaling* law is
-asserted (Rabi freq proportional to gain), which is the injection-faithful
-invariant for any envelope.
+len_rabi covers both hard const sweeps and soft gauss sweeps. The hard sweep
+recovers the absolute injected pi length on QICK's quantized axis. A gauss
+envelope's rotation angle is area-weighted, so the absolute const formula
+``pi_len == pi_gain_len/gain`` does not hold for that envelope; the soft sweep
+instead checks gain scaling (Rabi frequency proportional to gain).
 
 dephasing note: the engine averages the deterministic per-point signal over a
 Lorentzian quasi-static detune ensemble (HWHM Gamma = ``1/T2_star - 1/T2``).  A
@@ -347,9 +345,8 @@ def test_amp_rabi_recovers_pi_gain() -> None:
 def test_len_rabi_recovers_gain_scaling() -> None:
     """len_rabi Rabi frequency scales linearly with the drive gain.
 
-    The mock soccfg's const length register is too coarse for a hard length
-    sweep to compile, so this uses a gauss pulse and free-phase fit. A gauss
-    envelope is area-weighted, so the absolute const formula pi_len ==
+    This soft sweep uses a gauss pulse and free-phase fit. A gauss envelope
+    is area-weighted, so the absolute const formula pi_len ==
     pi_gain_len/gain does not apply; the injection-faithful invariant that *does*
     hold for any envelope is that the Rabi frequency is proportional to gain
     (Omega ∝ gain).  Doubling the gain must double the fitted Rabi frequency and
@@ -401,7 +398,85 @@ def test_len_rabi_recovers_gain_scaling() -> None:
     assert pi_len_hi / pi_len_lo == pytest.approx(0.5, rel=0.05)
 
 
+def test_len_rabi_recovers_pi_length_on_unaligned_clock_grid() -> None:
+    """A hard length sweep fits the injected pi length on its actual clock axis."""
+    sim = _SIM.model_copy(
+        update={
+            "EJ": 8.5,
+            "EC": 1.0,
+            "flux_bias": 0.2,
+            "snr": 200.0,
+            "poll_latency": 0.0,
+        }
+    )
+    soc, soccfg = make_mock_soc(sim=sim)
+    predictor = FluxoniumPredictor(
+        params=(sim.EJ, sim.EC, sim.EL),
+        flux_half=sim.flux_half,
+        flux_period=sim.flux_period,
+        flux_bias=sim.flux_bias,
+    )
+    f_qubit = float(predictor.predict_freq(predictor.flux_to_value(_OPERATING_FLUX)))
+    readout = DirectReadoutCfg(
+        ro_ch=0,
+        ro_length=1.0,
+        ro_freq=resonator_freqs(sim, _OPERATING_FLUX)[0] * 1000.0,
+    )
+    gain = 1.0
+    cfg = LenRabiCfg(
+        reps=2000,
+        rounds=2,
+        modules=LenRabiModuleCfg(
+            reset=None,
+            init_pulse=None,
+            qub_pulse=PulseCfg(
+                ch=0,
+                nqz=1,
+                gain=gain,
+                freq=f_qubit,
+                phase=0.0,
+                waveform=ConstWaveformCfg(length=sim.pi_gain_len),
+            ),
+            readout=readout,
+        ),
+        # On the mock generator, QICK truncates each step from 8.83 to 8 cycles.
+        sweep=LenRabiSweepCfg(
+            length=SweepCfg(start=0.05, stop=1.2, expts=51, step=1.15 / 50)
+        ),
+        relax_delay=_RESET_RELAX_DELAY,
+    )
+    exp = LenRabiExp()
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        context.cancel_signal.raise_if_error()
+        analysis = exp.analyze(
+            RunRecord(cfg, result),
+            LenRabiAnalyzeOptions(decay=False, fit_phase=True),
+            plots=context.plots,
+        )
+    assert analysis.pi_len == pytest.approx(sim.pi_gain_len / gain, rel=0.05)
+
+
 # --------------------------------------------------------------- T1
+
+
+def test_t1_recovers_lifetime_on_unaligned_clock_grid() -> None:
+    """A compressed delay sweep still fits the injected lifetime, not requested time."""
+    sim = _SIM.model_copy(update={"T1": 0.4, "T2": 0.4, "T2_star": 0.4})
+    soc, soccfg = make_mock_soc(sim=sim)
+    # QICK truncates a 4.54-cycle requested increment to 4 tProcessor cycles.
+    cfg = _t1_cfg(SweepCfg(start=0.05, stop=1.2, expts=110, step=1.15 / 109))
+    cfg.uniform = True
+    cfg.reps = 2000
+    cfg.relax_delay = 10.0 * sim.T1
+    exp = T1Exp()
+    with _simulation_context(soc, soccfg) as context:
+        result = exp.run(cfg, context=context)
+        context.cancel_signal.raise_if_error()
+        analysis = exp.analyze(
+            RunRecord(cfg, result), T1AnalyzeOptions(), plots=context.plots
+        )
+    assert analysis.t1 == pytest.approx(sim.T1, rel=0.05)
 
 
 def _t1_cfg(length: SweepCfg | list[float]) -> T1Cfg:

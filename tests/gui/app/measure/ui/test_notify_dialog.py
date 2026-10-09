@@ -40,8 +40,7 @@ def _make_dlg(
     qapp=None,
 ) -> NotifyUserDialog:
     # timeout=0 prevents the QTimer from firing while the test runs.
-    dlg = NotifyUserDialog(token, message, timeout, ctrl)
-    return dlg
+    return NotifyUserDialog(token, message, timeout, ctrl)
 
 
 def _find_btn(dlg: NotifyUserDialog, text: str) -> QPushButton:

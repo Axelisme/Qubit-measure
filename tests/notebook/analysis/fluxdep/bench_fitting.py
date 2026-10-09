@@ -173,7 +173,9 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
         )
         dt = time.perf_counter() - t0
         plt.close(fig)
-        err = max(abs(bp - tp) / tp for bp, tp in zip(best_params, true_params))
+        err = max(
+            abs(bp - tp) / tp for bp, tp in zip(best_params, true_params, strict=False)
+        )
         out[name] = {"time": dt, "best": list(best_params), "max_rel_err": err}
 
     # fit_spectrum benchmark.
@@ -190,7 +192,7 @@ def macro_benches(db_path: str, quick: bool, n_fluxs: int | None = None) -> dict
             maxfun=80,
         )
         dt = time.perf_counter() - t0
-        err = max(abs(f - tp) / tp for f, tp in zip(fit, true_params))
+        err = max(abs(f - tp) / tp for f, tp in zip(fit, true_params, strict=False))
         out["fit_spectrum"] = {"time": dt, "best": list(fit), "max_rel_err": err}
 
     return out

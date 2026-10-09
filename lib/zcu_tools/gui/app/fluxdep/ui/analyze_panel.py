@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -96,7 +96,7 @@ def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
 
 def _freq_edit() -> QLineEdit:
     """A nullable frequency field: blank means unset, else a float."""
-    from qtpy.QtGui import QDoubleValidator  # type: ignore[attr-defined]
+    from qtpy.QtGui import QDoubleValidator
 
     edit = QLineEdit()
     edit.setPlaceholderText("(unset)")
@@ -207,8 +207,8 @@ class AnalyzePanelWidget(QWidget):
     # --- Search tab ------------------------------------------------------
 
     def _build_search_tab(self) -> QWidget:
-        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-        from qtpy.QtWidgets import QSplitter  # type: ignore[attr-defined]
+        from qtpy.QtCore import Qt
+        from qtpy.QtWidgets import QSplitter
 
         form_box = self._build_search_form()
 
@@ -295,8 +295,8 @@ class AnalyzePanelWidget(QWidget):
         return form_box
 
     def _build_show_tab(self) -> QWidget:
-        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-        from qtpy.QtWidgets import QSplitter  # type: ignore[attr-defined]
+        from qtpy.QtCore import Qt
+        from qtpy.QtWidgets import QSplitter
 
         tools_box = QGroupBox("Display")
         tools = QFormLayout(tools_box)
@@ -642,7 +642,7 @@ class AnalyzePanelWidget(QWidget):
         self._status.setToolTip(path)
 
     def _show_message(self, title: str, message: str) -> None:
-        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QMessageBox
 
         QMessageBox.warning(self, title, message)
 

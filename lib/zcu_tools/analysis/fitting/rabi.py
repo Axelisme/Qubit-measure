@@ -73,10 +73,6 @@ def fit_rabi(
     pi_x_err = _xerr(pi_x)
     pi2_x_err = _xerr(pi2_x)
 
-    # while pi2_x < min_length:
-    #     pi2_x += 1.0 / freq
-    #     pi_x += 1.0 / freq
-
     pOpt = cast(tuple[float, float, float, float, float], tuple(pOpt))
 
     return (

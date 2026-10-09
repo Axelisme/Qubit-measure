@@ -105,7 +105,7 @@ class DmemDispatchPass(AbsIRTreePass):
         # dmem table lookup + indirect jump.
         #   s15 = index + table_base   (DmemAddr resolves to the base offset)
         #   s15 = dmem[s15]            (the entry's program address)
-        #   JUMP [s15]
+        #   Jump indirectly to the program address in s15.
         table_ref = DmemAddr(table_labels=tuple(node.target_labels))
         blocks.append(
             BasicBlockNode(
