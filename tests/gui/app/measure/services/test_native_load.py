@@ -14,10 +14,13 @@ from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry, SavedPayload
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._native_save_support import (
+    PaneParams,
+    PostSummary,
     declare_panes,
     native_save_session,
 )
@@ -101,8 +104,36 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
         service.load_result("tab", str(source))
         assert tab.run.confirmed_run_id is None
+        planned_copies: tuple[Path, ...] = ()
         if save_all:
             declare_panes(session, ("fit",))
+            post_plots = Plots(NonPresentingHost())
+            post_plots.subplots("post")
+            post_plots.finish(present=False)
+            session.state.update_tab_post_analyze(
+                "tab",
+                PostSummary(),
+                post_plots,
+                post_analyze_params_instance=PaneParams(4.0),
+            )
+            planned_copies = tuple(
+                output.path
+                for section in session.state.get_artifact_snapshots("tab")
+                for artifact in section.artifacts
+                for member in artifact.members
+                for output in member.outputs
+                if output.format == "png"
+                and output.path.is_relative_to(session.entry.result_path)
+            )
+            assert len(planned_copies) == 2
+            assert all(
+                path.parent
+                == session.entry.result_path
+                / "points"
+                / stored.snapshot.point
+                / "figures"
+                for path in planned_copies
+            )
         previous_events = session.entry.ledger.events()
 
         save = session.save_artifacts if save_all else session.save
@@ -143,11 +174,8 @@ def test_loaded_same_entry_different_point_resaves_original_run(
                 if item.output.format == "png"
                 and item.output.path.is_relative_to(session.entry.result_path)
             ]
-            assert len(copies) == 1
-            assert copies[0].parent == (
-                session.entry.result_path / "points" / stored.snapshot.point / "figures"
-            )
-            assert copies[0].is_file()
+            assert tuple(copies) == planned_copies
+            assert all(path.is_file() for path in copies)
 
 
 @pytest.mark.parametrize("save_all", [False, True])

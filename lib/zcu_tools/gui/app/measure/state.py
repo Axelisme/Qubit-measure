@@ -725,7 +725,7 @@ class State(SessionState):
             result_path=storage.result_path,
             database_path=storage.database_path,
             run_id=metadata.run_id,
-            point=storage.point,
+            point=metadata.snapshot.point,
             saved_at=datetime.now().astimezone(),
         )
 

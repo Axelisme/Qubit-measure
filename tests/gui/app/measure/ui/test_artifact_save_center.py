@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtCore import QEvent, Qt
-from qtpy.QtGui import QKeyEvent
+from qtpy.QtCore import QEvent, Qt, QUrl
+from qtpy.QtGui import QDesktopServices, QKeyEvent
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
 from zcu_tools.experiment.run_saving import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
@@ -214,6 +214,76 @@ def test_outputs_follow_actual_report_paths_and_errors(
             "copy denied" in label.text() for label in center.findChildren(QLabel)
         )
         assert center.has_unsaved_data()
+    finally:
+        center.deleteLater()
+        qapp.processEvents()
+
+
+def test_folder_actions_follow_latest_outputs_without_creating_directories(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracker, current = snapshot(tmp_path / "預留 空間")
+    opened: list[QUrl] = []
+
+    def open_url(url: QUrl) -> bool:
+        opened.append(QUrl(url))
+        return True
+
+    monkeypatch.setattr(QDesktopServices, "openUrl", open_url)
+    center = ArtifactSaveCenter(_CAPABILITIES)
+    try:
+        center.update_from_snapshot(replace(current, artifacts=()))
+        assert not any(
+            button.text() == "Open folder"
+            for button in center.findChildren(QPushButton)
+        )
+        assert opened == []
+        center.update_from_snapshot(current)
+        paths = tuple(
+            output.path
+            for section in current.artifacts
+            for artifact in section.artifacts
+            for member in artifact.members
+            for output in member.outputs
+        )
+        folders = [
+            button
+            for button in center.findChildren(QPushButton)
+            if button.text() == "Open folder"
+        ]
+        assert len(folders) == len(paths)
+        for button in folders:
+            button.click()
+        assert all(url.isLocalFile() for url in opened)
+        assert [url.toLocalFile() for url in opened] == [
+            str(path.parent) for path in paths
+        ]
+        assert all(not path.parent.exists() for path in paths)
+        outputs = tuple(
+            OutputResult(
+                member.key,
+                Output(
+                    output.format,
+                    tmp_path / "實際 存檔" / str(index) / output.path.name,
+                ),
+                "saved",
+                None,
+            )
+            for section in current.artifacts
+            for artifact in section.artifacts
+            for member in artifact.members
+            for index, output in enumerate(member.outputs)
+        )
+        tracker.apply_report(SaveReport("20261008T000000Z-a1b2c3", outputs))
+        center.update_from_snapshot(replace(current, artifacts=tracker.snapshot()))
+        opened.clear()
+        for button in folders:
+            button.click()
+        assert all(url.isLocalFile() for url in opened)
+        assert [url.toLocalFile() for url in opened] == [
+            str(item.output.path.parent) for item in outputs
+        ]
+        assert all(not item.output.path.parent.exists() for item in outputs)
     finally:
         center.deleteLater()
         qapp.processEvents()
