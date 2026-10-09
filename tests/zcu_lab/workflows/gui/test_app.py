@@ -207,9 +207,7 @@ def edit_alias_entry(
     entry = window.findChild(QPushButton, "workflow.source.aliases")
     assert entry is not None, "Window must expose the shared alias editor entry"
     entry.click()
-    dialog = next(
-        (d for d in window.findChildren(AliasDialog) if d.isVisible()), None
-    )
+    dialog = next((d for d in window.findChildren(AliasDialog) if d.isVisible()), None)
     assert dialog is not None, "Alias entry must show the shared AliasDialog"
     table = dialog.findChild(QTableWidget)
     buttons = dialog.findChild(QDialogButtonBox)
@@ -266,7 +264,9 @@ def test_alias_entry_edits_same_session_without_replacing_captured_forms(
     assert window.plan_panel is plan and window.tunables_panel is knobs
     assert env.parameters.resolve_path("$qubit.kind") == "Q1.kind"
     assert plan.state.input.data == before_plan and plan.state.base.data == base_plan
-    assert knobs.state.input.data == before_knobs and knobs.state.base.data == base_knobs
+    assert (
+        knobs.state.input.data == before_knobs and knobs.state.base.data == base_knobs
+    )
     assert edit.text() == "1+" and knobs.editor.local_parse_errors() is not None
     if outcome == "apply":
         button(window, "workflow.source.use").click()

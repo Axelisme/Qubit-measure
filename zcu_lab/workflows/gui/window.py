@@ -60,6 +60,7 @@ from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.plotting.plots import Plots
@@ -216,7 +217,9 @@ class T1WorkflowWindow(QWidget):
         and its fixed global qubit alias capture. Source errors propagate without
         fallback. Start requires a saved point, native QickConfig and connected
         SoC. setup_dialog is the retained shared Setup instance over this
-        session's setup_control. Qubit changes use the existing alias dialog.
+        session's setup_control. The Aliases button opens the shared AliasDialog
+        over this session's context_control; closing it updates source status,
+        not captured forms. Only explicit prepare_forms replaces those drafts.
         The caller retains this top-level Window through shutdown. Closing during
         work requests Stop and keeps it alive until terminal delivery. Once native
         work ends, optional on_close releases composition-owned resources on the
@@ -305,14 +308,28 @@ class T1WorkflowWindow(QWidget):
         setup_button = QPushButton("Setup", self)
         setup_button.setObjectName("workflow.source.setup")
         setup_button.clicked.connect(self.open_setup)
+        aliases_button = QPushButton("Aliases", self)
+        aliases_button.setObjectName("workflow.source.aliases")
+        aliases_button.clicked.connect(self._aliases_clicked)
         self._source_status = QLabel(self)
         self._source_status.setObjectName("workflow.source.status")
         use_button = QPushButton("Prepare forms", self)
         use_button.setObjectName("workflow.source.use")
         use_button.clicked.connect(self._use_source_clicked)
-        for widget in (setup_button, self._source_status, use_button):
+        for widget in (setup_button, aliases_button, self._source_status, use_button):
             self._layout.addWidget(widget)
         self._sync_source_status()
+
+    def _aliases_clicked(self) -> None:
+        try:
+            dialog = AliasDialog(self._services.context_control, self)
+        except Exception as error:
+            logger.exception("T1 workflow alias editor could not open")
+            self._message.setText(str(error))
+            return
+        dialog.finished.connect(self._sync_source_status)
+        dialog.finished.connect(dialog.deleteLater)
+        dialog.show()
 
     def _sync_source_status(self, *_args: object) -> None:
         try:
