@@ -976,9 +976,9 @@ def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
         assert {
             item["target_name"]: item["proposed_value"] for item in draft["items"]
         } == {
-            "qubit.flux_half": pytest.approx(original["flux_half"]),
-            "qubit.flux_int": pytest.approx(original["flux_int"]),
-            "qubit.flux_period": pytest.approx(
+            "$qubit.flux_half": pytest.approx(original["flux_half"]),
+            "$qubit.flux_int": pytest.approx(original["flux_int"]),
+            "$qubit.flux_period": pytest.approx(
                 2 * abs(original["flux_int"] - original["flux_half"])
             ),
         }

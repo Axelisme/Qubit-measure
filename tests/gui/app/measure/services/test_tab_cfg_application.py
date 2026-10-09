@@ -182,7 +182,7 @@ def test_production_capture_uses_published_cache_without_live_provider(
     monkeypatch.setattr(application.ctrl, "read_value_source", live_read_forbidden)
     published = editor.edit(
         editor.observe().ref.revision,
-        (CfgEdit(("gain",), EvalValue("$device.flux.value")),),
+        (CfgEdit(("gain",), EvalValue("@{device.flux.value}")),),
     )
     accepted = application.state.get_tab(tab_id).cfg.accept(published.ref.revision)
     assert accepted.values == {"gain": 0.25}

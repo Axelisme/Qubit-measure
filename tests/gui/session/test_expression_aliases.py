@@ -73,6 +73,17 @@ def test_invalid_alias_expression_is_rejected(expression: str) -> None:
         evaluate_scalar_expr(expression, _parameters())
 
 
+def test_parameter_reader_fault_is_not_reported_as_invalid_expression(monkeypatch) -> None:
+    parameters = _parameters()
+
+    def broken_source(path: str) -> object:
+        raise AttributeError(f"Source implementation failed for {path}")
+
+    monkeypatch.setattr(parameters, "value", broken_source)
+    with pytest.raises(AttributeError, match="Source implementation failed"):
+        evaluate_scalar_expr("$qubit.rate", parameters)
+
+
 def test_context_free_arithmetic_does_not_grant_parameter_access() -> None:
     assert evaluate_scalar_expr("2 ** 3 + 4", None) == 12
     with pytest.raises(ExpressionError, match="context"):
