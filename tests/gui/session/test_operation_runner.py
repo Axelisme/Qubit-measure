@@ -664,3 +664,212 @@ def test_missing_requested_facet_rejects_before_opening_handle(facet):
         runner.begin(spec)
     assert handles.live_count() == 0
     assert opened == []
+
+
+def test_opened_commits_token_before_exclusion_notification(monkeypatch) -> None:
+    runner, gate, handles, _progress, bg = _make_runner()
+    opened: list[int] = []
+    notified: list[tuple[int, tuple[int, ...]]] = []
+    register = gate.register
+
+    def notifying_register(
+        token: int,
+        kind: str,
+        *,
+        owner_id: str,
+        origin_kind: OriginKind,
+        note: str,
+        resource_id: str | None = None,
+    ) -> None:
+        register(
+            token,
+            kind,
+            owner_id=owner_id,
+            origin_kind=origin_kind,
+            note=note,
+            resource_id=resource_id,
+        )
+        notified.append((token, tuple(opened)))
+
+    monkeypatch.setattr(gate, "register", notifying_register)
+    token = runner.begin(
+        OperationSpec(
+            exclusion=ExclusionRequest("run", "workflow", "test"),
+            owner_id="workflow",
+            wants_progress=False,
+            cancel_hook=None,
+            work=lambda _factory: None,
+            run_in_pool=False,
+            on_terminal=lambda _result, settle: settle(OperationOutcome("finished")),
+            on_opened=opened.append,
+        )
+    )
+    bg.deliver_result()
+    assert notified == [(token, (token,))]
+    assert handles.known_outcome(token) == OperationOutcome("finished")
+
+
+def test_continuation_retains_handle_lease_progress_and_origin() -> None:
+    bus = BaseEventBus()
+    runner, gate, handles, progress, bg = _make_runner(bus=bus)
+    retained: list[SettleFn] = []
+    observed: list[EventOrigin] = []
+
+    def paused(_result: BgResult, settle: SettleFn) -> None:
+        retained.append(settle)
+
+    def finished(result: BgResult, settle: SettleFn) -> None:
+        assert result.ok and result.result == "resumed"
+        assert settle is retained[0]
+        observed.append(bus.current_origin)
+        settle(OperationOutcome("finished"))
+
+    with bus.origin(EventOrigin(kind="agent", client_id="workflow-client")):
+        token = runner.begin(
+            OperationSpec(
+                exclusion=ExclusionRequest("run", "workflow", "test"),
+                owner_id="workflow",
+                wants_progress=True,
+                cancel_hook=None,
+                work=lambda _factory: "paused",
+                run_in_pool=False,
+                on_terminal=paused,
+            )
+        )
+    bg.deliver_result()
+    factory = progress.factories[token]
+    assert handles.known_outcome(token) is None
+    assert (
+        runner.continue_operation(
+            token,
+            work=lambda: "resumed",
+            run_in_pool=False,
+            on_terminal=finished,
+            settle=retained[0],
+        )
+        == token
+    )
+    assert handles.live_count() == 1
+    assert len(gate.ensure_calls) == len(gate.register_calls) == 1
+    assert gate.release_calls == progress.discard_calls == []
+    assert progress.factories == {token: factory}
+    bg.deliver_result()
+    assert observed == [
+        EventOrigin(
+            kind="agent",
+            client_id="workflow-client",
+            operation_id=str(token),
+        )
+    ]
+    assert handles.known_outcome(token) == OperationOutcome("finished")
+    assert gate.release_calls == progress.discard_calls == [token]
+
+
+def test_continuation_submit_failure_retains_ownership(monkeypatch) -> None:
+    runner, gate, handles, progress, bg = _make_runner()
+    retained: list[SettleFn] = []
+    token = runner.begin(
+        OperationSpec(
+            exclusion=ExclusionRequest("run", "workflow", "test"),
+            owner_id="workflow",
+            wants_progress=True,
+            cancel_hook=None,
+            work=lambda _factory: "paused",
+            run_in_pool=False,
+            on_terminal=lambda _result, settle: retained.append(settle),
+        )
+    )
+    bg.deliver_result()
+    failure = OSError("continuation submit failed")
+
+    def reject(
+        work: Callable[[], object],
+        *,
+        run_in_pool: bool,
+        on_done: Callable[[object], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        raise failure
+
+    monkeypatch.setattr(bg, "submit", reject)
+    with pytest.raises(OSError, match="continuation submit failed") as caught:
+        runner.continue_operation(
+            token,
+            work=lambda: "resumed",
+            run_in_pool=False,
+            on_terminal=lambda _result, settle: settle(OperationOutcome("finished")),
+            settle=retained[0],
+        )
+    assert caught.value is failure
+    assert handles.known_outcome(token) is None
+    assert handles.live_count() == 1
+    assert gate.release_calls == progress.discard_calls == []
+    retained[0](OperationOutcome("failed", str(failure)))
+    assert handles.known_outcome(token) == OperationOutcome("failed", str(failure))
+    assert gate.release_calls == progress.discard_calls == [token]
+
+
+def test_continuation_terminal_callback_failure_settles_once() -> None:
+    runner, gate, handles, progress, bg = _make_runner()
+    retained: list[SettleFn] = []
+    token = runner.begin(
+        OperationSpec(
+            exclusion=ExclusionRequest("run", "workflow", "test"),
+            owner_id="workflow",
+            wants_progress=True,
+            cancel_hook=None,
+            work=lambda _factory: "paused",
+            run_in_pool=False,
+            on_terminal=lambda _result, settle: retained.append(settle),
+        )
+    )
+    bg.deliver_result()
+
+    def failed(_result: BgResult, _settle: SettleFn) -> None:
+        raise ValueError("continuation callback failed")
+
+    runner.continue_operation(
+        token,
+        work=lambda: "resumed",
+        run_in_pool=False,
+        on_terminal=failed,
+        settle=retained[0],
+    )
+    bg.deliver_result()
+    assert handles.known_outcome(token) == OperationOutcome(
+        "failed",
+        "continuation callback failed",
+    )
+    assert gate.release_calls == progress.discard_calls == [token]
+
+
+@pytest.mark.parametrize("known", [False, True])
+def test_continuation_rejects_unknown_or_settled_handle(known: bool) -> None:
+    runner, gate, handles, progress, bg = _make_runner()
+    retained: list[SettleFn] = []
+    token = runner.begin(
+        OperationSpec(
+            exclusion=ExclusionRequest("run", "workflow", "test"),
+            owner_id="workflow",
+            wants_progress=True,
+            cancel_hook=None,
+            work=lambda _factory: None,
+            run_in_pool=False,
+            on_terminal=lambda _result, settle: retained.append(settle),
+        )
+    )
+    bg.deliver_result()
+    retained[0](OperationOutcome("finished"))
+    target = token if known else token + 1
+    with pytest.raises(
+        RuntimeError if known else KeyError, match="settled" if known else "unknown"
+    ):
+        runner.continue_operation(
+            target,
+            work=lambda: None,
+            run_in_pool=False,
+            on_terminal=lambda _result, settle: settle(OperationOutcome("finished")),
+            settle=retained[0],
+        )
+    assert handles.live_count() == 0
+    assert gate.release_calls == progress.discard_calls == [token]

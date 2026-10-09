@@ -111,9 +111,11 @@ class OperationSpec:
       errors. Receives (BgResult, SettleFn); the policy performs domain side-
       effects (State writes, signals) and calls settle exactly once.
     - ``on_opened``: optional owner-thread hook receiving the newly opened
-      token after lease registration, before progress notification or submit. Use it to
-      latch domain admission/current activity. A hook failure settles failed,
-      cleans opened resources, and propagates like any startup failure.
+      token before lease registration, progress notification or submit. With an
+      exclusion request, only commit owner state here; do not notify listeners
+      or invoke reentrant UI callbacks before the lease is registered. Without
+      exclusion, an analysis owner may also publish its current activity.
+      A hook failure settles failed, cleans opened resources, and propagates.
     """
 
     exclusion: ExclusionRequest | None
@@ -157,7 +159,7 @@ class OperationRunner:
         Steps (in order):
         1. ``ensure_can_start`` (if exclusion) — fast-fail on conflict.
         2. ``handles.create(cancel_hook)`` — mint the token.
-        3. gate.register (if exclusion), then on_opened(token) (if configured).
+        3. on_opened(token) (if configured), then gate.register (if exclusion).
         4. ``progress.make_factory`` (if wants_progress) — mint the pbar factory.
         5. Build the call-once settle closure and submit to bg.
 
@@ -220,6 +222,38 @@ class OperationRunner:
             raise
 
         return token
+
+    def continue_operation[R](
+        self,
+        token: int,
+        *,
+        work: Callable[[], R],
+        run_in_pool: bool,
+        on_terminal: Callable[[BgResult, SettleFn], None],
+        settle: SettleFn,
+    ) -> int:
+        """Submit another producer for an idle, unsettled operation on its owner.
+
+        token is the handle returned by begin. The policy must wait for the
+        previous producer's owner delivery and retain its original settle
+        closure without calling it. work captures the retained run resources;
+        it receives no new progress factory. run_in_pool selects the executor's
+        shared pool or dedicated thread, as in begin. on_terminal receives the
+        returned BgResult and this same settle closure under the handle's
+        original event origin. It may retain ownership again or settle once.
+
+        Return token unchanged. Do not create a handle, check/register a new
+        lease, replace cancellation, or allocate/discard progress. Unknown or
+        evicted tokens raise KeyError; already settled tokens raise RuntimeError
+        before submission. A synchronous submit error propagates unchanged and
+        leaves ownership intact so the domain can retry or terminate. Worker
+        errors reach on_terminal. An escaping terminal callback is logged and
+        settles failed using the supplied closure. No hardware rollback occurs.
+
+        The domain owns producer exclusivity and verifies that settle belongs
+        to token; this mechanism does not add a producer registry or policy.
+        """
+        raise NotImplementedError("same-operation continuation seed")
 
     def _deliver_terminal(
         self,
