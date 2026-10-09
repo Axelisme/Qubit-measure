@@ -6,10 +6,6 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
-from zcu_tools.gui.app.measure.events.tab import (
-    TabContentChangedPayload,
-    TabContentFact,
-)
 from zcu_tools.gui.cfg.resource import CfgObservation, CfgRef
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ParameterContext
@@ -27,11 +23,10 @@ if TYPE_CHECKING:
 class TabControlPort(Protocol):
     """App-facing tab resource surface for driving adapters."""
 
-    def new_tab(self, adapter_name: str, *, target: str | None = None) -> str:
-        """Create/activate with target bound to the first role, or current focus.
+    def new_tab(self, adapter_name: str) -> str:
+        """Create/activate a tab whose cfg uses current global sources.
 
-        InvalidInputError rejects empty/roleless targets; RoleResolutionError
-        rejects unresolved components before any tab is registered.
+        Adapter/default-cfg failures propagate before registration.
         """
         ...
 
@@ -39,25 +34,6 @@ class TabControlPort(Protocol):
         self, adapter_name: str, data_path: str
     ) -> LoadTabResultOutcome:
         """Create/load/focus, cleaning up on failure; cfg backfill is best effort."""
-        ...
-
-    def set_role(self, tab_id: str, role: str, component: str | None) -> None:
-        """Manually bind/clear a declared role on an idle tab's fixed capture.
-
-        None deliberately clears the role. Other non-manual roles re-infer
-        using birth focus. RoleResolutionError rejects unknown roles/components
-        or wrong kinds; FailedPreconditionError rejects busy/roleless tabs;
-        CfgPreconditionError rejects notification reentrancy. Rejection changes
-        nothing. Success preserves cfg inputs/history and publishes ROLES_COMMITTED.
-        """
-        ...
-
-    def reset_role(self, tab_id: str, role: str) -> None:
-        """Remove this role's manual choice and re-infer using birth focus.
-
-        Other manual choices remain. Preconditions/errors and publication are
-        the same as set_role; current session selection is never consulted.
-        """
         ...
 
     def close_tab(self, tab_id: str) -> None: ...
@@ -115,10 +91,10 @@ class TabControlFacet:
         self._load_tab_result = load_tab_result
         self._access = access if access is not None else ExperimentAccess()
 
-    def new_tab(self, adapter_name: str, *, target: str | None = None) -> str:
-        """Create/activate with fixed target roles; see TabControlPort.new_tab."""
+    def new_tab(self, adapter_name: str) -> str:
+        """Create/activate using current sources; see TabControlPort.new_tab."""
         self._access.require_available()
-        return self._workspace.new_tab(adapter_name, target=target)
+        return self._workspace.new_tab(adapter_name)
 
     def open_tab_from_file(
         self, adapter_name: str, data_path: str
@@ -144,22 +120,6 @@ class TabControlFacet:
                 ) from cleanup_error
             raise
         return outcome
-
-    def set_role(self, tab_id: str, role: str, component: str | None) -> None:
-        """Commit a manual choice; see TabControlPort.set_role for failures."""
-        self._access.require_available()
-        self._tab.set_role(tab_id, role, component)
-        self._bus.emit(
-            TabContentChangedPayload(tab_id=tab_id, fact=TabContentFact.ROLES_COMMITTED)
-        )
-
-    def reset_role(self, tab_id: str, role: str) -> None:
-        """Return a role to captured-focus inference; see TabControlPort.reset_role."""
-        self._access.require_available()
-        self._tab.reset_role(tab_id, role)
-        self._bus.emit(
-            TabContentChangedPayload(tab_id=tab_id, fact=TabContentFact.ROLES_COMMITTED)
-        )
 
     def close_tab(self, tab_id: str) -> None:
         self._access.require_available()

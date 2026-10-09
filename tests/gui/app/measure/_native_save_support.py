@@ -209,8 +209,6 @@ def native_save_session(
             adapter_name="saving",
             adapter=AnalysisSavingAdapter(),
             cfg=make_cfg(CfgSchema(CfgSectionSpec(), CfgSectionValue()), state=state),
-            parameters=captured,
-            save_context=captured,
         ),
     )
     state.update_tab_result("tab", record, metadata=metadata, parameters=captured)

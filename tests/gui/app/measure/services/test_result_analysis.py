@@ -64,7 +64,6 @@ def test_default_analysis_params_retain_result_source(
             adapter_name="source",
             adapter=adapter,
             cfg=MagicMock(),
-            parameters=current,
         ),
     )
     result = object()
@@ -94,61 +93,13 @@ def test_default_analysis_params_retain_result_source(
     assert state.get_tab("tab").post_analysis.params is post_params
     assert post_contexts == [saved]
     assert state.get_tab("tab").run.parameters is saved
-    assert state.get_tab("tab").parameters is current
+    assert state.session_env.parameters is current
     if saved is not None:
         assert saved.value("source_qubit.rate") == 1.0
     if loaded:
         assert state.get_tab("tab").run.source_operation_id is None
         assert state.get_tab("tab").run.metadata is metadata
         assert state.get_tab("tab").run.source_path == "native.h5"
-
-
-def test_role_rebind_preserves_historical_draft_and_artifacts(
-    result_sources: tuple[ParameterContext, ParameterContext],
-) -> None:
-    q1, _q2 = result_sources
-    assert q1.roles is not None
-    state = State(
-        SessionEnv(
-            parameters=q1, soc=None, soccfg=None, readiness=ContextReadiness.ACTIVE
-        )
-    )
-    adapter = MagicMock()
-    adapter.parameter_roles.return_value = q1.roles.declarations
-    from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
-
-    adapter.make_default_cfg.return_value = CfgSchema(
-        CfgSectionSpec(), CfgSectionValue()
-    )
-    registry, writeback = MagicMock(), MagicMock()
-    registry.create.return_value = adapter
-    writeback.preview_draft.return_value = []
-    service = TabService(
-        state,
-        registry,
-        writeback,
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles, _target: q1,
-    )
-    tab_id = service.new_tab("fake")
-    tab = state.get_tab(tab_id)
-    draft, primary, post = object(), object(), object()
-    state.update_tab_result(tab_id, object(), parameters=q1)
-    tab.analysis.result, tab.analysis.writeback_draft = primary, draft
-    tab.post_analysis.result = post
-    artifacts = state.get_artifact_snapshots(tab_id)
-    resource, run = tab.cfg, tab.run
-    service.set_role(tab_id, "source_qubit", "Q2")
-    assert tab.parameters is not None and tab.parameters.roles is not None
-    assert tab.parameters.roles.names == {"source_qubit": "Q2"}
-    assert tab.cfg is resource and tab.run is run and tab.run.parameters is q1
-    assert tab.analysis.result is primary and tab.analysis.writeback_draft is draft
-    assert tab.post_analysis.result is post
-    assert tab.save_context is q1
-    assert state.get_artifact_snapshots(tab_id) == artifacts
-    assert service.get_snapshot(tab_id).analysis is not None
-    writeback.teardown_draft.assert_not_called()
 
 
 class _CapturedBackground:
@@ -217,7 +168,6 @@ def test_fit_uses_run_source_for_request_and_writeback_after_rebinding(
     captured = None if context_free else q1
     tab = state.get_tab("tab1")
     state.update_tab_result("tab1", object(), parameters=captured)
-    tab.parameters = q2
     state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
     service, background = _make_primary_service(state, EventBus(), writeback=writeback)
@@ -256,7 +206,6 @@ def test_interactive_writeback_retains_run_source_after_rebinding(
     captured = None if context_free else q1
     state.update_tab_result("tab1", object(), parameters=captured)
     tab = state.get_tab("tab1")
-    tab.parameters = q2
     state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
     service, _background = _make_primary_service(state, EventBus(), writeback=writeback)
@@ -296,7 +245,6 @@ def test_post_uses_run_source_for_request_and_writeback_after_rebinding(
     run_result, primary_result = object(), object()
     state.update_tab_result("tab1", run_result, parameters=captured)
     state.update_tab_analyze("tab1", primary_result, None)
-    tab.parameters = q2
     state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
     service, background = _make_post_service(state, EventBus(), writeback=writeback)

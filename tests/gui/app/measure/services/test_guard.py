@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import cast
 from unittest.mock import MagicMock
@@ -32,8 +33,24 @@ from zcu_tools.gui.cfg.resource import (
     CfgStaleError,
 )
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
+from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.entry import RoleSpec
 
-from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
+from tests.gui.app.measure._cfg_fakes import cfg_resolution, make_cfg, parameter_capture
+
+
+def _make_guard(state: State) -> GuardService:
+    def capture(
+        roles: Mapping[str, RoleSpec], _target: str | None
+    ) -> ParameterContext | None:
+        parameters = state.session_env.parameters
+        return None if parameters is None else parameters.bind_aliases((), roles)
+
+    return GuardService(
+        state,
+        captured_parameters=capture,
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+    )
 
 
 def _make_state(
@@ -55,6 +72,8 @@ def _make_state(
     )
     tab_id = "tab-1"
     adapter = MagicMock()
+    adapter.parameter_roles.return_value = {}
+    adapter.experiment_tag = None
     adapter.capabilities = AdapterCapabilities(
         requires_soc=requires_soc, load_data=load_data
     )
@@ -71,7 +90,6 @@ def _make_state(
         adapter_name="any",
         adapter=adapter,
         cfg=make_cfg(schema, state=state),
-        parameters=state.session_env.parameters,
     )
     tab.run.result = run_result
     tab.analysis.result = analyze_result
@@ -86,7 +104,7 @@ def _make_state(
 
 def test_run_inputs_issued_for_active_valid_cfg():
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     inputs = guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
 
@@ -94,7 +112,7 @@ def test_run_inputs_issued_for_active_valid_cfg():
     assert inputs.tab_id == tab_id
     assert inputs.accepted_cfg.values == {}
     assert inputs.request.soc is state.session_env.soc
-    parameters = state.get_tab(tab_id).parameters
+    parameters = inputs.parameters
     assert parameters is not None
     assert inputs.request.cfg_context == parameters.library.validation_context()
     assert inputs.adapter is state.get_tab(tab_id).adapter
@@ -116,7 +134,7 @@ def test_run_inputs_freezes_published_expression_and_provenance() -> None:
     )
     state.get_tab(tab_id).cfg = cfg
     before = cfg.observe()
-    inputs = GuardService(state).capture_run_inputs(
+    inputs = _make_guard(state).capture_run_inputs(
         tab_id, expected_revision=before.ref.revision
     )
     state.set_context(
@@ -142,7 +160,7 @@ def test_run_inputs_rejects_invalid_expression_without_preflight() -> None:
     )
     state.get_tab(tab_id).cfg = cfg
     with pytest.raises(CfgPreconditionError):
-        GuardService(state).capture_run_inputs(
+        _make_guard(state).capture_run_inputs(
             tab_id, expected_revision=cfg.observe().ref.revision
         )
     cast(
@@ -172,7 +190,7 @@ def test_run_inputs_detaches_reference_shape_and_values() -> None:
         state=state,
     )
     state.get_tab(tab_id).cfg = cfg
-    inputs = GuardService(state).capture_run_inputs(
+    inputs = _make_guard(state).capture_run_inputs(
         tab_id, expected_revision=cfg.observe().ref.revision
     )
     cfg.edit(cfg.observe().ref.revision, (CfgEdit(("asset", "gain"), 0.75),))
@@ -187,7 +205,7 @@ def test_run_inputs_rejects_stale_revision_without_preflight() -> None:
     old = cfg.observe().ref
     cfg.refresh(old.revision)
     with pytest.raises(CfgStaleError):
-        GuardService(state).capture_run_inputs(tab_id, expected_revision=old.revision)
+        _make_guard(state).capture_run_inputs(tab_id, expected_revision=old.revision)
     cast(
         MagicMock, state.get_tab(tab_id).adapter
     ).validate_run_request.assert_not_called()
@@ -209,7 +227,7 @@ def test_run_inputs_detaches_observed_device_settings(monkeypatch) -> None:
     live_read = MagicMock(side_effect=AssertionError("Unexpected hardware read"))
     monkeypatch.setattr(DeviceManager, "get_all_info", live_read)
 
-    inputs = GuardService(state).capture_run_inputs(
+    inputs = _make_guard(state).capture_run_inputs(
         tab_id, expected_revision=CfgRevision(0)
     )
     info.value = 0.5
@@ -243,7 +261,7 @@ def test_run_inputs_rejects_live_device_without_observed_settings(status) -> Non
     )
 
     with pytest.raises(GuardError, match="no observed settings"):
-        GuardService(state).capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
+        _make_guard(state).capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
     adapter = state.get_tab(tab_id).adapter
     assert isinstance(adapter, MagicMock)
     adapter.validate_run_request.assert_not_called()
@@ -261,7 +279,7 @@ def test_run_inputs_excludes_remembered_disconnected_device() -> None:
         )
     )
 
-    inputs = GuardService(state).capture_run_inputs(
+    inputs = _make_guard(state).capture_run_inputs(
         tab_id, expected_revision=CfgRevision(0)
     )
     assert inputs.request.device_snapshot == {}
@@ -272,7 +290,7 @@ def test_run_inputs_translates_adapter_preflight_error() -> None:
     adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
     preflight_error = ValueError("bad preflight")
     adapter.validate_run_request.side_effect = preflight_error
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="Run config invalid: bad preflight") as exc:
         guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
@@ -284,7 +302,7 @@ def test_run_inputs_translates_adapter_preflight_error() -> None:
 @pytest.mark.parametrize("readiness", [ContextReadiness.EMPTY, ContextReadiness.DRAFT])
 def test_run_inputs_rejected_when_not_active(readiness: ContextReadiness):
     state, tab_id = _make_state(readiness=readiness)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="active file-backed context") as exc:
         guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
@@ -293,26 +311,17 @@ def test_run_inputs_rejected_when_not_active(readiness: ContextReadiness):
 
 def test_check_save_reason_code_no_run_result():
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, run_result=None)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     with pytest.raises(GuardError) as exc:
         guard.check_save(tab_id)
     assert exc.value.reason_code == "no_run_result"
 
 
-def test_check_analyze_reason_code_no_context():
-    state, tab_id = _make_state(readiness=ContextReadiness.EMPTY)
-    guard = GuardService(state)
-
-    with pytest.raises(GuardError) as exc:
-        guard.check_analyze(tab_id)
-    assert exc.value.reason_code == "no_context"
-
-
 def test_run_inputs_rejected_on_invalid_cfg():
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, lowering_raises=True)
     adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     with pytest.raises(CfgPreconditionError, match="valid"):
         guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
@@ -324,7 +333,7 @@ def test_run_inputs_rejected_when_soc_required_but_missing():
         readiness=ContextReadiness.ACTIVE, soc_attached=False, requires_soc=True
     )
     adapter = cast(MagicMock, state.get_tab(tab_id).adapter)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="soc"):
         guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
@@ -335,7 +344,7 @@ def test_run_inputs_issued_without_soc_when_capability_does_not_require():
     state, tab_id = _make_state(
         readiness=ContextReadiness.ACTIVE, soc_attached=False, requires_soc=False
     )
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     inputs = guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
     assert isinstance(inputs, RunInputs)
@@ -343,7 +352,7 @@ def test_run_inputs_issued_without_soc_when_capability_does_not_require():
 
 def test_run_inputs_rejected_for_unknown_tab():
     state, _ = _make_state(readiness=ContextReadiness.ACTIVE)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="Unknown tab"):
         guard.capture_run_inputs("does-not-exist", expected_revision=CfgRevision(0))
@@ -354,25 +363,19 @@ def test_run_inputs_rejected_for_unknown_tab():
 # ---------------------------------------------------------------------------
 
 
-def test_check_save_issued_for_active_with_result():
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    guard = GuardService(state)
+@pytest.mark.parametrize("readiness", list(ContextReadiness))
+def test_check_save_issued_with_result_without_live_context_dependency(
+    readiness: ContextReadiness,
+):
+    state, tab_id = _make_state(readiness=readiness)
+    guard = _make_guard(state)
 
     assert guard.check_save(tab_id) is None
 
 
-@pytest.mark.parametrize("readiness", [ContextReadiness.EMPTY, ContextReadiness.DRAFT])
-def test_check_save_rejected_when_not_active(readiness: ContextReadiness):
-    state, tab_id = _make_state(readiness=readiness)
-    guard = GuardService(state)
-
-    with pytest.raises(GuardError, match="active file-backed context"):
-        guard.check_save(tab_id)
-
-
 def test_check_save_rejected_without_run_result():
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, run_result=None)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="No run result"):
         guard.check_save(tab_id)
@@ -383,8 +386,8 @@ def test_check_save_rejected_without_run_result():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("readiness", [ContextReadiness.DRAFT, ContextReadiness.ACTIVE])
-def test_check_load_issued_with_context_without_soc_or_result(
+@pytest.mark.parametrize("readiness", list(ContextReadiness))
+def test_check_load_issued_without_live_context_dependency_without_soc_or_result(
     readiness: ContextReadiness,
 ):
     state, tab_id = _make_state(
@@ -393,18 +396,9 @@ def test_check_load_issued_with_context_without_soc_or_result(
         run_result=None,
         analyze_result=None,
     )
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     assert guard.check_load(tab_id) is None
-
-
-def test_check_load_rejected_when_empty():
-    state, tab_id = _make_state(readiness=ContextReadiness.EMPTY)
-    guard = GuardService(state)
-
-    with pytest.raises(GuardError, match="no experiment context") as exc:
-        guard.check_load(tab_id)
-    assert exc.value.reason_code == "no_context"
 
 
 # ---------------------------------------------------------------------------
@@ -412,27 +406,19 @@ def test_check_load_rejected_when_empty():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("readiness", [ContextReadiness.DRAFT, ContextReadiness.ACTIVE])
-def test_check_analyze_issued_with_context_and_result(
+@pytest.mark.parametrize("readiness", list(ContextReadiness))
+def test_check_analyze_issued_without_live_context_dependency_and_result(
     readiness: ContextReadiness,
 ):
     state, tab_id = _make_state(readiness=readiness)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     assert guard.check_analyze(tab_id) is None
 
 
-def test_check_analyze_rejected_when_empty():
-    state, tab_id = _make_state(readiness=ContextReadiness.EMPTY)
-    guard = GuardService(state)
-
-    with pytest.raises(GuardError, match="no experiment context"):
-        guard.check_analyze(tab_id)
-
-
 def test_check_analyze_rejected_without_run_result():
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, run_result=None)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="No run result"):
         guard.check_analyze(tab_id)
@@ -443,27 +429,19 @@ def test_check_analyze_rejected_without_run_result():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("readiness", [ContextReadiness.DRAFT, ContextReadiness.ACTIVE])
-def test_check_writeback_issued_with_context_and_analyze(
+@pytest.mark.parametrize("readiness", list(ContextReadiness))
+def test_check_writeback_issued_without_live_context_dependency_and_analyze(
     readiness: ContextReadiness,
 ):
     state, tab_id = _make_state(readiness=readiness)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     assert guard.check_writeback(tab_id) is None
 
 
-def test_check_writeback_rejected_when_empty():
-    state, tab_id = _make_state(readiness=ContextReadiness.EMPTY)
-    guard = GuardService(state)
-
-    with pytest.raises(GuardError, match="no experiment context"):
-        guard.check_writeback(tab_id)
-
-
 def test_check_writeback_rejected_without_analyze_result():
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, analyze_result=None)
-    guard = GuardService(state)
+    guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="No analyze result"):
         guard.check_writeback(tab_id)
@@ -474,7 +452,7 @@ def test_check_writeback_rejected_without_analyze_result():
 )
 def test_check_rejects_unknown_tab_with_original_reason(operation: str) -> None:
     state, _ = _make_state(readiness=ContextReadiness.ACTIVE)
-    guard = GuardService(state)
+    guard = _make_guard(state)
     with pytest.raises(GuardError) as caught:
         getattr(guard, operation)("unknown")
     assert caught.value.reason_code == "unknown_tab"
@@ -483,5 +461,5 @@ def test_check_rejects_unknown_tab_with_original_reason(operation: str) -> None:
 def test_check_load_rejects_unsupported_adapter_with_original_reason() -> None:
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, load_data=False)
     with pytest.raises(GuardError) as caught:
-        GuardService(state).check_load(tab_id)
+        _make_guard(state).check_load(tab_id)
     assert caught.value.reason_code == "unsupported_load"

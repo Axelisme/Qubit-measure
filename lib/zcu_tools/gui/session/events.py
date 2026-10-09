@@ -22,7 +22,6 @@ from zcu_tools.gui.event_bus import BasePayload, OriginKind
 if TYPE_CHECKING:
     from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_types import (
-        ComponentFocus,
         ContextSourceBinding,
         ContextSourceFault,
     )
@@ -35,7 +34,6 @@ class SessionEvent(str, Enum):
     MD_CHANGED = "md_changed"  # published point content/health changed
     ML_CHANGED = "ml_changed"  # published library content/health changed
     CONTEXT_SWITCHED = "context_switched"  # parameter binding switched
-    COMPONENT_FOCUS_CHANGED = "component_focus_changed"
     ALIASES_CHANGED = "aliases_changed"
     SOC_CHANGED = "soc_changed"  # soc/soccfg connection changed
     PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed
@@ -83,7 +81,7 @@ class MdChangedPayload(SessionPayload):
 
 @dataclass(frozen=True)
 class ContextSwitchedPayload(SessionPayload):
-    """Installed binding fact, emitted after parameters and focus are published.
+    """Installed binding fact, emitted after parameters are published.
 
     binding_id is the service-local source ID, or None for EMPTY.
     sources is the ordered persistent source binding, or None without sources.
@@ -105,14 +103,6 @@ class AliasesChangedPayload(SessionPayload):
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.ALIASES_CHANGED
     rows: tuple[AliasRow, ...]
-
-
-@dataclass(frozen=True)
-class ComponentFocusChangedPayload(SessionPayload):
-    """Installed session selection; focus carries target, name, and ordered options."""
-
-    EVENT: ClassVar[SessionEvent] = SessionEvent.COMPONENT_FOCUS_CHANGED
-    focus: ComponentFocus
 
 
 @dataclass(frozen=True)

@@ -65,8 +65,8 @@ GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
 
 def _blank_pulse(ctx: SessionEnv) -> ReferenceValue:
     value = make_default_value(make_pulse_module_spec().allowed[0])
-    value.with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
-    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("freq", path_seed("$qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
     value.with_field("nqz", 2)
     value.with_field("gain", 0.1)
     value.with_field("waveform.length", 5.1)
@@ -75,24 +75,24 @@ def _blank_pulse(ctx: SessionEnv) -> ReferenceValue:
 
 def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     value = make_default_value(make_pulse_readout_module_spec().allowed[0])
-    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
     value.with_field("pulse_cfg.freq", frequency)
     value.with_field(
-        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
     )
     value.with_field("pulse_cfg.nqz", 2)
     value.with_field("pulse_cfg.gain", 0.1)
     value.with_field("pulse_cfg.waveform.length", 1.0)
     value.with_field("ro_cfg.ro_freq", frequency)
     value.with_field(
-        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
     )
     value.with_field("ro_cfg.ro_length", 0.9)
     value.with_field(
         "ro_cfg.trig_offset",
         path_seed(
-            "resonator.ext.time_of_fly",
-            expr="resonator.ext.time_of_fly + 0.05",
+            "$resonator.ext.time_of_fly",
+            expr="$resonator.ext.time_of_fly + 0.05",
             fallback=0.55,
         ).resolve(ctx),
     )
@@ -196,10 +196,10 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
     )
 
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the qubit and its referenced resonator for tab capture."""
+        """Declare the global aliases used by this adapter."""
         return {
             "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+            "resonator": RoleSpec("resonator"),
         }
 
     @classmethod
@@ -216,18 +216,18 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             .field(
                 "modules.reset",
                 spec=make_reset_module_spec(optional=True),
-                default=module_seed("qubit.module.reset", fallback=None),
+                default=module_seed("$qubit.module.reset", fallback=None),
             )
             .field(
                 "modules.init_pulse",
                 spec=make_pulse_module_spec(optional=True),
-                default=module_seed("qubit.module.x180", fallback=None),
+                default=module_seed("$qubit.module.x180", fallback=None),
             )
             .field(
                 "modules.probe_pulse",
                 spec=make_pulse_module_spec(label="Probe Pulse"),
                 default=module_seed(
-                    "qubit.module.x180",
+                    "$qubit.module.x180",
                     fallback=custom(_blank_pulse, description="inline probe pulse"),
                 ),
             )
@@ -235,11 +235,13 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
                 "modules.readout",
                 spec=make_pulse_readout_module_spec(),
                 default=module_seed(
-                    "qubit.module.readout",
+                    "$qubit.module.readout",
                     fallback=custom(_blank_readout, description="inline readout"),
                 ),
             )
-            .relax_delay(scaled_path_seed("qubit.t1", factor=5.0, fallback_value=100.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
+            )
             .int("shots", label="Shots", default=100000)
             .reps(1, locked=True)
             .rounds(1, locked=True)
@@ -308,22 +310,22 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         # AcceptedWrite owns native complex conversion; producers keep numbers.
         return [
             MetaDictWriteback(
-                target_name="qubit.ext.readout_cal.fidelity",
+                target_name="$qubit.ext.readout_cal.fidelity",
                 description="Single-shot assignment fidelity",
                 proposed_value=result.fidelity,
             ),
             MetaDictWriteback(
-                target_name="qubit.ext.readout_cal.sigma",
+                target_name="$qubit.ext.readout_cal.sigma",
                 description="Single-shot IQ cluster width (s)",
                 proposed_value=result.ge_s,
             ),
             MetaDictWriteback(
-                target_name="qubit.ext.readout_cal.g_center",
+                target_name="$qubit.ext.readout_cal.g_center",
                 description="Single-shot |g> IQ cluster centre (complex)",
                 proposed_value=result.g_center,
             ),
             MetaDictWriteback(
-                target_name="qubit.ext.readout_cal.e_center",
+                target_name="$qubit.ext.readout_cal.e_center",
                 description="Single-shot |e> IQ cluster centre (complex)",
                 proposed_value=result.e_center,
             ),
@@ -336,12 +338,12 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         result = cast(GEPostAnalyzeResult, req.post_analyze_result)
         return [
             MetaDictWriteback(
-                target_name="qubit.ext.readout_cal.radius",
+                target_name="$qubit.ext.readout_cal.radius",
                 description="Single-shot classification radius",
                 proposed_value=result.ge_radius,
             ),
             MetaDictWriteback(
-                target_name="qubit.ext.readout_cal.confusion_matrix",
+                target_name="$qubit.ext.readout_cal.confusion_matrix",
                 description="Single-shot 3x3 confusion matrix (prepared->measured)",
                 proposed_value=result.confusion,
             ),
