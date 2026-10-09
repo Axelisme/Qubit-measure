@@ -1,6 +1,6 @@
 # Autofluxdep 逐項宣告依賴與 predictor 載入
 
-狀態：已確認待實作。這是未編號的未來跨模組設計，不代表目前行為。源自已核准的 Experiment Runtime／Autofluxdep workflow P2，以及部分仍有效的 ADR-0018。現行跨模組責任見 [ADR-0062](../0062-experiment-workflow.md)。
+狀態：retired（2026-10-09）。autofluxdep 已於 04799f2f2 移除。以下保留移除前已確認、尚未實作的設計記錄，不是現行契約或待實作工作。源自已核准的 Experiment Runtime／Autofluxdep workflow P2，以及部分仍有效的 ADR-0018。現行跨模組責任見 [ADR-0062](../0062-experiment-workflow.md)。
 
 ## 問題與決定
 
