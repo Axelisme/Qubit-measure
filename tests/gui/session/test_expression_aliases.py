@@ -79,7 +79,7 @@ def test_parameter_reader_fault_is_not_reported_as_invalid_expression(monkeypatc
     def broken_source(path: str) -> object:
         raise AttributeError(f"Source implementation failed for {path}")
 
-    monkeypatch.setattr(parameters, "value", broken_source)
+    monkeypatch.setattr(parameters, "lookup", broken_source)
     with pytest.raises(AttributeError, match="Source implementation failed"):
         evaluate_scalar_expr("$qubit.rate", parameters)
 
