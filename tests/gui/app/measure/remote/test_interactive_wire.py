@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -53,14 +55,14 @@ class DeferredBackground:
 
 
 class InteractiveFixture(Fixture):
-    def __init__(self) -> None:
-        super().__init__(active_label="interactive-test")
+    def __init__(self, *, project_root: str) -> None:
+        super().__init__(active_label="interactive-test", project_root=project_root)
         self.widgets: list[FluxPickFrontend] = []
 
 
 @pytest.fixture
-def fx(qapp):
-    fixture = InteractiveFixture()
+def fx(qapp, tmp_path):
+    fixture = InteractiveFixture(project_root=str(tmp_path))
     fixture.start()
     yield fixture
     fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - queued owner deliveries precede widget GC
@@ -72,16 +74,19 @@ def fx(qapp):
 
 
 @pytest.fixture
-def mounted_fx(qapp):
+def mounted_fx(qapp, tmp_path):
     before = registry_state()
     try:
         register_components(component_registry)
-        fixture = InteractiveFixture()
+        fixture = InteractiveFixture(project_root=str(tmp_path))
         fixture.ctrl.context_control.add_component(
             "R1", "resonator", {"freq": 4500.0, "kappa": 1.0}
         )
         fixture.ctrl.context_control.add_component(
             "Q1", "qubit/fluxonium", {"resonator": "R1"}
+        )
+        fixture.ctrl.context_control.set_alias_rows(
+            (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
         )
         fixture.state.set_context(
             replace(fixture.state.session_env, soc=None, soccfg=None)
@@ -104,8 +109,11 @@ def mounted_fx(qapp):
 def _load_native_onetone(
     fx: InteractiveFixture, tab_id: str, path: Path, result: FluxDepResult
 ) -> None:
-    """Write and publicly load history captured from this tab's entry and point."""
-    parameters = fx.state.get_tab(tab_id).parameters
+    """Write and publicly load history captured from the current session source."""
+    parameters = fx.ctrl.context_control.read_context().bind_aliases(
+        fx.ctrl.context_control.get_alias_rows(),
+        fx.state.get_tab(tab_id).adapter.parameter_roles(),
+    )
     assert parameters is not None
     storage = parameters.capture_storage()
     cfg = make_onetone_cfg()
@@ -174,8 +182,10 @@ def _start_mounted(
     )
     tab = fx.state.get_tab(tab_id)
     if native_source is None:
-        tab.run.result = run_result
-        tab.run.parameters = tab.parameters
+        parameters = fx.ctrl.context_control.read_context().bind_aliases(
+            fx.ctrl.context_control.get_alias_rows(), tab.adapter.parameter_roles()
+        )
+        fx.state.update_tab_result(tab_id, run_result, parameters=parameters)
     else:
         assert isinstance(run_result.result, FluxDepResult)
         _load_native_onetone(fx, tab_id, native_source, run_result.result)
@@ -591,6 +601,22 @@ def test_controller_interactive_mount_is_visible_from_run_or_data(
     assert window.interactive_presentation(tab_id) is None
 
 
+def _assert_mcp_interactive_discovery(
+    call: Callable[[str, dict[str, Any]], dict[str, Any]],
+    tab_id: str,
+) -> dict[str, Any]:
+    read = call("tab_interact", {"tab": tab_id})
+    # The caller keeps structured data; MCP stdio contracts own image delivery.
+    # Read the GUI PNG through its public RPC instead of a session file.
+    figure = call("rpc_call", {"method": "tab.interact", "params": {"tab_id": tab_id}})[
+        "figure"
+    ]
+    assert base64.b64decode(figure["png_b64"], validate=True).startswith(b"\x89PNG")
+    assert read["preview_active"] is False
+    assert "done" in {command["name"] for command in read["commands"]}
+    return read
+
+
 @pytest.mark.parametrize("terminal", ["done", "cancel"])
 def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
     mounted_fx, tmp_path, terminal, request
@@ -603,22 +629,14 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         native_source=tmp_path / "source.h5" if terminal == "done" else None,
     )
     source = fx.state.get_tab(tab_id).run.metadata
-    captured = fx.state.get_tab(tab_id).save_context
+    captured = fx.state.get_tab(tab_id).run.parameters
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
     bridge, call = mcp_client(fx.service.port, tmp_path, request=request)
     try:
         call("connect", {"port": fx.service.port})
-        read = call("tab_interact", {"tab": tab_id})
+        read = _assert_mcp_interactive_discovery(call, tab_id)
         assert read["state"] == active.plugin.project_state(active.session.snapshot())
-        # The caller keeps structured data; MCP stdio contracts own image delivery.
-        # Read the GUI PNG through its public RPC instead of a session file.
-        figure = call(
-            "rpc_call", {"method": "tab.interact", "params": {"tab_id": tab_id}}
-        )["figure"]
-        assert base64.b64decode(figure["png_b64"], validate=True).startswith(b"\x89PNG")
-        assert read["preview_active"] is False
-        assert "done" in {command["name"] for command in read["commands"]}
         changed = call(
             "tab_interact",
             {
@@ -760,7 +778,7 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
         fx, window, "onetone/flux_dep", native_source=tmp_path / "source.h5"
     )
     source = fx.state.get_tab(tab_id).run.metadata
-    captured = fx.state.get_tab(tab_id).save_context
+    captured = fx.state.get_tab(tab_id).run.parameters
     assert source is not None and source.snapshot.point is not None
     assert captured is not None
     storage = captured.capture_storage()
@@ -782,9 +800,9 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
             },
         )
         expected = {
-            "qubit.flux_half": done["interaction"]["state"]["flux_half"],
-            "qubit.flux_int": done["interaction"]["state"]["flux_int"],
-            "qubit.flux_period": 2
+            "$qubit.flux_half": done["interaction"]["state"]["flux_half"],
+            "$qubit.flux_int": done["interaction"]["state"]["flux_int"],
+            "$qubit.flux_period": 2
             * abs(
                 done["interaction"]["state"]["flux_int"]
                 - done["interaction"]["state"]["flux_half"]
@@ -806,9 +824,9 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
             },
         )
         actual_expected = {
-            "Q1.flux_half": expected["qubit.flux_half"],
-            "Q1.flux_int": expected["qubit.flux_int"],
-            "Q1.flux_period": expected["qubit.flux_period"],
+            "Q1.flux_half": expected["$qubit.flux_half"],
+            "Q1.flux_int": expected["$qubit.flux_int"],
+            "Q1.flux_period": expected["$qubit.flux_period"],
         }
         assert {
             item["target"]: item["after"] for item in written["written"]
@@ -817,9 +835,9 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
             "components"
         ]["Q1"]
         assert {
-            "qubit.flux_half": component["flux_half"],
-            "qubit.flux_int": component["flux_int"],
-            "qubit.flux_period": component["flux_period"],
+            "$qubit.flux_half": component["flux_half"],
+            "$qubit.flux_int": component["flux_int"],
+            "$qubit.flux_period": component["flux_period"],
         } == expected
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
             "tabs"
@@ -967,9 +985,9 @@ def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
         assert {
             item["target_name"]: item["proposed_value"] for item in draft["items"]
         } == {
-            "qubit.flux_half": pytest.approx(original["flux_half"]),
-            "qubit.flux_int": pytest.approx(original["flux_int"]),
-            "qubit.flux_period": pytest.approx(
+            "$qubit.flux_half": pytest.approx(original["flux_half"]),
+            "$qubit.flux_int": pytest.approx(original["flux_int"]),
+            "$qubit.flux_period": pytest.approx(
                 2 * abs(original["flux_int"] - original["flux_half"])
             ),
         }

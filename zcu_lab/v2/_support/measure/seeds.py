@@ -15,7 +15,6 @@ from zcu_tools.gui.cfg import (
     ScalarLeafInput,
     SweepValue,
 )
-from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
     ScalarType,
@@ -23,6 +22,7 @@ from zcu_tools.gui.session.value_lookup import (
     ValueRef,
     resolve_value_ref,
 )
+from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.v2._support.measure.ctx_helpers import (
     md_has_key,
@@ -33,7 +33,6 @@ from zcu_lab.v2._support.measure.ctx_helpers import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.gui.session.parameters import ParameterContext
 
 T = TypeVar("T", covariant=True)
 
@@ -92,33 +91,19 @@ def md(
 def path_seed(
     path: str, *, fallback: ScalarLeafInput, expr: str | None = None
 ) -> Seed[ScalarLeafInput]:
-    """Use a non-null role/component calibration, else explicit fallback.
+    """Store a deferred calibration expression without reading its source.
 
-    Resolve only at fresh defaults. A declared unbound role stores an EvalValue
-    without lookup or fallback; cfg evaluation reports the missing role. Refresh
-    evaluates the expression; reset reruns defaults and can use fallback after
-    binding. Absent/explicit null on a bound path means uncalibrated.
-    Empty paths raise ValueError; other source/role faults propagate rather than
-    becoming fallback. A malformed non-null value still fails expression lowering.
-    expr overrides the captured expression.
+    path is a canonical $alias.path or concrete/general path; expr optionally
+    supplies arithmetic. Empty paths raise ValueError. Missing aliases and
+    calibrations become Invalid at resolution. fallback remains accepted but
+    is not substituted for scalar defaults.
     """
+    del fallback  # Scalar defaults never substitute missing calibration.
     if not path.strip():
         raise ValueError("parameter seed path must not be empty")
 
-    def resolve(ctx: SessionEnv) -> ScalarLeafInput:
-        if ctx.parameters is not None:
-            roles = ctx.parameters.roles
-            prefix = path.split(".", 1)[0]
-            if (
-                roles is not None
-                and prefix in roles.declarations
-                and prefix not in roles.names
-            ):
-                return EvalValue(expr=expr if expr is not None else path)
-            calibration = ctx.parameters.lookup(path)
-            if calibration.present and calibration.value is not None:
-                return EvalValue(expr=expr if expr is not None else path)
-        return fallback
+    def resolve(_ctx: SessionEnv) -> ScalarLeafInput:
+        return EvalValue(expr=expr if expr is not None else path)
 
     return Seed(resolve, description=f"parameter:{path}")
 
@@ -142,17 +127,14 @@ def module_seed(
 
     def resolve(ctx: SessionEnv) -> ReferenceValue | None:
         parameters = ctx.parameters
+        if parameters is None and path.startswith("$"):
+            return ReferenceValue(chosen_key=path, value=CfgSectionValue())
         if parameters is not None:
-            roles = parameters.roles
-            prefix = path.split(".", 1)[0]
-            if (
-                roles is not None
-                and prefix in roles.declarations
-                and prefix not in roles.names
-            ):
-                return ReferenceValue(chosen_key=path, value=CfgSectionValue())
             try:
                 key = parameters.library_key(path)
+            except RoleResolutionError:
+                # Missing aliases remain linked so refresh can supply their source.
+                return ReferenceValue(chosen_key=path, value=CfgSectionValue())
             except AttributeError:
                 # The path owner defines unset and dangling module slots.
                 key = None
@@ -173,36 +155,17 @@ def module_seed(
 def scaled_path_seed(
     path: str, *, factor: float, fallback_value: float
 ) -> Seed[float | EvalValue]:
-    """Seed factor * path, or the already scaled fallback when absent/null.
+    """Store factor * canonical path without reading calibration at creation.
 
-    A declared unbound role stores factor * path as EvalValue without lookup or
-    fallback. Refresh evaluates it; reset reruns defaults and can use fallback
-    after binding. Explicit null and unset/dangling bound module slots mean
-    uncalibrated. Empty paths raise ValueError. Other capture, role and
-    materialization faults propagate; no rebind.
+    Missing aliases or calibration become Invalid at resolution. Empty paths
+    raise ValueError. fallback_value remains accepted but is not substituted.
     """
+    del fallback_value  # Scalar defaults never substitute missing calibration.
     if not path.strip():
         raise ValueError("scaled parameter seed path must not be empty")
 
-    def resolve(ctx: SessionEnv) -> float | EvalValue:
-        if ctx.parameters is None:
-            return fallback_value
-        roles = ctx.parameters.roles
-        prefix = path.split(".", 1)[0]
-        if (
-            roles is not None
-            and prefix in roles.declarations
-            and prefix not in roles.names
-        ):
-            return EvalValue(expr=f"{factor} * {path}")
-        try:
-            calibration = ctx.parameters.lookup(path)
-        except AttributeError:
-            # The parameter owner reports unset/dangling module slots this way.
-            return fallback_value
-        if calibration.present and calibration.value is not None:
-            return EvalValue(expr=f"{factor} * {path}")
-        return fallback_value
+    def resolve(_ctx: SessionEnv) -> float | EvalValue:
+        return EvalValue(expr=f"{factor} * {path}")
 
     return Seed(resolve, description=f"{factor} * parameter:{path}")
 
@@ -242,14 +205,6 @@ class SweepDefault:
         )
 
 
-def _parameters(ctx: SessionEnv) -> ParameterContext:
-    if ctx.parameters is None:
-        raise FailedPreconditionError(
-            "No parameter context is available", reason_code="no_context"
-        )
-    return ctx.parameters
-
-
 def res_freq_range(
     *,
     expts: int,
@@ -259,7 +214,7 @@ def res_freq_range(
 
     return custom(
         lambda ctx: proper_res_freq_range(
-            _parameters(ctx), expts, span_factor=span_factor
+            ctx.parameters, expts, span_factor=span_factor
         ),
         description=f"resonator frequency range ({expts} points)",
     )
@@ -268,7 +223,7 @@ def res_freq_range(
 def qub_freq_range(*, expts: int, span_factor: float = 1.5) -> Seed[SweepValue]:
     return custom(
         lambda ctx: proper_qub_freq_range(
-            _parameters(ctx), expts, span_factor=span_factor
+            ctx.parameters, expts, span_factor=span_factor
         ),
         description=f"qubit frequency range ({expts} points)",
     )
@@ -276,7 +231,7 @@ def qub_freq_range(*, expts: int, span_factor: float = 1.5) -> Seed[SweepValue]:
 
 def flux_range(*, expts: int) -> Seed[SweepValue]:
     return custom(
-        lambda ctx: proper_flux_range(_parameters(ctx), expts),
+        lambda ctx: proper_flux_range(ctx.parameters, expts),
         description=f"flux range ({expts} points)",
     )
 
