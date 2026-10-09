@@ -31,6 +31,7 @@ from zcu_tools.gui.session.operation_runner import (
     SettleFn,
 )
 from zcu_tools.gui.session.ports import (
+    BackgroundAdmissionClosedError,
     BackgroundExecutor,
     DeviceMemoryInfo,
     DeviceRegistryPort,
@@ -850,7 +851,8 @@ class DeviceService:
         allowed: setup/ramp code owns the write lock, while ``get_info`` is a
         best-effort current-value read. A single read that fails (timeout / no
         response / driver gone) is logged and swallowed so the next tick still
-        runs — this is the best-effort core, not a Fast-Fail path.
+        runs — this is the best-effort core, not a Fast-Fail path. Terminal
+        executor admission rejection also skips the tick without scheduling I/O.
         """
         if not self._can_poll_device_info(name):
             return
@@ -873,12 +875,16 @@ class DeviceService:
             # poller keeps ticking.
             logger.debug("device poll read failed: name=%r error=%s", name, exc)
 
-        self._bg.submit(
-            read_work,
-            run_in_pool=True,
-            on_done=on_read,
-            on_error=on_read_failed,
-        )
+        try:
+            self._bg.submit(
+                read_work,
+                run_in_pool=True,
+                on_done=on_read,
+                on_error=on_read_failed,
+            )
+        except BackgroundAdmissionClosedError:
+            # Terminal shutdown makes further polling unnecessary.
+            return
 
     def _can_poll_device_info(self, name: str) -> bool:
         """Return whether ``poll_device_info`` may live-read this device now.
