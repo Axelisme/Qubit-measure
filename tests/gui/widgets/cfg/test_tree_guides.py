@@ -149,7 +149,7 @@ def test_nested_tree_keeps_row_backgrounds_and_root_alignment(
         spec=CfgSectionSpec(label="Root", fields={"child": nested_spec}),
         value=CfgSectionValue(fields={"child": nested_value}),
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)

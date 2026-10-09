@@ -12,6 +12,7 @@ from qtpy.QtWidgets import QLineEdit, QPushButton
 from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services import TabSnapshot
+from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 
@@ -324,6 +325,9 @@ def test_main_window_refresh_projects_post_writeback_into_post_widget(
     host._tab_widgets = {"tab-1": tab}
     host._ctrl = ctrl
 
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
+        item.session_id: WritebackValues("radius", None, 1, None)
+    }
     MainWindow.refresh_tab_writeback(host, "tab-1", committed)
 
     assert tab.post_writeback_widget._items == [item]
@@ -356,11 +360,9 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     from zcu_tools.gui.app.measure.state import Session, State
     from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
     from zcu_tools.gui.session.types import SessionEnv
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     exp_ctx = SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
+        parameters=None,
         soc=MagicMock(),
         soccfg=MagicMock(),
         database_path="/db",
@@ -596,7 +598,9 @@ def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget):
     item = ParameterWriteback(target_name="x", description="d", proposed_value=1)
     item.session_id = "param-1"
     item.selected = True
-    tab.post_writeback_widget.populate([item])
+    tab.post_writeback_widget.populate(
+        [item], {item.session_id: WritebackValues("x", None, 1, None)}
+    )
     # Toggle should route to post_analysis pane, not analysis
     # Find checkbox and toggle
     for child in tab.post_writeback_widget.findChildren(MagicMock):
@@ -614,7 +618,9 @@ def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget):
     )
     primary_item.session_id = "param-1"
     primary_item.selected = True
-    tab.writeback_widget.populate([primary_item])
+    tab.writeback_widget.populate(
+        [primary_item], {primary_item.session_id: WritebackValues("y", None, 2, None)}
+    )
     tab.writeback_widget._on_check_toggled(primary_item)
     ctrl.set_writeback_item_for_pane.assert_called_with(
         "tab-1", "analysis", "param-1", selected=primary_item.selected

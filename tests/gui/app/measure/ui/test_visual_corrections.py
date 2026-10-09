@@ -31,9 +31,9 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg import CfgFormWidget, TreeCfgWidget
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict
 
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
+from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, parameter_capture
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
@@ -45,12 +45,8 @@ def make_ctrl():
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    md = MetaDict()
-    md.r_f = 6000.0
-    ml = ModuleLibrary()
     exp_ctx = MagicMock()
-    exp_ctx.md = md
-    exp_ctx.ml = ml
+    exp_ctx.parameters = parameter_capture(r_f=6000.0)
     ctrl.get_session_env.return_value = exp_ctx
     return ctrl
 
@@ -159,7 +155,7 @@ def test_A2_sole_tree_has_no_structure_selector(qapp):
         value=CfgSectionValue(fields={"reps": DirectValue(10)}),
     )
     w = CfgFormWidget()
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     w.attach(draft)
     assert isinstance(w._root_widget, TreeCfgWidget)
     w.detach()
@@ -187,7 +183,7 @@ def test_A4_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget):
         value=CfgSectionValue(fields={"reps": DirectValue(10)}),
     )
     w = CfgFormWidget()
-    draft = MeasureCfgBindings(ctrl2).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl2).new_draft(schema, parameters=None)
     w.attach(draft)
     assert w._scroll.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
     assert w._scroll.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff

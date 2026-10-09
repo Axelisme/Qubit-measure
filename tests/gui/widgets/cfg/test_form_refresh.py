@@ -238,7 +238,7 @@ def test_tree_refresh_routes_root_and_rejects_unsupported_paths(
         {"value": ScalarSpec(label="Value", type=float)},
         {"value": DirectValue(2.0)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     rendering = RecordingRenderers()
     root = TreeCfgWidget(
         draft.root,
@@ -386,7 +386,7 @@ def test_choice_refresh_fallback_preserves_pending_schema_snapshot(
         },
     )
     rendering = RecordingRenderers()
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget(renderers=rendering.registry)
     try:
         form.attach(draft)
