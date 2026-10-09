@@ -94,7 +94,6 @@ class LookbackGui:
                         "interaction": {
                             "is_running": False,
                             "is_analyzing": False,
-                            "is_saving_data": False,
                         },
                         "result_state": {
                             "available": self.ran,

@@ -104,10 +104,13 @@ or stale_version. Inspect current state and confirmed files before deciding.
 Use global status for GUI operations, non-terminal executions and terminal count.
 Keep known execution IDs for later queries; global status does not embed history.
 status(execution) returns the shared execution summary without reconnecting.
-Read actual conditions, Primary/Post estimates, details and warnings, and every
-writeback candidate with its destination. run_id is the confirmed identity from
-the captured Save report, or null before any persistent output succeeds. A Run or
-analysis step marked unknown may have started even without a returned handle.
+Read actual conditions, Primary/Post estimates, native summary and invalid paths,
+and every writeback candidate with its destination. run_id is the original Run
+identity from the captured Save report, including when all outputs fail. It is
+null only without a captured report; output status/error determines save success.
+Readonly tab snapshots keep confirmed identity: null until a persistent output
+succeeds. A Run or analysis step marked unknown may have started even without a
+returned handle.
 Use status(execution, detail="full") for captured native detail without new RPCs
 or guard observations. Artifacts preserve producer sections, names, every member
 and all output paths, formats, statuses and errors. Synchronous tab.save_data and

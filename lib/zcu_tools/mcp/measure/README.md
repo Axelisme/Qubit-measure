@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-09, Save replies retain Run identity on output failure
+**Last updated:** 2026-10-09, reuse busy flags and Save/image public contracts
 
 # `zcu_tools/mcp/measure/`
 
@@ -59,7 +59,7 @@ Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的
 
 `tab_interact` 省略 payload 時讀 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。`done` 接住原 analysis operation，然後加入其 execution 的完成讀取與保存。此 method 不加 seen guard，較晚的 owner-loop commit 生效。沒有來源鎖或自動重試。
 
-Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post scalar estimates、原生 summary 與 invalid、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 取同次 Save report 的 confirmed 身分，尚未確認持久輸出時為 null。Execution ID 仍是 session-local。
+Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post scalar estimates、原生 summary 與 invalid、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 取已捕捉 Save report 的原 Run 身分，全部輸出失敗也保留同一 ID。沒有捕捉到 report 時才為 null。各 output 的 status/error 表示保存結果。這與 readonly tab snapshot 的 confirmed run_id 不同，後者在尚無持久輸出成功時仍為 null。Execution ID 仍是 session-local。
 
 `status(execution, detail="full")` 保留該 execution 已捕捉的 native 資料，包括完整 cfg publication、raw expressions、source_basis、analysis results 與 writeback proposals。查詢不新增 RPC 或 guard 觀察。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
 

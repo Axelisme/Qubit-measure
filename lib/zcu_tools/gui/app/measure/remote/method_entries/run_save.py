@@ -97,7 +97,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             30.0,
             "Synchronously save measurement_data to every native/Labber output on "
-            "the GUI owner thread. Returns confirmed run_id and the complete "
+            "the GUI owner thread. Returns the original Run ID, even if all outputs "
+            "fail, and the complete "
             "current artifacts with paths/status/error; no Save handle or await. "
             "Partial failures stay in the report. run_operation_id optionally "
             "binds the Run source and does not replace seen guards.",
@@ -119,7 +120,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             30.0,
             "Synchronously save complete artifacts, including all figures, JSON "
             "and destinations. artifacts is all (including Saved) or unique "
-            "{section,name} refs. No caller paths. Returns confirmed run_id and "
+            "{section,name} refs. No caller paths. Returns the original Run ID, "
+            "even if all outputs fail, and "
             "this attempt's complete paths/status/error; no Save handle or await. "
             "run_operation_id binds the Run source. operation_id optionally binds "
             "one explicitly selected analysis/post_analysis artifact to its "

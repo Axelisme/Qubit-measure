@@ -22,7 +22,7 @@ Recipe、`tab_analyze`、`wait(execution)` 與互動完成回覆使用同一 exe
 
 Artifact 依 section、名稱與 members 分層，每個 member 保留當次報告的全部 format、path、status 與 error。預留目的地不代表保存成功；partial 與失敗也保留同次全部輸出。Resave 取代選中 artifact 的報告，不累積跨次成功路徑。當次 MCP image content 只在記憶體中交付，不建立 session preview 檔案或 previews 欄位。之後 tab.get_figure 取得 GUI 當下的圖，不保證是先前回覆的圖。
 
-Execution ID 只屬於 MCP session。`run_id` 取 Save report 的 confirmed 身分，未確認持久輸出前為 null。路徑描述本機輸出，不保證檔案仍在；同一 run 再 Save 可以覆寫 run 成員，Labber 每次另存新檔。全域 status 列非終態 executions 與終態數量，完整歷史按已知 ID 查詢。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。這個表示層不改 GUI facts、保存、guard 或 writeback owner。
+Execution ID 只屬於 MCP session。`run_id` 取已捕捉 Save report 的原 Run 身分，全部輸出失敗也保留同一 ID。沒有捕捉到 report 時才為 null。各 output 的 status/error 表示保存結果。Readonly tab snapshot 的 confirmed run_id 仍在尚無持久輸出成功時為 null。路徑描述本機輸出，不保證檔案仍在；同一 run 再 Save 可以覆寫 run 成員，Labber 每次另存新檔。全域 status 列非終態 executions 與終態數量，完整歷史按已知 ID 查詢。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。這個表示層不改 GUI facts、保存、guard 或 writeback owner。
 
 Recipe-owned done 回該 recipe 的後續 handoff，standalone analysis 保留原 execution。`answer(recipe, decision)` 只回答已 capture 的寫回提問，普通 `tab.accept(items)` 才寫當前 draft。Recipe 摘要的 writeback.receipts 保留實際寫入與失敗前綴，不從回答 accepted 推斷成功。
 
