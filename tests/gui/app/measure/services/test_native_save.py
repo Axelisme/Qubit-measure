@@ -26,9 +26,20 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
-from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactSectionSnapshot,
+    SaveStatus,
+)
 from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.events.completion import (
+    SaveArtifactsFinishedPayload,
+    SaveDataFinishedPayload,
+)
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
+from zcu_tools.gui.app.measure.events.tab import (
+    TabInteractionChangedPayload,
+    TabInteractionFact,
+)
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
@@ -478,6 +489,223 @@ def test_each_output_failure_preserves_the_other_and_reports_both(
         native.status,
         labber.status,
     ]
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize(
+    ("comment", "expected"),
+    [(None, "retained note"), ("", ""), ("new note", "new note")],
+)
+def test_save_commands_preserve_clear_or_replace_annotation_in_native_output(
+    native_session: NativeSaveSession,
+    batch: bool,
+    comment: str | None,
+    expected: str,
+) -> None:
+    session = native_session
+    session.control.set_comment("tab", "retained note")
+    command = session.control.save_artifacts if batch else session.control.save_data
+    report = command("tab", comment=comment, origin=GUI_ORIGIN)
+
+    assert session.state.get_tab("tab").save.comment == expected
+    native = next(item for item in report.outputs if item.output.format == "data_h5")
+    assert native.status == "saved"
+    assert load_run_data(native.output.path).payload.metadata.comment == expected
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("output_failure", [False, True])
+def test_save_events_observe_committed_state_and_complete_report(
+    native_session: NativeSaveSession, batch: bool, output_failure: bool
+) -> None:
+    session = native_session
+    declare_panes(session)
+    if output_failure:
+        (session.entry.database_path / "Labber").write_text("not a directory")
+    completions: list[
+        tuple[
+            SaveDataFinishedPayload | SaveArtifactsFinishedPayload,
+            tuple[ArtifactSectionSnapshot, ...],
+            str,
+        ]
+    ] = []
+    facts: list[
+        tuple[TabInteractionChangedPayload, tuple[ArtifactSectionSnapshot, ...]]
+    ] = []
+
+    def completed(
+        payload: SaveDataFinishedPayload | SaveArtifactsFinishedPayload,
+    ) -> None:
+        completions.append(
+            (
+                payload,
+                session.state.get_artifact_snapshots(payload.tab_id),
+                session.state.get_tab(payload.tab_id).save.comment,
+            )
+        )
+
+    def interaction(payload: TabInteractionChangedPayload) -> None:
+        facts.append((payload, session.state.get_artifact_snapshots(payload.tab_id)))
+
+    completion_subscription = session.bus.subscribe(
+        SaveArtifactsFinishedPayload if batch else SaveDataFinishedPayload, completed
+    )
+    fact_subscription = session.bus.subscribe(TabInteractionChangedPayload, interaction)
+    try:
+        command = session.control.save_artifacts if batch else session.control.save_data
+        report = command("tab", comment="committed note", origin=GUI_ORIGIN)
+    finally:
+        completion_subscription.unsubscribe()
+        fact_subscription.unsubscribe()
+
+    assert len(completions) == 1
+    payload, at_completion, annotation = completions[0]
+    committed = session.state.get_artifact_snapshots("tab")
+    assert payload.tab_id == "tab"
+    assert payload.report == report
+    assert at_completion == committed
+    assert annotation == "committed note"
+    assert len(report.outputs) == (8 if batch else 2)
+    expected_fact = (
+        TabInteractionFact.SAVE_FAILED
+        if output_failure
+        else TabInteractionFact.SAVE_SUCCEEDED
+    )
+    save_facts = [item for item in facts if item[0].fact is expected_fact]
+    assert len(save_facts) == 1
+    assert save_facts[0][0].tab_id == "tab"
+    assert save_facts[0][1] == committed
+    committed_outputs = {
+        (member.key, output.path): output.status
+        for section in committed
+        for artifact in section.artifacts
+        for member in artifact.members
+        for output in member.outputs
+    }
+    assert all(
+        committed_outputs[(item.key, item.output.path)] == item.status
+        for item in report.outputs
+    )
+    if output_failure:
+        failed = [item for item in report.outputs if item.status == "failed"]
+        assert len(failed) == 1
+        assert payload.error is not None
+        assert str(failed[0].output.path) in payload.error
+        assert failed[0].error and failed[0].error in payload.error
+    else:
+        assert payload.error is None
+        assert all(item.status == "saved" for item in report.outputs)
+    if isinstance(payload, SaveDataFinishedPayload):
+        native = next(
+            item for item in report.outputs if item.output.format == "data_h5"
+        )
+        assert payload.data_path == str(native.output.path)
+    assert len(session.artifact_completions if batch else session.completions) == 1
+    assert (session.completions if batch else session.artifact_completions) == []
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("rejection", ["busy", "no_run_result"])
+def test_save_commands_reject_before_annotation_or_output_mutation(
+    native_session: NativeSaveSession, batch: bool, rejection: str
+) -> None:
+    session = native_session
+    session.control.set_comment("tab", "retained note")
+    if rejection == "busy":
+        session.state.set_tab_analyzing("tab", analyzing=True)
+    else:
+        session.state.clear_tab_results("tab")
+    before = session.state.get_artifact_snapshots("tab")
+    command = session.control.save_artifacts if batch else session.control.save_data
+    with pytest.raises(FailedPreconditionError, match="busy|No run result"):
+        command("tab", comment="rejected note", origin=GUI_ORIGIN)
+    assert session.state.get_tab("tab").save.comment == "retained note"
+    assert session.state.get_artifact_snapshots("tab") == before
+    assert session.state.is_tab_busy("tab") is (rejection == "busy")
+    assert not session.completions and not session.artifact_completions
+    assert session.entry.ledger.events() == ()
+    assert not (session.entry.database_path / "runs").exists()
+    assert not (session.entry.database_path / "Labber").exists()
+
+
+def test_saved_analysis_selection_resaves_without_writing_other_sections(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    declare_panes(session)
+    first = session.save_artifacts()
+    before = session.state.get_artifact_snapshots("tab")
+    assert before[1].artifacts[0].status is SaveStatus.SAVED
+    unselected = {
+        item.output.path: item.output.path.stat().st_mtime_ns
+        for item in first.outputs
+        if item.key.section != "analysis"
+    }
+    report = session.save_artifacts((ArtifactRef("analysis", "results"),))
+    assert len(report.outputs) == 5
+    assert all(
+        item.key.section == "analysis" and item.status == "saved"
+        for item in report.outputs
+    )
+    after = session.state.get_artifact_snapshots("tab")
+    assert after[0] == before[0] and after[2] == before[2]
+    assert after[1].artifacts[0].status is SaveStatus.SAVED
+    assert {path: path.stat().st_mtime_ns for path in unselected} == unselected
+    saved = session.entry.ledger.events()[-1].payload
+    assert isinstance(saved, SavedPayload)
+    assert len(saved.outputs) == 5
+    assert [(item.path, item.status) for item in saved.outputs] == [
+        (str(item.output.path), item.status) for item in report.outputs
+    ]
+
+
+def test_first_analysis_save_all_failed_preserves_run_and_post_sections(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    declare_panes(session)
+    sections = session.state.get_artifact_snapshots("tab")
+    assert all(
+        artifact.status is SaveStatus.NOT_SAVED
+        for section in sections
+        for artifact in section.artifacts
+    )
+    for member in sections[1].artifacts[0].members:
+        for output in member.outputs:
+            output.path.mkdir(parents=True)
+    report = session.save_artifacts()
+    analysis = [item for item in report.outputs if item.key.section == "analysis"]
+    assert len(analysis) == 5
+    assert all(item.status == "failed" and item.error for item in analysis)
+    assert all(
+        item.status == "saved" and item.output.path.is_file()
+        for item in report.outputs
+        if item.key.section != "analysis"
+    )
+    committed = session.state.get_artifact_snapshots("tab")
+    assert [section.section for section in committed] == [
+        "run",
+        "analysis",
+        "post_analysis",
+    ]
+    assert committed[1].artifacts[0].status is SaveStatus.NOT_SAVED
+    assert all(
+        output.status == "failed" and output.error
+        for member in committed[1].artifacts[0].members
+        for output in member.outputs
+    )
+    assert committed[0].artifacts[0].status is SaveStatus.SAVED
+    assert committed[2].artifacts[0].status is SaveStatus.SAVED
+    assert session.state.get_tab("tab").run.confirmed_run_id == report.run_id
+    assert session.artifact_completions[-1].report == report
+    assert session.artifact_completions[-1].error
+
+
+def test_save_control_has_tab_observes_existing_and_missing_resources(
+    native_session: NativeSaveSession,
+) -> None:
+    assert native_session.control.has_tab("tab") is True
+    assert native_session.control.has_tab("missing") is False
 
 
 def test_save_uses_tab_storage_after_live_entry_switch(
