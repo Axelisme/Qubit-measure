@@ -24,6 +24,7 @@ from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.runtime import GuiAssembly
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.resources.entry import (
@@ -106,13 +107,11 @@ def open_point(
     setup_button(app.window, "Switch to selected").click()
     info = app.services.context_control.get_entry_info()
     assert info is not None and info.name == "sample"
-    assert app.services.context_control.get_component_focus().target is not None
+    app.services.context_control.set_alias_rows((AliasRow("qubit", "Q1"),))
     app.window.setup_dialog.close()
     qapp.processEvents()
-    qubit = app.window.findChild(QComboBox, "workflow.source.qubit")
-    assert qubit is not None and qubit.findText("Q1") >= 0
-    qubit.setCurrentText("Q1")
-    assert app.services.context_control.get_component_focus().name == "Q1"
+    captured = app.services.context.read_alias_context({"qubit": RoleSpec("qubit/*")})
+    assert captured is not None and captured.resolve_path("$qubit.kind") == "Q1.kind"
     return entry
 
 
@@ -154,7 +153,7 @@ def test_after_show_reuses_nonmodal_setup_without_selecting_entry(
         app.after_show(GuiAssembly(controller=object(), window=QWidget()))
 
 
-def test_setup_focus_and_explicit_capture_replace_drafts_not_live_link(
+def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
     app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication
 ) -> None:
     app.assemble(None)
