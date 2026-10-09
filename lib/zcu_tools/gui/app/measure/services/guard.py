@@ -131,15 +131,6 @@ class GuardService:
             reason_code="wrong_readiness",
         )
 
-    def _require_context(self, operation: str) -> None:
-        """Require any editable context (DRAFT or ACTIVE), not EMPTY."""
-        if self._state.session_env.readiness is ContextReadiness.EMPTY:
-            raise GuardError(
-                f"Cannot {operation}: no experiment context. Use Project… to set "
-                "up chip/qubit or load a project.",
-                reason_code="no_context",
-            )
-
     def capture_run_inputs(
         self,
         tab_id: str,
@@ -258,13 +249,13 @@ class GuardService:
         return isinstance(caps, AdapterCapabilities) and caps.load_data
 
     def check_load(self, tab_id: str) -> None:
-        """Require an existing tab, editable context and load_data capability.
+        """Require an existing tab and load_data capability.
 
-        DRAFT and ACTIVE are editable. No SoC or result is required. Raise
-        GuardError on rejection; return None without mutation on success.
+        No live context, SoC or result is required. EMPTY loads retain native
+        history without an analysis source. Raise GuardError on rejection;
+        return None without mutation on success.
         """
         tab = self._require_tab(tab_id)
-        self._require_context("load data")
         if not self._supports_load_data(tab.adapter):
             raise GuardError(
                 "This tab does not support loading data files.",
@@ -273,13 +264,14 @@ class GuardService:
         logger.debug("check_load: tab_id=%r", tab_id)
 
     def check_analyze(self, tab_id: str) -> None:
-        """Require an existing tab, editable context and a Run result.
+        """Require an existing tab and a Run result, not a live context.
 
-        Raise GuardError on rejection; return None without mutation on success.
-        This check does not validate the adapter's analysis capability.
+        Analysis consumes the historical Run source, which may be None for
+        context-free analysis. Source-dependent consumers own missing-source
+        failures. Raise GuardError on rejection; return None without mutation
+        on success. This check does not validate adapter analysis capability.
         """
         tab = self._require_tab(tab_id)
-        self._require_context("analyze")
         if not tab.has_run_result():
             raise GuardError(
                 "No run result available to analyze.", reason_code="no_run_result"
@@ -287,13 +279,14 @@ class GuardService:
         logger.debug("check_analyze: tab_id=%r", tab_id)
 
     def check_writeback(self, tab_id: str) -> None:
-        """Require an existing tab, editable context and a Primary result.
+        """Require an existing tab and a Primary result, not a live context.
 
         Raise GuardError on rejection; return None without mutation on success.
-        This shared check does not select, apply or tear down a draft.
+        This shared check does not select, apply or tear down a draft. The
+        writeback owner requires a captured destination in the still-open entry
+        before nonempty writes; this guard never substitutes current sources.
         """
         tab = self._require_tab(tab_id)
-        self._require_context("write back")
         if not tab.has_analyze_result():
             raise GuardError(
                 "No analyze result available for writeback.",
