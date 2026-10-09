@@ -161,7 +161,7 @@ def test_start_live_read_failure_names_device_before_admission(
 ) -> None:
     window, harness, entry = attachment
     driver = harness.services.device.get_connected_devices()["flux"]
-    before = window.plan_panel.state.input
+    before = window.plan_panel.state.input.data
 
     def reject_read() -> DeviceInfo:
         raise OSError("instrument read failed")
@@ -170,7 +170,7 @@ def test_start_live_read_failure_names_device_before_admission(
     with pytest.raises(RuntimeError, match="flux"):
         window.start("live-read-failure")
 
-    assert window.plan_panel.state.input == before
+    assert window.plan_panel.state.input.data == before
     assert harness.background.work is None and harness.handles.live_count() == 0
     assert not harness.gate.snapshot()
     assert not (entry.result_path / "workflows/live-read-failure").exists()
@@ -430,6 +430,8 @@ def test_replacement_accepted_progress_uses_current_host_and_form_capture(
     replies: list[TunablesSnapshot | FormErrors] = []
 
     def apply_on_accepted_progress() -> None:
+        if observed:
+            return
         status = window.controller.status()
         if status is None or status.run_id != "next" or status.lifecycle != "running":
             return
