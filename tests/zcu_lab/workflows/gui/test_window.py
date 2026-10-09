@@ -1245,8 +1245,14 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
     engine = window.controller.engine
     assert engine is not None and len(paused_tuning) == 2
     first = engine.records("tuning")[0]
-    expected = asdict(first)
-    expected["run_files"] = list(first.run_files)
+    expected = {
+        "commit_seq": first.commit_seq,
+        "call_seq": first.call_seq,
+        "revision": first.revision,
+        "encoded_record": asdict(first.encoded_record),
+        "iteration_dir": first.iteration_dir,
+        "run_files": list(first.run_files),
+    }
     assert rpc("workflow.records", {"run_id": "tuning"})["result"] == {
         "run_id": "tuning",
         "records": [expected],
@@ -1270,8 +1276,14 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
     result = rpc("workflow.records", {"run_id": "tuning", "since": 1})["result"]
     records = engine.records("tuning", since=1)
     assert len(records) == 1 and records[0].revision == 1
-    expected = asdict(records[0])
-    expected["run_files"] = list(records[0].run_files)
+    expected = {
+        "commit_seq": records[0].commit_seq,
+        "call_seq": records[0].call_seq,
+        "revision": records[0].revision,
+        "encoded_record": asdict(records[0].encoded_record),
+        "iteration_dir": records[0].iteration_dir,
+        "run_files": list(records[0].run_files),
+    }
     assert result == {"run_id": "tuning", "records": [expected]}
     assert engine.records("tuning")[0] == first
     assert window.controller.status() is not None and not harness.gate.snapshot()
@@ -1307,8 +1319,14 @@ def test_rpc_records_running_empty_and_committed_native_summary(
     engine = window.controller.engine
     assert engine is not None
     native = engine.records("reader")[0]
-    expected = asdict(native)
-    expected["run_files"] = list(native.run_files)
+    expected = {
+        "commit_seq": native.commit_seq,
+        "call_seq": native.call_seq,
+        "revision": native.revision,
+        "encoded_record": asdict(native.encoded_record),
+        "iteration_dir": native.iteration_dir,
+        "run_files": list(native.run_files),
+    }
     assert observations[1]["result"] == {"run_id": "reader", "records": [expected]}
     assert native.encoded_record.value == {"measurement": 2.5}
 
@@ -1370,7 +1388,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
     result = reply["result"]
     assert isinstance(result, dict) and isinstance(result["png_base64"], str)
     png = b64decode(result["png_base64"], validate=True)
-    assert png.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
     assert result["run_id"] == "reader" and result["name"] == "live"
     assert renders == [owner_id]
     assert window.figure_png("reader", "live") == png
