@@ -118,8 +118,9 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   and role resolution at creation. Its preview returns per-item `WritebackValues`
   with the actual path, latest stored value and capture-lowered proposal. Both
   panes obtain these facts through `writeback_control`; Qt does not resolve paths.
-  Qt and remote preview also display the proposal's existing stderr. Unit display
-  awaits a user decision. The widget is a
+  Qt and remote preview also display the proposal's existing stderr. Qt rows use
+  resources-provided static unit labels without conversion; ext and fields
+  without static units have no label. The widget is a
   compact unified ledger: draft-owned unapplied items以粗體`target*`與`* = not applied`
   legend呈現，成功寫入的items改為一般字重`target`，retarget或內容修改後回到unapplied；
   apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
