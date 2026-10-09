@@ -16,6 +16,7 @@ from zcu_tools.gui.interactive.flux_pick import SharedFluxPickPlugin
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.plots import Plots
 
+from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickResult
 
 
@@ -64,12 +65,30 @@ def make_flux_pick_plugin(
     plots: Plots,
     result_builder: Callable[[FluxPickInputs, FluxPickState, Plots], FluxPickResult],
 ) -> FluxPickPlugin:
-    """Capture a read-only spectrum, fold the two calibrated seed positions."""
+    """Build a picker from the request's bare spectrum and fixed parameters.
+
+    req.run_result supplies signals, values and freqs; no RunRecord unwrap is
+    performed here. force_magnitude sets the initial magnitude-only mode.
+    Optional req.parameters supplies qubit.flux_half/flux_int through its
+    captured roles. None parameters or absent/null leaves use the line owner's
+    defaults. Invalid scalars, missing roles and unavailable sources propagate.
+    plots receives the terminal figure through result_builder on Finish; neither
+    current session state nor legacy md/ml is read, and values never convert.
+    """
     result = req.run_result
     inputs = FluxPickInputs(result.signals, result.values, result.freqs)
-    half, integer = fold_initial_lines(
-        inputs.dev_values, req.md.get("flx_half", None), req.md.get("flx_int", None)
+    parameters = req.parameters
+    flux_half = (
+        None
+        if parameters is None
+        else optional_parameter_float(parameters, "qubit.flux_half")
     )
+    flux_int = (
+        None
+        if parameters is None
+        else optional_parameter_float(parameters, "qubit.flux_int")
+    )
+    half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
     return FluxPickPlugin(
         inputs,
         FluxPickState(flux_half=half, flux_int=integer, magnitude_only=force_magnitude),

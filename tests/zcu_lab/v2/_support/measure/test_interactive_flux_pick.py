@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Generator
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.analysis.fluxdep.line_state import fold_initial_lines
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry import ComponentSchema, RoleSpec
+from zcu_tools.resources.entry.schema import PointDocument
 
+from tests.resources.entry.fakes import registry_state
+from tests.resources.entry.view_support import registered_model
 from zcu_lab.v2._support.measure.flux_pick_plugin import (
     FluxPickPlugin,
     make_flux_pick_plugin,
@@ -27,8 +37,155 @@ from zcu_lab.v2._support.measure.interactive_flux_pick import (
 )
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepResult
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
-from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
+from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxResult
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter as TwoToneFluxDepAdapter
+
+FluxParameters = Callable[[YamlValue, YamlValue], ParameterContext]
+FluxEntrypoint = Literal["factory", "twotone"]
+
+
+@pytest.fixture
+def flux_parameters() -> Generator[FluxParameters]:
+    class Qubit(ComponentSchema):
+        flux_half: YamlValue = None
+        flux_int: YamlValue = None
+
+    before = registry_state()
+    with registered_model("test/flux-picker-qubit", Qubit) as kind:
+
+        def make(half: YamlValue, integer: YamlValue) -> ParameterContext:
+            point = PointDocument.model_validate(
+                {
+                    "format": "zcu.parameter-container",
+                    "format_version": "1.0",
+                    "general": {"created_at": "2026-10-04T00:00:00Z"},
+                    "components": {
+                        "Q1": {"kind": kind, "flux_half": half, "flux_int": integer}
+                    },
+                }
+            )
+            return ParameterContext(
+                point=point,
+                library=LibrarySnapshot(
+                    ModuleLibraryDocument(
+                        format="zcu.module-library",
+                        format_version="1.0",
+                    )
+                ),
+                target=EntryDraft(entry_id="00000000-0000-0000-0000-000000000001"),
+                roles=RoleBinding("Q1", {"qubit": RoleSpec(kind)}, {"qubit": "Q1"}),
+            )
+
+        yield make
+    assert registry_state() == before
+
+
+@pytest.fixture
+def flux_plots() -> Generator[Plots]:
+    plots = Plots(NonPresentingHost())
+    try:
+        yield plots
+    finally:
+        plots.finish()
+        plots.release()
+
+
+def _current_plugin(
+    entrypoint: FluxEntrypoint, parameters: ParameterContext | None, plots: Plots
+) -> FluxPickPlugin:
+    values = np.linspace(-5.0, 5.0, 60, dtype=np.float64)
+    freqs = np.linspace(4.0, 5.0, 30, dtype=np.float64)
+    signals = np.asarray(
+        np.exp(-(values[:, None] ** 2)) * np.ones((1, 30)), dtype=np.complex128
+    )
+    result = FreqFluxResult(values, freqs, signals)
+    if entrypoint == "factory":
+        return make_flux_pick_plugin(
+            AnalyzeRequest(
+                run_result=result,
+                analyze_params=FluxPickParams(),
+                parameters=parameters,
+                predictor=None,
+            ),
+            force_magnitude=True,
+            plots=plots,
+            result_builder=render_flux_pick,
+        )
+    return TwoToneFluxDepAdapter().make_interactive_plugin(
+        AnalyzeRequest(
+            run_result=RunRecord[FreqFluxCfg, FreqFluxResult](cfg=None, result=result),
+            analyze_params=FluxPickParams(),
+            parameters=parameters,
+            predictor=None,
+        ),
+        plots=plots,
+    )
+
+
+@pytest.mark.parametrize("entrypoint", ["factory", "twotone"])
+def test_current_request_without_parameters_builds_and_finishes_picker(
+    entrypoint: FluxEntrypoint, flux_plots: Plots
+) -> None:
+    plugin = _current_plugin(entrypoint, None, flux_plots)
+    session = plugin.open(ManualOwnerScheduler())
+    try:
+        state = session.snapshot()
+        assert state.flux_half == pytest.approx(0.0)
+        assert state.flux_int > state.flux_half
+        assert state.magnitude_only is (entrypoint == "factory")
+        plugin.execute_command(session, "move_line", {"role": "half", "position": 0.5})
+        result = plugin.finish(session)
+        assert result.flx_half == pytest.approx(0.5)
+        assert result.flx_period > 0.0
+        assert tuple(flux_plots) == ("pick",)
+    finally:
+        session.dispose()
+
+
+@pytest.mark.parametrize("entrypoint", ["factory", "twotone"])
+@pytest.mark.parametrize("half", [None, 0.5])
+def test_current_request_uses_fixed_parameter_calibration(
+    entrypoint: FluxEntrypoint,
+    half: float | None,
+    flux_parameters: FluxParameters,
+    flux_plots: Plots,
+) -> None:
+    parameters = flux_parameters(half, 2.0)
+    expected_half, expected_int = fold_initial_lines(
+        np.linspace(-5.0, 5.0, 60, dtype=np.float64), half, 2.0
+    )
+    plugin = _current_plugin(entrypoint, parameters, flux_plots)
+    session = plugin.open(ManualOwnerScheduler())
+    try:
+        state = session.snapshot()
+        assert state.flux_half == pytest.approx(expected_half)
+        assert state.flux_int == pytest.approx(expected_int)
+        assert plugin.finish(session).flx_period == pytest.approx(
+            2 * abs(expected_int - expected_half)
+        )
+    finally:
+        session.dispose()
+
+
+@pytest.mark.parametrize("entrypoint", ["factory", "twotone"])
+@pytest.mark.parametrize(
+    ("half", "error", "message"),
+    [
+        (True, TypeError, "real scalar"),
+        ("bad", TypeError, "real scalar"),
+        (float("nan"), ValueError, "finite"),
+    ],
+)
+def test_current_request_propagates_invalid_parameter_calibration(
+    entrypoint: FluxEntrypoint,
+    half: YamlValue,
+    error: type[Exception],
+    message: str,
+    flux_parameters: FluxParameters,
+    flux_plots: Plots,
+) -> None:
+    with pytest.raises(error, match=message):
+        _current_plugin(entrypoint, flux_parameters(half, 2.0), flux_plots)
 
 
 def _request(md: MetaDict | None = None) -> AnalyzeRequest[Any, FluxPickParams]:
