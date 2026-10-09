@@ -15,7 +15,7 @@ def test_effective_temperature_two_point_round_trip() -> None:
     freqs = np.array([0.0, 1000.0])
     pops = boltzmann_distribution(freqs, eff_T=50.0)
 
-    temp, err = effective_temperature(list(zip(pops, freqs)))
+    temp, err = effective_temperature(list(zip(pops, freqs, strict=False)))
 
     assert temp == pytest.approx(50.0)
     assert err == 0.0

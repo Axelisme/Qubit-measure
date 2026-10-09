@@ -120,7 +120,7 @@ def _format_table(headers: list[str], rows: list[list[str]], aligns: str) -> str
     def fmt(cells: list[str]) -> str:
         padded = [
             cell.rjust(w) if a == "r" else cell.ljust(w)
-            for cell, w, a in zip(cells, widths, aligns)
+            for cell, w, a in zip(cells, widths, aligns, strict=False)
         ]
         return ("  " + "  ".join(padded)).rstrip()
 

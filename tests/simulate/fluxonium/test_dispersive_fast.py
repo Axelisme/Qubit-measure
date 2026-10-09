@@ -115,6 +115,6 @@ def test_flux_independent_operators_are_cached():
     fresh = calculate_dispersive_vs_flux_fast(
         params, fluxs, 5.4, 0.07, qub_cutoff=30, qub_dim=15
     )
-    for a, b in zip(second, fresh):
+    for a, b in zip(second, fresh, strict=False):
         np.testing.assert_allclose(a, b, atol=1e-12)
     del first  # (kept above only to populate the cache)
