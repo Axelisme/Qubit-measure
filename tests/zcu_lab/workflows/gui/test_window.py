@@ -1040,7 +1040,6 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     assert window.close()
 
 
-@pytest.mark.parametrize("command", ["pause", "resume", "stop"])
 def test_prepare_forms_rejects_pending_and_paused_run(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
@@ -1075,6 +1074,7 @@ def test_prepare_forms_rejects_pending_and_paused_run(
     window.stop("prepare-guard")
 
 
+@pytest.mark.parametrize("command", ["pause", "resume", "stop"])
 def test_window_without_run_rejects_explicit_target(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     command: str,
