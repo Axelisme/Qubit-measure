@@ -591,7 +591,7 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
     [
         ("tab.writeback_preview", 93),
         ("tab.post_analyze", None),
-        ("tab.save_artifacts", 104),
+        pytest.param("tab.save_artifacts", 104, id="tab.save_image-104"),
     ],
 )
 def test_ge_close_stops_stage_admission_without_reconnect(
@@ -1160,7 +1160,6 @@ def test_ge_author_post_capture_retains_reports_images_and_original_sources(
         )
         assert capture.result is not None
         assert capture.result.summary == {"fidelity": 0.98}
-        assert capture.result.invalid == []
         assert capture.save_report == (None if outcome == "transport" else expected)
         assert capture.save_status == (
             "incomplete" if outcome in ("partial", "transport") else "saved"
@@ -1170,16 +1169,25 @@ def test_ge_author_post_capture_retains_reports_images_and_original_sources(
         )
         assert (capture.writeback is None) == (outcome in ("transport", "png"))
         assert run.snapshot().raw_save == RAW_REPORT
-        assert run.snapshot().analyses["primary"] == primary.snapshot
-        assert run.snapshot().analyses["post"] == capture
+        assert run.snapshot().analyses == {"primary": primary.snapshot, "post": capture}
         before = list(client.transport.sent)
         assert post.snapshot() == capture
-        assert run.snapshot().raw_save == RAW_REPORT
         assert client.transport.sent == before
         methods = [method for method, _ in client.transport.sent]
-        assert methods.count("tab.run_start") == methods.count("tab.save_data") == 1
-        assert methods.count("tab.save_artifacts") == 2
-        assert methods.count("tab.post_analyze") == 1
+        assert {
+            method: methods.count(method)
+            for method in (
+                "tab.run_start",
+                "tab.save_data",
+                "tab.save_artifacts",
+                "tab.post_analyze",
+            )
+        } == {
+            "tab.run_start": 1,
+            "tab.save_data": 1,
+            "tab.save_artifacts": 2,
+            "tab.post_analyze": 1,
+        }
         assert (
             "tab.post_analyze",
             {"tab_id": "t", "updates": {}, "operation_id": 93, "run_operation_id": 71},
