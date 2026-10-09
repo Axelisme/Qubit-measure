@@ -70,7 +70,7 @@ class OpenInnerLoop(Macro):
     ) -> None:
         super().__init__(name=name, counter_reg=counter_reg, n=n, range_hint=range_hint)
 
-    def expand(self, prog):  # type: ignore[override]
+    def expand(self, prog):
         start = f"{self.name}_start"
         end = f"{self.name}_end"
 
@@ -129,7 +129,7 @@ class CloseInnerLoop(Macro):
     def __init__(self, name: str, counter_reg: str, n: int | str) -> None:
         super().__init__(name=name, counter_reg=counter_reg, n=n)
 
-    def expand(self, prog):  # type: ignore[override]
+    def expand(self, prog):
         start = f"{self.name}_start"
         end = f"{self.name}_end"
 
