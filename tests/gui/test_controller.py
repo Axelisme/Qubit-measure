@@ -7,7 +7,6 @@ import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -20,9 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     SessionEnv,
 )
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
@@ -45,14 +42,13 @@ from zcu_tools.gui.cfg import (
     DirectValue,
 )
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
-from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
 )
 from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._completion_helpers import (
@@ -133,7 +129,7 @@ class ControllerFixture:
 
     def quiesce(self) -> None:
         """Join the Controller's in-flight background work and flush its queued
-        main-thread deliveries (run/analyze/save/device all share one
+        main-thread deliveries (run/analyze/device all share one
         BackgroundRunner). Must run before the fixture — and thus the Controller
         and its QObject service graph — is GC'd: a run spawns a dedicated worker
         thread whose finished→deleteLater and done delivery are posted to the main
@@ -370,64 +366,6 @@ def test_run_finished_emits_run_finished(cf):
     )
 
 
-def test_save_all_without_remote_uses_one_operation_and_writes_artifacts(
-    cf, tmp_path, monkeypatch
-):
-    from matplotlib.figure import Figure
-    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKind, SaveStatus
-
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(
-        tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
-    )
-    assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
-    plots = Plots(NonPresentingHost())
-    plots.adopt("fit", Figure())
-    plots.finish()
-    plots.release()
-    cf.state.update_tab_analyze(tab_id, object(), plots)
-
-    def write_data(req) -> None:
-        Path(req.data_path).write_bytes(b"offline adapter output")
-
-    # FakeAdapter's default save is a no-op; exercise real filesystem I/O here.
-    monkeypatch.setattr(cf.state.get_tab(tab_id).adapter, "save", write_data)
-    cf.ctrl.update_tab_data_path(tab_id, str(tmp_path / "data"))
-    cf.ctrl.update_tab_image_path(
-        tab_id,
-        ArtifactKey(ArtifactKind.ANALYSIS, "fit"),
-        str(tmp_path / "analysis.png"),
-    )
-    submission = cf.ctrl.save_artifacts(tab_id)
-    with pytest.raises(FailedPreconditionError, match="no cancellation point"):
-        cf.ctrl.operation_control.cancel_operation(submission.operation_id)
-    assert _wait_for(lambda: not cf.state.is_tab_busy(tab_id))
-    artifacts = cf.ctrl.get_tab_snapshot(tab_id).artifacts
-    assert {a.key.kind for a in artifacts} == {ArtifactKind.DATA, ArtifactKind.ANALYSIS}
-    assert all(a.status is SaveStatus.SAVED for a in artifacts)
-    assert all(a.last_saved_path is not None for a in artifacts)
-    assert all(Path(d.path).is_file() for d in submission.destinations)
-    assert cf.ctrl.operation_control.active_operations() == ()
-    cf.view.show_status_message.assert_called_with("Artifacts saved")
-
-
-def test_save_data_completion_reports_only_data_artifact(cf):
-    cf.ctrl._on_save_data_finished(
-        SaveDataFinishedPayload(tab_id="tab-1", data_path="/tmp/data.hdf5")
-    )
-
-    cf.view.show_status_message.assert_called_with("Data saved to /tmp/data.hdf5")
-
-    cf.ctrl._on_save_data_finished(
-        SaveDataFinishedPayload(
-            tab_id="tab-1", data_path="/tmp/data.hdf5", error="disk full"
-        )
-    )
-
-    cf.view.show_error_dialog.assert_called_with("Save data failed", "disk full")
-
-
 def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(
@@ -522,7 +460,6 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     no_analysis.get_analyze_params.side_effect = NotImplementedError(
         "declares no analysis support"
     )
-    no_analysis.make_save_paths.return_value = None
     cf.state.get_tab(tab_id).adapter = no_analysis
 
     cf.ctrl.start_run(
@@ -624,7 +561,7 @@ def test_start_run_while_device_setup_active_raises(cf):
     cf.ctrl._operation_gate.release(1)
 
 
-def test_draft_context_rejects_real_run_and_save(cf):
+def test_draft_context_rejects_real_run(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.set_context(
         dataclasses.replace(
@@ -638,12 +575,6 @@ def test_draft_context_rejects_real_run_and_save(cf):
         cf.ctrl.start_run(
             tab_id,
             cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
-        )
-    with pytest.raises(RuntimeError, match="active file-backed context"):
-        cf.ctrl.save_data(tab_id, "/tmp/data.h5")
-    with pytest.raises(RuntimeError, match="active file-backed context"):
-        cf.ctrl.save_image(
-            tab_id, ArtifactKey(ArtifactKind.ANALYSIS, "fit"), "/tmp/image.png"
         )
 
 

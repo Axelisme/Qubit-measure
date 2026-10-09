@@ -30,7 +30,7 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactSectionSnapshot,
     SaveStatus,
 )
-from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.controller import Controller, DiagnosticSink
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
     SaveDataFinishedPayload,
@@ -602,6 +602,50 @@ def test_save_events_observe_committed_state_and_complete_report(
         assert payload.data_path == str(native.output.path)
     assert len(session.artifact_completions if batch else session.completions) == 1
     assert (session.completions if batch else session.artifact_completions) == []
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("output_failure", [False, True])
+def test_controller_projects_native_save_completion_to_diagnostic_sinks(
+    native_session: NativeSaveSession,
+    role_controller: tuple[State, Controller, BaseEventBus],
+    batch: bool,
+    output_failure: bool,
+) -> None:
+    session = native_session
+    declare_panes(session)
+    if output_failure:
+        (session.entry.database_path / "Labber").write_text("not a directory")
+    report = session.save_artifacts() if batch else session.save()
+    payload = (session.artifact_completions if batch else session.completions)[-1]
+    assert payload.report == report
+
+    _, controller, bus = role_controller
+    sink = MagicMock(spec=DiagnosticSink)
+    controller.add_diagnostic_sink(sink)
+    try:
+        bus.emit(payload)
+    finally:
+        controller.remove_diagnostic_sink(sink)
+
+    diagnostics = [call.args for call in sink.notify_diagnostic.call_args_list]
+    if batch and output_failure:
+        expected_severities = ["error"]
+    elif output_failure:
+        expected_severities = ["info", "error"]
+    else:
+        expected_severities = ["info"]
+    assert [item[0] for item in diagnostics] == expected_severities
+    messages = "\n".join(item[2] for item in diagnostics)
+    for item in report.outputs:
+        assert str(item.output.path) in messages
+        assert item.status in messages
+    if output_failure:
+        assert payload.error is not None
+        errors = [item[2] for item in diagnostics if item[0] == "error"]
+        for item in report.outputs:
+            if item.error is not None:
+                assert item.error in errors[0]
 
 
 @pytest.mark.parametrize("batch", [False, True])
