@@ -10,11 +10,14 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, LoadDataReque
 from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
 from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.parameters import RoleBinding
 
 from .plot_lifecycle import release_retired_plots
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import RetiredPaneResources, State
+    from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.entry import RoleSpec
 
@@ -65,6 +68,7 @@ class LoadService:
         writeback: WritebackLifecyclePort,
         *,
         provide_options: Callable[[str], Sequence[object]],
+        context: ContextControlPort,
         captured_parameters: Callable[
             [Mapping[str, RoleSpec], str | None], ParameterContext | None
         ],
@@ -73,8 +77,10 @@ class LoadService:
 
         captured_parameters reads current point/library/storage and global aliases
         on the owner thread; its result must not follow later source changes.
-        provide_options returns current selector choices for cfg backfill.
+        context reads the file's fixed point/roles in the opened entry without
+        changing selection. provide_options returns cfg backfill choices.
         """
+        self._context = context
         self._captured_parameters = captured_parameters
         self._state = state
         self._writeback = writeback
@@ -91,7 +97,12 @@ class LoadService:
 
         Call in the same owner-thread command; data_path is the selected file.
         Capture current global parameters once before the adapter call, never tab
-        birth bindings. Retain that source and native history without acquisition.
+        birth bindings. Retain its Save storage, not its aliases for analysis.
+        In the same entry, read the file's point/roles once for analysis and WB.
+        This reads current persisted values, not an unrecorded historical version.
+        Foreign-entry/pointless/EMPTY loads have no analysis source; context-free
+        analysis remains available. Historical source read failures propagate
+        before result replacement. Retain native history without acquisition.
         Return committed result details and cfg backfill status. Busy or cfg
         notification reentrancy rejects before loading; adapter file/capability
         failures raise LoadDataError without replacing the previous result.
@@ -106,9 +117,14 @@ class LoadService:
                 "This tab does not support loading data files.",
                 reason_code="unsupported_load",
             )
+        declarations = tab.adapter.parameter_roles()
         request = LoadDataRequest(
             data_path=data_path,
-            parameters=self._captured_parameters(tab.adapter.parameter_roles(), None),
+            parameters=self._captured_parameters(declarations, None),
+        )
+        # Native history owns aliases; Save needs only the Load-time entry capability.
+        storage = (
+            None if request.parameters is None else self._context.read_context().storage
         )
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
@@ -129,13 +145,25 @@ class LoadService:
                 reason_code="invalid_data_file",
             ) from exc
 
+        history = metadata.snapshot
+        parameters = None
+        if (
+            request.parameters is not None
+            and request.parameters.target.entry_id == str(history.entry_id)
+            and history.point is not None
+        ):
+            parameters = self._context.read_target(
+                SavedPoint(entry_id=str(history.entry_id), point=history.point),
+                roles=RoleBinding(None, declarations, history.roles),
+            )
         snapshot = getattr(result, "cfg", None)
         retired = self._state.update_tab_loaded_result(
             tab_id,
             result,
             data_path,
             metadata=metadata,
-            parameters=request.parameters,
+            parameters=parameters,
+            storage=storage,
         )
         self._teardown_retired(retired)
         return LoadTabResultOutcome(

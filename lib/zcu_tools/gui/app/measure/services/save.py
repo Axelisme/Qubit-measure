@@ -136,7 +136,8 @@ class SaveService:
         self._require_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
         metadata = tab.run.metadata
-        if metadata is None or tab.run.parameters is None:
+        storage = tab.run.storage
+        if metadata is None or storage is None:
             raise FailedPreconditionError(
                 "Run has no historical native metadata or captured storage",
                 reason_code="storage_unavailable",
@@ -145,7 +146,6 @@ class SaveService:
             selected = tab.artifacts.select(refs)
         except ValueError as exc:
             raise FailedPreconditionError(str(exc)) from exc
-        storage = tab.run.parameters.capture_storage()
         history = metadata.snapshot
         if history.entry_id != storage.entry_id:
             raise FailedPreconditionError(

@@ -762,7 +762,7 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
     if missing == "metadata":
         session.state.update_tab_result("tab", session.state.get_tab("tab").run.result)
     else:
-        session.state.get_tab("tab").run.parameters = None
+        session.state.get_tab("tab").run.storage = None
     with pytest.raises(FailedPreconditionError):
         session.control.save_data("tab", origin=GUI_ORIGIN)
     assert not session.state.is_tab_busy("tab")
@@ -975,7 +975,7 @@ def test_missing_evidence_rejects_comment_before_operation(
     if missing == "metadata":
         session.state.update_tab_result("tab", session.state.get_tab("tab").run.result)
     else:
-        session.state.get_tab("tab").run.parameters = None
+        session.state.get_tab("tab").run.storage = None
     command = session.control.save_artifacts if batch else session.control.save_data
     with pytest.raises(FailedPreconditionError):
         command("tab", comment="rejected", origin=GUI_ORIGIN)

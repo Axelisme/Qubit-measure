@@ -157,6 +157,7 @@ def test_analysis_draft_uses_start_run_identity(
                 "historical.h5",
                 metadata=native.metadata,
                 parameters=tab.run.parameters,
+                storage=tab.run.storage,
             )
         elif source in ("without_metadata", "context_free"):
             tab.run.metadata = None
@@ -254,6 +255,7 @@ def test_post_analysis_draft_retains_primary_identity(
                 "historical.h5",
                 metadata=native.metadata,
                 parameters=original_capture,
+                storage=tab.run.storage,
             )
         elif source in ("without_metadata", "context_free"):
             tab.run.metadata = None

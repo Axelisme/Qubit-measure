@@ -1,5 +1,6 @@
 """Native Load retains history and rejects unsafe saves through public services."""
 
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -10,20 +11,300 @@ import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import load_run_data
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import (
+    AnalyzeRequest,
+    MetaDictWriteback,
+    WritebackItem,
+    WritebackRequest,
+)
+from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
+from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
+from zcu_tools.gui.app.measure.services.writeback import (
+    WritebackDraft,
+    WritebackEdit,
+    WritebackService,
+    WritebackWritten,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    PointUseRequest,
+    SavedPoint,
+)
+from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.entry import ResultEntry, SavedPayload
+from zcu_tools.resources.entry import (
+    AcceptedPayload,
+    ResultEntry,
+    RoleResolutionError,
+    RoleSpec,
+    SavedPayload,
+)
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._native_save_support import (
+    NativeSaveSession,
     PaneParams,
+    PaneSummary,
     PostSummary,
     declare_panes,
     native_save_session,
 )
+
+
+@pytest.fixture
+def role_load_session(
+    tmp_path: Path,
+    qapp: QApplication,
+    result_sources: tuple[ParameterContext, ParameterContext],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[NativeSaveSession]:
+    """Save Q1 roles at p, then update persisted Q1.rate before native Load."""
+    del result_sources  # Fixture owns the component-kind registration lifecycle.
+    with native_save_session(tmp_path, qapp) as session:
+        control = ContextControlFacet(context=session.context)
+        tab = session.state.get_tab("tab")
+        declarations = {"source_qubit": RoleSpec("run-source/qubit")}
+        monkeypatch.setattr(tab.adapter, "parameter_roles", lambda: declarations)
+        control.add_component("Q1", "run-source/qubit", {"rate": 1.0})
+        control.add_component("Q2", "run-source/qubit", {"rate": 2.0})
+        session.context.set_alias_rows(
+            (
+                AliasRow("source_qubit", "Q1"),
+                AliasRow("custom", "Q2"),
+            )
+        )
+        captured = session.context.read_alias_context(declarations)
+        assert captured is not None and captured.roles is not None
+        session.metadata = replace(
+            session.metadata,
+            snapshot=replace(session.metadata.snapshot, roles=captured.roles.names),
+        )
+        session.state.update_tab_result(
+            "tab",
+            tab.run.result,
+            metadata=session.metadata,
+            parameters=captured,
+        )
+        session.save()
+        control.set_parameter(captured.target, "Q1.rate", 7.0)
+        yield session
+
+
+def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id(
+    role_load_session: NativeSaveSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = role_load_session
+    control = ContextControlFacet(context=session.context)
+    tab = session.state.get_tab("tab")
+    target = control.read_context().target
+    path = session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+    session.entry.new_point("other")
+    other = control.use_point(PointUseRequest("other"))
+    control.add_component("Q1", "run-source/qubit", {"rate": 40.0})
+    control.add_component("Q2", "run-source/qubit", {"rate": 50.0})
+    session.context.set_alias_rows(
+        (
+            AliasRow("source_qubit", "Q2"),
+            AliasRow("custom", "Q1"),
+        )
+    )
+    rows = session.context.get_alias_rows()
+    service = LoadService(
+        session.state,
+        MagicMock(),
+        provide_options=lambda _: (),
+        context=control,
+        captured_parameters=session.context.read_alias_context,
+    )
+
+    service.load_result("tab", str(path))
+
+    loaded = tab.run.parameters
+    assert loaded is not None
+    assert loaded.target == target
+    assert loaded.roles is not None and loaded.roles.names == {
+        "source_qubit": "Q1",
+        "custom": "Q2",
+    }
+    assert tab.run.storage is not None and tab.run.storage.point == "other"
+    assert control.read_context().target == other
+    control.set_parameter(target, "Q1.rate", 10.0)
+    seen: list[AnalyzeRequest[object, object]] = []
+
+    def analyze(
+        request: AnalyzeRequest[object, object], *, plots: Plots
+    ) -> PaneSummary:
+        del plots
+        seen.append(request)
+        return PaneSummary()
+
+    def proposals(
+        request: WritebackRequest[object, PaneSummary],
+    ) -> list[WritebackItem]:
+        assert request.ctx.parameters is loaded
+        return [MetaDictWriteback("$source_qubit.rate", "Rate", proposed_value=12.0)]
+
+    monkeypatch.setattr(tab.adapter, "analyze", analyze)
+    monkeypatch.setattr(tab.adapter, "get_writeback_items", proposals)
+    editor = CfgEditorService(
+        MagicMock(), control, MagicMock(), MagicMock(), session.bus
+    )
+    writeback = WritebackService(
+        editor,
+        write_port=control,
+        entry_ledger=session.context.entry_ledger,
+    )
+    runner = OperationRunner(
+        None, session.handles, None, session.background, session.bus
+    )
+    analysis = AnalyzeService(
+        session.state, runner, session.bus, writeback, session.handles
+    )
+    analysis.start_analyze("tab", PaneParams(), plots=Plots(NonPresentingHost()))
+    assert session.background.quiesce()
+    assert len(seen) == 1 and seen[0].parameters is loaded
+    assert loaded.value("$source_qubit.rate") == 7.0
+    draft = tab.analysis.writeback_draft
+    assert isinstance(draft, WritebackDraft)
+    assert draft.parameters is loaded
+    assert draft.run_id == session.metadata.run_id
+    assert writeback.preview_values(draft)["md-1"].current == 10.0
+    assert writeback.write_draft(
+        draft,
+        (WritebackEdit("md-1"),),
+        origin=CommandOrigin("mcp"),
+    ) == [WritebackWritten("md-1", "md", "Q1.rate", 10.0, 12.0)]
+    event = session.entry.ledger.events()[-1]
+    assert (
+        isinstance(event.payload, AcceptedPayload)
+        and event.payload.run_id == session.metadata.run_id
+    )
+    assert control.read_context().target == other
+    assert control.read_context().value("Q2.rate") == 50.0
+    assert control.read_target(target).value("Q1.rate") == 12.0
+    assert session.context.get_alias_rows() == rows
+    writeback.teardown_draft(draft)
+
+
+@pytest.mark.parametrize("failure", ["missing_point", "missing_alias"])
+def test_native_load_historical_source_failure_preserves_previous_result(
+    role_load_session: NativeSaveSession,
+    failure: str,
+) -> None:
+    session = role_load_session
+    tab = session.state.get_tab("tab")
+    history = session.metadata.snapshot
+    broken = replace(
+        history,
+        point="missing" if failure == "missing_point" else history.point,
+        roles={"source_qubit": "missing"}
+        if failure == "missing_alias"
+        else history.roles,
+    )
+    session.state.update_tab_result(
+        "tab",
+        tab.run.result,
+        metadata=replace(session.metadata, snapshot=broken),
+        parameters=tab.run.parameters,
+    )
+    session.save()
+    previous = tab.run
+    events = session.entry.ledger.events()
+    service = LoadService(
+        session.state,
+        MagicMock(),
+        provide_options=lambda _: (),
+        context=ContextControlFacet(context=session.context),
+        captured_parameters=session.context.read_alias_context,
+    )
+    error = FileNotFoundError if failure == "missing_point" else RoleResolutionError
+
+    with pytest.raises(error):
+        service.load_result(
+            "tab",
+            str(
+                session.entry.database_path
+                / "runs"
+                / session.metadata.run_id
+                / "data.h5"
+            ),
+        )
+
+    assert tab.run is previous
+    assert session.entry.ledger.events() == events
+
+
+@pytest.mark.parametrize("source", ["foreign", "empty", "pointless"])
+def test_native_load_without_readable_source_allows_context_free_analysis(
+    role_load_session: NativeSaveSession,
+    tmp_path: Path,
+    source: str,
+) -> None:
+    session = role_load_session
+    tab = session.state.get_tab("tab")
+    path = session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+    if source == "foreign":
+        other = ResultEntry.create(
+            "foreign",
+            result_root=tmp_path / "Foreign",
+            database_root=tmp_path / "ForeignDB",
+        )
+        other.new_point("foreign-point")
+        session.context.install_entry(other)
+        ContextControlFacet(context=session.context).use_point(
+            PointUseRequest("foreign-point")
+        )
+    elif source == "empty":
+        session.context.clear_context()
+    else:
+        session.state.update_tab_result(
+            "tab",
+            tab.run.result,
+            parameters=tab.run.parameters,
+            metadata=replace(
+                session.metadata,
+                snapshot=replace(session.metadata.snapshot, point=None),
+            ),
+        )
+        session.save()
+    control = ContextControlFacet(context=session.context)
+    editor = CfgEditorService(
+        MagicMock(), control, MagicMock(), MagicMock(), session.bus
+    )
+    writeback = WritebackService(
+        editor, write_port=control, entry_ledger=session.context.entry_ledger
+    )
+    service = LoadService(
+        session.state,
+        writeback,
+        provide_options=lambda _: (),
+        context=control,
+        captured_parameters=session.context.read_alias_context,
+    )
+
+    service.load_result("tab", str(path))
+
+    assert tab.run.parameters is None
+    runner = OperationRunner(
+        None, session.handles, None, session.background, session.bus
+    )
+    analysis = AnalyzeService(
+        session.state, runner, session.bus, writeback, session.handles
+    )
+    analysis.start_analyze("tab", PaneParams(), plots=Plots(NonPresentingHost()))
+    assert session.background.quiesce()
+    assert isinstance(tab.analysis.result, PaneSummary)
+    draft = tab.analysis.writeback_draft
+    assert isinstance(draft, WritebackDraft)
+    assert draft.parameters is None and draft.run_id == session.metadata.run_id
+    assert draft.items == ()
+    writeback.teardown_draft(draft)
 
 
 @pytest.mark.parametrize("completion", ["complete", "partial", "stopped"])
@@ -50,6 +331,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
             session.state,
             MagicMock(),
             provide_options=lambda _: (),
+            context=ContextControlFacet(context=session.context),
             captured_parameters=session.context.read_alias_context,
         )
         outcome = service.load_result("tab", str(path))
@@ -108,6 +390,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
             session.state,
             MagicMock(),
             provide_options=lambda _: (),
+            context=ContextControlFacet(context=session.context),
             captured_parameters=session.context.read_alias_context,
         )
         service.load_result("tab", str(source))
@@ -162,8 +445,17 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         assert saved.labber_path != stored.labber_path
         assert tab.run.metadata == saved
         assert tab.run.confirmed_run_id == stored.run_id
-        assert tab.run.parameters is not None
-        assert tab.run.parameters.capture_storage().point == "destination-point"
+        assert (
+            tab.run.parameters is not None
+            and tab.run.parameters.target
+            == SavedPoint(
+                entry_id=str(stored.snapshot.entry_id),
+                point=stored.snapshot.point,
+            )
+        )
+        assert (
+            tab.run.storage is not None and tab.run.storage.point == "destination-point"
+        )
         events = session.entry.ledger.events()
         assert events[:-1] == previous_events
         event = events[-1]
@@ -214,10 +506,14 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
             session.state,
             MagicMock(),
             provide_options=lambda _: (),
+            context=ContextControlFacet(context=session.context),
             captured_parameters=session.context.read_alias_context,
         )
         service.load_result("tab", str(source))
         assert tab.run.metadata == load_run_data(source).metadata
+        assert tab.run.parameters is None
+        assert tab.run.storage is not None
+        assert tab.run.storage.entry_id == captured.entry_id
         before = {
             p.relative_to(tmp_path): p.read_bytes()
             for p in tmp_path.rglob("*")
@@ -273,6 +569,7 @@ def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
             session.state,
             MagicMock(),
             provide_options=lambda _: (),
+            context=ContextControlFacet(context=session.context),
             captured_parameters=session.context.read_alias_context,
         )
 
@@ -284,7 +581,11 @@ def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is not None
-        assert tab.run.parameters.target == draft.target
+        assert tab.run.parameters.target == SavedPoint(
+            entry_id=str(stored.metadata.snapshot.entry_id),
+            point="p",
+        )
+        assert tab.run.storage is None
         assert tab.analysis.result is None
         assert tab.post_analysis.result is None
         assert tab.artifacts.snapshot() == ()
@@ -321,6 +622,7 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
             session.state,
             MagicMock(),
             provide_options=lambda _: (),
+            context=ContextControlFacet(context=session.context),
             captured_parameters=session.context.read_alias_context,
         )
 
@@ -342,6 +644,7 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
             session.state,
             MagicMock(),
             provide_options=lambda _: (),
+            context=ContextControlFacet(context=session.context),
             captured_parameters=session.context.read_alias_context,
         )
 

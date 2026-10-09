@@ -33,7 +33,7 @@ from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.gui.version_table import (
     VersionTable as VersionTable,
 )
-from zcu_tools.resources.entry import ArtifactKey, SaveLayout
+from zcu_tools.resources.entry import ArtifactKey, PointStorageBinding, SaveLayout
 
 from .adapter import (
     ExpAdapterProtocol,
@@ -75,8 +75,12 @@ class RunPaneState(Generic[T_Result]):
     confirmed_run_id is None until a complete Save report confirms at least one
     persistent output. It survives failed resaves of this Run, but replacement
     or a new Run resets it; it is identity, not a successful-output history.
-    parameters is the fixed source accepted for this result (Run permit or Load
-    request), or None for context-free data. Later tab bindings never replace it.
+    parameters fixes analysis/WB values and target. Run uses admission values;
+    native Load reads its historical point once using its resolved alias names.
+    None means no readable analysis source, never a live-context fallback.
+    storage fixes the Save capability: Run admission or Load request storage.
+    None means no Save destination. Native Load may have a different analysis
+    target; Save still checks this capability against file history.
     """
 
     result: T_Result | None = None
@@ -85,6 +89,7 @@ class RunPaneState(Generic[T_Result]):
     metadata: RunMetadata | None = None
     confirmed_run_id: str | None = None
     parameters: ParameterContext | None = None
+    storage: PointStorageBinding | None = None
 
 
 @dataclass
@@ -452,6 +457,7 @@ class State(SessionState):
                 source_operation_id=source_operation_id,
                 metadata=metadata,
                 parameters=parameters,
+                storage=None if parameters is None else parameters.storage,
             ),
         )
 
@@ -463,12 +469,15 @@ class State(SessionState):
         *,
         metadata: RunMetadata,
         parameters: ParameterContext | None = None,
+        storage: PointStorageBinding | None = None,
     ) -> RetiredPaneResources:
-        """Replace loaded data, its original native history and request source.
+        """Replace loaded data, native history and fixed analysis/Save sources.
 
         source_path is the exact loaded file, not a saving destination. metadata
         is the original native history, never a new acquisition. parameters is
-        the Load request's fixed capture, or None for context-free data.
+        its fixed historical-point analysis source, or None when not readable.
+        storage is the Load request's Save capability, or None without one.
+        Do not derive storage from parameters: their targets may differ.
         Clear dependent panes, Run token and Save confirmation; return retired
         resources. Unknown tabs raise KeyError; off-owner calls fail before mutation.
         """
@@ -486,6 +495,7 @@ class State(SessionState):
                 source_path=source_path,
                 metadata=metadata,
                 parameters=parameters,
+                storage=storage,
             ),
         )
 
@@ -714,10 +724,8 @@ class State(SessionState):
     def _save_layout(run: RunPaneState[T_Result]) -> SaveLayout | None:
         """Plan against this result's source, never tab birth or live selection."""
         metadata = run.metadata
-        if metadata is None or run.parameters is None:
-            return None
-        storage = run.parameters.storage
-        if storage is None:
+        storage = run.storage
+        if metadata is None or storage is None:
             return None
         return SaveLayout(
             result_path=storage.result_path,

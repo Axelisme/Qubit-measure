@@ -228,6 +228,7 @@ def build_app_services(
         state,
         writeback,
         provide_options=bindings.provide_options,
+        context=ContextControlFacet(context=context),
         captured_parameters=captured_parameters,
     )
     run = RunService(

@@ -58,6 +58,7 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
             state,
             writeback,
             provide_options=lambda source_id: (),
+            context=MagicMock(),
             captured_parameters=lambda _roles, _target: state.session_env.parameters,
         ),
         emit,
@@ -66,7 +67,7 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
 
 
 @pytest.mark.parametrize("context_free", [False, True])
-def test_load_retains_request_source_and_native_history(
+def test_load_retains_request_and_history_without_foreign_analysis_fallback(
     result_sources: tuple[ParameterContext, ParameterContext],
     context_free: bool,
 ) -> None:
@@ -97,7 +98,7 @@ def test_load_retains_request_source_and_native_history(
     if request.parameters is not None:
         assert request.parameters.value("source_qubit.rate") == 1.0
     assert tab.run.result is loaded
-    assert tab.run.parameters is captured
+    assert tab.run.parameters is None
     assert tab.run.source_operation_id is None
     assert tab.run.metadata is metadata
     state.clear_tab_results(tab_id)

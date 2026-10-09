@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，全域 alias、Run admission 與歷史 Save source
+**Last updated:** 2026-10-09，全域 alias、Run admission 與 native Load 來源
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -24,7 +24,11 @@ metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。
 
 RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
-Load 保存 LoadDataRequest 的 capture 與 native 檔案的原 metadata，不新增 Run token 或量測歷史。
+Native Load 保留檔案 metadata。在相同 opened entry，Load 一次讀回歷史 point，
+固定檔案的 alias 名稱供分析與 WB。值是 Load 時的持久值，不重建未保存的原始參數版本。
+跨 entry、EMPTY 或無 point 時，Load 不提供分析來源，也不回退全域 alias。
+Context-free analysis 仍可用。Save storage 獨立固定在 Load request 時。
+Load 不新增 Run token 或量測歷史。
 純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。predictor 仍跨 tab 共享。
 
 ## 局部設計與閱讀入口
@@ -173,7 +177,9 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   Mapping／ledger 錯誤直接傳遞，不偽造 report 或回滾已寫文件。
   保存不產生 acquisition identity，也不重讀 live point。
   RPC／MCP 直接投影回傳報告。Native Load 讀回 typed record 與原 RunMetadata。
-  Load 在 adapter 呼叫前捕捉當前全域參數來源，再連同檔案歷史發布到 Run pane。
+  Load 在 adapter 呼叫前固定 request 與不帶 alias 的 Save storage capability。
+  Analyze/WB 另用檔案 point 與 resolved alias names，一次透過 context owner 讀取。
+  歷史 point 的檔案、schema 或 kind 錯誤在發布結果前傳遞，舊結果不變。
   Save 在 mapping 或輸出 I/O 前比對 native 歷史 entry 與這份 result source storage。
   跨 entry 時顯示雙方來源並拒絕。同 entry 的不同 point 仍保存，沿用原 run_id
   與資料自己的 point，覆寫原 run 目錄，saved event 保留原 point。
@@ -407,7 +413,11 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    Native Load retains the original identity, and analysis without native metadata
    uses `None`.
 
-- `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。缺 cfg 時保留可用資料，不捏造設定。有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource identity 並推進 revision。Run/Load 先提交 primary result；analysis preparation 失敗不撤回它，只報 diagnostic。Named figures 和各 pane 的 presentation lifecycle 分開管理。
+- `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。
+  缺 cfg 時保留可用資料，不捏造設定。WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
+  有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource identity 並推進 revision。
+  Run/Load 先提交 primary result。Analysis preparation 失敗不撤回它，只報 diagnostic。
+  Named figures 和各 pane 的 presentation lifecycle 分開管理。
 dynamic selectors must match live options and the new complete draft must be valid
 before publication. A failed lookup or malformed option list rejects the entire
 backfill rather than silently skipping that selector. Module/waveform references
