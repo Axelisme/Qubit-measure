@@ -12,17 +12,34 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from plotly.graph_objects import Scatter
+from numpy.typing import NDArray
+from plotly.graph_objects import Figure, Scatter
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
 from zcu_tools.resources.sample_table import SampleFluxFrame, SampleTableV2Error
 
 
-def _sample_points_trace(fig) -> Scatter:
+def _sample_points_trace(fig: Figure) -> Scatter:
     # plot_sample_points adds exactly one marker scatter.
-    traces = [trace for trace in fig.data if trace.mode == "markers"]
+    traces = []
+    for trace in fig.data:
+        assert isinstance(trace, Scatter)
+        if trace.mode == "markers":
+            traces.append(trace)
     assert len(traces) == 1
     return traces[0]
+
+
+def _coordinates(values: object) -> NDArray[np.float64]:
+    assert isinstance(values, (list, tuple, np.ndarray))
+    assert not np.iscomplexobj(values)
+    return np.asarray(values, dtype=np.float64)
+
+
+def _trace_count(fig: Figure) -> int:
+    data = fig.data
+    assert isinstance(data, (list, tuple))
+    return len(data)
 
 
 def _make_table(rows: list[dict[str, object]]) -> pd.DataFrame:
@@ -51,9 +68,9 @@ def test_explicit_flux_rows_plot_at_resolved_flux() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.3, 0.7])
+    np.testing.assert_allclose(_coordinates(trace.x), [0.3, 0.7])
     # Freq (MHz) -> GHz display conversion is preserved.
-    np.testing.assert_allclose(trace.y, [4.0, 4.0])
+    np.testing.assert_allclose(_coordinates(trace.y), [4.0, 4.0])
     assert vis.xlimits == [0.3, 0.7]
 
 
@@ -72,7 +89,7 @@ def test_explicit_flux_precedes_row_frame() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.25])
+    np.testing.assert_allclose(_coordinates(trace.x), [0.25])
 
 
 def test_row_frame_derived_rows_plot_at_derived_flux() -> None:
@@ -86,7 +103,7 @@ def test_row_frame_derived_rows_plot_at_derived_flux() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.5, -0.5])
+    np.testing.assert_allclose(_coordinates(trace.x), [0.5, -0.5])
 
 
 def test_fallback_frame_rows_plot_at_fallback_flux() -> None:
@@ -102,7 +119,7 @@ def test_fallback_frame_rows_plot_at_fallback_flux() -> None:
     )
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.5, -0.5])
+    np.testing.assert_allclose(_coordinates(trace.x), [0.5, -0.5])
 
 
 def test_mixed_provenance_rows_plot_together() -> None:
@@ -119,7 +136,7 @@ def test_mixed_provenance_rows_plot_together() -> None:
     )
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.25, 0.5, 0.75])
+    np.testing.assert_allclose(_coordinates(trace.x), [0.25, 0.5, 0.75])
     assert vis.xlimits == [0.25, 0.75]
 
 
@@ -141,7 +158,10 @@ def test_hover_labels_exclude_coordinate_and_freq_columns() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    label = trace.hovertext[0]
+    hovertext = trace.hovertext
+    assert isinstance(hovertext, (list, tuple, np.ndarray))
+    label = np.asarray(hovertext)[0]
+    assert isinstance(label, str)
     assert "dev_value" not in label
     assert "dev_unit" not in label
     assert "flux_int" not in label
@@ -158,7 +178,7 @@ def test_unresolved_rows_fail_with_indexes() -> None:
     with pytest.raises(SampleTableV2Error, match="row\\(s\\) \\[1\\]"):
         vis.plot_sample_points(table)
     # nothing was plotted before the failure
-    assert len(vis.fig.data) == 0
+    assert _trace_count(vis.fig) == 0
 
 
 def test_fallback_frame_unit_mismatch_is_unresolved() -> None:
@@ -182,7 +202,7 @@ def test_legacy_coordinate_column_fails_before_analysis() -> None:
 
     with pytest.raises(SampleTableV2Error, match="calibrated mA"):
         vis.plot_sample_points(table)
-    assert len(vis.fig.data) == 0
+    assert _trace_count(vis.fig) == 0
 
 
 def test_empty_table_fails_before_analysis() -> None:
@@ -193,7 +213,7 @@ def test_empty_table_fails_before_analysis() -> None:
 
     with pytest.raises(SampleTableV2Error, match="empty"):
         vis.plot_sample_points(table)
-    assert len(vis.fig.data) == 0
+    assert _trace_count(vis.fig) == 0
 
 
 def test_mixed_unit_rows_plot_at_resolved_flux() -> None:
@@ -216,8 +236,8 @@ def test_mixed_unit_rows_plot_at_resolved_flux() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.5, 0.5])
-    np.testing.assert_allclose(trace.y, [4.0, 4.0])
+    np.testing.assert_allclose(_coordinates(trace.x), [0.5, 0.5])
+    np.testing.assert_allclose(_coordinates(trace.y), [4.0, 4.0])
 
 
 def test_plot_md_fluent_chain_smoke() -> None:
@@ -262,10 +282,9 @@ def test_plot_md_fluent_chain_smoke() -> None:
     )
 
     # sample-point markers plotted at fallback-resolved flux, MHz->GHz display
-    markers = [t for t in fig.data if t.mode == "markers"]
-    assert len(markers) == 1
-    np.testing.assert_allclose(markers[0].x, [0.5, 0.8])
-    np.testing.assert_allclose(markers[0].y, [4.0, 4.1])
+    markers = _sample_points_trace(fig)
+    np.testing.assert_allclose(_coordinates(markers.x), [0.5, 0.8])
+    np.testing.assert_allclose(_coordinates(markers.y), [4.0, 4.1])
 
     # dev-value secondary x axis ticks overlaid on the flux axis
     xaxis2 = fig.layout.xaxis2
@@ -273,10 +292,11 @@ def test_plot_md_fluent_chain_smoke() -> None:
     assert xaxis2.side == "top"
     assert xaxis2.overlaying == "x"
     assert isinstance(xaxis2.ticktext, (list, tuple))
-    assert len(xaxis2.tickvals) == len(xaxis2.ticktext)
+    tickvals = _coordinates(xaxis2.tickvals)
+    assert len(tickvals) == len(xaxis2.ticktext)
     n = flxs.shape[0]
     tick_indices = np.unique(np.round(np.linspace(0, n - 1, 12)).astype(int))
-    np.testing.assert_allclose(xaxis2.tickvals, flxs[tick_indices])
+    np.testing.assert_allclose(tickvals, flxs[tick_indices])
     assert list(xaxis2.ticktext) == [f"{v:.1e}" for v in dev_values[tick_indices]]
 
     # three constant-frequency reference lines (added as layout shapes)

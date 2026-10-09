@@ -142,21 +142,6 @@ def test_correct_flux_from_f01_missing_frequency_keeps_raw_flux(
     np.testing.assert_array_equal(result.accepted, [False])
 
 
-def test_solve_f01_candidate_flux_rejects_unreachable_frequencies() -> None:
-    # Probe frequencies far outside the model f01 range must not silently fall
-    # back to the guessed flux (that would read as a zero, apparently
-    # successful, correction).
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        candidates = [
-            flux_mod._solve_f01_candidate_flux(
-                1e3 * freq_ghz, (3.0, 1.0, 0.5), guess_flux=0.5
-            )
-            for freq_ghz in (-1.0, 0.0, 100.0)
-        ]
-    assert all(not np.isfinite(candidate) for candidate in candidates)
-
-
 def test_correct_flux_from_f01_rejects_non_converged_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

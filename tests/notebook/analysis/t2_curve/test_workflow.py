@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import cast
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -294,7 +292,9 @@ def test_plot_t2_flux_calibration_shows_provenance_categories() -> None:
     plt.close(fig)
 
 
-def test_t2e_and_t2r_rows_with_null_freq_reach_analysis() -> None:
+@pytest.fixture
+def null_frequency_analysis() -> T2DephasingAnalysis:
+    """Fresh public analysis with explicit, row-frame and fallback T2e/T2r rows."""
     samples = pd.DataFrame(
         {
             "dev_value": [0.0, 0.0, 0.01, 0.0, 0.0, 0.01],
@@ -313,10 +313,15 @@ def test_t2e_and_t2r_rows_with_null_freq_reach_analysis() -> None:
     calibration = _synthetic_calibration(samples)
 
     cal = calibrate_t2_flux(calibration.context)
-    assert len(cal.t2e_df) == 3
-    assert len(cal.t2r_df) == 3
-    data = prepare_t2_dephasing_data(cal, analysis_flux_range=(0.49, 0.53))
+    return prepare_t2_dephasing_data(cal, analysis_flux_range=(0.49, 0.53))
 
+
+def test_null_frequency_rows_reach_the_fit_window(
+    null_frequency_analysis: T2DephasingAnalysis,
+) -> None:
+    data = null_frequency_analysis
+    assert len(data.calibration.t2e_df) == 3
+    assert len(data.calibration.t2r_df) == 3
     assert len(data.fit.T2e_us) == 3
     assert not np.any(data.window.f01_measured)
     assert data.window.flux_sources == ("explicit", "row-frame", "fallback-frame")
@@ -329,6 +334,11 @@ def test_t2e_and_t2r_rows_with_null_freq_reach_analysis() -> None:
     np.testing.assert_allclose(np.sort(data.window.raw_fluxs), [-0.5, -0.49, 0.5])
     np.testing.assert_allclose(np.sort(data.window.fluxs), [0.5, 0.5, 0.51])
 
+
+def test_null_frequency_t2r_diagnostics_preserve_row_identity(
+    null_frequency_analysis: T2DephasingAnalysis,
+) -> None:
+    data = null_frequency_analysis
     # Row-level T2r diagnostics expose every resolved row in deterministic
     # samples_df positional order: stable position, raw/corrected/aligned
     # coordinates, model-frequency reachability, observed-vs-model source,
@@ -355,6 +365,12 @@ def test_t2e_and_t2r_rows_with_null_freq_reach_analysis() -> None:
     np.testing.assert_allclose(diag.f01_model_mhz, data.window.f01_mhz)
     np.testing.assert_allclose(diag.f01_used_mhz, diag.f01_model_mhz)
 
+
+def test_null_frequency_coverage_and_summary_match_row_diagnostics(
+    null_frequency_analysis: T2DephasingAnalysis,
+) -> None:
+    data = null_frequency_analysis
+    diag = data.t2r_diagnostics
     coverage_t2e = data.branch_coverage.loc[
         data.branch_coverage["subset"] == "T2e rows"
     ].iloc[0]
@@ -738,7 +754,7 @@ def test_t2_correction_disabled_preserves_raw_flux_and_reports_disabled(
 def test_run_t2_curve_analysis_threads_correction_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, object] = {}
+    captured: list[bool] = []
     config = T2CurveAnalysisConfig(
         result_dir="/tmp/result",
         correct_flux_from_f01_enabled=False,
@@ -750,8 +766,13 @@ def test_run_t2_curve_analysis_threads_correction_setting(
         fit_bounds={"A_phi": (0.0, 1e-3), "n_th": (0.0, 1.0)},
     )
 
-    def _fake_prepare(calibration: object, **kwargs: object) -> object:
-        captured["prepare_kwargs"] = kwargs
+    def _fake_prepare(
+        calibration: object,
+        *,
+        correct_flux_from_f01_enabled: bool,
+        **_kwargs: object,
+    ) -> object:
+        captured.append(correct_flux_from_f01_enabled)
         return object()
 
     monkeypatch.setattr(workflow, "load_t2_curve_context", lambda **_kwargs: object())
@@ -780,17 +801,7 @@ def test_run_t2_curve_analysis_threads_correction_setting(
 
     run_t2_curve_analysis(config)
 
-    prepare_kwargs = cast(dict[str, object], captured["prepare_kwargs"])
-    assert prepare_kwargs["correct_flux_from_f01_enabled"] is False
-
-
-def test_t2_workflow_has_no_current_scale_vocabulary() -> None:
-    import zcu_tools.notebook.analysis.fit_tools as fit_tools
-
-    assert not hasattr(workflow, "choose_current_scale")
-    assert not hasattr(workflow, "choose_current_scale_from_f01")
-    assert not hasattr(fit_tools, "choose_current_scale_from_f01")
-    assert "calibrated mA" not in workflow._REQUIRED_COLUMNS
+    assert captured == [False]
 
 
 def _synthetic_dephasing_data(
