@@ -60,8 +60,15 @@ class WritebackControlPort(Protocol):
     ) -> dict[str, bool]: ...
 
     def get_writeback_values_for_pane(
-        self, tab_id: str, pane: WritebackPane
-    ) -> dict[str, WritebackValues]: ...
+        self, tab_id: str, pane: WritebackPane, *, session_id: str | None = None
+    ) -> dict[str, WritebackValues]:
+        """Read captured pane facts; None means strict bulk, an ID means one item.
+
+        Unknown IDs raise KeyError. Invalid/inactive/missing panes or drafts,
+        unreadable targets and requested proposal validation failures propagate.
+        Item reads do not lower siblings and never change selection or focus.
+        """
+        ...
 
     def write_writeback_for_pane(
         self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]
@@ -158,8 +165,15 @@ class WritebackControlFacet:
             self._emit_draft_changed(tab_id)
 
     def get_writeback_values_for_pane(
-        self, tab_id: str, pane: WritebackPane
+        self, tab_id: str, pane: WritebackPane, *, session_id: str | None = None
     ) -> dict[str, WritebackValues]:
+        """Read all pane facts or only session_id, without changing draft/selection.
+
+        None keeps strict bulk validation, including unselected items. An ID
+        excludes sibling lowering, and an unknown ID raises KeyError. Existing
+        tab/pane/draft errors and requested target/source/I/O/validation failures
+        propagate. Facts belong to this pane's creation capture, not active focus.
+        """
         draft = self._draft_for_pane(tab_id, pane)
         if not isinstance(draft, WritebackDraft):
             raise InvalidInputError("unknown writeback draft")

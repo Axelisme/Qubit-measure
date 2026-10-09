@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.writeback import WritebackService
 from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.cfg.binding.fields import ScalarField
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -152,6 +153,69 @@ def test_cfg_preview_contains_complete_current_and_live_draft_values(
     draft.teardown()
     with pytest.raises(FailedPreconditionError):
         service.preview_values(draft)
+
+
+@pytest.mark.parametrize("kind", ["module", "waveform"])
+def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session, kind):
+    _entry, control, _editor, service = session
+    proposals = []
+    for suffix in ("a", "b"):
+        if kind == "module":
+            module_cfg = PulseSpec(
+                ch=0,
+                nqz=1,
+                freq=100.0,
+                gain=0.5,
+                waveform=ConstWaveformCfg(length=0.1),
+            )
+            name = f"Q1.pulses.{suffix}"
+            control.set_module(control.read_context().target, name, module_cfg)
+            spec, value = module_cfg_to_value(
+                control.read_context().library.get_module(name)
+            )
+            proposals.append(
+                ModuleWriteback(name, name, edit_schema=CfgSchema(spec, value))
+            )
+            field_name, expected = "freq", 100.0
+        else:
+            waveform_cfg = ConstWaveformCfg(length=0.1)
+            name = f"Q1.waveforms.{suffix}"
+            control.set_waveform(control.read_context().target, name, waveform_cfg)
+            spec, value = waveform_cfg_to_value(waveform_cfg)
+            proposals.append(
+                WaveformWriteback(name, name, edit_schema=CfgSchema(spec, value))
+            )
+            field_name, expected = "length", 0.1
+    draft = service.create_draft(proposals, parameters=control.read_context())
+    try:
+        first, second = draft.items
+        second.selected = False
+        field = service.get_item_draft(draft, second.session_id).root.fields[field_name]
+        assert isinstance(field, ScalarField)
+        field.set_text("")
+        selected = service.preview_values(draft, session_id=first.session_id)
+        assert list(selected) == [first.session_id]
+        fact = selected[first.session_id]
+        assert fact.actual_path == first.target_name
+        assert fact.current[field_name] == fact.proposed[field_name] == expected
+        with pytest.raises(RuntimeError):
+            service.preview_values(draft)
+        with pytest.raises(RuntimeError):
+            service.preview_values(draft, session_id=second.session_id)
+        with pytest.raises(KeyError):
+            service.preview_values(draft, session_id="missing")
+        field.set_text(str(expected))
+        assert len(service.preview_values(draft)) == 2
+        assert second.selected is False
+    finally:
+        draft.teardown()
+    empty = service.create_draft([], parameters=None)
+    try:
+        assert service.preview_values(empty) == {}
+        with pytest.raises(KeyError):
+            service.preview_values(empty, session_id="missing")
+    finally:
+        empty.teardown()
 
 
 def test_preview_without_context_fails_instead_of_claiming_missing_targets():

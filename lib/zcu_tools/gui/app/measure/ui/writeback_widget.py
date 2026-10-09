@@ -511,9 +511,12 @@ class WritebackWidget(QWidget):
         return proposed
 
     def _refresh_item_preview(self, item: WritebackItem) -> None:
-        self._values = self._ctrl.writeback_control.get_writeback_values_for_pane(
-            self._tab_id, self._pane
-        )
+        self._values = {
+            **self._values,
+            **self._ctrl.writeback_control.get_writeback_values_for_pane(
+                self._tab_id, self._pane, session_id=item.session_id
+            ),
+        }
         fact = self._values[item.session_id]
         current_label, proposed_label, actual_path, checkbox = self._row_widgets[
             item.session_id

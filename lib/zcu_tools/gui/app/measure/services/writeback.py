@@ -302,13 +302,19 @@ class WritebackService:
         self._require_draft(draft)
         return list(draft.items)
 
-    def preview_values(self, draft: WritebackDraft) -> dict[str, WritebackValues]:
+    def preview_values(
+        self, draft: WritebackDraft, *, session_id: str | None = None
+    ) -> dict[str, WritebackValues]:
         """Read actual current values at the captured target, without selecting it.
 
         Proposed cfg values lower against the creation capture, never current
         focus, point, or slot references. Missing destinations have current=None.
-        Empty drafts return {}; nonempty drafts require a still-readable target.
-        Target/source/I/O and proposal validation errors propagate.
+        session_id=None reads every item, including unselected items. A supplied
+        session_id reads only that item's facts, without lowering siblings; an
+        unknown ID raises KeyError before reading the destination. Empty bulk
+        reads return {}; empty item reads raise KeyError. Nonempty reads require
+        a still-readable captured target. Inactive/foreign drafts are rejected.
+        Target/source/I/O and requested proposal validation errors propagate.
         """
         self._require_draft(draft)
         if not draft.items:
