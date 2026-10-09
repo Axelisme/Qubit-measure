@@ -134,7 +134,7 @@ class ProgressService:
         if owner is not None:
             self._notify_owner(owner)
 
-    # -- reads (RPC + UI)
+    # -- Progress queries for RPC and UI
     def bars_for_owner(self, owner_id: str) -> tuple[tuple[int, ProgressBarModel], ...]:
         op = self._live_op.get(owner_id)
         if op is None:

@@ -121,7 +121,8 @@ class SyncFile(ABC):
                 if mtime > self._modify_time:
                     warnings.warn(
                         f"SyncFile conflict: {self._path} was modified by "
-                        "another process; local changes kept, overwriting."
+                        "another process; local changes kept, overwriting.",
+                        stacklevel=1,
                     )
                 self.dump()
             elif mtime >= self._modify_time:

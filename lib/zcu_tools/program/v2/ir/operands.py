@@ -458,8 +458,7 @@ def _parse_alu_rhs(token: str) -> Register | Immediate | None:
     imm = parse_immediate(token)
     if imm is not None:
         return imm
-    reg = parse_register(token)
-    return reg
+    return parse_register(token)
 
 
 def parse_side_write(val: SideWrite | str | None) -> SideWrite | None:

@@ -267,7 +267,7 @@ def plot_t1_with_sample(
         "Q_ind": r"$Q_{ind}$",
     }[name]
 
-    for v, t1_eff in zip(noise_values, t1_effs):
+    for v, t1_eff in zip(noise_values, t1_effs, strict=False):
         label = f"{nname}(w)" if callable(v) else f"{nname} = {format_exponent(v)}"
         ax.plot(t_fluxs, t1_eff, label=label, linestyle="--")
 

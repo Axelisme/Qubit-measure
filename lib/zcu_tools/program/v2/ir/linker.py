@@ -126,7 +126,7 @@ class IRLinker:
         # because markers_by_addr is a defaultdict(list) populated in link()
         # order, so an interleaved label+meta at the same address keeps its
         # relative order.
-        for p_addr, markers in sorted(markers_by_addr.items()):
+        for _p_addr, markers in sorted(markers_by_addr.items()):
             for m in markers:
                 if m["kind"] == "label":
                     logical_insts.append(

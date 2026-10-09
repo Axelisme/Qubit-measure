@@ -106,7 +106,7 @@ class ProgressStack(QWidget):
         """
         shown = models[: self.MAX_LAYERS]
         if len(shown) == len(self._active):
-            for bar, model in zip(self._active, shown):
+            for bar, model in zip(self._active, shown, strict=False):
                 self._apply_model(bar, model)
             return
         self.reset_all()

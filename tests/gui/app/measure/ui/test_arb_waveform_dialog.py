@@ -72,7 +72,7 @@ def repository_state_guard() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _qt(qapp):  # noqa: ARG001
+def _qt(qapp):
     yield
 
 
@@ -89,9 +89,7 @@ def _qwait(ms: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dialog_validates_segments_and_saves_preview(  # noqa: ARG001
-    qapp, monkeypatch
-) -> None:
+def test_dialog_validates_segments_and_saves_preview(qapp, monkeypatch) -> None:
     from qtpy.QtCore import Qt  # type: ignore[attr-defined]
     from qtpy.QtWidgets import (  # type: ignore[attr-defined]
         QHeaderView,
@@ -179,7 +177,7 @@ def test_dialog_validates_segments_and_saves_preview(  # noqa: ARG001
     assert "arb_data1" not in ctrl.assets
 
 
-def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(qapp) -> None:  # noqa: ARG001
+def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(qapp) -> None:
     data = render_formula_recipe(
         {
             "segments": [{"duration": 0.002, "formula": "0.25 + 0.5*I"}],
@@ -221,7 +219,7 @@ def test_preview_canvas_autoscales_y_axis_for_normalized_and_raw(qapp) -> None: 
 # ---------------------------------------------------------------------------
 
 
-def test_A1_cheap_structure_error_is_immediate(qapp) -> None:  # noqa: ARG001
+def test_A1_cheap_structure_error_is_immediate(qapp) -> None:
     """Structural errors (empty formula, non-numeric duration) disable Save synchronously."""
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
@@ -240,7 +238,7 @@ def test_A1_cheap_structure_error_is_immediate(qapp) -> None:  # noqa: ARG001
     assert dlg._structure_error is not None
 
 
-def test_A2_deep_render_error_surfaces_after_debounce(qapp) -> None:  # noqa: ARG001
+def test_A2_deep_render_error_surfaces_after_debounce(qapp) -> None:
     """Formula that passes structure but fails render → error only after debounce timer."""
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
@@ -265,7 +263,7 @@ def test_A2_deep_render_error_surfaces_after_debounce(qapp) -> None:  # noqa: AR
     assert "unsupported" in dlg._render_error
 
 
-def test_A3_data_key_change_does_not_trigger_render(qapp, monkeypatch) -> None:  # noqa: ARG001
+def test_A3_data_key_change_does_not_trigger_render(qapp, monkeypatch) -> None:
     """Editing data_key must never call render_formula_recipe."""
     ctrl = _FakeController()
     render_call_count = 0
@@ -302,7 +300,7 @@ def test_A3_data_key_change_does_not_trigger_render(qapp, monkeypatch) -> None: 
     assert render_call_count == count_after_init
 
 
-def test_A4_save_uses_valid_recipe_without_waiting_for_debounce(qapp) -> None:  # noqa: ARG001
+def test_A4_save_uses_valid_recipe_without_waiting_for_debounce(qapp) -> None:
     """Save uses _valid_recipe set by cheap path; service renders once internally."""
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
@@ -324,7 +322,7 @@ def test_A4_save_uses_valid_recipe_without_waiting_for_debounce(qapp) -> None:  
     assert stored_recipe.segments[0].formula == "sin(2*pi*t)"
 
 
-def test_A5_render_failure_leaves_no_half_baked_state(qapp) -> None:  # noqa: ARG001
+def test_A5_render_failure_leaves_no_half_baked_state(qapp) -> None:
     """After a render failure: _valid_data is None, Save disabled, preview unchanged."""
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
@@ -353,7 +351,7 @@ def test_A5_render_failure_leaves_no_half_baked_state(qapp) -> None:  # noqa: AR
 
 def test_A6_save_with_deep_invalid_formula_reports_save_failed(
     qapp, monkeypatch
-) -> None:  # noqa: ARG001
+) -> None:
     """Save in the optimistic window with a render-failing formula shows 'Save failed'."""
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
@@ -390,7 +388,7 @@ def test_A6_save_with_deep_invalid_formula_reports_save_failed(
 
 def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     qapp, monkeypatch
-) -> None:  # noqa: ARG001
+) -> None:
     """When save succeeds but reload fails, the user sees 'Reload failed', not 'Save failed'.
 
     The patched load fails only on the first call so that the subsequent
@@ -434,7 +432,7 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
     assert critical_calls[0][0] == "Reload failed"
 
 
-def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:  # noqa: ARG001
+def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:
     """Selecting an asset whose load fails must not mutate editor state.
 
     The load runs before _current_data_key / the data_key field are updated, so
@@ -469,7 +467,7 @@ def test_asset_load_failure_keeps_editor_state(qapp, monkeypatch) -> None:  # no
 # ---------------------------------------------------------------------------
 
 
-def test_E12_recipe_from_ui_returns_formula_recipe(qapp) -> None:  # noqa: ARG001
+def test_E12_recipe_from_ui_returns_formula_recipe(qapp) -> None:
     """_recipe_from_ui always returns a typed FormulaRecipe, never a plain dict."""
     ctrl = _FakeController()
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]

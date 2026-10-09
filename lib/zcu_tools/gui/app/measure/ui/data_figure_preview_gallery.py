@@ -107,7 +107,7 @@ class _PreviewCard(QWidget):
         header.addStretch()
         outer.addLayout(header)
 
-        # Stack: image / empty / error
+        # Stack the image, empty, and error pages in that order.
         self._stack = QStackedWidget()
         self._stack.setObjectName(f"previewStack_{source_key}")
 

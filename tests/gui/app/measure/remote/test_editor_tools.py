@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.services.ports import CfgEditResult
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.services.context import MlEntryValidationError
 
-from ._helpers import dispatch_handler as _dispatch  # noqa: E402
+from ._helpers import dispatch_handler as _dispatch
 
 
 @pytest.fixture

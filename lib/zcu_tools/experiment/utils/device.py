@@ -20,7 +20,7 @@ def get_labeled_device_cfg(
             match_list.append(name)
     if len(match_list) == 0:
         raise ValueError(f"Device with label '{label}' not found in dev configuration.")
-    elif len(match_list) > 1:
+    if len(match_list) > 1:
         raise ValueError(
             f"Multiple devices with label '{label}' found in dev configuration: {match_list}"
         )

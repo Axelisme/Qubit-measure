@@ -15,10 +15,10 @@ if TYPE_CHECKING:
 # -----------------------------
 # The equations:
 # $$
-# P_{res} (n) = (1 - exp(-\beta \hbar \omega_r)) exp(-n \beta \hbar \omega_r) \\
-# n_{th}(\omega_j) = \frac{1}{exp(\beta \hbar \omega_j) - 1} \\
-# \Gamma^{up}_{l->l'} = \sum_{n,n'} P_{res}(n)\kappa n_{th} (\omega_{l',n'} - \omega_{l,n})\left|\langle l',n'\left|a^\dagger\right|l,n \rangle\right|^2 \\
-# \Gamma^{down}_{l->l'} = \sum_{n,n'} P_{res}(n)\kappa (n_{th} (-\omega_{l',n'} + \omega_{l,n}) + 1)\left|\langle l',n'\left|a\right|l,n \rangle\right|^2 \\
+# Thermal resonator occupation probability: P_{res} (n) = (1 - exp(-\beta \hbar \omega_r)) exp(-n \beta \hbar \omega_r) \\
+# Thermal mean photon number: n_{th}(\omega_j) = \frac{1}{exp(\beta \hbar \omega_j) - 1} \\
+# Upward transition rate from l to l': \Gamma^{up}_{l->l'} = \sum_{n,n'} P_{res}(n)\kappa n_{th} (\omega_{l',n'} - \omega_{l,n})\left|\langle l',n'\left|a^\dagger\right|l,n \rangle\right|^2 \\
+# Downward transition rate from l to l': \Gamma^{down}_{l->l'} = \sum_{n,n'} P_{res}(n)\kappa (n_{th} (-\omega_{l',n'} + \omega_{l,n}) + 1)\left|\langle l',n'\left|a\right|l,n \rangle\right|^2 \\
 # $$
 # -----------------------------
 

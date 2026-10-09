@@ -181,7 +181,7 @@ def auto_tune(
             return -sample_score(
                 params, sp_fluxs, sp_freqs, norm_phases, sample_fluxs, g, bare_rf
             )
-        except Exception:  # noqa: BLE001 — a bad eval must not abort the optimisation
+        except Exception:  # a bad eval must not abort the optimisation
             logger.exception("auto-tune objective failed at g=%s rf=%s", g, bare_rf)
             return 1e6
 

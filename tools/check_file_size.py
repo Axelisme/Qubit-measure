@@ -5,9 +5,11 @@ hundred simple functions and satisfy every per-function rule while being
 impossible to navigate. This is the only check that guards file size, so it is
 the only thing standing between the tree and another five-thousand-line module.
 
-The limit states the standard rather than describing the tree. Existing files
-above it are read through the ratchet (tools/check_ratchet.py), which compares a
-candidate against its base rather than against zero.
+The limit is 1000 lines; exactly 1000 lines is allowed. This checker reports
+actual line counts for every oversize file. The ratchet (tools/check_ratchet.py)
+counts each such file once on both base and candidate: only crossing the limit
+or adding a new oversize file increases the count. Growth of an already
+oversize file does not add a file-size violation.
 """
 
 from __future__ import annotations

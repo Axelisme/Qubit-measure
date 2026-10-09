@@ -534,14 +534,6 @@ from zcu_tools.program.v2.ir.passes.dataflow.inc_reg_merge import (
 )
 
 
-def _inc_inst(dst: str, rhs: int) -> RegWriteInst:
-    return RegWriteInst(
-        dst=Register(dst),
-        src=SrcKeyword.OP,
-        op=AluExpr(Register(dst), AluOp.ADD, Immediate(rhs)),
-    )
-
-
 def test_is_const_increment_returns_none_for_uf_inst():
     """Instruction with uf=True is not a plain increment → return None (line 85)."""
     inst = RegWriteInst(

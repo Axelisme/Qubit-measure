@@ -38,7 +38,7 @@ def deepupdate(
     ) -> None:
         if behavior == "error":
             raise KeyError(f"Key {k} already exists in {d}.")
-        elif behavior == "force":
+        if behavior == "force":
             d[k] = u[k]
 
     for k, v in u.items():

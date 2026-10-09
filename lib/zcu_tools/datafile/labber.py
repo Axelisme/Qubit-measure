@@ -617,7 +617,7 @@ def _write_trace_log_group(
     else:
         x1 = np.asarray(x_values, dtype=float).ravel()
         x_list = [x1 for _ in range(n_entry)]
-    for i, (t, xi) in enumerate(zip(trace_list, x_list)):
+    for i, (t, xi) in enumerate(zip(trace_list, x_list, strict=False)):
         if len(t) != len(xi):
             raise ValueError(f"trace {i}: len(x) {len(xi)} != len(trace) {len(t)}")
 
@@ -981,7 +981,7 @@ def _write_traces_group(f, z_name, trace_list, x_list, x_name, x_unit, n_entry, 
     max_n = max(len(t) for t in trace_list)
     arr = np.full((max_n, 3, n_entry), np.nan, dtype=float)
     n_arr = np.zeros(n_entry, dtype=np.int32)
-    for e, (t, xi) in enumerate(zip(trace_list, x_list)):
+    for e, (t, xi) in enumerate(zip(trace_list, x_list, strict=False)):
         n = len(t)
         arr[:n, 0, e] = t.real
         arr[:n, 1, e] = t.imag
@@ -1053,7 +1053,7 @@ def _load_labber_data(path: str) -> LabberData:
                 zi, axes_i, _tsi = _read_single_log(f, log)
                 if len(axes_i) != len(axes0):
                     raise ValueError("logs have different number of axes")
-                for (n0, _u0, v0), (ni, _ui, vi) in zip(axes0, axes_i):
+                for (n0, _u0, v0), (_ni, _ui, vi) in zip(axes0, axes_i, strict=False):
                     if np.shape(v0) != np.shape(vi) or not np.allclose(v0, vi):
                         raise ValueError(f"axis '{n0}' differs across logs")
                 z_list.append(zi)
@@ -1146,10 +1146,9 @@ def _read_single_log(f, log):
         axes.append((name, units.get(name, ""), np.asarray(vals)))
 
     # complex data, entries flattened with y (axis 1) fastest
-    if log_complex:
-        zf = D[:, -2, :] + 1j * D[:, -1, :]  # (Nx, Nentries)
-    else:
-        zf = D[:, -1, :].astype(complex)
+    zf = (
+        D[:, -2, :] + 1j * D[:, -1, :] if log_complex else D[:, -1, :].astype(complex)
+    )  # (Nx, Nentries)
     zf = zf.T  # (Nentries, Nx)
 
     # reshape to natural grid (..., Ny, Nx): outer dims are step_dims[1:] but
@@ -1419,7 +1418,7 @@ def _read_outer_step_axes(f, log):
     D = log["Data"]["Data"][()]
     col_names = [(_decode(n), _decode(i)) for n, i in log["Data"]["Channel names"][()]]
     units = _channel_units(f, log)
-    _n_inner, _n_col, n_entry = D.shape
+    _n_inner, _n_col, _n_entry = D.shape
 
     # all step columns are scalar-info columns; drop the dummy API channel
     out = []

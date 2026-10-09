@@ -13,7 +13,7 @@ from ._helpers import Fixture, dispatch_handler
 
 
 @pytest.fixture(autouse=True)
-def _qt(qapp):  # noqa: ARG001
+def _qt(qapp):
     yield
 
 
