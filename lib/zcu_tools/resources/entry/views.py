@@ -281,7 +281,26 @@ def document_unit(document: SetupDocument | PointDocument, path: str) -> str | N
     Invalid/unaddressable dotted syntax or malformed unit metadata raises
     ValueError. Labels are not inferred from field names or other values.
     """
-    raise NotImplementedError("Static schema unit lookup is not implemented")
+    parts = _path_parts(path)
+    node: object = (
+        document.general if parts[0] == "general" else document.components.get(parts[0])
+    )
+    for index, part in enumerate(parts[1:], start=1):
+        if part == "ext" or not isinstance(node, BaseModel):
+            return None
+        field = type(node).model_fields.get(part)
+        if field is None:
+            return None
+        if index == len(parts) - 1:
+            metadata = field.json_schema_extra
+            if not isinstance(metadata, dict) or "unit" not in metadata:
+                return None
+            unit = metadata["unit"]
+            if not isinstance(unit, str) or not unit:
+                raise ValueError(f"{path!r}: unit must be a nonempty string")
+            return unit
+        node = _model_field_value(node, part)
+    return None
 
 
 def document_value(document: SetupDocument | PointDocument, path: str) -> YamlValue:

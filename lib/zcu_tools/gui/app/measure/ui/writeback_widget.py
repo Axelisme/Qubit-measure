@@ -501,13 +501,21 @@ class WritebackWidget(QWidget):
         self._update_applied_presentation(item, checkbox)
 
     def _display_current(self, item: WritebackItem) -> str:
-        current = self._values[item.session_id].current
-        return "\u2014" if current is None else _bounded_summary(current)
+        values = self._values[item.session_id]
+        if values.current is None:
+            return "\u2014"
+        current = _bounded_summary(values.current)
+        if values.unit is not None:
+            current += f" {values.unit}"
+        return current
 
     def _display_proposed(self, item: WritebackItem) -> str:
-        proposed = _bounded_summary(self._values[item.session_id].proposed)
+        values = self._values[item.session_id]
+        proposed = _bounded_summary(values.proposed)
         if item.stderr is not None:
             proposed += f" ± {item.stderr}"
+        if values.unit is not None:
+            proposed += f" {values.unit}"
         return proposed
 
     def _refresh_item_preview(self, item: WritebackItem) -> None:
