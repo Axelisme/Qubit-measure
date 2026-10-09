@@ -156,18 +156,20 @@ def test_load_data_gates(
     assert snap.interaction is not None
     center = window.findChild(ArtifactSaveCenter)
     assert center is not None
-    center.update_interaction(
-        replace(
-            snap,
-            interaction=replace(
-                snap.interaction,
-                has_context=context,
-                is_running=running,
-                is_analyzing=analyzing,
-            ),
+    for active in (True, False):
+        center.update_interaction(
+            replace(
+                snap,
+                interaction=replace(
+                    snap.interaction,
+                    has_context=context,
+                    has_active_context=active,
+                    is_running=running,
+                    is_analyzing=analyzing,
+                ),
+            )
         )
-    )
-    assert center.load_button.isEnabled() is enabled
+        assert center.load_button.isEnabled() is enabled
     assert snap.capabilities is not None
     unsupported = ArtifactSaveCenter(replace(snap.capabilities, load_data=False))
     try:
