@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Self, cast, overload
+from typing import Literal, Self, overload
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -211,6 +211,18 @@ class SampleMergeResult:
     target_frame: FluxFrame
 
 
+@dataclass(frozen=True)
+class _MergedSource:
+    """Keep one source's row-aligned coordinates and fit provenance together."""
+
+    source: SampleSource
+    raw: pd.DataFrame
+    resolution: SampleFluxResolution
+    flux_final: NDArray[np.float64]
+    dev_values: NDArray[np.float64]
+    batch: BatchFluxOffsetResult
+
+
 def merge_sample_sources(
     *,
     target_frame: FluxFrame,
@@ -238,7 +250,6 @@ def merge_sample_sources(
 
     for source in tuple(sources):
         source_path = Path(source.path)
-        source_label = source.label or source_path.stem
         raw = pd.read_csv(source_path, encoding="utf-8-sig")
         validate_sample_table_v2(raw, allow_empty=True)
         resolution = resolve_sample_flux(
@@ -269,32 +280,18 @@ def merge_sample_sources(
             flux_final=flux_final,
             target_frame=target_frame,
         )
-        diagnostics = _make_diagnostics_table(
-            raw,
+        merged_source = _MergedSource(
             source=source,
-            source_label=source_label,
-            source_path=source_path,
-            target_frame=target_frame,
+            raw=raw,
             resolution=resolution,
-            flux_resolved=flux_resolved,
             flux_final=flux_final,
             dev_values=dev_values,
             batch=batch,
         )
+        diagnostics = _make_diagnostics_table(merged_source, target_frame)
         merged_parts.append(merged)
         diagnostic_parts.append(diagnostics)
-        summary_rows.append(
-            _summary_row(
-                source_label=source_label,
-                source=source,
-                source_path=source_path,
-                target_frame=target_frame,
-                raw=raw,
-                resolution=resolution,
-                diagnostics=diagnostics,
-                batch=batch,
-            )
-        )
+        summary_rows.append(_summary_row(merged_source, target_frame, diagnostics))
 
     if not merged_parts:
         raise ValueError("At least one SampleSource is required")
@@ -515,23 +512,17 @@ def _make_output_table(
 
 
 def _make_diagnostics_table(
-    raw: pd.DataFrame,
-    *,
-    source: SampleSource,
-    source_label: str,
-    source_path: Path,
+    merged: _MergedSource,
     target_frame: FluxFrame,
-    resolution: SampleFluxResolution,
-    flux_resolved: NDArray[np.float64],
-    flux_final: NDArray[np.float64],
-    dev_values: NDArray[np.float64],
-    batch: BatchFluxOffsetResult,
 ) -> pd.DataFrame:
+    raw, source, resolution = merged.raw, merged.source, merged.resolution
+    flux_final, dev_values, batch = merged.flux_final, merged.dev_values, merged.batch
     f01_mhz = (
         _float_column(raw, F01_FREQUENCY_COLUMN)
         if F01_FREQUENCY_COLUMN in raw.columns
         else np.full(len(raw), np.nan, dtype=np.float64)
     )
+    flux_resolved = resolution.values
     before_batch = flux_resolved + float(source.integer_flux_offset)
     residual_before = _predict_residual_or_nan(
         target_frame.params, before_batch, f01_mhz
@@ -539,8 +530,8 @@ def _make_diagnostics_table(
     residual_after = _predict_residual_or_nan(target_frame.params, flux_final, f01_mhz)
     return pd.DataFrame(
         {
-            "source_label": source_label,
-            "source_path": str(source_path.resolve()),
+            "source_label": source.label or Path(source.path).stem,
+            "source_path": str(Path(source.path).resolve()),
             "flux_source": list(resolution.sources),
             "integer_flux_offset": source.integer_flux_offset,
             "batch_flux_offset_objective": batch.objective,
@@ -559,16 +550,11 @@ def _make_diagnostics_table(
 
 
 def _summary_row(
-    *,
-    source_label: str,
-    source: SampleSource,
-    source_path: Path,
+    merged: _MergedSource,
     target_frame: FluxFrame,
-    raw: pd.DataFrame,
-    resolution: SampleFluxResolution,
     diagnostics: pd.DataFrame,
-    batch: BatchFluxOffsetResult,
 ) -> dict[str, object]:
+    source, resolution, batch = merged.source, merged.resolution, merged.batch
     source_counts = {
         name: sum(1 for item in resolution.sources if item == name)
         for name in _FLUX_SOURCE_LABELS
@@ -578,9 +564,9 @@ def _summary_row(
     residual_before = _float_column(diagnostics, "residual_before_offset_MHz")
     residual_after = _float_column(diagnostics, "residual_after_merge_MHz")
     return {
-        "source": source_label,
-        "path": str(source_path.resolve()),
-        "rows": len(raw),
+        "source": source.label or Path(source.path).stem,
+        "path": str(Path(source.path).resolve()),
+        "rows": len(diagnostics),
         "explicit_flux_rows": source_counts["explicit"],
         "row_frame_flux_rows": source_counts["row-frame"],
         "fallback_frame_flux_rows": source_counts["fallback-frame"],
@@ -640,15 +626,8 @@ def _predict_residual_or_nan(
 
 
 def _float_column(frame: pd.DataFrame, column: str) -> NDArray[np.float64]:
-    numeric = cast(pd.Series, pd.to_numeric(_series(frame, column), errors="coerce"))
-    return cast(
-        NDArray[np.float64],
-        numeric.to_numpy(dtype=np.float64),
-    )
-
-
-def _series(frame: pd.DataFrame, column: str) -> pd.Series:
-    return cast(pd.Series, frame[column])
+    numeric = pd.to_numeric(frame[column], errors="coerce")
+    return np.asarray(numeric, dtype=np.float64)
 
 
 def _nan_stat(
