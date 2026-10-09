@@ -322,10 +322,12 @@ class WorkflowController[F: FormModel, C]:
         try:
             captured = devices()
 
-            def work() -> RunStatus:
+            def work() -> RunStatus | None:
                 with self._lock:
-                    if not run.stop.is_set():
-                        engine.resume(run_id, devices=captured)
+                    if run.stop.is_set():
+                        # Delivery still owns cleanup after Stop during capture.
+                        return engine.status()
+                    engine.resume(run_id, devices=captured)
                 return engine.execute(run_id)
 
             token = self._runner.continue_operation(
