@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-09, global aliases, explicit result-entry RPCs, synchronous Save reports and version handshake
+**Last updated:** 2026-10-10，native context snapshot 與 parameter／library event requery
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -95,7 +95,9 @@ Qt widgets.
 
 Event push is still available on the wire for GUI/internal consumers. Event
 payloads use requery hints for complex objects; live Python objects never cross
-the wire. `aliases_changed` directs subscribers to `tab.get_cfg` after the
+the wire. Parameter／library 變更事件以 `context.snapshot` 提示訂閱者重新讀取目前
+工作單位的 native 文件。這次讀取不改歷史 Run 的固定來源。
+`aliases_changed` directs subscribers to `tab.get_cfg` after the
 committed global table refreshes current cfg publications. It does not change
 historical Run sources. MCP completion still uses operation replies, not events.
 EventBus pushes add process-wide `seq` and `origin={kind, operation_id}` without
@@ -229,8 +231,10 @@ entry, saving a loaded Run uses its captured historical point, not the tab birth
 The wire surface is grouped by ownership:
 
 - `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布空 DRAFT，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
-- `context.*`：MetaDict / ModuleLibrary / active context operations through
-  `ContextControlPort`; role-catalog create/list stays on the app controller.
+- `context.*`：透過 `ContextControlPort` 讀取目前工作單位並提交參數／library 命令。
+  Caller 使用 `context.snapshot` 取得 native `{target, point, library}`，不讀舊扁平
+  md keys 或 ml runtime index。這是目前已發布的固定投影，不是歷史 Run 的參數版本。
+  Role-catalog create/list 仍由 app controller 擁有。
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
 - `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc and installs a predictor if absent. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
