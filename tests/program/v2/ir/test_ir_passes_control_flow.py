@@ -44,10 +44,6 @@ def _label(name: str) -> Label:
     return Label(name)
 
 
-def _lref(name: str) -> LabelRef:
-    return LabelRef(Label(name))
-
-
 def _run_chunk_passes_on_root(root: BlockNode, passes: list) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
