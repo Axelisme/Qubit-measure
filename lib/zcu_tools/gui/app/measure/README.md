@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，domain checks 與 Run admission inputs
+**Last updated:** 2026-10-09，Load 後 Save 保留原 run 與 point
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -167,8 +167,10 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   Mapping／ledger 錯誤直接傳遞，不偽造 report 或回滾已寫文件。
   保存不產生 acquisition identity，也不重讀 live point。
   RPC／MCP 直接投影回傳報告。Native Load 讀回 typed record 與原 RunMetadata。
-  Save 在 mapping 或輸出 I/O 前比對歷史 entry／point 與 tab captured storage。
-  不符時顯示雙方來源並拒絕，不重綁 tab 或寫回 Load 來源。
+  Save 在 mapping 或輸出 I/O 前比對歷史 entry 與 tab captured storage。
+  跨 entry 時顯示雙方來源並拒絕。同 entry 的不同 point 仍保存，沿用原 run_id
+  與資料自己的 point，覆寫原 run 目錄，saved event 保留原 point。
+  Tab 的 point 不參與，也不重綁 tab 或寫到其他 entry。
   Load Data 的 RunLoadDialog 由既有 SaveControlFacet 查詢 opened entry ledger，
   按 run_id 合併 acquired／saved，保留最近成功 native path。未存 native 的列不可 Load。
   Point／experiment／Recorded at 篩選只看 ledger，Recorded at 不冒充量測開始時間。

@@ -33,7 +33,7 @@ def test_raw_save_captures_every_output_from_the_synchronous_owner(tmp_path, sta
         "error": "Labber write failed" if states[1] == "failed" else None,
     }
     report = {
-        "run_id": "run-a" if "saved" in states else None,
+        "run_id": "run-a",
         "artifacts": {
             "raw": {
                 "data": {
@@ -296,6 +296,7 @@ def test_interaction_delivers_committed_state_and_inline_png(tmp_path, clients):
     "report",
     [
         {"run_id": "run-a"},
+        {"run_id": None, "artifacts": {}},
         {
             "run_id": "run-a",
             "artifacts": {"raw": {"data": {"status": "invalid", "members": {}}}},

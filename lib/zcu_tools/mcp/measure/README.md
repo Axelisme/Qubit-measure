@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-09, persistent output reports without lifetime fields
+**Last updated:** 2026-10-09, Save replies retain Run identity on output failure
 
 # `zcu_tools/mcp/measure/`
 
@@ -20,7 +20,7 @@ Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。G
 
 日常量測優先 recipe，既有資料分析使用共用分析工具。細部 setup、cfg、保存、writeback 及排查由 RPC 承接。日常／排查是使用指引，不是權限模式。`rpc_call` 接受 catalog 中全部 `rpc` 與 `tool` methods；tool 名稱只提示高層入口。GUI 仍驗證每次操作。公開 method 的參數、回覆及前置條件由 `rpc_describe` 提供。
 
-Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.connect` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Caller 直接核對 report 的 confirmed run_id、全部 members、各路徑 status 與 error，不用 await 或再次讀 snapshot。
+Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.connect` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Report 的 run_id 沿用 Run 時產生的同一個 ID，即使全部輸出失敗也不為 null。Caller 用各路徑的 status 與 error 判斷保存成功，不以 run_id 是否存在判斷。Report 保留全部 members，不用 await 或再次讀 snapshot。Readonly snapshot 的 confirmed run_id 仍只表示已有持久輸出成功。
 
 ## Recipe 與 execution
 
@@ -36,7 +36,7 @@ Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server �
 
 Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` 的流程先確認可用，再 reset、套本次 cfg 與 Run。關閉由 `tab_close` 明確指定。
 
-Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與 confirmed run_id。Author handle 使用這份保存契約。沒有 SaveReport 時 steps.raw_save 為 null，不推論 not_started、unknown 或 Save 是否已送出。save_raw 的傳輸與 admission 失敗照常拋出，recipe 回覆的原因只在 error；不加 requested 旗標。
+Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與該 Run 的 run_id，全部輸出失敗亦保留這個 ID。Author handle 使用這份保存契約。沒有 SaveReport 時 steps.raw_save 為 null，不推論 not_started、unknown 或 Save 是否已送出。save_raw 的傳輸與 admission 失敗照常拋出，recipe 回覆的原因只在 error；不加 requested 旗標。
 
 Author analysis 綁定原 Run 與同一 Run 的 Primary。它重用 `AnalysisExecution`，在 recipe 的 worker 完成分析、圖像與候選 capture。Recipe-local close 和 session close 都能停止接續。寫回提問只篩選已捕捉的 stable names，不重讀 GUI 或寫入。`recipe_execution.py` 擁有 generator、單一 recipe admission、一次性取消、captured question 與 typed snapshot。它以同一 worker 完成 author handles；analysis 共用 driver 的本地 condition 交付進度。Session 與 tool table 使用必填的同一份注入 definitions。Guide 與 analysis-only scalar estimates 也讀 owning registry。單一 recipe 包含 interactive 與 awaiting_answer；terminal 之後才放行下一個呼叫。
 

@@ -43,15 +43,16 @@ class SaveArtifact:
 class SaveReport:
     """The complete synchronous tab.save_data/tab.save_artifacts wire reply.
 
-    run_id is confirmed by the GUI after a persistent output succeeds, or None
-    before that. A failed resave may still carry the confirmed run_id.
+    run_id is the immutable acquisition identity generated during Run and
+    retained by every Save attempt, including when all outputs fail. It does
+    not indicate persistence success; each output's status/error does.
     artifacts maps opaque sections to opaque artifact names and all their
     members/outputs from this attempt; an empty map means no attempted capture.
     Reports do not accumulate successful prefixes from earlier saves.
     Paths describe local outputs, not a guarantee that the files still exist.
     """
 
-    run_id: str | None
+    run_id: str
     artifacts: dict[str, dict[str, SaveArtifact]]
 
 

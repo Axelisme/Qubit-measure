@@ -345,8 +345,9 @@ def test_save_rpc_returns_the_current_complete_report(
 
 
 @pytest.mark.parametrize("block_native", [True, False])
+@pytest.mark.parametrize("method", ["tab.save_data", "tab.save_artifacts"])
 def test_save_rpc_reports_partial_and_initial_all_failed_identity(
-    tmp_path: Path, qapp: QApplication, block_native: bool
+    tmp_path: Path, qapp: QApplication, block_native: bool, method: str
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
         (session.entry.database_path / "Labber").write_text("blocked")
@@ -358,10 +359,18 @@ def test_save_rpc_reports_partial_and_initial_all_failed_identity(
                 / "data.h5"
             ).mkdir(parents=True)
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
-        reply = call(sock, "tab.save_data", {"tab_id": "tab"})
+        params: dict[str, object] = {"tab_id": "tab"}
+        if method == "tab.save_artifacts":
+            params["artifacts"] = [{"section": "run", "name": "measurement_data"}]
+        reply = call(sock, method, params)
         assert reply["ok"] is True
         report = SaveSnapshotWire.model_validate(reply["result"])
-        assert report.run_id == (None if block_native else session.metadata.run_id)
+        assert report.run_id == session.metadata.run_id
+        snapshot = call(sock, "tab.snapshot", {"tab_id": "tab"})
+        assert snapshot["ok"] is True
+        assert snapshot["result"]["tabs"][0]["run_id"] == (
+            None if block_native else session.metadata.run_id
+        )
         artifact = report.artifacts["run"]["measurement_data"]
         outputs = artifact.members["data"]
         assert [output.status for output in outputs] == (

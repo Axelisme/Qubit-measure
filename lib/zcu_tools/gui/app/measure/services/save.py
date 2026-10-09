@@ -82,9 +82,11 @@ class SaveService:
         tab_id identifies an existing idle tab with historical storage/metadata.
         Call after GuardService.check_save on the same owner-thread command.
         comment=None retains its annotation; origin attributes this command.
-        Missing evidence, busy or an entry/point mismatch between file history
-        and captured storage raises FailedPreconditionError before mapping or I/O.
+        Missing evidence, busy or an entry mismatch between file history and
+        captured storage raises FailedPreconditionError before mapping or I/O.
         Mismatch diagnostics identify both sources; no automatic rebinding occurs.
+        Within the same entry, retain the historical run_id and point for all
+        output paths and the saved event, regardless of the tab's captured point.
         Output failures appear in the complete report; mapping or ledger errors
         propagate without a report. State publication completes before return.
         """
@@ -106,9 +108,11 @@ class SaveService:
         tab_id identifies an existing tab. Call after GuardService.check_save on
         the same owner-thread command. None selects all declarations, including
         Saved; explicit refs are ordered, unique and nonempty. Unknown refs,
-        missing storage/metadata, busy or history/captured entry/point mismatch
-        raise FailedPreconditionError before mapping, I/O or annotation mutation.
+        missing storage/metadata, busy or history/captured entry mismatch raise
+        FailedPreconditionError before mapping, I/O or annotation mutation.
         Mismatch diagnostics identify both sources; no automatic rebinding occurs.
+        Within the same entry, all selected outputs and the saved event use the
+        historical run_id and point, not the tab's captured point.
         Invalid pane content raises TypeError/ValueError.
         comment=None retains the annotation. origin attributes this command.
         All mapping, PNG encoding, writes and ledger append finish before return.
@@ -143,17 +147,17 @@ class SaveService:
             raise FailedPreconditionError(str(exc)) from exc
         storage = tab.save_context.capture_storage()
         history = metadata.snapshot
-        if history.entry_id != storage.entry_id or history.point != storage.point:
+        if history.entry_id != storage.entry_id:
             raise FailedPreconditionError(
                 f"Historical run entry_id={history.entry_id!r}, point={history.point!r} "
                 f"does not match tab entry_id={storage.entry_id!r}, point={storage.point!r}; "
-                "save from a tab captured at the matching historical entry and point."
+                "save from a tab captured at the matching historical entry."
             )
         layout = SaveLayout(
             result_path=storage.result_path,
             database_path=storage.database_path,
             run_id=metadata.run_id,
-            point=storage.point,
+            point=history.point,
             saved_at=datetime.now().astimezone(),
         )
         annotation = tab.save.comment if comment is None else comment

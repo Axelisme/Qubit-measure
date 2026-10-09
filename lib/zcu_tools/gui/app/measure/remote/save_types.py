@@ -72,10 +72,11 @@ class SaveArtifactWire(BaseModel):
 class SaveSnapshotWire(BaseModel):
     """Detached owning save evidence, not a second persistence policy.
 
-    run_id is confirmed only after a persistent output succeeds and is None
-    beforehand. artifacts maps opaque section names to opaque artifact names
-    and their complete members. An empty map means no capture/declaration.
-    A later failed resave can retain run_id but replaces selected outputs.
+    Snapshot reads expose a confirmed run_id only after a persistent output
+    succeeds; before that it is None. Save replies expose the attempted Run's
+    identity even when every output fails. artifacts maps opaque section names
+    to opaque artifact names and their complete members. An empty map means no
+    capture/declaration. Output status, not run_id, establishes Save success.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -123,15 +124,14 @@ def project_save_snapshot(
 def project_save_report(
     report: SaveReport,
     sections: tuple[ArtifactSectionSnapshot, ...],
-    *,
-    run_id: str | None,
 ) -> SaveSnapshotWire:
-    """Encode only artifacts attempted in the synchronous report.
+    """Encode the attempted Run identity and artifacts in one synchronous report.
 
-    report comes directly from SaveControl; sections and confirmed run_id are
-    the owner's committed read model immediately after that call. The owner
-    supplies aggregate status. Unselected declarations and previous outputs
-    are not part of this response. This performs no RPC, path planning or I/O.
+    report comes directly from SaveControl and retains the acquisition's run_id
+    even if every output fails. sections is the owner's committed read model
+    immediately after that call and supplies aggregate output status. Unselected
+    declarations and previous outputs are not part of this response. This
+    performs no RPC, path planning or I/O.
     """
     selected = {(item.key.section, item.key.name) for item in report.outputs}
     groups = []
@@ -143,4 +143,4 @@ def project_save_report(
         )
         if artifacts:
             groups.append(ArtifactSectionSnapshot(section.section, artifacts))
-    return project_save_snapshot(tuple(groups), run_id=run_id)
+    return project_save_snapshot(tuple(groups), run_id=report.run_id)

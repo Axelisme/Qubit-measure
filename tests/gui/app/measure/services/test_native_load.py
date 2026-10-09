@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, SavedPayload
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._native_save_support import (
@@ -80,13 +80,81 @@ def test_native_load_retains_history_and_resaves_captured_source(
         assert not other.ledger.events()
 
 
-@pytest.mark.parametrize("foreign_entry", [False, True])
+@pytest.mark.parametrize("save_all", [False, True])
+def test_loaded_same_entry_different_point_resaves_original_run(
+    tmp_path: Path, qapp: QApplication, save_all: bool
+) -> None:
+    with native_save_session(tmp_path, qapp) as session:
+        session.save()
+        source = (
+            session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+        )
+        stored = load_run_data(source).metadata
+        assert stored.snapshot.point == "p"
+        session.entry.new_point("destination-point")
+        control = ContextControlFacet(context=session.context)
+        control.use_point(PointUseRequest("destination-point"))
+        tab = session.state.get_tab("tab")
+        tab.parameters = control.read_context()
+        tab.save_context = tab.parameters
+        captured = tab.save_context
+        service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
+        service.load_result("tab", str(source))
+        assert tab.run.confirmed_run_id is None
+        if save_all:
+            declare_panes(session, ("fit",))
+        previous_events = session.entry.ledger.events()
+
+        save = session.save_artifacts if save_all else session.save
+        report = save()
+
+        assert report.run_id == stored.run_id
+        assert all(item.status == "saved" for item in report.outputs)
+        assert (
+            next(
+                item.output.path
+                for item in report.outputs
+                if item.output.format == "data_h5"
+            )
+            == source
+        )
+        saved = load_run_data(source).metadata
+        assert replace(saved, labber_path=stored.labber_path) == stored
+        assert saved.labber_path != stored.labber_path
+        assert tab.run.metadata == saved
+        assert tab.run.confirmed_run_id == stored.run_id
+        assert tab.save_context is captured
+        assert captured.capture_storage().point == "destination-point"
+        events = session.entry.ledger.events()
+        assert events[:-1] == previous_events
+        event = events[-1]
+        assert event.kind == "saved"
+        assert event.entry_id == str(stored.snapshot.entry_id)
+        assert isinstance(event.payload, SavedPayload)
+        assert event.payload.run_id == stored.run_id
+        record = session.entry.ledger.get(event.id).record
+        assert record is not None
+        assert record["point"] == stored.snapshot.point
+        assert list((session.entry.database_path / "runs").iterdir()) == [source.parent]
+        if save_all:
+            copies = [
+                item.output.path
+                for item in report.outputs
+                if item.output.format == "png"
+                and item.output.path.is_relative_to(session.entry.result_path)
+            ]
+            assert len(copies) == 1
+            assert copies[0].parent == (
+                session.entry.result_path / "points" / stored.snapshot.point / "figures"
+            )
+            assert copies[0].is_file()
+
+
 @pytest.mark.parametrize("save_all", [False, True])
 def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
     tmp_path: Path,
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
-    foreign_entry: bool,
     save_all: bool,
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
@@ -94,23 +162,20 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
         source = (
             session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
         )
-        if foreign_entry:
-            destination = ResultEntry.create(
-                "destination",
-                result_root=tmp_path / "Destination",
-                database_root=tmp_path / "DestinationDB",
-            )
-            destination.new_point("destination-point")
-            session.context.install_entry(destination)
-        else:
-            destination = session.entry
-            destination.new_point("destination-point")
+        destination = ResultEntry.create(
+            "destination",
+            result_root=tmp_path / "Destination",
+            database_root=tmp_path / "DestinationDB",
+        )
+        destination.new_point("destination-point")
+        session.context.install_entry(destination)
         control = ContextControlFacet(context=session.context)
         control.use_point(PointUseRequest("destination-point"))
         tab = session.state.get_tab("tab")
         tab.parameters = control.read_context()
         tab.save_context = tab.parameters
         captured = tab.save_context.capture_storage()
+        assert captured.point == "destination-point"
         service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
         service.load_result("tab", str(source))
         assert tab.run.metadata == load_run_data(source).metadata
@@ -130,6 +195,7 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
 
         message = str(error.value)
         assert str(session.metadata.snapshot.entry_id) in message
+        assert session.metadata.snapshot.point == "p"
         assert session.metadata.snapshot.point in message
         assert str(captured.entry_id) in message
         assert captured.point in message

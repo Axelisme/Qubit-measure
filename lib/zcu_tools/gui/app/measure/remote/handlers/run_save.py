@@ -100,9 +100,7 @@ def h_tab_save_data(
         run_operation_id=_operation_id(params["run_operation_id"], "run_operation_id"),
     )
     snap = adapter.tab_control.get_tab_snapshot(tab_id)
-    projection = project_save_report(
-        written, snap.artifacts, run_id=None if snap.run is None else snap.run.run_id
-    )
+    projection = project_save_report(written, snap.artifacts)
     return projection.model_dump(mode="json")
 
 
@@ -154,7 +152,5 @@ def h_tab_save_artifacts(
         origin=origin,
     )
     snap = adapter.tab_control.get_tab_snapshot(tab_id)
-    projection = project_save_report(
-        written, snap.artifacts, run_id=None if snap.run is None else snap.run.run_id
-    )
+    projection = project_save_report(written, snap.artifacts)
     return projection.model_dump(mode="json")
