@@ -11,16 +11,12 @@ from zcu_tools.gui.app.measure.state import Session, TabInteractionState
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.resource import (
     CfgObservation,
-    CfgPreconditionError,
-    CfgPreconditionReason,
     CfgRef,
     CfgResolution,
-    CfgResource,
     CfgStaleError,
 )
-from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import RoleResolutionError, RoleSpec
+from zcu_tools.resources.entry import RoleSpec
 
 from ..adapter import AnalysisMode, WritebackItem
 from .plot_lifecycle import release_retired_plots
@@ -131,7 +127,7 @@ class TabService:
         populated). The persist/restore form of ``TabSnapshot`` is produced
         elsewhere (codec / restore) with the live fields left empty."""
         tab = self._state.get_tab(tab_id)
-        ctx = replace(self._state.session_env, parameters=tab.parameters)
+        ctx = self._state.session_env
         is_running = self._state.is_tab_running(tab_id)
         interaction = TabInteractionState(
             global_run_active=self._state.is_run_active() and not is_running,
@@ -187,77 +183,24 @@ class TabService:
             ),
             save=SavePaneSnapshot(comment=tab.save.comment),
             artifacts=self._state.get_artifact_snapshots(tab_id),
-            parameters=tab.parameters,
         )
-
-    def set_role(self, tab_id: str, role: str, component: str | None) -> None:
-        """Commit a manual choice/None clear and refresh this idle tab's cfg.
-
-        Re-infer all non-manual roles from this capture's declarations/focus.
-        RoleResolutionError rejects invalid names/kinds/roles before mutation.
-        FailedPreconditionError rejects busy/roleless tabs. CfgPreconditionError
-        rejects any tab cfg notification reentrancy. Preserve resource identity,
-        cfg inputs and historical pane/save captures. Facet publishes the fact.
-        """
-        self._commit_role_change(tab_id, role, {role: component})
-
-    def reset_role(self, tab_id: str, role: str) -> None:
-        """Remove one manual choice, re-infer and refresh; set_role errors apply."""
-        self._commit_role_change(tab_id, role, {})
-
-    def _commit_role_change(
-        self, tab_id: str, role: str, manual_choice: Mapping[str, str | None]
-    ) -> None:
-        # An empty choice removes the manual key; None is a deliberate clear.
-        resources = tuple(
-            self._state.get_tab(key).cfg for key in self._state.list_tab_ids()
-        )
-        if CfgResource.notifications_active(resources):
-            raise CfgPreconditionError(
-                CfgPreconditionReason.REENTRANT_MUTATION,
-                "Role mutation is forbidden during cfg notification",
-            )
-        tab = self._state.get_tab(tab_id)
-        if self._state.is_tab_busy(tab_id):
-            raise FailedPreconditionError(f"Cannot rebind roles on busy tab {tab_id!r}")
-        parameters = tab.parameters
-        roles = parameters.roles if parameters is not None else None
-        if parameters is None or roles is None or not roles.declarations:
-            raise FailedPreconditionError("Tab has no declared roles")
-        if role not in roles.declarations:
-            raise RoleResolutionError(role, roles.focus, None, "Role is not declared")
-        explicit = dict(roles.explicit)
-        explicit.pop(role, None)
-        explicit.update(manual_choice)
-        candidate = parameters.bind_roles(
-            roles.declarations, focus=roles.focus, explicit=explicit
-        )
-        revision = tab.cfg.observe().ref.revision
-        self._state.update_tab_parameters(tab_id, candidate)
-        tab.cfg.refresh(revision)
 
     def new_tab(
         self,
         adapter_name: str,
         from_dict: TabSnapshot | None = None,
-        *,
-        target: str | None = None,
     ) -> str:
         """Create a tab cfg whose refresh/reset reads current global sources.
 
         Defaults use current global aliases, not focus or via inference. Unbound
         aliases still permit tab creation; cfgs that consume them are Invalid.
-        target optionally validates and initializes the pane's parameter capture,
-        but does not override cfg refresh/reset. An empty, missing or wrong-kind
-        target, or a target on a roleless adapter, raises before registration.
+        The tab retains no source capture; Run admission captures its own inputs.
 
         ``from_dict is None`` → a fresh tab with the adapter's default cfg.
         ``from_dict`` given (restore) → rebuild the tab from the snapshot's
         detached ``cfg_schema`` input memento. Path overrides are process-local and not
         persisted, so restore creates fresh panes.
         """
-        if target is not None and not target.strip():
-            raise InvalidInputError("target must be a non-empty component name")
         adapter = self._registry.create(adapter_name)
         tab_id = f"{_slug(adapter_name)}-{uuid.uuid4().hex[:8]}"
         logger.info(
@@ -265,10 +208,6 @@ class TabService:
             adapter_name,
             tab_id,
             from_dict is not None,
-        )
-        parameters = self._captured_parameters(adapter.parameter_roles(), target)
-        save_context = (
-            parameters if parameters is not None else self._state.session_env.parameters
         )
 
         def current_parameters() -> ParameterContext | None:
@@ -288,8 +227,6 @@ class TabService:
                 adapter_name=adapter_name,
                 adapter=adapter,
                 cfg=cfg,
-                parameters=parameters,
-                save_context=save_context,
             ),
         )
 
