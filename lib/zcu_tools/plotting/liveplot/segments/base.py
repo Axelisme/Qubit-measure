@@ -76,12 +76,12 @@ class BaseSegmentLivePlot(AbsLivePlot):
         if self.disable:
             return
 
-        for ax_row, seg_row in zip(self.axs, self.segments):
-            for ax, segment in zip(ax_row, seg_row):
+        for ax_row, seg_row in zip(self.axs, self.segments, strict=False):
+            for ax, segment in zip(ax_row, seg_row, strict=False):
                 segment.clear(ax)
 
-        for ax_row, seg_row in zip(self.axs, self.segments):
-            for ax, segment in zip(ax_row, seg_row):
+        for ax_row, seg_row in zip(self.axs, self.segments, strict=False):
+            for ax, segment in zip(ax_row, seg_row, strict=False):
                 segment.init_ax(ax)
 
         # Externally hosted (fig is None): the host owns refresh — see __enter__.
@@ -103,8 +103,8 @@ class BaseSegmentLivePlot(AbsLivePlot):
         if self.disable:
             return self
 
-        for ax_row, seg_row in zip(self.axs, self.segments):
-            for ax, segment in zip(ax_row, seg_row):
+        for ax_row, seg_row in zip(self.axs, self.segments, strict=False):
+            for ax, segment in zip(ax_row, seg_row, strict=False):
                 segment.init_ax(ax)
 
         # When the figure is hosted externally (existed_axes provided, e.g. a
