@@ -80,7 +80,9 @@ def h_tab_writeback_preview(
     """Pure read of a pane's persistent writeback draft (not a dry-run).
 
     Requires (tab_id, subtab_id) with closed values analysis|post_analysis.
-    Projects current destination context at reply time; draft stores no source.
+    Each item includes the service-owned captured actual_path and existing
+    stderr (working units, or None). destination_context is the active context
+    at reply time, not the draft's captured destination.
     """
     tab_id = str(params["tab_id"])
     subtab_id = str(params["subtab_id"])
@@ -127,6 +129,8 @@ def h_tab_writeback_preview(
         "items": [
             {
                 **_writeback_item_wire(item),
+                "actual_path": values[item.session_id].actual_path,
+                "stderr": item.stderr,
                 "current": _writeback_wire_value(values[item.session_id].current),
                 "proposed": _writeback_wire_value(values[item.session_id].proposed),
             }

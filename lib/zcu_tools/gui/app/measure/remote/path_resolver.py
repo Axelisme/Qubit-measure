@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from zcu_tools.gui.cfg import DirectValue, EvalValue, encode_complex
+from zcu_tools.core.complex_codec import encode_complex
+from zcu_tools.gui.cfg import DirectValue, EvalValue
 from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget, SettableTargetKind
 
 

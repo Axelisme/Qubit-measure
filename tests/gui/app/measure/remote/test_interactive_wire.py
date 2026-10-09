@@ -21,8 +21,10 @@ from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.entry import component_registry
 
+from tests.resources.entry.fakes import registry_state, restore_registry
+from zcu_lab.components import register_all as register_components
 from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
 from zcu_lab.v2._support.measure.flux_pick_plugin import (
     make_flux_pick_plugin,
@@ -32,7 +34,7 @@ from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepResult
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 
-from ._helpers import Fixture, mcp_client, open_client, recv_response, send
+from ._helpers import Fixture, make_ctx, mcp_client, open_client, recv_response, send
 
 
 class DeferredBackground:
@@ -64,27 +66,32 @@ def fx(qapp):
 
 @pytest.fixture
 def mounted_fx(qapp):
-    fixture = InteractiveFixture()
-    fixture.state.set_context(
-        replace(
-            fixture.state.session_env,
-            md=MetaDict(),
-            ml=ModuleLibrary(),
-            soc=None,
-            soccfg=None,
+    before = registry_state()
+    try:
+        register_components(component_registry)
+        fixture = InteractiveFixture()
+        fixture.ctrl.context_control.add_component(
+            "R1", "resonator", {"freq": 4500.0, "kappa": 1.0}
         )
-    )
-    window = MainWindow(fixture.ctrl)
-    fixture.ctrl.add_view(window)
-    fixture.service.render_view = window
-    fixture.start()
-    window.show()
-    qapp.processEvents()
-    yield fixture, window
-    fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - owner deliveries before Qt teardown
-    fixture.stop()
-    window.deleteLater()
-    qapp.processEvents()
+        fixture.ctrl.context_control.add_component(
+            "Q1", "qubit/fluxonium", {"resonator": "R1"}
+        )
+        fixture.state.set_context(
+            replace(fixture.state.session_env, soc=None, soccfg=None)
+        )
+        window = MainWindow(fixture.ctrl)
+        fixture.ctrl.add_view(window)
+        fixture.service.render_view = window
+        fixture.start()
+        window.show()
+        qapp.processEvents()
+        yield fixture, window
+        fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - owner deliveries before Qt teardown
+        fixture.stop()
+        window.deleteLater()
+        qapp.processEvents()
+    finally:
+        restore_registry(before)
 
 
 def _start_mounted(
@@ -108,7 +115,9 @@ def _start_mounted(
         if adapter == "onetone/flux_dep"
         else RunRecord(cfg=None, result=FreqFluxResult(devs, freqs, signals))
     )
-    fx.state.get_tab(tab_id).run.result = run_result
+    tab = fx.state.get_tab(tab_id)
+    tab.run.result = run_result
+    tab.run.parameters = tab.parameters
     tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - test fixture locates the mounted presentation
     if pane is not None:
         tab_widget.select_pane(pane)
@@ -131,8 +140,7 @@ def _start(fx, *, background=None):
         AnalyzeRequest(
             run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
             analyze_params=analyze_params,
-            md=MetaDict(),
-            ml=ModuleLibrary(),
+            parameters=None,
             predictor=None,
         ),
         force_magnitude=True,
@@ -277,7 +285,7 @@ def test_commands_after_gui_and_context_changes_need_no_seen_baseline(fx) -> Non
     assert active is not None
     plugin.execute_command(active.session, "set_conjugate", {"enabled": True})
     fx.state.set_context(
-        replace(fx.state.session_env, md=MetaDict(), ml=ModuleLibrary())
+        replace(fx.state.session_env, parameters=make_ctx().parameters)
     )
     with open_client(fx.service.port) as sock:
         # First request is a mutation, without any hidden snapshot reads.
@@ -675,9 +683,9 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
             },
         )
         expected = {
-            "flx_half": done["interaction"]["state"]["flux_half"],
-            "flx_int": done["interaction"]["state"]["flux_int"],
-            "flx_period": 2
+            "qubit.flux_half": done["interaction"]["state"]["flux_half"],
+            "qubit.flux_int": done["interaction"]["state"]["flux_int"],
+            "qubit.flux_period": 2
             * abs(
                 done["interaction"]["state"]["flux_int"]
                 - done["interaction"]["state"]["flux_half"]
@@ -698,10 +706,22 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
                 },
             },
         )
+        actual_expected = {
+            "Q1.flux_half": expected["qubit.flux_half"],
+            "Q1.flux_int": expected["qubit.flux_int"],
+            "Q1.flux_period": expected["qubit.flux_period"],
+        }
         assert {
             item["target"]: item["after"] for item in written["written"]
+        } == actual_expected
+        component = call("rpc_call", {"method": "context.snapshot"})["point"][
+            "components"
+        ]["Q1"]
+        assert {
+            "qubit.flux_half": component["flux_half"],
+            "qubit.flux_int": component["flux_int"],
+            "qubit.flux_period": component["flux_period"],
         } == expected
-        assert call("rpc_call", {"method": "context.snapshot"})["md"] == expected
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
             "tabs"
         ][0]
@@ -825,9 +845,16 @@ def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
         assert {
             item["target_name"]: item["proposed_value"] for item in draft["items"]
         } == {
-            "flx_half": pytest.approx(original["flux_half"]),
-            "flx_int": pytest.approx(original["flux_int"]),
-            "flx_period": pytest.approx(
+            "qubit.flux_half": pytest.approx(original["flux_half"]),
+            "qubit.flux_int": pytest.approx(original["flux_int"]),
+            "qubit.flux_period": pytest.approx(
+                2 * abs(original["flux_int"] - original["flux_half"])
+            ),
+        }
+        assert {item["actual_path"]: item["proposed"] for item in draft["items"]} == {
+            "Q1.flux_half": pytest.approx(original["flux_half"]),
+            "Q1.flux_int": pytest.approx(original["flux_int"]),
+            "Q1.flux_period": pytest.approx(
                 2 * abs(original["flux_int"] - original["flux_half"])
             ),
         }
@@ -838,8 +865,9 @@ def test_mounted_equal_seed_done_failure_preserves_editor_then_recovers(
     mounted_fx,
 ) -> None:
     fx, window = mounted_fx
-    fx.state.session_env.md.flx_half = 0.0
-    fx.state.session_env.md.flx_int = 0.0
+    parameters = fx.ctrl.context_control.read_context()
+    fx.ctrl.context_control.set_parameter(parameters.target, "Q1.flux_half", 0.0)
+    fx.ctrl.context_control.set_parameter(parameters.target, "Q1.flux_int", 0.0)
     tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep")
     with open_client(fx.service.port) as sock:
         rejected = _interact(sock, tab_id, {"command": "done"})

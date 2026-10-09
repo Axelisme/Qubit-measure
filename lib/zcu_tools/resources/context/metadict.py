@@ -8,6 +8,7 @@ from pathlib import Path
 from pprint import pformat
 from typing import Any, Self
 
+from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.utils import format_obj
 
 from ..syncfile import SyncFile, auto_sync
@@ -20,28 +21,13 @@ def _looks_like_legacy_complex_string(value: str) -> bool:
     return "j" in value.strip().lower()
 
 
-def _restore_complex_tag(raw_value: Any) -> complex:
-    if not isinstance(raw_value, list) or len(raw_value) != 2:
-        raise ValueError(
-            f"Invalid MetaDict complex tag: expected [real, imag], got {raw_value!r}"
-        )
-    real, imag = raw_value
-    if (
-        isinstance(real, bool)
-        or isinstance(imag, bool)
-        or not isinstance(real, int | float)
-        or not isinstance(imag, int | float)
-    ):
-        raise ValueError(
-            f"Invalid MetaDict complex tag: real/imag must be JSON numbers, got {raw_value!r}"
-        )
-    return complex(float(real), float(imag))
-
-
 def _restore_complex(obj: Any) -> Any:
     if isinstance(obj, dict):
         if set(obj) == {_COMPLEX_TAG}:
-            return _restore_complex_tag(obj[_COMPLEX_TAG])
+            try:
+                return decode_complex(obj)
+            except (ValueError, OverflowError) as exc:
+                raise ValueError(f"Invalid MetaDict complex tag: {obj!r}") from exc
         if set(obj) == {_STRING_TAG}:
             raw_string = obj[_STRING_TAG]
             if not isinstance(raw_string, str):
@@ -50,27 +36,27 @@ def _restore_complex(obj: Any) -> Any:
                 )
             return raw_string
         return {k: _restore_complex(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         return [_restore_complex(v) for v in obj]
-    elif isinstance(obj, str) and _looks_like_legacy_complex_string(obj):
+    if isinstance(obj, str) and _looks_like_legacy_complex_string(obj):
         try:
             restored = complex(obj)
         except ValueError:
-            return obj
-        warnings.warn(
-            "Loading legacy MetaDict complex strings is deprecated; rewrite the "
-            f"file so complex values use the {_COMPLEX_TAG!r} marker.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return restored
-    else:
-        return obj
+            pass  # Ordinary strings containing j remain strings.
+        else:
+            warnings.warn(
+                "Loading legacy MetaDict complex strings is deprecated; rewrite the "
+                f"file so complex values use the {_COMPLEX_TAG!r} marker.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return restored
+    return obj
 
 
 def _dump_tagged_values(obj: Any) -> Any:
     if isinstance(obj, complex):
-        return {_COMPLEX_TAG: [obj.real, obj.imag]}
+        return encode_complex(obj)
     if isinstance(obj, dict):
         return {k: _dump_tagged_values(v) for k, v in obj.items()}
     if isinstance(obj, list | tuple):

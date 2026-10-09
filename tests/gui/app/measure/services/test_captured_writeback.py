@@ -33,10 +33,11 @@ from zcu_tools.gui.session.context_types import (
     ContextTarget,
     PointUseRequest,
 )
+from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.ledger import RecordsLedger
 from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
 from zcu_tools.resources.entry.provenance import Provenance
@@ -175,6 +176,89 @@ def test_setter_failure_retains_accepted_and_successful_prefix(
     assert isinstance(event.payload, AcceptedPayload) and len(event.payload.writes) == 3
     source = current.meta("general.flux_value")
     assert source is not None and source.source == event.id
+
+
+def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
+    session: WritebackSession,
+) -> None:
+    session.entry.new_point("a")
+    first = session.control.use_point(PointUseRequest("a"))
+    session.control.add_component(
+        "Q1",
+        "fake/drive/a",
+        {"ext": {"readout_cal": {"g_center": {"__complex__": [0.2, -0.1]}}}},
+    )
+    captured = session.control.read_context().bind_roles(
+        {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
+    )
+    centers = (complex(3.125, -1.625), complex(-0.4, 0.1))
+    tags = [{"__complex__": [value.real, value.imag]} for value in centers]
+    draft = session.service.create_draft(
+        [
+            MetaDictWriteback(
+                "driver.ext.readout_cal.g_center",
+                "Ground center",
+                proposed_value=centers[0],
+                stderr=0.01,
+            ),
+            MetaDictWriteback(
+                "driver.ext.readout_cal.e_center",
+                "Excited center",
+                proposed_value=centers[1],
+                stderr=0.02,
+            ),
+        ],
+        parameters=captured,
+    )
+    session.control.set_parameter(
+        first, "Q1.ext.readout_cal.g_center", {"__complex__": [0.6, 0.1]}
+    )
+    session.entry.new_point("b")
+    second = session.control.use_point(PointUseRequest("b"))
+    session.control.add_component("Q2", "fake/drive/a", {})
+    session.control.set_component_focus("Q2")
+    selected = session.control.read_context().document()
+    preview = session.service.preview_values(draft)
+    assert preview["md-1"].current == {"__complex__": [0.6, 0.1]}
+    assert preview["md-2"].current is None
+    assert [preview[item].actual_path for item in ("md-1", "md-2")] == [
+        "Q1.ext.readout_cal.g_center",
+        "Q1.ext.readout_cal.e_center",
+    ]
+    assert [preview[item].proposed for item in ("md-1", "md-2")] == tags
+    assert session.entry.ledger.events() == ()
+    session.service.apply_draft(draft, origin=CommandOrigin("mcp"))
+    current = session.control.read_target(first, roles=captured.roles)
+    paths = ("Q1.ext.readout_cal.g_center", "Q1.ext.readout_cal.e_center")
+    assert [current.value(path) for path in paths] == tags
+    assert (
+        evaluate_scalar_expr("driver.ext.readout_cal.g_center", current) == centers[0]
+    )
+    assert captured.value("driver.ext.readout_cal.g_center") == {
+        "__complex__": [0.2, -0.1]
+    }
+    assert session.control.read_context().target == second
+    assert session.control.read_context().document() == selected
+    assert session.control.get_component_focus().name == "Q2"
+    event = session.entry.ledger.events()[-1]
+    assert event.origin == "mcp"
+    assert isinstance(event.payload, AcceptedPayload)
+    assert [write.path for write in event.payload.writes] == list(paths)
+    assert [write.value for write in event.payload.writes] == tags
+    sources = [current.meta(path) for path in paths]
+    assert all(source is not None for source in sources)
+    assert [source.source for source in sources if source is not None] == [
+        event.id,
+        event.id,
+    ]
+    assert [source.stderr for source in sources if source is not None] == [0.01, 0.02]
+    reopened = ResultEntry.open(
+        "entry",
+        result_root=session.entry.result_path.parent,
+        database_root=session.entry.database_path.parent,
+    )
+    document = snapshot(reopened.use_point("a"))
+    assert [document_value(document, path) for path in paths] == tags
 
 
 def test_receipt_reads_actual_role_target_after_point_and_focus_change(

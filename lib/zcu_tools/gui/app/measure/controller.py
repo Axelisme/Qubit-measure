@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.services.experiment_reload import (
@@ -52,7 +52,6 @@ from .services import (
     AppPersistedState,
     LoadTabResultOutcome,
     PersistenceError,
-    ProjectRequest,
     RestoreReport,
     TabSnapshot,
     build_app_services,
@@ -163,6 +162,27 @@ class RenderHost(Protocol):
     def current_left_panel_width(self) -> int: ...
 
 
+class ViewSnapshot(TypedDict):
+    """Visible measure-window facts exposed to remote readers.
+
+    active_tab_id is the focused State-owned tab ID, or None.
+    tab_ids lists State-owned IDs in State order, excluding ghost widgets.
+    entry_label is the visible entry name, or "No entry open".
+    point_label is the visible SavedPoint label, "Draft (in-memory)", or
+    "No point selected". It never derives from component focus.
+    predictor_label and status are the visible predictor and status-bar text.
+    open_dialogs lists the named dialogs currently open, using wire names.
+    """
+
+    active_tab_id: str | None
+    tab_ids: list[str]
+    entry_label: str
+    point_label: str
+    predictor_label: str
+    status: str
+    open_dialogs: list[str]
+
+
 class RenderView(Protocol):
     """View reads and explicit presentation commands for RemoteControlAdapter.
 
@@ -174,7 +194,10 @@ class RenderView(Protocol):
         self, tab_id: str, pane: Literal["run", "analysis", "post_analysis", "data"]
     ) -> None: ...
 
-    def get_view_snapshot(self) -> dict[str, object]: ...
+    def get_view_snapshot(self) -> ViewSnapshot:
+        """Read visible entry/point and State-owned tab facts without mutation."""
+        ...
+
     def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None:
         """Read an active frontend's figure and preview flag, if mounted."""
         ...
@@ -213,8 +236,7 @@ class Controller(SessionControllerMixin):
 
     The identical shared controller forwards live in SessionControllerMixin
     (read through the _*_svc accessors assigned in __init__); app-specific methods
-    are kept here (apply_project /
-    get_project_root / get_bus, plus everything app-specific). Shared setup,
+    are kept here (get_project_root / get_bus, plus everything app-specific). Shared setup,
     context / inspect, and value-md-ml consumers use their own control facets
     instead of this facade.
     """
@@ -622,7 +644,7 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def has_project(self) -> bool:
-        return self._ctx_svc.has_project()
+        return self._ctx_svc.get_entry_info() is not None
 
     def has_context(self) -> bool:
         return self._ctx_svc.has_context()
@@ -839,15 +861,6 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
     # Context / IO (ContextService)
     # ------------------------------------------------------------------
-
-    def apply_project(self, req: ProjectRequest) -> dict[str, str]:
-        # Applies the project to the active context AND records it as the
-        # remembered prefs (in State); persisted to disk only at close.
-        # An unchanged project is a no-op inside the service; a failure raises.
-        # Either way we echo the resolved project rather than a bool.
-        # ProjectSettingsService owns result-scope resolution so callers cannot
-        # inject arbitrary result/database paths.
-        return self._settings_svc.apply_project(req).as_wire_dict()
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         """Capture published sources with fixed roles; EMPTY/source errors propagate."""
@@ -1098,10 +1111,11 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def get_project_root(self) -> str:
-        """The base directory default result/database paths are anchored under
-        (the repo root, injected by the entry script). Setup dialog + project RPC
-        derive defaults through ``derive_project_paths`` against this, NOT cwd, so
-        a .bat launcher that cd's into scripts/ still scopes under the repo root."""
+        """Return the injected base directory for result and Database roots.
+
+        Session composition passes its explicit roots to the entry owner;
+        opening an entry never derives chip/qubit identity from the current cwd.
+        """
         return self._project_root
 
     # ------------------------------------------------------------------

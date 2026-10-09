@@ -18,6 +18,8 @@ from pydantic import (
     model_validator,
 )
 
+from zcu_tools.core.complex_codec import encode_complex
+
 
 def _json_value(value: object) -> object:
     """Reject non-JSON Python values before Pydantic can coerce them."""
@@ -104,10 +106,24 @@ class SavedOutput(_LedgerModel):
 
 
 class AcceptedWrite(_LedgerModel):
-    """Accepted working-unit value at a nonempty dot-separated container path."""
+    """One accepted value for a nonempty dot-separated container path.
+
+    path is a concrete destination with nonempty segments; no escaping or
+    indexing is supported. value stores strict JSON in working units.
+    Native complex input at this field alone becomes the shared __complex__
+    tag before JSON validation. Nested complex, non-finite components and
+    other non-JSON values raise ValueError; strings are never decoded.
+    """
 
     path: _Nonempty
     value: JsonValue
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _encode_complex_value(cls, value: object) -> object:
+        if isinstance(value, complex):
+            return encode_complex(value)
+        return value
 
     @field_validator("path")
     @classmethod

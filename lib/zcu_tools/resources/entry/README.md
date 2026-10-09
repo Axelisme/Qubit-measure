@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-09，角色手動清空
+**Last updated:** 2026-10-09，固定欄位的靜態單位查詢
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -12,7 +12,7 @@ Setup 是元件範本。Point 自帶 kind、元件、來源與 general。`new_po
 
 `SetupView` 與 `PointView` 各綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 需逐筆交易，不承諾整批 all-or-nothing。
 
-Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(document, path)` 提供隔離的 typed 讀取、綁定文件位置與 logical YAML 值，不讀檔或執行 model hooks。Snapshot 也接受 EditView，複製尚未提交的 draft。Document_value 只讀實際元件或 general 路徑，不展開角色，區分 explicit null 與缺值。`document_meta(document, path)` 投影本文件的來源。`resolve_path(document, path, roles=..., reserved_names=...)` 只展開已捕捉角色的首段，不檢查後續 leaf 或 library key。Role、component、general 欄位和 expression 保留名稱碰撞時明確報錯，general 欄位必須使用 general namespace。這些能力不加成 view method，保留 snapshot、path 等合法元件名稱。
+Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(document, path)` 提供隔離的 typed 讀取、綁定文件位置與 logical YAML 值，不讀檔或執行 model hooks。Snapshot 也接受 EditView，複製尚未提交的 draft。Document_value 只讀實際元件或 general 路徑，不展開角色，區分 explicit null 與缺值。`document_meta(document, path)` 投影本文件的來源。`document_unit(document, path)` 只讀固定欄位既有的靜態 schema unit，包含尚未 set 的 optional leaf。直接指向已宣告欄位時，list、mapping 或 null 值不影響 label。Ext、mapping/list 內的子路徑、缺失路徑或無 metadata 的欄位沒有單位。查詢不讀 leaf 值、不執行 schema callback、不推導可變單位，也不換算值。`resolve_path(document, path, roles=..., reserved_names=...)` 只展開已捕捉角色的首段，不檢查後續 leaf 或 library key。Role、component、general 欄位和 expression 保留名稱碰撞時明確報錯，general 欄位必須使用 general namespace。這些能力不加成 view method，保留 snapshot、path 等合法元件名稱。
 
 `document_fields(document)` 列舉 logical data 的隔離 DocumentField。Models／mapping 展開為葉列，list、null 與空 mapping 是單列。Segments 保留 literal keys；有空字串或點號的 row 沒有 editable_path，不以另一條 dotted path 冒充它。Rows 保留完整 provenance 和 cloned_from，不執行 serializers/model hooks、不讀檔或顯示 opaque forward-minor 資料。
 
@@ -40,9 +40,9 @@ ComponentSchema 只要求字串 kind。原 model 決定必填欄位、型別、e
 
 ## 視圖與來源
 
-所有 dict 與巢狀 BaseModel 欄位回傳 FieldView。子 view 保留完整路徑，每次讀取都跟隨 owning view 的最新快照。Scalar、null 與 list 回傳獨立 YAML 值，沒有 list index 子 view。Item access 使用單一 literal key，set／meta 使用點分路徑。空 key 或含點號的 key 無法以點分路徑定址，框架不拒絕這些 key，也不提供 escaping。
+SetupView、PointView 與 EditView 共用的 FieldView 將 `{"__complex__": [re, im]}` 葉值讀成 Python complex，RoleView 也沿同一讀取路徑。其他 dict 與巢狀 BaseModel 欄位回傳 FieldView。子 view 保留完整路徑，每次讀取都跟隨 owning view 的最新快照。Scalar、null 與 list 回傳獨立 YAML 值，沒有 list index 子 view，list 內保留原始 YAML 元素。Malformed tag 由唯一的 core.complex_codec 拒絕，不當作一般子 view。Item access 使用單一 literal key，set／meta 使用點分路徑。空 key 或含點號的 key 無法以點分路徑定址，框架不拒絕這些 key，也不提供 escaping。
 
-每次寫入複製完整父元件 candidate，保留 dict 內的 model 型別，再由原完整 model 驗證。Schema 或 body 失敗不污染 draft、來源或磁碟。EditView 的元件、general、子 view 與 set 共用同一份 draft。元件名稱必須是 public identifier，不得遮蔽 view 方法。
+手動 scalar 賦值與 EditView.set 將 native complex 委派 core.complex_codec 編回既有 tag，再走原本的 schema 與 provenance 驗證。Container assignments 仍使用既有 YAML/model 契約。Snapshot、document_value、document_fields 與 ParameterContext 等 non-view 路徑保留 raw tag，文件格式不變。每次寫入複製完整父元件 candidate，保留 dict 內的 model 型別，再由原完整 model 驗證。Schema 或 body 失敗不污染 draft、來源或磁碟。EditView 的元件、general、子 view 與 set 共用同一份 draft。元件名稱必須是 public identifier，不得遮蔽 view 方法。
 
 值與 provenance 在同一文件、同一交易提交。普通賦值、draft set、加入元件與子 view 寫入記錄 manual 來源和 UTC 時間。重新接受同值也更新來源並清除 clone 標記。`meta` 沒有值或來源時回 None，否則回傳獨立 Provenance。Stderr 保存 caller 提供的工作單位數字，不換算。
 

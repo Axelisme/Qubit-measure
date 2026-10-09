@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
+    EntryInfo,
+    EntryRequest,
     PointBindingError,
     PointCreateRequest,
     PointUseRequest,
@@ -24,6 +26,82 @@ class PointEntry(TypedDict):
     name: str
     result_path: str
     database_path: str
+
+
+class EntryListReply(TypedDict):
+    """entries contains refreshed persisted entry directory names."""
+
+    entries: list[str]
+
+
+class EntryInfoReply(TypedDict):
+    """entry is the cached opened identity, or None before opening."""
+
+    entry: PointEntry | None
+
+
+def h_entry_list(
+    adapter: RemoteControlAdapter, _params: Mapping[str, object]
+) -> EntryListReply:
+    """Refresh entry names; no binding change or full-context observation.
+
+    params is empty. Owner discovery/schema/I/O failures propagate.
+    """
+    return {"entries": list(adapter.ctrl.setup_control.list_entries(refresh=True))}
+
+
+def h_entry_info(
+    adapter: RemoteControlAdapter, _params: Mapping[str, object]
+) -> EntryInfoReply:
+    """Read cached EntryInfo as {entry}, with None before opening.
+
+    params is empty. Paths are absolute owner roots converted to strings.
+    This metadata-only read establishes no full-context observation.
+    """
+    info = adapter.ctrl.setup_control.get_entry_info()
+    return {"entry": _entry_projection(info) if info is not None else None}
+
+
+def h_entry_new(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PointEntry:
+    """Create required string name through SetupControlPort and publish DRAFT.
+
+    Return the exact EntryInfo fields with path strings. Invalid wire types
+    raise INVALID_PARAMS. Owner name/existence/I/O errors propagate and preserve
+    the prior binding. Post-creation installation failure retains the entry and
+    names Open as recovery; never retry or delete it. No hardware side effects.
+    """
+    name = params.get("name")
+    if not isinstance(name, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'name' must be a string")
+    info = adapter.ctrl.setup_control.new_entry(EntryRequest(name))
+    return _entry_projection(info)
+
+
+def h_entry_open(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PointEntry:
+    """Open required string name through SetupControlPort and publish DRAFT.
+
+    Return the exact EntryInfo fields with path strings. Invalid wire types
+    raise INVALID_PARAMS. Owner invalid/missing/I/O/install errors propagate and
+    preserve the prior binding. Never creates resources or touches hardware.
+    """
+    name = params.get("name")
+    if not isinstance(name, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'name' must be a string")
+    info = adapter.ctrl.setup_control.open_entry(EntryRequest(name))
+    return _entry_projection(info)
+
+
+def _entry_projection(info: EntryInfo) -> PointEntry:
+    return {
+        "entry_id": info.entry_id,
+        "name": info.name,
+        "result_path": str(info.result_path),
+        "database_path": str(info.database_path),
+    }
 
 
 class PointSummary(TypedDict):
@@ -65,12 +143,7 @@ def h_point_list(
     points = adapter.context_control.list_points(refresh=True)
     entry: PointEntry | None = None
     if info is not None:
-        entry = {
-            "entry_id": info.entry_id,
-            "name": info.name,
-            "result_path": str(info.result_path),
-            "database_path": str(info.database_path),
-        }
+        entry = _entry_projection(info)
     return {
         "entry": entry,
         "points": [

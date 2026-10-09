@@ -26,6 +26,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.entry import document_unit
 from zcu_tools.resources.entry.ledger import RecordsLedger
 from zcu_tools.resources.entry.ledger_models import (
     AcceptedPayload,
@@ -98,10 +99,20 @@ def _destination_value(
 
 @dataclass(frozen=True)
 class WritebackValues:
-    """Current fixed-target value and capture-lowered proposal; missing is None."""
+    """Complete preview facts for one item at its captured destination.
 
+    actual_path is the captured role-resolved parameter path or library key,
+    after any draft-local retarget edit. current is the latest stored value at
+    that destination, or None if missing. proposed is the complete validated
+    value, lowered against the creation capture for cfg items. unit is the
+    resources-provided static schema label for display only, or None for
+    destinations without one (including ext and cfg items). Values never convert.
+    """
+
+    actual_path: str
     current: object
     proposed: object
+    unit: str | None
 
 
 @dataclass
@@ -295,21 +306,32 @@ class WritebackService:
         self._require_draft(draft)
         return list(draft.items)
 
-    def preview_values(self, draft: WritebackDraft) -> dict[str, WritebackValues]:
+    def preview_values(
+        self, draft: WritebackDraft, *, session_id: str | None = None
+    ) -> dict[str, WritebackValues]:
         """Read actual current values at the captured target, without selecting it.
 
         Proposed cfg values lower against the creation capture, never current
         focus, point, or slot references. Missing destinations have current=None.
-        Empty drafts return {}; nonempty drafts require a still-readable target.
-        Target/source/I/O and proposal validation errors propagate.
+        session_id=None reads every item, including unselected items. A supplied
+        session_id reads only that item's facts, without lowering siblings; an
+        unknown ID raises KeyError before reading the destination. Empty bulk
+        reads return {}; empty item reads raise KeyError. Nonempty reads require
+        a still-readable captured target. Inactive/foreign drafts are rejected.
+        Target/source/I/O and requested proposal validation errors propagate.
         """
         self._require_draft(draft)
-        if not draft.items:
+        items = draft.items
+        if session_id is not None:
+            items = tuple(item for item in items if item.session_id == session_id)
+            if not items:
+                raise KeyError(session_id)
+        if not items:
             return {}
         parameters = self._require_parameters(draft)
         current = self._write.read_target(parameters.target, roles=parameters.roles)
         values: dict[str, WritebackValues] = {}
-        for item in draft.items:
+        for item in items:
             path = _destination_path(item, parameters)
             proposed = (
                 AcceptedWrite.model_validate(
@@ -322,7 +344,14 @@ class WritebackService:
                 )
             )
             values[item.session_id] = WritebackValues(
-                current=_destination_value(item, current, path), proposed=proposed
+                actual_path=path,
+                current=_destination_value(item, current, path),
+                proposed=proposed,
+                unit=(
+                    document_unit(current.document(), path)
+                    if isinstance(item, MetaDictWriteback)
+                    else None
+                ),
             )
         return values
 

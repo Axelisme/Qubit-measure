@@ -57,8 +57,6 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 協作流程歸外部 dev-flow／collab skills，repo 的 live resource 限制見 [CLAUDE.md](../../CLAUDE.md)。
 
-- [0018 — Autofluxdep resolver builder](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：保留 Builder／Node 與 requires/provides/produce 原介面；§3 的 predictor 校正與載入敘述已被取代（現行 overlay 見 0062，按需載入的目標見 draft）。
-
 ## Draft
 
 - [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。不遷移 CfgSchema／Measure。
@@ -68,7 +66,6 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 - [模組定位與依賴邊界](draft/module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、core 共用 waveform 格式、cfg_model 契約與債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13/C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；其餘債務尚未清除。
 - [實驗核心、前端包裝與具名圖形產物](draft/experiment-interface-redesign.md)：全實驗與 caller 已在 task 分支遷移，舊自訂 pyplot routing backend 已退場。修正候選已完成軟體驗證及雙軸審查；正式接受以 task 的逐列證據與裁決紀錄為準，landing 另需使用者授權。草案不代表持久分支已採用。包含 records、具名原生圖、RunContext／CfgEnv、instance DeviceManager 與模擬環境 coordinator 的分工。
 
-- [Autofluxdep 逐項宣告依賴與 predictor 載入](draft/autofluxdep-explicit-dependencies.md)：已確認待實作，不代表現行契約。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：measure tab 的 resource、refresh／override、revision 與 atomic batch 已落實；library-entry editing port、selected Apply 與其他 app 仍待收斂。
 - [Cfg 資源公開契約與同步發布](draft/cfg-resource-contract.md)：measure tab 的 resource-bound editing、可寫節點、同步 publication、expression capture 與 explicit revision 設計及驗收記錄；其他 app 未因這條接線完成而全面遷移。
@@ -76,6 +73,8 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 
 ## Retired
+
+- [0018 — Autofluxdep resolver builder](retired/0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md) 與 [Autofluxdep 逐項宣告依賴與 predictor 載入](retired/autofluxdep-explicit-dependencies.md)：autofluxdep 已於 04799f2f2 移除。
 
 以下舊篇保留原號與正文；現行 GUI 決策見 0067，Operation 見 0066，Remote／Transport 見 0068，Persistence 見 0063，workflow 見 0062，process startup 見 0064。Cfg 來源篇尚有有效局部契約，未整篇退役。
 
