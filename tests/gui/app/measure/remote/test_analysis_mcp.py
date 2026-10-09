@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from tests.gui.app.measure._cfg_fakes import parameter_capture
 
 from ._helpers import Fixture, call, mcp_client, open_client
 
@@ -69,9 +68,6 @@ def _result_method(stage: str) -> str:
 @pytest.fixture()
 def fx(qapp):
     fixture = Fixture(active_label="ctx001")
-    fixture.state.set_context(
-        replace(fixture.state.session_env, parameters=parameter_capture())
-    )
     fixture.start()
     yield fixture
     fixture.stop()
