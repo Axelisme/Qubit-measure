@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from uuid import uuid4
 
+from pydantic import JsonValue
+from pydantic_core import PydanticCustomError
 from qick import QickConfig
 from qtpy.QtCore import QTimer
 from qtpy.QtGui import QCloseEvent
@@ -26,7 +29,14 @@ from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
+from zcu_tools.gui.form import (
+    FormEnv,
+    FormErrors,
+    FormInput,
+    FormModel,
+    FormState,
+    FormWritePath,
+)
 from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.remote.control_service import ControlOptions
@@ -35,6 +45,7 @@ from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import RoleSpec
@@ -43,11 +54,46 @@ from zcu_tools.resources.entry.save_layout import workflow_roots
 from ..calibration import Calibrated
 from ..t1 import T1Plan, t1_fluxdep
 from .panel import T1PlanPanel, T1TunablesPanel
+from .plan import T1PlanForm
 from .remote import T1RemoteControlAdapter
 from .tunables import T1TunablesForm
 from .tuning_panel import T1TuningPanel
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_start_form[F: FormModel](
+    model: type[F],
+    state: FormState[F],
+    editor: FormEditor[F],
+    batch: Mapping[FormWritePath, JsonValue] | None,
+    env: FormEnv,
+) -> tuple[F, FormInput[F]] | FormErrors:
+    """Select draft or captured defaults, returning validated values and input.
+
+    Explicit batches never read the editor or draft. Native directed default/write
+    errors retain their field path; undirected structural errors use ().
+    """
+    if batch is None:
+        errors = editor.local_parse_errors()
+        if errors is not None:
+            return errors
+    else:
+        try:
+            state = FormState(model.default_input(env))
+            state.write(batch, env)
+        except PydanticCustomError as exc:
+            # field_error owns the directed path; other native errors propagate.
+            if exc.type != "form_field" or exc.context is None:
+                raise
+            return FormErrors({exc.context["path"]: exc.context["message"]})
+        except ValueError as exc:
+            # Batch structure errors have no directed path in the core contract.
+            return FormErrors({(): str(exc)})
+    form = state.result(env)
+    if isinstance(form, FormErrors):
+        return form
+    return form, state.input
 
 
 def _calibrated_seed(plan: T1Plan, pi_length_us: float) -> Calibrated:
@@ -178,11 +224,25 @@ class T1WorkflowWindow(QWidget):
         }:
             raise InvalidRunState("start", status.lifecycle)
 
-    def start(self, run_id: str) -> int | FormErrors:
+    def start(
+        self,
+        run_id: str,
+        *,
+        plan_batch: Mapping[FormWritePath, JsonValue] | None = None,
+        tunables_batch: Mapping[FormWritePath, JsonValue] | None = None,
+    ) -> int | FormErrors:
         """Capture/validate and submit T1, returning a token or directed errors.
 
         run_id is a nonempty path-safe segment for this run's exact directories.
-        Local parse/model errors return FormErrors without submission or files.
+        A None batch reads that GUI panel and its local parse errors. An explicit
+        batch, including {}, starts from that form's default_input in this Start's
+        fixed capture, then uses FormState.write once. Paths are model-field tuple
+        leaves; lists/mappings are whole leaves and branch switches use core rules.
+        Invalid batch/model input returns FormErrors without touching either panel,
+        submission or files. Structural errors without a directed path are model-wide.
+        Success resets both panel bases to the submitted input and clears local text.
+        Both editors display ordinary values in this same fixed Start capture,
+        not their old constructor capture; they do not poll later source changes.
         Draft/unbound storage, missing hardware, source/provenance and native
         failures raise without fallback/retry. The returned operation token is
         pending, not proof of accepted startup. Calibrated uses the validated
@@ -191,20 +251,25 @@ class T1WorkflowWindow(QWidget):
         """
         self._ensure_can_start()
         env = self._capture_env()
-        parameters = env.parameters
-        if parameters is None:
+        if env.parameters is None:
             raise ValueError("T1 Start requires captured parameters")
-        storage = self._services.context.capture_storage(parameters)
-        for editor in (self.plan_panel.editor, self.tunables_panel.editor):
-            errors = editor.local_parse_errors()
-            if errors is not None:
-                return errors
-        form = self.plan_panel.state.result(env)
-        if isinstance(form, FormErrors):
-            return form
-        tunables_form = self.tunables_panel.state.result(env)
-        if isinstance(tunables_form, FormErrors):
-            return tunables_form
+        storage = self._services.context.capture_storage(env.parameters)
+        prepared_plan = _prepare_start_form(
+            T1PlanForm, self.plan_panel.state, self.plan_panel.editor, plan_batch, env
+        )
+        if isinstance(prepared_plan, FormErrors):
+            return prepared_plan
+        form, submitted_plan = prepared_plan
+        prepared_tunables = _prepare_start_form(
+            T1TunablesForm,
+            self.tunables_panel.state,
+            self.tunables_panel.editor,
+            tunables_batch,
+            env,
+        )
+        if isinstance(prepared_tunables, FormErrors):
+            return prepared_tunables
+        tunables_form, accepted_input = prepared_tunables
         snapshot = RunSnapshot(
             entry_id=storage.entry_id,
             entry_name=storage.entry_name,
@@ -246,7 +311,6 @@ class T1WorkflowWindow(QWidget):
         )
         if self._plots is not None:
             self._plots.release()
-        accepted_input = self.tunables_panel.state.input
         # Runner progress listeners can synchronously request Stop or close.
         self.controller = candidate
         try:
@@ -266,6 +330,11 @@ class T1WorkflowWindow(QWidget):
         except Exception:
             self.controller = None
             raise
+        self.plan_panel.state.reset(submitted_plan)
+        self.tunables_panel.state.reset(accepted_input)
+        for editor in (self.plan_panel.editor, self.tunables_panel.editor):
+            editor.refresh(env)
+            editor.discard_local_text()
         if self.tuning_panel is not None:
             self.tuning_panel.close()
             self.tuning_panel.deleteLater()

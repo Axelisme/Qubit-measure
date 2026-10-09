@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, TypedDict
 
+from pydantic import JsonValue
 from zcu_tools.experiment.workflows import InvalidRunState, RunMismatch, RunStatus
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
     RemoteControlServiceBase,
@@ -25,6 +27,40 @@ class RunTarget(TypedDict):
     """run_id is the non-empty native identity supplied to Start, never a token."""
 
     run_id: str
+
+
+class FormWrite(TypedDict):
+    """One JSON batch edit: nonempty string field path and JSON value.
+
+    path uses model-field segments, not dotted keys, mapping keys or indexes.
+    value may be an ordinary value, expression or complex tag. Native FormState
+    owns branch ordering, whole-leaf replacement and field/model validation.
+    """
+
+    path: list[str]
+    value: JsonValue
+
+
+class StartParams(RunTarget):
+    """Start identity and two required partial-input batches.
+
+    plan/tunables contain FormWrite objects; [] uses current captured defaults.
+    Each path occurs once. They never edit the existing GUI draft before success.
+    """
+
+    plan: list[FormWrite]
+    tunables: list[FormWrite]
+
+
+class FormErrorReply(TypedDict):
+    """Existing FormErrors projection: relative field/index path and native message.
+
+    Empty path means a model-wide error. No code, identity or other metadata
+    is inferred from the native message.
+    """
+
+    path: list[str | int]
+    message: str
 
 
 class ProgressReply(TypedDict):
@@ -72,6 +108,12 @@ class WorkflowReply(TypedDict):
 class T1RemoteControlAdapter(RemoteControlServiceBase):
     """RPC face of one T1 Window; it never owns a second run or capture.
 
+    workflow.start submits partial path/value batches through Window.start;
+    FormErrors becomes invalid_params/form_errors; data is an object whose native
+    messages field contains the list of FormErrorReply path/message entries.
+    Batch wire admission rejects malformed or duplicate paths without side effects.
+    A successful reply is pending admission, not worker acceptance. GUI drafts are
+    untouched on failure; success resets their bases through the existing owner.
     workflow.status reads the same Controller on the owner. Pause/Resume/Stop
     require explicit run_id and invoke the existing Window control once.
     RunMismatch becomes precondition_failed/run_mismatch with expected/actual;
@@ -110,6 +152,9 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             gui_version=GUI_VERSION,
             server_name="T1WorkflowRemoteServer",
             method_registry={
+                "workflow.start": BoundMethod(
+                    self._start, METHOD_SPECS["workflow.start"]
+                ),
                 "workflow.status": BoundMethod(
                     self._status, METHOD_SPECS["workflow.status"]
                 ),
@@ -127,6 +172,34 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
 
     def _get_bus(self) -> BaseEventBus:
         return self._event_bus
+
+    def _start(
+        self,
+        _adapter: RemoteControlServiceBase,
+        params: StartParams,
+    ) -> WorkflowReply:
+        plan_batch = _parse_start_batch(params["plan"])
+        tunables_batch = _parse_start_batch(params["tunables"])
+        try:
+            result = self.ctrl.start(
+                params["run_id"],
+                plan_batch=plan_batch,
+                tunables_batch=tunables_batch,
+            )
+        except InvalidRunState as exc:
+            raise _project_control_error(exc) from exc
+        if isinstance(result, FormErrors):
+            messages: list[FormErrorReply] = [
+                {"path": list(path), "message": message}
+                for path, message in result.messages.items()
+            ]
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "Invalid Start form input",
+                reason="form_errors",
+                data={"messages": messages},
+            )
+        return self._status(_adapter, {})
 
     def _status(
         self,
@@ -191,6 +264,38 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             "operation_id": None if controller is None else controller.operation_id,
             "status": _project_status(status),
         }
+
+
+def _parse_start_batch(
+    batch: JsonValue | list[FormWrite],
+) -> dict[FormWritePath, JsonValue]:
+    """Convert the JSON batch shape only; FormState owns values and field paths."""
+    if not isinstance(batch, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "Start batch must be an array")
+    writes: dict[FormWritePath, JsonValue] = {}
+    for edit in batch:
+        if not isinstance(edit, dict) or set(edit) != {"path", "value"}:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "Start edits require path and value"
+            )
+        path = edit["path"]
+        if not isinstance(path, list) or not path:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "Start paths must be nonempty arrays"
+            )
+        segments: list[str] = []
+        for segment in path:
+            if not isinstance(segment, str) or not segment:
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS,
+                    "Start path segments must be nonempty strings",
+                )
+            segments.append(segment)
+        field_path = tuple(segments)
+        if field_path in writes:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, "Duplicate Start path")
+        writes[field_path] = edit["value"]
+    return writes
 
 
 def _project_status(status: RunStatus | None) -> NativeStatusReply | None:
