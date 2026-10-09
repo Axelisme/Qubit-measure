@@ -88,28 +88,27 @@ def predict_state_with_error(
 
     if gates == ("I", "I"):
         return 1
-    elif gates in [("X180", "X180"), ("Y180", "Y180")]:
+    if gates in [("X180", "X180"), ("Y180", "Y180")]:
         return 1 - 8 * ep**2 - (np.pi**2 / 32) * ed**4
-    elif gates in [("X180", "Y180"), ("Y180", "X180")]:
+    if gates in [("X180", "Y180"), ("Y180", "X180")]:
         return 1 - 4 * ep**2 - ed**2
-    elif gates in [("X90", "I"), ("Y90", "I"), ("I", "X90"), ("I", "Y90")]:
+    if gates in [("X90", "I"), ("Y90", "I"), ("I", "X90"), ("I", "Y90")]:
         return -ep + (1 - np.pi / 2) * ed**2
-    elif gates == ("X90", "Y90"):
+    if gates == ("X90", "Y90"):
         return ep**2 - 2 * ed
-    elif gates == ("Y90", "X90"):
+    if gates == ("Y90", "X90"):
         return ep**2 + 2 * ed
-    elif gates in [("X90", "Y180"), ("X180", "Y90")]:
+    if gates in [("X90", "Y180"), ("X180", "Y90")]:
         return ep - ed
-    elif gates in [("Y90", "X180"), ("Y180", "X90")]:
+    if gates in [("Y90", "X180"), ("Y180", "X90")]:
         return ep + ed
-    elif gates in [("X90", "X180"), ("X180", "X90"), ("Y90", "Y180"), ("Y180", "Y90")]:
+    if gates in [("X90", "X180"), ("X180", "X90"), ("Y90", "Y180"), ("Y180", "Y90")]:
         return 3 * ep + (3 * np.pi / 8) * ed**2
-    elif gates in [("X180", "I"), ("Y180", "I"), ("I", "X180"), ("I", "Y180")]:
+    if gates in [("X180", "I"), ("Y180", "I"), ("I", "X180"), ("I", "Y180")]:
         return -1 + 2 * ep**2 + 0.5 * ed**2
-    elif gates in [("X90", "X90"), ("Y90", "Y90")]:
+    if gates in [("X90", "X90"), ("Y90", "Y90")]:
         return -1 + 2 * ep**2 + 2 * ed**2
-    else:
-        raise ValueError(f"Invalid gate pair: {gates}")
+    raise ValueError(f"Invalid gate pair: {gates}")
 
 
 def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
