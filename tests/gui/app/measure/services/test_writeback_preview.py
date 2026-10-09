@@ -96,7 +96,8 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
             control.set_parameter(target, "U1.frequency", 21.5)
             entry.new_point("b")
             control.use_point(PointUseRequest("b"))
-            control.set_component_focus("Q1")
+            control.add_component("Q2", "fake/drive/a", {})
+            control.set_component_focus("Q2")
             refreshed = service.preview_values(draft)["md-1"]
             assert (refreshed.actual_path, refreshed.unit) == ("U1.frequency", "MHz")
             assert (refreshed.current, refreshed.proposed) == (21.5, 20.09)
