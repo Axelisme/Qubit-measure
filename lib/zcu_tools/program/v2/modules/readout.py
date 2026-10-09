@@ -157,7 +157,8 @@ class PulseReadout(AbsReadout):
             self.cfg.pulse_cfg.ro_ch = ro_ch
         if ro_ch != self.cfg.ro_cfg.ro_ch:
             warnings.warn(
-                f"{name} pulse_cfg.ro_ch is {ro_ch}, this may not be what you want"
+                f"{name} pulse_cfg.ro_ch is {ro_ch}, this may not be what you want",
+                stacklevel=1,
             )
         self.pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
         self.ro_window = DirectReadout(name=f"{name}_adc", cfg=self.cfg.ro_cfg)

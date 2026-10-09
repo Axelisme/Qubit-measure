@@ -61,7 +61,9 @@ class DeviceManager:
 
         with self._lock:
             if name in self._devices:
-                warnings.warn(f"Device {name} already registered, overwriting")
+                warnings.warn(
+                    f"Device {name} already registered, overwriting", stacklevel=1
+                )
             self._devices[name] = device
 
     def drop_device(self, name: str, ignore_error: bool = False) -> None:
