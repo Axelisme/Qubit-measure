@@ -13,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
     MetaDictWriteback,
-    SavePaths,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
@@ -31,6 +30,7 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedErrorCategory
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
@@ -71,7 +71,13 @@ class _Writeback:
         self.fail_teardown = False
         self.fail_create = False
 
-    def create_draft(self, items: list[Any]) -> _Draft:
+    def create_draft(
+        self,
+        items: list[Any],
+        *,
+        parameters: ParameterContext | None,
+        run_id: str | None = None,
+    ) -> _Draft:
         if self.fail_create:
             raise RuntimeError("draft creation failed")
         draft = _Draft(tuple(items))
@@ -109,7 +115,6 @@ def _state() -> tuple[State, str, MagicMock, SessionEnv]:
     )
     state = State(ctx)
     adapter = MagicMock()
-    adapter.make_save_paths.return_value = SavePaths("/db/data.h5", "/result/base.png")
     state.add_tab(
         "tab",
         Session(
