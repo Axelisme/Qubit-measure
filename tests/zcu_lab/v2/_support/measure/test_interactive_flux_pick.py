@@ -10,6 +10,7 @@ from typing import Any, Literal
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.analysis.fluxdep.line_state import fold_initial_lines
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
@@ -150,14 +151,17 @@ def test_current_request_uses_fixed_parameter_calibration(
     flux_plots: Plots,
 ) -> None:
     parameters = flux_parameters(half, 2.0)
+    expected_half, expected_int = fold_initial_lines(
+        np.linspace(-5.0, 5.0, 60, dtype=np.float64), half, 2.0
+    )
     plugin = _current_plugin(entrypoint, parameters, flux_plots)
     session = plugin.open(ManualOwnerScheduler())
     try:
         state = session.snapshot()
-        assert state.flux_half == pytest.approx(0.0 if half is None else half)
-        assert state.flux_int == pytest.approx(2.0)
+        assert state.flux_half == pytest.approx(expected_half)
+        assert state.flux_int == pytest.approx(expected_int)
         assert plugin.finish(session).flx_period == pytest.approx(
-            2 * abs(2.0 - (0.0 if half is None else half))
+            2 * abs(expected_int - expected_half)
         )
     finally:
         session.dispose()
