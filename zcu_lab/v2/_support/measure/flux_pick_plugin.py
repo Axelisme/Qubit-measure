@@ -64,7 +64,16 @@ def make_flux_pick_plugin(
     plots: Plots,
     result_builder: Callable[[FluxPickInputs, FluxPickState, Plots], FluxPickResult],
 ) -> FluxPickPlugin:
-    """Capture a read-only spectrum, fold the two calibrated seed positions."""
+    """Build a picker from the request's bare spectrum and fixed parameters.
+
+    req.run_result supplies signals, values and freqs; no RunRecord unwrap is
+    performed here. force_magnitude sets the initial magnitude-only mode.
+    Optional req.parameters supplies qubit.flux_half/flux_int through its
+    captured roles. None parameters or absent/null leaves use the line owner's
+    defaults. Invalid scalars, missing roles and unavailable sources propagate.
+    plots receives the terminal figure through result_builder on Finish; neither
+    current session state nor legacy md/ml is read, and values never convert.
+    """
     result = req.run_result
     inputs = FluxPickInputs(result.signals, result.values, result.freqs)
     half, integer = fold_initial_lines(
