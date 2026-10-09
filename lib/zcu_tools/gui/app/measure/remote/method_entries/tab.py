@@ -20,13 +20,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             10.0,
             "Create a new tab for the named adapter. Optional target binds its "
-            "first declared role to a concrete component without changing GUI "
-            "focus. Omission uses current focus. Unresolved roles return "
+            "first declared alias to a concrete component without changing global "
+            "aliases. Omission uses current global aliases. Unresolved aliases return "
             "precondition_failed/role_resolution_failed with role, focus, "
             "required_kind and detail. Returns {tab_id}.",
             (
                 required_string("adapter_name", "Adapter to instantiate"),
-                optional_string("target", "Concrete component for the primary role"),
+                optional_string("target", "Concrete component for the primary alias"),
             ),
         ),
         agent=AgentMethodPolicy(

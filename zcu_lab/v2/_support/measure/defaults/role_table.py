@@ -12,8 +12,8 @@ file. Two generic builders consume the data:
   replacing the 8 near-identical ``make_<role>_ref_default`` clones (and their
   ``@overload`` stubs).
 
-The seed value carriers (:class:`Md` / :class:`Source` / :data:`TRIG`) wrap the
-existing md-mechanism and the read-only value-source escape hatch. They resolve
+The seed value carriers (EvalValue / :class:`Source` / :data:`TRIG`) wrap
+canonical parameter references and the read-only value-source escape hatch. They resolve
 against the whole ``SessionEnv`` (predictor / device / project / …) while still
 materializing to direct/eval scalar leaves before the cfg tree leaves the builder.
 """
@@ -40,7 +40,6 @@ from zcu_tools.gui.session.value_lookup import ValueRef, resolve_value_ref
 from zcu_tools.program.v2.modules import AbsResetCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_has_key
 from zcu_lab.v2._support.measure.defaults.helpers import (
     make_trig_offset,
     patch_pulse_fields,
@@ -91,20 +90,8 @@ def make_cosine_waveform_spec_() -> CfgSectionSpec:
 
 
 # ---------------------------------------------------------------------------
-# Seed value carriers — the md-mechanism today, a ValueSource seam tomorrow.
+# Deferred calibration and registered value-source seeds.
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Md:
-    """A md-linked seed gated on ``key``: a live ``EvalValue`` (of ``expr`` when
-    given — for arithmetic like ``"best_ro_length + 0.1"`` — else of the bare
-    ``key``) when md has ``key``; otherwise ``default`` (a constant whose int/float
-    type is preserved, or a nested ``Md`` fallback chain)."""
-
-    key: str
-    default: float | int | Md = 0
-    expr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,25 +106,24 @@ class _Trig(Enum):
     TRIG = "trig"
 
 
-#: The readout trig-offset rule: ``EvalValue("timeFly + 0.05")`` when md has
-#: ``timeFly``, else ``DirectValue(0.55)`` (see ``make_trig_offset``).
+#: Deferred trigger time of flight in the resonator calibration.
 TRIG = _Trig.TRIG
 
-#: A seed value in a RoleDef: a raw scalar, an md-linked ``Md``, a registered
+#: A seed value in a RoleDef: a raw scalar, a deferred EvalValue, a registered
 #: ``Source``, or the ``TRIG`` rule (ro_cfg only).
-SeedVal = float | int | str | bool | Md | Source | _Trig
+SeedVal = float | int | str | bool | EvalValue | Source | _Trig
 
 
 def _resolve(ctx: SessionEnv, v: SeedVal) -> ScalarValue:
     """Lower a seed value to a scalar leaf (DirectValue / EvalValue)."""
-    if isinstance(v, Md):
-        if md_has_key(ctx, v.key):
-            return EvalValue(expr=v.expr if v.expr is not None else v.key)
-        return _resolve(ctx, v.default)
+    if isinstance(v, EvalValue):
+        return EvalValue(v.expr)
     if isinstance(v, Source):
         return DirectValue(resolve_value_ref(ValueRef(v.key, v.type_name), ctx.values))
     if v is TRIG:
-        return make_trig_offset(ctx, trig_expr="timeFly + 0.05", trig_fallback=0.55)
+        return make_trig_offset(
+            ctx, trig_expr="$resonator.ext.time_of_fly + 0.05", trig_fallback=0.55
+        )
     return DirectValue(v)
 
 
@@ -149,7 +135,7 @@ def _resolve(ctx: SessionEnv, v: SeedVal) -> ScalarValue:
 @dataclass(frozen=True)
 class Lib:
     """A library adopt policy: a module type (``None`` → waveform library) and the
-    preferred entry names in priority order (load-bearing)."""
+    canonical module slot paths in priority order."""
 
     module_type: type | None
     prefer: tuple[str, ...]
@@ -236,20 +222,6 @@ def _nested_ref(role_id: str, ctx: SessionEnv, *, optional: bool) -> _RefNode | 
     return role_ref(role, ctx, optional=optional)
 
 
-def _adopt_waveform(value: CfgSectionValue, ctx: SessionEnv, name: str) -> None:
-    """Adopt a library waveform into the pulse's ``waveform`` sub-ref when present
-    (mirrors the readout factories' ro_waveform block)."""
-    from zcu_tools.gui.app.measure.cfg_schemas import waveform_cfg_to_value
-
-    pulse_cfg = value.fields.get("pulse_cfg")
-    if not isinstance(pulse_cfg, CfgSectionValue):
-        return
-    waveform_ref = pulse_cfg.fields.get("waveform")
-    if isinstance(waveform_ref, ReferenceValue) and name in ctx.ml.waveforms:
-        _, wav_val = waveform_cfg_to_value(ctx.ml.waveforms[name])
-        pulse_cfg.fields["waveform"] = ReferenceValue(chosen_key=name, value=wav_val)
-
-
 def role_blank(role: RoleDef, ctx: SessionEnv) -> _RefNode:
     """Assemble a role's blank value tree from its data (never a library lookup)."""
     value = make_default_value(role.shape())
@@ -278,9 +250,6 @@ def role_blank(role: RoleDef, ctx: SessionEnv) -> _RefNode:
     if role.wf_length is not None:
         value.with_field("length", _resolve(ctx, role.wf_length))
 
-    if role.adopt_waveform is not None:
-        _adopt_waveform(value, ctx, role.adopt_waveform)
-
     if role.is_waveform:
         return ReferenceValue(chosen_key=role.tag, value=value)
     return ReferenceValue(role.tag, value)
@@ -289,45 +258,33 @@ def role_blank(role: RoleDef, ctx: SessionEnv) -> _RefNode:
 def role_ref(
     role: RoleDef, ctx: SessionEnv, *, optional: bool = False
 ) -> _RefNode | None:
-    """Library-aware mount: adopt the first preferred-named library entry, else the
-    blank (or ``None`` when ``optional`` and nothing matches, ADR-0010)."""
-    from zcu_tools.gui.app.measure.cfg_schemas import (
-        module_cfg_to_value,
-        waveform_cfg_to_value,
-    )
+    """Mount a canonical slot, retaining SMART's optional/blank fallback.
+
+    Missing aliases remain linked empty until refresh binds them. Bound unset
+    slots use None for optional roles or a fresh inline role otherwise. Source,
+    malformed module and materialization failures propagate. No legacy names
+    or live session library are consulted.
+    """
+    from zcu_lab.v2._support.measure.seeds import custom, module_seed
 
     lib = role.lib
-    if lib is None:
-        raise RuntimeError(f"role {role.tag!r} has no library policy (ref unsupported)")
-    if ctx.parameters is not None:
-        library = ctx.parameters.library
-        if lib.module_type is None:
-            keys = library.waveform_keys()
-            for name in lib.prefer:
-                if name in keys:
-                    _, value = waveform_cfg_to_value(library.get_waveform(name))
-                    return ReferenceValue(chosen_key=name, value=value)
-        else:
-            keys = library.module_keys()
-            for name in lib.prefer:
-                if name in keys:
-                    module = library.get_module(name)
-                    if isinstance(module, lib.module_type):
-                        _, value = module_cfg_to_value(module)
-                        return ReferenceValue(chosen_key=name, value=value)
-    if optional:
-        return None
-    return role_blank(role, ctx)
+    if lib is None or lib.module_type is None:
+        raise RuntimeError(f"role {role.tag!r} has no module slot policy")
+    fallback = (
+        None
+        if optional
+        else custom(lambda env: role_blank(role, env), description=f"inline:{role.tag}")
+    )
+    return module_seed(lib.prefer[0], fallback=fallback).resolve(ctx)
 
 
 # ---------------------------------------------------------------------------
 # ROLE_TABLE — the single declarative source of every role default.
 # ---------------------------------------------------------------------------
 
-# Shared seed: a blank qubit pulse. Channel selection follows the qubit wiring
-# aliases used by setup files before falling back to the legacy numeric default.
-_QUB_CH = Md("qub_ch", Md("qub_1_4_ch", Md("qub_4_5_ch", 0)))
-_QUB_PULSE: tuple[Pulse, ...] = (Pulse(Md("q_f", 4000.0), _QUB_CH, 0.1, 5.1),)
+# Shared inline qubit pulse reads canonical scalar and wiring calibration.
+_QUB_CH = EvalValue("$qubit.wiring.L01.ch")
+_QUB_PULSE: tuple[Pulse, ...] = (Pulse(EvalValue("$qubit.freq"), _QUB_CH, 0.1, 5.1),)
 
 ROLE_TABLE: dict[str, RoleDef] = {
     # qubit / resonator probe pulses
@@ -335,31 +292,38 @@ ROLE_TABLE: dict[str, RoleDef] = {
         make_pulse_spec_,
         make_custom_reference_key("Pulse"),
         _QUB_PULSE,
-        lib=Lib(PulseCfg, ("qub_probe",)),
+        lib=Lib(PulseCfg, ("$qubit.module.probe",)),
     ),
     "res_probe": RoleDef(
         make_pulse_spec_,
         make_custom_reference_key("Pulse"),
-        (Pulse(Md("r_f", 6000.0), Md("res_ch", 0), 0.05, 1.0),),
-        lib=Lib(PulseCfg, ("res_probe",)),
+        (
+            Pulse(
+                EvalValue("$resonator.freq"),
+                EvalValue("$resonator.wiring.ch"),
+                0.05,
+                1.0,
+            ),
+        ),
+        lib=Lib(PulseCfg, ("$resonator.module.probe",)),
     ),
     "pi_pulse": RoleDef(
         make_pulse_spec_,
         make_custom_reference_key("Pulse"),
         _QUB_PULSE,
-        lib=Lib(PulseCfg, ("pi_amp", "pi_len")),
+        lib=Lib(PulseCfg, ("$qubit.module.x180",)),
     ),
     "rabi_pulse": RoleDef(
         make_pulse_spec_,
         make_custom_reference_key("Pulse"),
         _QUB_PULSE,
-        lib=Lib(PulseCfg, ("pi_len", "pi_amp")),
+        lib=Lib(PulseCfg, ("$qubit.module.x180",)),
     ),
     "pi2_pulse": RoleDef(
         make_pulse_spec_,
         make_custom_reference_key("Pulse"),
         _QUB_PULSE,
-        lib=Lib(PulseCfg, ("pi2_amp", "pi2_len")),
+        lib=Lib(PulseCfg, ("$qubit.module.x90",)),
     ),
     # readout: "readout" is the library-aware pulse readout (ModuleInit.SMART prefers a
     # calibrated library entry; ModuleInit.INLINE seeds a fresh inline pulse readout —
@@ -368,39 +332,45 @@ ROLE_TABLE: dict[str, RoleDef] = {
     "readout": RoleDef(
         make_pulse_readout_spec_,
         make_custom_reference_key("Pulse Readout"),
-        (Pulse(Md("r_f", 6000.0), Md("res_ch", 0), 0.1, 1.0, at="pulse_cfg"),),
-        ro=Ro(Md("r_f", 6000.0), Md("ro_ch", 0)),
-        adopt_waveform="ro_waveform",
-        lib=Lib(
-            PulseReadoutCfg, ("readout_dpm", "readout_rf", "readout", "res_readout")
+        (
+            Pulse(
+                EvalValue("$resonator.freq"),
+                EvalValue("$resonator.wiring.ch"),
+                0.1,
+                1.0,
+                at="pulse_cfg",
+            ),
         ),
+        ro=Ro(EvalValue("$resonator.freq"), EvalValue("$resonator.wiring.ro_ch")),
+        lib=Lib(PulseReadoutCfg, ("$qubit.module.readout",)),
     ),
     "direct_readout": RoleDef(
         make_direct_readout_spec_,
         make_custom_reference_key("Direct Readout"),
-        ro=Ro(Md("r_f", 6000.0), Md("ro_ch", 0), at=""),
+        ro=Ro(
+            EvalValue("$resonator.freq"), EvalValue("$resonator.wiring.ro_ch"), at=""
+        ),
     ),
     # readout_dpm: the optimized pulse readout, seeded all-live from the
     # ro_optimize outputs (best_ro_*). The pulse window is best_ro_length + 0.1us,
-    # the acquisition window is best_ro_length; freq falls back to r_f then 6000.
+    # the acquisition window is best_ro_length; missing calibration remains Invalid.
     "readout_dpm": RoleDef(
         make_pulse_readout_spec_,
         make_custom_reference_key("Pulse Readout"),
         (
             Pulse(
-                Md("best_ro_freq", Md("r_f", 6000.0)),
-                Md("res_ch", 0),
-                Md("best_ro_gain", 0.1),
-                Md("best_ro_length", 1.1, expr="best_ro_length + 0.1"),
+                EvalValue("$qubit.ext.best_ro_freq"),
+                EvalValue("$resonator.wiring.ch"),
+                EvalValue("$qubit.ext.best_ro_gain"),
+                EvalValue("$qubit.ext.best_ro_length + 0.1"),
                 at="pulse_cfg",
             ),
         ),
         ro=Ro(
-            Md("best_ro_freq", Md("r_f", 6000.0)),
-            Md("ro_ch", 0),
-            Md("best_ro_length", 1.0),
+            EvalValue("$qubit.ext.best_ro_freq"),
+            EvalValue("$resonator.wiring.ro_ch"),
+            EvalValue("$qubit.ext.best_ro_length"),
         ),
-        adopt_waveform="ro_waveform",
     ),
     # reset: "reset" is the library-aware pulse reset (ModuleInit.SMART prefers a
     # calibrated library entry; ModuleInit.INLINE seeds a fresh inline pulse reset — the
@@ -409,8 +379,8 @@ ROLE_TABLE: dict[str, RoleDef] = {
     "reset": RoleDef(
         make_pulse_reset_spec_,
         make_custom_reference_key("Pulse Reset"),
-        (Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="pulse_cfg"),),
-        lib=Lib(AbsResetCfg, ("reset_bath", "reset_10", "reset_120")),
+        (Pulse(EvalValue("$qubit.freq"), _QUB_CH, 0.2, 1.0, at="pulse_cfg"),),
+        lib=Lib(AbsResetCfg, ("$qubit.module.reset",)),
     ),
     "none_reset": RoleDef(
         make_none_reset_spec_, make_custom_reference_key("None Reset")
@@ -419,16 +389,22 @@ ROLE_TABLE: dict[str, RoleDef] = {
         make_two_pulse_reset_spec_,
         make_custom_reference_key("Two-Pulse Reset"),
         (
-            Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="pulse1_cfg"),
-            Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="pulse2_cfg"),
+            Pulse(EvalValue("$qubit.freq"), _QUB_CH, 0.2, 1.0, at="pulse1_cfg"),
+            Pulse(EvalValue("$qubit.freq"), _QUB_CH, 0.2, 1.0, at="pulse2_cfg"),
         ),
     ),
     "bath_reset": RoleDef(
         make_bath_reset_spec_,
         make_custom_reference_key("Bath Reset"),
         (
-            Pulse(Md("r_f", 6000.0), Md("res_ch", 0), 0.1, 1.0, at="cavity_tone_cfg"),
-            Pulse(Md("q_f", 4000.0), _QUB_CH, 0.2, 1.0, at="qubit_tone_cfg"),
+            Pulse(
+                EvalValue("$resonator.freq"),
+                EvalValue("$resonator.wiring.ch"),
+                0.1,
+                1.0,
+                at="cavity_tone_cfg",
+            ),
+            Pulse(EvalValue("$qubit.freq"), _QUB_CH, 0.2, 1.0, at="qubit_tone_cfg"),
         ),
         refs=(Ref("pi2_cfg", "pi2_pulse"),),
     ),
@@ -438,13 +414,11 @@ ROLE_TABLE: dict[str, RoleDef] = {
         make_custom_reference_key("Cosine"),
         wf_length=0.1,
         is_waveform=True,
-        lib=Lib(None, ("qub_flat", "qub_cos")),
     ),
     "res_waveform": RoleDef(
         make_const_waveform_spec_,
         make_custom_reference_key("Const"),
         wf_length=1.0,
         is_waveform=True,
-        lib=Lib(None, ("res_flat", "res_const")),
     ),
 }

@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.jpa_shared import lower_jpa_flux_dev
 from zcu_lab.v2._support.measure.schema_builder import (
@@ -67,17 +68,16 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
             "interface) before running."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'best_jpa_flux' — a "
-            "previously accepted JPA flux device value, preferred as the flux "
-            "sweep centre; 'r_f' — resonator frequency, centring the readout "
-            "frequency sweep; 'rf_w' — linewidth, setting the span as "
-            "r_f ± 1.5*rf_w; 'res_ch' / 'ro_ch' — drive / ADC channels; "
-            "'timeFly' — cable time-of-flight for the trigger offset."
+            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
+            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
+            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
+            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
+            "Missing aliases or calibration leave cfg Invalid; no static fallback."
         ),
         expects_ml=(
-            "Needs a pulse-readout module (e.g. 'readout_rf'); references a "
-            "ModuleLibrary waveform named 'ro_waveform' when present. "
-            "Optionally references a reset module."
+            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
+            "optional $qubit.module.reset. Inline readout uses resonator scalar "
+            "and wiring calibration; module waveforms follow their module source."
         ),
         typical_writeback=(
             "No writeback — this adapter has no analysis step (the "
@@ -87,13 +87,21 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
         ),
         recommended=(
             "No analysis options. Typical sweep: JPA flux device value ~101 "
-            "points around the seeded centre (best_jpa_flux when present), "
+            "points around the seeded centre ($jpa.flux), "
             "readout frequency ~101 points spanning 1.5 linewidths around "
             "'r_f'. Confirm the JPA pump state yourself before every run. "
             "Survey the map wide first, then narrow the ranges around the "
             "response you want to inspect."
         ),
     )
+
+    def parameter_roles(self) -> dict[str, RoleSpec]:
+        """Declare consumer kinds; bindings come only from the global alias table."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator"),
+            "jpa": RoleSpec("amplifier/jpa"),
+        }
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

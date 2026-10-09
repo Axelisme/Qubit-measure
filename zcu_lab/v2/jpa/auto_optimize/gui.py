@@ -28,6 +28,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.jpa_shared import (
     lower_jpa_flux_dev,
@@ -121,22 +122,16 @@ class JpaAutoOptimizeAdapter(
             "limits."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'best_jpa_flux' — a "
-            "previously accepted JPA flux device value, preferred as the flux "
-            "search centre; 'best_jpa_freq' — a previously accepted pump "
-            "frequency, preferred as the frequency search centre; "
-            "'best_jpa_power' — a previously accepted pump power, preferred "
-            "as the power search centre; 'r_f' — resonator frequency, "
-            "seeding the pump search near 2*r_f; 'res_ch' / 'ro_ch' — drive "
-            "/ ADC channels; 'timeFly' — cable time-of-flight for the trigger "
-            "offset; 'q_f' / 'qub_ch' — qubit frequency / drive channel for "
-            "the g↔e pi pulse."
+            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
+            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
+            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
+            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
+            "Missing aliases or calibration leave cfg Invalid; no static fallback."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module (typically a calibrated pi "
-            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
-            "'readout_rf'); references a ModuleLibrary waveform named "
-            "'ro_waveform' when present. Optionally references a reset module."
+            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
+            "optional $qubit.module.reset. Inline readout uses resonator scalar "
+            "and wiring calibration; module waveforms follow their module source."
         ),
         typical_writeback=(
             "Proposes the signal-maximizing flux device value, pump frequency "
@@ -158,6 +153,14 @@ class JpaAutoOptimizeAdapter(
             "evaluated point with no tuning knobs."
         ),
     )
+
+    def parameter_roles(self) -> dict[str, RoleSpec]:
+        """Declare consumer kinds; bindings come only from the global alias table."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator"),
+            "jpa": RoleSpec("amplifier/jpa"),
+        }
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
