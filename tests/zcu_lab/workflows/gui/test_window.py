@@ -2129,6 +2129,40 @@ def test_window_start_explicit_empty_batch_uses_defaults_not_the_gui_draft(
     }
 
 
+@pytest.mark.parametrize("method", ["gui", "rpc"])
+def test_start_submit_failure_preserves_error_and_allows_window_close(
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
+    rpc: RpcRequest,
+    method: str,
+) -> None:
+    window, harness, entry = run_attachment
+    controller = window.controller
+    harness.background.fail_submit = True
+    if method == "gui":
+        with pytest.raises(OSError, match="submit failed"):
+            window.start("submit-error")
+    else:
+        reply = rpc(
+            "workflow.start",
+            {
+                "run_id": "submit-error",
+                "plan": _start_plan_batch(inputs),
+                "tunables": [],
+            },
+        )
+        assert reply["ok"] is False
+        error = reply["error"]
+        assert isinstance(error, dict) and error["code"] == "controller_error"
+        assert "submit failed" in error["message"]
+    assert window.controller is controller
+    assert harness.handles.live_count() == 0
+    assert not harness.gate.snapshot()
+    assert not (entry.result_path / "workflows").exists()
+    assert not (entry.database_path / "workflows").exists()
+    assert window.close()
+
+
 def test_rpc_start_native_submit_failure_does_not_install_new_panel_bases(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     inputs: Inputs,
