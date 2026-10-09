@@ -8,9 +8,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from qtpy.QtWidgets import QLineEdit, QPushButton
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
+from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 
 from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, make_cfg
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
@@ -205,8 +208,6 @@ def test_main_window_follow_selects_subpane_on_already_selected_tab(
 
 
 def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget):
-    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-
     ctrl = make_ctrl()
     snap_none = make_snapshot(
         "tab-1", analysis=AnalysisMode.NONE, post=False, load=False
@@ -222,16 +223,22 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     # Prove absent Analysis/Post pages and controls/containers were never constructed, not only hidden
     assert not hasattr(tab_none, "analyze_form")
     assert not hasattr(tab_none, "writeback_widget")
-    assert not tab_none._save_center.has_artifact(
-        ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    center_none = tab_none.findChild(ArtifactSaveCenter)
+    assert center_none is not None
+    assert (
+        len(
+            [
+                button
+                for button in center_none.findChildren(QPushButton)
+                if button.text() == "Save"
+            ]
+        )
+        == 1
     )
     assert not hasattr(tab_none, "_analysis_panel")
     assert not hasattr(tab_none, "_analysis_container")
     assert not hasattr(tab_none, "post_analyze_form")
     assert not hasattr(tab_none, "post_writeback_widget")
-    assert not tab_none._save_center.has_artifact(
-        ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
-    )
     assert not hasattr(tab_none, "_post_panel")
     assert not hasattr(tab_none, "_post_container")
     with pytest.raises(RuntimeError, match="does not support analysis"):
@@ -255,8 +262,17 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     ]
     assert visible_analysis == ["Run", "Analysis", "Data", "Guide"]
     assert hasattr(tab_analysis, "analyze_form")
-    assert tab_analysis._save_center.has_artifact(
-        ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    center_analysis = tab_analysis.findChild(ArtifactSaveCenter)
+    assert center_analysis is not None
+    assert (
+        len(
+            [
+                button
+                for button in center_analysis.findChildren(QPushButton)
+                if button.text() == "Save"
+            ]
+        )
+        == 2
     )
     assert not hasattr(tab_analysis, "post_analyze_form")
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
@@ -273,8 +289,8 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     assert hasattr(tab_both, "analyze_form")
     assert hasattr(tab_both, "post_analyze_form")
 
-    assert not tab_none._save_center.is_load_visible()
-    assert tab_analysis._save_center.is_load_visible()
+    assert center_none.load_button.isHidden()
+    assert not center_analysis.load_button.isHidden()
 
     tab_none.detach()
     tab_analysis.detach()
@@ -483,29 +499,32 @@ def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
     )
     assert snap.capabilities is not None
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
-    tab.attach(snap, MagicMock())
-
-    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-
-    analysis_key = ArtifactKey(ArtifactKind.ANALYSIS, "fit")
-    post_key = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
-    assert all(
-        tab._save_center.has_artifact(key)
-        for key in (ArtifactKey(ArtifactKind.DATA), analysis_key, post_key)
-    )
-    tab.set_data_path("/tmp/data.hdf5")
-    tab.set_image_path(analysis_key, "/tmp/a.png")
-    tab.set_image_path(post_key, "/tmp/p.png")
-    assert tab.get_data_path() == "/tmp/data.hdf5"
-    assert tab.get_image_path(analysis_key) == "/tmp/a.png"
-    assert tab.get_image_path(post_key) == "/tmp/p.png"
-
-    tab.set_data_path("")
-    tab.set_image_path(analysis_key, "")
-    tab.set_image_path(post_key, "")
-    assert tab.get_data_path() == ""
-    assert tab.get_image_path(analysis_key) == ""
-    assert tab.get_image_path(post_key) == ""
+    actions = MagicMock()
+    tab.attach(snap, actions)
+    center = tab.findChild(ArtifactSaveCenter)
+    assert center is not None
+    edits = center.findChildren(QLineEdit)
+    assert all(edit.isReadOnly() for edit in edits)
+    assert [edit.text() for edit in edits] == [
+        str(output.path)
+        for section in snap.artifacts
+        for artifact in section.artifacts
+        for member in artifact.members
+        for output in member.outputs
+    ]
+    buttons = [
+        button for button in center.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(buttons) == 3
+    for button in buttons:
+        button.click()
+    assert [call.args for call in actions.save_artifact.call_args_list] == [
+        ("tab-1", ArtifactRef("run", "measurement_data")),
+        ("tab-1", ArtifactRef("analysis", "results")),
+        ("tab-1", ArtifactRef("post_analysis", "results")),
+    ]
+    center.save_all_button.click()
+    assert [call.args for call in actions.save_all.call_args_list] == [("tab-1",)]
     tab._left_tabs.setCurrentWidget(tab._save_panel)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
     assert tab._right_stack.currentWidget() is tab._data_gallery
