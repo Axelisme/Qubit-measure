@@ -1013,7 +1013,32 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
         assert fields["span_mhz"]["source"] == span_source
         assert fields["reps"]["value"] == 17
         assert fields["rounds"]["value"] == 3
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == {
+            "run_id": "run-a",
+            "artifacts": {
+                "raw": {
+                    "data": {
+                        "status": "Saved",
+                        "members": {
+                            "data": [
+                                {
+                                    "format": "data_h5",
+                                    "path": "/runs/run-a/data.h5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                                {
+                                    "format": "labber",
+                                    "path": "/labber/raw.hdf5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                            ]
+                        },
+                    }
+                }
+            },
+        }
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"][0]["proposed"] == 0.24
         assert reply.images
