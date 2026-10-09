@@ -53,12 +53,14 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
     emit = MagicMock()
     bus.emit = emit  # type: ignore[method-assign]
     writeback = MagicMock()
+    context = MagicMock()
+    context.read_context.side_effect = lambda: state.session_env.parameters
     return (
         LoadService(
             state,
             writeback,
             provide_options=lambda source_id: (),
-            context=MagicMock(),
+            context=context,
             captured_parameters=lambda _roles, _target: state.session_env.parameters,
         ),
         emit,
@@ -99,6 +101,7 @@ def test_load_retains_request_and_history_without_foreign_analysis_fallback(
         assert request.parameters.value("source_qubit.rate") == 1.0
     assert tab.run.result is loaded
     assert tab.run.parameters is None
+    assert tab.run.storage is None
     assert tab.run.source_operation_id is None
     assert tab.run.metadata is metadata
     state.clear_tab_results(tab_id)
