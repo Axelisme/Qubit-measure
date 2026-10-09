@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 import pytest
 from zcu_tools.gui.cfg import (
+    CfgNodeSpec,
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
@@ -17,10 +16,15 @@ from zcu_tools.gui.cfg import (
 )
 
 
-def _readout_pulse_freq(spec: CfgSectionSpec) -> Any:
-    """Dig to allowed[0].pulse_cfg.freq (test navigation, cast past the union)."""
-    ref = cast(Any, spec.fields["modules"]).fields["readout"]
-    return ref.allowed[0].fields["pulse_cfg"].fields["freq"]
+def _readout_pulse_freq(spec: CfgSectionSpec) -> CfgNodeSpec:
+    """Read allowed[0].pulse_cfg.freq through the public spec nodes."""
+    modules = spec.fields["modules"]
+    assert isinstance(modules, CfgSectionSpec)
+    ref = modules.fields["readout"]
+    assert isinstance(ref, ReferenceSpec)
+    pulse_cfg = ref.allowed[0].fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionSpec)
+    return pulse_cfg.fields["freq"]
 
 
 def _nested_spec() -> CfgSectionSpec:
@@ -72,9 +76,17 @@ def test_lock_literal_returns_new_frozen_spec_original_untouched():
 def test_lock_literal_duck_type_skips_allowed_without_path():
     spec = _nested_spec()
     locked = spec.lock_literal("modules.readout.pulse_cfg.freq", 0.0)
-    shape_b = cast(Any, locked.fields["modules"]).fields["readout"].allowed[1]
+    locked_modules = locked.fields["modules"]
+    assert isinstance(locked_modules, CfgSectionSpec)
+    locked_readout = locked_modules.fields["readout"]
+    assert isinstance(locked_readout, ReferenceSpec)
+    shape_b = locked_readout.allowed[1]
     # shape B has no pulse_cfg → untouched (same object identity preserved)
-    orig_b = cast(Any, spec.fields["modules"]).fields["readout"].allowed[1]
+    orig_modules = spec.fields["modules"]
+    assert isinstance(orig_modules, CfgSectionSpec)
+    orig_readout = orig_modules.fields["readout"]
+    assert isinstance(orig_readout, ReferenceSpec)
+    orig_b = orig_readout.allowed[1]
     assert shape_b is orig_b
 
 
@@ -102,11 +114,15 @@ def test_module_ref_spec_lock_literal_is_chain_start():
     ref = ReferenceSpec(kind="module", allowed=[inner])
     locked = ref.lock_literal("pulse_cfg.freq", 0.0)
     assert isinstance(locked, ReferenceSpec)
-    leaf = cast(Any, locked.allowed[0]).fields["pulse_cfg"].fields["freq"]
+    locked_pulse_cfg = locked.allowed[0].fields["pulse_cfg"]
+    assert isinstance(locked_pulse_cfg, CfgSectionSpec)
+    leaf = locked_pulse_cfg.fields["freq"]
     assert isinstance(leaf, LiteralSpec)
     assert leaf.value == 0.0
     # original untouched (frozen)
-    orig = cast(Any, ref.allowed[0]).fields["pulse_cfg"].fields["freq"]
+    orig_pulse_cfg = ref.allowed[0].fields["pulse_cfg"]
+    assert isinstance(orig_pulse_cfg, CfgSectionSpec)
+    orig = orig_pulse_cfg.fields["freq"]
     assert isinstance(orig, ScalarSpec)
 
 
@@ -149,7 +165,7 @@ def test_lock_literal_descends_into_waveform_ref_via_module_ref():
     ReferenceSpec — symmetric with the ReferenceSpec descent."""
     ref = ReferenceSpec(kind="module", allowed=[_pulse_with_waveform()])
     locked = ref.lock_literal("waveform.length", 0.0)
-    wf = cast(Any, locked.allowed[0]).fields["waveform"]
+    wf = locked.allowed[0].fields["waveform"]
     assert isinstance(wf, ReferenceSpec)
     # every allowed waveform shape with a 'length' leaf is locked (duck-typed)
     for shape in wf.allowed:
@@ -184,12 +200,12 @@ def test_lock_literal_descends_waveform_ref_via_full_section_path():
         }
     )
     locked = spec.lock_literal("modules.qub_pulse.waveform.length", 0.0)
-    wf = (
-        cast(Any, locked.fields["modules"])
-        .fields["qub_pulse"]
-        .allowed[0]
-        .fields["waveform"]
-    )
+    modules = locked.fields["modules"]
+    assert isinstance(modules, CfgSectionSpec)
+    qub_pulse = modules.fields["qub_pulse"]
+    assert isinstance(qub_pulse, ReferenceSpec)
+    wf = qub_pulse.allowed[0].fields["waveform"]
+    assert isinstance(wf, ReferenceSpec)
     assert all(isinstance(s.fields["length"], LiteralSpec) for s in wf.allowed)
 
 
@@ -223,22 +239,31 @@ def test_with_field_sets_scalar_in_place_and_returns_self():
     val = _nested_value()
     out = val.with_field("readout.pulse_cfg.gain", 0.05)
     assert out is val  # in-place, returns self
-    assert (
-        cast(Any, val.fields["readout"]).value.fields["pulse_cfg"].fields["gain"].value
-        == 0.05
-    )
+    readout = val.fields["readout"]
+    assert isinstance(readout, ReferenceValue)
+    pulse_cfg = readout.value.fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    gain = pulse_cfg.fields["gain"]
+    assert isinstance(gain, DirectValue)
+    assert gain.value == 0.05
 
 
 def test_with_field_chains():
     val = _nested_value()
     val.with_field("readout.pulse_cfg.gain", 0.05).with_field("reps", 200)
-    assert cast(Any, val.fields["reps"]).value == 200
+    reps = val.fields["reps"]
+    assert isinstance(reps, DirectValue)
+    assert reps.value == 200
 
 
 def test_with_field_accepts_prebuilt_eval_value():
     val = _nested_value()
     val.with_field("readout.pulse_cfg.freq", EvalValue("q_f", 4000.0))
-    leaf = cast(Any, val.fields["readout"]).value.fields["pulse_cfg"].fields["freq"]
+    readout = val.fields["readout"]
+    assert isinstance(readout, ReferenceValue)
+    pulse_cfg = readout.value.fields["pulse_cfg"]
+    assert isinstance(pulse_cfg, CfgSectionValue)
+    leaf = pulse_cfg.fields["freq"]
     assert isinstance(leaf, EvalValue)
     assert leaf.expr == "q_f"
 
@@ -248,7 +273,9 @@ def test_with_field_module_ref_with_field_delegates():
     ref = ReferenceValue(chosen_key="<Custom:X>", value=inner)
     out = ref.with_field("gain", 0.3)
     assert out is ref
-    assert cast(Any, ref.value.fields["gain"]).value == 0.3
+    gain = ref.value.fields["gain"]
+    assert isinstance(gain, DirectValue)
+    assert gain.value == 0.3
 
 
 def test_with_field_raises_on_bad_descent():
