@@ -38,10 +38,6 @@ def make_ctrl():
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.update_tab_data_path = MagicMock()
-    ctrl.update_tab_analysis_image_path = MagicMock()
-    ctrl.update_tab_post_analysis_image_path = MagicMock()
-    ctrl.update_tab_save_paths = MagicMock()
     ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
     ctrl.get_cfg_editor_draft.return_value = MagicMock()
     ctrl.active_operation_count.return_value = 0
