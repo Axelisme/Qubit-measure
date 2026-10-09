@@ -89,7 +89,18 @@ def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_pa
         }
         assert full["writeback"]["destination_context"] == destination
         assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
-            {"path": "/actual/raw.h5", "status": "saved"}
+            {
+                "format": "data_h5",
+                "path": "/runs/run-a/data.h5",
+                "status": "saved",
+                "error": None,
+            },
+            {
+                "format": "labber",
+                "path": "/labber/raw.hdf5",
+                "status": "saved",
+                "error": None,
+            },
         ]
 
 
@@ -337,7 +348,18 @@ def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
                 "reason": "completed",
             }
             assert confirmed["artifacts"]["raw"]["data"]["members"]["data"] == [
-                {"path": "/actual/raw.h5", "status": "saved"}
+                {
+                    "format": "data_h5",
+                    "path": "/runs/run-a/data.h5",
+                    "status": "saved",
+                    "error": None,
+                },
+                {
+                    "format": "labber",
+                    "path": "/labber/raw.hdf5",
+                    "status": "saved",
+                    "error": None,
+                },
             ]
             assert [method for method, _ in client.transport.sent].count(
                 "tab.run_start"
@@ -414,7 +436,7 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         summary = client.call("status", {"execution": execution})
         full = client.call("status", {"execution": execution, "detail": "full"})
         assert summary["execution"] == full["execution"] == execution
-        assert summary["run_id"] is None
+        assert summary["run_id"] == full["raw_save"]["run_id"] == "run-a"
         assert summary["actual"]["cfg_ref"] == full["actual"]["cfg_ref"]
         assert summary["actual"]["parameters"]["frequency_mhz"] == {
             "value": 6020.0,
@@ -436,13 +458,50 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         assert summary["analysis"]["primary"]["params"] == {"threshold": 0.5}
         assert summary["analysis"]["primary"]["details"] == {"offset": 0.24}
         assert summary["artifacts"]["raw"]["data"] == {
-            "status": "saved",
-            "lifetime": "persistent",
-            "members": {"data": [{"path": "/actual/raw.h5", "status": "saved"}]},
+            "status": "Saved",
+            "members": {
+                "data": [
+                    {
+                        "format": "data_h5",
+                        "path": "/runs/run-a/data.h5",
+                        "status": "saved",
+                        "error": None,
+                    },
+                    {
+                        "format": "labber",
+                        "path": "/labber/raw.hdf5",
+                        "status": "saved",
+                        "error": None,
+                    },
+                ]
+            },
         }
-        assert summary["artifacts"]["analysis"]["trace"]["members"] == {
-            "image": [{"path": "/actual/trace.png", "status": "saved"}]
+        assert summary["artifacts"]["raw"] == full["raw_save"]["artifacts"]["raw"]
+        assert summary["artifacts"]["analysis"]["results"] == {
+            "status": "Saved",
+            "members": {
+                "analysis:primary": [
+                    {
+                        "format": "json",
+                        "path": "/runs/run-a/analysis/results.json",
+                        "status": "saved",
+                        "error": None,
+                    }
+                ],
+                "figure:trace": [
+                    {
+                        "format": "png",
+                        "path": "/runs/run-a/analysis/trace.png",
+                        "status": "saved",
+                        "error": None,
+                    }
+                ],
+            },
         }
+        assert (
+            summary["artifacts"]["analysis"]
+            == full["analysis"]["save_report"]["artifacts"]["analysis"]
+        )
         candidate = summary["writeback"]["stages"]["primary"][0]
         assert candidate == {
             "id": "md-1",
