@@ -1,20 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import asdict, replace
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
     ContextReadiness,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import (
     SaveStatus,
 )
+from zcu_tools.gui.app.measure.services.ports import TabSnapshot
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
     AnalysisPaneState,
@@ -287,7 +289,7 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
         service.initialize_tab_post_analyze_params("tab")
 
 
-def _native_snapshot(session: NativeSaveSession):
+def _native_snapshot(session: NativeSaveSession) -> TabSnapshot:
     return TabService(
         session.state,
         registry=MagicMock(),
@@ -299,7 +301,7 @@ def _native_snapshot(session: NativeSaveSession):
 
 
 @pytest.fixture
-def native_session(tmp_path, qapp):
+def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSession]:
     with native_save_session(tmp_path, qapp) as session:
         yield session
 
