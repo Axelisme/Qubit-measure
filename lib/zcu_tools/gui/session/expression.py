@@ -104,6 +104,9 @@ def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scal
     None permits pure calculation only; parameter/library references raise
     ExpressionError. Resolve paths through ParameterContext, never the live
     session. Retain numeric limits, math functions, constants and XOR semantics.
+    Parameter complex tags decode through the shared scalar codec; the captured
+    context itself still returns raw YAML. Malformed tags raise ExpressionError
+    naming the path and retain the codec error as cause. Strings are not decoded.
     Invalid grammar, missing/non-numeric paths and arithmetic failures raise.
     """
     tree = _parse_expression(expr)

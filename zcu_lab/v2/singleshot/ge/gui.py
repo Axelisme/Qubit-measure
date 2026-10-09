@@ -175,12 +175,11 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             "the inline pulse and readout timing before Run."
         ),
         typical_writeback=(
-            "Primary proposes the fitted assignment fidelity into MetaDict 'fid', the "
-            "cluster width into 'ge_s', and the complex discrimination centres into "
-            "'g_center' / 'e_center'. Post-Analysis proposes the optimised "
-            "classification radius into 'ge_radius' and the 3x3 confusion matrix "
-            "(nested list) into 'confusion_matrix' (a non-scalar, read-only "
-            "writeback item)."
+            "Writes to the captured qubit.ext.readout_cal: primary proposes "
+            "fidelity, sigma, g_center and e_center; post-analysis proposes "
+            "radius and the nested-list confusion_matrix. Centers remain native "
+            "complex proposals; accepted values use the shared __complex__ tag. "
+            "Changing point or focus does not retarget an existing proposal."
         ),
         recommended=(
             "Set Initial State to the predominant state after reset/init and before "
@@ -306,29 +305,25 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         result.validate_calibration()
-        # Float scalars plus the complex discrimination centres. complex md
-        # values round-trip end-to-end now (in-process apply + MetaDict str
-        # persistence both speak complex; the wire carries {"__complex__": [...]}
-        # and the UI parses "re+imj"). Mirrors the notebook's md.g_center /
-        # md.e_center.
+        # AcceptedWrite owns native complex conversion; producers keep numbers.
         return [
             MetaDictWriteback(
-                target_name="fid",
+                target_name="qubit.ext.readout_cal.fidelity",
                 description="Single-shot assignment fidelity",
                 proposed_value=result.fidelity,
             ),
             MetaDictWriteback(
-                target_name="ge_s",
+                target_name="qubit.ext.readout_cal.sigma",
                 description="Single-shot IQ cluster width (s)",
                 proposed_value=result.ge_s,
             ),
             MetaDictWriteback(
-                target_name="g_center",
+                target_name="qubit.ext.readout_cal.g_center",
                 description="Single-shot |g> IQ cluster centre (complex)",
                 proposed_value=result.g_center,
             ),
             MetaDictWriteback(
-                target_name="e_center",
+                target_name="qubit.ext.readout_cal.e_center",
                 description="Single-shot |e> IQ cluster centre (complex)",
                 proposed_value=result.e_center,
             ),
@@ -341,12 +336,12 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         result = cast(GEPostAnalyzeResult, req.post_analyze_result)
         return [
             MetaDictWriteback(
-                target_name="ge_radius",
+                target_name="qubit.ext.readout_cal.radius",
                 description="Single-shot classification radius",
                 proposed_value=result.ge_radius,
             ),
             MetaDictWriteback(
-                target_name="confusion_matrix",
+                target_name="qubit.ext.readout_cal.confusion_matrix",
                 description="Single-shot 3x3 confusion matrix (prepared->measured)",
                 proposed_value=result.confusion,
             ),

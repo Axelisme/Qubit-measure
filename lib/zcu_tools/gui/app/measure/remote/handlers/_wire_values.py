@@ -46,8 +46,10 @@ def _is_complex_tag(value: object) -> bool:
 def coerce_wire_value(value: object) -> object:
     """Decode an inbound complex tag; leave every other wire value unchanged.
 
-    Writeback uses this before applying a proposed value to MetaDict, whose
-    persistence format also supports complex numbers.
+    A dict containing __complex__ is decoded by the shared strict scalar
+    codec. Invalid tags raise ValueError, and oversized numeric components
+    can raise OverflowError. No strings or tuples are guessed as complex.
+    Writeback uses this before accepting the proposed working-unit value.
     """
     if _is_complex_tag(value):
         re, im = value[_COMPLEX_TAG]  # type: ignore[index]

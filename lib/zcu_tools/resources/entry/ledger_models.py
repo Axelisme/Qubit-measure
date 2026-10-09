@@ -104,7 +104,14 @@ class SavedOutput(_LedgerModel):
 
 
 class AcceptedWrite(_LedgerModel):
-    """Accepted working-unit value at a nonempty dot-separated container path."""
+    """One accepted value for a nonempty dot-separated container path.
+
+    path is a concrete destination with nonempty segments; no escaping or
+    indexing is supported. value stores strict JSON in working units.
+    Native complex input at this field alone becomes the shared __complex__
+    tag before JSON validation. Nested complex, non-finite components and
+    other non-JSON values raise ValueError; strings are never decoded.
+    """
 
     path: _Nonempty
     value: JsonValue
