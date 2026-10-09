@@ -390,6 +390,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     context.set_component_focus("Q2")
     active = context.read_context().target
     window = MainWindow(controller)
+    window.add_tab_widget(tab, "pointed")
     try:
         preview = application.result(
             "tab.writeback_preview", {"tab_id": tab, "subtab_id": "analysis"}
