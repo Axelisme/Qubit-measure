@@ -22,7 +22,7 @@ class DelayRegAuto(TimedMacro):
         auto_rounded = self.convert_time(prog, auto_t, "auto_t")
         prog.decrement_timestamps(auto_rounded)
 
-    def expand(self, prog):
+    def expand(self, prog):  # pyright: ignore[reportIncompatibleMethodOverride]
         insts = []
         auto_t_reg = self.t_regs["auto_t"]
         if isinstance(auto_t_reg, Integral):

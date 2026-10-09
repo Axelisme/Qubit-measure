@@ -22,7 +22,7 @@ class PatchWmemFromRegs(Macro):
         if self.freq_reg is None and self.gain_reg is None:
             raise ValueError("PatchWmemFromRegs requires at least one runtime register")
 
-    def expand(self, prog) -> list[AsmInst]:
+    def expand(self, prog) -> list[AsmInst]:  # pyright: ignore[reportIncompatibleMethodOverride]
         addr = _single_wave_addr(prog, self.name)
         insts = [_read_wmem(addr)]
         if self.freq_reg is not None:
@@ -43,7 +43,7 @@ class PatchWmemFromDmem(Macro):
     val_reg: str
     dmem_offset: int
 
-    def expand(self, prog) -> list[AsmInst]:
+    def expand(self, prog) -> list[AsmInst]:  # pyright: ignore[reportIncompatibleMethodOverride]
         idx_reg = prog._get_reg(self.idx_reg)
         addr_reg = prog._get_reg(self.addr_reg)
         val_reg = prog._get_reg(self.val_reg)
@@ -169,7 +169,7 @@ class PulseFromLengthReg(TimedMacro):
         # register. Do not advance QICK's compile-time generator timestamp here.
         self.convert_time(prog, self.t, "t")
 
-    def expand(self, prog) -> list[Macro]:
+    def expand(self, prog) -> list[Macro]:  # pyright: ignore[reportIncompatibleMethodOverride]
         addrs = _pulse_wave_addrs(prog, self.name, flat_top=self.flat_top)
         port = int(prog.soccfg["gens"][self.ch]["tproc_ch"])
         time_reg = self.t_regs["t"]
