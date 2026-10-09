@@ -7,6 +7,7 @@ from typing import Literal
 import pytest
 from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec
 from zcu_tools.gui.remote.errors import ErrorCode
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import ContextSourceFault
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.entry import ResultEntry
@@ -16,7 +17,7 @@ from ._helpers import open_client, recv_response, send
 from ._point_application import PointApplication
 
 
-def test_active_point_label_and_real_window_follow_published_target_not_focus(
+def test_active_point_label_and_real_window_follow_published_target_not_aliases(
     application: PointApplication, qapp, caplog: pytest.LogCaptureFixture
 ) -> None:
     import logging
@@ -64,8 +65,8 @@ def test_active_point_label_and_real_window_follow_published_target_not_focus(
             application.result("point.new", {"label": point, "description": point})
             assert application.result("context.active", {}) == {"label": point}
             assert_visible_snapshot(info.name, point)
-            for focus in ("Q1", "Q2", None):
-                context.set_component_focus(focus)
+            for name in ("Q1", "Q2", ""):
+                context.set_alias_rows((AliasRow("driver", name),))
                 assert application.result("context.active", {}) == {"label": point}
                 assert_visible_snapshot(info.name, point)
         assert application.result("context.labels", {}) == {"labels": ["base", "next"]}
@@ -76,7 +77,7 @@ def test_active_point_label_and_real_window_follow_published_target_not_focus(
         window.refresh_context_panel()
         assert_visible_snapshot(info.name, "No point selected")
         assert not caplog.records, (
-            "Entry/point/focus facts must not raise in GUI subscribers"
+            "Entry/point/alias facts must not raise in GUI subscribers"
         )
     finally:
         application.remote.render_view = previous_view
