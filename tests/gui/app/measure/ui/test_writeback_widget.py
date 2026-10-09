@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
 
@@ -17,6 +18,7 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QTableWidget,
 )
+from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.adapter import (
@@ -24,15 +26,73 @@ from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
     RunRequest,
     SessionEnv,
+    WaveformWriteback,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.services.writeback import WritebackValues
+from zcu_tools.gui.app.measure.cfg_schemas import waveform_cfg_to_value
+from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
+from zcu_tools.gui.app.measure.services.writeback import (
+    WritebackService,
+    WritebackValues,
+)
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
+from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv as ParameterSessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 from zcu_lab.v2.fake.freq.core import FakeFreqRunResult
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter, FakeFreqAnalyzeParams
+
+
+@pytest.fixture
+def waveform_writeback(tmp_path: Path):
+    before = registry_state()
+    draft = None
+    try:
+        register_fakes()
+        installed = registry_state()
+        entry = ResultEntry.create(
+            "entry",
+            result_root=tmp_path / "Result",
+            database_root=tmp_path / "Database",
+        )
+        bus = BaseEventBus()
+        context = ContextService(
+            SessionState(ParameterSessionEnv(parameters=None, soc=None, soccfg=None)),
+            bus,
+            bind_assets=ArbWaveformDatabase.info_at,
+        )
+        context.install_entry(entry)
+        control = ContextControlFacet(context=context)
+        control.add_component("Q1", "fake/drive/a", {})
+        target = control.read_context().target
+        control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.1))
+        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
+        service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
+        spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=0.1))
+        draft = service.create_draft(
+            [
+                WaveformWriteback(
+                    "Q1.waveforms.base", "Waveform", edit_schema=CfgSchema(spec, value)
+                )
+            ],
+            parameters=control.read_context(),
+        )
+        service.apply_draft(draft)
+        yield control, service, draft
+        assert registry_state() == installed
+    finally:
+        if draft is not None:
+            draft.teardown()
+        restore_registry(before)
 
 
 def _make_ctx() -> SessionEnv:
@@ -444,6 +504,83 @@ def test_nonempty_preview_requires_each_service_fact(qapp) -> None:
     try:
         with pytest.raises(KeyError, match="md-1"):
             widget.populate([item], {})
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("repopulate", [False, True])
+def test_cfg_edit_and_retarget_refresh_live_facts_and_applied_state(
+    qapp,
+    waveform_writeback,
+    pane: Literal["analysis", "post_analysis"],
+    *,
+    repopulate: bool,
+) -> None:
+    control, service, draft = waveform_writeback
+    item = draft.items[0]
+    model = service.get_item_draft(draft, item.session_id)
+    ctrl = MagicMock()
+    ctrl.get_writeback_item_draft_for_pane.return_value = model
+    ctrl.get_writeback_applied_for_pane.side_effect = lambda *_: (
+        service.get_all_applied(draft)
+    )
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = lambda *_: (
+        service.preview_values(draft)
+    )
+    ctrl.set_writeback_item_for_pane.side_effect = lambda _tab, _pane, sid, **kwargs: (
+        draft.edit(sid, **kwargs)
+    )
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate(service.preview_draft(draft), service.preview_values(draft))
+        widget.show()
+        checkbox = widget.findChildren(QCheckBox)[0]
+        assert not checkbox.text().endswith("*")
+        next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Edit"
+        ).click()
+        qapp.processEvents()
+        dialog = next(
+            candidate
+            for candidate in qapp.topLevelWidgets()
+            if isinstance(candidate, QDialog)
+            and candidate.isVisible()
+            and candidate.windowTitle() == "Edit Config: Q1.waveforms.base"
+        )
+        if repopulate:
+            widget.populate(service.preview_draft(draft), service.preview_values(draft))
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            checkbox = widget.findChildren(QCheckBox)[0]
+        model.set_target("length", 0.2)
+        assert checkbox.text().endswith("*")
+        name_edit = dialog.findChildren(QLineEdit)[0]
+        name_edit.setText("Q1.waveforms.other")
+        name_edit.editingFinished.emit()
+        assert checkbox.text() == "Q1.waveforms.other*"
+        texts = [label.text() for label in widget.findChildren(QLabel)]
+        assert "Q1.waveforms.other" in texts
+        assert "—" in texts
+        control.set_waveform(
+            control.read_context().target,
+            "Q1.waveforms.other",
+            ConstWaveformCfg(length=0.4),
+        )
+        model.set_target("length", 0.3)
+        assert "—" not in [label.text() for label in widget.findChildren(QLabel)]
+        assert service.preview_values(draft)[item.session_id].proposed["length"] == 0.3
+        next(
+            button
+            for button in dialog.findChildren(QPushButton)
+            if button.text() == "Close"
+        ).click()
+        qapp.processEvents()
+        assert checkbox.isChecked()
+        assert checkbox.text().endswith("*")
     finally:
         widget.close()
         widget.deleteLater()
