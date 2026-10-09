@@ -47,7 +47,10 @@ def _link(peer: str, *, subscribed: bool = False) -> ClientLink:
 
 
 def _matches(link: ClientLink) -> bool:
-    return "subscribed" in cast(set[str], link.app_ctx)
+    subscriptions = link.app_ctx
+    if not isinstance(subscriptions, set):
+        raise TypeError("Expected a subscription set")
+    return "subscribed" in subscriptions
 
 
 def _register(endpoint: NdjsonRpcEndpoint, link: ClientLink) -> socket.socket:
@@ -149,9 +152,14 @@ def test_unsubscribe_between_selection_and_delivery_prevents_late_push(
     )
     worker.start()
     assert factory_entered.wait(timeout=2.0)
-    endpoint.client_state_transaction(
-        link, lambda: cast(set[str], link.app_ctx).discard("subscribed")
-    )
+
+    def unsubscribe() -> None:
+        subscriptions = link.app_ctx
+        if not isinstance(subscriptions, set):
+            raise TypeError("Expected a subscription set")
+        subscriptions.discard("subscribed")
+
+    endpoint.client_state_transaction(link, unsubscribe)
     release_factory.set()
     worker.join(timeout=2.0)
 
@@ -205,9 +213,14 @@ def test_subscribe_after_selection_does_not_receive_old_event(endpoint) -> None:
     )
     worker.start()
     assert factory_entered.wait(timeout=2.0)
-    endpoint.client_state_transaction(
-        late, lambda: cast(set[str], late.app_ctx).add("subscribed")
-    )
+
+    def subscribe() -> None:
+        subscriptions = late.app_ctx
+        if not isinstance(subscriptions, set):
+            raise TypeError("Expected a subscription set")
+        subscriptions.add("subscribed")
+
+    endpoint.client_state_transaction(late, subscribe)
     release_factory.set()
     worker.join(timeout=2.0)
 
@@ -223,9 +236,14 @@ def test_delivery_linearizes_before_later_unsubscribe_reply(endpoint) -> None:
     _register(endpoint, link)
 
     endpoint.broadcast_lazy(lambda: b"push\n", _matches)
-    endpoint.client_state_transaction(
-        link, lambda: cast(set[str], link.app_ctx).discard("subscribed")
-    )
+
+    def unsubscribe() -> None:
+        subscriptions = link.app_ctx
+        if not isinstance(subscriptions, set):
+            raise TypeError("Expected a subscription set")
+        subscriptions.discard("subscribed")
+
+    endpoint.client_state_transaction(link, unsubscribe)
     endpoint.reply_ok(link, rid="unsubscribe", result={"subscribed": []})
 
     queued = _queued(link)
