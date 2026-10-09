@@ -33,9 +33,8 @@ Each app keeps as its own override the methods whose body genuinely diverges:
   a session service).
 - ``get_bus`` — returns the app-specific ``EventBus`` subtype.
 
-Project apply is not forwarded here: the setup dialog uses ``SetupControlPort``, and
-measure's remote ``project.apply`` uses the measure Controller's own
-``apply_project``, which returns the resolved-project dict (WIRE-48).
+Entry New/Open is not forwarded here: the setup dialog and measure remote
+entry handlers use ``SetupControlPort`` directly.
 
 Layering: this module lives in the shared ``gui/session/`` layer, so it MUST NOT
 import Qt or ``gui.app.*`` (guarded by ``tests/gui/test_shared_layer.py``). Every
@@ -54,7 +53,6 @@ from zcu_tools.gui.event_bus import BaseEventBus, EventSubscriptions
 from zcu_tools.gui.session.events import ConnectionFinishedPayload
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.result_scope import ProjectPaths, ResultScope
     from zcu_tools.gui.session.services.connection import (
         ConnectRequest,
         SoCConnectionService,
@@ -93,12 +91,6 @@ class SessionControllerMixin:
     # --- setup dialog: project settings ----------------------------------
     def get_left_panel_width(self) -> int:
         return self._settings_svc.get_left_panel_width()
-
-    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
-        return self._settings_svc.list_result_scopes(refresh=refresh)
-
-    def derive_project_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
-        return self._settings_svc.derive_project_paths(chip_name, qub_name)
 
     # --- setup dialog: context switching ---------------------------------
     def use_context(self, label: str) -> None:
