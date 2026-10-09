@@ -641,7 +641,7 @@ def test_capture_groups_negative_power_and_keeps_dynamic_dependencies(
     resource, sources = captured_resource
     changed = resource.edit(
         CfgRevision(0),
-        (CfgEdit(("a",), EvalValue("$device.value ** 2 + general.ext.offset")),),
+        (CfgEdit(("a",), EvalValue("@{device.value} ** 2 + general.ext.offset")),),
     )
     assert resource.accept(changed.ref.revision).values["a"] == 5.0
     value = changed.tree.children["a"].value
@@ -663,9 +663,9 @@ def test_capture_uses_real_functions_complex_and_integer_semantics(
     changed = resource.edit(
         CfgRevision(0),
         (
-            CfgEdit(("z",), EvalValue("$z * $z")),
-            CfgEdit(("flags",), EvalValue("$flags ^ 3")),
-            CfgEdit(("a",), EvalValue("cos($angle) + log(e)")),
+            CfgEdit(("z",), EvalValue("@{z} * @{z}")),
+            CfgEdit(("flags",), EvalValue("@{flags} ^ 3")),
+            CfgEdit(("a",), EvalValue("cos(@{angle}) + log(e)")),
         ),
     )
     values = resource.accept(changed.ref.revision).values
@@ -676,16 +676,37 @@ def test_capture_uses_real_functions_complex_and_integer_semantics(
     assert isinstance(changed.tree.children["flags"].value, EvalValue)
 
 
+def test_capture_complex_tag_and_large_integer_preserve_literal_types(
+    captured_resource,
+) -> None:
+    resource, sources = captured_resource
+    integer = 2**80 + 1
+    sources.captured.update({"z": {"__complex__": [1.0, 2.0]}, "flags": integer})
+    publication = resource.edit(
+        CfgRevision(0),
+        (
+            CfgEdit(("z",), EvalValue("@{z}")),
+            CfgEdit(("flags",), EvalValue("@{flags} ^ 3")),
+        ),
+    )
+    values = resource.accept(publication.ref.revision).values
+    assert values["z"] == 1.0 + 2.0j
+    assert isinstance(values["z"], complex)
+    assert values["flags"] == integer ^ 3
+    assert isinstance(values["flags"], int)
+    assert sources.capture_reads == ["z", "flags"]
+
+
 @pytest.mark.parametrize(
     "expression",
     [
-        "$",
-        "$device.value +",
-        "$device.",
-        "$device.value[0]",
-        "$device.value()",
-        "$ device",
-        "$device.value @ 2",
+        "@",
+        "@{device.value} +",
+        "@{device.}",
+        "@{device.value}[0]",
+        "@{device.value}()",
+        "@ {device.value}",
+        "@{device.value} @ 2",
     ],
 )
 def test_invalid_capture_structure_rejects_batch_before_reading_sources(
@@ -717,7 +738,7 @@ def test_capture_missing_source_rejects_without_publishing_prefix(
             before.ref.revision,
             (
                 CfgEdit(("a",), 10.0),
-                CfgEdit(("literal.dot",), EvalValue("$missing")),
+                CfgEdit(("literal.dot",), EvalValue("@{missing}")),
             ),
         )
     assert caught.value.reason is CfgPreconditionReason.CAPTURE_UNAVAILABLE
@@ -733,7 +754,7 @@ def test_capture_rejects_non_literal_values(captured_resource, value: object) ->
     resource, sources = captured_resource
     sources.captured["device.value"] = value
     with pytest.raises(CfgInputError, match="numeric|finite") as caught:
-        resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("$device.value")),))
+        resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("@{device.value}")),))
     assert caught.value.reason is CfgInputReason.INVALID_VALUE
     assert resource.observe().ref.revision == 0
 
@@ -762,7 +783,7 @@ def test_capture_token_boundaries_and_missing_dynamic_name(captured_resource) ->
             CfgEdit(
                 ("a",),
                 EvalValue(
-                    "$device.value + general.ext.device_value + general.ext.missing"
+                    "@{device.value} + general.ext.device_value + general.ext.missing"
                 ),
             ),
         ),
@@ -1054,7 +1075,7 @@ def test_unexpected_capture_validator_fault_preserves_publication(
     before = resource.observe()
     with pytest.raises(RuntimeError) as caught:
         resource.edit(
-            before.ref.revision, (CfgEdit(("a",), EvalValue("$device.value")),)
+            before.ref.revision, (CfgEdit(("a",), EvalValue("@{device.value}")),)
         )
     assert caught.value is defect
     assert resource.observe() == before
