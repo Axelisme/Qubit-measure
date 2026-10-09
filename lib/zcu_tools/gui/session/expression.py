@@ -273,7 +273,7 @@ def _parameter_reader(
         except (ValueError, InvalidInputError) as exc:
             raise ExpressionError(f"Invalid parameter path {path!r}: {exc}") from exc
         if not result.present:
-            raise ExpressionError(f"Missing parameter path {path!r}")
+            raise ExpressionError(f"Invalid parameter path {path!r}: missing parameter")
         return _parameter_number(result.value, path)
 
     return read
