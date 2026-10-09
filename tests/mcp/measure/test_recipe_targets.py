@@ -1,6 +1,7 @@
 """Recipe target admission and fixed role-source reads through public tools."""
 
 from contextlib import closing
+from copy import deepcopy
 from pathlib import Path
 from typing import Literal
 
@@ -18,7 +19,7 @@ def targeted(
     target: str | None = None,
     reuse_tab_id: str | None = None,
 ) -> RecipeGenerator:
-    """Prepare readout from the tab capture, then yield one fake acquisition."""
+    """Prepare current/temporary readout, then yield one fake acquisition."""
     tab = session.open_tab("lookback", target=target, reuse=reuse_tab_id)
     tab.set_frequency(
         "modules.readout", calibration="resonator", required="readout_ref"
@@ -40,14 +41,15 @@ TARGETED = definition(
 
 
 class TargetGui(LookbackGui):
-    """Expose role calibration only through the new fixed-tab source wire."""
+    """Record current/temporary source queries through the public recipe wire."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.md = {"resonator.freq": 6200.0}
+        self.md = {"$resonator.freq": 6200.0}
         self.created: list[dict[str, object]] = []
         self.reads: list[dict[str, object]] = []
         self.modules: dict[str, str] = {}
+        self.targets: list[str | None] = []
         self.queried_paths: list[str] = []
         self.queried_modules: list[str] = []
 
@@ -57,6 +59,24 @@ class TargetGui(LookbackGui):
         if method == "tab.new":
             self.created.append(dict(params))
             return {"tab_id": "t"}
+        if method == "tab.get_cfg" and params.get("target") is not None:
+            assert params["expected"] == self.publication["cfg_ref"]
+            projected = deepcopy(self.publication)
+            projected["status"] = "Valid"
+            readout = projected["tree"]["children"]["modules"]["children"]["readout"]
+            for node in readout["children"].values():
+                for child in node.get("children", {}).values():
+                    if child.get("input", {}).get("raw") == "$resonator.freq":
+                        child["input"]["resolved"] = 8200.0
+            projected["source_basis"] = [{"source_id": "target", "revision": "1"}]
+            return projected
+        if method == "tab.run_start":
+            target = params.get("target")
+            assert target is None or isinstance(target, str)
+            self.targets.append(target)
+            return super().__call__(
+                method, {key: value for key, value in params.items() if key != "target"}
+            )
         if method == "tab.parameter_read":
             assert params["tab_id"] == "t"
             self.reads.append(dict(params))
@@ -159,8 +179,8 @@ class SweepGui(TargetGui):
 def test_frequency_sweep_preserves_dotted_linewidth_expression(
     tmp_path: Path, calibration: Literal["resonator", "qubit"]
 ) -> None:
-    center = f"{calibration}.freq"
-    width = f"{calibration}.kappa"
+    center = f"${calibration}.freq"
+    width = f"${calibration}.kappa"
     gui = SweepGui(f"{center} - 3 * {width}", f"{center} + 3 * {width}", 970.0, 1030.0)
     gui.md = {center: 1000.0, width: 10.0}
     span = f"(0 + 3 * {width}) - (0 - 3 * {width})"
@@ -196,10 +216,10 @@ def test_frequency_sweep_preserves_dotted_linewidth_expression(
 def test_flux_sweep_uses_role_expressions_and_rejects_invalid_explicit_endpoints(
     tmp_path: Path, start: float | None, stop: float | None, status: str
 ) -> None:
-    low = "qubit.flux_half - (qubit.flux_int - qubit.flux_half) / 2"
-    high = "qubit.flux_half + (qubit.flux_int - qubit.flux_half) / 2"
+    low = "$qubit.flux_half - ($qubit.flux_int - $qubit.flux_half) / 2"
+    high = "$qubit.flux_half + ($qubit.flux_int - $qubit.flux_half) / 2"
     gui = SweepGui(low, high, 0.1, 0.5)
-    gui.md = {"qubit.flux_half": 0.3, "qubit.flux_int": 0.7}
+    gui.md = {"$qubit.flux_half": 0.3, "$qubit.flux_int": 0.7}
     recipe = definition(
         flux_sweep,
         {
@@ -220,19 +240,19 @@ def test_flux_sweep_uses_role_expressions_and_rejects_invalid_explicit_endpoints
         assert inputs["start"]["raw"] == low
         assert inputs["stop"]["raw"] == high
         if status == "finished":
-            assert {"qubit.flux_half", "qubit.flux_int"} <= set(gui.queried_paths)
+            assert {"$qubit.flux_half", "$qubit.flux_int"} <= set(gui.queried_paths)
 
 
 @pytest.mark.parametrize(
-    "reference", [None, "resonator.module.readout", "<Custom:readout>"]
+    "reference", [None, "$resonator.module.readout", "<Custom:readout>"]
 )
 def test_required_library_uses_captured_role_slot_membership(
     tmp_path: Path, reference: str | None
 ) -> None:
     gui = TargetGui()
-    gui.modules = {"resonator.module.readout": "R2.readouts.main"}
+    gui.modules = {"$resonator.module.readout": "R2.readouts.main"}
     gui.publication["tree"]["children"]["modules"]["children"]["readout"]["ref"] = (
-        "resonator.module.readout"
+        "$resonator.module.readout"
     )
     recipe = definition(
         required_library,
@@ -248,26 +268,35 @@ def test_required_library_uses_captured_role_slot_membership(
         valid = reference != "<Custom:readout>"
         assert reply.data["status"] == ("finished" if valid else "failed")
         assert gui.ran is valid
-        expected = "resonator.module.readout" if valid else "<Custom:readout>"
+        expected = "$resonator.module.readout" if valid else "<Custom:readout>"
         assert expected in gui.queried_modules
 
 
 @pytest.mark.parametrize("target", [None, "Q2"])
-def test_recipe_opens_target_and_uses_role_calibration_without_live_context(
+def test_recipe_run_uses_temporary_target_without_tab_birth_binding(
     tmp_path: Path, target: str | None
 ) -> None:
     gui = TargetGui()
+    if target is not None:
+        gui.publication["status"] = "Invalid"
     client = make_client(tmp_path, gui, recipes=(TARGETED,))
     with closing(client.context.session):
         reply = client.call("sample", {} if target is None else {"target": target})
         assert reply.data["status"] == "finished"
-        assert gui.created == [
-            {"adapter_name": "lookback"}
-            if target is None
-            else {"adapter_name": "lookback", "target": "Q2"}
-        ]
+        assert gui.created == [{"adapter_name": "lookback"}]
         assert gui.ran
+        assert gui.targets == [target]
         assert gui.reads
+        assert all(read["target"] == target for read in gui.reads)
+        full = client.call(
+            "status", {"execution": reply.data["execution"], "detail": "full"}
+        )
+        assert full["actual"]["fields"]["modules.readout.pulse_cfg.freq"]["value"] == (
+            6200.0 if target is None else 8200.0
+        )
+        assert full["actual"]["source_basis"] == (
+            [] if target is None else [{"source_id": "target", "revision": "1"}]
+        )
         edits = [
             params
             for method, params in client.transport.sent
@@ -280,8 +309,8 @@ def test_recipe_opens_target_and_uses_role_calibration_without_live_context(
             if edit["path"][-1] in ("freq", "ro_freq")
         ]
         assert expressions == [
-            {"__expr": "resonator.freq"},
-            {"__expr": "resonator.freq"},
+            {"__expr": "$resonator.freq"},
+            {"__expr": "$resonator.freq"},
         ]
         assert (
             gui.publication["tree"]["children"]["modules"]["children"]["readout"][
@@ -291,21 +320,55 @@ def test_recipe_opens_target_and_uses_role_calibration_without_live_context(
         )
 
 
-def test_recipe_target_and_reuse_are_rejected_before_gui_requests(
-    tmp_path: Path,
-) -> None:
+def test_recipe_stale_run_ref_is_not_refreshed_or_retried(tmp_path: Path) -> None:
+    gui = TargetGui()
+    client = make_client(tmp_path, gui, recipes=(TARGETED,))
+    client.transport.replies["tab.run_start"] = {
+        "ok": False,
+        "error": {
+            "code": "precondition_failed",
+            "reason": "stale_revision",
+            "message": "Source publication changed after preview",
+        },
+    }
+    with closing(client.context.session):
+        reply = client.call("sample", {"target": "Q2"})
+        assert reply.data["status"] == "failed"
+        assert not gui.ran
+        starts = [
+            params
+            for method, params in client.transport.sent
+            if method == "tab.run_start"
+        ]
+        assert starts == [
+            {"tab_id": "t", "expected": gui.publication["cfg_ref"], "target": "Q2"}
+        ]
+        previews = [
+            params
+            for method, params in client.transport.sent
+            if method == "tab.get_cfg" and params.get("target") is not None
+        ]
+        assert previews[-1]["expected"] == starts[0]["expected"]
+        start_index = next(
+            index
+            for index, (method, _) in enumerate(client.transport.sent)
+            if method == "tab.run_start"
+        )
+        assert not any(
+            method == "tab.get_cfg"
+            for method, _ in client.transport.sent[start_index + 1 :]
+        )
+
+
+def test_recipe_target_can_be_used_with_explicit_reuse(tmp_path: Path) -> None:
     gui = TargetGui()
     client = make_client(tmp_path, gui, recipes=(TARGETED,))
     with closing(client.context.session):
         reply = client.call("sample", {"target": "Q2", "reuse_tab_id": "t"})
-        assert reply.data["status"] == "failed"
-        assert "重用 tab 時不要傳 target" in str(reply.data)
+        assert reply.data["status"] == "finished"
         assert gui.created == []
-        assert not gui.ran
-        assert not any(
-            method.startswith("tab.") or method == "context.snapshot"
-            for method, _ in client.transport.sent
-        )
+        assert gui.targets == ["Q2"]
+        assert any(method == "tab.reset_cfg" for method, _ in client.transport.sent)
 
 
 def test_role_resolution_rejection_is_not_replaced_by_another_target(
@@ -313,7 +376,7 @@ def test_role_resolution_rejection_is_not_replaced_by_another_target(
 ) -> None:
     gui = TargetGui()
     client = make_client(tmp_path, gui, recipes=(TARGETED,))
-    client.transport.replies["tab.new"] = {
+    client.transport.replies["tab.parameter_read"] = {
         "ok": False,
         "error": {
             "code": "precondition_failed",
@@ -335,4 +398,10 @@ def test_role_resolution_rejection_is_not_replaced_by_another_target(
         creations = [
             params for method, params in client.transport.sent if method == "tab.new"
         ]
-        assert creations == [{"adapter_name": "lookback", "target": "missing"}]
+        assert creations == [{"adapter_name": "lookback"}]
+        reads = [
+            params
+            for method, params in client.transport.sent
+            if method == "tab.parameter_read"
+        ]
+        assert reads[0]["target"] == "missing"

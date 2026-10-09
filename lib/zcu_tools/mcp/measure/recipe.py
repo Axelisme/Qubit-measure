@@ -410,7 +410,8 @@ class _TabBinding:
 
     tools is the execution's fixed connection. tab is the GUI locator.
     publication is the last returned cfg observation, never refreshed on failure.
-    Parameter sources are queried from this tab's fixed capture. origins records sources
+    target is an optional single-use first-alias override, never tab binding.
+    Parameter sources are queried from current globals with this target. origins records sources
     by public/derived field name for the later Run capture, including individual
     sweep labels. flux_unit is the asserted device unit.
     """
@@ -421,6 +422,7 @@ class _TabBinding:
     observe_run: Callable[[RunOperation], None]
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
+    target: str | None = None
     origins: dict[str, str | SweepSources] = field(default_factory=dict)
     flux_unit: str | None = None
     frequency_sweep: str | None = None
@@ -503,9 +505,9 @@ def _field_path(name: str) -> list[str]:
 
 def _calibration_key(calibration: Literal["resonator", "qubit"]) -> str:
     if calibration == "resonator":
-        return "resonator.freq"
+        return "$resonator.freq"
     if calibration == "qubit":
-        return "qubit.freq"
+        return "$qubit.freq"
     raise ValueError("calibration must be resonator or qubit")
 
 
@@ -649,18 +651,17 @@ class RecipeSession:
         """Open adapter's tab, or validate/reset the named reusable tab.
 
         adapter is a non-empty public GUI adapter ID. target is a concrete
-        component for the adapter's first declared role; omission uses GUI focus.
-        reuse=None creates a fresh tab; otherwise reuse is a non-empty GUI locator.
-        Explicit target with reuse raises ValueError before any GUI request,
-        with the message '重用 tab 時不要傳 target'. Reuse never retargets capture.
-        Parameter and library reads use the named tab's fixed capture, not live
-        context.snapshot. Source/role failures propagate without fallback. Busy, mismatched adapters
-        and invalid locators fail without creating a fallback. Observe context
-        sources once and capture the cfg ref for edits and Run. GUI/connection
+        component for the adapter's first declared alias on this recipe's Run.
+        Omission uses current global aliases. It never changes tab/global binding.
+        reuse=None creates a fresh tab; otherwise reuse is a non-empty GUI locator
+        and may also specify target. Parameter/library reads and targeted cfg
+        previews use current sources with this same temporary override, not a
+        tab birth capture or context.snapshot. Source/alias failures propagate
+        without fallback. Busy, mismatched adapters
+        and invalid locators fail without creating a fallback. Capture the cfg
+        ref for edits and Run; each source query uses current globals. GUI/connection
         errors propagate; invalid names raise ValueError before any GUI request.
         """
-        if target is not None and reuse is not None:
-            raise ValueError("重用 tab 時不要傳 target")
         if not adapter or not adapter.strip():
             raise ValueError("adapter must be a non-empty GUI adapter ID")
         if target is not None and (not target or not target.strip()):
@@ -669,8 +670,6 @@ class RecipeSession:
             raise ValueError("reuse must be a non-empty GUI tab locator")
         if reuse is None:
             payload: dict[str, object] = {"adapter_name": adapter}
-            if target is not None:
-                payload["target"] = target
             created = self._tools.send_gui_rpc("tab.new", payload)
             tab = created["tab_id"]
             if not isinstance(tab, str) or not tab:
@@ -712,6 +711,7 @@ class RecipeSession:
                 closed=self._closed,
                 condition=self._condition,
                 consume_cancel=self._consume_cancel,
+                target=target,
             )
         )
 
@@ -728,22 +728,46 @@ class RecipeTab:
 
     def __init__(self, binding: _TabBinding) -> None:
         self._binding = binding
+        self._preview_target()
+
+    def _preview_target(self) -> None:
+        """Project this target at the retained ref; stale failures never refresh."""
+        if self._binding.target is not None:
+            reply = self._binding.tools.send_gui_rpc(
+                "tab.get_cfg",
+                {
+                    "tab_id": self._binding.tab,
+                    "target": self._binding.target,
+                    "expected": self._binding.publication["cfg_ref"],
+                },
+            )
+            self._binding.publication = _cfg_object(reply)
 
     def _calibration(self, path: str) -> object:
         """Read one requested role path, retaining missing/null as unusable values."""
         reply = self._binding.tools.send_gui_rpc(
             "tab.parameter_read",
-            {"tab_id": self._binding.tab, "paths": [path], "module_refs": []},
+            {
+                "tab_id": self._binding.tab,
+                "paths": [path],
+                "module_refs": [],
+                "target": self._binding.target,
+            },
         )
         return _cfg_object(reply["values"]).get(path)
 
     def _library_reference(self, reference: str | None) -> str | None:
-        """Resolve a usable canonical module root in the tab's fixed capture."""
+        """Resolve a canonical module root using current sources and target."""
         if reference is None:
             return None
         reply = self._binding.tools.send_gui_rpc(
             "tab.parameter_read",
-            {"tab_id": self._binding.tab, "paths": [], "module_refs": [reference]},
+            {
+                "tab_id": self._binding.tab,
+                "paths": [],
+                "module_refs": [reference],
+                "target": self._binding.target,
+            },
         )
         root = _cfg_object(reply["modules"])[reference]
         if root is not None and not isinstance(root, str):
@@ -770,6 +794,7 @@ class RecipeTab:
                 },
             )
             self._binding.publication = _cfg_object(reply)
+            self._preview_target()
 
     def _reference(self, field: str) -> dict[str, object]:
         node = self._node(field)
@@ -986,10 +1011,12 @@ class RecipeTab:
             if (
                 edge["mode"] != "expression"
                 or not isinstance(raw, str)
-                or not re.search(rf"\b{re.escape(width_key)}\b", raw)
+                or not re.search(rf"(?<![\w$]){re.escape(width_key)}\b", raw)
             ):
                 return None
-            expressions.append(re.sub(rf"\b{re.escape(center_key)}\b", "0", raw))
+            expressions.append(
+                re.sub(rf"(?<![\w$]){re.escape(center_key)}\b", "0", raw)
+            )
         return f"({expressions[1]}) - ({expressions[0]})"
 
     def set_frequency_sweep(
@@ -1010,7 +1037,7 @@ class RecipeTab:
         inputs raise ValueError; invalid resolved ranges raise GuiRpcError.
         """
         key = _calibration_key(calibration)
-        width_key = f"{calibration}.kappa"
+        width_key = f"${calibration}.kappa"
         _check_points(expts)
         if center_mhz is not None and not _finite_frequency(center_mhz):
             raise ValueError("center_mhz must be finite and not boolean")
@@ -1092,8 +1119,8 @@ class RecipeTab:
             )
         inputs = self._sweep_inputs(field)
         if start is None:
-            half = self._calibration("qubit.flux_half")
-            integer = self._calibration("qubit.flux_int")
+            half = self._calibration("$qubit.flux_half")
+            integer = self._calibration("$qubit.flux_int")
             if (
                 not _finite_frequency(half)
                 or not _finite_frequency(integer)
@@ -1112,8 +1139,8 @@ class RecipeTab:
                 if (
                     state["mode"] != "expression"
                     or not isinstance(raw, str)
-                    or set(re.findall(r"\bqubit\.flux_(?:half|int)\b", raw))
-                    != {"qubit.flux_half", "qubit.flux_int"}
+                    or set(re.findall(r"\$qubit\.flux_(?:half|int)\b", raw))
+                    != {"$qubit.flux_half", "$qubit.flux_int"}
                 ):
                     raise RecipeNeedsParameters(
                         (
@@ -1255,6 +1282,7 @@ class RecipeTab:
         consume_cancel = self._binding.consume_cancel
         if consume_cancel is not None and consume_cancel():
             return suppressed
+        self._preview_target()
         if self._binding.publication["status"] != "Valid":
             raise GuiRpcError("Recipe cfg is not Valid", reason="invalid_cfg")
         actual = capture_actual(self._binding.publication, self._actual_fields())
@@ -1278,11 +1306,12 @@ class RecipeTab:
                 raise _StepCancelled
             binding.publish(replace(binding.capture, start_status="unknown"))
 
+        payload: dict[str, object] = {"tab_id": tab, "expected": actual["cfg_ref"]}
+        if self._binding.target is not None:
+            payload["target"] = self._binding.target
         try:
             started = tools.gui.send_gui_rpc(
-                "tab.run_start",
-                {"tab_id": tab, "expected": actual["cfg_ref"]},
-                before_send=admit,
+                "tab.run_start", payload, before_send=admit
             )
         except _StepCancelled:
             self._binding.observe_run(suppressed)

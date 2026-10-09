@@ -13,8 +13,10 @@ from zcu_tools.gui.cfg.resource import (
     CfgObservation,
     CfgPreconditionError,
     CfgPreconditionReason,
+    CfgRef,
     CfgResolution,
     CfgResource,
+    CfgStaleError,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.types import ParameterContext
@@ -92,6 +94,37 @@ class TabService:
         self._cfg_resources = cfg_resources
         self._cfg_resolution = cfg_resolution
         self._captured_parameters = captured_parameters
+
+    def capture_parameters(
+        self, tab_id: str, *, target: str | None = None
+    ) -> ParameterContext | None:
+        """Freeze current point/library/aliases for an existing tab's consumer.
+
+        target overrides this capture's first declared alias, not session rows
+        or tab state. EMPTY yields None without a target. Unknown tab and source,
+        alias or target failures propagate; no observation guard is refreshed.
+        """
+        tab = self._state.get_tab(tab_id)
+        return self._captured_parameters(tab.adapter.parameter_roles(), target)
+
+    def preview_cfg(
+        self, tab_id: str, expected: CfgRef, *, target: str
+    ) -> CfgObservation:
+        """Preview one target's cfg without publishing or accepting a Run.
+
+        Require an existing tab and its exact observed identity/revision.
+        Resolve current inputs from the same capture owner as Run admission.
+        Stale refs, source/target failures and cfg notification guards propagate.
+        Return Valid or Invalid; do not change aliases, inputs or revision.
+        """
+        tab = self._state.get_tab(tab_id)
+        actual = tab.cfg.observe().ref
+        if expected != actual:
+            raise CfgStaleError(expected, actual)
+        parameters = self.capture_parameters(tab_id, target=target)
+        return tab.cfg.preview(
+            expected.revision, resolution=self._cfg_resolution(parameters)
+        )
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields

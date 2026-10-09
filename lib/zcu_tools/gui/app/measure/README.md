@@ -533,7 +533,9 @@ renders each publication after submitting an input change:
 Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
 remains valid. Run admission captures the current global `ParameterContext`, not tab birth sources.
 A single-use target resolves the same inputs against its temporary capture without
-changing the tab publication or global aliases.
+changing the tab publication or global aliases. Recipe source queries also capture
+current globals through TabService. Targeted preview requires the original full
+CfgRef and returns a temporary observation without replacing it or publishing.
 `schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
 fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves

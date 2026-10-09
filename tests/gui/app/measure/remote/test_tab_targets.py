@@ -29,6 +29,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.handlers.tab import (
+    h_tab_get_cfg,
     h_tab_new,
     h_tab_parameter_read,
 )
@@ -770,12 +771,10 @@ def test_explicit_target_allows_unbound_same_kind_peer_reference(
     assert application.controller.context_control.get_component_focus().name == "Q1"
 
 
-def test_parameter_read_uses_fixed_tab_roles_and_distinguishes_missing_null(
+def test_parameter_read_uses_current_sources_and_temporary_aliases(
     application: TargetApplication,
 ) -> None:
-    tab_id = h_tab_new(
-        application.remote, {"adapter_name": "targeted", "target": "Q2"}
-    )["tab_id"]
+    tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
     assert isinstance(tab_id, str)
     context = application.controller.context_control
     context.set_parameter(context.read_context().target, "Q2.rate", 25.0)
@@ -784,23 +783,22 @@ def test_parameter_read_uses_fixed_tab_roles_and_distinguishes_missing_null(
         application.remote,
         {
             "tab_id": tab_id,
-            "paths": ["driver.rate", "driver.energy_a", "driver.not_supplied"],
+            "target": "Q2",
+            "paths": ["$driver.rate", "$driver.energy_a", "$driver.not_supplied"],
             "module_refs": [],
         },
     )
     assert sources == {
-        "values": {"driver.rate": 20.0, "driver.energy_a": None},
+        "values": {"$driver.rate": 25.0, "$driver.energy_a": None},
         "modules": {},
     }
     assert context.get_component_focus().name == "Q1"
 
 
-def test_parameter_read_resolves_library_role_slots_in_original_capture(
+def test_parameter_read_resolves_library_slots_in_current_temporary_source(
     application: TargetApplication,
 ) -> None:
-    tab_id = h_tab_new(
-        application.remote, {"adapter_name": "targeted", "target": "QL"}
-    )["tab_id"]
+    tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
     context = application.controller.context_control
     context.set_parameter(
         context.read_context().target, "QL.module.pi", "QL.pulses.missing"
@@ -821,11 +819,12 @@ def test_parameter_read_resolves_library_role_slots_in_original_capture(
         {
             "tab_id": tab_id,
             "paths": [],
+            "target": "QL",
             "module_refs": [
-                "driver.module.pi",
-                "driver.pulses.pi",
+                "$driver.module.pi",
+                "$driver.pulses.pi",
                 "QL.pulses.pi",
-                "driver.pulses.later",
+                "$driver.pulses.later",
                 "<Custom:pulse>",
             ],
         },
@@ -833,10 +832,10 @@ def test_parameter_read_resolves_library_role_slots_in_original_capture(
     assert sources == {
         "values": {},
         "modules": {
-            "driver.module.pi": "QL.pulses.pi",
-            "driver.pulses.pi": "QL.pulses.pi",
+            "$driver.module.pi": None,
+            "$driver.pulses.pi": "QL.pulses.pi",
             "QL.pulses.pi": "QL.pulses.pi",
-            "driver.pulses.later": None,
+            "$driver.pulses.later": "QL.pulses.later",
             "<Custom:pulse>": None,
         },
     }
@@ -851,27 +850,63 @@ def test_parameter_read_rejects_unbound_role_instead_of_live_focus_fallback(
     with pytest.raises(RoleResolutionError):
         h_tab_parameter_read(
             application.remote,
-            {"tab_id": tab_id, "paths": ["qubit.freq"], "module_refs": []},
+            {"tab_id": tab_id, "paths": ["$qubit.freq"], "module_refs": []},
         )
 
 
-def test_parameter_read_source_free_tab_accepts_only_empty_queries(
+def test_parameter_read_roleless_tab_can_read_current_concrete_paths(
     application: TargetApplication,
 ) -> None:
     tab_id = h_tab_new(application.remote, {"adapter_name": "roleless"})["tab_id"]
     assert h_tab_parameter_read(
-        application.remote, {"tab_id": tab_id, "paths": [], "module_refs": []}
-    ) == {"values": {}, "modules": {}}
-    for requested in (
-        {"paths": ["driver.rate"]},
-        {"module_refs": ["driver.pulses.pi"]},
+        application.remote,
+        {"tab_id": tab_id, "paths": ["Q2.rate"], "module_refs": ["QL.pulses.pi"]},
+    ) == {"values": {"Q2.rate": 20.0}, "modules": {"QL.pulses.pi": "QL.pulses.pi"}}
+
+
+def test_target_cfg_preview_keeps_publication_and_rejects_stale_ref(
+    application: TargetApplication,
+) -> None:
+    tab_id = application.controller.tab_control.new_tab("targeted")
+    cfg = application.state.get_tab(tab_id).cfg
+    observed = cfg.edit(cfg.observe().ref.revision, (CfgEdit(("rate",), 17.0),))
+    expected = {
+        "cfg_id": str(observed.ref.cfg_id),
+        "revision": str(observed.ref.revision),
+    }
+    preview = h_tab_get_cfg(
+        application.remote, {"tab_id": tab_id, "target": "Q2", "expected": expected}
+    )
+    assert preview["status"] == "Valid"
+    assert preview["cfg_ref"] == expected
+    assert cfg.observe() == observed
+    cfg.edit(observed.ref.revision, (CfgEdit(("rate",), 18.0),))
+    with pytest.raises(RemoteError) as caught:
+        h_tab_get_cfg(
+            application.remote, {"tab_id": tab_id, "target": "Q2", "expected": expected}
+        )
+    assert caught.value.reason == "stale_revision"
+
+
+@pytest.mark.parametrize("target", ["", " ", 2, False])
+def test_target_source_reads_reject_malformed_target(
+    application: TargetApplication, target: object
+) -> None:
+    tab_id = application.controller.tab_control.new_tab("targeted")
+    for handler, query in (
+        (h_tab_parameter_read, {"paths": [], "module_refs": []}),
+        (h_tab_get_cfg, {}),
     ):
         with pytest.raises(RemoteError) as caught:
-            h_tab_parameter_read(
-                application.remote,
-                {"tab_id": tab_id, "paths": [], "module_refs": [], **requested},
-            )
-        assert caught.value.code is ErrorCode.PRECONDITION_FAILED
+            handler(application.remote, {"tab_id": tab_id, "target": target, **query})
+        assert caught.value.reason == "invalid_target"
+
+
+def test_target_preview_requires_expected_ref(application: TargetApplication) -> None:
+    tab_id = application.controller.tab_control.new_tab("targeted")
+    with pytest.raises(RemoteError) as caught:
+        h_tab_get_cfg(application.remote, {"tab_id": tab_id, "target": "Q2"})
+    assert caught.value.code is ErrorCode.INVALID_PARAMS
 
 
 @pytest.mark.parametrize("field", ["paths", "module_refs"])

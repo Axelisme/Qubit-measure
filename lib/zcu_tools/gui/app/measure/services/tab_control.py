@@ -10,7 +10,9 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
 )
+from zcu_tools.gui.cfg.resource import CfgObservation, CfgRef
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.types import ParameterContext
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
@@ -71,6 +73,26 @@ class TabControlPort(Protocol):
         self, adapter_name: str, *, stage: Literal["primary", "post"]
     ) -> list[dict[str, Any]]: ...
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
+
+    def capture_parameters(
+        self, tab_id: str, *, target: str | None = None
+    ) -> ParameterContext | None:
+        """Freeze current sources with optional single-use first-alias target.
+
+        Unknown tab and source/target errors propagate. EMPTY returns None
+        without target. No tab/session mutation or guard observation occurs.
+        """
+        ...
+
+    def preview_cfg(
+        self, tab_id: str, expected: CfgRef, *, target: str
+    ) -> CfgObservation:
+        """Resolve exact observed inputs for target without publication.
+
+        Stale identity/revision, notification and source/target errors propagate.
+        Return Valid or Invalid with the same ref and temporary source basis.
+        """
+        ...
 
 
 class TabControlFacet:
@@ -171,3 +193,15 @@ class TabControlFacet:
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
+
+    def capture_parameters(
+        self, tab_id: str, *, target: str | None = None
+    ) -> ParameterContext | None:
+        """Freeze current sources; see TabControlPort.capture_parameters."""
+        return self._tab.capture_parameters(tab_id, target=target)
+
+    def preview_cfg(
+        self, tab_id: str, expected: CfgRef, *, target: str
+    ) -> CfgObservation:
+        """Read temporary cfg; see TabControlPort.preview_cfg."""
+        return self._tab.preview_cfg(tab_id, expected, target=target)

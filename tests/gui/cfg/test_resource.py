@@ -287,6 +287,17 @@ def test_one_off_acceptance_resolves_invalid_inputs_without_publication() -> Non
     seen: list[CfgObservation] = []
     resource.watch(seen.append)
     temporary = Sources(revision=7, values={"$qubit.t1": 9.0}).read()
+    preview = resource.preview(before.ref.revision, resolution=temporary)
+    assert preview.ref == before.ref
+    assert preview.status is CfgStatus.VALID
+    assert preview.source_basis == temporary.source_basis
+    value = preview.tree.children["a"].value
+    assert isinstance(value, EvalValue)
+    assert value.resolved == 9.0
+    assert (
+        resource.preview(before.ref.revision, resolution=published).status
+        is CfgStatus.INVALID
+    )
 
     accepted = resource.accept(before.ref.revision, resolution=temporary)
 
@@ -382,6 +393,9 @@ def test_one_off_acceptance_guards_precede_evaluation(guard: str) -> None:
     with pytest.raises(CfgPreconditionError) as caught:
         resource.accept(expected, resolution=temporary)
     assert caught.value.reason is reason
+    with pytest.raises(CfgPreconditionError) as preview_error:
+        resource.preview(expected, resolution=temporary)
+    assert preview_error.value.reason is reason
     assert evaluations == []
 
 

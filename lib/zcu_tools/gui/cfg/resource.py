@@ -425,6 +425,24 @@ class CfgResource:
             self._observation.ref, self._observation.source_basis, deepcopy(values)
         )
 
+    def preview(
+        self, expected_revision: CfgRevision, *, resolution: CfgResolution
+    ) -> CfgObservation:
+        """Resolve observed inputs against a fixed source without publication.
+
+        App owners receive a detached Valid or Invalid observation with the
+        same ref and the supplied source basis. Inputs, publication, subscribers
+        and the source factory stay unchanged. Stale, revoked and notification
+        guards run before evaluation; unexpected resolver failures propagate.
+        This does not accept execution values or refresh the observed revision.
+        """
+        self._check_command(expected_revision, editing=False)
+        candidate, basis = self._prepare(deepcopy(self._inputs), source=resolution)
+        try:
+            return self._observe_draft(candidate, self._observation.ref, basis)
+        finally:
+            candidate.close()
+
     def revoke(self) -> None:
         if self._closed:
             return
