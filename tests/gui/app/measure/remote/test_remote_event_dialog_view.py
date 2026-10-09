@@ -163,11 +163,11 @@ def test_all_event_serializer_payload_shapes_are_locked() -> None:
         ),
         (
             MdChangedPayload(binding_id=1, content_changed=True, fault=None),
-            {"requery": ["context.md_get_attr"]},
+            {"requery": ["context.snapshot"]},
         ),
         (
             MlChangedPayload(binding_id=1, content_changed=True, fault=None),
-            {"requery": ["context.ml_get"]},
+            {"requery": ["context.snapshot"]},
         ),
         (SocChangedPayload(soc=None, soccfg=None), {"connected": False}),
         (
@@ -458,7 +458,7 @@ def test_md_changed_emits_requery_hint(fx):
         call(sock, "events.subscribe", {"events": ["md_changed"]})
         fx.bus.emit(MdChangedPayload(binding_id=1, content_changed=True, fault=None))
         msg = recv_push(sock, "md_changed")
-        assert msg["payload"] == {"requery": ["context.md_get_attr"]}
+        assert msg["payload"] == {"requery": ["context.snapshot"]}
     finally:
         sock.close()
 
