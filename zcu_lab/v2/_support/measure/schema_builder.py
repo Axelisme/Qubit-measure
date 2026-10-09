@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, Self, cast
+from typing import TYPE_CHECKING, Literal, Self
 
 from zcu_tools.gui.cfg import (
     CfgNodeSpec,
@@ -590,12 +590,12 @@ def _normalize_overrides(
     return tuple((path, _as_seed(value)) for path, value in (values or {}).items())
 
 
-def _as_seed(value: object | Seed[object]) -> Seed:
+def _as_seed[T](value: T | Seed[T]) -> Seed[T]:
     return value if isinstance(value, Seed) else literal(value)
 
 
 def _as_object_seed(value: object | Seed[object]) -> Seed[object]:
-    return cast(Seed[object], _as_seed(value))
+    return _as_seed(value)
 
 
 def _validate_local_name(name: str, *, verb: str) -> None:
