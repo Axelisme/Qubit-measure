@@ -683,9 +683,9 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
             },
         )
         expected = {
-            "flx_half": done["interaction"]["state"]["flux_half"],
-            "flx_int": done["interaction"]["state"]["flux_int"],
-            "flx_period": 2
+            "qubit.flux_half": done["interaction"]["state"]["flux_half"],
+            "qubit.flux_int": done["interaction"]["state"]["flux_int"],
+            "qubit.flux_period": 2
             * abs(
                 done["interaction"]["state"]["flux_int"]
                 - done["interaction"]["state"]["flux_half"]
@@ -706,10 +706,22 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
                 },
             },
         )
+        actual_expected = {
+            "Q1.flux_half": expected["qubit.flux_half"],
+            "Q1.flux_int": expected["qubit.flux_int"],
+            "Q1.flux_period": expected["qubit.flux_period"],
+        }
         assert {
             item["target"]: item["after"] for item in written["written"]
+        } == actual_expected
+        component = call("rpc_call", {"method": "context.snapshot"})["point"][
+            "components"
+        ]["Q1"]
+        assert {
+            "qubit.flux_half": component["flux_half"],
+            "qubit.flux_int": component["flux_int"],
+            "qubit.flux_period": component["flux_period"],
         } == expected
-        assert call("rpc_call", {"method": "context.snapshot"})["md"] == expected
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
             "tabs"
         ][0]
@@ -833,9 +845,16 @@ def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
         assert {
             item["target_name"]: item["proposed_value"] for item in draft["items"]
         } == {
-            "flx_half": pytest.approx(original["flux_half"]),
-            "flx_int": pytest.approx(original["flux_int"]),
-            "flx_period": pytest.approx(
+            "qubit.flux_half": pytest.approx(original["flux_half"]),
+            "qubit.flux_int": pytest.approx(original["flux_int"]),
+            "qubit.flux_period": pytest.approx(
+                2 * abs(original["flux_int"] - original["flux_half"])
+            ),
+        }
+        assert {item["actual_path"]: item["proposed"] for item in draft["items"]} == {
+            "Q1.flux_half": pytest.approx(original["flux_half"]),
+            "Q1.flux_int": pytest.approx(original["flux_int"]),
+            "Q1.flux_period": pytest.approx(
                 2 * abs(original["flux_int"] - original["flux_half"])
             ),
         }
