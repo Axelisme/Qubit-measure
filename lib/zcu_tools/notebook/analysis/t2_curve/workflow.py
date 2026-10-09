@@ -1432,7 +1432,7 @@ def _prepare_window_data(
     )
     order = np.argsort(resolved.aligned_fluxs[resolved.in_window])
 
-    def take(values_arr: NDArray[np.float64]) -> NDArray[np.float64]:
+    def take[T: np.generic](values_arr: NDArray[T]) -> NDArray[T]:
         return np.asarray(values_arr)[resolved.in_window][order]
 
     f01_observed = _float_column(samples_df, "Freq (MHz)")[valid_t2e]
