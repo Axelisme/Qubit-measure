@@ -221,6 +221,10 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     preview = session.service.preview_values(draft)
     assert preview["md-1"].current == {"__complex__": [0.6, 0.1]}
     assert preview["md-2"].current is None
+    assert [preview[item].actual_path for item in ("md-1", "md-2")] == [
+        "Q1.ext.readout_cal.g_center",
+        "Q1.ext.readout_cal.e_center",
+    ]
     assert [preview[item].proposed for item in ("md-1", "md-2")] == tags
     assert session.entry.ledger.events() == ()
     session.service.apply_draft(draft, origin=CommandOrigin("mcp"))

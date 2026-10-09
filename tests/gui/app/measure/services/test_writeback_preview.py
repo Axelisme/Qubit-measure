@@ -73,6 +73,7 @@ def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(ses
         parameters=capture,
     )
     first = service.preview_values(draft)["md-1"]
+    assert first.actual_path == "general.ext.value"
     assert first.current == [1, 2]
     assert first.proposed == [3, 4]
     control.set_parameter(target, "general.ext.value", [1, 2, 5])
@@ -88,7 +89,9 @@ def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(ses
     entry.new_point("b")
     control.use_point(PointUseRequest("b"))
     control.set_parameter(control.read_context().target, "general.ext.other", 8)
-    assert service.preview_values(draft)["md-1"].current == 7
+    retargeted = service.preview_values(draft)["md-1"]
+    assert retargeted.actual_path == "general.ext.other"
+    assert retargeted.current == 7
     assert service.get_all_applied(draft) == {"md-1": False}
     assert draft.items[0].selected is True
 
@@ -118,6 +121,7 @@ def test_cfg_preview_contains_complete_current_and_live_draft_values(
         item_id, path, edited = "wf-1", "length", 0.2
     draft = service.create_draft([proposal], parameters=capture)
     preview = service.preview_values(draft)[item_id]
+    assert preview.actual_path == name
     assert preview.current == capture.library.entry_value(name, kind=kind)
     if kind == "module":
         assert PulseSpec.model_validate(
@@ -132,6 +136,7 @@ def test_cfg_preview_contains_complete_current_and_live_draft_values(
     assert live.current == preview.current
     draft.edit(item_id, target_name=name.replace("target", "new"))
     missing = service.preview_values(draft)[item_id]
+    assert missing.actual_path == name.replace("target", "new")
     assert missing.current is None
     assert missing.proposed == live.proposed
     error = FailedPreconditionError("draft unavailable")

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDialog,
+    QFrame,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QTableWidget,
@@ -22,6 +26,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
@@ -338,3 +343,177 @@ def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qap
             w2.close()
     finally:
         widget.close()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
+    qapp, pane: Literal["analysis", "post_analysis"]
+) -> None:
+    matrix = [[0.9, 0.1], [0.2, 0.8]]
+    scalar = MetaDictWriteback(
+        "driver.ext.value", "Value", proposed_value=20.09, stderr=0.18
+    )
+    scalar.session_id = "md-1"
+    table = MetaDictWriteback("driver.ext.matrix", "Matrix", proposed_value=matrix)
+    table.session_id = "md-2"
+    values = {
+        "md-1": WritebackValues(
+            actual_path="Q1.ext.value", current=19.8, proposed=20.09
+        ),
+        "md-2": WritebackValues(
+            actual_path="Q1.ext.matrix", current=None, proposed=matrix
+        ),
+    }
+    ctrl = MagicMock()
+    applied = {"md-1": False, "md-2": False}
+    ctrl.get_writeback_applied_for_pane.return_value = applied
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied
+    ctrl.get_writeback_summaries_for_pane.return_value = {
+        "md-1": ("18.0", "19.0"),  # stale baseline, not the supplied live facts
+        "md-2": ("—", "2 × 2 matrix"),
+    }
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate([scalar, table], values)
+        widget.show()
+        for width in (620, 360):
+            widget.resize(width, 400)
+            qapp.processEvents()
+            texts = [label.text() for label in widget.findChildren(QLabel)]
+            assert any("Q1.ext.value" in text for text in texts)
+            assert any("Q1.ext.matrix" in text for text in texts)
+            assert any("±" in text and "0.18" in text for text in texts)
+            assert any("19.8" in text for text in texts)
+            assert any("20.09" in text for text in texts)
+            matrix_row = next(
+                row
+                for row in widget.findChildren(QFrame, "writebackRow")
+                if any(
+                    "Q1.ext.matrix" in label.text()
+                    for label in row.findChildren(QLabel)
+                )
+            )
+            assert all(
+                "±" not in label.text() for label in matrix_row.findChildren(QLabel)
+            )
+            assert any(
+                "driver.ext.value" in check.text()
+                for check in widget.findChildren(QCheckBox)
+            )
+        copy_button = next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Copy"
+        )
+        copy_button.click()
+        clipboard = QApplication.clipboard()
+        assert clipboard is not None
+        assert json.loads(clipboard.text()) == matrix
+        assert scalar.selected and table.selected
+        unapplied = next(
+            check
+            for check in widget.findChildren(QCheckBox)
+            if check.text() == "driver.ext.value*"
+        )
+        assert unapplied.font().bold()
+        applied["md-1"] = True
+        widget.populate([scalar, table], values)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        written = next(
+            check
+            for check in widget.findChildren(QCheckBox)
+            if check.text() == "driver.ext.value"
+        )
+        assert not written.font().bold()
+        widget.populate([], {})
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
+        assert not widget.findChildren(QCheckBox)
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+def test_nonempty_preview_requires_each_service_fact(qapp) -> None:
+    item = MetaDictWriteback("driver.ext.value", "Value", proposed_value=1.0)
+    item.session_id = "md-1"
+    ctrl = MagicMock()
+    ctrl.get_writeback_applied_for_pane.return_value = {}
+    widget = WritebackWidget(ctrl, tab_id="captured")
+    try:
+        with pytest.raises(KeyError, match="md-1"):
+            widget.populate([item], {})
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_retarget_edit_refreshes_captured_path_current_and_proposal(
+    qapp, pane: Literal["analysis", "post_analysis"]
+) -> None:
+    item = MetaDictWriteback("driver.ext.value", "Value", proposed_value=20.09)
+    item.session_id = "md-1"
+    original = WritebackValues(actual_path="Q1.ext.value", current=19.8, proposed=20.09)
+    ctrl = MagicMock()
+    ctrl.get_writeback_applied_for_pane.return_value = {}
+    ctrl.get_writeback_summaries_for_pane.return_value = {"md-1": ("19.8", "20.09")}
+
+    def commit_edit(
+        tab_id: str,
+        requested_pane: str,
+        session_id: str,
+        *,
+        target_name: str,
+        proposed_value: object,
+    ) -> None:
+        assert (tab_id, requested_pane, session_id) == ("captured", pane, "md-1")
+        assert target_name == "driver.ext.other"
+        ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
+            "md-1": WritebackValues(
+                actual_path="Q1.ext.other", current=7.0, proposed=proposed_value
+            )
+        }
+
+    ctrl.set_writeback_item_for_pane.side_effect = commit_edit
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = commit_edit
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate([item], {"md-1": original})
+        widget.show()
+        next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Edit"
+        ).click()
+        qapp.processEvents()
+        dialog = next(
+            candidate
+            for candidate in qapp.topLevelWidgets()
+            if isinstance(candidate, QDialog)
+            and candidate.isVisible()
+            and candidate.windowTitle() == "Edit Value: driver.ext.value"
+        )
+        inputs = dialog.findChildren(QLineEdit)
+        assert len(inputs) == 2
+        inputs[0].setText("driver.ext.other")
+        inputs[1].setText("9.0")
+        next(
+            button
+            for button in dialog.findChildren(QPushButton)
+            if button.text() == "Save"
+        ).click()
+        qapp.processEvents()
+        texts = [label.text() for label in widget.findChildren(QLabel)]
+        assert any("Q1.ext.other" in text for text in texts)
+        assert any(text == "7.0" for text in texts)
+        assert any("9.0" in text for text in texts)
+        assert item.target_name == "driver.ext.other"
+        assert item.proposed_value == 9.0
+        assert item.selected
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()

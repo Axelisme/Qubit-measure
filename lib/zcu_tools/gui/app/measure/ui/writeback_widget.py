@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
@@ -37,6 +37,7 @@ from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
+    from zcu_tools.gui.app.measure.services.writeback import WritebackValues
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
 
 logger = logging.getLogger(__name__)
@@ -230,7 +231,7 @@ class _WritebackRow(QFrame):
 class WritebackWidget(QWidget):
     """Compact unified writeback ledger (S1–S3).
 
-    Presentation is app-local; no data-model or wire contract is introduced.
+    The service resolves captured destinations; this view renders its facts.
 
     - Draft-owned applied state projected as bold ``target*`` vs normal ``target``.
     - Centered Current → Proposed columns on a shared-background,
@@ -320,7 +321,21 @@ class WritebackWidget(QWidget):
 
         self._refresh_apply_enabled()
 
-    def populate(self, items: Sequence[WritebackItem]) -> None:
+    def populate(
+        self,
+        items: Sequence[WritebackItem],
+        values: Mapping[str, WritebackValues],
+    ) -> None:
+        """Render persistent items with service-owned captured preview facts.
+
+        values maps every item session_id to its current preview. Missing keys
+        raise KeyError; the view never resolves a target or substitutes active
+        context. Rows show the logical target, actual path, current/proposed
+        values and optional stderr in working units, without a unit label.
+        Empty items clear the view. Items remain the persistent draft objects
+        so checkbox and Edit commands use the same stable identities.
+        """
+        self._values = values
         # Clear old rows
         while self._rows_layout.count():
             child = self._rows_layout.takeAt(0)

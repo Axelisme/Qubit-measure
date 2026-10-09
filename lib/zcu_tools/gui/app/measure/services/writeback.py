@@ -98,8 +98,15 @@ def _destination_value(
 
 @dataclass(frozen=True)
 class WritebackValues:
-    """Current fixed-target value and capture-lowered proposal; missing is None."""
+    """Complete preview facts for one item at its captured destination.
 
+    actual_path is the captured role-resolved parameter path or library key,
+    after any draft-local retarget edit. current is the latest stored value at
+    that destination, or None if missing. proposed is the complete validated
+    value, lowered against the creation capture for cfg items.
+    """
+
+    actual_path: str
     current: object
     proposed: object
 
@@ -322,7 +329,9 @@ class WritebackService:
                 )
             )
             values[item.session_id] = WritebackValues(
-                current=_destination_value(item, current, path), proposed=proposed
+                actual_path=path,
+                current=_destination_value(item, current, path),
+                proposed=proposed,
             )
         return values
 

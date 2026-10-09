@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，tab 角色改綁與歷史來源
+**Last updated:** 2026-10-09，WB captured preview facts
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -114,9 +114,12 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   Modules do not invoke operation services directly. Each `WritebackWidget`
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
-  `WritebackService` remains stage-agnostic and owns the display-only baseline
-  capture (S2): at draft creation it snapshots the destination `SessionEnv` and
-  exposes per-item `current_summary` / `proposed_summary` to Qt. The widget is a
+  `WritebackService` remains stage-agnostic and fixes each draft's destination
+  and role resolution at creation. Its preview returns per-item `WritebackValues`
+  with the actual path, latest stored value and capture-lowered proposal. Both
+  panes obtain these facts through `writeback_control`; Qt does not resolve paths.
+  Qt and remote preview also display the proposal's existing stderr. Unit display
+  awaits a user decision. The widget is a
   compact unified ledger: draft-owned unapplied items以粗體`target*`與`* = not applied`
   legend呈現，成功寫入的items改為一般字重`target`，retarget或內容修改後回到unapplied；
   apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
