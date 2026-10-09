@@ -220,7 +220,7 @@ def test_analysis_cancellation_delivers_none_without_reading_results(
         assert capture.result is None and capture.writeback is None
         assert not any(
             method
-            in ("tab.get_analyze_result", "tab.save_image", "tab.writeback_preview")
+            in ("tab.get_analyze_result", "tab.save_artifacts", "tab.writeback_preview")
             for method, _ in client.transport.sent
         )
 
