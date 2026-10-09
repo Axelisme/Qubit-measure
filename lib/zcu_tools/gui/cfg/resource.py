@@ -199,15 +199,32 @@ class CfgEditing(Protocol):
 
 
 class CfgAcceptance(Protocol):
-    def accept(self, expected_revision: CfgRevision) -> AcceptedConfig: ...
+    def accept(
+        self,
+        expected_revision: CfgRevision,
+        *,
+        resolution: CfgResolution | None = None,
+    ) -> AcceptedConfig:
+        """Accept the observed inputs, optionally against a fixed one-off source.
+
+        Without ``resolution``, require the published observation to be Valid.
+        With it, resolve the same inputs without changing their publication.
+        Both paths reject stale revisions, revoked resources and notification
+        reentry; a non-Valid result raises CfgPreconditionError.
+        """
+        ...
 
 
 @dataclass(frozen=True)
 class CfgResolution:
-    """One command's stable, already-published source view (never live I/O).
+    """One command's fixed source view; callbacks must never perform live I/O.
 
-    Composition binds these ports to detached source snapshots. A new view is
-    acquired for a command, not for observe, watch, or acceptance.
+    Composition binds all ports to the same detached source snapshots. Editing
+    and refresh acquire a new view. Observe, watch and ordinary acceptance do
+    not. A Run owner may supply a one-off view to acceptance without publishing
+    it. ``source_basis`` identifies those snapshots; the other fields evaluate
+    expressions, enumerate options, resolve references, read frozen values and
+    validate expression syntax, respectively.
     """
 
     source_basis: SourceBasis
@@ -372,8 +389,33 @@ class CfgResource:
         self._check_command(expected_revision, editing=False)
         return self.refresh_group((self,), resolution=self._resolution)[0]
 
-    def accept(self, expected_revision: CfgRevision) -> AcceptedConfig:
+    def accept(
+        self,
+        expected_revision: CfgRevision,
+        *,
+        resolution: CfgResolution | None = None,
+    ) -> AcceptedConfig:
+        """Return detached execution values for the observed input revision.
+
+        Without ``resolution``, use only the cached Valid publication. A supplied
+        fixed resolution prepares the current inputs as a temporary candidate,
+        including when the publication is Invalid or Unavailable. It never
+        changes inputs, revision, subscribers or the source factory. Non-Valid
+        results raise NOT_VALID; stale, revoked and notification guards apply
+        before evaluating the candidate. Unexpected resolver errors propagate.
+        """
         self._check_command(expected_revision, editing=False)
+        if resolution is not None:
+            candidate, basis = self._prepare(deepcopy(self._inputs), source=resolution)
+            try:
+                if not candidate.is_valid():
+                    raise CfgPreconditionError(
+                        CfgPreconditionReason.NOT_VALID, "cfg is not valid"
+                    )
+                values = lower_resolved_cfg(candidate.snapshot())
+                return AcceptedConfig(self._observation.ref, basis, values)
+            finally:
+                candidate.close()
         if self._observation.status is not CfgStatus.VALID:
             raise CfgPreconditionError(
                 CfgPreconditionReason.NOT_VALID, "cfg is not valid"
