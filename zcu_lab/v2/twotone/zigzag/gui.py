@@ -19,7 +19,7 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_lab.v2._support.measure import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    scaled_md,
+    scaled_path_seed,
 )
 from zcu_lab.v2._support.measure.zigzag import (
     EXPECTS_ML,
@@ -71,7 +71,7 @@ class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         builder = add_gate_modules(MeasureCfgBuilder()).relax_delay(
-            scaled_md("t1", factor=5.0, fallback_value=30.5)
+            scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5)
         )
         return (
             add_repeat_fields(builder, n_times=10)

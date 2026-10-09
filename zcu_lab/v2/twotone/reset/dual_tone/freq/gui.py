@@ -25,13 +25,12 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.reset_dual_tone import RESET_120_FIELD_MD_MAP
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import Seed, custom, md
+from zcu_lab.v2._support.measure.seeds import Seed, custom, path_seed
 from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_lab.v2.twotone.reset.dual_tone.freq.core import (
     FreqAnalyzeOptions,
@@ -44,32 +43,19 @@ DualToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
 def _reset_freq_axis(
-    center_key: Literal["reset_f1", "reset_f2"],
+    pulse: Literal["pulse1_cfg", "pulse2_cfg"],
 ) -> Seed[SweepValue]:
-    """Build one axis of this experiment's two-frequency reset map."""
+    """Store a 201-point ±50 MHz window around a calibrated dual-tone center."""
+    path = f"$qubit.module.dual_tone.{pulse}.freq"
 
-    def resolve(ctx: SessionEnv) -> SweepValue:
-        width_key = f"{center_key}_w"
-        center = md_get_float(ctx, center_key, 3000.0)
-        if md_has_key(ctx, center_key) and md_has_key(ctx, width_key):
-            start: float | EvalValue = EvalValue(
-                expr=f"{center_key} - 1.5 * {width_key}"
-            )
-            stop: float | EvalValue = EvalValue(
-                expr=f"{center_key} + 1.5 * {width_key}"
-            )
-        elif md_has_key(ctx, center_key):
-            start = EvalValue(expr=f"{center_key} - 50.0")
-            stop = EvalValue(expr=f"{center_key} + 50.0")
-        else:
-            start = center - 50.0
-            stop = center + 50.0
-        return SweepValue(start=start, stop=stop, expts=201)
+    def resolve(_ctx: SessionEnv) -> SweepValue:
+        return SweepValue(
+            start=EvalValue(f"{path} - 50.0"),
+            stop=EvalValue(f"{path} + 50.0"),
+            expts=201,
+        )
 
-    return custom(
-        resolve,
-        description=f"{center_key} reset frequency axis (201 points)",
-    )
+    return custom(resolve, description=f"{path} reset frequency axis (201 points)")
 
 
 @dataclass
@@ -145,8 +131,12 @@ class DualToneFreqAdapter(
                 shape="two_pulse",
                 locked={"pulse1_cfg.freq": 0.0, "pulse2_cfg.freq": 0.0},
                 overrides={
-                    "pulse1_cfg.gain": md("reset_gain1", fallback=1.0),
-                    "pulse2_cfg.gain": md("reset_gain2", fallback=1.0),
+                    "pulse1_cfg.gain": path_seed(
+                        "$qubit.module.dual_tone.pulse1_cfg.gain", fallback=1.0
+                    ),
+                    "pulse2_cfg.gain": path_seed(
+                        "$qubit.module.dual_tone.pulse2_cfg.gain", fallback=1.0
+                    ),
                 },
             )
             .readout()
@@ -154,12 +144,12 @@ class DualToneFreqAdapter(
             .sweep(
                 "freq1",
                 label="Freq 1 (MHz)",
-                default=_reset_freq_axis("reset_f1"),
+                default=_reset_freq_axis("pulse1_cfg"),
             )
             .sweep(
                 "freq2",
                 label="Freq 2 (MHz)",
-                default=_reset_freq_axis("reset_f2"),
+                default=_reset_freq_axis("pulse2_cfg"),
             )
             .reps(100)
             .rounds(1000)

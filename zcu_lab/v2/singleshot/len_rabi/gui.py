@@ -29,7 +29,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_path_seed
 from zcu_lab.v2._support.measure.singleshot_rabi import rabi_calibration_writeback
 from zcu_lab.v2._support.singleshot.rabi_fit import RabiJointFitResult
 from zcu_lab.v2.singleshot.len_rabi.core import (
@@ -126,7 +126,11 @@ class SsLenRabiAdapter(
                 label="Length (us)",
                 default=SweepDefault(
                     start=0.03,
-                    stop=scaled_md("pi_len", factor=4.0, fallback_value=0.2),
+                    stop=scaled_path_seed(
+                        "$qubit.module.x180.waveform.length",
+                        factor=4.0,
+                        fallback_value=0.2,
+                    ),
                     expts=51,
                 ),
             )
@@ -134,17 +138,17 @@ class SsLenRabiAdapter(
             .field(
                 "g_center",
                 spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("g_center"),
+                default=EvalValue("$qubit.ext.readout_cal.g_center"),
             )
             .field(
                 "e_center",
                 spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("e_center"),
+                default=EvalValue("$qubit.ext.readout_cal.e_center"),
             )
             .field(
                 "radius",
                 spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("ge_radius"),
+                default=EvalValue("$qubit.ext.readout_cal.radius"),
             )
             .reps(1, locked=True)
             .rounds(1, locked=True)

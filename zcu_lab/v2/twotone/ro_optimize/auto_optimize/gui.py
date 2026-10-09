@@ -27,7 +27,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import res_freq_range, scaled_md
+from zcu_lab.v2._support.measure.seeds import res_freq_range, scaled_path_seed
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import (
     AutoOptCfg,
@@ -118,7 +118,7 @@ class RoOptAutoAdapter(
                     "pulse_cfg.gain": 0.0,
                 },
             )
-            .relax_delay(scaled_md("t1", factor=3.0, fallback_value=30.5))
+            .relax_delay(scaled_path_seed("$qubit.t1", factor=3.0, fallback_value=30.5))
             .sweep(
                 "freq",
                 label="Readout freq (MHz)",

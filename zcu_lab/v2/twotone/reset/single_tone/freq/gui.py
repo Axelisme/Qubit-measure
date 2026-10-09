@@ -22,32 +22,29 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import custom, md
+from zcu_lab.v2._support.measure.seeds import custom, path_seed
 from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_lab.v2.twotone.reset.single_tone.freq.core import FreqCfg, FreqExp, FreqResult
 
 SingleToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
-def _reset_freq_range(ctx: SessionEnv) -> SweepValue:
-    """Build this sideband-reset scan around its calibrated frequency."""
-    center = md_get_float(ctx, "reset_f", 3000.0)
-    if md_has_key(ctx, "reset_f") and md_has_key(ctx, "resetf_w"):
-        start: float | EvalValue = EvalValue(expr="reset_f - 1.5 * resetf_w")
-        stop: float | EvalValue = EvalValue(expr="reset_f + 1.5 * resetf_w")
-    elif md_has_key(ctx, "reset_f"):
-        start = EvalValue(expr="reset_f - 50.0")
-        stop = EvalValue(expr="reset_f + 50.0")
-    else:
-        start = center - 50.0
-        stop = center + 50.0
-    return SweepValue(start=start, stop=stop, expts=201)
+def _reset_freq_range(_ctx: SessionEnv) -> SweepValue:
+    """Store the calibrated sideband frequency ± 1.5 FWHM in MHz."""
+    return SweepValue(
+        start=EvalValue(
+            "$qubit.module.sideband.pulse_cfg.freq - 1.5 * $qubit.ext.reset_fwhm"
+        ),
+        stop=EvalValue(
+            "$qubit.module.sideband.pulse_cfg.freq + 1.5 * $qubit.ext.reset_fwhm"
+        ),
+        expts=201,
+    )
 
 
 @dataclass
@@ -120,15 +117,15 @@ class SingleToneFreqAdapter(
                 overrides={
                     "pulse_cfg.gain": 0.3,
                     "pulse_cfg.waveform.length": 5.0,
-                    "pulse_cfg.post_delay": md(
-                        "rf_w",
-                        expr="5.0 / (2 * 3.141592653589793 * rf_w)",
+                    "pulse_cfg.post_delay": path_seed(
+                        "$resonator.kappa",
+                        expr="5.0 / (2 * 3.141592653589793 * $resonator.kappa)",
                         fallback=0.8,
                     ),
                 },
             )
             .readout()
-            .relax_delay(md("t1", expr="1.0 * t1", fallback=30.5))
+            .relax_delay(path_seed("$qubit.t1", expr="1.0 * $qubit.t1", fallback=30.5))
             .sweep(
                 "freq",
                 label="Freq (MHz)",
@@ -186,7 +183,9 @@ class SingleToneFreqAdapter(
                 req.ctx,
                 req.run_result.cfg,
                 target="reset_10",
-                field_md_map=[("pulse_cfg.freq", "reset_f")],
+                field_md_map=[
+                    ("pulse_cfg.freq", "$qubit.module.sideband.pulse_cfg.freq")
+                ],
                 desc="Reset with one pulse from 1 to 0",
             )
         )

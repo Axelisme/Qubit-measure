@@ -1,10 +1,10 @@
 """Shared helper for gated, per-experiment reset module writeback.
 
 Each reset calibration adapter proposes its final reset library module the same
-way: gate on whether every calibration md key the module needs is present, then
+way: gate on whether every canonical calibration path is present, then
 build the module from *this* run's ``cfg_snapshot.modules.tested_reset`` template
-and overwrite the calibration fields from md. The user's reset calibration runs
-are unordered and repeatable, so the proposal is keyed on md completeness — not on
+and overwrite fields from its fixed ParameterContext. Reset calibration runs
+are unordered and repeatable, so the proposal is keyed on completeness — not on
 being "the last step" — letting any run that has the full calibration emit it.
 """
 
@@ -19,7 +19,7 @@ from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.program.v2.modules import PulseReadoutCfg
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
+from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
@@ -67,9 +67,12 @@ def _resolve_readout_dpm_values(
         if key in proposed:
             values.append(float(proposed[key]))
             continue
-        if not md_has_key(ctx, key):
+        if ctx.parameters is None:
             return None
-        values.append(md_get_float(ctx, key, float("nan")))
+        calibrated = optional_parameter_float(ctx.parameters, f"$qubit.ext.{key}")
+        if calibrated is None:
+            return None
+        values.append(calibrated)
 
     best_ro_freq, best_ro_gain, best_ro_length = values
     if not all(math.isfinite(value) for value in values):
@@ -148,26 +151,25 @@ def reset_module_writeback_items(
 ) -> list[ModuleWriteback]:
     """A gated ``ModuleWriteback`` proposing the calibrated reset library module.
 
-    ``field_md_map`` pairs a dotted field path inside ``tested_reset`` (e.g.
-    ``"pulse_cfg.freq"``) with the md key holding its calibrated value (e.g.
-    ``"reset_f"``). The proposal is emitted only when *every* md key is present
-    (``md_has_key``) and a ``cfg_snapshot`` exists; otherwise it returns ``[]`` so
-    the experiment offers only its plain md writeback. When emitted, the module is
-    built from ``cfg_snapshot.modules.tested_reset`` (this run's calibrated
-    template) and each mapped field is overwritten from md.
+    ``field_md_map`` pairs fields inside ``tested_reset`` with canonical
+    parameter paths such as ``$qubit.module.sideband.pulse_cfg.freq``.
+    A missing capture, snapshot, null or absent calibration returns ``[]``.
+    Invalid sources, aliases and scalar values propagate without fallback.
+    The template remains this run's ``cfg_snapshot.modules.tested_reset``.
     """
-    if cfg_snapshot is None:
+    if cfg_snapshot is None or ctx.parameters is None:
         return []
-    if not all(md_has_key(ctx, md_key) for _, md_key in field_md_map):
-        return []
+    calibrated_fields: list[tuple[str, float]] = []
+    for field_path, parameter_path in field_md_map:
+        calibrated = optional_parameter_float(ctx.parameters, parameter_path)
+        if calibrated is None:
+            return []
+        calibrated_fields.append((field_path, calibrated))
 
     tested_reset = cfg_snapshot.modules.tested_reset
     spec, value = module_cfg_to_value(tested_reset)
-    for field_path, md_key in field_md_map:
-        # md_has_key gated every key above, so md_get_float's default is unreachable;
-        # pass NaN so a regression (a missing key slipping through) fails loudly
-        # downstream rather than silently writing a plausible 0.0.
-        value.with_field(field_path, md_get_float(ctx, md_key, float("nan")))
+    for field_path, calibrated in calibrated_fields:
+        value.with_field(field_path, calibrated)
 
     return [
         ModuleWriteback(

@@ -4,7 +4,6 @@ from zcu_lab.v2._support.measure.analyze_results import (
     FigureOnlyAnalyzeResult,
     run_figure_only_analyze,
 )
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.defaults.helpers import make_trig_offset
 from zcu_lab.v2._support.measure.defaults.module_defaults import (
     NamedModuleValue,
@@ -30,10 +29,9 @@ from zcu_lab.v2._support.measure.seeds import (
     custom,
     flux_range,
     literal,
-    md,
     qub_freq_range,
     res_freq_range,
-    scaled_md,
+    scaled_path_seed,
     value_source,
 )
 from zcu_lab.v2._support.measure.spec_helpers import (
@@ -64,10 +62,9 @@ __all__ = [
     "custom",
     "flux_range",
     "literal",
-    "md",
     "qub_freq_range",
     "res_freq_range",
-    "scaled_md",
+    "scaled_path_seed",
     "value_source",
     # shared analyze-result shapes
     "FigureOnlyAnalyzeResult",
@@ -75,9 +72,6 @@ __all__ = [
     # interactive flux-pick analysis (shared by onetone/twotone flux_dep)
     "FluxPickParams",
     "FluxPickResult",
-    # ctx helpers
-    "md_get_float",
-    "md_has_key",
     # Role factory table (single source for TemplateCatalog + MeasureCfgDefinition)
     "ROLE_FACTORIES",
     "RoleFactorySpec",

@@ -28,7 +28,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import scaled_md
+from zcu_lab.v2._support.measure.seeds import scaled_path_seed
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.power.core import (
     PowerAnalyzeOptions,
@@ -112,7 +112,9 @@ class RoOptPowerAdapter(
             .reset(optional=True)
             .pulse("qub_pulse", role_id="pi_pulse")
             .readout(pulse_only=True, locked={"pulse_cfg.gain": 0.0})
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
+            )
             .sweep(
                 "gain",
                 label="Readout gain (a.u.)",

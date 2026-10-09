@@ -1,89 +1,97 @@
-"""Shared defaults and analyze-time helpers for single-shot adapters.
+"""Single-shot defaults and analysis calibration from fixed parameter captures.
 
-Sweep runs classify shots using the GE centre/radius trio frozen from resolved
-cfg, not the live MetaDict. ``singleshot/ge`` writeback can seed those defaults,
-but direct cfg values work too. ``singleshot/check`` instead reads the trio from
-MetaDict during analyze; ``read_ge_centers`` fast-fails there if any is missing.
+Sweep runs classify shots using resolved cfg values. Analysis-only consumers
+read their Run's ParameterContext; missing sources never use current globals.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    ScalarValue,
-    SweepValue,
-)
+import numpy as np
+from numpy.typing import NDArray
+from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.cfg import EvalValue, ScalarValue, SweepValue
+
+from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.resources.context.metadict import MetaDict
-
-# MetaDict keys the ``singleshot/ge`` writeback owns (see GEAdapter writeback).
-_G_CENTER_KEY = "g_center"
-_E_CENTER_KEY = "e_center"
-_GE_RADIUS_KEY = "ge_radius"
-
-_MISSING_HINT = (
-    "run the 'singleshot/ge' experiment first and apply its writeback "
-    "(it proposes 'g_center' / 'e_center' / 'ge_radius' into the MetaDict)"
-)
-
-# MetaDict keys the dispersive-shift experiment owns (chi + resonator linewidth).
-_CHI_KEY = "chi"
-_KAPPA_KEY = "rf_w"
-
-_CHI_KAPPA_HINT = (
-    "run the dispersive-shift experiment first so 'chi' (dispersive shift) and "
-    "'rf_w' (resonator linewidth kappa) are present in the MetaDict"
-)
+    from zcu_tools.gui.session.parameters import ParameterContext
 
 
-def read_ge_centers(md: MetaDict) -> tuple[complex, complex, float]:
-    """Read the ``(g_center, e_center, radius)`` GE classification trio from md.
+def _analysis_value(parameters: ParameterContext | None, path: str) -> YamlValue:
+    if parameters is None:
+        raise RuntimeError(f"Analysis requires a captured parameter source: {path}")
+    result = parameters.lookup(path)
+    return result.value if result.present else None
 
-    ``g_center`` / ``e_center`` are complex IQ-cluster centres (kept complex —
-    the GE writeback round-trips complex md values end-to-end); ``radius`` is the
-    optimised classification radius (float). Fast-fails with an actionable message
-    if any of the three is absent or ``None`` during ``singleshot/check`` analyze.
-    Sweep runs consume their resolved cfg values and do not call this helper.
+
+def read_analysis_float(parameters: ParameterContext | None, path: str) -> float | None:
+    """Read an optional finite scalar at a canonical path from the Run capture.
+
+    Missing/null leaves return None for the core's optional analysis input.
+    Missing capture raises RuntimeError; invalid sources, aliases and values
+    propagate without falling back to current globals or static calibration.
     """
-    g_center = _require_complex(md, _G_CENTER_KEY)
-    e_center = _require_complex(md, _E_CENTER_KEY)
-    radius = _require_float(md, _GE_RADIUS_KEY)
+    if parameters is None:
+        raise RuntimeError(f"Analysis requires a captured parameter source: {path}")
+    return optional_parameter_float(parameters, path)
+
+
+def read_confusion_matrix(
+    parameters: ParameterContext | None,
+) -> NDArray[np.float64] | None:
+    """Decode optional $qubit.ext.readout_cal.confusion_matrix as a float array.
+
+    Missing/null calibration leaves return None. Missing capture raises
+    RuntimeError; invalid aliases, sources or non-array data fail explicitly.
+    The experiment core owns matrix shape and classification validation.
+    """
+    value = _analysis_value(parameters, "$qubit.ext.readout_cal.confusion_matrix")
+    if value is None:
+        return None
+    return np.asarray(value, dtype=np.float64)
+
+
+def read_ge_centers(
+    parameters: ParameterContext | None,
+) -> tuple[complex, complex, float]:
+    """Read required canonical GE center/radius calibration from the Run capture.
+
+    Centers accept real numbers or complex strings from the parameter document.
+    Missing capture or calibration raises RuntimeError naming the canonical path.
+    Invalid aliases and unavailable sources propagate without fallback.
+    """
+    g_center = _require_complex(parameters, "$qubit.ext.readout_cal.g_center")
+    e_center = _require_complex(parameters, "$qubit.ext.readout_cal.e_center")
+    radius = _require_float(parameters, "$qubit.ext.readout_cal.radius")
     return g_center, e_center, radius
 
 
-def read_chi_kappa(md: MetaDict) -> tuple[float, float]:
-    """Read the ``(chi, kappa)`` AC-Stark fit inputs from md.
+def read_chi_kappa(parameters: ParameterContext | None) -> tuple[float, float]:
+    """Read required $qubit.ext.chi and $resonator.kappa in MHz from the Run.
 
-    ``chi`` is the dispersive shift (md 'chi', MHz) and ``kappa`` is the
-    resonator linewidth (md 'rf_w', MHz) — both required by the AC-Stark
-    coefficient fit, which derives ``eta = kappa² / (kappa² + chi²)`` internally
-    (matching the twotone AcStarkExp.analyze). Fast-fails with an actionable
-    message if either is absent, so the fit never runs against missing
-    calibration.
+    Missing capture or calibration raises RuntimeError naming the canonical path.
+    Invalid scalar values, aliases and unavailable sources propagate.
     """
-    chi = _require_float(md, _CHI_KEY, _CHI_KAPPA_HINT)
-    kappa = _require_float(md, _KAPPA_KEY, _CHI_KAPPA_HINT)
-    return chi, kappa
+    return (
+        _require_float(parameters, "$qubit.ext.chi"),
+        _require_float(parameters, "$resonator.kappa"),
+    )
 
 
 def readout_probe_freq(ctx: SessionEnv) -> ScalarValue:
     """Store $resonator.freq without reading ctx; missing calibration is Invalid."""
-    del ctx  # Defaults do not read the source before resource resolution.
+    del ctx
     return EvalValue(expr="$resonator.freq")
 
 
 def readout_probe_freq_range(
     ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
-    """Store a live $resonator.freq ± span_factor*$resonator.kappa sweep.
-
-    ctx is not read; missing aliases/calibration become Invalid at resolution.
-    """
-    del ctx  # Defaults do not read the source before resource resolution.
+    """Store $resonator.freq ± span_factor*$resonator.kappa without reading ctx."""
+    del ctx
     return SweepValue(
         start=EvalValue(f"$resonator.freq - {span_factor} * $resonator.kappa"),
         stop=EvalValue(f"$resonator.freq + {span_factor} * $resonator.kappa"),
@@ -91,28 +99,19 @@ def readout_probe_freq_range(
     )
 
 
-def _require_complex(md: MetaDict, key: str) -> complex:
-    value = md.get(key)
+def _require_complex(parameters: ParameterContext | None, path: str) -> complex:
+    value = _analysis_value(parameters, path)
     if value is None:
-        raise RuntimeError(f"MetaDict is missing '{key}': {_MISSING_HINT}")
-    # Accept the in-process complex object as-is; coerce int/float/str (the
-    # MetaDict persistence form) so a reloaded md still yields complex.
-    if isinstance(value, complex):
-        return value
-    if isinstance(value, (int, float, str)):
+        raise RuntimeError(
+            f"Missing parameter calibration: {path}; apply singleshot/ge writeback"
+        )
+    if isinstance(value, (int, float, str)) and not isinstance(value, bool):
         return complex(value)
-    raise RuntimeError(
-        f"MetaDict '{key}' is not a complex value (got {type(value).__name__}); "
-        f"{_MISSING_HINT}"
-    )
+    raise RuntimeError(f"Parameter calibration is not a complex value: {path}")
 
 
-def _require_float(md: MetaDict, key: str, hint: str = _MISSING_HINT) -> float:
-    value = md.get(key)
+def _require_float(parameters: ParameterContext | None, path: str) -> float:
+    value = read_analysis_float(parameters, path)
     if value is None:
-        raise RuntimeError(f"MetaDict is missing '{key}': {hint}")
-    if isinstance(value, (int, float)):
-        return float(value)
-    raise RuntimeError(
-        f"MetaDict '{key}' is not a numeric value (got {type(value).__name__}); {hint}"
-    )
+        raise RuntimeError(f"Missing parameter calibration: {path}")
+    return value

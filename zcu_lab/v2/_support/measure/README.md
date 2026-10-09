@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-09，未綁角色的 scalar/module defaults
+**Last updated:** 2026-10-10，canonical defaults 與 Run analysis calibration
 
 # Measure domain support
 
@@ -13,10 +13,12 @@ Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitio
 單一 adapter 的 domain policy 留在其 authoritative file；同一小群組共用但不具全域意義的
 helper 留在群組內 `_shared.py`。
 
-`schema_builder.py` 提供 adapter author可讀的 domain vocabulary。`seeds.py` 的角色路徑 seed
-只讀 tab 的固定 ParameterContext。module seed 按明確的 module 槽或 library root 掛載校準內容，
-已綁路徑缺少或明示 null 的 scalar 校準使用 caller 指定的 fallback，module 校準缺少時使用 fresh fallback。`path_seed` 與 `scaled_path_seed` 遇到宣告但未綁的角色，直接保存 `EvalValue`，不讀該路徑或使用 fallback。Cfg 求值時發布指名角色的 Invalid；綁定後 refresh 求值，reset 才重跑 defaults。`module_seed` 遇到未綁角色，保存 linked empty section，即使 optional/fallback=None 也啟用。Cfg 發布含 alias 路徑的 missing-reference Invalid；綁後 refresh 由 catalog 提供 shape 與內容。手動關掉 optional 後 refresh 不重掛，缺少槽的 fallback 仍由 reset 重跑 defaults 才採用。非 null 的錯誤值、來源與 materialization 故障仍報錯。
-其他 adapter 的舊 MetaDict／named-library defaults 尚待遷移。`defaults/` 擁有 cfg authoring 的語義角色與 fresh module
+`schema_builder.py` 提供 adapter author可讀的 domain vocabulary。`seeds.py` 的 scalar seed
+保存 canonical `EvalValue`，建立 defaults 時不查校準，也不代用靜態 fallback。module seed 按明確的 module 槽或 library root 掛載校準內容，
+module 校準缺少時使用既有 fresh fallback。`path_seed` 與 `scaled_path_seed` 遇到宣告但未綁的角色，直接保存 `EvalValue`，不讀該路徑或使用 fallback。Cfg 求值時發布指名角色的 Invalid；綁定後 refresh 求值，reset 才重跑 defaults。`module_seed` 遇到未綁角色，保存 linked empty section，即使 optional/fallback=None 也啟用。Cfg 發布含 alias 路徑的 missing-reference Invalid；綁後 refresh 由 catalog 提供 shape 與內容。手動關掉 optional 後 refresh 不重掛，缺少槽的 fallback 仍由 reset 重跑 defaults 才採用。非 null 的錯誤值、來源與 materialization 故障仍報錯。
+`singleshot_shared.py` 從 AnalyzeRequest 的固定 Run `ParameterContext` 讀取分類、chi/kappa 和可選分析校準。
+沒有 capture 時明示失敗，不讀目前 alias；可選校準 leaf 缺少或 null 時才交給 core 的既有分析預設。
+MIST `log_scale` 是 typed analysis input，不是儲存參數。`defaults/` 擁有 cfg authoring 的語義角色與 fresh module
 預設值，startup TemplateCatalog 也重用其 shape／blank factories。這些 module 可以依賴 domain-free `zcu_tools.gui.cfg`，但 generic cfg
 core不得反向 import measure domain。
 

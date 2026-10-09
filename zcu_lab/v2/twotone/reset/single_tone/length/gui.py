@@ -28,7 +28,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import md
+from zcu_lab.v2._support.measure.seeds import path_seed
 from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_lab.v2.twotone.reset.single_tone.length.core import (
     LengthCfg,
@@ -104,7 +104,11 @@ class SingleToneLengthAdapter(
                 label="Tested Reset",
                 shape="pulse",
                 init=ModuleInit.INLINE,
-                overrides={"pulse_cfg.freq": md("reset_f", fallback=0.0)},
+                overrides={
+                    "pulse_cfg.freq": path_seed(
+                        "$qubit.module.sideband.pulse_cfg.freq", fallback=0.0
+                    )
+                },
             )
             .readout()
             .relax_delay(30.5)
@@ -151,7 +155,9 @@ class SingleToneLengthAdapter(
                 req.ctx,
                 req.run_result.cfg,
                 target="reset_10",
-                field_md_map=[("pulse_cfg.freq", "reset_f")],
+                field_md_map=[
+                    ("pulse_cfg.freq", "$qubit.module.sideband.pulse_cfg.freq")
+                ],
                 desc="Reset with one pulse from 1 to 0",
             )
         )

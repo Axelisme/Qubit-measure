@@ -26,9 +26,8 @@ from zcu_lab.v2._support.measure import (
     Seed,
     SweepDefault,
     custom,
-    scaled_md,
+    scaled_path_seed,
 )
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.zigzag import (
     EXPECTS_ML,
     add_gate_modules,
@@ -57,14 +56,12 @@ class ZigZagScanAnalyzeResult(AnalyzeResultBase):
     best_value: float
 
 
-def _qub_freq_window(ctx: SessionEnv, expts: int) -> SweepValue:
-    if md_has_key(ctx, "q_f"):
-        start: float | EvalValue = EvalValue(expr=f"q_f - {_FREQ_HALF_SPAN}")
-        stop: float | EvalValue = EvalValue(expr=f"q_f + {_FREQ_HALF_SPAN}")
-    else:
-        center = md_get_float(ctx, "q_f", 5000.0)
-        start, stop = center - _FREQ_HALF_SPAN, center + _FREQ_HALF_SPAN
-    return SweepValue(start=start, stop=stop, expts=expts)
+def _qub_freq_window(_ctx: SessionEnv, expts: int) -> SweepValue:
+    return SweepValue(
+        start=EvalValue(f"$qubit.freq - {_FREQ_HALF_SPAN}"),
+        stop=EvalValue(f"$qubit.freq + {_FREQ_HALF_SPAN}"),
+        expts=expts,
+    )
 
 
 class _ZigZagScanBase(
@@ -91,7 +88,9 @@ class _ZigZagScanBase(
     def cfg_definition(cls) -> MeasureCfgDefinition:
         builder = (
             add_gate_modules(MeasureCfgBuilder())
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.5))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.5)
+            )
             .sweep(cls.sweep_key, label=cls.sweep_label, default=cls.sweep_default())
         )
         return add_repeat_fields(builder, n_times=6).reps(100).rounds(100).build()
@@ -155,8 +154,12 @@ class ZigZagScanGainAdapter(_ZigZagScanBase):
     @classmethod
     def sweep_default(cls) -> SweepDefault:
         return SweepDefault(
-            start=scaled_md("pi_gain", factor=0.8, fallback_value=0.4),
-            stop=scaled_md("pi_gain", factor=1.2, fallback_value=0.6),
+            start=scaled_path_seed(
+                "$qubit.module.x180.gain", factor=0.8, fallback_value=0.4
+            ),
+            stop=scaled_path_seed(
+                "$qubit.module.x180.gain", factor=1.2, fallback_value=0.6
+            ),
             expts=101,
         )
 

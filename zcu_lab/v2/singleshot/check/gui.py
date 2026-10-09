@@ -22,7 +22,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import scaled_md
+from zcu_lab.v2._support.measure.seeds import scaled_path_seed
 from zcu_lab.v2._support.measure.singleshot_shared import read_ge_centers
 from zcu_lab.v2.singleshot.check.core import (
     CheckAnalyzeOptions,
@@ -92,7 +92,9 @@ class CheckAdapter(
                 init=ModuleInit.INLINE,
             )
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
+            )
             .int("shots", label="Shots", default=5000)
             .reps(1, locked=True)
             .rounds(1, locked=True)
@@ -116,7 +118,7 @@ class CheckAdapter(
     ) -> CheckAnalyzeResult:
         # The check classifies the scatter against the GE centres — read the trio
         # from md (fast-fail if the upstream 'singleshot/ge' writeback is absent).
-        g_center, e_center, radius = read_ge_centers(req.md)
+        g_center, e_center, radius = read_ge_centers(req.parameters)
         CheckExp().analyze(
             req.run_result, CheckAnalyzeOptions(g_center, e_center, radius), plots=plots
         )

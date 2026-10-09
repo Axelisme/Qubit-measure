@@ -35,7 +35,9 @@ from zcu_lab.v2._support.measure.schema_builder import (
 )
 from zcu_lab.v2._support.measure.seeds import custom
 from zcu_lab.v2._support.measure.singleshot_shared import (
+    read_analysis_float,
     read_chi_kappa,
+    read_confusion_matrix,
     readout_probe_freq,
 )
 from zcu_lab.v2.singleshot.ac_stark.core import (
@@ -258,14 +260,11 @@ class SsAcStarkAdapter(
     def analyze(
         self, req: AnalyzeRequest[SsAcStarkRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> SsAcStarkAnalyzeResult:
-        # ``chi`` / ``kappa`` (= md 'rf_w', the resonator linewidth) are required
-        # fit inputs read from md — fast-fail if either is missing. The domain
-        # derives eta = kappa²/(kappa²+chi²) internally. ``confusion_matrix``
-        # (readout correction) and ``cutoff`` (drop high gains before fitting) are
-        # optional md inputs, never user knobs; absent → domain defaults.
-        chi, kappa = read_chi_kappa(req.md)
-        confusion = req.md.get("confusion_matrix")
-        cutoff = req.md.get("cutoff")
+        # Required chi/kappa and optional readout correction/cutoff use this
+        # Run's fixed capture. The core derives eta and owns fit defaults.
+        chi, kappa = read_chi_kappa(req.parameters)
+        confusion = read_confusion_matrix(req.parameters)
+        cutoff = read_analysis_float(req.parameters, "$qubit.ext.cutoff")
         analysis = AcStarkExp().analyze(
             req.run_result,
             AcStarkAnalyzeOptions(

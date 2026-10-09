@@ -26,8 +26,8 @@ from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder, Module
 from zcu_lab.v2._support.measure.seeds import (
     SweepDefault,
     custom,
-    md,
-    scaled_md,
+    path_seed,
+    scaled_path_seed,
     value_source,
 )
 
@@ -81,13 +81,13 @@ def test_definition_shape_is_context_free_and_instances_are_isolated() -> None:
     definition = (
         MeasureCfgBuilder()
         .pulse("pi_pulse", role_id="pi_pulse")
-        .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+        .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0))
         .sweep(
             "length",
             label="Delay (us)",
             default=SweepDefault(
                 start=0.0,
-                stop=scaled_md("t1", factor=5.0, fallback_value=500.0),
+                stop=scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=500.0),
                 expts=101,
             ),
         )
@@ -101,13 +101,13 @@ def test_definition_shape_is_context_free_and_instances_are_isolated() -> None:
     calibrated = definition.instantiate(_ctx(md_values={"t1": 12.0}))
 
     assert empty.spec == static_spec == calibrated.spec
-    assert empty.value.fields["relax_delay"] == DirectValue(100.0)
-    assert calibrated.value.fields["relax_delay"] == EvalValue("5.0 * t1")
+    assert empty.value.fields["relax_delay"] == EvalValue("5.0 * $qubit.t1")
+    assert calibrated.value.fields["relax_delay"] == EvalValue("5.0 * $qubit.t1")
     sweep = calibrated.value.fields["sweep"]
     assert isinstance(sweep, CfgSectionValue)
     length = sweep.fields["length"]
     assert isinstance(length, SweepValue)
-    assert length.stop == EvalValue("5.0 * t1")
+    assert length.stop == EvalValue("5.0 * $qubit.t1")
 
     empty.spec.fields.clear()
     assert definition.spec == static_spec
@@ -333,9 +333,9 @@ def test_md_override_and_locks_are_local_to_one_module_declaration() -> None:
             init=ModuleInit.INLINE,
             locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
             overrides={
-                "ro_cfg.ro_length": md(
-                    "res_probe_len",
-                    expr="res_probe_len - 0.1",
+                "ro_cfg.ro_length": path_seed(
+                    "$resonator.ext.default_probe_length",
+                    expr="$resonator.ext.default_probe_length - 0.1",
                     fallback=0.9,
                 )
             },
@@ -356,7 +356,9 @@ def test_md_override_and_locks_are_local_to_one_module_declaration() -> None:
     assert isinstance(ro, CfgSectionValue)
     assert pulse.fields["freq"] == DirectValue(0.0)
     assert ro.fields["ro_freq"] == DirectValue(0.0)
-    assert ro.fields["ro_length"] == EvalValue("res_probe_len - 0.1")
+    assert ro.fields["ro_length"] == EvalValue(
+        "$resonator.ext.default_probe_length - 0.1"
+    )
 
     with pytest.raises(ValueError, match="cannot also be overridden"):
         MeasureCfgBuilder().readout(
