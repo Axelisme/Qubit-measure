@@ -1920,6 +1920,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert isinstance(control, QLineEdit) and isinstance(button, QPushButton)
     assert isinstance(message, QLabel)
     control.setText("8.00")
+    before_click_text = control.text()
     journal = entry.result_path / "workflows/tuning/journal.jsonl"
     original = journal.read_bytes()
     journal.unlink()
@@ -1948,7 +1949,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
     assert panel.panel.state.input.data["guess_us"] == 45.0
     assert panel.panel.state.input.data["sweep_factor"] == 8.0
-    assert control.text() == "8.00"
+    assert control.text() == before_click_text
     assert settlements == [token]
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
     assert not harness.progress.bars_for_owner("t1-workflow")
