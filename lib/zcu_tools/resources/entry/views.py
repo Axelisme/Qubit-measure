@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, overload
 
 from pydantic import BaseModel, TypeAdapter
 
+from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
@@ -584,6 +585,8 @@ def _field_container(value: object, path: str) -> _FieldNode:
 
 
 def _write_field(node: _FieldNode, name: str, value: object) -> None:
+    if isinstance(value, complex):
+        value = encode_complex(value)
     copied = deepcopy(value)
     if isinstance(node, BaseModel):
         if name in type(node).model_fields:
@@ -649,6 +652,8 @@ class FieldView:
         AttributeError. Empty or dotted keys cannot be addressed by set/meta.
         """
         value = _read_field(self._model(), name, self._path)
+        if isinstance(value, Mapping) and "__complex__" in value:
+            return decode_complex(value)
         if isinstance(value, (BaseModel, dict)):
             return FieldView(
                 lambda: _field_container(
