@@ -149,7 +149,7 @@ class CoherenceGui(LookbackGui):
                 "written": [
                     {
                         "id": item["id"],
-                        "kind": "md",
+                        "kind": "parameter",
                         "target": "decay_time",
                         "before": {"value": 20.0},
                         "after": {"value": 35.0},
@@ -210,8 +210,8 @@ class CoherenceGui(LookbackGui):
             "has_draft": True,
             "items": [
                 {
-                    "id": "md-1",
-                    "kind": "metadict",
+                    "id": "param-1",
+                    "kind": "parameter",
                     "target_name": "decay_time",
                     "proposed": 35.0,
                     "current": 20.0,
@@ -563,7 +563,7 @@ def test_coherence_primary_handoff_waits_before_question_and_actual_writes(
                 {
                     "tab_id": "t",
                     "subtab_id": "analysis",
-                    "write": [{"id": "md-1"}],
+                    "write": [{"id": "param-1"}],
                 }
             ]
             assert receipts[0]["status"] == "finished"

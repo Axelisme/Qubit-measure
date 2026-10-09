@@ -12,8 +12,8 @@ from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     PostAnalyzeRequest,
     PostWritebackRequest,
     WaveformWriteback,
@@ -115,7 +115,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
         assert tab.run.metadata is not None
         source_run_id = tab.run.metadata.run_id
         draft = service.create_draft(
-            [MetaDictWriteback("general.flux_value", "Flux", proposed_value=2.0)],
+            [ParameterWriteback("general.flux_value", "Flux", proposed_value=2.0)],
             parameters=captured,
             run_id=source_run_id,
         )
@@ -301,7 +301,7 @@ def test_post_analysis_draft_retains_primary_identity(
                 []
                 if captured is None
                 else [
-                    MetaDictWriteback("general.flux_value", "Flux", proposed_value=3.0)
+                    ParameterWriteback("general.flux_value", "Flux", proposed_value=3.0)
                 ]
             )
 
@@ -398,7 +398,7 @@ def test_append_failure_leaves_parameter_untouched(
 ) -> None:
     captured = session.control.read_context()
     draft = session.service.create_draft(
-        [MetaDictWriteback("general.flux_value", "Value", proposed_value=2.0)],
+        [ParameterWriteback("general.flux_value", "Value", proposed_value=2.0)],
         parameters=captured,
     )
 
@@ -418,11 +418,11 @@ def test_setter_failure_retains_accepted_and_successful_prefix(
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [
-            MetaDictWriteback("general.flux_value", "First", proposed_value=2.0),
-            MetaDictWriteback(
+            ParameterWriteback("general.flux_value", "First", proposed_value=2.0),
+            ParameterWriteback(
                 "general.description", "Failed", proposed_value="changed"
             ),
-            MetaDictWriteback("general.flux_unit", "Not started", proposed_value="mA"),
+            ParameterWriteback("general.flux_unit", "Not started", proposed_value="mA"),
         ],
         parameters=captured,
         run_id="original-run",
@@ -475,13 +475,13 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     tags = [{"__complex__": [value.real, value.imag]} for value in centers]
     draft = session.service.create_draft(
         [
-            MetaDictWriteback(
+            ParameterWriteback(
                 "driver.ext.readout_cal.g_center",
                 "Ground center",
                 proposed_value=centers[0],
                 stderr=0.01,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 "driver.ext.readout_cal.e_center",
                 "Excited center",
                 proposed_value=centers[1],
@@ -498,13 +498,13 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     session.control.add_component("Q2", "fake/drive/a", {})
     selected = session.control.read_context().document()
     preview = session.service.preview_values(draft)
-    assert preview["md-1"].current == {"__complex__": [0.6, 0.1]}
-    assert preview["md-2"].current is None
-    assert [preview[item].actual_path for item in ("md-1", "md-2")] == [
+    assert preview["param-1"].current == {"__complex__": [0.6, 0.1]}
+    assert preview["param-2"].current is None
+    assert [preview[item].actual_path for item in ("param-1", "param-2")] == [
         "Q1.ext.readout_cal.g_center",
         "Q1.ext.readout_cal.e_center",
     ]
-    assert [preview[item].proposed for item in ("md-1", "md-2")] == tags
+    assert [preview[item].proposed for item in ("param-1", "param-2")] == tags
     assert session.entry.ledger.events() == ()
     session.service.apply_draft(draft, origin=CommandOrigin("mcp"))
     current = session.control.read_target(first, roles=captured.roles)
@@ -549,7 +549,7 @@ def test_receipt_reads_actual_role_target_after_point_change(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
     draft = session.service.create_draft(
-        [MetaDictWriteback("driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
+        [ParameterWriteback("driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
         parameters=captured,
         run_id="original-run",
     )
@@ -558,17 +558,17 @@ def test_receipt_reads_actual_role_target_after_point_change(
     second = session.control.use_point(PointUseRequest("b"))
     session.control.add_component("Q2", "fake/drive/a", {"rate": 0.8})
     selected = session.control.read_context().document()
-    assert session.service.preview_values(draft)["md-1"].current == 0.6
-    draft.edit("md-1", selected=False)
+    assert session.service.preview_values(draft)["param-1"].current == 0.6
+    draft.edit("param-1", selected=False)
     written = session.service.write_draft(
-        draft, (WritebackEdit("md-1"),), origin=CommandOrigin("mcp")
+        draft, (WritebackEdit("param-1"),), origin=CommandOrigin("mcp")
     )
-    assert written == [WritebackWritten("md-1", "md", "Q1.rate", 0.6, 0.2)]
+    assert written == [WritebackWritten("param-1", "parameter", "Q1.rate", 0.6, 0.2)]
     assert captured.value("driver.rate") == 0.1
     assert session.control.read_context().target == second
     assert session.control.read_context().document() == selected
     assert not draft.items[0].selected
-    assert session.service.get_all_applied(draft) == {"md-1": True}
+    assert session.service.get_all_applied(draft) == {"param-1": True}
     event = session.entry.ledger.events()[-1]
     assert event.origin == "mcp"
     source = session.control.read_target(first).meta("Q1.rate")
@@ -637,11 +637,11 @@ def test_each_parameter_write_preserves_its_own_stderr(
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [
-            MetaDictWriteback("Q1.rate", "Rate", proposed_value=0.2, stderr=0.01),
-            MetaDictWriteback(
+            ParameterWriteback("Q1.rate", "Rate", proposed_value=0.2, stderr=0.01),
+            ParameterWriteback(
                 "Q1.duration", "Duration", proposed_value=3.0, stderr=0.4
             ),
-            MetaDictWriteback("Q1.coherence", "Unknown error", proposed_value=5.0),
+            ParameterWriteback("Q1.coherence", "Unknown error", proposed_value=5.0),
         ],
         parameters=captured,
     )
@@ -672,8 +672,8 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
     )
     draft = session.service.create_draft(
         [
-            MetaDictWriteback("driver.rate", "Role", proposed_value=0.2),
-            MetaDictWriteback("Q1.rate", "Direct", proposed_value=0.3),
+            ParameterWriteback("driver.rate", "Role", proposed_value=0.2),
+            ParameterWriteback("Q1.rate", "Direct", proposed_value=0.3),
         ],
         parameters=captured,
     )
@@ -700,7 +700,7 @@ def test_stale_draft_target_is_not_replaced_by_selected_point(
 ) -> None:
     captured = session.control.read_context()
     draft = session.service.create_draft(
-        [MetaDictWriteback("Q1.rate", "Rate", proposed_value=0.2)],
+        [ParameterWriteback("Q1.rate", "Rate", proposed_value=0.2)],
         parameters=captured,
     )
     session.entry.new_point("a")
@@ -709,7 +709,7 @@ def test_stale_draft_target_is_not_replaced_by_selected_point(
     perform = (
         partial(session.service.preview_values, draft)
         if operation == "preview"
-        else partial(session.service.write_draft, draft, (WritebackEdit("md-1"),))
+        else partial(session.service.write_draft, draft, (WritebackEdit("param-1"),))
     )
     with pytest.raises(FailedPreconditionError) as caught:
         perform()
@@ -722,11 +722,11 @@ def test_preview_proposed_data_is_isolated_at_validation_boundary(
     session: WritebackSession,
 ) -> None:
     draft = session.service.create_draft(
-        [MetaDictWriteback("Q1.ext.samples", "Samples", proposed_value=[1, 2])],
+        [ParameterWriteback("Q1.ext.samples", "Samples", proposed_value=[1, 2])],
         parameters=session.control.read_context(),
     )
-    preview = session.service.preview_values(draft)["md-1"]
+    preview = session.service.preview_values(draft)["param-1"]
     assert preview.current is None and preview.proposed == [1, 2]
     assert isinstance(preview.proposed, list)
     preview.proposed.append(3)
-    assert session.service.preview_values(draft)["md-1"].proposed == [1, 2]
+    assert session.service.preview_values(draft)["param-1"].proposed == [1, 2]

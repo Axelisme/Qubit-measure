@@ -610,7 +610,7 @@ def test_author_accept_returns_only_the_current_confirmed_writes(tmp_path, items
                 "written": [
                     {
                         "id": "current",
-                        "kind": "md",
+                        "kind": "parameter",
                         "target": "offset",
                         "before": None,
                         "after": 1.0,
@@ -659,7 +659,7 @@ def test_author_accept_raises_with_confirmed_prefix_from_the_writeback_owner(tmp
                     "written": [
                         {
                             "id": "current",
-                            "kind": "md",
+                            "kind": "parameter",
                             "target": "sample",
                             "before": None,
                             "after": 1.0,

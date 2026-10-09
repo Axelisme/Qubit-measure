@@ -37,7 +37,7 @@ analysis workflow一次算出adapter proposal items，再交給`WritebackService
 
 Draft建立具有strong exception guarantee：任何editor open失敗時，Writeback在拋出原始錯誤前清理該draft已開啟的所有sessions，不把未成功回傳的cleanup責任交給workflow。Teardown先封閉draft再逐一清理，因此可重複呼叫；單一session cleanup失敗不會造成其他session被略過或讓已封閉draft再次close。Apply snapshot各item model並只把selected items組成一個`ContextWrites`交給ContextService（見[[0067]]），不直接修改md/ml。
 
-**agent編writeback草稿的入口統一在writeback面：** remote/MCP以required `(tab_id, subtab_id)`定址Analysis或Post-Analysis draft，再以item session id選取draft-private entry；Writeback透過`CfgEditorPort.set_fields`套用ordered、fail-fast edits。`editor_id`不上writeback wire，agent不先取得editor handle。metadict item仍走同一面的value facet。這個封裝只涵蓋writeback draft；`editor.*` RPC對ModuleLibrary ml-entry的直接編輯仍使用`editor_id`，不受影響。
+**agent編writeback草稿的入口統一在writeback面：** remote/MCP以required `(tab_id, subtab_id)`定址Analysis或Post-Analysis draft，再以item session id選取draft-private entry；Writeback透過`CfgEditorPort.set_fields`套用ordered、fail-fast edits。`editor_id`不上writeback wire，agent不先取得editor handle。parameter item仍走同一面的value facet。這個封裝只涵蓋writeback draft；`editor.*` RPC對ModuleLibrary ml-entry的直接編輯仍使用`editor_id`，不受影響。
 
 `CfgEditorPort`包含open、teardown、draft read與field edit所需的窄介面，使`WritebackService`依賴port而非concrete service（[[0067]]）。底層仍是同一個service-owned `CfgDraft`，因此user dialog與agent共享同一份可見草稿。
 

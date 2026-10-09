@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -420,17 +420,17 @@ class OneToneFreqAdapter(
                 "for writeback"
             )
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$resonator.freq",
                 description="Resonator frequency (MHz)",
                 proposed_value=result.freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$resonator.kappa",
                 description="Resonator linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$resonator.ext.theta0",
                 description="Resonator circle phase offset (rad)",
                 proposed_value=float(theta0),
@@ -446,7 +446,7 @@ class OneToneFreqAdapter(
                 )
             res_ch, ro_ch = route
             items.append(
-                MetaDictWriteback(
+                ParameterWriteback(
                     target_name=f"${_EDELAY_PARAMETER_PATH}",
                     description="Route-qualified resonator electrical-delay calibration",
                     proposed_value={

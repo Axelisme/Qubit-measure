@@ -138,13 +138,13 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert not hasattr(tab, "post_writeback_widget") or tab._has_post is False
 
     # Populate writeback via service projection (S2) and verify ledger columns
-    from zcu_tools.gui.app.measure.adapter import MetaDictWriteback
+    from zcu_tools.gui.app.measure.adapter import ParameterWriteback
 
     # Use the controller's writeback service to create a draft so summaries are
     # captured in the service-owned model (not on the public WritebackItem).
     svc = ctrl._writeback_svc  # type: ignore[attr-defined]
 
-    md_item = MetaDictWriteback(
+    md_item = ParameterWriteback(
         target_name="r_f", description="freq", proposed_value=6100.0
     )
     draft = svc.create_draft([md_item])

@@ -7,8 +7,8 @@ WIRE_VERSION; it reports GUI_VERSION without comparing it.
 from __future__ import annotations
 
 # Bump for RPC method/parameter or reply/event shape changes.
-WIRE_VERSION = 87
+WIRE_VERSION = 88
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 119
+GUI_VERSION = 120

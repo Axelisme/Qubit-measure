@@ -43,6 +43,10 @@ Reply    <- {"id": "...", "ok": false, "error": {"code": "...", "message": "..."
 Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "agent", "operation_id": "7"}}
 ```
 
+Parameter writeback previews and write receipts use `kind="parameter"`.
+Their draft-local IDs use `param-<n>`. Apply receipts list parameter paths in
+`written.parameter`.
+
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
 - Request and response lines allow up to 8 MiB of UTF-8 bytes, excluding the
@@ -122,8 +126,8 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 87`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 119`: GUI process code revision. It is displayed, not compared.
+- `WIRE_VERSION = 88`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 120`: GUI process code revision. It is displayed, not compared.
 - `MCP_VERSION = 112`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.

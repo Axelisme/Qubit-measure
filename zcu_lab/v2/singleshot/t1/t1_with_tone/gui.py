@@ -11,8 +11,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -188,7 +188,7 @@ class SsT1ToneAdapter(
     ) -> Sequence[WritebackItem]:
         # Key ``t1_with_tone`` per single_qubit.md:3079.
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="t1_with_tone",
                 description="T1 with probe tone (us)",
                 proposed_value=req.analyze_result.t1,

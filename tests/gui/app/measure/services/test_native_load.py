@@ -13,7 +13,7 @@ from zcu_tools.datafile import load_run_data
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    MetaDictWriteback,
+    ParameterWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -232,7 +232,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
         request: WritebackRequest[object, PaneSummary],
     ) -> list[WritebackItem]:
         assert request.ctx.parameters is loaded
-        return [MetaDictWriteback("$source_qubit.rate", "Rate", proposed_value=12.0)]
+        return [ParameterWriteback("$source_qubit.rate", "Rate", proposed_value=12.0)]
 
     monkeypatch.setattr(tab.adapter, "analyze", analyze)
     monkeypatch.setattr(tab.adapter, "get_writeback_items", proposals)
@@ -258,12 +258,12 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     assert isinstance(draft, WritebackDraft)
     assert draft.parameters is loaded
     assert draft.run_id == session.metadata.run_id
-    assert writeback.preview_values(draft)["md-1"].current == 10.0
+    assert writeback.preview_values(draft)["param-1"].current == 10.0
     assert writeback.write_draft(
         draft,
-        (WritebackEdit("md-1"),),
+        (WritebackEdit("param-1"),),
         origin=CommandOrigin("mcp"),
-    ) == [WritebackWritten("md-1", "md", "Q1.rate", 10.0, 12.0)]
+    ) == [WritebackWritten("param-1", "parameter", "Q1.rate", 10.0, 12.0)]
     event = session.entry.ledger.events()[-1]
     assert (
         isinstance(event.payload, AcceptedPayload)
@@ -384,7 +384,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     assert session.entry.ledger.events() == events
     writeback.teardown_draft(draft)
     rejected = writeback.create_draft(
-        [MetaDictWriteback("Q1.rate", "rate", 99.0)],
+        [ParameterWriteback("Q1.rate", "rate", 99.0)],
         parameters=None,
         run_id=session.metadata.run_id,
     )
@@ -417,7 +417,7 @@ def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
     )
     _, wb = _native_controls(session, writeback, control)
     draft = writeback.create_draft(
-        [MetaDictWriteback("$source_qubit.rate", "rate", 99.0)],
+        [ParameterWriteback("$source_qubit.rate", "rate", 99.0)],
         parameters=parameters,
         run_id=session.metadata.run_id,
     )

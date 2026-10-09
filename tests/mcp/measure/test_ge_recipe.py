@@ -150,7 +150,7 @@ class GeGui(LookbackGui):
                 "written": [
                     {
                         "id": item["id"],
-                        "kind": "md",
+                        "kind": "parameter",
                         "target": item["id"],
                         "before": {"value": 0.0},
                         "after": {"value": 1.0},
@@ -176,8 +176,8 @@ class GeGui(LookbackGui):
                 "has_draft": True,
                 "items": [
                     {
-                        "id": "md-1",
-                        "kind": "metadict",
+                        "id": "param-1",
+                        "kind": "parameter",
                         "target_name": "predict_offset",
                         "proposed": 0.24,
                         "current": 0.0,
@@ -226,7 +226,7 @@ class GeGui(LookbackGui):
             self._edit_references(reply, params)
         if method == "tab.writeback_preview":
             reply["items"][0].update(
-                kind="metadict",
+                kind="parameter",
                 target_name="predict_offset",
                 current=0.0,
                 selected=False,
@@ -293,7 +293,7 @@ class GeGui(LookbackGui):
                 "items": [
                     {
                         "id": "classifier",
-                        "kind": "metadict",
+                        "kind": "parameter",
                         "target_name": "classifier",
                         "proposed": 0.98,
                         "current": 0.0,
@@ -430,7 +430,7 @@ def test_ge_cancel_during_writeback_retains_stage_and_prevents_next_admission(
         )
         data = terminal.data
         assert data["status"] == "cancelled", data
-        assert data["writeback"]["items"][0]["id"] == "md-1"
+        assert data["writeback"]["items"][0]["id"] == "param-1"
         assert data["analysis"]["status"] == (
             "cancelled" if stage == "primary" else "finished"
         )
@@ -510,7 +510,7 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
         assert methods.count("tab.get_post_analyze_result") == 0
         if stage == "post":
             assert data["analysis"]["status"] == "finished"
-            assert data["writeback"]["items"][0]["id"] == "md-1"
+            assert data["writeback"]["items"][0]["id"] == "param-1"
     finally:
         release.set()
         stopped.set()
@@ -781,7 +781,7 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
     if stage == "post":
         assert data["analysis"]["status"] == "finished"
         assert data["analysis"]["save_report"] == asdict(PRIMARY_REPORT)
-        assert data["writeback"]["items"][0]["id"] == "md-1"
+        assert data["writeback"]["items"][0]["id"] == "param-1"
     else:
         assert data["writeback"] is None
         assert data["post_analysis"] is None
@@ -948,7 +948,7 @@ def test_ge_writeback_waits_for_both_stages_and_reports_actual_receipts(
                 "post_analysis",
             ]
             assert [request["write"] for request in gui.writes] == [
-                [{"id": "md-1"}],
+                [{"id": "param-1"}],
                 [{"id": "classifier"}],
             ]
             assert len(receipts) == 1
@@ -1057,7 +1057,7 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         }
         assert data["analysis"]["save_report"] == asdict(PRIMARY_REPORT)
         assert data["post_analysis"]["save_report"] == asdict(POST_REPORT)
-        assert data["writeback"]["items"][0]["id"] == "md-1"
+        assert data["writeback"]["items"][0]["id"] == "param-1"
         assert data["post_writeback"]["items"][0]["id"] == "classifier"
         assert len(reply.images) == 2
         assert data["actual"]["fields"]["shots"]["value"] == 1234

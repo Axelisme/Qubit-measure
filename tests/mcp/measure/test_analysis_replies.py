@@ -72,7 +72,7 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
         "items": [
             {
                 "id": "candidate-t1",
-                "kind": "metadict",
+                "kind": "parameter",
                 "target_name": "t1",
                 "proposed": 27.5,
                 "current": 20.0,
@@ -661,7 +661,7 @@ def test_done_joins_original_completion_without_duplicate_saves(
                 proposal["items"] = [
                     {
                         "id": "final",
-                        "kind": "metadict",
+                        "kind": "parameter",
                         "target_name": "frequency",
                         "proposed": 8.5,
                         "current": 3.0,

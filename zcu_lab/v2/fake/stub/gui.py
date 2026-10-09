@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -126,9 +126,9 @@ class FakeAdapter(
 
     def get_writeback_items(
         self, req: WritebackRequest[FakeRunResult, FakeAnalyzeResult]
-    ) -> Sequence[MetaDictWriteback]:
+    ) -> Sequence[ParameterWriteback]:
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="fake_peak",
                 description="Fake peak value from FakeAdapter analysis",
                 proposed_value=req.analyze_result.peak,

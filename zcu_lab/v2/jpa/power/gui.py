@@ -18,8 +18,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -181,7 +181,7 @@ class JpaPowerAdapter(
         self, req: WritebackRequest[JpaPowerRunResult, JpaPowerAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=req.analyze_result.best_power,

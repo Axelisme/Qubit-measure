@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -197,12 +197,12 @@ class BathFreqGainAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="bathreset_gain",
                 description="Bath-reset cavity gain (a.u.)",
                 proposed_value=result.gain,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="bathreset_freq",
                 description="Bath-reset cavity frequency (MHz)",
                 proposed_value=result.freq,

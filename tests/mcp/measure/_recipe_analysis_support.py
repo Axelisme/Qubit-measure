@@ -36,7 +36,7 @@ class AnalysisRecipeGui(LookbackGui):
                 items=[
                     {
                         "id": f"{stage}-draft",
-                        "kind": "metadict",
+                        "kind": "parameter",
                         "target_name": name,
                         "current": 1.0,
                         "proposed": 2.0,

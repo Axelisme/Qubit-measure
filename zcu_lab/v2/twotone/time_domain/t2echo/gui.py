@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -290,7 +290,7 @@ class T2EchoAdapter(
         """
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.t2e",
                 description="T2 Echo time (us)",
                 proposed_value=result.t2e,

@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -158,7 +158,7 @@ class RoOptLengthAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_ro_length",
                 description="Optimal readout length (us)",
                 proposed_value=result.best_length,

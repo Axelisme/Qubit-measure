@@ -1010,8 +1010,8 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         }
         assert data["writeback"]["items"] == [
             {
-                "id": "md-1",
-                "kind": "metadict",
+                "id": "param-1",
+                "kind": "parameter",
                 "target_name": "trigger_offset",
                 "selected": False,
                 "proposed": 0.24,

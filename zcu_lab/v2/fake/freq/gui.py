@@ -18,7 +18,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     LoadDataRequest,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SaveDataRequest,
@@ -227,12 +227,12 @@ class FakeFreqAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="r_f",
                 description="Resonator frequency (MHz)",
                 proposed_value=result.freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="rf_w",
                 description="Resonator linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,

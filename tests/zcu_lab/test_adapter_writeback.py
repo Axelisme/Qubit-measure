@@ -350,7 +350,7 @@ def test_recipe_writeback_keeps_run_component_after_environment_change(
         for path, (leaf, value) in calibration.modules.items():
             concrete = path.replace("$qubit", "Q1").replace("$resonator", "R1")
             assert destination.value(f"{concrete}.{leaf}") == pytest.approx(value)
-        assert receipt["written"]["md"] == [
+        assert receipt["written"]["parameter"] == [
             item.target_name.replace("$qubit", "Q1").replace("$resonator", "R1")
             for item in proposals
             if item.target_name in scalars

@@ -12,8 +12,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -335,14 +335,14 @@ class AmpRabiAdapter(
                 )
             )
             items.append(
-                MetaDictWriteback(
+                ParameterWriteback(
                     target_name=slot,
                     description=f"{description} slot",
                     proposed_value=key,
                 )
             )
         items.append(
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.pi_product",
                 description="Pi pulse gain times length (a.u. * us)",
                 proposed_value=result.pi_gain * length,

@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -172,17 +172,17 @@ class RoOptAutoAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_ro_freq",
                 description="Optimal readout frequency (MHz)",
                 proposed_value=result.best_freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_ro_gain",
                 description="Optimal readout gain (a.u.)",
                 proposed_value=result.best_gain,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_ro_length",
                 description="Optimal readout length (us)",
                 proposed_value=result.best_length,

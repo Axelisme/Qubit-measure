@@ -12,7 +12,7 @@ from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
-    MetaDictWriteback,
+    ParameterWriteback,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
@@ -377,7 +377,7 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
     state.replace_post_analysis_pane(
         tab_id, result="old-post", plots=None, writeback_draft=old_post_draft
     )
-    adapter.get_writeback_items.return_value = [MetaDictWriteback("new", "new", 1.0)]
+    adapter.get_writeback_items.return_value = [ParameterWriteback("new", "new", 1.0)]
     writeback = _Writeback()
     service, bg = _analyze_service(state, writeback)
     plots = Plots(NonPresentingHost())

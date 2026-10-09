@@ -18,8 +18,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -193,7 +193,7 @@ class JpaFluxAdapter(
         self, req: WritebackRequest[JpaFluxRunResult, JpaFluxAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_flux",
                 description="Best JPA flux device value",
                 proposed_value=req.analyze_result.best_flux,

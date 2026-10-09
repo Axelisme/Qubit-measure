@@ -55,7 +55,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "analyze produced a draft; destination_context is the current active "
             "SessionEnv projection at reply time. Each item: id "
             "(<kind>-<n>, kind∈md|ml|wf), target_name (apply destination, editable), "
-            "kind (metadict|module|waveform), description, selected; metadict adds "
+            "kind (parameter|module|waveform), description, selected; parameter adds "
             "proposed_value; every item includes complete current/proposed values "
             "(md values or module/waveform cfg dictionaries). Current is read from "
             "the active context at preview time and is null for a missing target; "
@@ -63,7 +63,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "missing context fails instead of reporting an empty preview. "
             "Module/waveform add has_edit_schema, and "
             "may include role_id when the proposal corresponds to a ModuleLibrary "
-            "role. A complex metadict proposed_value is carried as "
+            "role. A complex parameter proposed_value is carried as "
             '{"__complex__": [re, im]} (JSON has no complex). Edit an item via '
             "rpc_call on tab.writeback_set; the user's Edit dialog renders the same "
             "model (WYSIWYG). Optional operation_id requires that analysis result "
@@ -111,7 +111,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "proposed_value",
                     JsonType.JSON,
                     required=False,
-                    description="Proposed metadict scalar (metadict items only)",
+                    description="Proposed parameter scalar (parameter items only)",
                 ),
                 ParamSpec(
                     "edits",

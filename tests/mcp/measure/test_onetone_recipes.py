@@ -405,7 +405,7 @@ class OnetoneGui(LookbackGui):
         if method == "tab.snapshot":
             reply["tabs"][0]["adapter_name"] = self.experiment
         if method == "tab.writeback_preview":
-            reply["items"][0].update(kind="metadict", target_name="predict_offset")
+            reply["items"][0].update(kind="parameter", target_name="predict_offset")
         return reply
 
 

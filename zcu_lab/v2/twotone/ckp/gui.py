@@ -14,8 +14,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -210,17 +210,17 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="chi",
                 description="Dispersive shift chi (MHz)",
                 proposed_value=result.chi,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="rf_w",
                 description="Resonator linewidth kappa (MHz)",
                 proposed_value=result.kappa,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="readout_f",
                 description="Readout frequency (MHz)",
                 proposed_value=result.res_freq,

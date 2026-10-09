@@ -197,7 +197,7 @@ def _changed_paths(
 def _candidate(item: dict[str, Any], cfg_ref: dict[str, Any] | None) -> dict[str, Any]:
     candidate: dict[str, Any] = {
         "id": item["id"],
-        "kind": "parameter" if item.get("kind") == "metadict" else item.get("kind"),
+        "kind": item.get("kind"),
         "target": item.get("target_name"),
         "resolved_target": item.get("resolved_target"),
         "proposed": deepcopy(item.get("proposed", item.get("proposed_value"))),

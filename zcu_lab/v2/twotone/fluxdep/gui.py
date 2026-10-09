@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    MetaDictWriteback,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -219,17 +219,17 @@ class FluxDepAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.flux_half",
                 description="Half-flux (Φ₀/2) sweet-spot device value",
                 proposed_value=result.flx_half,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.flux_int",
                 description="Integer-flux sweet-spot device value",
                 proposed_value=result.flx_int,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.flux_period",
                 description="Flux period (device units) = 2·|flx_int − flx_half|",
                 proposed_value=result.flx_period,
