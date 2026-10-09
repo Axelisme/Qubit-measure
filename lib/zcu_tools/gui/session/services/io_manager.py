@@ -5,12 +5,12 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-logger = logging.getLogger(__name__)
-
 from zcu_tools.gui.session.types import SessionEnv
 
 if TYPE_CHECKING:
     from zcu_tools.resources.context import ContextManager
+
+logger = logging.getLogger(__name__)
 
 
 class IOManager:
