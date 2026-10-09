@@ -766,15 +766,16 @@ def test_main_window_load_data_dialog_calls_controller(
     from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
     ctrl = _apply_window_defaults(MagicMock())
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     database_root = tmp_path / "Database" / "Q3_2D" / "Q1"
     database_root.mkdir(parents=True)
+    ctrl.save_control.list_saved_runs.return_value = ()
     ctrl.get_session_env.return_value = SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
+        parameters=None,
         soc=None,
         soccfg=None,
         database_path=str(database_root / "2026" / "06" / "Data_0625"),
@@ -804,6 +805,13 @@ def test_main_window_load_data_dialog_calls_controller(
         fake_get_open_file_name,
     )
 
+    def choose_file(dialog: RunLoadDialog) -> int:
+        button = dialog.findChild(QPushButton, "load_file")
+        assert button is not None
+        button.click()
+        return dialog.result()
+
+    monkeypatch.setattr(RunLoadDialog, "exec", choose_file)
     window.load_tab_data_dialog("tab-1")
 
     ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")
