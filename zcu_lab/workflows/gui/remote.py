@@ -135,6 +135,37 @@ class FormErrorReply(TypedDict):
     message: str
 
 
+class FormInspectionParams(TypedDict):
+    """form selects plan/tunables; run_id targets an attached run or is null.
+
+    batch is null for current draft read, or path/value edits for a non-submitting
+    candidate preview. [] previews retained parsed input, not Start defaults.
+    """
+
+    form: Literal["plan", "tunables"]
+    run_id: str | None
+    batch: list[FormWrite] | None
+
+
+class FormInspectionReply(TypedDict):
+    """Same-owner form observation, never submission or a new editing state.
+
+    schema describes accepted partial input in the fixed capture. input retains
+    expressions and missing/null in the complete candidate tree. values lists
+    successfully decoded ordinary leaves as path/value entries; complex uses
+    the existing __complex__ tag, tuples become lists. errors contains native
+    path/message entries and, on read only, renderer-local parse errors.
+    revision is the attached Engine's tunables revision or null before Start;
+    it is not a form version. Values do not establish validity or acceptance.
+    """
+
+    schema: dict[str, JsonValue]
+    input: dict[str, JsonValue]
+    values: list[FormWrite]
+    errors: list[FormErrorReply]
+    revision: int | None
+
+
 class ProgressReply(TypedDict):
     """Native display snapshot: name is the bar; total may be null; completed is absolute."""
 
@@ -191,6 +222,10 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
     [] never resets defaults. Success returns WorkflowReply with native revision.
     Invalid input stays in draft and projects FormErrors; accepted input/base and
     native values/revision are unchanged. Pending startup is not editable.
+    workflow.form reads schema/input/ordinary values/errors and native revision
+    through Window.inspect_form. An optional batch previews a call-local candidate
+    without modifying input/base, native state or renderer-local text. An attached
+    run requires explicit run_id; pending acceptance is not readable as accepted.
     workflow.status reads the same Controller on the owner. Pause/Resume/Stop
     require explicit run_id and invoke the existing Window control once.
     RunMismatch becomes precondition_failed/run_mismatch with expected/actual;
@@ -244,6 +279,7 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
                 "workflow.tunables": BoundMethod(
                     self._tunables, METHOD_SPECS["workflow.tunables"]
                 ),
+                "workflow.form": BoundMethod(self._form, METHOD_SPECS["workflow.form"]),
                 "workflow.status": BoundMethod(
                     self._status, METHOD_SPECS["workflow.status"]
                 ),
@@ -325,6 +361,32 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
                 data={"messages": messages},
             )
         return self._status(_adapter, {})
+
+    def _form(
+        self,
+        _adapter: RemoteControlServiceBase,
+        params: FormInspectionParams,
+    ) -> FormInspectionReply:
+        batch = params["batch"]
+        writes = None if batch is None else _parse_form_batch(batch)
+        try:
+            result = self.ctrl.inspect_form(
+                params["form"], run_id=params["run_id"], batch=writes
+            )
+        except (RunMismatch, InvalidRunState) as exc:
+            raise _project_control_error(exc) from exc
+        if isinstance(result, FormErrors):
+            messages: list[FormErrorReply] = [
+                {"path": list(path), "message": message}
+                for path, message in result.messages.items()
+            ]
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "Invalid form preview batch",
+                reason="form_errors",
+                data={"messages": messages},
+            )
+        return result
 
     def _status(
         self,

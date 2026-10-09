@@ -15,6 +15,7 @@ from .tunables import T1TunablesForm
 class T1TunablesPanel(QWidget):
     """Present a host-owned T1 draft on the GUI thread.
 
+    env is the constructor's fixed capture, not a live source.
     state is the supplied FormState[T1TunablesForm], not a copy or fresh draft.
     editor is its FormEditor evaluated in the supplied fixed env. Hosts use
     these public handles for validation, changes and reset, and check
@@ -22,6 +23,7 @@ class T1TunablesPanel(QWidget):
     defaults, submit, capture sources or own native lifecycle.
     """
 
+    env: FormEnv
     state: FormState[T1TunablesForm]
     editor: FormEditor[T1TunablesForm]
 
@@ -39,6 +41,7 @@ class T1TunablesPanel(QWidget):
         Requires GUI-thread use and a QApplication.
         """
         super().__init__(parent)
+        self.env = env
         self.state = state
         self.editor = FormEditor(self.state, env, self)
         layout = QVBoxLayout(self)
@@ -57,11 +60,13 @@ class T1TunablesPanel(QWidget):
 class T1PlanPanel(QWidget):
     """Edit native T1 plan input and preview without submitting or capturing.
 
+    env is the constructor's fixed capture, not a live source.
     state owns the editable T1PlanForm input. editor presents it and retains
     local parse errors. Both use the fixed host env supplied at construction.
     Host chooses the historical snapshot and owns Start/read-only policy.
     """
 
+    env: FormEnv
     state: FormState[T1PlanForm]
     editor: FormEditor[T1PlanForm]
 
@@ -73,7 +78,7 @@ class T1PlanPanel(QWidget):
         parent controls Qt lifetime. No Engine or live resource is accessed.
         """
         super().__init__(parent)
-        self._env = env
+        self.env = env
         self.state = FormState(T1PlanForm.default_input(env))
         self.editor = FormEditor(self.state, env, self)
         layout = QVBoxLayout(self)
@@ -89,10 +94,10 @@ class T1PlanPanel(QWidget):
         errors = self.editor.local_parse_errors()
         if errors is not None:
             return errors
-        result = self.state.result(self._env)
+        result = self.state.result(self.env)
         if isinstance(result, FormErrors):
             return result
-        return result.to_cfg(self._env, snapshot)
+        return result.to_cfg(self.env, snapshot)
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         """Detach the editor subscriptions before normal Qt close handling."""

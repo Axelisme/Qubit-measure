@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from math import isfinite
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import JsonValue
@@ -30,6 +32,7 @@ from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
+from zcu_tools.gui.cfg.codec import encode_complex
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import (
@@ -38,6 +41,7 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
+    FormValue,
     FormWritePath,
 )
 from zcu_tools.gui.plotting.container import FigureContainer
@@ -59,7 +63,7 @@ from ..calibration import Calibrated
 from ..t1 import T1Plan, t1_fluxdep
 from .panel import T1PlanPanel, T1TunablesPanel
 from .plan import T1PlanForm
-from .remote import T1RemoteControlAdapter
+from .remote import FormInspectionReply, T1RemoteControlAdapter
 from .tunables import T1TunablesForm
 from .tuning_panel import T1TuningPanel
 
@@ -98,6 +102,64 @@ def _prepare_start_form[F: FormModel](
     if isinstance(form, FormErrors):
         return form
     return form, state.input
+
+
+def _encode_form_value(value: FormValue) -> JsonValue:
+    """Project ordinary display leaves; scalar complex format belongs to codec."""
+    if isinstance(value, complex):
+        encoded: dict[str, JsonValue] = {
+            key: list[JsonValue](parts) for key, parts in encode_complex(value).items()
+        }
+        return encoded
+    if isinstance(value, (list, tuple)):
+        return [_encode_form_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _encode_form_value(item) for key, item in value.items()}
+    if isinstance(value, float) and not isfinite(value):
+        raise ValueError("Nonfinite form values cannot be encoded as JSON")
+    return value
+
+
+def _inspect_form_input(
+    input: FormInput[FormModel],
+    env: FormEnv,
+    batch: Mapping[FormWritePath, JsonValue] | None,
+    local_errors: FormErrors | None,
+    revision: int | None,
+) -> FormInspectionReply | FormErrors:
+    """Project input/candidate and partial ordinary values without publication.
+
+    env/revision are fixed owner observations, not sources to refresh. A batch
+    uses the core's write contract in this call-local state. local_errors are
+    supplied only for current GUI reads. Translate directed/structural write
+    errors as Start does; declaration and unexpected failures propagate.
+    """
+    state = FormState(input)
+    if batch is not None:
+        try:
+            state.write(batch, env)
+        except PydanticCustomError as exc:
+            if exc.type != "form_field" or exc.context is None:
+                raise
+            return FormErrors({exc.context["path"]: exc.context["message"]})
+        except ValueError as exc:
+            return FormErrors({(): str(exc)})
+    preview = state.preview(env)
+    errors = dict(preview.errors.messages) if preview.errors is not None else {}
+    if local_errors is not None:
+        errors.update(local_errors.messages)
+    return {
+        "schema": state.input_schema(env),
+        "input": state.input.data,
+        "values": [
+            {"path": list(path), "value": _encode_form_value(value)}
+            for path, value in preview.values.items()
+        ],
+        "errors": [
+            {"path": list(path), "message": message} for path, message in errors.items()
+        ],
+        "revision": revision,
+    }
 
 
 def _calibrated_seed(plan: T1Plan, pi_length_us: float) -> Calibrated:
@@ -368,6 +430,58 @@ class T1WorkflowWindow(QWidget):
         stopping the transport does not cancel a native run.
         """
         return T1RemoteControlAdapter(self, opts, bus=bus, owner_scheduler=self._owner)
+
+    def inspect_form(
+        self,
+        form: Literal["plan", "tunables"],
+        *,
+        run_id: str | None = None,
+        batch: Mapping[FormWritePath, JsonValue] | None = None,
+    ) -> FormInspectionReply | FormErrors:
+        """Read or preview this Window's form on the GUI owner, without I/O.
+
+        form selects plan or tunables. Before any attached run, run_id must be
+        omitted; afterwards require its explicit native identity, with the same
+        Controller target checks as other controls. Pending acceptance raises
+        RuntimeError. Use binding's fixed env and unique knobs state for a run,
+        constructor panel captures otherwise. revision is native, never a guard.
+
+        batch=None reads current input and includes local parse errors. A batch
+        (even {}) previews current parsed input plus edits in a call-local
+        FormState; local text is not candidate input. Structural/source write
+        errors return FormErrors, model errors are in the reply. No input/base,
+        accepted input, local text, Engine state, lease or source is changed.
+        Schema/source declaration failures propagate. Ordinary value projection
+        preserves the existing complex tag and rejects nonfinite values.
+        """
+        if form not in ("plan", "tunables"):
+            raise ValueError("Unknown workflow form")
+        panel = self.plan_panel if form == "plan" else self.tunables_panel
+        state = panel.state
+        editor = panel.editor
+        env = panel.env
+        revision = None
+        binding = self.controller.binding
+        if binding is None:
+            if run_id is not None:
+                self.controller.require_run_id(run_id)
+        else:
+            if run_id is None:
+                raise FailedPreconditionError(
+                    "An attached run requires explicit run_id"
+                )
+            self.controller.require_run_id(run_id)
+            if binding.engine is None:
+                raise RuntimeError("Form inspection requires native acceptance")
+            env = binding.env
+            revision = binding.engine.tunables(binding.run_id).revision
+            if form == "tunables":
+                state = binding.state
+                if self.tuning_panel is None:
+                    raise RuntimeError("Accepted run has no tuning panel")
+                editor = self.tuning_panel.panel.editor
+        local = editor.local_parse_errors() if batch is None else None
+        return _inspect_form_input(state.input, env, batch, local, revision)
 
     def figure_names(self, run_id: str) -> tuple[str, ...]:
         """List names from this run's Plots without rendering; call on Qt owner.

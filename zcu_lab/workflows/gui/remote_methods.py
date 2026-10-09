@@ -42,6 +42,32 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             ),
         ),
     ),
+    "workflow.form": MethodSpec(
+        5.0,
+        "Read schema/input/ordinary values/errors, or preview a batch without committing.",
+        params=(
+            ParamSpec(
+                "form",
+                JsonType.STRING,
+                enum=("plan", "tunables"),
+                description="Form to inspect; current run knobs use the same accepted binding.",
+            ),
+            ParamSpec(
+                "run_id",
+                JsonType.STRING,
+                required=False,
+                default=None,
+                description="Required when a run is attached; omitted/null before Start.",
+            ),
+            ParamSpec(
+                "batch",
+                JsonType.JSON,
+                required=False,
+                default=None,
+                description="Omitted/null reads GUI draft with local errors; a path/value array previews parsed input only, without writing.",
+            ),
+        ),
+    ),
     "workflow.status": MethodSpec(
         5.0,
         "Read the attached run_id, operation_id and native status; pending status is null.",

@@ -165,6 +165,32 @@ def test_native_tool_forwards_once(
     bridge.disconnect()
 
 
+def test_form_inspection_tool_forwards_candidate_once(
+    config: MCPBridgeConfig,
+    bridge: McpBridge,
+    transport: RecordingTransport,
+    tmp_path: Path,
+) -> None:
+    native = {
+        "schema": {},
+        "input": {"guess_us": {"expr": "2 * 20"}},
+        "values": [{"path": ["guess_us"], "value": 40.0}],
+        "errors": [],
+        "revision": 2,
+    }
+    transport.replies.append(GuiResponse(result=native))
+    tools = build_workflow_tools(config, bridge, tmp_path)
+    arguments = {
+        "form": "tunables",
+        "run_id": "run:a",
+        "batch": [{"path": ["guess_us"], "value": {"expr": "2 * 20"}}],
+    }
+    assert tools["workflows_workflow_form"]["handler"](arguments) == native
+    assert [(r["method"], r["params"]) for r in transport.requests] == [
+        ("workflow.form", arguments),
+    ]
+
+
 def test_mismatched_bridge_fails_before_sending(
     config: MCPBridgeConfig,
     bridge: McpBridge,
