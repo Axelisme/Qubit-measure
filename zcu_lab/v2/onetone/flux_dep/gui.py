@@ -69,29 +69,29 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     value = make_default_value(make_pulse_readout_module_spec().allowed[0])
     value.with_field("pulse_cfg.freq", 0.0)
     value.with_field(
-        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
     )
     value.with_field("pulse_cfg.nqz", 2)
     value.with_field("pulse_cfg.gain", 0.05)
     value.with_field("pulse_cfg.waveform.length", 1.0)
     value.with_field("ro_cfg.ro_freq", 0.0)
     value.with_field(
-        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
     )
     value.with_field(
         "ro_cfg.ro_length",
         path_seed(
-            "resonator.ext.default_probe_length",
+            "$resonator.ext.default_probe_length",
             fallback=0.9,
-            expr="resonator.ext.default_probe_length - 0.1",
+            expr="$resonator.ext.default_probe_length - 0.1",
         ).resolve(ctx),
     )
     value.with_field(
         "ro_cfg.trig_offset",
         path_seed(
-            "resonator.ext.time_of_fly",
+            "$resonator.ext.time_of_fly",
             fallback=0.55,
-            expr="resonator.ext.time_of_fly + 0.05",
+            expr="$resonator.ext.time_of_fly + 0.05",
         ).resolve(ctx),
     )
     return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
@@ -166,10 +166,10 @@ class OneToneFluxDepAdapter(
     )
 
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Capture the chosen qubit and its resonator for the flux survey."""
+        """Declare the global aliases used by this adapter."""
         return {
             "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+            "resonator": RoleSpec("resonator"),
         }
 
     @classmethod
@@ -231,12 +231,12 @@ class OneToneFluxDepAdapter(
         flux_half = (
             None
             if parameters is None
-            else optional_parameter_float(parameters, "qubit.flux_half")
+            else optional_parameter_float(parameters, "$qubit.flux_half")
         )
         flux_int = (
             None
             if parameters is None
-            else optional_parameter_float(parameters, "qubit.flux_int")
+            else optional_parameter_float(parameters, "$qubit.flux_int")
         )
         half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
         # One-tone resonator spectra have uninformative phase.
@@ -269,17 +269,17 @@ class OneToneFluxDepAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                target_name="qubit.flux_half",
+                target_name="$qubit.flux_half",
                 description="Half-flux (Φ₀/2) sweet-spot device value",
                 proposed_value=result.flx_half,
             ),
             MetaDictWriteback(
-                target_name="qubit.flux_int",
+                target_name="$qubit.flux_int",
                 description="Integer-flux sweet-spot device value",
                 proposed_value=result.flx_int,
             ),
             MetaDictWriteback(
-                target_name="qubit.flux_period",
+                target_name="$qubit.flux_period",
                 description="Flux period (device units) = 2·|flx_int − flx_half|",
                 proposed_value=result.flx_period,
             ),

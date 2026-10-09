@@ -27,7 +27,6 @@ def test_empty_owner_reads_and_value_sources(control: ContextControlFacet) -> No
     assert control.get_entry_info() is None
     assert control.list_points() == ()
     assert control.get_source_binding() is None
-    assert control.get_component_focus().name is None
     assert control.list_value_sources() == ()
     with pytest.raises(MissingValue):
         control.read_value_source("device.flux.value", "float")

@@ -71,29 +71,29 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     value = make_default_value(make_pulse_readout_module_spec().allowed[0])
     value.with_field("pulse_cfg.freq", 0.0)
     value.with_field(
-        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
     )
     value.with_field("pulse_cfg.nqz", 2)
     value.with_field("pulse_cfg.gain", 0.05)
     value.with_field("pulse_cfg.waveform.length", 1.0)
     value.with_field("ro_cfg.ro_freq", 0.0)
     value.with_field(
-        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
     )
     value.with_field(
         "ro_cfg.ro_length",
         path_seed(
-            "resonator.ext.default_probe_length",
+            "$resonator.ext.default_probe_length",
             fallback=0.9,
-            expr="resonator.ext.default_probe_length - 0.1",
+            expr="$resonator.ext.default_probe_length - 0.1",
         ).resolve(ctx),
     )
     value.with_field(
         "ro_cfg.trig_offset",
         path_seed(
-            "resonator.ext.time_of_fly",
+            "$resonator.ext.time_of_fly",
             fallback=0.55,
-            expr="resonator.ext.time_of_fly + 0.05",
+            expr="$resonator.ext.time_of_fly + 0.05",
         ).resolve(ctx),
     )
     return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
@@ -223,7 +223,7 @@ class OneToneFreqAdapter(
     ) -> float | None:
         if parameters is None or route is None:
             return None
-        lookup = parameters.lookup(_EDELAY_PARAMETER_PATH)
+        lookup = parameters.lookup(f"${_EDELAY_PARAMETER_PATH}")
         raw = lookup.value
         if not lookup.present or raw is None or not isinstance(raw, Mapping):
             return None
@@ -277,10 +277,10 @@ class OneToneFreqAdapter(
         return not bool(np.allclose(steps, np.median(steps), rtol=1e-8, atol=0.0))
 
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Capture the chosen qubit and its resonator for one-tone calibration."""
+        """Declare the global aliases used by this adapter."""
         return {
             "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+            "resonator": RoleSpec("resonator"),
         }
 
     @classmethod
@@ -421,17 +421,17 @@ class OneToneFreqAdapter(
             )
         items: list[WritebackItem] = [
             MetaDictWriteback(
-                target_name="resonator.freq",
+                target_name="$resonator.freq",
                 description="Resonator frequency (MHz)",
                 proposed_value=result.freq,
             ),
             MetaDictWriteback(
-                target_name="resonator.kappa",
+                target_name="$resonator.kappa",
                 description="Resonator linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,
             ),
             MetaDictWriteback(
-                target_name="resonator.ext.theta0",
+                target_name="$resonator.ext.theta0",
                 description="Resonator circle phase offset (rad)",
                 proposed_value=float(theta0),
             ),
@@ -447,7 +447,7 @@ class OneToneFreqAdapter(
             res_ch, ro_ch = route
             items.append(
                 MetaDictWriteback(
-                    target_name=_EDELAY_PARAMETER_PATH,
+                    target_name=f"${_EDELAY_PARAMETER_PATH}",
                     description="Route-qualified resonator electrical-delay calibration",
                     proposed_value={
                         "edelay": edelay,
@@ -459,7 +459,7 @@ class OneToneFreqAdapter(
         items.extend(
             pulse_readout_module_writeback_items(
                 req.run_result.cfg,
-                target="resonator.readout.readout_rf",
+                target="$resonator.readout.readout_rf",
                 desc="Readout at fitted resonator frequency",
                 field_updates=(
                     ("pulse_cfg.freq", float(result.freq)),

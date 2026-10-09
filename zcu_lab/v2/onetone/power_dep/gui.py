@@ -54,27 +54,27 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
         .with_field("pulse_cfg.waveform.length", 1.0)
         .with_field(
             "pulse_cfg.ch",
-            path_seed("resonator.wiring.ch", fallback=0).resolve(ctx),
+            path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx),
         )
         .with_field("ro_cfg.ro_freq", 0.0)
         .with_field(
             "ro_cfg.ro_ch",
-            path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx),
+            path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx),
         )
         .with_field(
             "ro_cfg.ro_length",
             path_seed(
-                "resonator.ext.default_probe_length",
+                "$resonator.ext.default_probe_length",
                 fallback=0.9,
-                expr="resonator.ext.default_probe_length - 0.1",
+                expr="$resonator.ext.default_probe_length - 0.1",
             ).resolve(ctx),
         )
         .with_field(
             "ro_cfg.trig_offset",
             path_seed(
-                "resonator.ext.time_of_fly",
+                "$resonator.ext.time_of_fly",
                 fallback=0.55,
-                expr="resonator.ext.time_of_fly + 0.05",
+                expr="$resonator.ext.time_of_fly + 0.05",
             ).resolve(ctx),
         )
     )
@@ -124,10 +124,10 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
     )
 
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the chosen qubit and its resonator for fixed tab capture."""
+        """Declare the global aliases used by this adapter."""
         return {
             "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+            "resonator": RoleSpec("resonator"),
         }
 
     @classmethod
