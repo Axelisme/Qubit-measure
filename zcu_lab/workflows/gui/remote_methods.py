@@ -30,6 +30,18 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             ),
         ),
     ),
+    "workflow.tunables": MethodSpec(
+        5.0,
+        "Submit current parsed input with external edits to run_id; return native revision.",
+        params=(
+            _RUN_ID,
+            ParamSpec(
+                "batch",
+                JsonType.JSON,
+                description='Required array of {"path": ["field", ...], "value": JSON}; [] submits current draft, not defaults.',
+            ),
+        ),
+    ),
     "workflow.status": MethodSpec(
         5.0,
         "Read the attached run_id, operation_id and native status; pending status is null.",

@@ -258,8 +258,14 @@ class WorkflowController[C]:
         engine = self.engine
         return None if engine is None else engine.status()
 
-    def _require_run_id(self, run_id: str) -> None:
-        """Reject a control target that is not this Start's native identity."""
+    def require_run_id(self, run_id: str) -> None:
+        """Check this Start's native identity without changing run or admission.
+
+        run_id must equal the identity supplied to Start, including pending
+        startup. A wrong or absent target raises RunMismatch with requested and
+        attached identities before side effects. Matching does not imply native
+        acceptance or permit a lifecycle operation. Call on the owner thread.
+        """
         if run_id != self._run_id:
             raise RunMismatch(expected=run_id, actual=self._run_id)
 
@@ -274,7 +280,7 @@ class WorkflowController[C]:
         delivery; Pause does not discard progress, plots or submitted inputs.
         """
         with self._lock:
-            self._require_run_id(run_id)
+            self.require_run_id(run_id)
             engine = self._engine
             status = None if engine is None else engine.status()
             if engine is None or status is None:
@@ -308,7 +314,7 @@ class WorkflowController[C]:
         Stop while this segment is pending prevents its step from restarting.
         """
         with self._lock:
-            self._require_run_id(run_id)
+            self.require_run_id(run_id)
             engine = self._engine
             status = None if engine is None else engine.status()
             if engine is None or status is None:
@@ -389,7 +395,7 @@ class WorkflowController[C]:
         rollback or cleanup occurs.
         """
         with self._lock:
-            self._require_run_id(run_id)
+            self.require_run_id(run_id)
             self._stop_signal.set()
             if self._engine is None:
                 return None

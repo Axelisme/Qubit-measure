@@ -6,7 +6,12 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import JsonValue
-from zcu_tools.experiment.workflows import InvalidRunState, RunMismatch, RunStatus
+from zcu_tools.experiment.workflows import (
+    Actor,
+    InvalidRunState,
+    RunMismatch,
+    RunStatus,
+)
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.remote.control_service import (
@@ -50,6 +55,16 @@ class StartParams(RunTarget):
 
     plan: list[FormWrite]
     tunables: list[FormWrite]
+
+
+class TunablesParams(RunTarget):
+    """External edit of one native run using its current complete parsed input.
+
+    batch contains unique FormWrite paths. [] submits current input, not defaults.
+    Actor is app-owned agent/rpc; caller supplies no revision or holder.
+    """
+
+    batch: list[FormWrite]
 
 
 class FormErrorReply(TypedDict):
@@ -114,6 +129,11 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
     Batch wire admission rejects malformed or duplicate paths without side effects.
     A successful reply is pending admission, not worker acceptance. GUI drafts are
     untouched on failure; success resets their bases through the existing owner.
+    workflow.tunables requires run_id and a path/value batch. It submits complete
+    current parsed draft through the same Window tuning panel with agent/rpc actor;
+    [] never resets defaults. Success returns WorkflowReply with native revision.
+    Invalid input stays in draft and projects FormErrors; accepted input/base and
+    native values/revision are unchanged. Pending startup is not editable.
     workflow.status reads the same Controller on the owner. Pause/Resume/Stop
     require explicit run_id and invoke the existing Window control once.
     RunMismatch becomes precondition_failed/run_mismatch with expected/actual;
@@ -154,6 +174,9 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             method_registry={
                 "workflow.start": BoundMethod(
                     self._start, METHOD_SPECS["workflow.start"]
+                ),
+                "workflow.tunables": BoundMethod(
+                    self._tunables, METHOD_SPECS["workflow.tunables"]
                 ),
                 "workflow.status": BoundMethod(
                     self._status, METHOD_SPECS["workflow.status"]
@@ -200,6 +223,21 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
                 data={"messages": messages},
             )
         return self._status(_adapter, {})
+
+    def _tunables(
+        self,
+        _adapter: RemoteControlServiceBase,
+        params: TunablesParams,
+    ) -> WorkflowReply:
+        result = self.ctrl.apply_tunables(
+            params["run_id"],
+            _parse_start_batch(params["batch"]),
+            actor=Actor("agent", "rpc"),
+        )
+        del result
+        raise NotImplementedError(
+            "Project FormErrors and native controls without retry"
+        )
 
     def _status(
         self,

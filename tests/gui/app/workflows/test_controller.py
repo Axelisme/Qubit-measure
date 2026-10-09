@@ -98,6 +98,35 @@ def declare(rig: Rig):
     return workflow("example", plan=Plan, tunables=Tunables, init=rig.init)(invoke)
 
 
+def test_target_check_is_available_before_acceptance_without_changing_admission(
+    tmp_path: Path,
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    controller = create_controller(harness, rig, lambda _status, _error: None)
+    with pytest.raises(RunMismatch) as absent:
+        controller.require_run_id("run")
+    assert (absent.value.expected, absent.value.actual) == ("run", None)
+    assert not harness.gate.snapshot()
+    token = controller.start(
+        declare(rig),
+        plan=Plan(),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=identity(),
+    )
+    controller.require_run_id("run")
+    with pytest.raises(RunMismatch) as stale:
+        controller.require_run_id("old")
+    assert (stale.value.expected, stale.value.actual) == ("old", "run")
+    assert controller.operation_id == token and controller.status() is None
+    assert harness.gate.snapshot() and not rig.paths.metadata_root.exists()
+    harness.complete_segment()
+    before = controller.status()
+    controller.require_run_id("run")
+    assert controller.status() == before
+    assert not harness.gate.snapshot()
+
+
 def test_submit_is_pending_until_worker_accepts_and_owner_releases_lease(
     tmp_path: Path,
 ) -> None:

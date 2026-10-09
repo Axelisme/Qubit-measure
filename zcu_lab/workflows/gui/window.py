@@ -17,6 +17,7 @@ from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
+    Actor,
     DeviceSnapshot,
     EnginePorts,
     InvalidRunState,
@@ -24,6 +25,7 @@ from zcu_tools.experiment.workflows import (
     RunMismatch,
     RunPaths,
     RunStatus,
+    TunablesSnapshot,
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
@@ -361,6 +363,30 @@ class T1WorkflowWindow(QWidget):
         stopping the transport does not cancel a native run.
         """
         return T1RemoteControlAdapter(self, opts, bus=bus, owner_scheduler=self._owner)
+
+    def apply_tunables(
+        self,
+        run_id: str,
+        batch: Mapping[FormWritePath, JsonValue],
+        *,
+        actor: Actor,
+    ) -> TunablesSnapshot | FormErrors:
+        """Submit external edits through this run's existing tuning panel.
+
+        Call on the Qt owner. run_id is the explicit Start identity; Controller
+        checks it before draft writes. Wrong/absent targets raise RunMismatch.
+        A matching pending run without native acceptance raises RuntimeError
+        without changing draft. batch uses model-field tuple leaves; sequences
+        and mappings are whole leaves. {} submits complete current parsed input,
+        not defaults. actor identifies the user/agent in Engine's numeric journal.
+        Parsed GUI draft participates; expressions stay in FormInput and the
+        fixed accepted Start capture resolves sources, without live refresh.
+        Model-invalid input stays in draft and returns FormErrors. Structural/
+        source and native lifecycle/journal errors propagate without retry.
+        Success updates accepted input/base and clears renderer-local text.
+        Failure does neither; Engine owns revision and atomic publication.
+        """
+        raise NotImplementedError("Wire the canonical target and existing tuning panel")
 
     def pause(self, run_id: str) -> RunStatus:
         """Request Pause of the explicit native target, retaining plan and plots.

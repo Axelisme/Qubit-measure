@@ -159,6 +159,32 @@ def test_successful_external_edit_replaces_unparseable_view_text(
     assert float(restored.text()) == 8.0
 
 
+def test_journal_failure_propagates_without_accepting_input_or_clearing_local_text(
+    tuning: tuple[T1TuningPanel, Engine[Calibrated]],
+    tmp_path: Path,
+) -> None:
+    widget, engine = tuning
+    before = engine.tunables("tuning")
+    accepted = widget.host.accepted_input.data
+    control = widget.panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
+    assert isinstance(control, QLineEdit)
+    control.setText("-")
+    journal = tmp_path / "metadata/journal.jsonl"
+    journal.unlink()
+    journal.mkdir()
+    with pytest.raises(IsADirectoryError) as caught:
+        widget.apply_external({("guess_us",): 45.0}, actor=Actor("agent", "rpc"))
+    assert caught.value.filename == str(journal)
+    assert engine.tunables("tuning") == before
+    status = engine.status()
+    assert status is not None and status.lifecycle == "failed"
+    assert widget.host.accepted_input.data == widget.panel.state.base.data == accepted
+    assert widget.panel.state.input.data["guess_us"] == 45.0
+    assert (
+        widget.panel.editor.local_parse_errors() is not None and control.text() == "-"
+    )
+
+
 def test_invalid_native_t1_batch_retains_input_without_partial_publication(
     tuning: tuple[T1TuningPanel, Engine[Calibrated]],
 ) -> None:
