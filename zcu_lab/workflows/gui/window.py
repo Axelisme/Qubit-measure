@@ -13,7 +13,14 @@ from pydantic_core import PydanticCustomError
 from qick import QickConfig
 from qtpy.QtCore import QTimer
 from qtpy.QtGui import QCloseEvent
-from qtpy.QtWidgets import QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from qtpy.QtWidgets import (
+    QComboBox,
+    QLabel,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
@@ -223,14 +230,20 @@ class T1WorkflowWindow(QWidget):
         self._runner = runner
         self._owner = owner
         self._progress = progress
+        self._on_close = on_close
         self.controller: WorkflowController[T1TunablesForm, Calibrated] = (
             WorkflowController(runner, "t1-workflow", on_finished=self._finished)
         )
         self.tuning_panel: T1TuningPanel | None = None
         self._plots: Plots | None = None
 
-        env = self._capture_env(
-            DeviceSnapshot(self._services.device.capture_native_device_info())
+        focus = services.context_control.get_component_focus()
+        env = (
+            self._capture_env(
+                DeviceSnapshot(self._services.device.capture_native_device_info())
+            )
+            if focus.target is not None and focus.name is not None
+            else FormEnv()
         )
         self.plan_panel = T1PlanPanel(env, self)
         self.tunables_panel = T1TunablesPanel(
@@ -258,6 +271,7 @@ class T1WorkflowWindow(QWidget):
         stack.addWidget(placeholder)
         self._plot_host = QtPlotHost(FigureContainer(stack, placeholder), owner)
         self._layout = QVBoxLayout(self)
+        self._init_source_controls()
         for widget in (
             self.plan_panel,
             self.tunables_panel,
@@ -282,7 +296,57 @@ class T1WorkflowWindow(QWidget):
         entry is opened or hardware connected by showing. Closing Setup updates
         qubit choices from ContextControlPort without replacing form drafts.
         """
-        raise NotImplementedError
+        self.setup_dialog.show()
+        self.setup_dialog.raise_()
+        self.setup_dialog.activateWindow()
+
+    def _init_source_controls(self) -> None:
+        self.setup_dialog = SetupDialog(self._services.setup_control, self)
+        self.setup_dialog.finished.connect(self._sync_source_choices)
+        setup_button = QPushButton("Setup", self)
+        setup_button.setObjectName("workflow.source.setup")
+        setup_button.clicked.connect(self.open_setup)
+        self._qubit_choice = QComboBox(self)
+        self._qubit_choice.setObjectName("workflow.source.qubit")
+        self._qubit_choice.currentIndexChanged.connect(self._source_selected)
+        use_button = QPushButton("Use source", self)
+        use_button.setObjectName("workflow.source.use")
+        use_button.clicked.connect(self._use_source_clicked)
+        for widget in (setup_button, self._qubit_choice, use_button):
+            self._layout.addWidget(widget)
+        self._sync_source_choices()
+
+    def _sync_source_choices(self, *_args: object) -> None:
+        focus = self._services.context_control.get_component_focus()
+        was_blocked = self._qubit_choice.blockSignals(True)
+        try:
+            self._qubit_choice.clear()
+            self._qubit_choice.addItem("None")
+            for component in focus.components:
+                if component.kind.startswith("qubit/"):
+                    self._qubit_choice.addItem(component.name)
+            index = (
+                self._qubit_choice.findText(focus.name) if focus.name is not None else 0
+            )
+            self._qubit_choice.setCurrentIndex(max(0, index))
+        finally:
+            self._qubit_choice.blockSignals(was_blocked)
+
+    def _source_selected(self, index: int) -> None:
+        name = self._qubit_choice.currentText() if index > 0 else None
+        try:
+            self._services.context_control.set_component_focus(name)
+        except Exception as error:
+            logger.exception("T1 workflow source selection failed")
+            self._message.setText(str(error))
+            self._sync_source_choices()
+
+    def _use_source_clicked(self) -> None:
+        try:
+            self.prepare_forms()
+        except Exception as error:
+            logger.exception("T1 workflow source capture failed")
+            self._message.setText(str(error))
 
     def prepare_forms(self) -> None:
         """Replace both Start drafts and bases with current captured defaults.
@@ -295,7 +359,34 @@ class T1WorkflowWindow(QWidget):
         Source/editor failures propagate without replacing the existing panels.
         Pending, running or paused operations raise InvalidRunState before capture.
         """
-        raise NotImplementedError
+        self._ensure_can_start()
+        focus = self._services.context_control.get_component_focus()
+        if focus.target is None or focus.name is None:
+            raise FailedPreconditionError(
+                "Select a qubit source before preparing forms"
+            )
+        env = self._capture_env(
+            DeviceSnapshot(self._services.device.capture_native_device_info())
+        )
+        plan_panel = T1PlanPanel(env, self)
+        try:
+            tunables_panel = T1TunablesPanel(
+                FormState(T1TunablesForm.default_input(env)), env, self
+            )
+        except Exception:
+            # The first editor is not installed if the second construction fails.
+            plan_panel.close()
+            plan_panel.deleteLater()
+            raise
+        old_plan, old_tunables = self.plan_panel, self.tunables_panel
+        self._layout.replaceWidget(old_plan, plan_panel)
+        self._layout.replaceWidget(old_tunables, tunables_panel)
+        self.plan_panel, self.tunables_panel = plan_panel, tunables_panel
+        for panel in (old_plan, old_tunables):
+            panel.close()
+            panel.deleteLater()
+        plan_panel.show()
+        tunables_panel.show()
 
     def _capture_env(self, devices: DeviceSnapshot) -> FormEnv:
         context = self._services.context
@@ -729,6 +820,19 @@ class T1WorkflowWindow(QWidget):
         if isinstance(result, FormErrors):
             self._message.setText("; ".join(result.messages.values()))
 
+    def _shutdown_on_close(self, event: QCloseEvent | None) -> bool:
+        """Isolate composition shutdown failure and reject the Qt close attempt."""
+        try:
+            if self._on_close is not None:
+                self._on_close()
+        except Exception as error:
+            logger.exception("T1 workflow session shutdown failed")
+            self._message.setText(str(error))
+            if event is not None:
+                event.ignore()
+            return False
+        return True
+
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         """Keep producer/canvas alive during Stop; release only after terminal."""
         run_id = self.controller.run_id
@@ -755,6 +859,9 @@ class T1WorkflowWindow(QWidget):
                 if a0 is not None:
                     a0.ignore()
                 return
+        if not self._shutdown_on_close(a0):
+            return
+        self.setup_dialog.close()
         self._poll.stop()
         if self._plots is not None:
             self._plots.release()
