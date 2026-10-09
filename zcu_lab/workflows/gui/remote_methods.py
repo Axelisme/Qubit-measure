@@ -46,6 +46,37 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the attached run_id, operation_id and native status; pending status is null.",
     ),
+    "workflow.records": MethodSpec(
+        5.0,
+        "Read committed native records with commit_seq > since; terminal data remains readable.",
+        params=(
+            _RUN_ID,
+            ParamSpec(
+                "since",
+                JsonType.INTEGER,
+                required=False,
+                default=0,
+                description="Nonnegative native commit_seq cursor; omitted/null means 0.",
+            ),
+        ),
+    ),
+    "workflow.figures": MethodSpec(
+        5.0,
+        "List names in the current run's live Plots without rendering.",
+        params=(_RUN_ID,),
+    ),
+    "workflow.figure": MethodSpec(
+        5.0,
+        "Render one named Figure as base64 PNG on the GUI owner, at 640 x 480.",
+        params=(
+            _RUN_ID,
+            ParamSpec(
+                "name",
+                JsonType.STRING,
+                description="Exact name returned by workflow.figures.",
+            ),
+        ),
+    ),
     "workflow.pause": MethodSpec(
         5.0,
         "Request cooperative Pause of run_id; reply is not segment completion.",

@@ -41,6 +41,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
+from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.ports import OwnerScheduler
@@ -366,6 +367,27 @@ class T1WorkflowWindow(QWidget):
         stopping the transport does not cancel a native run.
         """
         return T1RemoteControlAdapter(self, opts, bus=bus, owner_scheduler=self._owner)
+
+    def figure_names(self, run_id: str) -> tuple[str, ...]:
+        """List names from this run's Plots without rendering; call on Qt owner.
+
+        run_id must be the attached native identity. RunMismatch rejects absent
+        or stale targets first. Pending acceptance raises RuntimeError. Released
+        plots raise FailedPreconditionError(no_plots), never an empty success.
+        An accepted run without registered figures returns (). Terminal figures
+        stay readable until a new Start or close. No control/input/save effects.
+        """
+        raise NotImplementedError("Internal figure lookup pending")
+
+    def figure_png(self, run_id: str, name: str) -> bytes:
+        """Render the named current Figure as PNG at 640 x 480 on the Qt owner.
+
+        run_id follows figure_names target/acceptance/lifetime requirements.
+        name must be an exact registered name; unknown names raise KeyError.
+        Use the existing shared renderer; no saving, cache, canvas replacement or
+        artist-derived records. Renderer failures propagate without retry.
+        """
+        raise NotImplementedError("Internal PNG rendering pending")
 
     def apply_tunables(
         self,
