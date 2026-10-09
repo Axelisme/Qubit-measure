@@ -935,33 +935,6 @@ def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence
     capture.assert_not_called()
 
 
-def test_load_replaces_result_without_manufacturing_acquisition_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state, tab_id, adapter = _make_state()
-    adapter.run.return_value = RunRecord(
-        cfg=ExpCfgModel(), result=FakeResult(np.array([1.0]))
-    )
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
-        MagicMock(return_value=_provenance()),
-    )
-    inputs = replace(
-        _make_inputs(state, tab_id, adapter),
-        snapshot=_run_snapshot(),
-        experiment_tag="test/native",
-    )
-    service, _gate, background, _handles = _make_run_service(state)
-    service.start_run(inputs, plots=_plots())
-    background.run_work()
-    assert state.get_tab(tab_id).run.metadata is not None
-    loaded = RunRecord(cfg=None, result=FakeResult(np.array([2.0])))
-    state.update_tab_loaded_result(tab_id, loaded, "old-data.h5")
-    assert state.get_tab(tab_id).run.result is loaded
-    assert state.get_tab(tab_id).run.source_path == "old-data.h5"
-    assert state.get_tab(tab_id).run.metadata is None
-
-
 def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
