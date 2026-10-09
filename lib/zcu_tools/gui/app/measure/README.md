@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，全域 alias 與 Run admission evidence
+**Last updated:** 2026-10-09，全域 alias、Run admission 與歷史 Save source
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -162,8 +162,8 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   Unsaved changes。部分成功顯示 Partially saved，重存失敗不沿用前次成功狀態。
   關閉警告只看 measurement data 是否完整 Saved，不因圖片或 JSON 未存而阻擋。
 
-  GUI 直接呼 SaveControlFacet。SaveService 捕捉 tab 的固定 storage、歷史
-  RunMetadata、窗格結果與 result_params，再用一次 shared saver 保存全部選集。
+  GUI 直接呼 SaveControlFacet。SaveService 讀 Run pane 的固定 source storage、
+  歷史 RunMetadata、窗格結果與 result_params，再用一次 shared saver 保存全部選集。
   Data 寫 canonical `runs/<run_id>/data.h5`，每次保存另取新的 Labber filename。
   Data mapping、Figure 編碼、檔案 I/O 與一次 saved ledger event 都在 owner thread
   同步完成。shared saver 每個 member 編碼一次，隔離逐輸出失敗。
@@ -173,10 +173,11 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   Mapping／ledger 錯誤直接傳遞，不偽造 report 或回滾已寫文件。
   保存不產生 acquisition identity，也不重讀 live point。
   RPC／MCP 直接投影回傳報告。Native Load 讀回 typed record 與原 RunMetadata。
-  Save 在 mapping 或輸出 I/O 前比對歷史 entry 與 tab captured storage。
+  Load 在 adapter 呼叫前捕捉當前全域參數來源，再連同檔案歷史發布到 Run pane。
+  Save 在 mapping 或輸出 I/O 前比對 native 歷史 entry 與這份 result source storage。
   跨 entry 時顯示雙方來源並拒絕。同 entry 的不同 point 仍保存，沿用原 run_id
   與資料自己的 point，覆寫原 run 目錄，saved event 保留原 point。
-  Tab 的 point 不參與，也不重綁 tab 或寫到其他 entry。
+  Tab birth capture 與後來的全域選取不參與路徑計算。Save 不要求 live ACTIVE context。
   Load Data 的 RunLoadDialog 由既有 SaveControlFacet 查詢 opened entry ledger，
   按 run_id 合併 acquired／saved，保留最近成功 native path。未存 native 的列不可 Load。
   Point／experiment／Recorded at 篩選只看 ledger，Recorded at 不冒充量測開始時間。

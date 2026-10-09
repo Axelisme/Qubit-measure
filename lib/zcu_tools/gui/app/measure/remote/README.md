@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-09, explicit entry RPCs and synchronous Save reports
+**Last updated:** 2026-10-09, global alias source events and synchronous Save reports
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -91,7 +91,9 @@ Qt widgets.
 
 Event push is still available on the wire for GUI/internal consumers. Event
 payloads use requery hints for complex objects; live Python objects never cross
-the wire.
+the wire. `aliases_changed` directs subscribers to `tab.get_cfg` after the
+committed global table refreshes current cfg publications. It does not change
+historical Run sources. MCP completion still uses operation replies, not events.
 EventBus pushes add process-wide `seq` and `origin={kind, operation_id}` without
 changing the event name or payload shape. The per-connection `client_id` is
 RPC-side bookkeeping and is deliberately omitted. Diagnostic and cfg-editor

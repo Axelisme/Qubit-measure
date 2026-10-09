@@ -239,13 +239,12 @@ class GuardService:
         )
 
     def check_save(self, tab_id: str) -> None:
-        """Require an existing tab, ACTIVE context and a Run result.
+        """Require an existing tab and a Run result, without live context reads.
 
         Raise GuardError on rejection; return None without mutation on success.
         Busy and native evidence checks remain at the Save service boundary.
         """
         tab = self._require_tab(tab_id)
-        self._require_readiness(ContextReadiness.ACTIVE, "save")
         if not tab.has_run_result():
             raise GuardError(
                 "No run result available to save.", reason_code="no_run_result"

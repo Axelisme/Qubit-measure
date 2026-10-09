@@ -512,7 +512,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         """Read req.data_path as an exact native file using this core's spec.
 
         Return the typed cfg/Result record and its full historical metadata.
-        req.parameters is the tab capture, not a replacement for file history.
+        req.parameters is the Load-time capture, not a replacement for file history.
         Missing persistence declarations or required constructor arguments raise
         NotImplementedError. Native validation raises ValueError; I/O and core
         constructor failures propagate. No Labber fallback or history recapture.

@@ -66,7 +66,7 @@ class SaveControlPort(Protocol):
     ) -> SaveReport:
         """Save both data formats synchronously on the owner thread.
 
-        tab_id identifies an idle completed active-context tab. comment=None
+        tab_id identifies an idle tab with a completed historical result. comment=None
         retains its annotation. run_operation_id optionally binds the current
         Run source, not a Save handle. Guards/missing evidence raise
         FailedPreconditionError before mutation. Output failures are reported;

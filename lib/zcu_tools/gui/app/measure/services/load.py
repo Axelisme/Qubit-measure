@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -15,6 +15,8 @@ from .plot_lifecycle import release_retired_plots
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import RetiredPaneResources, State
+    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.resources.entry import RoleSpec
 
     from .ports import WritebackLifecyclePort
 
@@ -63,7 +65,17 @@ class LoadService:
         writeback: WritebackLifecyclePort,
         *,
         provide_options: Callable[[str], Sequence[object]],
+        captured_parameters: Callable[
+            [Mapping[str, RoleSpec], str | None], ParameterContext | None
+        ],
     ) -> None:
+        """Inject fixed current-source capture and cfg backfill option lookup.
+
+        captured_parameters reads current point/library/storage and global aliases
+        on the owner thread; its result must not follow later source changes.
+        provide_options returns current selector choices for cfg backfill.
+        """
+        self._captured_parameters = captured_parameters
         self._state = state
         self._writeback = writeback
         self._provide_options = provide_options
@@ -78,7 +90,8 @@ class LoadService:
         """Load data_path into an existing tab after GuardService.check_load.
 
         Call in the same owner-thread command; data_path is the selected file.
-        Preserve native history and the request's tab source without acquisition.
+        Capture current global parameters once before the adapter call, never tab
+        birth bindings. Retain that source and native history without acquisition.
         Return committed result details and cfg backfill status. Busy or cfg
         notification reentrancy rejects before loading; adapter file/capability
         failures raise LoadDataError without replacing the previous result.
@@ -93,7 +106,10 @@ class LoadService:
                 "This tab does not support loading data files.",
                 reason_code="unsupported_load",
             )
-        request = LoadDataRequest(data_path=data_path, parameters=tab.parameters)
+        request = LoadDataRequest(
+            data_path=data_path,
+            parameters=self._captured_parameters(tab.adapter.parameter_roles(), None),
+        )
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
             result, metadata = tab.adapter.load(request)

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
+from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import (
@@ -29,6 +30,7 @@ from zcu_tools.gui.app.measure.adapter.types import (
     AnalyzeResultBase,
     PostAnalyzeResultBase,
 )
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
     SaveDataFinishedPayload,
@@ -216,7 +218,16 @@ def native_save_session(
     background = BackgroundRunner()
     service = SaveService(state, bus)
     control = SaveControlFacet(
-        state=state, guard=GuardService(state), save=service, context=context
+        state=state,
+        guard=GuardService(
+            state,
+            captured_parameters=context.read_alias_context,
+            cfg_resolution=lambda parameters: MeasureCfgBindings(
+                MagicMock()
+            ).snapshot_from_state(state, captured_values={}, parameters=parameters),
+        ),
+        save=service,
+        context=context,
     )
     completions: list[SaveDataFinishedPayload] = []
     subscription = bus.subscribe(SaveDataFinishedPayload, completions.append)

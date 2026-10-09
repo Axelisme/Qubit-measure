@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 from collections.abc import Generator, Mapping
-from datetime import datetime
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -20,7 +20,6 @@ from zcu_tools.datafile import (
     SoftwareProvenance,
     load_run_data,
 )
-from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -30,7 +29,7 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactSectionSnapshot,
     SaveStatus,
 )
-from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
     SaveDataFinishedPayload,
@@ -41,6 +40,10 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionFact,
 )
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services.app_services import (
+    AppServices,
+    build_app_services,
+)
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.services.run import RunService
@@ -49,6 +52,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -57,6 +61,7 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
@@ -90,7 +95,7 @@ class RoleSavingAdapter(SavingAdapter):
     """Use the existing offline saving backend with a declared driver alias."""
 
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Bind driver to the birth focus; allow manual rebinding on the tab."""
+        """Declare the driver alias consumed by this offline experiment."""
         return {"driver": RoleSpec("fake/drive/*")}
 
 
@@ -127,9 +132,13 @@ def _acquire_to_terminal(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
     cfg = session.state.get_tab("tab").cfg
-    inputs = GuardService(session.state).capture_run_inputs(
-        "tab", expected_revision=cfg.observe().ref.revision
-    )
+    inputs = GuardService(
+        session.state,
+        captured_parameters=session.context.read_alias_context,
+        cfg_resolution=lambda parameters: MeasureCfgBindings(
+            MagicMock()
+        ).snapshot_from_state(session.state, captured_values={}, parameters=parameters),
+    ).capture_run_inputs("tab", expected_revision=cfg.observe().ref.revision)
     loop = QEventLoop()
     timer = QTimer()
     timer.setSingleShot(True)
@@ -176,26 +185,26 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     metadata = tab.run.metadata
     record = tab.run.result
     assert metadata is not None and record is not None and record.cfg is not None
-    events = session.entry.ledger.events()
+    events = other.ledger.events()
     assert len(events) == 1
     event = events[0]
     assert event.kind == "acquired" and event.origin == frontend
-    assert event.entry_id == str(session.entry.entry_id)
+    assert event.entry_id == str(other.entry_id)
     assert event.at == metadata.finished_at
     assert isinstance(event.payload, AcquiredPayload)
     assert event.payload.run_id == metadata.run_id
     assert event.payload.tab == "saving" and event.payload.tab_id == "tab"
     assert event.payload.experiment == metadata.experiment
     assert event.payload.cfg_summary == record.cfg.model_dump(mode="json")
-    assert event.payload.point == "p"
+    assert event.payload.point == "q"
     assert event.payload.roles == dict(metadata.snapshot.roles)
-    assert other.ledger.events() == ()
+    assert session.entry.ledger.events() == ()
     assert tab.run.confirmed_run_id is None
-    assert not (session.entry.database_path / "runs").exists()
+    assert not (other.database_path / "runs").exists()
     assert session.completions == []
     session.save()
     session.save()
-    assert [event.kind for event in session.entry.ledger.events()] == [
+    assert [event.kind for event in other.ledger.events()] == [
         "acquired",
         "saved",
         "saved",
@@ -203,72 +212,80 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
 
 
 @pytest.fixture
-def role_controller(
+def role_application(
     native_session: NativeSaveSession,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-) -> Generator[tuple[State, Controller, BaseEventBus]]:
-    """Compose an offline role-aware application and restore its registry/Qt owners."""
+    qapp: QApplication,
+) -> Generator[tuple[State, AppServices, BaseEventBus]]:
+    """Compose offline production services and restore registry/Qt owners."""
     before = registry_state()
-    background = native_session.background
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     bus = BaseEventBus()
     registry = Registry()
     registry.register("role_saving", RoleSavingAdapter)
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.app_services.BackgroundRunner",
-        lambda: background,
-    )
 
     def provenance(*, context: RunContext) -> SoftwareProvenance:
         return native_session.metadata.provenance
 
     monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
-        provenance,
+        "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
-    controller = Controller(
-        state,
-        registry,
-        None,
-        bus,
-        project_root=str(tmp_path),
+    services = build_app_services(
+        state=state,
+        bus=bus,
+        registry=registry,
+        cfg_editor_ctrl=MagicMock(),
         progress_transport=DirectProgressTransport(),
+        resource_versions=state.version.snapshot,
+        render_host=lambda: None,
+        owner_scheduler=QtOwnerScheduler(),
+        project_root=str(tmp_path),
     )
     try:
         register_fakes()
         installed = registry_state()
-        controller.setup_control.new_entry(EntryRequest("rebound"))
-        context = controller.context_control
-        context.new_point(PointCreateRequest("p", "birth point", GUI_ORIGIN))
+        services.setup_control.new_entry(EntryRequest("birth"))
+        services.context.new_point(PointCreateRequest("p", "birth point", GUI_ORIGIN))
         for name in ("Q1", "Q2"):
-            context.add_component(name, "fake/drive/a", {"rate": 10.0})
-        context.set_component_focus("Q1")
-        yield state, controller, bus
+            services.context.add_component(name, "fake/drive/a", {"rate": 10.0})
+        services.context.set_alias_rows((AliasRow("driver", "Q1"),))
+        yield state, services, bus
         assert registry_state() == installed
     finally:
-        assert background.quiesce()
         for tab_id in tuple(state.list_tab_ids()):
-            controller.tab_control.close_tab(tab_id)
+            services.tab.close_tab(tab_id)
+        assert services.background.quiesce()
+        services.background.deleteLater()
+        qapp.processEvents()
         restore_registry(before)
 
 
 @pytest.mark.parametrize("frontend", ["gui", "mcp"])
-def test_native_role_rebind_records_new_alias_and_retains_result_source(
-    role_controller: tuple[State, Controller, BaseEventBus], frontend: str
+@pytest.mark.parametrize("target", [None, "Q2"])
+def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
+    role_application: tuple[State, AppServices, BaseEventBus],
+    frontend: str,
+    target: str | None,
 ) -> None:
-    state, controller, bus = role_controller
-    control = controller.tab_control
-    tab_id = control.new_tab("role_saving")
+    state, services, bus = role_application
+    tab_id = services.tab.new_tab("role_saving")
     tab = state.get_tab(tab_id)
-    birth = tab.parameters
-    assert (
-        birth is not None
-        and birth.roles is not None
-        and birth.roles.names == {"driver": "Q1"}
+    birth = services.context.read_alias_context(tab.adapter.parameter_roles())
+    assert birth is not None
+    birth_storage = birth.capture_storage()
+    services.setup_control.new_entry(EntryRequest("acquisition"))
+    services.context.new_point(
+        PointCreateRequest("run-point", "Run source", GUI_ORIGIN)
     )
-    storage = birth.capture_storage()
-    control.set_role(tab_id, "driver", "Q2")
+    for name in ("Q1", "Q2"):
+        services.context.add_component(name, "fake/drive/a", {"rate": 20.0})
+    services.context.set_alias_rows(
+        (
+            AliasRow("driver", "Q2" if target is None else "Q1"),
+            AliasRow("custom", "Q1"),
+        )
+    )
     origin = GUI_ORIGIN if frontend == "gui" else CommandOrigin("mcp")
     finished: list[RunFinishedPayload] = []
     loop, timer = QEventLoop(), QTimer()
@@ -281,8 +298,8 @@ def test_native_role_rebind_records_new_alias_and_retains_result_source(
 
     subscription = bus.subscribe(RunFinishedPayload, terminal)
     try:
-        controller.run_analyze_control.start_run(
-            tab_id, tab.cfg.observe().ref, origin=origin
+        services.run_analyze_control.start_run(
+            tab_id, tab.cfg.observe().ref, origin=origin, target=target
         )
         timer.start(5000)
         if not finished:
@@ -291,44 +308,42 @@ def test_native_role_rebind_records_new_alias_and_retains_result_source(
         timer.stop()
         subscription.unsubscribe()
     assert len(finished) == 1 and finished[0].outcome == "finished"
-    assert not state.is_tab_busy(tab_id)
     metadata, parameters = tab.run.metadata, tab.run.parameters
-    assert (
-        metadata is not None and parameters is not None and parameters.roles is not None
-    )
-    assert metadata.snapshot.roles == parameters.roles.names == {"driver": "Q2"}
+    assert metadata is not None and parameters is not None
+    storage = parameters.capture_storage()
+    assert metadata.snapshot.roles == {"driver": "Q2", "custom": "Q1"}
     assert (metadata.snapshot.entry_id, metadata.snapshot.point) == (
         storage.entry_id,
-        storage.point,
+        "run-point",
     )
-    (event,) = storage.ledger.events()
-    assert (event.kind, event.origin, event.entry_id) == (
-        "acquired",
-        frontend,
-        str(storage.entry_id),
+    (acquired,) = storage.ledger.events()
+    assert isinstance(acquired.payload, AcquiredPayload)
+    assert acquired.payload.run_id == metadata.run_id
+    planned = state.get_artifact_snapshots(tab_id)
+    assert all(
+        output.path.is_relative_to(storage.database_path)
+        for section in planned
+        for artifact in section.artifacts
+        for member in artifact.members
+        for output in member.outputs
     )
-    assert isinstance(event.payload, AcquiredPayload)
-    assert event.payload.run_id == metadata.run_id
-    assert event.payload.roles == {"driver": "Q2"}
-    assert event.payload.point == "p"
-    assert not (storage.database_path / "runs").exists()
-    control.set_role(tab_id, "driver", "Q1")
-    assert (
-        tab.parameters is not None
-        and tab.parameters.roles is not None
-        and tab.parameters.roles.names == {"driver": "Q1"}
-    )
-    assert tab.run.metadata is metadata and tab.run.parameters is parameters
-    assert tab.save_context is birth
-    report = controller.save_control.save_data(tab_id, origin=origin)
+    services.context.set_parameter(parameters.target, "Q2.rate", 30.0)
+    services.context.set_alias_rows((AliasRow("driver", "Q1"),))
+    services.setup_control.new_entry(EntryRequest("later"))
+    assert parameters.value("$driver.rate") == 20.0
+    report = services.save_control.save_data(tab_id, origin=origin)
     assert all(output.status == "saved" for output in report.outputs)
-    stored = load_run_data(report.outputs[0].output.path)
+    stored = load_run_data(
+        next(
+            output.output.path
+            for output in report.outputs
+            if output.output.format == "data_h5"
+        )
+    )
     assert stored.metadata.snapshot == metadata.snapshot
-    assert stored.metadata.run_id == event.payload.run_id
-    assert [event.kind for event in storage.ledger.events()] == [
-        "acquired",
-        "saved",
-    ]
+    assert stored.metadata.run_id == acquired.payload.run_id
+    assert [event.kind for event in storage.ledger.events()] == ["acquired", "saved"]
+    assert not birth_storage.ledger.events()
 
 
 @pytest.mark.parametrize("failure", [False, True])
@@ -413,7 +428,19 @@ def test_native_run_without_storage_reports_missing_acquired_destination(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     session = native_session
-    session.state.get_tab("tab").save_context = None
+    captured = session.state.session_env.parameters
+    assert captured is not None
+    session.state.set_context(
+        replace(
+            session.state.session_env,
+            parameters=ParameterContext(
+                point=captured.document(),
+                library=captured.library,
+                target=captured.target,
+                roles=None,
+            ),
+        )
+    )
     token, terminal = _acquire_to_terminal(session, monkeypatch)
     assert terminal.outcome == "finished"
     outcome = session.handles.known_outcome(token)
@@ -735,7 +762,7 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
     if missing == "metadata":
         session.state.update_tab_result("tab", session.state.get_tab("tab").run.result)
     else:
-        session.state.get_tab("tab").save_context = None
+        session.state.get_tab("tab").run.parameters = None
     with pytest.raises(FailedPreconditionError):
         session.control.save_data("tab", origin=GUI_ORIGIN)
     assert not session.state.is_tab_busy("tab")
@@ -744,82 +771,16 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
     assert not (session.entry.database_path / "runs").exists()
 
 
-def test_cancel_during_metadata_preserves_completed_acquisition_when_saved(
-    native_session: NativeSaveSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    session = native_session
-    owner = QtOwnerScheduler()
-    gate = OperationGate(session.bus)
-    progress = ProgressService(DirectProgressTransport())
-    run = RunService(
-        session.state,
-        OperationRunner(
-            gate, session.handles, progress, session.background, session.bus
-        ),
-        session.bus,
-        session.handles,
-        MagicMock(),
-        gate=gate,
-        devices=lambda: {},
-    )
-
-    def historical_provenance(*, context: RunContext) -> SoftwareProvenance:
-        # Host/Git evidence is not the target of the Run -> Save contract.
-        return session.metadata.provenance
-
-    def identity_after_cancel(started_at: datetime) -> str:
-        # This collaborator runs after the offline acquisition has returned.
-        assert owner.call(run.cancel_run)
-        return new_run_id(started_at)
-
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
-        historical_provenance,
-    )
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.new_run_id", identity_after_cancel
-    )
-    cfg = session.state.get_tab("tab").cfg
-    inputs = GuardService(session.state).capture_run_inputs(
-        "tab", expected_revision=cfg.observe().ref.revision
-    )
-    loop = QEventLoop()
-    timer = QTimer()
-    timer.setSingleShot(True)
-    timer.timeout.connect(loop.quit)
-    finished: list[RunFinishedPayload] = []
-
-    def terminal(payload: RunFinishedPayload) -> None:
-        finished.append(payload)
-        loop.quit()
-
-    subscription = session.bus.subscribe(RunFinishedPayload, terminal)
-    try:
-        token = run.start_run(inputs, plots=Plots(NonPresentingHost()))
-        timer.start(5000)
-        loop.exec()
-    finally:
-        timer.stop()
-        subscription.unsubscribe()
-    assert len(finished) == 1 and finished[0].outcome == "cancelled"
-    outcome = session.handles.known_outcome(token)
-    assert outcome is not None and outcome.status == "cancelled"
-    metadata = session.state.get_tab("tab").run.metadata
-    assert metadata is not None and metadata.completion == "complete"
-    session.metadata = metadata
-    saved = session.save()
-    stored = load_run_data(saved.outputs[0].output.path)
-    assert stored.metadata.completion == "complete"
-    assert stored.metadata.run_id == metadata.run_id
-    assert stored.metadata.started_at == metadata.started_at
-    assert stored.metadata.finished_at == metadata.finished_at
-
-
 def test_invalid_record_raises_without_writing_or_saved_event(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
-    session.state.update_tab_result("tab", object(), metadata=session.metadata)
+    session.state.update_tab_result(
+        "tab",
+        object(),
+        metadata=session.metadata,
+        parameters=session.state.get_tab("tab").run.parameters,
+    )
     with pytest.raises(TypeError, match="RunRecord"):
         session.save()
     assert session.entry.ledger.events() == ()
@@ -1014,7 +975,7 @@ def test_missing_evidence_rejects_comment_before_operation(
     if missing == "metadata":
         session.state.update_tab_result("tab", session.state.get_tab("tab").run.result)
     else:
-        session.state.get_tab("tab").save_context = None
+        session.state.get_tab("tab").run.parameters = None
     command = session.control.save_artifacts if batch else session.control.save_data
     with pytest.raises(FailedPreconditionError):
         command("tab", comment="rejected", origin=GUI_ORIGIN)

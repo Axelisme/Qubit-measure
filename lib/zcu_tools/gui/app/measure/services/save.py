@@ -86,7 +86,7 @@ class SaveService:
         captured storage raises FailedPreconditionError before mapping or I/O.
         Mismatch diagnostics identify both sources; no automatic rebinding occurs.
         Within the same entry, retain the historical run_id and point for all
-        output paths and the saved event, regardless of the tab's captured point.
+        output paths and the saved event, regardless of later global selections.
         Output failures appear in the complete report; mapping or ledger errors
         propagate without a report. State publication completes before return.
         """
@@ -112,7 +112,7 @@ class SaveService:
         FailedPreconditionError before mapping, I/O or annotation mutation.
         Mismatch diagnostics identify both sources; no automatic rebinding occurs.
         Within the same entry, all selected outputs and the saved event use the
-        historical run_id and point, not the tab's captured point.
+        historical run_id and point, not the current global point.
         Invalid pane content raises TypeError/ValueError.
         comment=None retains the annotation. origin attributes this command.
         All mapping, PNG encoding, writes and ledger append finish before return.
@@ -136,7 +136,7 @@ class SaveService:
         self._require_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
         metadata = tab.run.metadata
-        if metadata is None or tab.save_context is None:
+        if metadata is None or tab.run.parameters is None:
             raise FailedPreconditionError(
                 "Run has no historical native metadata or captured storage",
                 reason_code="storage_unavailable",
@@ -145,13 +145,13 @@ class SaveService:
             selected = tab.artifacts.select(refs)
         except ValueError as exc:
             raise FailedPreconditionError(str(exc)) from exc
-        storage = tab.save_context.capture_storage()
+        storage = tab.run.parameters.capture_storage()
         history = metadata.snapshot
         if history.entry_id != storage.entry_id:
             raise FailedPreconditionError(
                 f"Historical run entry_id={history.entry_id!r}, point={history.point!r} "
-                f"does not match tab entry_id={storage.entry_id!r}, point={storage.point!r}; "
-                "save from a tab captured at the matching historical entry."
+                f"does not match result source entry_id={storage.entry_id!r}, "
+                f"point={storage.point!r}; load with the matching historical entry."
             )
         layout = SaveLayout(
             result_path=storage.result_path,

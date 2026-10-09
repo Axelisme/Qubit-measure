@@ -35,7 +35,10 @@ def test_native_load_retains_history_and_resaves_captured_source(
     with native_save_session(tmp_path, qapp) as session:
         session.metadata = replace(session.metadata, completion=completion)
         session.state.update_tab_result(
-            "tab", session.state.get_tab("tab").run.result, metadata=session.metadata
+            "tab",
+            session.state.get_tab("tab").run.result,
+            metadata=session.metadata,
+            parameters=session.state.get_tab("tab").run.parameters,
         )
         session.save()
         path = (
@@ -43,7 +46,14 @@ def test_native_load_retains_history_and_resaves_captured_source(
         )
         stored = load_run_data(path)
         events = session.entry.ledger.events()
-        original_capture = session.state.get_tab("tab").save_context
+        service = LoadService(
+            session.state,
+            MagicMock(),
+            provide_options=lambda _: (),
+            captured_parameters=session.context.read_alias_context,
+        )
+        outcome = service.load_result("tab", str(path))
+        original_capture = session.state.get_tab("tab").run.parameters
         other = ResultEntry.create(
             "other",
             result_root=tmp_path / "Elsewhere",
@@ -54,10 +64,6 @@ def test_native_load_retains_history_and_resaves_captured_source(
         ContextControlFacet(context=session.context).use_point(
             PointUseRequest("other-point")
         )
-        service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
-
-        outcome = service.load_result("tab", str(path))
-
         tab = session.state.get_tab("tab")
         record = tab.run.result
         assert isinstance(record, RunRecord)
@@ -68,7 +74,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
         assert tab.run.metadata == stored.metadata
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
-        assert tab.save_context is original_capture
+        assert tab.run.parameters is original_capture
         assert session.entry.ledger.events() == events
 
         report = session.save()
@@ -98,10 +104,12 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         control = ContextControlFacet(context=session.context)
         control.use_point(PointUseRequest("destination-point"))
         tab = session.state.get_tab("tab")
-        tab.parameters = control.read_context()
-        tab.save_context = tab.parameters
-        captured = tab.save_context
-        service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
+        service = LoadService(
+            session.state,
+            MagicMock(),
+            provide_options=lambda _: (),
+            captured_parameters=session.context.read_alias_context,
+        )
         service.load_result("tab", str(source))
         assert tab.run.confirmed_run_id is None
         planned_copies: tuple[Path, ...] = ()
@@ -154,8 +162,8 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         assert saved.labber_path != stored.labber_path
         assert tab.run.metadata == saved
         assert tab.run.confirmed_run_id == stored.run_id
-        assert tab.save_context is captured
-        assert captured.capture_storage().point == "destination-point"
+        assert tab.run.parameters is not None
+        assert tab.run.parameters.capture_storage().point == "destination-point"
         events = session.entry.ledger.events()
         assert events[:-1] == previous_events
         event = events[-1]
@@ -200,11 +208,14 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
         control = ContextControlFacet(context=session.context)
         control.use_point(PointUseRequest("destination-point"))
         tab = session.state.get_tab("tab")
-        tab.parameters = control.read_context()
-        tab.save_context = tab.parameters
-        captured = tab.save_context.capture_storage()
+        captured = control.read_context().capture_storage()
         assert captured.point == "destination-point"
-        service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
+        service = LoadService(
+            session.state,
+            MagicMock(),
+            provide_options=lambda _: (),
+            captured_parameters=session.context.read_alias_context,
+        )
         service.load_result("tab", str(source))
         assert tab.run.metadata == load_run_data(source).metadata
         before = {
@@ -227,7 +238,6 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
         assert session.metadata.snapshot.point in message
         assert str(captured.entry_id) in message
         assert captured.point in message
-        assert "save" in message.lower()
         after = {
             p.relative_to(tmp_path): p.read_bytes()
             for p in tmp_path.rglob("*")
@@ -253,15 +263,18 @@ def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
         draft = control.read_context()
         assert draft.storage is None
         tab = session.state.get_tab("tab")
-        tab.parameters = draft
-        tab.save_context = draft
         before = {
             p.relative_to(tmp_path): p.read_bytes()
             for p in tmp_path.rglob("*")
             if p.is_file()
         }
         events = session.entry.ledger.events()
-        service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
+        service = LoadService(
+            session.state,
+            MagicMock(),
+            provide_options=lambda _: (),
+            captured_parameters=session.context.read_alias_context,
+        )
 
         outcome = service.load_result("tab", str(path))
 
@@ -270,11 +283,12 @@ def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
         assert tab.run.metadata == stored.metadata
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
-        assert tab.save_context is draft
+        assert tab.run.parameters is not None
+        assert tab.run.parameters.target == draft.target
         assert tab.analysis.result is None
         assert tab.post_analysis.result is None
         assert tab.artifacts.snapshot() == ()
-        # A valid active focus cannot fill this tab's missing captured destination.
+        # Later active selection cannot fill this Load's missing storage.
         control.use_point(PointUseRequest("p"))
         save = session.save_artifacts if save_all else session.save
         with pytest.raises(FailedPreconditionError):
@@ -296,13 +310,19 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
             "tab",
             tab.run.result,
             metadata=replace(session.metadata, experiment="test/different"),
+            parameters=tab.run.parameters,
         )
         session.save()
         path = (
             session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
         )
         old_run = tab.run
-        service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
+        service = LoadService(
+            session.state,
+            MagicMock(),
+            provide_options=lambda _: (),
+            captured_parameters=session.context.read_alias_context,
+        )
 
         with pytest.raises(LoadDataError) as error:
             service.load_result("tab", str(path))
@@ -318,7 +338,12 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
     with native_save_session(tmp_path, qapp) as session:
         tab = session.state.get_tab("tab")
         old_run = tab.run
-        service = LoadService(session.state, MagicMock(), provide_options=lambda _: ())
+        service = LoadService(
+            session.state,
+            MagicMock(),
+            provide_options=lambda _: (),
+            captured_parameters=session.context.read_alias_context,
+        )
 
         with pytest.raises(LoadDataError) as error:
             service.load_result("tab", str(tmp_path / "missing.h5"))

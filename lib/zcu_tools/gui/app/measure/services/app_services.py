@@ -224,7 +224,12 @@ def build_app_services(
     guard = GuardService(
         state, captured_parameters=captured_parameters, cfg_resolution=cfg_resolution
     )
-    load = LoadService(state, writeback, provide_options=bindings.provide_options)
+    load = LoadService(
+        state,
+        writeback,
+        provide_options=bindings.provide_options,
+        captured_parameters=captured_parameters,
+    )
     run = RunService(
         state,
         runner,

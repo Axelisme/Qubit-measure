@@ -30,7 +30,6 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import make_cfg
 from tests.gui.app.measure._load_support import historical_metadata
-from tests.gui.session.ui._parameter_fakes import make_parameters
 
 
 def _empty_schema() -> CfgSchema:
@@ -55,7 +54,12 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
     bus.emit = emit  # type: ignore[method-assign]
     writeback = MagicMock()
     return (
-        LoadService(state, writeback, provide_options=lambda source_id: ()),
+        LoadService(
+            state,
+            writeback,
+            provide_options=lambda source_id: (),
+            captured_parameters=lambda _roles, _target: state.session_env.parameters,
+        ),
         emit,
         writeback,
     )
@@ -71,17 +75,15 @@ def test_load_retains_request_source_and_native_history(
     captured = None if context_free else q1
     tab = state.get_tab(tab_id)
     state.update_tab_result(tab_id, object(), parameters=q2, source_operation_id=91)
-    tab.parameters = captured
-    state.set_context(
-        replace(state.session_env, parameters=make_parameters({"rate": 2.0}))
-    )
+    tab.parameters = q2
+    state.set_context(replace(state.session_env, parameters=captured))
     loaded: RunRecord[ExpCfgModel, object] = RunRecord(cfg=None, result=object())
     metadata = historical_metadata()
 
     def load_and_rebind(
         _request: LoadDataRequest,
     ) -> tuple[RunRecord[ExpCfgModel, object], RunMetadata]:
-        tab.parameters = q2
+        state.set_context(replace(state.session_env, parameters=q2))
         return loaded, metadata
 
     adapter.load.side_effect = load_and_rebind

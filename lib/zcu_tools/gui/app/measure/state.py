@@ -374,7 +374,7 @@ class State(SessionState):
         """
         self._assert_owner()
         tab = self.tabs[tab_id]
-        layout = self._save_layout(tab, pane.metadata)
+        layout = self._save_layout(pane)
         artifacts = ArtifactTracker()
         if pane.result is not None and layout is not None:
             artifacts.replace_section(
@@ -506,7 +506,7 @@ class State(SessionState):
             analysis=State._retired_analysis(tab.analysis),
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        layout = self._save_layout(tab, tab.run.metadata)
+        layout = self._save_layout(tab.run)
         if layout is not None:
             tab.artifacts.replace_section(
                 "analysis",
@@ -601,7 +601,7 @@ class State(SessionState):
         retired = RetiredPaneResources(
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        layout = self._save_layout(tab, tab.run.metadata)
+        layout = self._save_layout(tab.run)
         if layout is not None:
             tab.artifacts.replace_section(
                 "post_analysis",
@@ -711,14 +711,12 @@ class State(SessionState):
         return self.get_tab(tab_id).artifacts.snapshot()
 
     @staticmethod
-    def _save_layout(
-        tab: Session[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams],
-        metadata: RunMetadata | None,
-    ) -> SaveLayout | None:
-        """Plan against captured historical storage, never the current focus."""
-        if metadata is None or tab.save_context is None:
+    def _save_layout(run: RunPaneState[T_Result]) -> SaveLayout | None:
+        """Plan against this result's source, never tab birth or live selection."""
+        metadata = run.metadata
+        if metadata is None or run.parameters is None:
             return None
-        storage = tab.save_context.storage
+        storage = run.parameters.storage
         if storage is None:
             return None
         return SaveLayout(
