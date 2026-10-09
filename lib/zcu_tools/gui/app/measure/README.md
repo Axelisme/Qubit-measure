@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，WB captured preview facts
+**Last updated:** 2026-10-09，WB 靜態單位標籤
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -358,11 +358,14 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 6. RunService uses State directly for busy checks and atomic result/evidence
    publication. AnalyzeService retains its narrow `AnalyzeStatePort`.
 7. Writeback items are generated from analysis results and edited through the same
-   cfg-editor machinery before commit; `WritebackService.create_draft` snapshots
-   the destination `SessionEnv` at creation and the ledger shows
-   `current_summary` → `proposed_summary` per item (S2). Scalar MetaDict items
-   show concrete values; module/waveform items show bounded change summaries and
-   keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
+   cfg-editor machinery before commit. `WritebackService.create_draft` captures
+   the destination ParameterContext and its fixed role names. Preview facts
+   expose the actual destination, latest stored current value and complete proposal.
+   Scalar MetaDict rows show values and stderr with static schema unit labels
+   from resources; ext and fields without static units show no label. Labels never
+   convert values. Draft-local retarget refreshes the destination facts and unit.
+   Module/waveform items show bounded change summaries without units and keep
+   full cfg editing in `Edit`. Primary and post workflows own proposal timing;
    the Writeback service remains stage-free.
 
 - `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。缺 cfg 時保留可用資料，不捏造設定。有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource identity 並推進 revision。Run/Load 先提交 primary result；analysis preparation 失敗不撤回它，只報 diagnostic。Named figures 和各 pane 的 presentation lifecycle 分開管理。

@@ -19,6 +19,7 @@ from zcu_tools.resources.entry import (
     accept_source,
     document_fields,
     document_meta,
+    document_unit,
     document_value,
     manual_update,
     snapshot,
@@ -28,6 +29,78 @@ from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
 from zcu_tools.resources.entry.views import FieldView
 
 from .view_support import create_entry, field_view, registered_model
+
+
+@pytest.mark.parametrize("owner", ["setup", "point"])
+def test_static_units_follow_declared_fields_without_reading_values(
+    tmp_path: Path, registry_state_guard: None, owner: str
+) -> None:
+    def reject_schema_callback(_schema: object) -> None:
+        raise AssertionError("Static unit reads must not execute schema callbacks")
+
+    class Nested(BaseModel):
+        arbitrary: float = Field(default=2.0, json_schema_extra={"unit": "quux"})
+
+    class Measured(ComponentSchema):
+        frequency: float = Field(default=12.0, json_schema_extra={"unit": "MHz"})
+        unset: float | None = Field(default=None, json_schema_extra={"unit": "us"})
+        nested: Nested = Field(default_factory=Nested)
+        absent: Nested | None = None
+        plain: float = 3.0
+        values: list[float] = Field(default_factory=lambda: [1.0])
+        dynamic: float = Field(default=4.0, json_schema_extra=reject_schema_callback)
+        flux: float = 0.0
+        ext: YamlMap = Field(default_factory=dict)
+
+    with registered_model("notebook/static-units", Measured) as kind:
+        entry, _, _ = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, ext={"frequency": 5.0})
+        view = entry.setup if owner == "setup" else entry.new_point("working")
+        document = snapshot(view)
+        assert document_unit(document, "N1.frequency") == "MHz"
+        assert document_unit(document, "N1.unset") == "us"
+        assert document_unit(document, "N1.nested.arbitrary") == "quux"
+        for path in (
+            "N1.absent.arbitrary",
+            "N1.plain",
+            "N1.dynamic",
+            "N1.flux",
+            "N1.ext.frequency",
+            "N1.values",
+            "N1.values.0",
+            "N1.missing",
+            "missing.frequency",
+            "general.ext.frequency",
+            "general.flux_value",
+        ):
+            assert document_unit(document, path) is None
+        assert document_value(document, "N1.frequency") == 12.0
+        with pytest.raises(AttributeError):
+            document_value(document, "N1.unset")
+        assert snapshot(view) == document
+
+
+@pytest.mark.parametrize("path", ["", ".N1.frequency", "N1..frequency", "N1."])
+def test_static_units_reject_unaddressable_dotted_paths(
+    tmp_path: Path, registry_state_guard: None, path: str
+) -> None:
+    entry, _, _ = create_entry(tmp_path)
+    with pytest.raises(ValueError, match="dotted path"):
+        document_unit(snapshot(entry.setup), path)
+
+
+@pytest.mark.parametrize("unit", ["", 3, None])
+def test_static_units_reject_malformed_metadata(
+    tmp_path: Path, registry_state_guard: None, unit: str | int | None
+) -> None:
+    class Measured(ComponentSchema):
+        value: float = Field(default=1.0, json_schema_extra={"unit": unit})
+
+    with registered_model("notebook/invalid-unit", Measured) as kind:
+        entry, _, _ = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind)
+        with pytest.raises(ValueError, match="unit"):
+            document_unit(snapshot(entry.setup), "N1.value")
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])

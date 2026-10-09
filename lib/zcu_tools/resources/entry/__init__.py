@@ -46,6 +46,7 @@ from .views import (
     accept_source,
     document_fields,
     document_meta,
+    document_unit,
     document_value,
     manual_update,
     resolve_path,

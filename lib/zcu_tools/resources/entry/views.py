@@ -270,6 +270,20 @@ def document_fields(
     return tuple(rows)
 
 
+def document_unit(document: SetupDocument | PointDocument, path: str) -> str | None:
+    """Read a fixed field's static schema unit at an actual dotted path.
+
+    Return the nonempty json_schema_extra.unit label without converting values.
+    Roles are not expanded. Ext namespaces, mapping/list data, missing ancestors
+    or fields, and fields without static unit metadata return None. A declared
+    optional leaf retains its label even when unset; existing nested BaseModel
+    fields can supply labels. No schema callback, model hook or I/O runs.
+    Invalid/unaddressable dotted syntax or malformed unit metadata raises
+    ValueError. Labels are not inferred from field names or other values.
+    """
+    raise NotImplementedError("Static schema unit lookup is not implemented")
+
+
 def document_value(document: SetupDocument | PointDocument, path: str) -> YamlValue:
     """Read an actual dotted component/general path from this document only.
 

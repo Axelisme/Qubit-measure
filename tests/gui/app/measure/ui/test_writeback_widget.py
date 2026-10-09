@@ -472,6 +472,46 @@ def _assert_matrix_row_reflows(row: QFrame, *, narrow: bool) -> None:
 
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_static_units_display_once_after_stderr_without_converting_values(
+    qapp, pane: Literal["analysis", "post_analysis"]
+) -> None:
+    fixed = MetaDictWriteback(
+        "driver.frequency", "Frequency", proposed_value=20.09, stderr=0.18
+    )
+    unset = MetaDictWriteback("driver.duration", "Duration", proposed_value=0.25)
+    ext = MetaDictWriteback("general.ext.value", "Value", proposed_value=9.0)
+    items = [fixed, unset, ext]
+    for index, item in enumerate(items, 1):
+        item.session_id = f"md-{index}"
+    facts = {
+        "md-1": WritebackValues(
+            actual_path="Q1.frequency", current=19.8, proposed=20.09, unit="MHz"
+        ),
+        "md-2": WritebackValues(
+            actual_path="Q1.duration", current=None, proposed=0.25, unit="us"
+        ),
+        "md-3": WritebackValues(
+            actual_path="general.ext.value", current=7.0, proposed=9.0, unit=None
+        ),
+    }
+    ctrl = MagicMock()
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {}
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate(items, facts)
+        texts = [label.text() for label in widget.findChildren(QLabel)]
+        for expected in ("19.8 MHz", "20.09 ± 0.18 MHz", "—", "0.25 us", "7.0", "9.0"):
+            assert expected in texts
+        assert "— us" not in texts
+        assert fixed.proposed_value == 20.09 and fixed.stderr == 0.18
+        assert all(item.selected for item in items)
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
 def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
     qapp, pane: Literal["analysis", "post_analysis"]
 ) -> None:
@@ -484,10 +524,10 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
     table.session_id = "md-2"
     values = {
         "md-1": WritebackValues(
-            actual_path="Q1.ext.value", current=19.8, proposed=20.09
+            actual_path="Q1.ext.value", current=19.8, proposed=20.09, unit=None
         ),
         "md-2": WritebackValues(
-            actual_path="Q1.ext.matrix", current=None, proposed=matrix
+            actual_path="Q1.ext.matrix", current=None, proposed=matrix, unit=None
         ),
     }
     ctrl = MagicMock()
@@ -821,9 +861,11 @@ def test_cfg_edit_and_retarget_refresh_live_facts_and_applied_state(
 def test_retarget_edit_refreshes_captured_path_current_and_proposal(
     qapp, pane: Literal["analysis", "post_analysis"]
 ) -> None:
-    item = MetaDictWriteback("driver.ext.value", "Value", proposed_value=20.09)
+    item = MetaDictWriteback("driver.frequency", "Value", proposed_value=20.09)
     item.session_id = "md-1"
-    original = WritebackValues(actual_path="Q1.ext.value", current=19.8, proposed=20.09)
+    original = WritebackValues(
+        actual_path="Q1.frequency", current=19.8, proposed=20.09, unit="MHz"
+    )
     ctrl = MagicMock()
     ctrl.get_writeback_applied_for_pane.return_value = {}
     ctrl.get_writeback_summaries_for_pane.return_value = {"md-1": ("19.8", "20.09")}
@@ -840,7 +882,10 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
         assert target_name == "driver.ext.other"
         ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
             "md-1": WritebackValues(
-                actual_path="Q1.ext.other", current=7.0, proposed=proposed_value
+                actual_path="Q1.ext.other",
+                current=7.0,
+                proposed=proposed_value,
+                unit=None,
             )
         }
 
@@ -849,6 +894,9 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
     widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
     try:
         widget.populate([item], {"md-1": original})
+        initial_texts = [label.text() for label in widget.findChildren(QLabel)]
+        assert "19.8 MHz" in initial_texts
+        assert "20.09 MHz" in initial_texts
         widget.show()
         next(
             button
@@ -861,7 +909,7 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
             for candidate in qapp.topLevelWidgets()
             if isinstance(candidate, QDialog)
             and candidate.isVisible()
-            and candidate.windowTitle() == "Edit Value: driver.ext.value"
+            and candidate.windowTitle() == "Edit Value: driver.frequency"
         )
         inputs = dialog.findChildren(QLineEdit)
         assert len(inputs) == 2
@@ -876,7 +924,8 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
         texts = [label.text() for label in widget.findChildren(QLabel)]
         assert any("Q1.ext.other" in text for text in texts)
         assert any(text == "7.0" for text in texts)
-        assert any("9.0" in text for text in texts)
+        assert any(text == "9.0" for text in texts)
+        assert all("MHz" not in text for text in texts)
         assert item.target_name == "driver.ext.other"
         assert item.proposed_value == 9.0
         assert item.selected

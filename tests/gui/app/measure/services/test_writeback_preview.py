@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import Field
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
@@ -25,10 +26,11 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ComponentSchema, ResultEntry, RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
+from tests.resources.entry.view_support import registered_model
 
 
 @pytest.fixture
@@ -62,6 +64,54 @@ def session(tmp_path: Path, component_kinds):
     editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
     service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
     return entry, control, editor, service
+
+
+def test_static_unit_facts_follow_captured_target_and_retarget_without_conversion(
+    session,
+):
+    entry, control, _editor, service = session
+
+    class Measured(ComponentSchema):
+        frequency: float = Field(default=19.8, json_schema_extra={"unit": "MHz"})
+        duration: float | None = Field(default=None, json_schema_extra={"unit": "us"})
+
+    with registered_model("fake/unit-preview", Measured) as kind:
+        control.add_component("U1", kind, {})
+        target = control.read_context().target
+        captured = control.read_context().bind_roles(
+            {"driver": RoleSpec(kind)}, focus="U1", explicit={}
+        )
+        draft = service.create_draft(
+            [
+                MetaDictWriteback(
+                    "driver.frequency", "Frequency", proposed_value=20.09, stderr=0.18
+                )
+            ],
+            parameters=captured,
+        )
+        try:
+            initial = service.preview_values(draft, session_id="md-1")["md-1"]
+            assert (initial.actual_path, initial.unit) == ("U1.frequency", "MHz")
+            assert (initial.current, initial.proposed) == (19.8, 20.09)
+            control.set_parameter(target, "U1.frequency", 21.5)
+            entry.new_point("b")
+            control.use_point(PointUseRequest("b"))
+            control.set_component_focus("Q1")
+            refreshed = service.preview_values(draft)["md-1"]
+            assert (refreshed.actual_path, refreshed.unit) == ("U1.frequency", "MHz")
+            assert (refreshed.current, refreshed.proposed) == (21.5, 20.09)
+            draft.edit("md-1", target_name="driver.duration")
+            unset = service.preview_values(draft)["md-1"]
+            assert (unset.actual_path, unset.unit) == ("U1.duration", "us")
+            assert (unset.current, unset.proposed) == (None, 20.09)
+            draft.edit("md-1", target_name="general.ext.value")
+            ext = service.preview_values(draft)["md-1"]
+            assert (ext.actual_path, ext.unit) == ("general.ext.value", None)
+            assert (ext.current, ext.proposed) == (None, 20.09)
+            assert draft.items[0].stderr == 0.18
+            assert control.read_context().target != target
+        finally:
+            draft.teardown()
 
 
 def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(session):
@@ -123,6 +173,7 @@ def test_cfg_preview_contains_complete_current_and_live_draft_values(
     draft = service.create_draft([proposal], parameters=capture)
     preview = service.preview_values(draft)[item_id]
     assert preview.actual_path == name
+    assert preview.unit is None
     assert preview.current == capture.library.entry_value(name, kind=kind)
     if kind == "module":
         assert PulseSpec.model_validate(
@@ -138,6 +189,7 @@ def test_cfg_preview_contains_complete_current_and_live_draft_values(
     draft.edit(item_id, target_name=name.replace("target", "new"))
     missing = service.preview_values(draft)[item_id]
     assert missing.actual_path == name.replace("target", "new")
+    assert missing.unit is None
     assert missing.current is None
     assert missing.proposed == live.proposed
     error = FailedPreconditionError("draft unavailable")
