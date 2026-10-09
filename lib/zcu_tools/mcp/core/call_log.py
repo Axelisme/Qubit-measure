@@ -88,7 +88,7 @@ def _purge_old_call_logs(log_dir: Path, retain: int) -> None:
             stale.unlink(missing_ok=True)
 
 
-def _get_log_file():  # type: ignore[return]
+def _get_log_file() -> TextIO | None:
     """Return the open log file, opening it lazily on first call.
 
     Returns None if the kill-switch is active or if opening failed.
