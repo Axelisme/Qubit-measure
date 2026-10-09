@@ -8,6 +8,7 @@ expanded from this package.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
 from zcu_tools.device import BaseDeviceInfo, DeviceInfo
 
@@ -47,13 +48,50 @@ def supports_output_knob(info: DeviceInfo) -> bool:
     return type(info).set_output is not BaseDeviceInfo.set_output
 
 
+@dataclass(frozen=True)
+class _JpaRole:
+    """Resolve a GUI role selector before checking experiment-specific knobs.
+
+    ``key`` is the field under ``dev``; ``description`` names the role in errors;
+    ``label`` is the assembler patch label used to find the selected device.
+    """
+
+    key: str
+    description: str
+    label: str
+
+    def selected_device(
+        self,
+        raw_cfg: Mapping[str, object],
+        device_snapshot: Mapping[str, DeviceInfo],
+    ) -> tuple[str, DeviceInfo]:
+        dev_section = raw_cfg.get("dev")
+        if not isinstance(dev_section, Mapping):
+            raise ValueError(
+                f"missing JPA {self.description} selection: cfg has no 'dev' section"
+            )
+        selected = dev_section.get(self.key)
+        if not isinstance(selected, str) or not selected:
+            raise ValueError(
+                f"missing JPA {self.description} selection: 'dev.{self.key}' is empty"
+            )
+        info = device_snapshot.get(selected)
+        if info is None:
+            raise ValueError(
+                f"JPA {self.description} {selected!r} not found in the device snapshot"
+            )
+        return selected, info
+
+
+_JPA_RF_ROLE = _JpaRole(JPA_RF_ROLE_KEY, "RF device", JPA_RF_LABEL)
+_JPA_FLUX_ROLE = _JpaRole(JPA_FLUX_ROLE_KEY, "flux device", JPA_FLUX_LABEL)
+
+
 def _lower_jpa_dev(
     raw_cfg: Mapping[str, object],
     device_snapshot: Mapping[str, DeviceInfo],
     *,
-    role_key: str,
-    role_label: str,
-    label: str,
+    role: _JpaRole,
     knob_name: str,
     supports_knob: Callable[[DeviceInfo], bool],
 ) -> dict[str, dict[str, str]]:
@@ -71,27 +109,13 @@ def _lower_jpa_dev(
     patches, not registry state, so no other device's metadata is inspected or
     inferred. Returns the assembler patch.
     """
-    dev_section = raw_cfg.get("dev")
-    if not isinstance(dev_section, Mapping):
-        raise ValueError(
-            f"missing JPA {role_label} selection: cfg has no 'dev' section"
-        )
-    selected = dev_section.get(role_key)
-    if not isinstance(selected, str) or not selected:
-        raise ValueError(
-            f"missing JPA {role_label} selection: 'dev.{role_key}' is empty"
-        )
-    info = device_snapshot.get(selected)
-    if info is None:
-        raise ValueError(
-            f"JPA {role_label} {selected!r} not found in the device snapshot"
-        )
+    selected, info = role.selected_device(raw_cfg, device_snapshot)
     if not supports_knob(info):
         raise ValueError(
-            f"JPA {role_label} {selected!r} ({type(info).__name__}) does not "
+            f"JPA {role.description} {selected!r} ({type(info).__name__}) does not "
             f"support the {knob_name} knob"
         )
-    return {selected: {"label": label}}
+    return {selected: {"label": role.label}}
 
 
 def lower_jpa_rf_dev(
@@ -102,9 +126,7 @@ def lower_jpa_rf_dev(
     return _lower_jpa_dev(
         raw_cfg,
         device_snapshot,
-        role_key=JPA_RF_ROLE_KEY,
-        role_label="RF device",
-        label=JPA_RF_LABEL,
+        role=_JPA_RF_ROLE,
         knob_name="frequency",
         supports_knob=supports_freq_knob,
     )
@@ -118,9 +140,7 @@ def lower_jpa_rf_power_dev(
     return _lower_jpa_dev(
         raw_cfg,
         device_snapshot,
-        role_key=JPA_RF_ROLE_KEY,
-        role_label="RF device",
-        label=JPA_RF_LABEL,
+        role=_JPA_RF_ROLE,
         knob_name="power",
         supports_knob=supports_power_knob,
     )
@@ -134,9 +154,7 @@ def lower_jpa_rf_output_dev(
     return _lower_jpa_dev(
         raw_cfg,
         device_snapshot,
-        role_key=JPA_RF_ROLE_KEY,
-        role_label="RF device",
-        label=JPA_RF_LABEL,
+        role=_JPA_RF_ROLE,
         knob_name="output",
         supports_knob=supports_output_knob,
     )
@@ -150,9 +168,7 @@ def lower_jpa_flux_dev(
     return _lower_jpa_dev(
         raw_cfg,
         device_snapshot,
-        role_key=JPA_FLUX_ROLE_KEY,
-        role_label="flux device",
-        label=JPA_FLUX_LABEL,
+        role=_JPA_FLUX_ROLE,
         knob_name="flux",
         supports_knob=supports_flux_knob,
     )

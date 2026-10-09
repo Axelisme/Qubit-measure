@@ -266,7 +266,7 @@ def make_flux_pick_frontend(
     del plots
     return FluxPickFrontend(
         plugin,
-        cast(Session[FluxPickState], session),
+        session,
         env,
         request_finish,
         request_cancel,
