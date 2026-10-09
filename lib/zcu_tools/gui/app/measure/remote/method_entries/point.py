@@ -10,6 +10,53 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "entry.list",
+        "point:h_entry_list",
+        MethodSpec(
+            5.0,
+            "Refresh and return {entries: [name, ...]} from the result entry owner. "
+            "Does not open an entry or reveal context content. Read errors propagate.",
+        ),
+    ),
+    method_entry(
+        "entry.info",
+        "point:h_entry_info",
+        MethodSpec(
+            5.0,
+            "Return {entry}: null before opening, otherwise entry_id/name/"
+            "result_path/database_path from the cached owner identity. "
+            "Metadata only; establishes no full-context observation.",
+        ),
+    ),
+    method_entry(
+        "entry.new",
+        "point:h_entry_new",
+        MethodSpec(
+            10.0,
+            "Create a named entry and publish empty DRAFT without selecting a point "
+            "or touching hardware. Return entry_id/name/result_path/database_path. "
+            "Name is one arbitrary resource-validated segment, not chip/qubit. "
+            "Existing or invalid names fail without changing the binding. "
+            "Installation failure retains the created entry; recover with entry.open, "
+            "not another New. No retry or rollback.",
+            (required_string("name", "New single-segment result entry name"),),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
+        "entry.open",
+        "point:h_entry_open",
+        MethodSpec(
+            10.0,
+            "Open an existing named entry and publish empty DRAFT without selecting "
+            "a point or touching hardware. Return entry_id/name/result_path/"
+            "database_path. Invalid/missing entry or installation failure preserves "
+            "the old binding; never creates an entry or retries.",
+            (required_string("name", "Existing single-segment result entry name"),),
+        ),
+        agent=AgentMethodPolicy(refresh_after_write=True),
+    ),
+    method_entry(
         "point.list",
         "point:h_point_list",
         MethodSpec(

@@ -26,6 +26,64 @@ class PointEntry(TypedDict):
     database_path: str
 
 
+class EntryListReply(TypedDict):
+    """entries contains refreshed persisted entry directory names."""
+
+    entries: list[str]
+
+
+class EntryInfoReply(TypedDict):
+    """entry is the cached opened identity, or None before opening."""
+
+    entry: PointEntry | None
+
+
+def h_entry_list(
+    adapter: RemoteControlAdapter, _params: Mapping[str, object]
+) -> EntryListReply:
+    """Refresh entry names; no binding change or full-context observation.
+
+    params is empty. Owner discovery/schema/I/O failures propagate.
+    """
+    raise NotImplementedError("entry.list wiring")
+
+
+def h_entry_info(
+    adapter: RemoteControlAdapter, _params: Mapping[str, object]
+) -> EntryInfoReply:
+    """Read cached EntryInfo as {entry}, with None before opening.
+
+    params is empty. Paths are absolute owner roots converted to strings.
+    This metadata-only read establishes no full-context observation.
+    """
+    raise NotImplementedError("entry.info wiring")
+
+
+def h_entry_new(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PointEntry:
+    """Create required string name through SetupControlPort and publish DRAFT.
+
+    Return the exact EntryInfo fields with path strings. Invalid wire types
+    raise INVALID_PARAMS. Owner name/existence/I/O errors propagate and preserve
+    the prior binding. Post-creation installation failure retains the entry and
+    names Open as recovery; never retry or delete it. No hardware side effects.
+    """
+    raise NotImplementedError("entry.new wiring")
+
+
+def h_entry_open(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PointEntry:
+    """Open required string name through SetupControlPort and publish DRAFT.
+
+    Return the exact EntryInfo fields with path strings. Invalid wire types
+    raise INVALID_PARAMS. Owner invalid/missing/I/O/install errors propagate and
+    preserve the prior binding. Never creates resources or touches hardware.
+    """
+    raise NotImplementedError("entry.open wiring")
+
+
 class PointSummary(TypedDict):
     """Persisted point label and description; absent descriptions are empty."""
 

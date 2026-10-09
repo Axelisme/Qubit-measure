@@ -125,7 +125,8 @@ from __future__ import annotations
 # v83: analysis result summaries replace nonfinite values with null and list invalid paths.
 # v84: shared string enum schemas declare and validate interactive flux-line roles.
 # WIRE 86 adds optional tab.new(target) and structured role-resolution errors.
-WIRE_VERSION = 86
+# v87: entry.list/new/open/info replace legacy project and result-scope RPCs.
+WIRE_VERSION = 87
 
 # v60: value-source input completion UX and named-device value sources.
 # v61: setup result-scope discovery UI and path-based params.json project migration.
@@ -186,4 +187,5 @@ WIRE_VERSION = 86
 # v115: project nonfinite analysis results without changing generic context serialization.
 # v116: flux-line commands derive enum choices from their domain role type.
 # GUI 118 captures an explicit primary-role target without changing focus.
-GUI_VERSION = 118
+# GUI 119 uses explicit Result entry New/Open in Setup.
+GUI_VERSION = 119

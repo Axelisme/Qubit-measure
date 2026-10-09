@@ -2,42 +2,47 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QFormLayout,
-    QGroupBox,
+    QApplication,
+    QComboBox,
+    QInputDialog,
     QLabel,
     QListWidget,
     QPushButton,
-    QWidget,
 )
-from zcu_tools.gui.result_scope import ResultScope, ResultScopeManager
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.services.connection import (
     ConnectRemoteRequest,
 )
 from zcu_tools.gui.session.services.project_settings import (
     ConnectionPreferences,
-    ProjectRequest,
     SetupPreferences,
 )
+from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
 
 def _prefs(
     *,
-    chip_name: str = "",
-    qub_name: str = "",
-    res_name: str = "",
-    scope_id: str = "",
+    entry_name: str = "",
     ip: str = "192.168.10.1",
     port: int = 8887,
 ) -> SetupPreferences:
     return SetupPreferences(
-        chip_name=chip_name,
-        qub_name=qub_name,
-        res_name=res_name,
-        scope_id=scope_id,
+        entry_name=entry_name,
         ip=ip,
         port=port,
     )
@@ -53,36 +58,13 @@ def _make_ctrl(**overrides: object) -> MagicMock:
     ctrl.get_context_labels.return_value = []
     ctrl.get_active_context_label.return_value = None
     ctrl.get_soccfg.return_value = None
-    ctrl.apply_project.return_value = True
     ctrl.get_project_root.return_value = "/tmp"
-    ctrl.list_result_scopes.return_value = ()
-    manager = ResultScopeManager("/tmp")
-    ctrl.derive_project_paths.side_effect = manager.derive_paths
+    ctrl.list_entries.return_value = ()
+    ctrl.get_entry_info.return_value = None
+    ctrl.list_points.return_value = ()
     for k, v in overrides.items():
         getattr(ctrl, k).return_value = v
     return ctrl
-
-
-def _nearest_group(widget: QWidget) -> QGroupBox | None:
-    parent = widget.parentWidget()
-    while parent is not None:
-        if isinstance(parent, QGroupBox):
-            return parent
-        parent = parent.parentWidget()
-    return None
-
-
-def _form_label_rows(form: QFormLayout) -> dict[str, int]:
-    rows: dict[str, int] = {}
-    for row in range(form.rowCount()):
-        item = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
-        if item is None:
-            continue
-        widget = item.widget()
-        if not isinstance(widget, QLabel):
-            continue
-        rows[widget.text()] = row
-    return rows
 
 
 def test_setup_dialog_cached_point_list_uses_entry_queries_on_show_and_fact(qapp):
@@ -93,11 +75,12 @@ def test_setup_dialog_cached_point_list_uses_entry_queries_on_show_and_fact(qapp
     # Keep unrelated legacy project controls outside this read-side seam.
     ctrl = MagicMock()
     prefs = MagicMock()
-    prefs.chip_name = prefs.qub_name = prefs.res_name = prefs.scope_id = ""
+    prefs.entry_name = ""
     prefs.ip = "192.168.10.1"
     prefs.port = 8887
     ctrl.get_setup_preferences.return_value = prefs
-    ctrl.list_result_scopes.return_value = ()
+    ctrl.list_entries.return_value = ()
+    ctrl.get_entry_info.return_value = None
     ctrl.list_devices.return_value = []
     ctrl.get_soccfg.return_value = None
     bus = BaseEventBus()
@@ -148,140 +131,6 @@ def test_setup_dialog_init(qapp):
     assert dialog._ctx_list.count() == 2
     # The first item should be active (index 0)
     assert dialog._ctx_list.currentRow() == 0
-
-
-def test_setup_dialog_project_scope_names_and_apply_share_group(qapp):
-    ctrl = _make_ctrl()
-    dialog = SetupDialog(ctrl)
-
-    project_group = _nearest_group(dialog._scope_combo)
-    assert project_group is not None
-    for widget in (
-        dialog._chip_edit,
-        dialog._qub_edit,
-        dialog._res_edit,
-        dialog._apply_btn,
-    ):
-        assert _nearest_group(widget) is project_group
-
-    form = project_group.layout()
-    assert isinstance(form, QFormLayout)
-    rows = _form_label_rows(form)
-    assert rows["Scope:"] < rows["Chip name:"]
-    assert rows["Chip name:"] < rows["Qubit name:"]
-    assert rows["Qubit name:"] < rows["Resonator name:"]
-    assert "Result dir:" not in rows
-    assert "Database path:" not in rows
-
-
-def test_setup_dialog_apply_project(qapp):
-    ctrl = _make_ctrl()
-    dialog = SetupDialog(ctrl)
-
-    dialog._chip_edit.setText("Q1_Chip")
-    dialog._qub_edit.setText("Q1")
-    dialog._res_edit.setText("R1")
-
-    dialog._on_apply_clicked()
-
-    ctrl.apply_project.assert_called_once_with(
-        ProjectRequest(
-            chip_name="Q1_Chip",
-            qub_name="Q1",
-            res_name="R1",
-        )
-    )
-
-
-def test_setup_dialog_scope_combo_lists_all_scopes_and_selection_prefills_names(qapp):
-    scope = ResultScope(
-        scope_id="/tmp/result/Q3_2D/Q1",
-        chip_name="Q3_2D",
-        qub_name="Q1",
-        result_dir="/tmp/result/Q3_2D/Q1",
-        params_path="/tmp/result/Q3_2D/Q1/params.json",
-        source="discovered",
-    )
-    ctrl = _make_ctrl(list_result_scopes=(scope,))
-
-    dialog = SetupDialog(ctrl)
-
-    idx = dialog._scope_combo.findData(scope.scope_id)
-    assert idx >= 0
-    assert dialog._scope_combo.itemText(idx) == "Q3_2D/Q1"
-    dialog._scope_combo.setCurrentIndex(idx)
-
-    assert dialog._chip_edit.text() == "Q3_2D"
-    assert dialog._qub_edit.text() == "Q1"
-
-
-def test_setup_dialog_prefills_persisted_scope_id_without_side_effects(qapp):
-    scope = ResultScope(
-        scope_id="/tmp/result/Q4_2D/Q2",
-        chip_name="Q4_2D",
-        qub_name="Q2",
-        result_dir="/tmp/result/Q4_2D/Q2",
-        params_path="/tmp/result/Q4_2D/Q2/params.json",
-        source="discovered",
-    )
-    prefs = _prefs(
-        chip_name="Q4_2D",
-        qub_name="Q2",
-        res_name="R2",
-        scope_id=scope.scope_id,
-        ip="10.0.0.2",
-        port=7777,
-    )
-    ctrl = _make_ctrl(get_setup_preferences=prefs, list_result_scopes=(scope,))
-
-    dialog = SetupDialog(ctrl)
-
-    assert dialog._scope_combo.currentData() == scope.scope_id
-    assert dialog._chip_edit.text() == "Q4_2D"
-    assert dialog._qub_edit.text() == "Q2"
-    assert dialog._res_edit.text() == "R2"
-    assert dialog._ip_edit.text() == "10.0.0.2"
-    assert dialog._port_spin.value() == 7777
-    ctrl.apply_project.assert_not_called()
-    ctrl.remember_connection.assert_not_called()
-    ctrl.start_connect.assert_not_called()
-
-
-def test_setup_dialog_missing_persisted_scope_falls_back_without_side_effects(qapp):
-    scope = ResultScope(
-        scope_id="/tmp/result/Q5_2D/Q1",
-        chip_name="Q5_2D",
-        qub_name="Q1",
-        result_dir="/tmp/result/Q5_2D/Q1",
-        params_path="/tmp/result/Q5_2D/Q1/params.json",
-        source="discovered",
-    )
-    prefs = _prefs(
-        chip_name="Q5_2D",
-        qub_name="Q1",
-        res_name="R1",
-        scope_id="/tmp/result/missing/scope",
-    )
-    ctrl = _make_ctrl(get_setup_preferences=prefs, list_result_scopes=(scope,))
-
-    dialog = SetupDialog(ctrl)
-
-    assert dialog._scope_combo.currentData() == scope.scope_id
-    assert dialog._chip_edit.text() == "Q5_2D"
-    assert dialog._qub_edit.text() == "Q1"
-    ctrl.apply_project.assert_not_called()
-    ctrl.remember_connection.assert_not_called()
-    ctrl.start_connect.assert_not_called()
-
-
-def test_setup_dialog_does_not_render_success_when_project_apply_fails(qapp):
-    ctrl = _make_ctrl()
-    ctrl.apply_project.return_value = False
-    dialog = SetupDialog(ctrl)
-
-    dialog._on_apply_clicked()
-
-    assert "Project applied" not in dialog._project_status.text()
 
 
 def test_setup_dialog_switch_context(qapp):
@@ -372,28 +221,135 @@ def test_setup_dialog_connect_failure_signal_updates_status(qapp):
     assert dialog._connect_btn.isEnabled()
 
 
-def test_setup_dialog_reseed_on_reshow_clears_stale_draft(qapp):
-    """Regression: re-raising a dialog with an un-applied draft must reset to
-    the current State (preferences), not retain the typed-but-not-applied value.
+class SetupController(Controller):
+    """Expose owned background teardown for this real-session widget fixture."""
 
-    Scenario: open dialog (shows chip="Q5_2D") → user types "DRAFT" without
-    applying → dialog is re-shown (simulated by calling showEvent directly, as
-    open_dialog does raise_()+show()) → chip field reverts to "Q5_2D".
-    """
-    prefs = _prefs(chip_name="Q5_2D", qub_name="Q1", res_name="R1")
-    ctrl = _make_ctrl(get_setup_preferences=prefs)
+    def quiesce(self) -> None:
+        """Settle workers and queued terminal callbacks before Qt teardown."""
+        self._background_svc.quiesce()
 
-    dialog = SetupDialog(ctrl)
-    # after init: chip_edit should reflect the remembered preferences
-    assert dialog._chip_edit.text() == "Q5_2D"
 
-    # user types a draft — no apply
-    dialog._chip_edit.setText("DRAFT_NAME")
-    assert dialog._chip_edit.text() == "DRAFT_NAME"
+@pytest.fixture
+def entry_dialog(
+    qapp: QApplication, tmp_path: Path
+) -> Generator[tuple[SetupDialog, Controller, State]]:
+    """Own a real offline session; opening Setup never connects hardware."""
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    controller = SetupController(
+        state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
+    )
+    controller.setup_control.new_entry(EntryRequest("remembered"))
+    dialog = SetupDialog(controller.setup_control)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        yield dialog, controller, state
+    finally:
+        dialog.reject()
+        controller.quiesce()
+        dialog.deleteLater()
+        qapp.processEvents()
 
-    # simulate the dialog being re-raised (open_dialog calls raise_()/show();
-    # showEvent fires on every show call)
-    dialog.showEvent(None)
 
-    # the re-seed must revert to the State value, not the stale draft
-    assert dialog._chip_edit.text() == "Q5_2D"
+def entry_button(dialog: SetupDialog, text: str) -> QPushButton:
+    """Locate the visible action through the public Qt widget tree."""
+    return next(
+        button for button in dialog.findChildren(QPushButton) if button.text() == text
+    )
+
+
+def entry_selector(dialog: SetupDialog) -> QComboBox:
+    """Result entry selector has a stable object name for Qt consumers."""
+    combo = dialog.findChild(QComboBox, "result_entry")
+    assert combo is not None
+    return combo
+
+
+def test_entry_show_and_reopen_prefill_without_changing_active_point(
+    entry_dialog: tuple[SetupDialog, Controller, State], qapp: QApplication
+) -> None:
+    dialog, controller, state = entry_dialog
+    selected = controller.setup_control.new_point(
+        PointCreateRequest("bias", "", CommandOrigin("gui"))
+    )
+    dialog.hide()
+    dialog.show()
+    qapp.processEvents()
+    assert entry_selector(dialog).currentText() == "remembered"
+    assert controller.context_control.read_context().target == selected
+    assert state.session_env.readiness == ContextReadiness.ACTIVE
+    assert state.session_env.soc is None
+    assert state.session_env.soccfg is None
+
+
+def test_entry_new_arbitrary_name_displays_owner_paths_and_empty_draft(
+    entry_dialog: tuple[SetupDialog, Controller, State],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dialog, controller, state = entry_dialog
+
+    def chosen_name(*args: object, **kwargs: object) -> tuple[str, bool]:
+        return "cooldown-A", True
+
+    monkeypatch.setattr(QInputDialog, "getText", chosen_name)
+    entry_button(dialog, "New entry…").click()
+    info = controller.setup_control.get_entry_info()
+    assert info is not None and info.name == "cooldown-A"
+    assert entry_selector(dialog).currentText() == info.name
+    labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
+    assert str(info.result_path) in labels
+    assert str(info.database_path) in labels
+    assert state.session_env.readiness == ContextReadiness.DRAFT
+    assert controller.context_control.read_context().document().components == {}
+    assert controller.setup_control.list_points() == ()
+    assert state.session_env.soc is None
+    assert controller.device_control.list_devices() == []
+
+
+def test_entry_open_republishes_draft_without_selecting_a_point(
+    entry_dialog: tuple[SetupDialog, Controller, State],
+) -> None:
+    dialog, controller, state = entry_dialog
+    selected = controller.setup_control.new_point(
+        PointCreateRequest("bias", "", CommandOrigin("gui"))
+    )
+    entry_selector(dialog).setCurrentText("remembered")
+    entry_button(dialog, "Open").click()
+    assert state.session_env.readiness == ContextReadiness.DRAFT
+    assert controller.context_control.read_context().target != selected
+    assert controller.setup_control.list_points()[0].label == "bias"
+
+
+def test_entry_rejected_new_shows_error_and_keeps_active_point(
+    entry_dialog: tuple[SetupDialog, Controller, State],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dialog, controller, state = entry_dialog
+    selected = controller.setup_control.new_point(
+        PointCreateRequest("bias", "", CommandOrigin("gui"))
+    )
+
+    def duplicate_name(*args: object, **kwargs: object) -> tuple[str, bool]:
+        return "remembered", True
+
+    monkeypatch.setattr(QInputDialog, "getText", duplicate_name)
+    entry_button(dialog, "New entry…").click()
+    assert controller.context_control.read_context().target == selected
+    assert state.session_env.readiness == ContextReadiness.ACTIVE
+    labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
+    assert "exists" in labels.lower()
+
+
+def test_entry_cancel_new_keeps_binding(
+    entry_dialog: tuple[SetupDialog, Controller, State], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dialog, controller, state = entry_dialog
+    before = controller.setup_control.get_entry_info()
+
+    def cancelled(*args: object, **kwargs: object) -> tuple[str, bool]:
+        return "", False
+
+    monkeypatch.setattr(QInputDialog, "getText", cancelled)
+    entry_button(dialog, "New entry…").click()
+    assert controller.setup_control.get_entry_info() == before
+    assert state.session_env.readiness == ContextReadiness.DRAFT

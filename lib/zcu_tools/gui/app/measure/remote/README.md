@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-09, native parameter-context snapshots
+**Last updated:** 2026-10-09, explicit result-entry RPCs
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -302,7 +302,7 @@ reports `cleanup_failed`. Existing-tab `tab.load_data` keeps its stricter guards
 
 The wire surface is grouped by ownership:
 
-- `project.*` / `result_scope.*`：project apply/read and result-scope discovery.
+- `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布空 DRAFT，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
 - `context.*`：MetaDict / ModuleLibrary / active context operations through
   `ContextControlPort`; role-catalog create/list stays on the app controller.
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
