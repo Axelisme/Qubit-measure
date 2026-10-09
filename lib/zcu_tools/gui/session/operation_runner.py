@@ -184,6 +184,8 @@ class OperationRunner:
 
         settle = self._make_settle(spec, token)
         try:
+            if spec.on_opened is not None:
+                spec.on_opened(token)
             if spec.exclusion is not None and self._gate is not None:
                 self._gate.register(
                     token,
@@ -193,8 +195,6 @@ class OperationRunner:
                     note=spec.exclusion.note,
                     resource_id=spec.exclusion.resource_id,
                 )
-            if spec.on_opened is not None:
-                spec.on_opened(token)
             factory = (
                 self._progress.make_factory(token, spec.owner_id)
                 if spec.wants_progress and self._progress is not None
@@ -205,19 +205,19 @@ class OperationRunner:
                 run_in_pool=spec.run_in_pool,
                 on_done=lambda r: self._deliver_terminal(
                     token,
-                    spec,
+                    spec.on_terminal,
                     settle,
                     BgResult(ok=True, result=r, error=None),
                 ),
                 on_error=lambda e: self._deliver_terminal(
                     token,
-                    spec,
+                    spec.on_terminal,
                     settle,
                     BgResult(ok=False, result=NO_RESULT, error=e),
                 ),
             )
         except Exception:
-            # submit failed synchronously: unwind every resource opened above.
+            # Startup failed synchronously: unwind every resource opened above.
             settle(OperationOutcome("failed", "operation failed to start"))
             raise
 
@@ -253,19 +253,39 @@ class OperationRunner:
         The domain owns producer exclusivity and verifies that settle belongs
         to token; this mechanism does not add a producer registry or policy.
         """
-        raise NotImplementedError("same-operation continuation seed")
+        if self._handles.known_outcome(token) is not None:
+            raise RuntimeError(f"operation token is already settled: {token}")
+
+        # Submission failure leaves the retained resources for the domain owner.
+        self._bg.submit(
+            work,
+            run_in_pool=run_in_pool,
+            on_done=lambda r: self._deliver_terminal(
+                token,
+                on_terminal,
+                settle,
+                BgResult(ok=True, result=r, error=None),
+            ),
+            on_error=lambda e: self._deliver_terminal(
+                token,
+                on_terminal,
+                settle,
+                BgResult(ok=False, result=NO_RESULT, error=e),
+            ),
+        )
+        return token
 
     def _deliver_terminal(
         self,
         token: int,
-        spec: OperationSpec,
+        on_terminal: Callable[[BgResult, SettleFn], None],
         settle: SettleFn,
         bg: BgResult,
     ) -> None:
         """Run the policy terminal callback without letting it escape Qt delivery."""
         with self._bus.origin(self._handles.event_origin(token)):
             try:
-                spec.on_terminal(bg, settle)
+                on_terminal(bg, settle)
             except Exception as exc:
                 logger.exception("operation terminal callback failed")
                 settle(OperationOutcome("failed", str(exc)))
