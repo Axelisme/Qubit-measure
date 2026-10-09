@@ -136,6 +136,31 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.post_analysis.result is None
+        before = call(sock, "tab.snapshot", {"tab_id": "tab"})["result"]
+        result_state = before["tabs"][0]["result_state"]
+        assert result_state["available"] is True
+        assert result_state["source_path"] == str(path)
+        assert result_state["source_operation_id"] is None
+        for method in ("tab.get_figure", "tab.analyze"):
+            params = {"tab_id": "tab", "run_operation_id": 101}
+            if method == "tab.get_figure":
+                params["subtab_id"] = "run"
+            rejected_source = call(sock, method, params)
+            assert rejected_source["ok"] is False
+            assert rejected_source["error"]["reason"] == "result_superseded"
+            assert call(sock, "tab.snapshot", {"tab_id": "tab"})["result"] == before
+        rejected = call(
+            sock,
+            "tab.save_data",
+            {
+                "tab_id": "tab",
+                "run_operation_id": 101,
+                "comment": "must not publish",
+            },
+        )
+        assert rejected["ok"] is False
+        assert rejected["error"]["reason"] == "result_superseded"
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["result"] == before
         if draft_capture:
             assert tab.save_context is not None
             assert tab.save_context.storage is None
@@ -505,15 +530,141 @@ def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
         assert not (session.entry.database_path / "Labber").exists()
 
 
-def test_save_rpc_rejects_invalid_source_token_at_request_admission(
+def test_save_rpc_selects_primary_and_post_results_without_name_collision(
     tmp_path: Path, qapp: QApplication
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
         reply = call(
-            sock, "tab.save_data", {"tab_id": "tab", "run_operation_id": "bad"}
+            sock,
+            "tab.save_artifacts",
+            {
+                "tab_id": "tab",
+                "artifacts": [
+                    {"section": "analysis", "name": "results"},
+                    {"section": "post_analysis", "name": "results"},
+                ],
+            },
+        )
+        assert reply["ok"] is True
+        report = SaveSnapshotWire.model_validate(reply["result"])
+        assert report.run_id == session.metadata.run_id
+        assert set(report.artifacts) == {"analysis", "post_analysis"}
+        paths: set[str] = set()
+        snapshot = call(sock, "tab.snapshot", {"tab_id": "tab"})["result"]["tabs"][0]
+        for section, count in (("analysis", 5), ("post_analysis", 1)):
+            assert set(report.artifacts[section]) == {"results"}
+            artifact = report.artifacts[section]["results"]
+            assert artifact.status == "Saved"
+            assert snapshot["artifacts"][section]["results"] == artifact.model_dump(
+                mode="json"
+            )
+            outputs = [
+                output for members in artifact.members.values() for output in members
+            ]
+            assert len(outputs) == count
+            for output in outputs:
+                assert output.status == "saved" and output.error is None
+                assert Path(output.path).is_file()
+                paths.add(output.path)
+        assert len(paths) == 6
+        assert len(session.entry.ledger.events()) == 1
+
+
+@pytest.mark.parametrize(
+    "artifacts",
+    [
+        "other",
+        2,
+        [],
+        [{"section": "analysis"}],
+        [{"section": "analysis", "name": ""}],
+        [{"section": "../analysis", "name": "results"}],
+        [{"section": "analysis", "name": "results", "extra": True}],
+        [{"section": "analysis", "name": 2}],
+        [
+            {"section": "analysis", "name": "results"},
+            {"section": "analysis", "name": "results"},
+        ],
+    ],
+)
+def test_save_rpc_rejects_invalid_artifact_refs_without_changing_outputs(
+    tmp_path: Path, qapp: QApplication, artifacts: object
+) -> None:
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        before = call(sock, "tab.snapshot", {"tab_id": "tab"})["result"]
+        reply = call(
+            sock,
+            "tab.save_artifacts",
+            {
+                "tab_id": "tab",
+                "artifacts": artifacts,
+                "comment": "must not publish",
+            },
         )
         assert reply["ok"] is False
         assert reply["error"]["code"] == "invalid_params"
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["result"] == before
+        assert session.state.get_tab("tab").save.comment == ""
+        assert session.entry.ledger.events() == ()
+        assert not (session.entry.database_path / "runs").exists()
+
+
+def test_save_rpc_keeps_its_own_save_changes_observed_without_another_snapshot(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        reports: list[SaveSnapshotWire] = []
+        for comment in ("first", "second"):
+            reply = call(
+                sock,
+                "tab.save_artifacts",
+                {
+                    "tab_id": "tab",
+                    "artifacts": [{"section": "analysis", "name": "results"}],
+                    "comment": comment,
+                },
+            )
+            assert reply["ok"] is True, reply
+            report = SaveSnapshotWire.model_validate(reply["result"])
+            assert report.run_id == session.metadata.run_id
+            assert report.artifacts["analysis"]["results"].status == "Saved"
+            assert session.state.get_tab("tab").save.comment == comment
+            reports.append(report)
+        assert reports[0].artifacts == reports[1].artifacts
+        assert len(session.entry.ledger.events()) == 2
+
+
+@pytest.mark.parametrize(
+    ("source_token", "code", "reason"),
+    [
+        ("bad", "invalid_params", None),
+        (999, "precondition_failed", "result_superseded"),
+    ],
+)
+def test_save_rpc_rejects_invalid_or_unknown_source_token(
+    tmp_path: Path,
+    qapp: QApplication,
+    source_token: object,
+    code: str,
+    reason: str | None,
+) -> None:
+    with native_save_rpc(tmp_path, qapp) as (session, sock):
+        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
+        reply = call(
+            sock,
+            "tab.save_data",
+            {
+                "tab_id": "tab",
+                "run_operation_id": source_token,
+                "comment": "must not publish",
+            },
+        )
+        assert reply["ok"] is False
+        assert reply["error"]["code"] == code
+        if reason is not None:
+            assert reply["error"]["reason"] == reason
+        assert session.state.get_tab("tab").save.comment == ""
         assert session.entry.ledger.events() == ()
         assert not (session.entry.database_path / "runs").exists()
