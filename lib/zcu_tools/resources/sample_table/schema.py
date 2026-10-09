@@ -213,7 +213,7 @@ def _coerce_numeric_column(samples: pd.DataFrame, column: str) -> NDArray[np.flo
         )
     try:
         series = pd.to_numeric(source, errors="raise")
-        return series.to_numpy(dtype=np.float64)
+        return series.to_numpy(dtype=np.dtype(np.float64))
     except (TypeError, ValueError, OverflowError) as exc:
         raise SampleTableV2Error(
             f"column {column!r} must be numeric: {exc}",
