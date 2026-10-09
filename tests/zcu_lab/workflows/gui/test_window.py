@@ -658,7 +658,8 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
         harness.complete_segment()
         assert harness.background.error is None
     status = controller.status()
-    gate = harness.gate.snapshot()
+    # Lease age advances on each read; compare stable presence fields.
+    gate = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
     bars = harness.progress.bars_for_owner("t1-workflow")
     tuning = window.tuning_panel
     captures: list[str] = []
@@ -679,7 +680,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
         assert (raised.value.expected, raised.value.actual) == ("run-A", "run-B")
         assert controller.status() == status
         assert (
-            harness.gate.snapshot(),
+            tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot()),
             harness.progress.bars_for_owner("t1-workflow"),
         ) == (gate, bars)
         assert (

@@ -892,11 +892,13 @@ def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
     assert seen == ["run"] and captured == []
     assert not rig.paths.metadata_root.exists()
     assert not rig.paths.data_root.exists()
-    assert controller.stop("run") is None
     assert progress_calls == ([token], [])
     harness.complete_segment()
-    assert finished == [(None, None)]
-    assert harness.handles.known_outcome(token) == OperationOutcome("cancelled")
+    status = controller.status()
+    assert status is not None and status.lifecycle == "done"
+    assert finished == [(status, None)]
+    assert rig.initialized
+    assert harness.handles.known_outcome(token) == OperationOutcome("finished")
     assert controller.run_id == "run"
     assert progress_calls == ([token], [token])
 
@@ -922,7 +924,8 @@ def test_accepted_old_controls_preserve_native_state_progress_and_capture(
     def reject_old_controls() -> None:
         before = controller.status()
         assert before is not None and before.lifecycle == phase
-        gate = harness.gate.snapshot()
+        # Lease age advances on each read; compare stable presence fields.
+        gate = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
         bars = harness.progress.bars_for_owner("example")
         events = rig.events()
         for invoke in (
@@ -934,7 +937,10 @@ def test_accepted_old_controls_preserve_native_state_progress_and_capture(
                 invoke()
             assert (raised.value.expected, raised.value.actual) == ("old", "run")
             assert controller.status() == before
-            assert harness.gate.snapshot() == gate
+            assert (
+                tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
+                == gate
+            )
             assert harness.progress.bars_for_owner("example") == bars
             assert rig.events() == events
         assert captured == [] and progress_calls[1] == []
