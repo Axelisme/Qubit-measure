@@ -280,7 +280,7 @@ class ValueRegistry(ValueLookup):
                 requested.path, f"Value source {requested.path!r} is not registered"
             )
         if entry.key.type_ is not requested.type_:
-            registered_type = cast(ScalarType, entry.key.type_)
+            registered_type = entry.key.type_
             requested_type = cast(
                 ScalarType,
                 _ensure_supported_type(requested.path, requested.type_),
