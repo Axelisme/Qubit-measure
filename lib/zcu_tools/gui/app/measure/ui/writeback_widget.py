@@ -362,7 +362,7 @@ class WritebackWidget(QWidget):
             cb=cb,
             current=current_label,
             proposed=proposed_label,
-            action=self._make_action(item, cb, fact),
+            action=self._make_action(item, fact),
             proposed_table=proposed_table,
             actual_path=actual_path,
         )
@@ -397,15 +397,11 @@ class WritebackWidget(QWidget):
             table = _make_matrix_table(fact.proposed)
         return proposed_label, table
 
-    def _make_action(
-        self, item: WritebackItem, cb: QCheckBox, fact: WritebackValues
-    ) -> QWidget:
+    def _make_action(self, item: WritebackItem, fact: WritebackValues) -> QWidget:
         if self._is_editable(item):
             button = QPushButton("Edit")
             button.setFixedSize(56, 26)
-            button.clicked.connect(
-                lambda _=False, it=item, chk=cb: self._edit_item(it, chk)
-            )
+            button.clicked.connect(lambda _=False, it=item: self._edit_item(it))
             return button
         if isinstance(item, MetaDictWriteback) and not _is_scalar_md_value(
             fact.proposed
@@ -508,26 +504,26 @@ class WritebackWidget(QWidget):
             proposed += f" ± {item.stderr}"
         return proposed
 
-    def _refresh_item_preview(self, item: WritebackItem, cb: QCheckBox) -> None:
+    def _refresh_item_preview(self, item: WritebackItem) -> None:
         self._values = self._ctrl.writeback_control.get_writeback_values_for_pane(
             self._tab_id, self._pane
         )
         fact = self._values[item.session_id]
-        current_label, proposed_label, actual_path, _checkbox = self._row_widgets[
+        current_label, proposed_label, actual_path, checkbox = self._row_widgets[
             item.session_id
         ]
         current_label.setText(self._display_current(item))
         proposed_label.setText(self._display_proposed(item))
         actual_path.setText(fact.actual_path)
-        self._refresh_item_applied_presentation(item, cb)
+        self._refresh_item_applied_presentation(item, checkbox)
 
-    def _edit_item(self, item: WritebackItem, cb: QCheckBox) -> None:
+    def _edit_item(self, item: WritebackItem) -> None:
         if isinstance(item, MetaDictWriteback):
-            self._edit_md_item(item, cb)
+            self._edit_md_item(item)
         elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
-            self._edit_cfg_item(item, cb)
+            self._edit_cfg_item(item)
 
-    def _edit_md_item(self, item: MetaDictWriteback, cb: QCheckBox) -> None:
+    def _edit_md_item(self, item: MetaDictWriteback) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Edit Value: {item.target_name}")
         layout = QVBoxLayout(dialog)
@@ -571,7 +567,7 @@ class WritebackWidget(QWidget):
                 )
                 item.target_name = new_name
                 item.proposed_value = new_value
-                self._refresh_item_preview(item, cb)
+                self._refresh_item_preview(item)
                 dialog.accept()
             except Exception as exc:
                 logger.exception("failed to edit writeback value %s", item.session_id)
@@ -584,7 +580,6 @@ class WritebackWidget(QWidget):
     def _edit_cfg_item(
         self,
         item: ModuleWriteback | WaveformWriteback,
-        cb: QCheckBox,
     ) -> None:
         assert self._tab_id is not None
         try:
@@ -632,7 +627,7 @@ class WritebackWidget(QWidget):
                 target_name=text,
             )
             item.target_name = text
-            self._refresh_item_preview(item, cb)
+            self._refresh_item_preview(item)
 
         name_edit.editingFinished.connect(_commit_name)
 
@@ -644,7 +639,7 @@ class WritebackWidget(QWidget):
         form_widget.attach(draft)
 
         def _on_draft_changed(*_: object) -> None:
-            self._refresh_item_preview(item, cb)
+            self._refresh_item_preview(item)
 
         draft.on_change.connect(_on_draft_changed)
         scroll.setWidget(form_widget)
@@ -658,7 +653,7 @@ class WritebackWidget(QWidget):
             finally:
                 draft.on_change.disconnect(_on_draft_changed)
                 form_widget.detach()
-            self._refresh_item_preview(item, cb)
+            self._refresh_item_preview(item)
 
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
         dialog.finished.connect(_on_finished)
