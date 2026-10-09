@@ -265,14 +265,16 @@ def _parameter_reader(
         try:
             # Bare namespaces must not inherit notebook's legacy role shorthand.
             if path.startswith("$"):
-                value = parameters.value(path)
+                result = parameters.lookup(path)
             else:
                 if concrete_parameters is None:
                     concrete_parameters = parameters.bind_aliases((), {})
-                value = concrete_parameters.value(path)
-        except (AttributeError, ValueError, InvalidInputError) as exc:
+                result = concrete_parameters.lookup(path)
+        except (ValueError, InvalidInputError) as exc:
             raise ExpressionError(f"Invalid parameter path {path!r}: {exc}") from exc
-        return _parameter_number(value, path)
+        if not result.present:
+            raise ExpressionError(f"Missing parameter path {path!r}")
+        return _parameter_number(result.value, path)
 
     return read
 

@@ -166,9 +166,9 @@ class FluxDepAdapter(
     ) -> FluxPickPlugin:
         """Build a phase-aware picker from the fixed Run/Load result source.
 
-        req.parameters=None or absent/null qubit.flux_half/flux_int uses the
+        req.parameters=None or absent/null $qubit.flux_half/flux_int uses the
         line owner's defaults. A supplied capture resolves those paths using
-        its fixed roles; scalar, role and source failures propagate. No live
+        its fixed aliases; scalar, alias and source failures propagate. No live
         context or legacy md/ml is read. plots receives the pick figure on Done.
         """
         result = req.run_result.result
@@ -177,12 +177,12 @@ class FluxDepAdapter(
         flux_half = (
             None
             if parameters is None
-            else optional_parameter_float(parameters, "qubit.flux_half")
+            else optional_parameter_float(parameters, "$qubit.flux_half")
         )
         flux_int = (
             None
             if parameters is None
-            else optional_parameter_float(parameters, "qubit.flux_int")
+            else optional_parameter_float(parameters, "$qubit.flux_int")
         )
         half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
         # Two-tone spectra may carry useful phase information.
