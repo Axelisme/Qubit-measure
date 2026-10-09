@@ -1,145 +1,174 @@
 """Owner-thread noninteractive close policy through the real GUI socket."""
 
 import os
+from collections.abc import Generator
 from dataclasses import replace
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+from qtpy.QtWidgets import QApplication
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.artifact_tracker import (
-    ArtifactKey,
-    ArtifactKind,
+    ArtifactSectionSnapshot,
     ArtifactSnapshot,
     SaveStatus,
 )
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.services.operation_control import ActiveOperation
 
-from ._helpers import Fixture, call, open_client
+from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
+    native_save_session,
+)
+
+from ._helpers import call, make_view, open_client
 
 
 @pytest.fixture()
-def fx(qapp):
-    fixture = Fixture()
-    fixture.start()
-    yield fixture
-    fixture.stop()
+def fx(
+    tmp_path: Path, qapp: QApplication
+) -> Generator[tuple[Controller, RemoteControlAdapter, MagicMock]]:
+    """Serve real tab controls over loopback with a native captured storage context."""
+    with native_save_session(tmp_path, qapp) as session:
+        # Retire the helper's figure-free seed before Controller owns new tabs.
+        session.state.remove_tab("tab")
+        registry = Registry()
+        registry.register("saving", AnalysisSavingAdapter)
+        view = make_view()
+        ctrl = Controller(
+            state=session.state, registry=registry, bus=session.bus, view=view
+        )
+        service = RemoteControlAdapter(
+            ctrl, ControlOptions(port=0), ctrl.owner_scheduler, render_view=view
+        )
+        service.start()
+        try:
+            yield ctrl, service, view
+        finally:
+            service.stop()
+            closed: list[bool] = []
+            ctrl.begin_shutdown(lambda: closed.append(True))
+            assert closed == [True]
+            qapp.processEvents()
 
 
-def _key(kind: ArtifactKind) -> ArtifactKey:
-    return ArtifactKey(kind, None if kind is ArtifactKind.DATA else "fit")
+def _artifact(section: str, status: SaveStatus) -> ArtifactSectionSnapshot:
+    name = "measurement_data" if section == "run" else "results"
+    return ArtifactSectionSnapshot(
+        section, (ArtifactSnapshot(ArtifactRef(section, name), (), status),)
+    )
 
 
 @pytest.mark.parametrize("method", ["tab.close", "app.shutdown"])
-@pytest.mark.parametrize("kind", list(ArtifactKind))
-@pytest.mark.parametrize("status", [SaveStatus.NOT_SAVED, SaveStatus.UNSAVED_CHANGES])
-def test_remote_close_requires_discard_for_each_unsaved_artifact(
-    fx, method, kind, status
-):
-    tab_id = fx.ctrl.new_tab("fake")
+@pytest.mark.parametrize("section", ["run", "analysis", "post_analysis"])
+@pytest.mark.parametrize("status", list(SaveStatus))
+def test_remote_close_only_requires_saved_measurement_data(fx, method, section, status):
+    ctrl, service, view = fx
+    tab_id = ctrl.new_tab("saving")
     params = {"tab_id": tab_id} if method == "tab.close" else {}
-    snapshot = fx.service.tab_control.get_tab_snapshot(tab_id)
-    unsaved = replace(
-        snapshot, artifacts=(ArtifactSnapshot(_key(kind), status, None, None, False),)
-    )
-    sock = open_client(fx.service.port)
+    snapshot = service.tab_control.get_tab_snapshot(tab_id)
+    artifacts = replace(snapshot, artifacts=(_artifact(section, status),))
+    sock = open_client(service.port)
     try:
         assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"]
         with patch.object(
-            fx.service.tab_control, "get_tab_snapshot", return_value=unsaved
+            service.tab_control, "get_tab_snapshot", return_value=artifacts
         ):
             reply = call(sock, method, params)
-            assert reply["error"]["reason"] == "unsaved"
-            keys = {
-                ArtifactKind.DATA: "data",
-                ArtifactKind.ANALYSIS: "analysis:fit",
-                ArtifactKind.POST_ANALYSIS: "post:fit",
-            }
-            assert reply["error"]["data"]["unsaved"] == [
-                {"tab": tab_id, "artifacts": [keys[kind]]}
-            ]
-            assert fx.ctrl.has_tab(tab_id)
-            fx.view.request_shutdown.assert_not_called()
-            allowed = call(sock, method, {**params, "discard_unsaved": True})
-            assert allowed["ok"] is True
+            if section == "run" and status is not SaveStatus.SAVED:
+                assert reply["error"]["reason"] == "unsaved"
+                assert reply["error"]["data"]["unsaved"] == [
+                    {"tab": tab_id, "artifacts": ["run/measurement_data"]}
+                ]
+                assert ctrl.has_tab(tab_id)
+                view.request_shutdown.assert_not_called()
+                reply = call(sock, method, {**params, "discard_unsaved": True})
+            assert reply["ok"] is True
             if method == "app.shutdown":
-                fx.view.request_shutdown.assert_called_once()
-                assert allowed["result"]["pid"] == os.getpid()
+                view.request_shutdown.assert_called_once()
+                assert reply["result"]["pid"] == os.getpid()
             else:
-                assert not fx.ctrl.has_tab(tab_id)
+                assert not ctrl.has_tab(tab_id)
     finally:
         sock.close()
 
 
-@pytest.mark.parametrize("kind", ["run", "analyze", "device", "save"])
+@pytest.mark.parametrize("kind", ["run", "analyze", "device"])
 @pytest.mark.parametrize("discard", [False, True])
 def test_shutdown_rejects_every_active_operation_even_when_discarding(
     fx, kind, discard
 ):
+    _ctrl, service, view = fx
     operation = ActiveOperation(op=71, tab=None, kind=kind)
-    sock = open_client(fx.service.port)
+    sock = open_client(service.port)
     try:
         with patch.object(
-            fx.service.operation_control, "active_operations", return_value=(operation,)
+            service.operation_control, "active_operations", return_value=(operation,)
         ):
             reply = call(sock, "app.shutdown", {"discard_unsaved": discard})
             assert reply["error"]["reason"] == "busy"
-            fx.view.request_shutdown.assert_not_called()
+            view.request_shutdown.assert_not_called()
     finally:
         sock.close()
 
 
 def test_tab_close_allows_an_operation_on_another_tab(fx):
-    target = fx.ctrl.new_tab("fake")
-    other = fx.ctrl.new_tab("fake")
-    operation = ActiveOperation(op=71, tab=other, kind="save")
-    sock = open_client(fx.service.port)
+    ctrl, service, _view = fx
+    target = ctrl.new_tab("saving")
+    other = ctrl.new_tab("saving")
+    operation = ActiveOperation(op=71, tab=other, kind="run")
+    sock = open_client(service.port)
     try:
         assert call(sock, "tab.snapshot", {"tab_id": target})["ok"]
         with patch.object(
-            fx.service.operation_control, "active_operations", return_value=(operation,)
+            service.operation_control, "active_operations", return_value=(operation,)
         ):
             reply = call(sock, "tab.close", {"tab_id": target})
         assert reply["ok"] is True
-        assert not fx.ctrl.has_tab(target)
-        assert fx.ctrl.has_tab(other)
+        assert not ctrl.has_tab(target)
+        assert ctrl.has_tab(other)
     finally:
         sock.close()
 
 
 def test_shutdown_collects_all_unsaved_tabs_and_checks_busy_first(fx):
-    first = fx.ctrl.new_tab("fake")
-    second = fx.ctrl.new_tab("fake")
+    ctrl, service, view = fx
+    first = ctrl.new_tab("saving")
+    second = ctrl.new_tab("saving")
+    third = ctrl.new_tab("saving")
     snapshots = {
         tab: replace(
-            fx.service.tab_control.get_tab_snapshot(tab),
-            artifacts=tuple(
-                ArtifactSnapshot(_key(kind), status, None, None, False)
-                for kind, status in states
-            ),
+            service.tab_control.get_tab_snapshot(tab),
+            artifacts=tuple(_artifact(section, status) for section, status in states),
         )
         for tab, states in (
-            (first, [(ArtifactKind.DATA, SaveStatus.NOT_SAVED)]),
+            (first, [("run", SaveStatus.NOT_SAVED)]),
             (
                 second,
                 [
-                    (ArtifactKind.DATA, SaveStatus.SAVED),
-                    (ArtifactKind.ANALYSIS, SaveStatus.UNSAVED_CHANGES),
-                    (ArtifactKind.POST_ANALYSIS, SaveStatus.NOT_SAVED),
+                    ("run", SaveStatus.SAVED),
+                    ("analysis", SaveStatus.UNSAVED_CHANGES),
+                    ("post_analysis", SaveStatus.NOT_SAVED),
                 ],
             ),
+            (third, [("run", SaveStatus.PARTIALLY_SAVED)]),
         )
     }
-    sock = open_client(fx.service.port)
+    sock = open_client(service.port)
     try:
         with (
             patch.object(
-                fx.service.tab_control,
+                service.tab_control,
                 "get_tab_snapshot",
                 side_effect=snapshots.__getitem__,
             ),
             patch.object(
-                fx.service.operation_control,
+                service.operation_control,
                 "active_operations",
-                return_value=(ActiveOperation(op=71, tab=second, kind="save"),),
+                return_value=(ActiveOperation(op=71, tab=second, kind="run"),),
             ) as active,
         ):
             busy = call(sock, "app.shutdown", {})
@@ -148,27 +177,28 @@ def test_shutdown_collects_all_unsaved_tabs_and_checks_busy_first(fx):
             unsaved = call(sock, "app.shutdown", {})
             assert unsaved["error"]["reason"] == "unsaved"
             assert unsaved["error"]["data"]["unsaved"] == [
-                {"tab": first, "artifacts": ["data"]},
-                {"tab": second, "artifacts": ["analysis:fit", "post:fit"]},
+                {"tab": first, "artifacts": ["run/measurement_data"]},
+                {"tab": third, "artifacts": ["run/measurement_data"]},
             ]
-            fx.view.request_shutdown.assert_not_called()
-            assert fx.ctrl.has_tab(first) and fx.ctrl.has_tab(second)
+            view.request_shutdown.assert_not_called()
+            assert ctrl.has_tab(first) and ctrl.has_tab(second) and ctrl.has_tab(third)
     finally:
         sock.close()
 
 
-@pytest.mark.parametrize("kind", ["run", "analyze", "save"])
+@pytest.mark.parametrize("kind", ["run", "analyze"])
 def test_tab_close_does_not_discard_an_active_operation(fx, kind):
-    tab_id = fx.ctrl.new_tab("fake")
+    ctrl, service, _view = fx
+    tab_id = ctrl.new_tab("saving")
     operation = ActiveOperation(op=71, tab=tab_id, kind=kind)
-    sock = open_client(fx.service.port)
+    sock = open_client(service.port)
     try:
         assert call(sock, "tab.snapshot", {"tab_id": tab_id})["ok"]
         with patch.object(
-            fx.service.operation_control, "active_operations", return_value=(operation,)
+            service.operation_control, "active_operations", return_value=(operation,)
         ):
             reply = call(sock, "tab.close", {"tab_id": tab_id, "discard_unsaved": True})
             assert reply["error"]["reason"] == "busy"
-            assert fx.ctrl.has_tab(tab_id)
+            assert ctrl.has_tab(tab_id)
     finally:
         sock.close()
