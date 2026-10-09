@@ -177,7 +177,7 @@ class WritebackControlFacet:
         draft = self._draft_for_pane(tab_id, pane)
         if not isinstance(draft, WritebackDraft):
             raise InvalidInputError("unknown writeback draft")
-        return self._writeback.preview_values(draft)
+        return self._writeback.preview_values(draft, session_id=session_id)
 
     def get_writeback_summaries_for_pane(
         self, tab_id: str, pane: WritebackPane

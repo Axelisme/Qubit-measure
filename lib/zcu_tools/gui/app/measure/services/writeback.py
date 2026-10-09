@@ -317,12 +317,17 @@ class WritebackService:
         Target/source/I/O and requested proposal validation errors propagate.
         """
         self._require_draft(draft)
-        if not draft.items:
+        items = draft.items
+        if session_id is not None:
+            items = tuple(item for item in items if item.session_id == session_id)
+            if not items:
+                raise KeyError(session_id)
+        if not items:
             return {}
         parameters = self._require_parameters(draft)
         current = self._write.read_target(parameters.target, roles=parameters.roles)
         values: dict[str, WritebackValues] = {}
-        for item in draft.items:
+        for item in items:
             path = _destination_path(item, parameters)
             proposed = (
                 AcceptedWrite.model_validate(
