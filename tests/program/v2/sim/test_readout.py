@@ -21,6 +21,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.cfg_model import CfgValidationContext
+from zcu_tools.cfg_model import ModuleCfgFactory as CoreModuleCfgFactory
+from zcu_tools.core.waveform_format import WaveformFormatError
+from zcu_tools.program.v2.modules import ModuleCfgFactory
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.waveform import (
     ArbWaveformCfg,
@@ -600,6 +604,69 @@ class TestEnvelopeAt:
         )
         amp = envelope_at(cfg, np.array([-0.1, 0.0, 0.5, 0.75, 1.0]), length=1.0)
         np.testing.assert_allclose(amp, [0.0, 0.0, 0.5, 0.75, 0.0])
+
+    @pytest.mark.parametrize("flat_top", [False, True])
+    def test_converted_capture_envelope_reads_current_arb_and_flat_top_samples(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flat_top: bool
+    ) -> None:
+        monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
+        first = tmp_path / "first"
+        ArbWaveformDatabase.init(first)
+        ArbWaveformDatabase.save(
+            "shape",
+            time=np.array([0.0, 1.0, 2.0]),
+            idata=np.array([0.0, 0.3, 0.0]),
+            qdata=np.array([0.0, 0.4, 0.0]),
+        )
+        context = CfgValidationContext(assets=ArbWaveformDatabase.bound_info())
+        waveform = {"style": "arb", "data": "shape"}
+        core = CoreModuleCfgFactory.from_raw(
+            {
+                "type": "pulse",
+                "ch": 0,
+                "nqz": 1,
+                "freq": 7200.0,
+                "gain": 1.0,
+                "waveform": {
+                    "style": "flat_top",
+                    "length": 4.0,
+                    "raise_waveform": waveform,
+                }
+                if flat_top
+                else waveform,
+            },
+            context=context,
+        )
+        native = ModuleCfgFactory.from_core(core, context=context)
+        assert isinstance(native, PulseCfg)
+        copied = PulseCfg.model_validate_json(native.model_dump_json()).model_copy(
+            deep=True
+        )
+        ArbWaveformDatabase.init(tmp_path / "second")
+        ArbWaveformDatabase.save(
+            "shape",
+            time=np.array([0.0, 9.0]),
+            idata=np.array([0.9, 0.9]),
+        )
+        t = np.array([-0.1, 0.0, 0.5, 1.0, 2.0, 3.5, 4.0])
+        expected = (
+            [0, 0, 0.25, 1, 1, 0.25, 0] if flat_top else [0, 0, 0.25, 0.5, 0, 0, 0]
+        )
+        np.testing.assert_allclose(
+            envelope_at(copied, t, float(copied.waveform.length)), expected
+        )
+        path = first / "shape.npz"
+        np.savez(path, time=[0, 1, 2], idata=[0, 0.6, 0], qdata=[0, 0.8, 0])
+        updated = [0, 0, 0.5, 1, 1, 0.5, 0] if flat_top else [0, 0, 0.5, 1, 0, 0, 0]
+        np.testing.assert_allclose(
+            envelope_at(copied, t, float(copied.waveform.length)), updated
+        )
+        path.unlink()
+        with pytest.raises(FileNotFoundError):
+            envelope_at(copied, t, 4.0 if flat_top else 2.0)
+        np.savez(path, time=[0, 1], idata=[0, 2], qdata=[0, 0])
+        with pytest.raises(WaveformFormatError):
+            envelope_at(copied, t, 4.0 if flat_top else 2.0)
 
     def test_unknown_window_is_zero_before_start(self) -> None:
         cfg = _const_readout_cfg(length=1.0)

@@ -224,12 +224,12 @@ class FreqAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                target_name="q_f",
+                target_name="$qubit.freq",
                 description="Qubit frequency (MHz)",
                 proposed_value=result.freq,
             ),
             MetaDictWriteback(
-                target_name="qf_w",
+                target_name="$qubit.kappa",
                 description="Qubit linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,
             ),
