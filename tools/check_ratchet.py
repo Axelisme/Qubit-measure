@@ -1,10 +1,14 @@
-"""Judge a candidate against its base instead of against zero.
+"""Report violation-count increases between a candidate and its base.
 
-Ruff, Pyright and the file-size check each report hundreds of pre-existing
-violations, so none of them can be a pass/fail gate on its own. This wraps them:
-it counts violations per (file, rule) on both the base tree and the candidate,
-and fails only when a count rises. Existing debt does not block work; adding to
-it does.
+Ruff, Pyright and the file-size check report pre-existing violations. This
+compares counts per (file, rule) on both trees and reports FAIL when a count
+rises. File size contributes one violation per file over 1000 lines, not its
+line count: growth of an already oversize file adds no violation.
+
+Count increases are review signals, not automatic delivery blockers. Reviewers
+classify each increase as non-substantive or substantive, record accepted
+non-substantive changes, and resolve or explain substantive problems. Import
+contracts and pytest collection remain independent mandatory checks.
 
 There is deliberately no baseline file. Git-detected renames transfer the old
 file's counts to its new path; genuine additions still start at zero. A saved
@@ -230,10 +234,15 @@ def pyright_counts(
 
 
 def file_size_counts(tree: Path, files: Iterable[str]) -> Mapping[tuple[str, str], int]:
-    """Return {(path, "lines"): line count} for oversize files among `files`."""
+    """Return {(path, "lines"): 1} for checked files over 1000 lines.
+
+    `tree` is the source root; `files` names paths relative to it. Missing files
+    and files at or below the limit produce no entry. Each oversize file counts
+    once regardless of its line count; the existing receipt rule stays "lines".
+    """
     checker = _support.load_tool("check_file_size")
     return {
-        (str(item.path), "lines"): item.lines
+        (str(item.path), "lines"): 1
         for item in checker.oversize_files(tree, paths=files)
     }
 

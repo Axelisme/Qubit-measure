@@ -151,55 +151,69 @@ A 為 CC 1–5、B 為 6–10、C 為 11–20、D 為 21–30、E 為 31–40、
 Radon distribution 版本隨既有 method.distributions 保存；方法或選用狀態不同仍拒絕比較。
 `compare` 保持違規計數比較，**不比較 CC 分數升降，也不配對函式改名或搬移**。
 
-## ratchet 是判準，不是另一個檢查
+## ratchet 是審查訊號
 
-`check_ratchet.py` 把七項檢查對照 base 判讀。一般診斷及設定抑制逐 (檔案, 規則)
-比較，計數上升才失敗。Git 以 20% 相似度確認的搬檔沿用原檔來源；其餘新檔從零比較。
+`check_ratchet.py` 把七項檢查對照 base，逐個檔案及規則列出計數上升。
+驗收看是否新增實質問題，不要求所有指標都不能增加。每項上升都要歸類，交付時列出
+path、detector／rule、before／after、分類及理由。無法判定時交 advisor，不自行忽略。
+
+- 非實質上升可接受，但要列出。例如搬移原有程式碼讓診斷換路徑，或 formatter 拆行、
+  rename 改變計數。需要來源證據證明只是原有診斷的移動，不能只因檔名變了就當成搬遷。
+- 實質問題必須修正或說明。例如新程式碼帶來型別錯誤、未處理的錯誤路徑、
+  為了過檢查新增 suppression／cast，或新的跨模組 private 依賴。
+
+這是 advisor 對「實質問題」的判讀，使用者可更正。`lint-imports` 與 pytest collection
+仍是硬性檢查，不受計數分類影響。行為測試仍需另外執行。
+
+File-size 對每個檔案只計是否超過 1000 行。超過計 1，否則計 0，不比較 raw 行數增長。
+1135 → 1137 是 1 → 1，不新增 regression；998 → 1003 與新檔 1001 行都是 0 → 1。
+恰好 1000 行未超標。`check_file_size.py` 仍列出實際行數，既有 oversize 檔案增長是
+非實質的大小變化，不會增加 file-size 計數。各檔獨立比較，刪除其他檔案不能抵銷新超標。
+
+一般診斷及設定抑制逐個檔案及規則比較。Git 以 20% 相似度確認的 rename 沿用原檔來源；
+其餘新檔從零比較。拆檔只有一個新檔可成為 Git rename，其餘路徑的診斷上升要逐項判讀。
+工具沒有持久 baseline 檔，也不替 reviewer 判定診斷是否實質新增。
+
+CLI 保留機械狀態：沒有計數上升時回報 `PASS`／exit 0，有上升時回報 `FAIL`／exit 1，
+工具無法完成比較時 exit 2。`FAIL` 要求逐項審查，不等於自動拒絕交付；不能把接受的上升
+改寫成機械 `PASS`。`gate.py` 仍呈現這些訊號，硬性檢查失敗則必須處理。
 
 `type-ignore` 與 `pyright-ignore` 另外按來源位置及 diagnostic scope 比較。
 `tools/suppression_comparison.py` 的 pure `compare_ignores` 以唯一 AST statement、
-owner/branch 與 line role 識別同一位置，保留 comment 增刪與 formatter 拆行後的對應。
-同位置的 blanket type-ignore 改成非空 explicit pyright-ignore code 集合可以通過。
-同 kind 也可以維持或縮小原範圍。新增位置、擴大 code 集合、改回 blanket 都失敗，
-其他位置或種類的刪除不能抵銷。位置有歧義、語法無法證明或 code list 無效時不核准遷移。
-完全相同的 source 保留既有 debt。位置配對不跨 function/class/branch。
+owner／branch 與 line role 識別位置，保留 comment 增刪與 formatter 拆行後的對應。
+同位置的 blanket type-ignore 改成非空 explicit pyright-ignore code 集合可以通過；
+同 kind 也可以維持或縮小原範圍。新增位置、擴大 code 集合或改回 blanket 會回報上升，
+其他位置或種類的刪除不能抵銷。位置有歧義、語法無法證明或 code list 無效時，
+工具不會自動核准來源配對，必須保留診斷並交審查判讀。配對不跨 function／class／branch。
 
-這類 regression 的 rule 包含 kind、reason 與 candidate line，before 0 / after 1 表示
-新增一個不允許的 escape-site 變化，不是該檔的 raw marker 總數。
-`check_suppressions.py` 與品質 snapshot 仍提供完整 usage counts，沒有把抑制清零或換 baseline。
-`check_ratchet.suppression_regressions` 擁有 Git path/rename 與 source-pair 的接線，
+這類 regression 的 rule 包含 kind、reason 與 candidate line。before 0／after 1 表示
+工具回報一個 escape-site 變化，不是該檔的 raw marker 總數。
+`check_suppressions.py` 與品質 snapshot 仍提供完整 usage counts，不清零抑制或換 baseline。
+`check_ratchet.suppression_regressions` 負責 Git path／rename 與 source-pair 接線，
 其他 escape families 及 configuration 仍分別比較計數。
 
 ```bash
---base <ref>        判定基準，預設 git merge-base HEAD main
---detector <name>   只跑一項，可重複；ratchet 報了 regression 想看細節時用
+--base <ref>        比較基準，預設 git merge-base HEAD main
+--detector <name>   只跑一項，可重複；查看上升細節時用
 ```
 
-兩個設計決定值得知道：
-
-**沒有 baseline 檔。** Git diff 將可辨識的舊路徑對應到新路徑，再比較兩側檢查結果。
-拆檔時只有一個新檔可成為 Git rename；其餘新檔仍須處理新增診斷。
-
-**兩側都用 candidate 的規則量測。** base tree 透過 `git archive` 展開後會拿到 candidate 的
-`pyproject.toml`，否則新啟用一條規則會讓它的所有發現看起來都是新的，ratchet 會擋下「把檢查
-打開」這個改動本身。但 base tree 同時保留自己那份於 `pyproject.base.toml`，供設定層的抑制
-比對使用——否則新增一條 per-file-ignore 會對負責看見它的檢查隱形。
+兩側都用 candidate 的規則量測。base tree 透過 `git archive` 展開後拿到 candidate 的
+`pyproject.toml`，避免新啟用的規則只出現在 candidate。base 同時保留原設定於
+`pyproject.base.toml`，供設定層抑制比對，不讓新增 per-file-ignore 隱形。
 
 預設 Pyright 只檢查變更檔案，不能保證未修改 caller 仍符合修改後的 interface。
-合併前使用獨立的慢速全樹比較，讓既存債務保持可見而不阻擋本次變更：
+合併前另跑慢速全樹比較，讓未修改 caller 的診斷保持可見：
 
 ```bash
 uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyright --full-pyright
 ```
 
-`--full-pyright` 對 base 與 candidate 都使用 candidate 設定、目前 worktree interpreter 與
-已安裝依賴，不建立 base 的另一個環境；receipt 的 `pyright_scope` 記錄此次範圍。
-此模式包含未修改 caller，成本與全樹相關，刻意不加入快速 gate。
-`gate.py --with-pyright` 則仍是現況報告，exit 0 不代表 regression 驗收通過。
+`--full-pyright` 對兩側使用 candidate 設定、目前 worktree interpreter 與已安裝依賴，
+不建立 base 的另一個環境。receipt 的 `pyright_scope` 記錄範圍，成本與全樹相關，
+因此不放進快速 gate。`gate.py --with-pyright` 是現況報告，exit 0 不代表本次變更已驗收。
 
-設定差異與診斷分開判讀：兩側使用 candidate 設定仍會受規則弱化影響，合併前必須審閱
-`configuration_changes`，不能只看 `status: PASS`。暫存 base tree 放在 invoking worktree
-的 `.agent_state/ratchet/`，比較結束即移除該次目錄。
+設定差異與診斷分開判讀。合併前必須審閱 `configuration_changes`，不能只看 `PASS`。
+暫存 base tree 放在 invoking worktree 的 `.agent_state/ratchet/`，比較結束即移除該次目錄。
 
 ## 檢查項目
 

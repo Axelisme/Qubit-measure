@@ -117,6 +117,65 @@ def test_regressions_are_ordered_by_size_of_increase() -> None:
     assert [item.path for item in found] == ["b.py", "c.py", "a.py"]
 
 
+@pytest.mark.parametrize(
+    ("before_lines", "after_lines", "expected_increase"),
+    [
+        (1135, 1137, False),
+        (1135, 1001, False),
+        (998, 1003, True),
+        (1000, 1000, False),
+        (1000, 1001, True),
+        (None, 1001, True),
+        (None, 1000, False),
+        (1001, 1000, False),
+        (1001, None, False),
+    ],
+)
+def test_file_size_regressions_depend_on_crossing_the_limit(
+    tmp_path: Path,
+    before_lines: int | None,
+    after_lines: int | None,
+    expected_increase: bool,
+) -> None:
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    path = "lib/module.py"
+    for tree, lines in ((base, before_lines), (candidate, after_lines)):
+        (tree / "lib").mkdir(parents=True)
+        if lines is not None:
+            (tree / path).write_text("pass\n" * lines, encoding="utf-8")
+
+    before = ratchet.file_size_counts(base, [path])
+    after = ratchet.file_size_counts(candidate, [path])
+
+    assert before == (
+        {(path, "lines"): 1} if before_lines and before_lines > 1000 else {}
+    )
+    assert after == ({(path, "lines"): 1} if after_lines and after_lines > 1000 else {})
+    found = ratchet.regressions(before, after)
+    assert [(item.path, item.rule, item.before, item.after) for item in found] == (
+        [(path, "lines", 0, 1)] if expected_increase else []
+    )
+
+
+def test_removing_an_oversize_file_does_not_offset_a_new_one(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    candidate = tmp_path / "candidate"
+    for tree, name in ((base, "old"), (candidate, "new")):
+        (tree / "lib").mkdir(parents=True)
+        (tree / "lib" / f"{name}.py").write_text("pass\n" * 1001, encoding="utf-8")
+    paths = ["lib/old.py", "lib/new.py"]
+
+    found = ratchet.regressions(
+        ratchet.file_size_counts(base, paths),
+        ratchet.file_size_counts(candidate, paths),
+    )
+
+    assert [(item.path, item.before, item.after) for item in found] == [
+        ("lib/new.py", 0, 1)
+    ]
+
+
 def test_changed_files_cover_the_working_tree_not_only_commits(
     repository: Path, command_receipts: CommandReceipts
 ) -> None:
