@@ -468,7 +468,18 @@ def _parse_form_batch(
 
 def _project_record(record: CommittedRecord) -> RecordReply:
     """Project native fields only; keep the detached encoded value unchanged."""
-    raise NotImplementedError("Internal record projection pending")
+    return {
+        "commit_seq": record.commit_seq,
+        "call_seq": record.call_seq,
+        "revision": record.revision,
+        "encoded_record": {
+            "mode": record.encoded_record.mode,
+            "value": record.encoded_record.value,
+            "error": record.encoded_record.error,
+        },
+        "iteration_dir": record.iteration_dir,
+        "run_files": list(record.run_files),
+    }
 
 
 def _project_status(status: RunStatus | None) -> NativeStatusReply | None:

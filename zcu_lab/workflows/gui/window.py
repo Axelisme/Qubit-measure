@@ -31,6 +31,7 @@ from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
@@ -377,7 +378,16 @@ class T1WorkflowWindow(QWidget):
         An accepted run without registered figures returns (). Terminal figures
         stay readable until a new Start or close. No control/input/save effects.
         """
-        raise NotImplementedError("Internal figure lookup pending")
+        controller = self.controller
+        controller.require_run_id(run_id)
+        if controller.engine is None:
+            raise RuntimeError("Figures require an accepted run")
+        plots = self._plots
+        if plots is None:
+            raise FailedPreconditionError(
+                "Run plots have been released", reason_code="no_plots"
+            )
+        return tuple(plots)
 
     def figure_png(self, run_id: str, name: str) -> bytes:
         """Render the named current Figure as PNG at 640 x 480 on the Qt owner.
@@ -387,7 +397,16 @@ class T1WorkflowWindow(QWidget):
         Use the existing shared renderer; no saving, cache, canvas replacement or
         artist-derived records. Renderer failures propagate without retry.
         """
-        raise NotImplementedError("Internal PNG rendering pending")
+        controller = self.controller
+        controller.require_run_id(run_id)
+        if controller.engine is None:
+            raise RuntimeError("Figures require an accepted run")
+        plots = self._plots
+        if plots is None:
+            raise FailedPreconditionError(
+                "Run plots have been released", reason_code="no_plots"
+            )
+        return render_figure_png(plots[name])
 
     def apply_tunables(
         self,
@@ -592,6 +611,7 @@ class T1WorkflowWindow(QWidget):
         self._poll.stop()
         if self._plots is not None:
             self._plots.release()
+            self._plots = None
         self.plan_panel.editor.detach()
         self.tunables_panel.editor.detach()
         if self.tuning_panel is not None:
