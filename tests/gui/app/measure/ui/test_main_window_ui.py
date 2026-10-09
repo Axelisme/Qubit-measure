@@ -930,18 +930,23 @@ def test_open_notify_prompt_retains_until_close(qapp):
 
 
 def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
-    from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
     ctrl = _apply_window_defaults(MagicMock())
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
+    ctrl.save_control.list_saved_runs.return_value = ()
     window = MainWindow(ctrl)
     window._tab_widgets["tab-1"] = MagicMock()
-    monkeypatch.setattr(
-        QFileDialog, "getOpenFileName", lambda *args, **kwargs: ("", "")
-    )
 
+    def cancel(dialog: RunLoadDialog) -> int:
+        button = dialog.findChild(QPushButton, "load_cancel")
+        assert button is not None
+        button.click()
+        return dialog.result()
+
+    monkeypatch.setattr(RunLoadDialog, "exec", cancel)
     window.load_tab_data_dialog("tab-1")
 
     ctrl.load_tab_result.assert_not_called()
@@ -951,10 +956,12 @@ def test_main_window_load_data_dialog_shows_user_facing_error(qapp, monkeypatch)
     from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.measure.services.load import LoadDataError
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
     ctrl = _apply_window_defaults(MagicMock())
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
+    ctrl.save_control.list_saved_runs.return_value = ()
     ctrl.load_tab_result.side_effect = LoadDataError(
         "Cannot load this data file into the current tab.\n\nDetails: bad axes",
         reason_code="invalid_data_file",
@@ -968,6 +975,13 @@ def test_main_window_load_data_dialog_shows_user_facing_error(qapp, monkeypatch)
         lambda *args, **kwargs: ("/tmp/bad.hdf5", ""),
     )
 
+    def choose_file(dialog: RunLoadDialog) -> int:
+        button = dialog.findChild(QPushButton, "load_file")
+        assert button is not None
+        button.click()
+        return dialog.result()
+
+    monkeypatch.setattr(RunLoadDialog, "exec", choose_file)
     window.load_tab_data_dialog("tab-1")
 
     window.show_error_dialog.assert_called_once()
