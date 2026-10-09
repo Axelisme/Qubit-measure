@@ -38,19 +38,6 @@
         "lib/zcu_tools/mcp/dispersive/server.py"
       ],
       "exposure": "deferred"
-    },
-    "autofluxdep-gui": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        ".",
-        "--no-sync",
-        "--",
-        "python",
-        "lib/zcu_tools/mcp/autofluxdep/server.py"
-      ],
-      "exposure": "deferred"
     }
   }
 }

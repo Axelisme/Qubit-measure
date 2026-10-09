@@ -12,20 +12,18 @@ import socket
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from functools import partial
 from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 from PIL import Image
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.gui.app.measure.adapter import (
-    ContextReadiness,
-    ExpAdapterProtocol,
-    SessionEnv,
-)
+from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -40,7 +38,12 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import remote_error_from_expected
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
+from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
@@ -49,24 +52,44 @@ from zcu_tools.mcp.measure.recipe import RecipeDefinition
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from zcu_lab.definitions import register_all
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
-def make_ctx() -> SessionEnv:
-    return SessionEnv(
-        md=MetaDict(None),
-        ml=ModuleLibrary(None),
-        soc=MagicMock(),
-        soccfg=make_mock_soccfg(),
-        res_name="fake_res",
-        result_dir="/tmp/zcu_result",
-        database_path="/tmp/zcu_db/fake_chip/fake_qubit",
-        active_label="ctx001",
-        readiness=ContextReadiness.ACTIVE,
+def _context_root() -> Path:
+    # Standalone helpers have no pytest tmp_path; keep their files lane-owned.
+    root = (
+        Path(__file__).resolve().parents[5] / ".pytest-tmp" / f"context-{uuid4().hex}"
     )
+    root.mkdir(parents=True)
+    return root
+
+
+def make_ctx() -> SessionEnv:
+    """Return an ACTIVE fixed capture backed by a real entry, point and ledger.
+
+    Resource files live under this checkout's .pytest-tmp until lane cleanup.
+    The SoC handles are synthetic and never connect to hardware.
+    """
+    root = _context_root()
+    entry = ResultEntry.create(
+        "fake_qubit", result_root=root / "result", database_root=root / "Database"
+    )
+    state = State(
+        SessionEnv(
+            parameters=None,
+            soc=MagicMock(),
+            soccfg=make_mock_soccfg(),
+            res_name="fake_res",
+        )
+    )
+    context = ContextService(state, EventBus(), bind_assets=ArbWaveformDatabase.info_at)
+    context.install_entry(entry)
+    context.new_point(PointCreateRequest("ctx001", "", CommandOrigin("gui")))
+    return state.session_env
 
 
 def observe_run_inputs(
@@ -141,33 +164,32 @@ class Fixture:
         empty_project: bool = False,
         headless: bool = False,
     ) -> None:
-        initial = (
-            SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-            if empty_project
-            else make_ctx()
-        )
-        self.state = State(initial)
+        self.state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
         self.registry = Registry()
         register_all(self.registry)
         if not self.registry.has("fake"):
             self.registry.register("fake", FakeAdapter)
         self.view = None if headless else make_view()
-        io_manager = IOManager()
-        if not empty_project:
-            exp_manager = MagicMock()
-            if active_label is not None:
-                exp_manager.current_label = active_label
-            io_manager._em = exp_manager
         self.bus = EventBus()
+        fixture_root = str(_context_root()) if project_root is None else project_root
         self.ctrl = Controller(
             state=self.state,
             registry=self.registry,
-            io_manager=io_manager,
             view=self.view,
             bus=self.bus,
             template_catalog=template_catalog,
-            project_root=project_root,
+            project_root=fixture_root,
         )
+        if not empty_project:
+            self.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
+            self.ctrl.setup_control.new_point(
+                PointCreateRequest(active_label or "ctx001", "", CommandOrigin("gui"))
+            )
+            self.state.set_context(
+                replace(
+                    self.state.session_env, soc=MagicMock(), soccfg=make_mock_soccfg()
+                )
+            )
         if opts is None:
             opts = ControlOptions(port=0)
         self.service = RemoteControlAdapter(

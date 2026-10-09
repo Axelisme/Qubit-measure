@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，Load 後 Save 保留原 run 與 point
+**Last updated:** 2026-10-09，Load／Save run identity 與 WB 靜態單位標籤
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -119,9 +119,13 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   Modules do not invoke operation services directly. Each `WritebackWidget`
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
-  `WritebackService` remains stage-agnostic and owns the display-only baseline
-  capture (S2): at draft creation it snapshots the destination `SessionEnv` and
-  exposes per-item `current_summary` / `proposed_summary` to Qt. The widget is a
+  `WritebackService` remains stage-agnostic and fixes each draft's destination
+  and role resolution at creation. Its preview returns per-item `WritebackValues`
+  with the actual path, latest stored value and capture-lowered proposal. Both
+  panes obtain these facts through `writeback_control`; Qt does not resolve paths.
+  Qt and remote preview also display the proposal's existing stderr. Qt rows use
+  resources-provided static unit labels without conversion; ext and fields
+  without static units have no label. The widget is a
   compact unified ledger: draft-owned unapplied items以粗體`target*`與`* = not applied`
   legend呈現，成功寫入的items改為一般字重`target`，retarget或內容修改後回到unapplied；
   apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
@@ -373,19 +377,24 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 6. RunService uses State directly for busy checks and atomic result/evidence
    publication. AnalyzeService retains its narrow `AnalyzeStatePort`.
 7. Writeback items are generated from analysis results and edited through the same
-   cfg-editor machinery before commit; `WritebackService.create_draft` snapshots
-   the destination `SessionEnv` at creation and the ledger shows
-   `current_summary` → `proposed_summary` per item (S2). Scalar MetaDict items
-   show concrete values; module/waveform items show bounded change summaries and
-   keep full cfg editing in `Edit`. Primary and post workflows own proposal timing;
-   the Writeback service remains stage-free. Primary FIT and interactive
-   operations capture the source `RunMetadata.run_id` at start and pass it to
-   the opaque draft. Post captures the Primary draft's identity at operation
-   start and passes it to its new draft. A missing Primary identity stays None,
-   even if live Run metadata or Save has an id. Accepted ledger events and
-   destination provenance use that identity whether or not Save occurred. The identity does not imply a
-   saved file; consult saved events for persistence. Native Load retains the
-   original identity, and analysis without native metadata uses `None`.
+   cfg-editor machinery before commit. `WritebackService.create_draft` captures
+   the destination ParameterContext and its fixed role names. Preview facts
+   expose the actual destination, latest stored current value and complete proposal.
+   Scalar MetaDict rows show values and stderr with static schema unit labels
+   from resources; ext and fields without static units show no label. Labels never
+   convert values. Draft-local retarget refreshes the destination facts and unit.
+   Module/waveform items show bounded change summaries without units and keep
+   full cfg editing in `Edit`. Primary and post workflows own proposal timing;
+   the Writeback service remains stage-free.
+
+   Primary FIT and interactive operations capture the source `RunMetadata.run_id`
+   at start and pass it to the opaque draft. Post captures the Primary draft's
+   identity at operation start and passes it to its new draft. A missing Primary
+   identity stays None, even if live Run metadata or Save has an id. Accepted
+   ledger events and destination provenance use that identity whether or not Save
+   occurred. The identity does not imply a saved file; consult saved events for
+   persistence. Native Load retains the original identity, and analysis without
+   native metadata uses `None`.
 
 - `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。缺 cfg 時保留可用資料，不捏造設定。有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource identity 並推進 revision。Run/Load 先提交 primary result；analysis preparation 失敗不撤回它，只報 diagnostic。Named figures 和各 pane 的 presentation lifecycle 分開管理。
 dynamic selectors must match live options and the new complete draft must be valid

@@ -94,7 +94,15 @@ def validate_finished_cfg(
     *,
     resolve_reference: ReferenceResolver | None,
 ) -> None:
-    """Validate the static contract at a finished-cfg boundary."""
+    """Validate structure, literals and direct values in authored cfg input.
+
+    Linked, non-overridden references with empty sections may await catalog
+    shape without resolving their keys. Custom, populated and overridden
+    references still require a valid shape and payload. Raise RuntimeError for
+    invalid input; reference resolver failures propagate. This static check
+    does not certify executability: lower_finished_cfg resolves every enabled
+    reference and rejects missing shapes or incomplete payloads.
+    """
     _validate_static_section(
         schema.spec,
         schema.value,
@@ -493,8 +501,18 @@ def _lower_section(
                 )
             case ReferenceSpec():
                 assert isinstance(node_value, ReferenceValue)
+                chosen_spec = _select_reference_spec(
+                    node_spec, node_value, resolve_reference
+                )
+                # Pending input admission must not fill execution payload gaps.
+                _validate_static_section(
+                    chosen_spec,
+                    node_value.value,
+                    resolve_reference=resolve_reference,
+                    path=[*path, key],
+                )
                 result[key] = _lower_section(
-                    _select_reference_spec(node_spec, node_value, resolve_reference),
+                    chosen_spec,
                     node_value.value,
                     resolve_expression=resolve_expression,
                     resolve_reference=resolve_reference,
@@ -585,17 +603,8 @@ def _validate_static_node(
         return
 
     if isinstance(spec, ReferenceSpec):
-        if not isinstance(node_value, ReferenceValue):
-            raise RuntimeError(
-                f"Config field '{full_path}' must be an enabled module/waveform "
-                f"ref, got {type(node_value).__name__}"
-            )
-        chosen_spec = _select_reference_spec(spec, node_value, resolve_reference)
-        _validate_static_section(
-            chosen_spec,
-            node_value.value,
-            resolve_reference=resolve_reference,
-            path=[full_path],
+        _validate_static_reference(
+            spec, node_value, resolve_reference=resolve_reference, full_path=full_path
         )
         return
 
@@ -615,6 +624,39 @@ def _validate_static_node(
 
     raise RuntimeError(
         f"Config field '{full_path}': unknown spec {type(spec).__name__}"
+    )
+
+
+def _validate_static_reference(
+    spec: ReferenceSpec,
+    node_value: object,
+    *,
+    resolve_reference: ReferenceResolver | None,
+    full_path: str,
+) -> None:
+    if not isinstance(node_value, ReferenceValue):
+        raise RuntimeError(
+            f"Config field '{full_path}' must be an enabled module/waveform "
+            f"ref, got {type(node_value).__name__}"
+        )
+    if (
+        not node_value.is_overridden
+        and not node_value.value.fields
+        and node_value.error is None
+    ):
+        try:
+            custom_label = parse_custom_reference_key(node_value.chosen_key)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        if custom_label is None:
+            # Binding supplies shape later; execution still resolves this key.
+            return
+    chosen_spec = _select_reference_spec(spec, node_value, resolve_reference)
+    _validate_static_section(
+        chosen_spec,
+        node_value.value,
+        resolve_reference=resolve_reference,
+        path=[full_path],
     )
 
 

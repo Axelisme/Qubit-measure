@@ -33,6 +33,159 @@ def _missing_expression(expr: str) -> float:
     raise RuntimeError(f"Missing parameter: {expr!r}")
 
 
+@pytest.mark.parametrize("kind", ["module", "waveform"])
+def test_linked_empty_input_can_await_shape_but_cannot_lower(kind: str) -> None:
+    schema = _schema(
+        {
+            "ref": ReferenceSpec(
+                kind=kind,
+                allowed=[
+                    CfgSectionSpec(
+                        label="Shape", fields={"count": ScalarSpec("Count", int)}
+                    )
+                ],
+            )
+        },
+        {"ref": ReferenceValue("driver.module.pi", CfgSectionValue())},
+    )
+
+    # Static input admission must not read an unavailable reference source.
+    def unavailable(kind: str, key: str, /) -> str | None:
+        raise LookupError(f"Source unavailable: {kind}:{key}")
+
+    validate_finished_cfg(schema, resolve_reference=unavailable)
+    with pytest.raises(LookupError, match="Source unavailable"):
+        lower_finished_cfg(
+            schema, resolve_expression=None, resolve_reference=unavailable
+        )
+    with pytest.raises(RuntimeError, match="Unknown .* reference"):
+        lower_finished_cfg(
+            schema, resolve_expression=None, resolve_reference=lambda kind, key: None
+        )
+    with pytest.raises(RuntimeError, match="count.*missing"):
+        lower_finished_cfg(
+            schema, resolve_expression=None, resolve_reference=lambda kind, key: "Shape"
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ReferenceValue("<Custom:Shape>", CfgSectionValue()),
+        ReferenceValue("driver.module.pi", CfgSectionValue(), is_overridden=True),
+        ReferenceValue(
+            "driver.module.pi", CfgSectionValue(fields={"count": DirectValue(1.5)})
+        ),
+        ReferenceValue("<Custom:Shape", CfgSectionValue()),
+        ReferenceValue("driver.module.pi", CfgSectionValue(), error="source fault"),
+    ],
+)
+def test_static_reference_input_exemption_does_not_mask_faults(
+    value: ReferenceValue,
+) -> None:
+    schema = _schema(
+        {
+            "ref": ReferenceSpec(
+                kind="module",
+                allowed=[
+                    CfgSectionSpec(
+                        label="Shape", fields={"count": ScalarSpec("Count", int)}
+                    )
+                ],
+            )
+        },
+        {"ref": value},
+    )
+    with pytest.raises(RuntimeError):
+        validate_finished_cfg(schema, resolve_reference=lambda kind, key: "Shape")
+
+
+@pytest.mark.parametrize("dynamic", [False, True])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        CfgSectionSpec(label="LiteralOnly", fields={"type": LiteralSpec("none")}),
+        CfgSectionSpec(
+            label="OptionalOnly",
+            fields={
+                "optional": ReferenceSpec(
+                    kind="module",
+                    allowed=[CfgSectionSpec(label="Zero", fields={})],
+                    optional=True,
+                )
+            },
+        ),
+    ],
+)
+def test_finished_reference_requires_literal_and_optional_entries(
+    shape: CfgSectionSpec,
+    dynamic: bool,
+) -> None:
+    schema = _schema(
+        {"ref": ReferenceSpec(kind="module", allowed=[shape])},
+        {"ref": ReferenceValue("library.pending", CfgSectionValue())},
+    )
+    validate_finished_cfg(schema, resolve_reference=None)
+    with pytest.raises(RuntimeError, match="ref\\.(type|optional).*missing"):
+        lower_finished_cfg(
+            schema,
+            resolve_expression=(lambda _: 1.0) if dynamic else None,
+            resolve_reference=lambda kind, key: shape.label,
+        )
+
+
+@pytest.mark.parametrize("dynamic", [False, True])
+def test_finished_nested_reference_rejects_incomplete_payload(dynamic: bool) -> None:
+    inner = CfgSectionSpec(label="Inner", fields={"type": LiteralSpec("none")})
+    outer = CfgSectionSpec(
+        label="Outer", fields={"nested": ReferenceSpec(kind="module", allowed=[inner])}
+    )
+    schema = _schema(
+        {"ref": ReferenceSpec(kind="module", allowed=[outer])},
+        {
+            "ref": ReferenceValue(
+                "outer",
+                CfgSectionValue(
+                    fields={"nested": ReferenceValue("inner", CfgSectionValue())}
+                ),
+            )
+        },
+    )
+    validate_finished_cfg(schema, resolve_reference=lambda kind, key: "Outer")
+    with pytest.raises(RuntimeError, match="ref.nested.type.*missing"):
+        lower_finished_cfg(
+            schema,
+            resolve_expression=(lambda _: 1.0) if dynamic else None,
+            resolve_reference=lambda kind, key: "Outer" if key == "outer" else "Inner",
+        )
+
+
+def test_finished_reference_allows_complete_disabled_optional_payload() -> None:
+    shape = CfgSectionSpec(
+        label="OptionalOnly",
+        fields={
+            "optional": ReferenceSpec(
+                kind="module",
+                allowed=[CfgSectionSpec(label="Zero", fields={})],
+                optional=True,
+            )
+        },
+    )
+    schema = _schema(
+        {"ref": ReferenceSpec(kind="module", allowed=[shape])},
+        {
+            "ref": ReferenceValue(
+                "library.complete", CfgSectionValue(fields={"optional": None})
+            )
+        },
+    )
+    assert lower_finished_cfg(
+        schema,
+        resolve_expression=None,
+        resolve_reference=lambda kind, key: "OptionalOnly",
+    ) == {"ref": {}}
+
+
 def test_complex_live_value_cannot_lower_to_real_scalar() -> None:
     schema = _schema(
         {"frequency": ScalarSpec("Frequency", float)},

@@ -460,7 +460,13 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         return {}
 
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        """Instantiate and validate a fresh cfg from the context-free definition."""
+        """Instantiate fresh defaults and validate their static input contract.
+
+        ctx supplies the fixed parameter capture. Unbound role defaults may
+        retain expressions and empty linked references for cfg Invalid
+        publication; they are not runnable. Definition, source and malformed
+        input failures propagate without fallback or context mutation.
+        """
         schema = type(self).cfg_definition().instantiate(ctx)
         validate_schema(schema, ctx.parameters)
         return schema

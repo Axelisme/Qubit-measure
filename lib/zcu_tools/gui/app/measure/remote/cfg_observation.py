@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+from zcu_tools.core.complex_codec import encode_complex
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -16,7 +17,6 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
     SweepSpec,
     SweepValue,
-    encode_complex,
 )
 from zcu_tools.gui.cfg.binding import CfgDraft, CfgNodeObservation
 from zcu_tools.gui.cfg.edit_codec import encode_input, encode_ref

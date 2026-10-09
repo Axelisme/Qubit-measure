@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from simpleeval import DEFAULT_OPERATORS, InvalidExpression, SimpleEval, safe_power
 
+from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.expected_error import InvalidInputError
 
 if TYPE_CHECKING:
@@ -104,6 +105,9 @@ def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scal
     None permits pure calculation only; parameter/library references raise
     ExpressionError. Resolve paths through ParameterContext, never the live
     session. Retain numeric limits, math functions, constants and XOR semantics.
+    Parameter complex tags decode through the shared scalar codec; the captured
+    context itself still returns raw YAML. Malformed tags raise ExpressionError
+    naming the path and retain the codec error as cause. Strings are not decoded.
     Invalid grammar, missing/non-numeric paths and arithmetic failures raise.
     """
     tree = _parse_expression(expr)
@@ -116,7 +120,7 @@ def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scal
             value = parameters.value(path)
         except (AttributeError, ValueError, InvalidInputError) as exc:
             raise ExpressionError(f"Invalid parameter path {path!r}: {exc}") from exc
-        return _number(value, f"Parameter path {path!r}")
+        return _parameter_number(value, path)
 
     # Replace complete dotted paths before simpleeval can perform attribute access.
     class CapturePaths(ast.NodeTransformer):
@@ -211,6 +215,17 @@ def _parse_expression(expr: str) -> ast.Expression:
             raise ExpressionError("Unsupported expression syntax: function call")
         pending.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
     return tree
+
+
+def _parameter_number(value: object, path: str) -> Scalar:
+    if isinstance(value, dict) and "__complex__" in value:
+        try:
+            value = decode_complex(value)
+        except (ValueError, OverflowError) as exc:
+            raise ExpressionError(
+                f"Invalid complex tag at parameter path {path!r}: {exc}"
+            ) from exc
+    return _number(value, f"Parameter path {path!r}")
 
 
 def _number(value: object, label: str) -> Scalar:

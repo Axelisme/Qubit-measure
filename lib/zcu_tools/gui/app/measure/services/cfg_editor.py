@@ -50,6 +50,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.app.measure.cfg_binding import (
     MeasureCfgBindingHost,
     MeasureCfgBindings,
@@ -62,7 +63,6 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
     EvalValue,
-    decode_complex,
     decode_eval_wire,
 )
 from zcu_tools.gui.cfg.binding import (

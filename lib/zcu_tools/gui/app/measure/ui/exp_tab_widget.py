@@ -772,12 +772,26 @@ class ExpTabWidget(QWidget):
 
     def update_writeback_items(self, items: list[WritebackItem]) -> None:
         self._require_analysis()
-        self.writeback_widget.populate(items)
+        values = (
+            self._ctrl.writeback_control.get_writeback_values_for_pane(
+                self.tab_id, "analysis"
+            )
+            if items
+            else {}
+        )
+        self.writeback_widget.populate(items, values)
         self.writeback_section.setVisible(len(items) > 0)
 
     def update_post_writeback_items(self, items: list[WritebackItem]) -> None:
         self._require_post()
-        self.post_writeback_widget.populate(items)
+        values = (
+            self._ctrl.writeback_control.get_writeback_values_for_pane(
+                self.tab_id, "post_analysis"
+            )
+            if items
+            else {}
+        )
+        self.post_writeback_widget.populate(items, values)
         self.post_writeback_section.setVisible(len(items) > 0)
 
     def get_comment(self) -> str:

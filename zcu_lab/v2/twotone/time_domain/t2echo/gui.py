@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
@@ -20,7 +20,13 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.detune import (
@@ -32,7 +38,19 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import (
+    SweepDefault,
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoAnalyzeOptions,
     T2EchoCfg,
@@ -62,6 +80,42 @@ class T2EchoAnalyzeResult(AnalyzeResultBase):
     fit_quality: dict[str, dict[str, object]] | None = None
 
 
+def _blank_pulse(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.1)
+    value.with_field("waveform.length", 5.1)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field(
+        "ro_cfg.trig_offset",
+        path_seed(
+            "resonator.ext.time_of_fly",
+            expr="resonator.ext.time_of_fly + 0.05",
+            fallback=0.55,
+        ).resolve(ctx),
+    )
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
+
+
 class T2EchoAdapter(
     BaseAdapter[
         T2EchoCfg,
@@ -83,27 +137,26 @@ class T2EchoAdapter(
             "is typically longer than the Ramsey T2*."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional, seeding defaults): 't2e' — "
-            "prior T2-echo estimate (us); the total-delay sweep spans up to "
-            "1.5*t2e (fallback ~20 us). 't1' seeds relax_delay (5*t1, fallback "
-            "~100 us). The pi and pi/2 pulses pull 'q_f' (~2000–6000 MHz) and "
-            "'qub_ch'. Readout pulls 'r_f' (~4000–8000 MHz), 'res_ch' / "
-            "'ro_ch', and 'timeFly' for the readout trigger offset (~0–1 us)."
+            "Defaults use the tab's fixed qubit and referenced resonator. "
+            "Total delay ends at 1.5 * qubit.t2e (us, fallback 20 us); "
+            "relax_delay is 5 * qubit.t1 (fallback 100 us). Inline pulses "
+            "read qubit.freq and qubit.wiring.L01.ch. Inline readout reads "
+            "resonator.freq, resonator.wiring.ch/ro_ch, and "
+            "resonator.ext.time_of_fly + 0.05 us (fallback 0.55 us). "
+            "Missing or null calibration uses fallback; unbound roles remain "
+            "Invalid until supplied."
         ),
         expects_ml=(
-            "Needs both a qubit pi-pulse module (prefers library 'pi_amp' / "
-            "'pi_len') and a pi/2-pulse module (prefers 'pi2_amp' / 'pi2_len'); "
-            "each falls back to a blank inline pulse. Plus a readout module "
-            "(calibrated 'readout_dpm' / "
-            "'readout_rf' / 'readout' / 'res_readout', else a blank "
-            "pulse-readout referencing 'ro_waveform' when present). Optional "
-            "reset references a library reset ('reset_bath' / 'reset_10' / "
-            "'reset_120') when present."
+            "Uses captured qubit.module.x180 for the pi pulse, "
+            "qubit.module.x90 for pi/2, and qubit.module.readout. Missing or "
+            "dangling slots seed fresh inline pulse/readout defaults. "
+            "Optional qubit.module.reset stays disabled when absent. "
+            "Verify the inline pulse values and readout timing before Run."
         ),
         typical_writeback=(
-            "Proposes the fitted T2-echo time into MetaDict 't2e' (us). No "
-            "qubit-frequency writeback (unlike T2 Ramsey, echo does not update "
-            "'q_f'). No ModuleLibrary writeback."
+            "Proposes fitted qubit.t2e (us) to the captured qubit and working "
+            "point, including analysis of a source without cfg. No frequency "
+            "or module writeback; later focus changes do not retarget it."
         ),
         recommended=(
             "Enable Fit phase offset to fit a free fringe phase; it defaults to "
@@ -121,23 +174,61 @@ class T2EchoAdapter(
         ),
     )
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Declare the qubit and its referenced resonator for tab capture."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
+        """Declare static shape and defaults resolved on the supplied capture.
+
+        Instantiate with SessionEnv.parameters. Bound missing/null calibration
+        uses the documented fallback; unbound roles remain cfg Invalid. Source
+        or module materialization faults propagate, without reading live md/ml.
+        """
         return (
             MeasureCfgBuilder()
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .pulse("pi2_pulse", role_id="pi2_pulse")
-            .readout()
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("qubit.module.reset", fallback=None),
+            )
+            .field(
+                "modules.pi_pulse",
+                spec=make_pulse_module_spec(),
+                default=module_seed(
+                    "qubit.module.x180",
+                    fallback=custom(_blank_pulse, description="inline pi pulse"),
+                ),
+            )
+            .field(
+                "modules.pi2_pulse",
+                spec=make_pulse_module_spec(),
+                default=module_seed(
+                    "qubit.module.x90",
+                    fallback=custom(_blank_pulse, description="inline pi/2 pulse"),
+                ),
+            )
+            .field(
+                "modules.readout",
+                spec=make_readout_module_spec(),
+                default=module_seed(
+                    "qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
             .relax_delay(
-                scaled_md("t1", factor=5.0, fallback_value=100.0),
+                scaled_path_seed("qubit.t1", factor=5.0, fallback_value=100.0),
             )
             .sweep(
                 "length",
                 label="Total delay (us)",
                 default=SweepDefault(
                     start=0.0,
-                    stop=scaled_md("t2e", factor=1.5, fallback_value=20.0),
+                    stop=scaled_path_seed("qubit.t2e", factor=1.5, fallback_value=20.0),
                     expts=101,
                 ),
             )
@@ -188,10 +279,17 @@ class T2EchoAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[T2EchoRunResult, T2EchoAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose the fitted T2E in us at captured qubit.t2e.
+
+        req supplies the result and its captured context; source.cfg may be None.
+        WritebackService resolves the role and destination on req.ctx.parameters
+        and rejects a missing capture or unbound role. No live focus lookup,
+        frequency/module update, or write occurs here.
+        """
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                target_name="t2e",
+                target_name="qubit.t2e",
                 description="T2 Echo time (us)",
                 proposed_value=result.t2e,
             ),

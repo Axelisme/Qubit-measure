@@ -52,15 +52,7 @@ def h_view_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     del params
-    snap = render_view(adapter).get_view_snapshot()
-    match snap:
-        case dict():
-            return snap
-        case _:
-            raise RemoteError(
-                ErrorCode.INTERNAL,
-                f"view snapshot returned non-dict {type(snap).__name__}",
-            )
+    return render_view(adapter).get_view_snapshot()
 
 
 def h_dialog_screenshot(

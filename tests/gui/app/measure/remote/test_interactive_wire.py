@@ -15,24 +15,33 @@ import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
+from zcu_tools.datafile import RunMetadata, RunSnapshot, SoftwareProvenance
+from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
-from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
+from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.program.v2.sweep import SweepCfg
+from zcu_tools.resources.entry import component_registry
 
+from tests.resources.entry.fakes import registry_state, restore_registry
+from tests.zcu_lab.v2.onetone.flux_dep.flux_dep_support import (
+    make_cfg as make_onetone_cfg,
+)
+from zcu_lab.components import register_all as register_components
 from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
 from zcu_lab.v2._support.measure.flux_pick_plugin import (
     make_flux_pick_plugin,
     render_flux_pick,
 )
 from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
-from zcu_lab.v2.onetone.flux_dep.core import FluxDepResult
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepExp, FluxDepResult
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 
-from ._helpers import Fixture, mcp_client, open_client, recv_response, send
+from ._helpers import Fixture, make_ctx, mcp_client, open_client, recv_response, send
 
 
 class DeferredBackground:
@@ -64,27 +73,81 @@ def fx(qapp):
 
 @pytest.fixture
 def mounted_fx(qapp):
-    fixture = InteractiveFixture()
-    fixture.state.set_context(
-        replace(
-            fixture.state.session_env,
-            md=MetaDict(),
-            ml=ModuleLibrary(),
-            soc=None,
-            soccfg=None,
+    before = registry_state()
+    try:
+        register_components(component_registry)
+        fixture = InteractiveFixture()
+        fixture.ctrl.context_control.add_component(
+            "R1", "resonator", {"freq": 4500.0, "kappa": 1.0}
         )
+        fixture.ctrl.context_control.add_component(
+            "Q1", "qubit/fluxonium", {"resonator": "R1"}
+        )
+        fixture.state.set_context(
+            replace(fixture.state.session_env, soc=None, soccfg=None)
+        )
+        window = MainWindow(fixture.ctrl)
+        fixture.ctrl.add_view(window)
+        fixture.service.render_view = window
+        fixture.start()
+        window.show()
+        qapp.processEvents()
+        yield fixture, window
+        fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - owner deliveries before Qt teardown
+        fixture.stop()
+        window.deleteLater()
+        qapp.processEvents()
+    finally:
+        restore_registry(before)
+
+
+def _load_native_onetone(
+    fx: InteractiveFixture, tab_id: str, path: Path, result: FluxDepResult
+) -> None:
+    """Write and publicly load history captured from this tab's entry and point."""
+    parameters = fx.state.get_tab(tab_id).parameters
+    assert parameters is not None
+    storage = parameters.capture_storage()
+    cfg = make_onetone_cfg()
+    cfg.sweep.freq = SweepCfg(
+        start=float(result.freqs[0]),
+        stop=float(result.freqs[-1]),
+        step=float((result.freqs[-1] - result.freqs[0]) / (len(result.freqs) - 1)),
+        expts=len(result.freqs),
     )
-    window = MainWindow(fixture.ctrl)
-    fixture.ctrl.add_view(window)
-    fixture.service.render_view = window
-    fixture.start()
-    window.show()
-    qapp.processEvents()
-    yield fixture, window
-    fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - owner deliveries before Qt teardown
-    fixture.stop()
-    window.deleteLater()
-    qapp.processEvents()
+    cfg.sweep.flux = SweepCfg(
+        start=float(result.values[0]),
+        stop=float(result.values[-1]),
+        step=float((result.values[-1] - result.values[0]) / (len(result.values) - 1)),
+        expts=len(result.values),
+    )
+    spec = FluxDepExp().persistence_spec()
+    metadata = RunMetadata(
+        run_id="20261008T000000Z-a1b2c3",
+        experiment=spec.tag,
+        started_at="2026-10-08T00:00:00+00:00",
+        finished_at="2026-10-08T00:01:00+00:00",
+        completion="complete",
+        labber_path=None,
+        snapshot=RunSnapshot(
+            entry_id=storage.entry_id,
+            entry_name=storage.entry_name,
+            point=storage.point,
+            description=storage.description,
+            roles=storage.roles,
+        ),
+        provenance=SoftwareProvenance(
+            software_versions={},
+            git_commit=None,
+            git_dirty=None,
+            qick_version=None,
+            soc_fingerprint=None,
+            hostname=None,
+        ),
+    )
+    save_run(RunRecord(cfg, result), path, spec=spec, metadata=metadata)
+    fx.ctrl.load_tab_result(tab_id, str(path))
+    assert fx.state.get_tab(tab_id).run.metadata == metadata
 
 
 def _start_mounted(
@@ -94,6 +157,7 @@ def _start_mounted(
     *,
     analyze_params: FluxPickParams | None = None,
     pane: Literal["run", "data"] | None = None,
+    native_source: Path | None = None,
 ):
     tab_id = fx.ctrl.new_tab(adapter)
     devs = np.linspace(-5.0, 5.0, 60)
@@ -108,7 +172,13 @@ def _start_mounted(
         if adapter == "onetone/flux_dep"
         else RunRecord(cfg=None, result=FreqFluxResult(devs, freqs, signals))
     )
-    fx.state.get_tab(tab_id).run.result = run_result
+    tab = fx.state.get_tab(tab_id)
+    if native_source is None:
+        tab.run.result = run_result
+        tab.run.parameters = tab.parameters
+    else:
+        assert isinstance(run_result.result, FluxDepResult)
+        _load_native_onetone(fx, tab_id, native_source, run_result.result)
     tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - test fixture locates the mounted presentation
     if pane is not None:
         tab_widget.select_pane(pane)
@@ -131,8 +201,7 @@ def _start(fx, *, background=None):
         AnalyzeRequest(
             run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
             analyze_params=analyze_params,
-            md=MetaDict(),
-            ml=ModuleLibrary(),
+            parameters=None,
             predictor=None,
         ),
         force_magnitude=True,
@@ -143,7 +212,7 @@ def _start(fx, *, background=None):
     # Set up a real AnalyzeService operation; RPC interactions below always go
     # through the shipped socket and RunAnalyzeControlFacet, not a handler stub.
     token = fx.ctrl._analyze_svc.start_plugin(
-        AnalyzePermit(tab_id=tab_id),
+        tab_id,
         plugin,
         QtOwnerScheduler(),
         analyze_params_instance=analyze_params,
@@ -277,7 +346,7 @@ def test_commands_after_gui_and_context_changes_need_no_seen_baseline(fx) -> Non
     assert active is not None
     plugin.execute_command(active.session, "set_conjugate", {"enabled": True})
     fx.state.set_context(
-        replace(fx.state.session_env, md=MetaDict(), ml=ModuleLibrary())
+        replace(fx.state.session_env, parameters=make_ctx().parameters)
     )
     with open_client(fx.service.port) as sock:
         # First request is a mutation, without any hidden snapshot reads.
@@ -527,7 +596,14 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
     mounted_fx, tmp_path, terminal, request
 ) -> None:
     fx, window = mounted_fx
-    tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep")
+    tab_id, token, widget = _start_mounted(
+        fx,
+        window,
+        "onetone/flux_dep",
+        native_source=tmp_path / "source.h5" if terminal == "done" else None,
+    )
+    source = fx.state.get_tab(tab_id).run.metadata
+    captured = fx.state.get_tab(tab_id).save_context
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
     bridge, call = mcp_client(fx.service.port, tmp_path, request=request)
@@ -535,7 +611,12 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         call("connect", {"port": fx.service.port})
         read = call("tab_interact", {"tab": tab_id})
         assert read["state"] == active.plugin.project_state(active.session.snapshot())
-        assert Path(read["figure"]).read_bytes().startswith(b"\x89PNG")
+        # The caller keeps structured data; MCP stdio contracts own image delivery.
+        # Read the GUI PNG through its public RPC instead of a session file.
+        figure = call(
+            "rpc_call", {"method": "tab.interact", "params": {"tab_id": tab_id}}
+        )["figure"]
+        assert base64.b64decode(figure["png_b64"], validate=True).startswith(b"\x89PNG")
         assert read["preview_active"] is False
         assert "done" in {command["name"] for command in read["commands"]}
         changed = call(
@@ -555,15 +636,34 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         assert read["handle"] == op
         assert changed["handle"] == op
         if terminal == "done":
+            assert source is not None and source.snapshot.point is not None
+            assert captured is not None
+            storage = captured.capture_storage()
+            fx.ctrl.context_control.new_point(
+                PointCreateRequest(
+                    "later", "", CommandOrigin("gui"), clone_from=source.snapshot.point
+                )
+            )
             result = call(
                 "tab_interact", {"tab": tab_id, "payload": {"command": "done"}}
             )
             assert result["interaction"]["state"] == changed["state"]
             assert result["status"] == "finished", result
+            assert result["run_id"] == source.run_id
             assert result["op"] == op
-            assert result["previews"]["primary"]
-            for preview_path in result["previews"]["primary"]:
-                assert Path(preview_path).read_bytes().startswith(b"\x89PNG")
+            analysis = SaveSnapshotWire.model_validate(
+                {"run_id": result["run_id"], "artifacts": result["artifacts"]}
+            ).artifacts["analysis"]["results"]
+            assert analysis.status == "Saved"
+            png_outputs = analysis.members["figure:pick"]
+            assert len(png_outputs) == 2
+            assert {Path(output.path).parent for output in png_outputs} == {
+                storage.database_path / "runs" / source.run_id / "figures",
+                storage.result_path / "points" / source.snapshot.point / "figures",
+            }
+            for output in png_outputs:
+                assert output.status == "saved" and output.error is None
+                assert Path(output.path).read_bytes().startswith(b"\x89PNG")
             committed = fx.state.get_tab(tab_id).analysis.plots
             assert committed is not None
             assert committed["pick"] is not widget.figure
@@ -656,7 +756,14 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
     mounted_fx, tmp_path, request
 ) -> None:
     fx, window = mounted_fx
-    tab_id, _, widget = _start_mounted(fx, window, "onetone/flux_dep")
+    tab_id, _, widget = _start_mounted(
+        fx, window, "onetone/flux_dep", native_source=tmp_path / "source.h5"
+    )
+    source = fx.state.get_tab(tab_id).run.metadata
+    captured = fx.state.get_tab(tab_id).save_context
+    assert source is not None and source.snapshot.point is not None
+    assert captured is not None
+    storage = captured.capture_storage()
     bridge, call = mcp_client(fx.service.port, tmp_path, request=request)
     try:
         call("connect", {"port": fx.service.port})
@@ -675,9 +782,9 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
             },
         )
         expected = {
-            "flx_half": done["interaction"]["state"]["flux_half"],
-            "flx_int": done["interaction"]["state"]["flux_int"],
-            "flx_period": 2
+            "qubit.flux_half": done["interaction"]["state"]["flux_half"],
+            "qubit.flux_int": done["interaction"]["state"]["flux_int"],
+            "qubit.flux_period": 2
             * abs(
                 done["interaction"]["state"]["flux_int"]
                 - done["interaction"]["state"]["flux_half"]
@@ -698,35 +805,70 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
                 },
             },
         )
+        actual_expected = {
+            "Q1.flux_half": expected["qubit.flux_half"],
+            "Q1.flux_int": expected["qubit.flux_int"],
+            "Q1.flux_period": expected["qubit.flux_period"],
+        }
         assert {
             item["target"]: item["after"] for item in written["written"]
+        } == actual_expected
+        component = call("rpc_call", {"method": "context.snapshot"})["point"][
+            "components"
+        ]["Q1"]
+        assert {
+            "qubit.flux_half": component["flux_half"],
+            "qubit.flux_int": component["flux_int"],
+            "qubit.flux_period": component["flux_period"],
         } == expected
-        assert call("rpc_call", {"method": "context.snapshot"})["md"] == expected
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})[
             "tabs"
         ][0]
-        image = tmp_path / "interactive-result.png"
-        saved = call(
-            "rpc_call",
-            {
-                "method": "tab.save_artifacts",
-                "params": {
-                    "artifacts": ["analysis:pick"],
-                    "paths": {"analysis:pick": str(image)},
-                    "tab_id": tab_id,
+        fx.ctrl.context_control.new_point(
+            PointCreateRequest(
+                "later", "", CommandOrigin("gui"), clone_from=source.snapshot.point
+            )
+        )
+        saved = SaveSnapshotWire.model_validate(
+            call(
+                "rpc_call",
+                {
+                    "method": "tab.save_artifacts",
+                    "params": {
+                        "artifacts": [{"section": "analysis", "name": "results"}],
+                        "tab_id": tab_id,
+                    },
                 },
-            },
+            )
         )
-        assert (
-            call("wait", {"op": saved["handle"], "timeout": 5})["status"] == "finished"
-        )
-        assert image.read_bytes().startswith(b"\x89PNG")
+        assert saved.run_id == source.run_id
+        assert set(saved.artifacts) == {"analysis"}
+        assert set(saved.artifacts["analysis"]) == {"results"}
+        analysis = saved.artifacts["analysis"]["results"]
+        assert analysis.status == "Saved"
+        png_outputs = analysis.members["figure:pick"]
+        assert len(png_outputs) == 2
+        assert {Path(output.path).parent for output in png_outputs} == {
+            storage.database_path / "runs" / source.run_id / "figures",
+            storage.result_path / "points" / source.snapshot.point / "figures",
+        }
+        for output in png_outputs:
+            assert output.format == "png"
+            assert output.status == "saved" and output.error is None
+            assert Path(output.path).read_bytes().startswith(b"\x89PNG")
+        json_outputs = [
+            output
+            for outputs in analysis.members.values()
+            for output in outputs
+            if output.format == "json"
+        ]
+        assert len(json_outputs) == 1
+        assert json_outputs[0].status == "saved" and json_outputs[0].error is None
+        assert Path(json_outputs[0].path).is_file()
         artifacts = call(
             "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}}
         )["tabs"][0]["artifacts"]
-        analysis = next(item for item in artifacts if item["key"] == "analysis:pick")
-        assert analysis["status"] == "saved"
-        assert analysis["last_saved_path"] == str(image)
+        assert artifacts["analysis"]["results"] == analysis.model_dump(mode="json")
         assert call("tab_close", {"tab": tab_id, "discard_unsaved": True}) == {
             "closed": tab_id
         }
@@ -825,9 +967,16 @@ def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
         assert {
             item["target_name"]: item["proposed_value"] for item in draft["items"]
         } == {
-            "flx_half": pytest.approx(original["flux_half"]),
-            "flx_int": pytest.approx(original["flux_int"]),
-            "flx_period": pytest.approx(
+            "qubit.flux_half": pytest.approx(original["flux_half"]),
+            "qubit.flux_int": pytest.approx(original["flux_int"]),
+            "qubit.flux_period": pytest.approx(
+                2 * abs(original["flux_int"] - original["flux_half"])
+            ),
+        }
+        assert {item["actual_path"]: item["proposed"] for item in draft["items"]} == {
+            "Q1.flux_half": pytest.approx(original["flux_half"]),
+            "Q1.flux_int": pytest.approx(original["flux_int"]),
+            "Q1.flux_period": pytest.approx(
                 2 * abs(original["flux_int"] - original["flux_half"])
             ),
         }
@@ -838,8 +987,9 @@ def test_mounted_equal_seed_done_failure_preserves_editor_then_recovers(
     mounted_fx,
 ) -> None:
     fx, window = mounted_fx
-    fx.state.session_env.md.flx_half = 0.0
-    fx.state.session_env.md.flx_int = 0.0
+    parameters = fx.ctrl.context_control.read_context()
+    fx.ctrl.context_control.set_parameter(parameters.target, "Q1.flux_half", 0.0)
+    fx.ctrl.context_control.set_parameter(parameters.target, "Q1.flux_int", 0.0)
     tab_id, token, widget = _start_mounted(fx, window, "onetone/flux_dep")
     with open_client(fx.service.port) as sock:
         rejected = _interact(sock, tab_id, {"command": "done"})

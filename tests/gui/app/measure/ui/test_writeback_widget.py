@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QCoreApplication, QEvent, QPoint, Qt
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDialog,
+    QFrame,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QTableWidget,
 )
+from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.adapter import (
@@ -20,14 +26,103 @@ from zcu_tools.gui.app.measure.adapter import (
     MetaDictWriteback,
     RunRequest,
     SessionEnv,
+    WaveformWriteback,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.cfg_schemas import waveform_cfg_to_value
+from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
+from zcu_tools.gui.app.measure.services.writeback import (
+    WritebackService,
+    WritebackValues,
+)
+from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
+from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
+from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.cfg.binding.fields import ScalarField
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv as ParameterSessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 from zcu_lab.v2.fake.freq.core import FakeFreqRunResult
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter, FakeFreqAnalyzeParams
+
+
+@pytest.fixture
+def waveform_writeback(tmp_path: Path):
+    before = registry_state()
+    draft = None
+    try:
+        register_fakes()
+        installed = registry_state()
+        entry = ResultEntry.create(
+            "entry",
+            result_root=tmp_path / "Result",
+            database_root=tmp_path / "Database",
+        )
+        bus = BaseEventBus()
+        context = ContextService(
+            SessionState(ParameterSessionEnv(parameters=None, soc=None, soccfg=None)),
+            bus,
+            bind_assets=ArbWaveformDatabase.info_at,
+        )
+        context.install_entry(entry)
+        control = ContextControlFacet(context=context)
+        control.add_component("Q1", "fake/drive/a", {})
+        target = control.read_context().target
+        control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.1))
+        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
+        service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
+        spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=0.1))
+        draft = service.create_draft(
+            [
+                WaveformWriteback(
+                    "Q1.waveforms.base", "Waveform", edit_schema=CfgSchema(spec, value)
+                )
+            ],
+            parameters=control.read_context(),
+        )
+        service.apply_draft(draft)
+        yield control, service, draft
+        assert registry_state() == installed
+    finally:
+        if draft is not None:
+            draft.teardown()
+        restore_registry(before)
+
+
+@pytest.fixture
+def multiple_waveform_writeback(waveform_writeback):
+    control, service, _original = waveform_writeback
+    names = ("Q1.waveforms.base", "Q1.waveforms.other")
+    control.set_waveform(
+        control.read_context().target, names[1], ConstWaveformCfg(length=0.2)
+    )
+    proposals = []
+    for name, length in zip(names, (0.1, 0.2), strict=True):
+        spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=length))
+        proposals.append(
+            WaveformWriteback(name, name, edit_schema=CfgSchema(spec, value))
+        )
+    draft = service.create_draft(proposals, parameters=control.read_context())
+    try:
+        service.apply_draft(draft)
+        yield control, service, draft, names
+    finally:
+        draft.teardown()
+
+
+def _waveform_length_field(service, draft, item_id: str) -> ScalarField:
+    field = service.get_item_draft(draft, item_id).root.fields["length"]
+    assert isinstance(field, ScalarField)
+    return field
 
 
 def _make_ctx() -> SessionEnv:
@@ -338,3 +433,503 @@ def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qap
             w2.close()
     finally:
         widget.close()
+
+
+def _assert_matrix_row_reflows(row: QFrame, *, narrow: bool) -> None:
+    checks = row.findChildren(QCheckBox)
+    currents = row.findChildren(QLabel, "writebackCurrent")
+    paths = row.findChildren(QLabel, "writebackActualPath")
+    actions = row.findChildren(QPushButton)
+    tables = row.findChildren(QTableWidget)
+    assert (
+        len(checks) == len(currents) == len(paths) == len(actions) == len(tables) == 1
+    )
+    check, current, path, action, table = (
+        checks[0],
+        currents[0],
+        paths[0],
+        actions[0],
+        tables[0],
+    )
+    assert all(child.isVisible() for child in (check, current, path, action, table))
+    check_y = check.mapTo(row, QPoint()).y() + check.height() / 2
+    current_y = current.mapTo(row, QPoint()).y() + current.height() / 2
+    action_y = action.mapTo(row, QPoint()).y() + action.height() / 2
+    assert abs(check_y - action_y) < (check.height() + action.height()) / 2
+    if narrow:
+        assert check_y + 10 < current_y
+    else:
+        assert abs(check_y - current_y) < (check.height() + current.height()) / 2
+    assert path.mapTo(row, QPoint()).y() > current.mapTo(row, QPoint()).y()
+    assert table.mapTo(row, QPoint()).y() > path.mapTo(row, QPoint()).y()
+    assert table.rowCount() == table.columnCount() == 2
+    assert table.editTriggers() == QTableWidget.EditTrigger.NoEditTriggers
+    for (r, c), expected in (((0, 1), 0.1), ((1, 0), 0.2)):
+        cell = table.item(r, c)
+        assert cell is not None
+        assert float(cell.text()) == expected
+        assert not cell.flags() & Qt.ItemFlag.ItemIsEditable
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_static_units_display_once_after_stderr_without_converting_values(
+    qapp, pane: Literal["analysis", "post_analysis"]
+) -> None:
+    fixed = MetaDictWriteback(
+        "driver.frequency", "Frequency", proposed_value=20.09, stderr=0.18
+    )
+    unset = MetaDictWriteback("driver.duration", "Duration", proposed_value=0.25)
+    ext = MetaDictWriteback("general.ext.value", "Value", proposed_value=9.0)
+    items = [fixed, unset, ext]
+    for index, item in enumerate(items, 1):
+        item.session_id = f"md-{index}"
+    facts = {
+        "md-1": WritebackValues(
+            actual_path="Q1.frequency", current=19.8, proposed=20.09, unit="MHz"
+        ),
+        "md-2": WritebackValues(
+            actual_path="Q1.duration", current=None, proposed=0.25, unit="us"
+        ),
+        "md-3": WritebackValues(
+            actual_path="general.ext.value", current=7.0, proposed=9.0, unit=None
+        ),
+    }
+    ctrl = MagicMock()
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {}
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate(items, facts)
+        texts = [label.text() for label in widget.findChildren(QLabel)]
+        for expected in ("19.8 MHz", "20.09 ± 0.18 MHz", "—", "0.25 us", "7.0", "9.0"):
+            assert expected in texts
+        assert "— us" not in texts
+        assert fixed.proposed_value == 20.09 and fixed.stderr == 0.18
+        assert all(item.selected for item in items)
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
+    qapp, pane: Literal["analysis", "post_analysis"]
+) -> None:
+    matrix = [[0.9, 0.1], [0.2, 0.8]]
+    scalar = MetaDictWriteback(
+        "driver.ext.value", "Value", proposed_value=20.09, stderr=0.18
+    )
+    scalar.session_id = "md-1"
+    table = MetaDictWriteback("driver.ext.matrix", "Matrix", proposed_value=matrix)
+    table.session_id = "md-2"
+    values = {
+        "md-1": WritebackValues(
+            actual_path="Q1.ext.value", current=19.8, proposed=20.09, unit=None
+        ),
+        "md-2": WritebackValues(
+            actual_path="Q1.ext.matrix", current=None, proposed=matrix, unit=None
+        ),
+    }
+    ctrl = MagicMock()
+    applied = {"md-1": False, "md-2": False}
+    ctrl.get_writeback_applied_for_pane.return_value = applied
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied
+    ctrl.get_writeback_summaries_for_pane.return_value = {
+        "md-1": ("18.0", "19.0"),  # stale baseline, not the supplied live facts
+        "md-2": ("—", "2 × 2 matrix"),
+    }
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate([scalar, table], values)
+        widget.show()
+        for width in (620, 360, 620):
+            widget.resize(width, 600)
+            qapp.processEvents()
+            texts = [label.text() for label in widget.findChildren(QLabel)]
+            assert any("Q1.ext.value" in text for text in texts)
+            assert any("Q1.ext.matrix" in text for text in texts)
+            assert any("±" in text and "0.18" in text for text in texts)
+            assert any("19.8" in text for text in texts)
+            assert any("20.09" in text for text in texts)
+            matrix_row = next(
+                row
+                for row in widget.findChildren(QFrame, "writebackRow")
+                if any(
+                    "Q1.ext.matrix" in label.text()
+                    for label in row.findChildren(QLabel)
+                )
+            )
+            _assert_matrix_row_reflows(matrix_row, narrow=width == 360)
+            assert all(
+                "±" not in label.text() for label in matrix_row.findChildren(QLabel)
+            )
+            assert any(
+                "driver.ext.value" in check.text()
+                for check in widget.findChildren(QCheckBox)
+            )
+        copy_button = next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Copy"
+        )
+        copy_button.click()
+        clipboard = QApplication.clipboard()
+        assert clipboard is not None
+        assert json.loads(clipboard.text()) == matrix
+        assert scalar.selected and table.selected
+        unapplied = next(
+            check
+            for check in widget.findChildren(QCheckBox)
+            if check.text() == "driver.ext.value*"
+        )
+        assert unapplied.font().bold()
+        applied["md-1"] = True
+        widget.populate([scalar, table], values)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        written = next(
+            check
+            for check in widget.findChildren(QCheckBox)
+            if check.text() == "driver.ext.value"
+        )
+        assert not written.font().bold()
+        widget.populate([], {})
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
+        assert not widget.findChildren(QCheckBox)
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+def test_nonempty_preview_requires_each_service_fact(qapp) -> None:
+    item = MetaDictWriteback("driver.ext.value", "Value", proposed_value=1.0)
+    item.session_id = "md-1"
+    ctrl = MagicMock()
+    ctrl.get_writeback_applied_for_pane.return_value = {}
+    widget = WritebackWidget(ctrl, tab_id="captured")
+    try:
+        with pytest.raises(KeyError, match="md-1"):
+            widget.populate([item], {})
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+def _assert_cfg_row_invalid(row: QFrame, name: str) -> None:
+    assert row.findChildren(QCheckBox)[0].text() == f"{name}*"
+    assert (
+        row.findChildren(QLabel, "writebackProposed")[0].text()
+        == "Invalid configuration"
+    )
+    for label_name in ("writebackCurrent", "writebackActualPath"):
+        assert (
+            row.findChildren(QLabel, label_name)[0].text()
+            == "Unavailable (invalid configuration)"
+        )
+
+
+def _assert_cfg_row_repaired(row: QFrame, name: str) -> None:
+    assert row.findChildren(QCheckBox)[0].text() == f"{name}*"
+    assert row.findChildren(QLabel, "writebackActualPath")[0].text() == name
+    assert row.findChildren(QLabel, "writebackCurrent")[0].text() == "map[2]"
+    assert row.findChildren(QLabel, "writebackProposed")[0].text() == "map[2]"
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("repair_order", [(0, 1), (1, 0)])
+def test_multiple_invalid_cfg_items_repair_independently_in_each_pane(
+    qapp,
+    multiple_waveform_writeback,
+    pane: Literal["analysis", "post_analysis"],
+    repair_order,
+) -> None:
+    control, service, draft, names = multiple_waveform_writeback
+    state = State(SessionEnv(parameters=control.read_context(), soc=None, soccfg=None))
+    state.add_tab(
+        "captured", Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock())
+    )
+    getattr(state.get_tab("captured"), pane).writeback_draft = draft
+    facet = WritebackControlFacet(
+        state=state,
+        guard=MagicMock(),
+        writeback=service,
+        resource_versions=lambda: {},
+        bus=BaseEventBus(),
+    )
+    ctrl = MagicMock()
+    ctrl.writeback_control = facet
+    ctrl.get_writeback_item_draft_for_pane = facet.get_writeback_item_draft_for_pane
+    ctrl.get_writeback_applied_for_pane = facet.get_writeback_applied_for_pane
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate(service.preview_draft(draft), service.preview_values(draft))
+        widget.show()
+        rows = widget.findChildren(QFrame, "writebackRow")
+        assert len(rows) == 2
+        fields = [
+            _waveform_length_field(service, draft, item.session_id)
+            for item in draft.items
+        ]
+        rows[1].findChildren(QCheckBox)[0].setChecked(False)
+        for row, field, name in zip(rows, fields, names, strict=True):
+            row.findChildren(QPushButton)[0].click()
+            field.set_text("")
+            _assert_cfg_row_invalid(row, name)
+            widget.findChildren(QDialog)[0].reject()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        with pytest.raises(RuntimeError):
+            facet.get_writeback_values_for_pane("captured", pane)
+        repaired = []
+        for index in repair_order:
+            row, field = rows[index], fields[index]
+            row.findChildren(QPushButton)[0].click()
+            field.set_text(str(0.5 + index / 10))
+            _assert_cfg_row_repaired(row, names[index])
+            sibling = 1 - index
+            if sibling not in repaired:
+                _assert_cfg_row_invalid(rows[sibling], names[sibling])
+            widget.findChildren(QDialog)[0].reject()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            repaired.append(index)
+        for row, name in zip(rows, names, strict=True):
+            _assert_cfg_row_repaired(row, name)
+        assert [row.findChildren(QCheckBox)[0].isChecked() for row in rows] == [
+            True,
+            False,
+        ]
+        facts = facet.get_writeback_values_for_pane("captured", pane)
+        assert [
+            ConstWaveformCfg.model_validate(facts[item.session_id].proposed).length
+            for item in draft.items
+        ] == [0.5, 0.6]
+        assert service.get_all_applied(draft) == {
+            item.session_id: False for item in draft.items
+        }
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("invalid_text", ["", "not-a-number"])
+def test_invalid_cfg_edit_can_close_and_repair_without_stale_applied_state(
+    qapp,
+    waveform_writeback,
+    pane: Literal["analysis", "post_analysis"],
+    invalid_text: str,
+) -> None:
+    _control, service, draft = waveform_writeback
+    item = draft.items[0]
+    model = service.get_item_draft(draft, item.session_id)
+    field = model.root.fields["length"]
+    assert isinstance(field, ScalarField)
+    ctrl = MagicMock()
+    ctrl.get_writeback_item_draft_for_pane.return_value = model
+    ctrl.get_writeback_applied_for_pane.side_effect = lambda *_: (
+        service.get_all_applied(draft)
+    )
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (
+        lambda *_, **kwargs: service.preview_values(draft, **kwargs)
+    )
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate(service.preview_draft(draft), service.preview_values(draft))
+        widget.show()
+        edit = next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Edit"
+        )
+        edit.click()
+        field.set_text(invalid_text)
+        assert not model.is_valid()
+        assert widget.findChildren(QCheckBox)[0].text() == "Q1.waveforms.base*"
+        assert (
+            widget.findChildren(QLabel, "writebackProposed")[0].text()
+            == "Invalid configuration"
+        )
+        for name in ("writebackCurrent", "writebackActualPath"):
+            assert (
+                widget.findChildren(QLabel, name)[0].text()
+                == "Unavailable (invalid configuration)"
+            )
+        with pytest.raises(RuntimeError):
+            service.preview_values(draft)
+        dialog = widget.findChildren(QDialog)[0]
+        dialog.reject()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        edit.click()
+        field.set_text("0.5")
+        assert model.is_valid()
+        facts = service.preview_values(draft)[item.session_id]
+        assert facts.proposed["length"] == 0.5
+        assert (
+            widget.findChildren(QLabel, "writebackActualPath")[0].text()
+            == facts.actual_path
+        )
+        assert widget.findChildren(QLabel, "writebackCurrent")[0].text() == "map[2]"
+        assert widget.findChildren(QLabel, "writebackProposed")[0].text() == "map[2]"
+        widget.findChildren(QDialog)[0].reject()
+        assert widget.findChildren(QCheckBox)[0].isChecked()
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("repopulate", [False, True])
+def test_cfg_edit_and_retarget_refresh_live_facts_and_applied_state(
+    qapp,
+    waveform_writeback,
+    pane: Literal["analysis", "post_analysis"],
+    *,
+    repopulate: bool,
+) -> None:
+    control, service, draft = waveform_writeback
+    item = draft.items[0]
+    model = service.get_item_draft(draft, item.session_id)
+    ctrl = MagicMock()
+    ctrl.get_writeback_item_draft_for_pane.return_value = model
+    ctrl.get_writeback_applied_for_pane.side_effect = lambda *_: (
+        service.get_all_applied(draft)
+    )
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (
+        lambda *_, **kwargs: service.preview_values(draft, **kwargs)
+    )
+    ctrl.set_writeback_item_for_pane.side_effect = lambda _tab, _pane, sid, **kwargs: (
+        draft.edit(sid, **kwargs)
+    )
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate(service.preview_draft(draft), service.preview_values(draft))
+        widget.show()
+        checkbox = widget.findChildren(QCheckBox)[0]
+        assert not checkbox.text().endswith("*")
+        next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Edit"
+        ).click()
+        qapp.processEvents()
+        dialog = next(
+            candidate
+            for candidate in qapp.topLevelWidgets()
+            if isinstance(candidate, QDialog)
+            and candidate.isVisible()
+            and candidate.windowTitle() == "Edit Config: Q1.waveforms.base"
+        )
+        if repopulate:
+            widget.populate(service.preview_draft(draft), service.preview_values(draft))
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            checkbox = widget.findChildren(QCheckBox)[0]
+        model.set_target("length", 0.2)
+        assert checkbox.text().endswith("*")
+        name_edit = dialog.findChildren(QLineEdit)[0]
+        name_edit.setText("Q1.waveforms.other")
+        name_edit.editingFinished.emit()
+        assert checkbox.text() == "Q1.waveforms.other*"
+        texts = [label.text() for label in widget.findChildren(QLabel)]
+        assert "Q1.waveforms.other" in texts
+        assert "—" in texts
+        control.set_waveform(
+            control.read_context().target,
+            "Q1.waveforms.other",
+            ConstWaveformCfg(length=0.4),
+        )
+        model.set_target("length", 0.3)
+        assert "—" not in [label.text() for label in widget.findChildren(QLabel)]
+        assert service.preview_values(draft)[item.session_id].proposed["length"] == 0.3
+        next(
+            button
+            for button in dialog.findChildren(QPushButton)
+            if button.text() == "Close"
+        ).click()
+        qapp.processEvents()
+        assert checkbox.isChecked()
+        assert checkbox.text().endswith("*")
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_retarget_edit_refreshes_captured_path_current_and_proposal(
+    qapp, pane: Literal["analysis", "post_analysis"]
+) -> None:
+    item = MetaDictWriteback("driver.frequency", "Value", proposed_value=20.09)
+    item.session_id = "md-1"
+    original = WritebackValues(
+        actual_path="Q1.frequency", current=19.8, proposed=20.09, unit="MHz"
+    )
+    ctrl = MagicMock()
+    ctrl.get_writeback_applied_for_pane.return_value = {}
+    ctrl.get_writeback_summaries_for_pane.return_value = {"md-1": ("19.8", "20.09")}
+
+    def commit_edit(
+        tab_id: str,
+        requested_pane: str,
+        session_id: str,
+        *,
+        target_name: str,
+        proposed_value: object,
+    ) -> None:
+        assert (tab_id, requested_pane, session_id) == ("captured", pane, "md-1")
+        assert target_name == "driver.ext.other"
+        ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
+            "md-1": WritebackValues(
+                actual_path="Q1.ext.other",
+                current=7.0,
+                proposed=proposed_value,
+                unit=None,
+            )
+        }
+
+    ctrl.set_writeback_item_for_pane.side_effect = commit_edit
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = commit_edit
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate([item], {"md-1": original})
+        initial_texts = [label.text() for label in widget.findChildren(QLabel)]
+        assert "19.8 MHz" in initial_texts
+        assert "20.09 MHz" in initial_texts
+        widget.show()
+        next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Edit"
+        ).click()
+        qapp.processEvents()
+        dialog = next(
+            candidate
+            for candidate in qapp.topLevelWidgets()
+            if isinstance(candidate, QDialog)
+            and candidate.isVisible()
+            and candidate.windowTitle() == "Edit Value: driver.frequency"
+        )
+        inputs = dialog.findChildren(QLineEdit)
+        assert len(inputs) == 2
+        inputs[0].setText("driver.ext.other")
+        inputs[1].setText("9.0")
+        next(
+            button
+            for button in dialog.findChildren(QPushButton)
+            if button.text() == "Save"
+        ).click()
+        qapp.processEvents()
+        texts = [label.text() for label in widget.findChildren(QLabel)]
+        assert any("Q1.ext.other" in text for text in texts)
+        assert any(text == "7.0" for text in texts)
+        assert any(text == "9.0" for text in texts)
+        assert all("MHz" not in text for text in texts)
+        assert item.target_name == "driver.ext.other"
+        assert item.proposed_value == 9.0
+        assert item.selected
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()

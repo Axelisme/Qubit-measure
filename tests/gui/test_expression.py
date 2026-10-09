@@ -4,6 +4,7 @@ import pytest
 from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.expression import (
+    ExpressionError,
     coerce_eval_result,
     evaluate_numeric_expr,
     evaluate_scalar_expr,
@@ -29,6 +30,49 @@ def _parameters(values: YamlMap) -> ParameterContext:
         target=EntryDraft(entry_id="entry"),
         roles=None,
     )
+
+
+@pytest.mark.parametrize("imaginary", [-0.034, 0.0])
+def test_parameter_tag_decodes_without_changing_raw_context(
+    imaginary: float,
+) -> None:
+    tag: YamlMap = {"__complex__": [0.012, imaginary]}
+    parameters = _parameters({"g_center": tag})
+    path = "general.ext.g_center"
+    assert parameters.value(path) == tag
+    result = evaluate_scalar_expr(path, parameters)
+    assert result == complex(0.012, imaginary)
+    assert isinstance(result, complex)
+    assert evaluate_scalar_expr(path + " + 2j", parameters) == complex(
+        0.012, imaginary + 2.0
+    )
+    with pytest.raises(ExpressionError, match="real number"):
+        evaluate_numeric_expr(path, parameters)
+    assert parameters.value(path) == tag
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        {"__complex__": [True, 2]},
+        {"__complex__": [1]},
+        {"__complex__": [1, 2], "extra": 3},
+    ],
+)
+def test_malformed_parameter_tag_names_path_and_keeps_codec_cause(
+    tag: YamlMap,
+) -> None:
+    parameters = _parameters({"g_center": tag})
+    with pytest.raises(ExpressionError, match="general.ext.g_center") as failure:
+        evaluate_scalar_expr("general.ext.g_center", parameters)
+    assert isinstance(failure.value.__cause__, ValueError)
+    assert parameters.value("general.ext.g_center") == tag
+
+
+def test_complex_string_parameter_is_not_guessed() -> None:
+    parameters = _parameters({"g_center": "(1+2j)"})
+    with pytest.raises(ExpressionError, match="not numeric"):
+        evaluate_scalar_expr("general.ext.g_center", parameters)
 
 
 def test_complex_scalar_expression_preserves_real_only_numeric_boundary():

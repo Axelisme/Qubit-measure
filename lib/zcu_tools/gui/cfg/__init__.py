@@ -2,9 +2,7 @@
 
 from .codec import (
     SessionCodecError,
-    decode_complex,
     decode_eval_wire,
-    encode_complex,
     raw_to_schema,
     schema_to_raw,
 )
@@ -79,8 +77,6 @@ __all__ = [
     "ChoiceBinding",
     "ChoiceSectionSpec",
     "DirectValue",
-    "decode_complex",
-    "encode_complex",
     "EvalValue",
     "ExpressionResolver",
     "FloatSpec",

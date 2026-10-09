@@ -13,13 +13,18 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
+from zcu_tools.gui.app.measure.state import RunPaneState
+from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
+from zcu_lab.v2.twotone.time_domain.t1.gui import T1AnalyzeParams
 
 from ._helpers import Fixture, call, open_client
+from ._point_application import PointAdapter, PointApplication
 
 
 @pytest.mark.parametrize(
@@ -331,3 +336,88 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
     finally:
         sock.close()
         fx.stop()
+
+
+def test_native_preview_and_window_keep_captured_path_and_stderr(
+    application: PointApplication, qapp, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from qtpy.QtWidgets import QLabel
+
+    # Only the domain fit is replaced. The real analysis owner creates its WB
+    # draft, so State/facet/preview use the same opaque-draft lifetime owner.
+    monkeypatch.setattr(PointAdapter, "analyze", lambda self, req, *, plots: 1.0)
+    monkeypatch.setattr(
+        PointAdapter,
+        "get_writeback_items",
+        lambda self, req: [
+            MetaDictWriteback(
+                "driver.ext.value", "Value", proposed_value=20.09, stderr=0.18
+            ),
+            MetaDictWriteback("driver.ext.other", "Other", proposed_value=23.0),
+        ],
+    )
+    application.open_entry()
+    controller = application.controller
+    context = controller.context_control
+    context.add_component(
+        "Q1",
+        "fake/drive/a",
+        {"rate": 10.0, "ext": {"value": 19.8}},
+        setup=True,
+    )
+    context.add_component(
+        "Q2",
+        "fake/drive/a",
+        {"rate": 20.0, "ext": {"value": 29.8}},
+        setup=True,
+    )
+    application.result("point.new", {"label": "a"})
+    context.set_component_focus("Q1")
+    captured = context.read_context().bind_roles(
+        {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
+    )
+    tab = controller.new_tab("pointed")
+    application.state.replace_run_pane(
+        tab, RunPaneState(result=1.0, parameters=captured)
+    )
+    analyzed = application.result(
+        "operation.await",
+        {"operation_id": controller.analyze(tab, T1AnalyzeParams()), "timeout": 2},
+    )
+    assert analyzed["status"] == "finished", analyzed
+    context.set_parameter(captured.target, "Q1.ext.value", 19.9)
+    application.result("point.new", {"label": "b"})
+    context.set_component_focus("Q2")
+    active = context.read_context().target
+    window = MainWindow(controller)
+    window.add_tab_widget(tab, "pointed")
+    try:
+        preview = application.result(
+            "tab.writeback_preview", {"tab_id": tab, "subtab_id": "analysis"}
+        )
+        items = preview["items"]
+        assert isinstance(items, list)
+        item = items[0]
+        assert isinstance(item, dict)
+        assert item["target_name"] == "driver.ext.value"
+        assert item["actual_path"] == "Q1.ext.value"
+        assert item["stderr"] == 0.18
+        assert item["current"] == 19.9
+        assert item["proposed"] == 20.09
+        other = items[1]
+        assert isinstance(other, dict)
+        assert other["actual_path"] == "Q1.ext.other"
+        assert other["stderr"] is None
+        assert other["current"] is None
+        window.refresh_tab_writeback(tab)
+        qapp.processEvents()
+        texts = [label.text() for label in window.findChildren(QLabel)]
+        assert any("Q1.ext.value" in text for text in texts)
+        assert any("±" in text and "0.18" in text for text in texts)
+        assert any("19.9" in text for text in texts)
+        assert context.read_context().target == active
+        assert context.get_component_focus().name == "Q2"
+    finally:
+        controller.tab_control.close_tab(tab)
+        window.deleteLater()
+        qapp.processEvents()

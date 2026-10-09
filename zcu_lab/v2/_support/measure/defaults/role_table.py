@@ -46,10 +46,6 @@ from zcu_lab.v2._support.measure.defaults.helpers import (
     patch_pulse_fields,
     patch_ro_cfg_fields,
 )
-from zcu_lab.v2._support.measure.defaults.module_defaults import (
-    select_named_module_value,
-    select_named_waveform_value,
-)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
@@ -295,19 +291,30 @@ def role_ref(
 ) -> _RefNode | None:
     """Library-aware mount: adopt the first preferred-named library entry, else the
     blank (or ``None`` when ``optional`` and nothing matches, ADR-0010)."""
+    from zcu_tools.gui.app.measure.cfg_schemas import (
+        module_cfg_to_value,
+        waveform_cfg_to_value,
+    )
+
     lib = role.lib
     if lib is None:
         raise RuntimeError(f"role {role.tag!r} has no library policy (ref unsupported)")
-    if lib.module_type is None:
-        selected = select_named_waveform_value(ctx.ml, list(lib.prefer))
-        if selected is not None:
-            return selected
-    else:
-        selected = select_named_module_value(
-            ml=ctx.ml, module_type=lib.module_type, preferred_names=list(lib.prefer)
-        )
-        if selected is not None:
-            return ReferenceValue(chosen_key=selected.name, value=selected.value)
+    if ctx.parameters is not None:
+        library = ctx.parameters.library
+        if lib.module_type is None:
+            keys = library.waveform_keys()
+            for name in lib.prefer:
+                if name in keys:
+                    _, value = waveform_cfg_to_value(library.get_waveform(name))
+                    return ReferenceValue(chosen_key=name, value=value)
+        else:
+            keys = library.module_keys()
+            for name in lib.prefer:
+                if name in keys:
+                    module = library.get_module(name)
+                    if isinstance(module, lib.module_type):
+                        _, value = module_cfg_to_value(module)
+                        return ReferenceValue(chosen_key=name, value=value)
     if optional:
         return None
     return role_blank(role, ctx)
