@@ -60,7 +60,6 @@ def test_tab_interaction_state_creation():
         global_run_active=True,
         is_running=False,
         is_analyzing=True,
-        is_saving_data=False,
         has_context=False,
         has_active_context=False,
         has_soc=True,
@@ -71,7 +70,6 @@ def test_tab_interaction_state_creation():
     assert state.global_run_active is True
     assert state.is_running is False
     assert state.is_analyzing is True
-    assert state.is_saving_data is False
 
 
 def test_add_tab_then_get_tab_returns_correct_tabstate():
@@ -205,10 +203,7 @@ def test_is_tab_busy_checks_per_tab_flags():
     _add_tab(state, "t1", adapter)
     _add_tab(state, "t2", adapter)
     assert state.is_tab_busy("t1") is False
-    state.set_tab_saving_data("t1", saving_data=True)
-    assert state.is_tab_busy("t1") is True
     assert state.is_tab_busy("t2") is False
-    state.set_tab_saving_data("t1", saving_data=False)
     state.set_tab_running("t2", running=True)
     assert state.is_tab_busy("t1") is False
     assert state.is_tab_busy("t2") is True

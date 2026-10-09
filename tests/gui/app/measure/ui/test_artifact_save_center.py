@@ -62,7 +62,6 @@ def snapshot(tmp_path: Path) -> tuple[ArtifactTracker, TabSnapshot]:
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
-            is_saving_data=False,
             has_active_context=True,
             has_context=True,
             has_soc=False,
@@ -193,16 +192,6 @@ def test_whole_artifact_commands_include_json_only_and_saved_items(
             button.click()
         center.save_all_button.click()
         assert selected == list(_REFS)
-        assert all_requests == [True]
-        assert current.interaction is not None
-        center.update_interaction(
-            replace(
-                current, interaction=replace(current.interaction, is_saving_data=True)
-            )
-        )
-        assert not center.save_all_button.isEnabled()
-        assert all(not button.isEnabled() for button in buttons)
-        center.save_all_button.click()
         assert all_requests == [True]
         center.update_interaction(replace(current, artifacts=()))
         qapp.processEvents()
