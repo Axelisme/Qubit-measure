@@ -456,7 +456,7 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         assert summary["steps"]["analysis"]["primary"]["status"] == "finished"
         assert summary["steps"]["analysis_save"]["primary"]["status"] == "saved"
         assert summary["analysis"]["primary"]["params"] == {"threshold": 0.5}
-        assert summary["analysis"]["primary"]["details"] == {"offset": 0.24}
+        assert summary["analysis"]["primary"]["summary"] == {"offset": 0.24}
         assert summary["artifacts"]["raw"]["data"] == {
             "status": "Saved",
             "members": {
