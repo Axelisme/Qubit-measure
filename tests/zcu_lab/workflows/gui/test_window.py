@@ -184,7 +184,7 @@ def test_invalid_pi_does_not_submit_or_create_workflow_directories(
     window.plan_panel.state.write({("pi_length_us",): 0.0}, FormEnv())
     result = window.start("invalid")
     assert isinstance(result, FormErrors) and ("pi_length_us",) in result.messages
-    assert window.controller is None and harness.background.work is None
+    assert window.controller.binding is None and harness.background.work is None
     assert not (entry.result_path / "workflows").exists()
     assert not (entry.database_path / "workflows").exists()
 
@@ -196,7 +196,7 @@ def test_startup_source_failure_is_not_replaced_by_old_constructor_capture(
     harness.services.context.clear_context()
     with pytest.raises(FailedPreconditionError):
         window.start("empty")
-    assert window.controller is None and harness.background.work is None
+    assert window.controller.binding is None and harness.background.work is None
     assert not (entry.result_path / "workflows").exists()
 
 
@@ -273,7 +273,7 @@ def test_submit_failure_leaves_no_accepted_run_or_paths(
     harness.background.fail_submit = True
     with pytest.raises(OSError, match="submit failed"):
         window.start("submit-error")
-    assert window.controller is None and harness.handles.live_count() == 0
+    assert window.controller.binding is None and harness.handles.live_count() == 0
     assert not harness.gate.snapshot()
     assert not (entry.result_path / "workflows").exists()
     assert not (entry.database_path / "workflows").exists()
@@ -2040,7 +2040,7 @@ def test_rpc_start_model_errors_leave_both_panel_drafts_and_bases_untouched(
         (p.state.input.data, p.state.base.data)
         for p in (window.plan_panel, window.tunables_panel)
     ]
-    assert window.controller is None and harness.background.work is None
+    assert window.controller.binding is None and harness.background.work is None
     assert not (entry.result_path / "workflows").exists()
     assert not (entry.database_path / "workflows").exists()
 
@@ -2086,7 +2086,7 @@ def test_rpc_start_rejects_bad_batches_without_mutating_drafts(
         (p.state.input.data, p.state.base.data)
         for p in (window.plan_panel, window.tunables_panel)
     ]
-    assert window.controller is None and harness.background.work is None
+    assert window.controller.binding is None and harness.background.work is None
     assert not (entry.result_path / "workflows").exists()
 
 
@@ -2184,7 +2184,7 @@ def test_rpc_start_native_submit_failure_does_not_install_new_panel_bases(
     error = reply["error"]
     assert isinstance(error, dict) and error["code"] == "controller_error"
     assert "submit failed" in error["message"]
-    assert window.controller is None and harness.handles.live_count() == 0
+    assert window.controller.binding is None and harness.handles.live_count() == 0
     assert not harness.gate.snapshot()
     assert before == [
         (p.state.input.data, p.state.base.data)
@@ -2215,7 +2215,7 @@ def test_rpc_start_source_failure_does_not_fall_back_to_old_gui_capture(
         (p.state.input.data, p.state.base.data)
         for p in (window.plan_panel, window.tunables_panel)
     ]
-    assert window.controller is None and harness.background.work is None
+    assert window.controller.binding is None and harness.background.work is None
     assert not (entry.result_path / "workflows").exists()
 
 
