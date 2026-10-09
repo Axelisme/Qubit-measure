@@ -2,74 +2,73 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import MagicMock
-
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QWidget
+from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtWidgets import QTabWidget, QWidget
+from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.plotting.figures import FigureCollection
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from tests.gui.app.measure.ui._artifact_snapshots import ready_figures
-
-
-def _tab() -> ExpTabWidget:
-    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-
-    ctrl = MagicMock()
-    ctrl.get_left_panel_width.return_value = 500
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
-    return ExpTabWidget("tab-1", ctrl, caps)
+from tests.gui.app.measure._native_save_support import (
+    NativeSaveSession,
+    PaneParams,
+    PaneSummary,
+)
 
 
-def test_result_focus_and_panel_width_are_owned_by_tab(qapp) -> None:
-    tab = _tab()
-    tab._left_tabs.setCurrentIndex(0)
+def _tab(window: MainWindow, tab_id: str) -> ExpTabWidget:
+    return next(
+        tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == tab_id
+    )
+
+
+def test_result_focus_and_panel_width_are_owned_by_tab(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+) -> None:
+    _session, ctrl, window, tab_id = live_ui
+    tab = _tab(window, tab_id)
+    panels = tab.findChild(QTabWidget)
+    assert panels is not None
+    tab.select_pane("analysis")
+    analysis_panel = panels.currentWidget()
+    tab.select_pane("run")
+    assert panels.currentWidget() is not analysis_panel
 
     tab.focus_result_panel()
 
-    assert tab._left_tabs.currentIndex() == 1
-    assert tab.left_panel_width() == 500
+    assert panels.currentWidget() is analysis_panel
+    assert tab.left_panel_width() == ctrl.get_left_panel_width()
+    assert window.current_left_panel_width() == tab.left_panel_width()
 
 
-def test_prepare_run_container_clears_run_and_downstream_figures(qapp) -> None:
-    tab = _tab()
+def test_prepare_run_container_clears_run_and_downstream_figures(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+) -> None:
+    _session, _ctrl, window, tab_id = live_ui
+    tab = _tab(window, tab_id)
+    analysis = FigureCollection()
+    analysis.adopt("fit", Figure())
+    analysis.seal()
+    post = FigureCollection()
+    post.adopt("diagnostic", Figure())
+    post.seal()
     tab.show_run_figure(Figure())
-    tab.show_analysis_figures(ready_figures(Figure()))
-    tab.show_post_analysis_figures(ready_figures(Figure()))
+    tab.show_analysis_figures(analysis)
+    tab.show_post_analysis_figures(post)
+    for pane in ("run", "analysis", "post_analysis"):
+        assert tab.get_current_figure_for_pane(pane) is not None
+    captured = tab.get_run_container()
 
     container = tab.prepare_run_container()
 
+    assert container is captured
     assert container is tab.get_run_container()
-    assert tab.get_current_figure_for_pane("run") is None
-    assert tab.get_current_figure_for_pane("analysis") is None
-    assert tab.get_current_figure_for_pane("post_analysis") is None
-    assert tab._run_stack.count() == 1
-    assert tab._analysis_stack.count() == 1
-    assert tab._post_stack.count() == 1
-
-
-def test_interactive_widget_lifecycle_is_owned_by_tab(qapp) -> None:
-    class _Interactive(QWidget):
-        pass
-
-    tab = _tab()
-    first = _Interactive()
-    second = _Interactive()
-    unrelated = QWidget()
-    tab.mount_interactive_widget(first)
-    # Interactive mounts into analysis pane
-    tab._analysis_stack.addWidget(second)  # type: ignore[attr-defined]
-    tab._analysis_stack.addWidget(unrelated)  # type: ignore[attr-defined]
-
-    tab.unmount_interactive_widgets(_Interactive)
-
-    assert tab._analysis_stack.indexOf(first) == -1  # type: ignore[attr-defined]
-    assert tab._analysis_stack.indexOf(second) == -1  # type: ignore[attr-defined]
-    assert tab._analysis_stack.indexOf(unrelated) >= 0  # type: ignore[attr-defined]
-    assert tab.get_current_figure_for_pane("analysis") is None
+    for pane in ("run", "analysis", "post_analysis"):
+        assert tab.get_current_figure_for_pane(pane) is None
 
 
 class _Interactive(InteractiveFrontend):
@@ -94,24 +93,50 @@ class _Interactive(InteractiveFrontend):
         self.stopped = True
 
 
-def _window_with_tab():
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+class _SelectedInteractive(_Interactive):
+    """A frontend type selected for removal while other frontends remain."""
 
-    ctrl = MagicMock()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 0
-    window = MainWindow(ctrl)
-    tab = _tab()
-    window._tab_widgets["tab-1"] = tab  # type: ignore[reportPrivateUsage] - fixture injection
-    return window, tab, ctrl
+
+def test_interactive_widget_lifecycle_is_owned_by_tab(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+) -> None:
+    _session, _ctrl, window, tab_id = live_ui
+    tab = _tab(window, tab_id)
+    first = _SelectedInteractive()
+    second = _SelectedInteractive()
+    unrelated = _Interactive()
+    for widget in (first, second, unrelated):
+        tab.mount_interactive_widget(widget)
+    assert tab.interactive_frontend() is unrelated
+
+    tab.unmount_interactive_widgets(_SelectedInteractive)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    assert tab.get_current_figure_for_pane("analysis") is None
+    remaining = tab.findChildren(_Interactive)
+    assert first not in remaining and second not in remaining
+    assert unrelated in remaining
+    tab.mount_interactive_widget(unrelated)
+    assert tab.interactive_frontend() is unrelated
+    tab.unmount_interactive_widgets(_Interactive)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not tab.findChildren(_Interactive)
+    assert tab.get_current_figure_for_pane("analysis") is None
 
 
 @pytest.mark.parametrize("failure_stage", ["factory", "mount"])
 def test_interactive_setup_failure_clears_stale_figure_and_cleans_widget(
-    qapp, monkeypatch, failure_stage: str
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
 ) -> None:
-    window, tab, _ctrl = _window_with_tab()
-    tab.show_analysis_figures(ready_figures(Figure()))
+    _session, ctrl, window, tab_id = live_ui
+    tab = _tab(window, tab_id)
+    figures = FigureCollection()
+    figures.adopt("stale", Figure())
+    figures.seal()
+    tab.show_analysis_figures(figures)
+    assert tab.get_current_figure_for_pane("analysis") is figures["stale"]
     captured = tab.get_analysis_container()
     widget = _Interactive()
     if failure_stage == "mount":
@@ -121,13 +146,14 @@ def test_interactive_setup_failure_clears_stale_figure_and_cleans_widget(
 
         monkeypatch.setattr(tab, "mount_interactive_widget", fail_mount)
 
-    def frontend_factory(_env):
+    def frontend_factory(env: Controller) -> InteractiveFrontend:
+        assert env is ctrl
         if failure_stage == "factory":
             raise RuntimeError("factory failed")
         return widget
 
     with pytest.raises(RuntimeError, match=failure_stage):
-        window.mount_interactive_analysis("tab-1", frontend_factory)
+        window.mount_interactive_analysis(tab_id, frontend_factory)
 
     assert tab.get_current_figure_for_pane("analysis") is None
     assert tab.get_analysis_container() is captured
@@ -135,45 +161,59 @@ def test_interactive_setup_failure_clears_stale_figure_and_cleans_widget(
         assert widget.stopped is True
 
 
-def test_interactive_mount_and_unmount_quiesce_frontend(qapp) -> None:
-    window, tab, _ctrl = _window_with_tab()
+def test_interactive_mount_and_unmount_quiesce_frontend(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+) -> None:
+    _session, _ctrl, window, tab_id = live_ui
+    tab = _tab(window, tab_id)
     captured = tab.get_analysis_container()
     widget = _Interactive()
 
-    window.mount_interactive_analysis("tab-1", lambda _env: widget)
+    window.mount_interactive_analysis(tab_id, lambda _env: widget)
     assert tab.get_analysis_container() is captured
     assert widget in tab.findChildren(_Interactive)
-    window.unmount_interactive_analysis("tab-1")
+    assert tab.interactive_frontend() is widget
+    window.unmount_interactive_analysis(tab_id)
     assert widget.stopped is True
     assert tab.get_current_figure_for_pane("analysis") is None
+    assert tab.get_analysis_container() is captured
 
 
-def test_mounted_interactive_view_exposes_figure_and_discardable_preview(qapp) -> None:
-    window, _tab, _ctrl = _window_with_tab()
+def test_mounted_interactive_view_exposes_figure_and_discardable_preview(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+) -> None:
+    _session, _ctrl, window, tab_id = live_ui
     widget = _Interactive()
-    window.mount_interactive_analysis("tab-1", lambda _env: widget)
+    window.mount_interactive_analysis(tab_id, lambda _env: widget)
 
-    assert window.interactive_presentation("tab-1") == (widget.figure, True)
-    window.discard_interactive_preview("tab-1")
-    assert window.interactive_presentation("tab-1") == (widget.figure, False)
-    window.unmount_interactive_analysis("tab-1")
-    assert window.interactive_presentation("tab-1") is None
+    assert window.interactive_presentation(tab_id) == (widget.figure, True)
+    window.discard_interactive_preview(tab_id)
+    assert window.interactive_presentation(tab_id) == (widget.figure, False)
+    window.unmount_interactive_analysis(tab_id)
+    assert window.interactive_presentation(tab_id) is None
 
 
-def test_interactive_success_restores_committed_figure_in_analysis_pane(qapp) -> None:
-    window, tab, ctrl = _window_with_tab()
+def test_interactive_success_restores_committed_figure_in_analysis_pane(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+) -> None:
+    session, ctrl, window, tab_id = live_ui
+    tab = _tab(window, tab_id)
     widget = _Interactive()
-    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-
-    committed_figure = Figure()
-    ctrl.get_tab_snapshot.return_value = SimpleNamespace(
-        analysis=SimpleNamespace(figures=ready_figures(committed_figure)),
-        capabilities=AdapterCapabilities(analysis=AnalysisMode.FIT),
+    plots = Plots(NonPresentingHost())
+    committed_figure, _axes = plots.subplots("fit")
+    plots.finish(present=False)
+    session.state.update_tab_analyze(
+        tab_id, PaneSummary(), plots, analyze_params_instance=PaneParams()
     )
+    window.refresh_tab_figure(tab_id, ctrl.get_tab_snapshot(tab_id))
+    assert tab.get_current_figure_for_pane("analysis") is committed_figure
+    captured = tab.get_analysis_container()
 
-    window.mount_interactive_analysis("tab-1", lambda _env: widget)
-    window.unmount_interactive_analysis("tab-1", restore_result=True)
+    window.mount_interactive_analysis(tab_id, lambda _env: widget)
+    assert tab.get_current_figure_for_pane("analysis") is widget.figure
+    window.unmount_interactive_analysis(tab_id, restore_result=True)
 
     assert widget.stopped is True
+    assert tab.get_analysis_container() is captured
     assert tab.get_current_figure_for_pane("analysis") is committed_figure
     assert committed_figure is not widget.figure
