@@ -107,7 +107,7 @@ class ContextService:
         global Database selection. Binding errors abort publication. values
         defaults to State's facade and does not change parameter content/version.
         alias_rows supplies the app's session-only default table. On the first
-        nonempty component publication, its empty primary shorthand row gets
+        nonempty cached component snapshot, its empty primary shorthand row gets
         the registry's sole default-focus candidate, or remains empty. Defaults
         never reset on later point changes. An explicit set_alias_rows command,
         even before any point, disables this one-time default initialization.
@@ -128,6 +128,9 @@ class ContextService:
         self._focus = ComponentFocus(None, None, ())
         self._aliases = AliasTable(alias_rows)
         self._aliases_initialized = False
+        parameters = state.session_env.parameters
+        if parameters is not None and not parameters.source_faults:
+            self._initialize_aliases(parameters.document().components)
         if state.session_env.values is not self._values:
             state.set_context(replace(state.session_env, values=self._values))
 

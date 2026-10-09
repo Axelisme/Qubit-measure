@@ -137,6 +137,31 @@ def test_alias_defaults_initialize_once_without_resetting_on_point_changes(
         capture.value("$driver.rate")
 
 
+def test_alias_defaults_use_an_already_published_snapshot_without_binding_assets(
+    context: ContextService,
+    tmp_path: Path,
+) -> None:
+    entry = _entry(tmp_path)
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
+    context.install_entry(entry)
+    context.new_point(_new_request("first"))
+
+    def no_asset_binding(_path: Path) -> WaveformAssetInfo:
+        raise AssertionError("Cached initialization must not reopen assets")
+
+    installed = ContextService(
+        SessionState(context.get_session_env()),
+        BaseEventBus(),
+        bind_assets=no_asset_binding,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+    )
+    assert installed.get_alias_rows()[0] == AliasRow("driver", "Q1")
+    captured = installed.read_alias_context({"driver": RoleSpec("fake/drive/*")})
+    assert captured is not None
+    assert captured.value("$driver.rate") == 4300.0
+
+
 def test_empty_alias_submission_before_a_point_prevents_default_rebinding(
     context: ContextService, tmp_path: Path
 ) -> None:
