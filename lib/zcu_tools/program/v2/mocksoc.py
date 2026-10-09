@@ -4,11 +4,6 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-# Default poll pacing for the white-noise mock path (no SimParams).
-# When a SimParams is attached, its poll_latency field overrides this value.
-# Set to 0 to skip the sleep entirely (avoids the syscall overhead of sleep(0)).
-_DEFAULT_POLL_LATENCY: float = 1e-7
-
 import numpy as np
 from qick import QickConfig
 from qick.asm_v2 import QickProgramV2
@@ -18,8 +13,13 @@ if TYPE_CHECKING:
     from .sim import SimParams
     from .sim.engine import SimEngine
 
+# Default poll pacing for the white-noise mock path (no SimParams).
+# When a SimParams is attached, its poll_latency field overrides this value.
+# Set to 0 to skip the sleep entirely (avoids the syscall overhead of sleep(0)).
+_DEFAULT_POLL_LATENCY: float = 1e-7
 
-def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
+
+def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict[str, object]:
     """Build a minimal but structurally-valid QickConfig dict for testing.
 
     Uses axis_signal_gen_v6 generators (no mixer, HAS_MIXER=False, SAMPS_PER_CLK=16)
@@ -61,7 +61,7 @@ def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
     _RO_F_DDS = _RO_FS / _RO_DECIMATION
     _RO_F_OUTPUT = _RO_FS / (_RO_DECIMATION * 8)
 
-    def _gen(dac: str, ch_idx: int) -> dict:
+    def _gen(dac: str, ch_idx: int) -> dict[str, object]:
         return {
             "type": "axis_signal_gen_v6",
             "dac": dac,
@@ -84,7 +84,7 @@ def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
             "tproc_ch": ch_idx,
         }
 
-    def _readout(adc: str, ch_idx: int) -> dict:
+    def _readout(adc: str, ch_idx: int) -> dict[str, object]:
         return {
             "type": "axis_readout_v2",
             "ro_type": "axis_readout_v2",
