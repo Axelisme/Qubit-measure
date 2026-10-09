@@ -1,16 +1,18 @@
 """Concrete Qt startup uses one fixed native capture and no hardware."""
 
 import json
+import sys
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from pathlib import Path
 from time import monotonic
+from types import TracebackType
 
 import pytest
 from matplotlib.figure import Figure
 from pydantic import JsonValue
-from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
+from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QStackedWidget
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.device import DeviceInfo
 from zcu_tools.device.fake import FakeDeviceInfo
@@ -153,6 +155,40 @@ def run_attachment(
         harness.services.device, "capture_live_native_device_info", lambda: native
     )
     return attachment
+
+
+@pytest.fixture
+def escaped_qt_errors(monkeypatch: pytest.MonkeyPatch) -> list[BaseException]:
+    """Observe Qt's public exception hook without aborting the test process."""
+    errors: list[BaseException] = []
+
+    def record(
+        _kind: type[BaseException],
+        error: BaseException,
+        _traceback: TracebackType | None,
+    ) -> None:
+        errors.append(error)
+
+    monkeypatch.setattr(sys, "excepthook", record)
+    return errors
+
+
+@pytest.fixture
+def settlements(
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[int]:
+    """Record real public settlement calls without replacing their behavior."""
+    _window, harness, _entry = run_attachment
+    tokens: list[int] = []
+    settle = harness.handles.settle
+
+    def record(token: int, outcome: OperationOutcome) -> None:
+        tokens.append(token)
+        settle(token, outcome)
+
+    monkeypatch.setattr(harness.handles, "settle", record)
+    return tokens
 
 
 def test_start_live_read_failure_names_device_before_admission(
@@ -1860,6 +1896,164 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     window.close()
     window.close()
     assert not harness.progress.bars_for_owner("t1-workflow")
+
+
+def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    paused_tuning: list[tuple[int, float, int]],
+    escaped_qt_errors: list[BaseException],
+    settlements: list[int],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    del paused_tuning
+    window, harness, entry = run_attachment
+    controller, panel = window.controller, window.tuning_panel
+    assert panel is not None and controller.engine is not None
+    token = controller.operation_id
+    assert token is not None
+    native = controller.engine.tunables("tuning")
+    accepted = panel.host.accepted_input.data
+    panel.panel.state.write({("guess_us",): 45.0}, panel.host.env)
+    control = panel.panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
+    button = panel.findChild(QPushButton, "workflow.tuning.apply")
+    message = panel.findChild(QLabel, "workflow.tuning.message")
+    assert isinstance(control, QLineEdit) and isinstance(button, QPushButton)
+    assert isinstance(message, QLabel)
+    control.setText("8.00")
+    journal = entry.result_path / "workflows/tuning/journal.jsonl"
+    original = journal.read_bytes()
+    journal.unlink()
+    journal.mkdir()
+    try:
+        button.click()
+    finally:
+        journal.rmdir()
+        journal.write_bytes(original)
+
+    assert escaped_qt_errors == []
+    status = controller.status()
+    assert status is not None and status.lifecycle == "failed"
+    outcome = harness.handles.known_outcome(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error is not None and str(journal) in outcome.error
+    assert str(journal) in message.text() and str(journal) in caplog.text
+    assert any(
+        record.name == "zcu_lab.workflows.gui.tuning_panel"
+        and record.exc_info is not None
+        and isinstance(record.exc_info[1], IsADirectoryError)
+        and record.exc_info[1].filename == str(journal)
+        for record in caplog.records
+    )
+    assert controller.engine.tunables("tuning") == native
+    assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
+    assert panel.panel.state.input.data["guess_us"] == 45.0
+    assert panel.panel.state.input.data["sweep_factor"] == 8.0
+    assert control.text() == "8.00"
+    assert settlements == [token]
+    assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
+    assert not harness.progress.bars_for_owner("t1-workflow")
+    assert window.plan_panel.isEnabled() and not controller.has_pending_segment
+    window.stop("tuning")
+    assert window.close() and window.close()
+    assert settlements == [token] and escaped_qt_errors == []
+
+
+@pytest.mark.parametrize("phase", ["paused", "active"])
+def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+    escaped_qt_errors: list[BaseException],
+    settlements: list[int],
+    caplog: pytest.LogCaptureFixture,
+    phase: str,
+) -> None:
+    window, harness, entry = run_attachment
+
+    @workflow(
+        "close-fault", plan=T1Plan, tunables=T1Tunables, init=lambda _env, _plan: None
+    )
+    def step(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del plan, tun, state
+        env.plots.subplots("live")
+
+        def draw(figure: Figure) -> None:
+            figure.clear()
+            figure.subplots().plot([0, 1], [0, 1])
+
+        env.plots.draw("live", draw)
+        env.pbar("work", 2).refresh()
+        window.pause("close-fault")
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    token = window.start("close-fault")
+    assert isinstance(token, int)
+    harness.complete_segment()
+    controller = window.controller
+    panel = window.tuning_panel
+    stack = next(
+        child
+        for child in window.findChildren(QStackedWidget)
+        if child.parent() is window
+    )
+    message = window.findChild(QLabel, "workflow.run.message")
+    assert isinstance(stack, QStackedWidget) and isinstance(message, QLabel)
+    assert panel is not None and stack.count() == 2
+    canvas = stack.currentWidget()
+    if phase == "active":
+        assert window.resume("close-fault") == token
+    journal = entry.result_path / "workflows/close-fault/journal.jsonl"
+    original = journal.read_bytes()
+    journal.unlink()
+    journal.mkdir()
+    try:
+        # Keep this close rejected so the user can see the native diagnostic.
+        closed = window.close()
+        assert escaped_qt_errors == []
+        assert not closed
+        status = controller.status()
+        assert status is not None and status.lifecycle == "failed"
+        assert str(journal) in message.text() and str(journal) in caplog.text
+        assert any(
+            record.name == "zcu_lab.workflows.gui.window"
+            and record.exc_info is not None
+            and isinstance(record.exc_info[1], IsADirectoryError)
+            and record.exc_info[1].filename == str(journal)
+            for record in caplog.records
+        )
+        if phase == "active":
+            assert controller.has_pending_segment and controller.binding is panel.host
+            assert stack.count() == 2 and stack.currentWidget() is canvas
+            assert not window.plan_panel.isEnabled()
+            assert harness.background.work is not None and harness.gate.snapshot()
+            assert harness.handles.live_count() == 1
+            assert harness.handles.known_outcome(token) is None and settlements == []
+        else:
+            assert not controller.has_pending_segment
+            assert harness.background.work is None
+            assert window.plan_panel.isEnabled() and settlements == [token]
+    finally:
+        journal.rmdir()
+        journal.write_bytes(original)
+
+    if phase == "active":
+        harness.background.execute()
+        assert harness.gate.snapshot() and settlements == []
+        assert stack.count() == 2 and stack.currentWidget() is canvas
+        harness.background.deliver()
+    outcome = harness.handles.known_outcome(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error is not None and str(journal) in outcome.error
+    assert settlements == [token]
+    assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
+    assert not harness.progress.bars_for_owner("t1-workflow")
+    assert not controller.has_pending_segment
+    assert window.close() and window.close()
+    assert stack.count() == 1
+    assert settlements == [token] and escaped_qt_errors == []
 
 
 def test_window_tunables_journal_failure_reraises_the_original_cause(
