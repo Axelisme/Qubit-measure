@@ -203,11 +203,10 @@ class T1WorkflowWindow(QWidget):
         runner: OperationRunner,
         owner: OwnerScheduler,
         progress: ProgressService,
-        parent: QWidget | None = None,
         *,
         on_close: Callable[[], None] | None = None,
     ) -> None:
-        """Build form/plot attachments on the GUI owner with a QApplication.
+        """Build a top-level Window on the GUI owner with a QApplication.
 
         state/services/runner/progress must be the same owning session. The
         progress service is borrowed directly from its composition root, not
@@ -218,13 +217,14 @@ class T1WorkflowWindow(QWidget):
         fallback. Start requires a saved point, native QickConfig and connected
         SoC. setup_dialog is the retained shared Setup instance over this
         session's setup_control. Qubit changes use the existing alias dialog.
-        parent controls Qt lifetime; closing during work requests Stop and keeps
-        the window alive until terminal delivery. Once native work ends, on_close
-        releases composition-owned resources. If it raises, close is rejected
+        The caller retains this top-level Window through shutdown. Closing during
+        work requests Stop and keeps it alive until terminal delivery. Once native
+        work ends, optional on_close releases composition-owned resources on the
+        GUI owner before accepting close. If it raises, close is rejected
         and the error is displayed, so resources remain alive for another attempt.
         No instrument is contacted by construction.
         """
-        super().__init__(parent)
+        super().__init__()
         self._state = state
         self._services = services
         self._runner = runner
