@@ -18,6 +18,9 @@ from zcu_tools.gui.app.measure.remote.handlers.run_save import (
 from zcu_tools.gui.app.measure.remote.handlers.writeback import (
     h_tab_writeback_write,
 )
+from zcu_tools.gui.cfg.resource import CfgId, CfgRef, CfgRevision
+from zcu_tools.gui.remote.errors import RemoteError
+from zcu_tools.gui.session.context_types import CommandOrigin
 
 
 @dataclass
@@ -161,6 +164,40 @@ def test_failed_writeback_view_selection_leaves_draft_untouched():
             },
         )
     adapter.writeback_control.write_writeback_for_pane.assert_not_called()
+
+
+@pytest.mark.parametrize("target", [None, "Q2"])
+def test_run_forwards_one_run_target_without_editing_sources(target):
+    adapter = MagicMock()
+    adapter.render_view = None
+    adapter.run_analyze_control.start_run.return_value = 19
+    params = {"tab_id": "t", "expected": {"cfg_id": "cfg-t", "revision": "0"}}
+    if target is not None:
+        params["target"] = target
+    assert h_tab_run_start(adapter, params) == {"operation_id": 19}
+    adapter.run_analyze_control.start_run.assert_called_once_with(
+        "t",
+        CfgRef(CfgId("cfg-t"), CfgRevision(0)),
+        target=target,
+        origin=CommandOrigin("mcp"),
+    )
+
+
+@pytest.mark.parametrize("target", ["", "   ", 1, []])
+def test_run_rejects_malformed_target_before_operation_or_view_changes(target):
+    adapter = MagicMock()
+    with pytest.raises(RemoteError) as caught:
+        h_tab_run_start(
+            adapter,
+            {
+                "tab_id": "t",
+                "expected": {"cfg_id": "cfg-t", "revision": "0"},
+                "target": target,
+            },
+        )
+    assert caught.value.reason == "invalid_target"
+    adapter.run_analyze_control.start_run.assert_not_called()
+    adapter.render_view.select_tab_pane.assert_not_called()
 
 
 def test_failed_view_selection_does_not_start_an_operation():

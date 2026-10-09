@@ -25,13 +25,22 @@ def h_tab_run_start(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
+    target = params.get("target")
+    if target is not None and (not isinstance(target, str) or not target.strip()):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "target must be a non-empty component name",
+            reason="invalid_target",
+        )
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
         expected = decode_ref(params["expected"])
         follow_tab(adapter, tab_id, "run")
-        operation_id = control.start_run(tab_id, expected, origin=CommandOrigin("mcp"))
+        operation_id = control.start_run(
+            tab_id, expected, target=target, origin=CommandOrigin("mcp")
+        )
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc
     return {"operation_id": operation_id}

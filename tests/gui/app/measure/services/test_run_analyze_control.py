@@ -91,7 +91,9 @@ class RecordingGuard:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def capture_run_inputs(self, tab_id: str, *, expected_revision: int) -> object:
+    def capture_run_inputs(
+        self, tab_id: str, *, expected_revision: int, target: str | None = None
+    ) -> object:
         self._log.add("guard", "capture_run_inputs", tab_id)
         return "run-inputs"
 

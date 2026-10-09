@@ -7,6 +7,7 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     optional_integer,
+    optional_string,
     required_object,
     required_string,
     save_comment,
@@ -19,8 +20,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_run_start",
         MethodSpec(
             5.0,
-            "Start a tab run with the explicitly observed cfg ref, without "
-            "refresh or substitution; use wait(op=handle) for terminal "
+            "Start the observed cfg inputs without ref refresh or substitution. "
+            "Optional target overrides the first declared alias for this Run only, "
+            "resolving its cfg and evidence from the same current source capture; "
+            "global aliases and tab publication do not change. Stale refs and "
+            "unresolvable targets reject admission. Use wait(op=handle) for terminal "
             "status, failure/cancellation and Send & Stop feedback. The GUI "
             "returns an operation_id, which MCP exposes as {handle}; starting "
             "is not completion. After completion, read result state with "
@@ -29,6 +33,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 required_string("tab_id"),
                 required_object("expected", "Observed cfg_id and string revision"),
+                optional_string("target", "Single-Run concrete first-alias override"),
             ),
         ),
         agent=AgentMethodPolicy(

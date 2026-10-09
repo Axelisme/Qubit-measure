@@ -83,9 +83,17 @@ class RunAnalyzeControlPort(Protocol):
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
     def start_run(
-        self, tab_id: str, expected: CfgRef, *, origin: CommandOrigin = _GUI_ORIGIN
+        self,
+        tab_id: str,
+        expected: CfgRef,
+        *,
+        target: str | None = None,
+        origin: CommandOrigin = _GUI_ORIGIN,
     ) -> int:
-        """Start the exact publication; attribute acquired to gui/mcp origin."""
+        """Start observed inputs, optionally overriding the first alias for one Run.
+
+        See RunAnalyzeControlFacet.start_run for guards and terminal semantics.
+        """
         ...
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome: ...
@@ -189,12 +197,23 @@ class RunAnalyzeControlFacet:
         return self._tab.get_snapshot(tab_id)
 
     def start_run(
-        self, tab_id: str, expected: CfgRef, *, origin: CommandOrigin = _GUI_ORIGIN
+        self,
+        tab_id: str,
+        expected: CfgRef,
+        *,
+        target: str | None = None,
+        origin: CommandOrigin = _GUI_ORIGIN,
     ) -> int:
-        """Start tab_id's exact publication and return an asynchronous token.
+        """Start tab_id's observed inputs and return an asynchronous token.
 
         expected is the observed CfgRef; stale refs and unavailable/busy tabs
-        raise before start. origin identifies the initiating gui/mcp frontend for
+        raise before start. target=None accepts the cached Valid publication;
+        a non-empty concrete target temporarily overrides the first declared alias
+        and resolves these inputs against that fixed capture, even if the global
+        publication is Invalid. Target/source errors propagate before admission.
+        Neither global aliases nor cfg inputs/publication change. The accepted
+        values and Run evidence share the same capture. origin identifies the
+        initiating gui/mcp frontend for
         acquired. Native terminal ledger failures settle failed on that token
         with ERROR diagnostics, retaining the published result for Save;
         missing saved-point storage emits a diagnostic instead of an event.
@@ -205,7 +224,7 @@ class RunAnalyzeControlFacet:
         if expected != actual:
             raise CfgStaleError(expected, actual)
         inputs = self._guard.capture_run_inputs(
-            tab_id, expected_revision=expected.revision
+            tab_id, expected_revision=expected.revision, target=target
         )
         self._ensure_tab_idle(tab_id)
         host = self._render_host()

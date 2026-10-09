@@ -683,8 +683,14 @@ class Controller(SessionControllerMixin):
         """Full resource-version snapshot (the resources.versions RPC payload)."""
         return self._state.version.snapshot()
 
-    def start_run(self, tab_id: str, expected: CfgRef) -> int:
-        return self._run_analyze_control.start_run(tab_id, expected)
+    def start_run(
+        self, tab_id: str, expected: CfgRef, *, target: str | None = None
+    ) -> int:
+        """Start observed cfg inputs with an optional single-Run alias override.
+
+        See RunAnalyzeControlFacet.start_run for admission and failure semantics.
+        """
+        return self._run_analyze_control.start_run(tab_id, expected, target=target)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         return self._run_analyze_control.load_tab_result(tab_id, data_path)

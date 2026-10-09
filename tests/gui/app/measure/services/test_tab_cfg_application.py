@@ -16,6 +16,8 @@ from zcu_tools.gui.app.measure.services.app_services import (
     AppServices,
     build_app_services,
 )
+from zcu_tools.gui.app.measure.services.guard import RunInputs
+from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg.model import (
     CfgSchema,
@@ -47,7 +49,13 @@ from zcu_tools.gui.session.events import (
     GateChangedPayload,
 )
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
-from zcu_tools.resources.entry import ComponentSchema, RoleSpec, component_registry
+from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import (
+    ComponentSchema,
+    RoleResolutionError,
+    RoleSpec,
+    component_registry,
+)
 
 from tests.gui.app.measure.remote._helpers import Fixture
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
@@ -434,6 +442,71 @@ def test_run_target_capture_does_not_mutate_global_rows_or_cfg(
         services.guard.capture_run_inputs(
             tab_id, expected_revision=observed.ref.revision, target="Q2"
         )
+
+
+@pytest.mark.parametrize("target,qubit", [(None, "Q1"), ("Q2", "Q2")])
+def test_run_control_delivers_target_capture_to_execution_without_publication_change(
+    global_sources: tuple[AppServices, State],
+    monkeypatch: pytest.MonkeyPatch,
+    target: str | None,
+    qubit: str,
+) -> None:
+    services, state = global_sources
+    tab_id = services.tab.new_tab("global-source")
+    cfg = state.get_tab(tab_id).cfg
+    observed = cfg.observe()
+    rows = services.context.get_alias_rows()
+    admitted: list[RunInputs] = []
+
+    def receive_run(
+        _self: RunService, inputs: RunInputs, *, plots: Plots, origin: CommandOrigin
+    ) -> int:
+        admitted.append(inputs)
+        return 99
+
+    monkeypatch.setattr(RunService, "start_run", receive_run)
+    assert (
+        services.run_analyze_control.start_run(tab_id, observed.ref, target=target)
+        == 99
+    )
+    assert len(admitted) == 1
+    inputs = admitted[0]
+    assert inputs.snapshot is not None
+    assert inputs.snapshot.roles == {"qubit": qubit, "custom": "Q2"}
+    assert inputs.parameters is not None
+    assert inputs.parameters.value("$qubit.gain") == (10.0 if target is None else 20.0)
+    assert inputs.accepted_cfg.ref == observed.ref
+    assert cfg.observe() == observed
+    assert services.context.get_alias_rows() == rows
+    cfg.edit(observed.ref.revision, (CfgEdit(("gain",), 15.0),))
+    with pytest.raises(CfgStaleError):
+        services.run_analyze_control.start_run(tab_id, observed.ref, target=target)
+    assert len(admitted) == 1
+
+
+def test_run_control_rejects_unresolvable_target_before_execution(
+    global_sources: tuple[AppServices, State],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    services, state = global_sources
+    tab_id = services.tab.new_tab("global-source")
+    cfg = state.get_tab(tab_id).cfg
+    observed = cfg.observe()
+    rows = services.context.get_alias_rows()
+    executions: list[RunInputs] = []
+
+    def receive_run(
+        _self: RunService, inputs: RunInputs, *, plots: Plots, origin: CommandOrigin
+    ) -> int:
+        executions.append(inputs)
+        return 99
+
+    monkeypatch.setattr(RunService, "start_run", receive_run)
+    with pytest.raises(RoleResolutionError):
+        services.run_analyze_control.start_run(tab_id, observed.ref, target="missing")
+    assert executions == []
+    assert cfg.observe() == observed
+    assert services.context.get_alias_rows() == rows
 
 
 @pytest.mark.parametrize("fail_submit", [False, True])
