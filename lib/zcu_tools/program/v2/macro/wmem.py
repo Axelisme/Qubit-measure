@@ -122,7 +122,7 @@ class PulseFromRegs(_WaveFromRegs, Pulse):
         self.freq_reg = freq_reg
         self.gain_reg = gain_reg
 
-    def expand(self, prog) -> list[AsmInst]:
+    def expand(self, prog) -> list[Macro]:
         port = int(prog.soccfg["gens"][self.ch]["tproc_ch"])
         return self._expand_wave_from_regs(prog, port)
 
@@ -216,7 +216,7 @@ class ConfigReadoutFromRegs(_WaveFromRegs, ConfigReadout):
         self.freq_reg = freq_reg
         self.gain_reg = None
 
-    def expand(self, prog) -> list[AsmInst]:
+    def expand(self, prog) -> list[Macro]:
         port = int(prog.soccfg["readouts"][self.ch]["tproc_ctrl"])
         return self._expand_wave_from_regs(prog, port)
 
