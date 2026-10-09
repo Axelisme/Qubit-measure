@@ -87,6 +87,7 @@ class WorkflowController[C]:
         self._lock = RLock()
         self._stop_signal = StopSignal()
         self._started = False
+        self._run_id: str | None = None
         self._admitting = False
         self._operation_id: int | None = None
         self._progress_token: int | None = None
@@ -98,6 +99,17 @@ class WorkflowController[C]:
         """Return the accepted native engine, or None before accepted startup."""
         with self._lock:
             return self._engine
+
+    @property
+    def run_id(self) -> str | None:
+        """Read Start's native target, including pending and terminal runs.
+
+        None before Start or after synchronous admission/factory/submit failure.
+        Published before Runner admission notifications; successful submission
+        retains this identity through Pause, Resume and terminal delivery.
+        This is not an operation token or proof of native acceptance.
+        """
+        return self._run_id
 
     @property
     def operation_id(self) -> int | None:
@@ -138,6 +150,8 @@ class WorkflowController[C]:
         registration/factory/submit failures propagate synchronously and leave
         no native run directories. Worker startup failures settle failed with
         their original error passed to on_finished; partial files are retained.
+        identity.run_id is published before Runner notifications; synchronous
+        rejection clears it. Successful submission retains it through terminal.
         Stop before worker startup creates no native run. Stop arriving during
         startup is delivered before execute calls init/step. Terminal is not
         reported until the worker has returned. No retry or hardware cleanup.
@@ -173,7 +187,7 @@ class WorkflowController[C]:
             return engine.execute(status.run_id)
 
         def cancel() -> None:
-            self.stop()
+            self.stop(identity.run_id)
 
         try:
             self._admitting = True
@@ -241,12 +255,14 @@ class WorkflowController[C]:
         engine = self.engine
         return None if engine is None else engine.status()
 
-    def pause(self) -> RunStatus:
-        """Request cooperative Pause on an accepted active segment.
+    def pause(self, run_id: str) -> RunStatus:
+        """Request cooperative Pause of the explicitly targeted active run.
 
-        No accepted run raises RuntimeError. Terminal runs and segments already
-        awaiting owner delivery reject invalid controls with InvalidRunState. Repeated pausing requests
-        follow Engine.pause. The lease stays held until producer return and owner
+        run_id must equal this controller's Start identity. A wrong or absent
+        target raises RunMismatch before any side effect. A matching pending
+        target without native acceptance raises RuntimeError. Terminal runs and
+        segments awaiting owner delivery raise InvalidRunState. Repeated pausing
+        requests follow Engine.pause. The lease stays held until producer return and owner
         delivery; Pause does not discard progress, plots or submitted inputs.
         """
         with self._lock:
@@ -259,13 +275,16 @@ class WorkflowController[C]:
                 "pausing",
             }:
                 raise InvalidRunState("pause", status.lifecycle)
-            return engine.pause(status.run_id)
+            return engine.pause(run_id)
 
-    def resume(self, *, devices: Callable[[], DeviceSnapshot]) -> int:
-        """Submit the paused run again, returning the new segment token.
+    def resume(self, run_id: str, *, devices: Callable[[], DeviceSnapshot]) -> int:
+        """Submit the explicitly targeted paused run, returning its segment token.
 
-        No accepted run raises RuntimeError. Only paused with previous owner
-        delivery complete is admitted; other states raise InvalidRunState.
+        run_id must equal this controller's Start identity. A wrong or absent
+        target raises RunMismatch before lease admission or device capture.
+        A matching target without native acceptance raises RuntimeError. Only
+        paused with previous owner delivery complete is admitted; other states
+        raise InvalidRunState.
         After obtaining the RUN lease, invoke devices once
         on the owner thread to capture current cached native device provenance.
         Engine.resume and execute run on the worker with the original progress
@@ -311,7 +330,7 @@ class WorkflowController[C]:
             return engine.execute(status.run_id)
 
         def cancel() -> None:
-            self.stop()
+            self.stop(run_id)
 
         try:
             self._admitting = True
@@ -345,10 +364,12 @@ class WorkflowController[C]:
                     self._discard_progress()
             raise
 
-    def stop(self) -> RunStatus | None:
-        """Request cooperative Stop without waiting for worker terminal delivery.
+    def stop(self, run_id: str) -> RunStatus | None:
+        """Request Stop of the explicit target without waiting for its worker.
 
-        Before acceptance this cancels pending startup and returns None. After
+        run_id must equal this controller's Start identity. A wrong or absent
+        target raises RunMismatch before StopSignal or any other side effect.
+        A matching target before acceptance cancels startup and returns None. After
         acceptance it delegates to Engine.stop and returns its native status.
         An active segment, including registration before its token is available,
         keeps its lease until worker terminal delivery or synchronous admission
@@ -364,7 +385,7 @@ class WorkflowController[C]:
             status = self._engine.status()
             if status is None:
                 raise RuntimeError("accepted engine has no run status")
-            stopped = self._engine.stop(status.run_id)
+            stopped = self._engine.stop(run_id)
         if (
             status.lifecycle == "paused"
             and not self._admitting

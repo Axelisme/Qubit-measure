@@ -13,6 +13,7 @@ from zcu_tools.experiment.workflows import (
     Done,
     InitEnv,
     InvalidRunState,
+    RunMismatch,
     Step,
     WorkflowEnv,
     workflow,
@@ -104,7 +105,9 @@ def attachment(
     finally:
         if window is not None:
             if harness.background.work is not None:
-                window.stop()
+                controller = window.controller
+                assert controller is not None and controller.operation_id is not None
+                harness.handles.cancel(controller.operation_id)
                 harness.background.execute()
                 harness.background.deliver()
             window.close()
@@ -261,7 +264,7 @@ def test_admission_notification_can_cancel_current_start(
     monkeypatch.setattr(window_module, "t1_fluxdep", observe)
     if previous_start:
         assert isinstance(window.start("previous"), int)
-        window.stop()
+        window.stop("previous")
         harness.background.execute()
         harness.background.deliver()
         assert not harness.gate.snapshot()
@@ -272,7 +275,7 @@ def test_admission_notification_can_cancel_current_start(
         if action == "close":
             close_results.append(window.close())
         else:
-            window.stop()
+            window.stop("notification")
 
     def cancel_on_register(payload: GateChangedPayload) -> None:
         if payload.active:
@@ -372,7 +375,7 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
         bar.set_progress(len(attempts))
         bar.refresh()
         if len(attempts) == 1:
-            window.pause()
+            window.pause("paused")
             yield from env.wait_until(env.started_at)
         return Done()
 
@@ -398,14 +401,19 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
         return capture_native()
 
     monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
-    resumed = window.resume()
-    assert resumed != token
-    assert captures == ["cached devices"]
+    resume_button = window.findChild(QPushButton, "workflow.run.resume")
+    assert resume_button is not None and resume_button.isEnabled()
+    resume_button.click()
+    resumed = controller.operation_id
+    assert resumed is not None and resumed != token and captures == ["cached devices"]
     assert not window.plan_panel.isEnabled()
     harness.complete_segment()
     terminal = controller.status()
-    assert terminal is not None and terminal.lifecycle == "done"
-    assert harness.background.error is None
+    assert (
+        terminal is not None
+        and terminal.lifecycle == "done"
+        and harness.background.error is None
+    )
     assert len(attempts) == 2 and attempts[0] == attempts[1]
     assert len(figures) == 2 and figures[0] == figures[1]
     assert window.plan_panel.isEnabled()
@@ -431,7 +439,7 @@ def test_resume_register_stop_or_close_keeps_window_locked_until_delivery(
         del plan, tun, state
         attempts.append("step")
         env.pbar("work", 2).refresh()
-        window.pause()
+        window.pause("register-window")
         yield from env.wait_until(env.started_at)
         return Done()
 
@@ -448,14 +456,14 @@ def test_resume_register_stop_or_close_keeps_window_locked_until_delivery(
             if action == "close":
                 close_results.append(window.close())
             else:
-                window.stop()
+                window.stop("register-window")
             observations.append(
                 (window.plan_panel.isEnabled(), active_controller.has_pending_segment)
             )
 
     subscription = harness.bus.subscribe(GateChangedPayload, stop_on_register)
     try:
-        window.resume()
+        window.resume("register-window")
     finally:
         subscription.unsubscribe()
     assert observations == [(False, True)]
@@ -495,7 +503,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
         del plan, tun, state
         attempts.append("step")
         env.pbar("work", 2).refresh()
-        window.pause()
+        window.pause("reject-window")
         yield from env.wait_until(env.started_at)
         return Done()
 
@@ -506,7 +514,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     capture_error = ValueError("cached snapshot failed after Stop")
 
     def capture() -> dict[str, DeviceInfo]:
-        window.stop()
+        window.stop("reject-window")
         if failure == "capture":
             raise capture_error
         return capture_native()
@@ -514,7 +522,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
     harness.background.fail_submit = failure == "submit"
     with pytest.raises(ValueError if failure == "capture" else OSError) as raised:
-        window.resume()
+        window.resume("reject-window")
     if failure == "capture":
         assert raised.value is capture_error
     else:
@@ -554,7 +562,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     ) -> Step[None, int]:
         del plan, tun, state
         env.pbar("work", 2).refresh()
-        window.pause()
+        window.pause("paused-stop")
         yield from env.wait_until(env.started_at)
         return Done()
 
@@ -577,7 +585,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     if action == "close":
         assert window.close()
     else:
-        status = window.stop()
+        status = window.stop("paused-stop")
         assert status is not None and status.lifecycle == "stopped"
         assert window.plan_panel.isEnabled() and start.isEnabled()
         assert not pause.isEnabled() and not resume.isEnabled()
@@ -588,3 +596,108 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     assert harness.background.work is None
     assert not harness.gate.snapshot()
     assert harness.progress.bars_for_owner("t1-workflow") == ()
+
+
+@pytest.mark.parametrize("command", ["pause", "resume", "stop"])
+def test_window_without_run_rejects_explicit_target(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    command: str,
+) -> None:
+    window, harness, _entry = attachment
+    commands: dict[str, Callable[[], object]] = {
+        "pause": lambda: window.pause("old"),
+        "resume": lambda: window.resume("old"),
+        "stop": lambda: window.stop("old"),
+    }
+    with pytest.raises(RunMismatch) as raised:
+        commands[command]()
+    assert (raised.value.expected, raised.value.actual) == ("old", None)
+    stop_button = window.findChild(QPushButton, "workflow.run.stop")
+    assert stop_button is not None
+    stop_button.click()
+    assert window.controller is None and harness.background.work is None
+    assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
+
+
+@pytest.mark.parametrize("phase", ["pending", "paused"])
+def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    window, harness, entry = attachment
+    attempts: list[str] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("replacement-target", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated],
+        plan: T1Plan,
+        tun: T1Tunables,
+        state: None,
+    ) -> Step[None, int]:
+        del plan, tun, state
+        attempts.append("step")
+        env.plots.subplots("live")
+        env.pbar("work", 2).refresh()
+        window.pause("run-B")
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    assert isinstance(window.start("run-A"), int)
+    window.stop("run-A")
+    harness.complete_segment()
+    token = window.start("run-B")
+    assert isinstance(token, int)
+    controller = window.controller
+    assert controller is not None and controller.run_id == "run-B"
+    if phase == "paused":
+        harness.complete_segment()
+        assert harness.background.error is None
+    status = controller.status()
+    gate = harness.gate.snapshot()
+    bars = harness.progress.bars_for_owner("t1-workflow")
+    tuning = window.tuning_panel
+    captures: list[str] = []
+    original_capture = harness.services.device.capture_native_device_info
+
+    def capture() -> dict[str, DeviceInfo]:
+        captures.append("devices")
+        return original_capture()
+
+    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
+    for invoke in (
+        lambda: window.pause("run-A"),
+        lambda: window.resume("run-A"),
+        lambda: window.stop("run-A"),
+    ):
+        with pytest.raises(RunMismatch) as raised:
+            invoke()
+        assert (raised.value.expected, raised.value.actual) == ("run-A", "run-B")
+        assert controller.status() == status
+        assert (
+            harness.gate.snapshot(),
+            harness.progress.bars_for_owner("t1-workflow"),
+        ) == (gate, bars)
+        assert (
+            window.tuning_panel,
+            window.plan_panel.isEnabled(),
+            window.tunables_panel.isEnabled(),
+        ) == (tuning, False, False)
+    assert captures == [] and attempts == ([] if phase == "pending" else ["step"])
+    stop_button = window.findChild(QPushButton, "workflow.run.stop")
+    assert stop_button is not None
+    stop_button.click()
+    if phase == "pending":
+        assert harness.gate.snapshot()
+        harness.complete_segment()
+        assert not (entry.result_path / "workflows/run-B").exists()
+    else:
+        stopped = controller.status()
+        assert stopped is not None and stopped.lifecycle == "stopped"
+    assert controller.run_id == "run-B" and window.plan_panel.isEnabled()
+    assert harness.progress.bars_for_owner("t1-workflow") == ()
+    assert not harness.gate.snapshot() and harness.handles.live_count() == 0

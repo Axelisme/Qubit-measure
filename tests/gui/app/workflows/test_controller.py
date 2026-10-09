@@ -14,6 +14,7 @@ from zcu_tools.experiment.workflows import (
     EnginePorts,
     InvalidRunState,
     RunIdentity,
+    RunMismatch,
     RunStatus,
     Step,
     TunableChange,
@@ -113,6 +114,7 @@ def test_submit_is_pending_until_worker_accepts_and_owner_releases_lease(
         identity=identity(),
     )
     assert controller.operation_id == token
+    assert controller.run_id == "run"
     assert controller.engine is controller.status() is None
     assert not rig.paths.metadata_root.exists()
     assert harness.handles.live_count() == 1
@@ -145,11 +147,35 @@ def test_submit_is_pending_until_worker_accepts_and_owner_releases_lease(
     assert not rig.bars
 
 
-def test_submit_failure_has_no_native_artifacts_or_lease(tmp_path: Path) -> None:
+@pytest.mark.parametrize("failure", ["lease", "factory", "submit"])
+def test_submit_failure_has_no_native_artifacts_or_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
-    harness.background.fail_submit = True
     controller = create_controller(harness, rig, lambda _status, _error: None)
-    with pytest.raises(OSError, match="submit failed"):
+
+    def reject_factory(_token: int, _owner: str) -> BoundProgressFactory:
+        raise OSError("factory failed")
+
+    if failure == "lease":
+        harness.gate.register(
+            999,
+            "device_setup",
+            owner_id="flux",
+            origin_kind=harness.bus.current_origin.kind,
+            note="device setup owns hardware",
+            resource_id="flux",
+        )
+        expected = OperationConflictError
+    elif failure == "factory":
+        monkeypatch.setattr(harness.progress, "make_factory", reject_factory)
+        expected = OSError
+    else:
+        harness.background.fail_submit = True
+        expected = OSError
+    with pytest.raises(expected):
         controller.start(
             declare(rig),
             plan=Plan(),
@@ -158,8 +184,11 @@ def test_submit_failure_has_no_native_artifacts_or_lease(tmp_path: Path) -> None
             identity=identity(),
         )
     assert controller.status() is None
+    assert controller.run_id is None
     assert controller.operation_id is None
     assert harness.handles.live_count() == 0
+    if failure == "lease":
+        harness.gate.release(999)
     assert not harness.gate.snapshot()
     assert not rig.paths.metadata_root.exists()
     assert not rig.paths.data_root.exists()
@@ -179,7 +208,7 @@ def test_stop_before_worker_acceptance_does_not_start_run(tmp_path: Path) -> Non
         identity=identity(),
     )
     harness.handles.cancel(token)
-    assert controller.stop() is None
+    assert controller.stop("run") is None
     assert harness.gate.snapshot()
     harness.background.execute()
     assert harness.gate.snapshot()
@@ -231,7 +260,7 @@ def test_stop_during_start_is_settled_before_init_and_step(tmp_path: Path) -> No
             nonlocal requested
             if not requested:
                 requested = True
-                controller.stop()
+                controller.stop("run")
             return super().now()
 
     ports = EnginePorts(rig.plots, rig.progress, StoppingClock(), context=7)
@@ -353,7 +382,7 @@ def test_native_execution_is_off_owner_and_terminal_delivery_returns_to_owner(
         assert harness.handles.known_outcome(token) == OperationOutcome("finished")
         assert not harness.gate.snapshot()
     finally:
-        controller.stop()
+        controller.stop("run")
         assert background.quiesce(timeout=5.0)
 
 
@@ -399,7 +428,7 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
         bar.set_progress(len(attempts))
         bar.refresh()
         if len(attempts) < 3:
-            controller.pause()
+            controller.pause("run")
             yield from env.wait_until(env.started_at)
         return Done()
 
@@ -415,7 +444,7 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
     handle, model = bars[0]
     assert model.n == 1
     with pytest.raises(InvalidRunState):
-        controller.resume(devices=lambda: DeviceSnapshot({}))
+        controller.resume("run", devices=lambda: DeviceSnapshot({}))
     harness.background.deliver()
     assert not harness.gate.snapshot()
     assert harness.progress.bars_for_owner("example") == bars
@@ -433,7 +462,7 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
         assert get_ident() == owner_thread
         return DeviceSnapshot({})
 
-    second = controller.resume(devices=capture)
+    second = controller.resume("run", devices=capture)
     assert second != token
     harness.background.execute()
     harness.owner.pump_all()
@@ -442,7 +471,7 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
     harness.background.deliver()
     assert progress_calls == ([token], [])
 
-    third = controller.resume(devices=capture)
+    third = controller.resume("run", devices=capture)
     harness.complete_segment()
     terminal = controller.status()
     assert terminal is not None and terminal.lifecycle == "done"
@@ -475,7 +504,7 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
         attempts += 1
         env.pbar("work", 2).refresh()
         if attempts == 1:
-            controller.pause()
+            controller.pause("run")
             yield from env.wait_until(env.started_at)
         raise ValueError("resumed workflow failed")
 
@@ -487,14 +516,14 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
     harness.background.deliver()
     assert harness.progress.bars_for_owner("example")
     if ending == "stop":
-        status = controller.stop()
+        status = controller.stop("run")
         assert status is not None and status.lifecycle == "stopped"
         assert attempts == 1
         assert len(finished) == 2 and finished[-1] == (status, None)
-        controller.stop()
+        controller.stop("run")
         assert len(finished) == 2
     else:
-        resumed = controller.resume(devices=lambda: DeviceSnapshot({}))
+        resumed = controller.resume("run", devices=lambda: DeviceSnapshot({}))
         harness.background.execute()
         harness.owner.pump_all()
         harness.background.deliver()
@@ -530,7 +559,7 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
         attempts += 1
         env.pbar("work", 2).refresh()
         if attempts == 1:
-            controller.pause()
+            controller.pause("run")
             yield from env.wait_until(env.started_at)
         return Done()
 
@@ -568,7 +597,7 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
         expected = ValueError
     try:
         with pytest.raises(expected):
-            controller.resume(devices=capture)
+            controller.resume("run", devices=capture)
         assert controller.status() == before
         assert controller.operation_id is None
         assert harness.handles.live_count() == 0
@@ -579,7 +608,7 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
         if failure == "lease":
             harness.gate.release(999)
         harness.background.fail_submit = False
-    resumed = controller.resume(devices=lambda: DeviceSnapshot({}))
+    resumed = controller.resume("run", devices=lambda: DeviceSnapshot({}))
     harness.background.execute()
     harness.background.deliver()
     assert harness.handles.known_outcome(resumed) == OperationOutcome("finished")
@@ -601,7 +630,7 @@ def test_stop_during_resume_capture_does_not_restart_paused_step(
         del plan, tun, state
         attempts.append("step")
         env.pbar("work", 2).refresh()
-        controller.pause()
+        controller.pause("run")
         yield from env.wait_until(env.started_at)
         return Done()
 
@@ -613,10 +642,10 @@ def test_stop_during_resume_capture_does_not_restart_paused_step(
     harness.background.deliver()
 
     def capture() -> DeviceSnapshot:
-        controller.stop()
+        controller.stop("run")
         return DeviceSnapshot({})
 
-    resumed = controller.resume(devices=capture)
+    resumed = controller.resume("run", devices=capture)
     assert harness.gate.snapshot()
     harness.background.execute()
     harness.background.deliver()
@@ -646,7 +675,7 @@ def test_resume_register_stop_waits_for_owner_terminal_delivery(
         del plan, tun, state
         attempts.append("step")
         env.pbar("work", 2).refresh()
-        controller.pause()
+        controller.pause("run")
         yield from env.wait_until(env.started_at)
         return Done()
 
@@ -660,7 +689,7 @@ def test_resume_register_stop_waits_for_owner_terminal_delivery(
 
     def stop_on_register(payload: GateChangedPayload) -> None:
         if payload.active:
-            controller.stop()
+            controller.stop("run")
             notifications.append(
                 (
                     len(finished),
@@ -671,7 +700,7 @@ def test_resume_register_stop_waits_for_owner_terminal_delivery(
 
     subscription = harness.bus.subscribe(GateChangedPayload, stop_on_register)
     try:
-        resumed = controller.resume(devices=lambda: DeviceSnapshot({}))
+        resumed = controller.resume("run", devices=lambda: DeviceSnapshot({}))
     finally:
         subscription.unsubscribe()
     assert notifications == [(1, True, True)]
@@ -687,7 +716,7 @@ def test_resume_register_stop_waits_for_owner_terminal_delivery(
     assert progress_calls == ([token], [token])
     assert harness.handles.known_outcome(resumed) == OperationOutcome("cancelled")
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
-    controller.stop()
+    controller.stop("run")
     assert len(finished) == 2
 
 
@@ -711,7 +740,7 @@ def test_resume_stop_rejection_finishes_without_a_producer(
         del plan, tun, state
         attempts.append("step")
         env.pbar("work", 2).refresh()
-        controller.pause()
+        controller.pause("run")
         yield from env.wait_until(env.started_at)
         return Done()
 
@@ -722,14 +751,14 @@ def test_resume_stop_rejection_finishes_without_a_producer(
     capture_error = ValueError("cached snapshot failed after Stop")
 
     def capture() -> DeviceSnapshot:
-        controller.stop()
+        controller.stop("run")
         if failure == "capture":
             raise capture_error
         return DeviceSnapshot({})
 
     harness.background.fail_submit = failure == "submit"
     with pytest.raises(ValueError if failure == "capture" else OSError) as raised:
-        controller.resume(devices=capture)
+        controller.resume("run", devices=capture)
     if failure == "capture":
         assert raised.value is capture_error
     else:
@@ -743,7 +772,7 @@ def test_resume_stop_rejection_finishes_without_a_producer(
     assert controller.operation_id is None and harness.handles.live_count() == 0
     assert not harness.gate.snapshot() and harness.background.work is None
     assert attempts == ["step"]
-    controller.stop()
+    controller.stop("run")
     assert len(finished) == 2 and progress_calls == ([token], [token])
 
 
@@ -752,10 +781,6 @@ def test_pause_resume_reject_pending_start_without_accepting_native_run(
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     controller = create_controller(harness, rig, lambda _status, _error: None)
-    with pytest.raises(RuntimeError, match="accepted"):
-        controller.pause()
-    with pytest.raises(RuntimeError, match="paused"):
-        controller.resume(devices=lambda: DeviceSnapshot({}))
     controller.start(
         declare(rig),
         plan=Plan(),
@@ -764,11 +789,189 @@ def test_pause_resume_reject_pending_start_without_accepting_native_run(
         identity=identity(),
     )
     with pytest.raises(RuntimeError, match="accepted"):
-        controller.pause()
+        controller.pause("run")
     with pytest.raises(RuntimeError, match="paused"):
-        controller.resume(devices=lambda: DeviceSnapshot({}))
+        controller.resume("run", devices=lambda: DeviceSnapshot({}))
     assert not rig.paths.metadata_root.exists()
-    controller.stop()
-    harness.background.execute()
-    harness.background.deliver()
+    controller.stop("run")
+    harness.complete_segment()
+    assert controller.run_id == "run"
     assert not harness.gate.snapshot()
+
+
+@pytest.mark.parametrize("command", ["pause", "resume", "stop"])
+def test_control_without_attached_target_rejects_before_side_effects(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    finished: list[tuple[RunStatus | None, Exception | None]] = []
+    controller = create_controller(
+        harness, rig, lambda status, error: finished.append((status, error))
+    )
+    captured: list[str] = []
+
+    def capture() -> DeviceSnapshot:
+        captured.append("devices")
+        return DeviceSnapshot({})
+
+    assert controller.run_id is None
+    commands: dict[str, Callable[[], object]] = {
+        "pause": lambda: controller.pause("old"),
+        "resume": lambda: controller.resume("old", devices=capture),
+        "stop": lambda: controller.stop("old"),
+    }
+    with pytest.raises(RunMismatch) as raised:
+        commands[command]()
+    assert (raised.value.expected, raised.value.actual) == ("old", None)
+    assert captured == finished == []
+    assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
+    # A rejected unattached Stop must not poison the next real Start.
+    controller.start(
+        declare(rig),
+        plan=Plan(),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=identity(),
+    )
+    harness.complete_segment()
+    status = controller.status()
+    assert status is not None and status.lifecycle == "done"
+
+
+@pytest.mark.parametrize("notification", ["gate", "progress"])
+def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
+    tmp_path: Path,
+    notification: str,
+    progress_calls: tuple[list[int], list[int]],
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    finished: list[tuple[RunStatus | None, Exception | None]] = []
+    controller = create_controller(
+        harness, rig, lambda status, error: finished.append((status, error))
+    )
+    seen: list[str | None] = []
+    captured: list[str] = []
+
+    def capture() -> DeviceSnapshot:
+        captured.append("devices")
+        return DeviceSnapshot({})
+
+    def notified() -> None:
+        seen.append(controller.run_id)
+        for invoke in (
+            lambda: controller.pause("old"),
+            lambda: controller.resume("old", devices=capture),
+            lambda: controller.stop("old"),
+        ):
+            with pytest.raises(RunMismatch) as raised:
+                invoke()
+            assert (raised.value.expected, raised.value.actual) == ("old", "run")
+        assert controller.status() is None and finished == []
+        assert harness.gate.snapshot()
+        assert progress_calls[1] == []
+
+    def registered(payload: GateChangedPayload) -> None:
+        if payload.active:
+            notified()
+
+    if notification == "gate":
+        detach = harness.bus.subscribe(GateChangedPayload, registered).unsubscribe
+    else:
+        detach = harness.progress.attach_by_owner("example", notified)
+    try:
+        token = controller.start(
+            declare(rig),
+            plan=Plan(),
+            tunables=Tunables(),
+            paths=rig.paths,
+            identity=identity(),
+        )
+    finally:
+        detach()
+    assert seen == ["run"] and captured == []
+    assert not rig.paths.metadata_root.exists()
+    assert not rig.paths.data_root.exists()
+    assert controller.stop("run") is None
+    assert progress_calls == ([token], [])
+    harness.complete_segment()
+    assert finished == [(None, None)]
+    assert harness.handles.known_outcome(token) == OperationOutcome("cancelled")
+    assert controller.run_id == "run"
+    assert progress_calls == ([token], [token])
+
+
+@pytest.mark.parametrize("phase", ["running", "pausing", "paused"])
+def test_accepted_old_controls_preserve_native_state_progress_and_capture(
+    tmp_path: Path,
+    phase: str,
+    progress_calls: tuple[list[int], list[int]],
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    finished: list[tuple[RunStatus | None, Exception | None]] = []
+    controller = create_controller(
+        harness, rig, lambda status, error: finished.append((status, error))
+    )
+    captured: list[str] = []
+    checked: list[str] = []
+
+    def capture() -> DeviceSnapshot:
+        captured.append("devices")
+        return DeviceSnapshot({})
+
+    def reject_old_controls() -> None:
+        before = controller.status()
+        assert before is not None and before.lifecycle == phase
+        gate = harness.gate.snapshot()
+        bars = harness.progress.bars_for_owner("example")
+        events = rig.events()
+        for invoke in (
+            lambda: controller.pause("old"),
+            lambda: controller.resume("old", devices=capture),
+            lambda: controller.stop("old"),
+        ):
+            with pytest.raises(RunMismatch) as raised:
+                invoke()
+            assert (raised.value.expected, raised.value.actual) == ("old", "run")
+            assert controller.status() == before
+            assert harness.gate.snapshot() == gate
+            assert harness.progress.bars_for_owner("example") == bars
+            assert rig.events() == events
+        assert captured == [] and progress_calls[1] == []
+        checked.append(phase)
+
+    @workflow("target-controls", plan=Plan, tunables=Tunables, init=rig.init)
+    def step(
+        env: WorkflowEnv[int],
+        plan: Plan,
+        tun: Tunables,
+        state: State,
+    ) -> Step[State, int]:
+        del plan, tun, state
+        env.pbar("work", 2).refresh()
+        if phase == "pausing":
+            controller.pause("run")
+        if phase != "paused":
+            reject_old_controls()
+        controller.pause("run")
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    token = controller.start(
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=identity(),
+    )
+    harness.complete_segment()
+    assert harness.background.error is None
+    if phase == "paused":
+        reject_old_controls()
+    assert checked == [phase]
+    assert controller.run_id == "run"
+    stopped = controller.stop("run")
+    assert stopped is not None and stopped.lifecycle == "stopped"
+    assert progress_calls == ([token], [token])
+    assert not harness.gate.snapshot()
+    assert harness.progress.bars_for_owner("example") == ()

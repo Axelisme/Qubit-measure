@@ -18,6 +18,7 @@ from zcu_tools.experiment.workflows import (
     EnginePorts,
     InvalidRunState,
     RunIdentity,
+    RunMismatch,
     RunPaths,
     RunStatus,
 )
@@ -121,7 +122,7 @@ class T1WorkflowWindow(QWidget):
         self._resume_button.clicked.connect(self._resume_clicked)
         stop_button = QPushButton("Stop", self)
         stop_button.setObjectName("workflow.run.stop")
-        stop_button.clicked.connect(self.stop)
+        stop_button.clicked.connect(self._stop_clicked)
 
         stack = QStackedWidget(self)
         placeholder = QLabel("Workflow plots", stack)
@@ -276,37 +277,46 @@ class T1WorkflowWindow(QWidget):
         self._poll.start()
         return token
 
-    def pause(self) -> RunStatus:
-        """Request Pause of the accepted run without unlocking plan or plots.
+    def pause(self, run_id: str) -> RunStatus:
+        """Request Pause of the explicit native target, retaining plan and plots.
 
-        No accepted run raises RuntimeError; illegal native states raise
-        InvalidRunState. The
-        lease remains held until the worker returns and owner delivery settles.
+        run_id is the identity passed to Start. Controller rejects a wrong or
+        absent target with RunMismatch before side effects. A matching pending
+        target raises RuntimeError; illegal native states raise InvalidRunState.
+        The lease remains held until worker return and owner delivery.
         """
         if self.controller is None:
-            raise RuntimeError("Pause requires an accepted workflow run")
-        return self.controller.pause()
+            raise RunMismatch(run_id, None)
+        return self.controller.pause(run_id)
 
-    def resume(self) -> int:
-        """Reacquire the RUN lease and submit the same paused T1 run.
+    def resume(self, run_id: str) -> int:
+        """Reacquire the RUN lease and submit the explicitly targeted paused run.
 
-        Capture only current cached device data after lease admission. Plan,
-        context, roles, accepted expressions and plots stay fixed. Return the
-        pending segment token, not proof of native Resume. No accepted run raises
-        RuntimeError; illegal native states raise InvalidRunState. Other
-        capture/submission errors propagate without retry or live hardware reads.
+        run_id is the identity passed to Start. Controller rejects a wrong or
+        absent target with RunMismatch before lease admission or cached device
+        capture. A matching pending target raises RuntimeError; illegal native
+        states raise InvalidRunState. Plan, context, roles, expressions and plots
+        stay fixed. Return the pending segment token, not native acceptance.
+        Capture/submission errors propagate without retry or live hardware reads.
         """
         if self.controller is None:
-            raise RuntimeError("Resume requires a paused workflow run")
+            raise RunMismatch(run_id, None)
         return self.controller.resume(
+            run_id,
             devices=lambda: DeviceSnapshot(
                 self._services.device.capture_native_device_info()
-            )
+            ),
         )
 
-    def stop(self) -> RunStatus | None:
-        """Request Stop; return native status or None before accepted startup."""
-        return None if self.controller is None else self.controller.stop()
+    def stop(self, run_id: str) -> RunStatus | None:
+        """Request Stop of Start's explicit native target without waiting.
+
+        Controller rejects a wrong or absent target with RunMismatch before side
+        effects. Return native status, or None for a matching pending startup.
+        """
+        if self.controller is None:
+            raise RunMismatch(run_id, None)
+        return self.controller.stop(run_id)
 
     def _refresh_run(self) -> None:
         controller = self.controller
@@ -360,17 +370,34 @@ class T1WorkflowWindow(QWidget):
             self._plots.finish()
 
     def _pause_clicked(self) -> None:
+        run_id = None if self.controller is None else self.controller.run_id
+        if run_id is None:
+            return
         try:
-            self.pause()
+            self.pause(run_id)
         except Exception as error:
             logger.exception("T1 workflow Pause failed")
             self._message.setText(str(error))
 
     def _resume_clicked(self) -> None:
+        run_id = None if self.controller is None else self.controller.run_id
+        if run_id is None:
+            return
         try:
-            self.resume()
+            self.resume(run_id)
         except Exception as error:
             logger.exception("T1 workflow Resume failed")
+            self._message.setText(str(error))
+
+    def _stop_clicked(self) -> None:
+        # Qt clicked(bool) is not a run target; use the Controller's native ID.
+        run_id = None if self.controller is None else self.controller.run_id
+        if run_id is None:
+            return
+        try:
+            self.stop(run_id)
+        except Exception as error:
+            logger.exception("T1 workflow Stop failed")
             self._message.setText(str(error))
 
     def _start_clicked(self) -> None:
@@ -385,18 +412,24 @@ class T1WorkflowWindow(QWidget):
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         """Keep producer/canvas alive during Stop; release only after terminal."""
+        run_id = None if self.controller is None else self.controller.run_id
         if self.controller is not None and (
             self.controller.has_pending_segment
             or self.controller.operation_id is not None
         ):
-            self.stop()
+            if run_id is not None:
+                self.stop(run_id)
             if a0 is not None:
                 a0.ignore()
             return
         if self.controller is not None:
             status = self.controller.status()
-            if status is not None and status.lifecycle == "paused":
-                self.stop()
+            if (
+                status is not None
+                and status.lifecycle == "paused"
+                and run_id is not None
+            ):
+                self.stop(run_id)
         self._poll.stop()
         if self._plots is not None:
             self._plots.release()
