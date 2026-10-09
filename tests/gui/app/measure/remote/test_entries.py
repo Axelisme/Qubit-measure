@@ -14,6 +14,7 @@ def test_empty_entry_queries_and_explicit_new_publish_draft(
     application: PointApplication, tmp_path: Path
 ) -> None:
     assert application.result("entry.info", {}) == {"entry": None}
+    (tmp_path / "result").mkdir()
     assert application.result("entry.list", {}) == {"entries": []}
     reply = application.result("entry.new", {"name": "cooldown-A"})
     info = application.controller.setup_control.get_entry_info()
@@ -124,3 +125,22 @@ def test_new_install_failure_keeps_created_entry_for_open_recovery(
     opened = application.result("entry.open", {"name": "retained"})
     assert opened["entry_id"] == retained.entry_id
     assert application.state.session_env.readiness == ContextReadiness.DRAFT
+
+
+def test_discovery_io_error_is_not_reported_as_cached_success(
+    application: PointApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened = application.result("entry.new", {"name": "first"})
+    assert application.result("entry.list", {}) == {"entries": ["first"]}
+
+    def failed_discovery(*, result_root: Path) -> tuple[str, ...]:
+        raise OSError("entry discovery unavailable")
+
+    monkeypatch.setattr(ResultEntry, "list_names", staticmethod(failed_discovery))
+    failed = application.rpc("entry.list", {})
+    assert failed["ok"] is False
+    error = failed["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "controller_error"
+    assert error["message"] == "entry discovery unavailable"
+    assert application.result("entry.info", {}) == {"entry": opened}

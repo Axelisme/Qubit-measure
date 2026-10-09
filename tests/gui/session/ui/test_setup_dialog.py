@@ -353,3 +353,16 @@ def test_entry_cancel_new_keeps_binding(
     entry_button(dialog, "New entry…").click()
     assert controller.setup_control.get_entry_info() == before
     assert state.session_env.readiness == ContextReadiness.DRAFT
+
+
+def test_entry_owner_switch_updates_visible_identity_and_paths(
+    entry_dialog: tuple[SetupDialog, Controller, State],
+) -> None:
+    dialog, controller, state = entry_dialog
+    info = controller.setup_control.new_entry(EntryRequest("external"))
+    assert entry_selector(dialog).currentText() == info.name
+    labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
+    assert str(info.result_path) in labels
+    assert str(info.database_path) in labels
+    assert state.session_env.readiness == ContextReadiness.DRAFT
+    assert state.session_env.soc is None

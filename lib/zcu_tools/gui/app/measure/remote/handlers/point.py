@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
+    EntryInfo,
+    EntryRequest,
     PointBindingError,
     PointCreateRequest,
     PointUseRequest,
@@ -45,7 +47,7 @@ def h_entry_list(
 
     params is empty. Owner discovery/schema/I/O failures propagate.
     """
-    raise NotImplementedError("entry.list wiring")
+    return {"entries": list(adapter.ctrl.setup_control.list_entries(refresh=True))}
 
 
 def h_entry_info(
@@ -56,7 +58,8 @@ def h_entry_info(
     params is empty. Paths are absolute owner roots converted to strings.
     This metadata-only read establishes no full-context observation.
     """
-    raise NotImplementedError("entry.info wiring")
+    info = adapter.ctrl.setup_control.get_entry_info()
+    return {"entry": _entry_projection(info) if info is not None else None}
 
 
 def h_entry_new(
@@ -69,7 +72,11 @@ def h_entry_new(
     the prior binding. Post-creation installation failure retains the entry and
     names Open as recovery; never retry or delete it. No hardware side effects.
     """
-    raise NotImplementedError("entry.new wiring")
+    name = params.get("name")
+    if not isinstance(name, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'name' must be a string")
+    info = adapter.ctrl.setup_control.new_entry(EntryRequest(name))
+    return _entry_projection(info)
 
 
 def h_entry_open(
@@ -81,7 +88,20 @@ def h_entry_open(
     raise INVALID_PARAMS. Owner invalid/missing/I/O/install errors propagate and
     preserve the prior binding. Never creates resources or touches hardware.
     """
-    raise NotImplementedError("entry.open wiring")
+    name = params.get("name")
+    if not isinstance(name, str):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'name' must be a string")
+    info = adapter.ctrl.setup_control.open_entry(EntryRequest(name))
+    return _entry_projection(info)
+
+
+def _entry_projection(info: EntryInfo) -> PointEntry:
+    return {
+        "entry_id": info.entry_id,
+        "name": info.name,
+        "result_path": str(info.result_path),
+        "database_path": str(info.database_path),
+    }
 
 
 class PointSummary(TypedDict):
@@ -123,12 +143,7 @@ def h_point_list(
     points = adapter.context_control.list_points(refresh=True)
     entry: PointEntry | None = None
     if info is not None:
-        entry = {
-            "entry_id": info.entry_id,
-            "name": info.name,
-            "result_path": str(info.result_path),
-            "database_path": str(info.database_path),
-        }
+        entry = _entry_projection(info)
     return {
         "entry": entry,
         "points": [
