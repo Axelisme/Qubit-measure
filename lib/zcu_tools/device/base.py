@@ -140,7 +140,7 @@ def device_operation(method: Callable[..., T_Return]) -> Callable[..., T_Return]
             self._op_depth -= 1
             self._op_lock.release()
 
-    return cast(Callable[..., T_Return], wrapper)
+    return wrapper
 
 
 class BaseDevice(ABC, Generic[T_DeviceInfo]):

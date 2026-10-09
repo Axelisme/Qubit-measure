@@ -120,9 +120,10 @@ class AxesSpec(Generic[T_Result, T_Config]):
     def __post_init__(self) -> None:
         _validate_cfg_schema_version(self.cfg_schema_version)
         # Fast-Fail at declaration time: the spec must reference real Result fields.
-        if not is_dataclass(self.result_type):
-            raise TypeError(f"result_type {self.result_type!r} must be a dataclass")
-        result_fields = {f.name for f in fields(self.result_type)}  # type: ignore[arg-type]
+        result_type = self.result_type
+        if not is_dataclass(result_type):
+            raise TypeError(f"result_type {result_type!r} must be a dataclass")
+        result_fields = {f.name for f in fields(result_type)}
         declared = {ax.field_name for ax in self.axes} | {self.z.field_name}
         missing = declared - result_fields
         if missing:
@@ -445,9 +446,10 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
         _validate_cfg_schema_version(self.cfg_schema_version)
         if not self.variables:
             raise ValueError("GroupedAxesSpec requires at least one variable")
-        if not is_dataclass(self.result_type):
-            raise TypeError(f"result_type {self.result_type!r} must be a dataclass")
-        result_fields = {f.name for f in fields(self.result_type)}  # type: ignore[arg-type]
+        result_type = self.result_type
+        if not is_dataclass(result_type):
+            raise TypeError(f"result_type {result_type!r} must be a dataclass")
+        result_fields = {f.name for f in fields(result_type)}
 
         seen: set[DataVariable] = set()
         for variable in self.variables:
