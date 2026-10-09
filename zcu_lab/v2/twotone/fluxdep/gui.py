@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
@@ -8,6 +8,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickState,
     fold_initial_lines,
 )
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -120,7 +121,11 @@ class FluxDepAdapter(
     )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> FluxDepRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FreqFluxExp().run(cfg, context=context)
@@ -231,7 +236,9 @@ class FluxDepAdapter(
             ),
         ]
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqFluxCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> FreqFluxCfg:
         cfg_raw = dict(raw_cfg)
         dev_raw = cfg_raw.pop("dev")
         if not isinstance(dev_raw, dict):
