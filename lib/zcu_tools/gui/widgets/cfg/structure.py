@@ -343,38 +343,8 @@ class TreeCfgWidget(QWidget):
     def _find_section_field(self, path: str) -> SectionField | None:
         if path == self._path or path == "":
             return self._field
-        # path is like "modules.readout" where readout is ReferenceField with sub_field
-        # We only consider true SectionField targets.
-        parts = path.split(".") if path else []
-        # Determine root traversal start: if self._path is not empty, we need to strip prefix
-        # But we usually call with full dotted path matching root path prefix.
-        cur: CfgField = self._field
-        # If path starts with self._path prefix, strip it.
-        remaining = path
-        if self._path:
-            if not path.startswith(self._path):
-                return None
-            if path == self._path:
-                return cur
-            remaining = path.removeprefix(self._path + ".")
-            parts = remaining.split(".") if remaining else []
-        for part in parts:
-            if isinstance(cur, SectionField):
-                nxt = cur.fields.get(part)
-                if nxt is None:
-                    return None
-                cur = nxt
-            elif isinstance(cur, ReferenceField):
-                sub = cur.sub_field
-                if sub is None:
-                    return None
-                nxt = sub.fields.get(part)
-                if nxt is None:
-                    return None
-                cur = nxt
-            else:
-                return None
-        return cur if isinstance(cur, SectionField) else None
+        field = self._find_field_for_path(path)
+        return field if isinstance(field, SectionField) else None
 
     def _remember_expanded(self, item: QTreeWidgetItem, expanded: bool) -> None:
         path = item.data(0, Qt.ItemDataRole.UserRole)
@@ -660,44 +630,20 @@ class TreeCfgWidget(QWidget):
         self._populate_reference_subtree(item, field, path, depth)
 
     def _find_reference_field(self, path: str) -> ReferenceField | None:
-        # Walk from root to locate ReferenceField at ``path``
-        if not path:
+        if not path or path == self._path:
             return None
-        parts = path.split(".") if path else []
-        cur: CfgField = self._field
-        # Strip root prefix if needed
-        remaining = path
-        if self._path:
-            if not path.startswith(self._path):
-                return None
-            if path == self._path:
-                return None
-            remaining = path.removeprefix(self._path + ".")
-            parts = remaining.split(".") if remaining else []
-        for i, part in enumerate(parts):
-            if isinstance(cur, SectionField):
-                nxt = cur.fields.get(part)
-                if nxt is None:
-                    return None
-                if i == len(parts) - 1:
-                    return nxt if isinstance(nxt, ReferenceField) else None
-                cur = nxt
-            elif isinstance(cur, ReferenceField):
-                sub = cur.sub_field
-                if sub is None:
-                    return None
-                nxt = sub.fields.get(part)
-                if nxt is None:
-                    return None
-                if i == len(parts) - 1:
-                    return nxt if isinstance(nxt, ReferenceField) else None
-                cur = nxt
-            else:
-                return None
-        return None
+        field = self._find_field_for_path(path)
+        return field if isinstance(field, ReferenceField) else None
 
     def _find_field_for_path(self, path: str) -> CfgField | None:
-        """Generic field lookup by full dotted cfg path (for decoration/ancestor checks)."""
+        """Return the field at a full dotted cfg path, traversing reference sub-fields.
+
+        Empty paths return None; a nonempty root path returns the root field.
+        With a nonempty root path, require its string prefix and remove the
+        root plus a dot when present, without further path validation.
+        Return None for unknown children, leaf traversal, or a reference with
+        no sub-field. A terminal reference returns the reference itself.
+        """
         if not path:
             return None
         if path == self._path:
@@ -706,27 +652,17 @@ class TreeCfgWidget(QWidget):
         if self._path:
             if not path.startswith(self._path):
                 return None
-            if path == self._path:
-                return self._field
             remaining = path.removeprefix(self._path + ".")
         parts = remaining.split(".") if remaining else []
         cur: CfgField = self._field
         for part in parts:
-            if isinstance(cur, SectionField):
-                nxt = cur.fields.get(part)
-                if nxt is None:
-                    return None
-                cur = nxt
-            elif isinstance(cur, ReferenceField):
-                sub = cur.sub_field
-                if sub is None:
-                    return None
-                nxt = sub.fields.get(part)
-                if nxt is None:
-                    return None
-                cur = nxt
-            else:
+            section = cur.sub_field if isinstance(cur, ReferenceField) else cur
+            if not isinstance(section, SectionField):
                 return None
+            nxt = section.fields.get(part)
+            if nxt is None:
+                return None
+            cur = nxt
         return cur
 
     def _add_section_children(
