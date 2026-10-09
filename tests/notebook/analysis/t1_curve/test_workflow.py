@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -244,6 +243,7 @@ def test_t1_mechanism_probe_passes_temperature_bounds_to_temp_fit(
 ) -> None:
     data = _synthetic_prepared_data()
     captured: dict[str, object] = {}
+    captured_temp_bounds: dict[str, tuple[float | None, float]] = {}
 
     def _fake_find_temp(
         guess_Temp: float,
@@ -252,7 +252,7 @@ def test_t1_mechanism_probe_passes_temperature_bounds_to_temp_fit(
         Temp_bounds: tuple[float | None, float],
     ) -> float:
         captured["guess_Temp"] = guess_Temp
-        captured["Temp_bounds"] = Temp_bounds
+        captured_temp_bounds["Temp_bounds"] = Temp_bounds
         return 0.08
 
     def _fake_arrays(
@@ -285,7 +285,7 @@ def test_t1_mechanism_probe_passes_temperature_bounds_to_temp_fit(
     )
 
     assert captured["guess_Temp"] == pytest.approx(0.06)
-    captured_bounds = cast(tuple[float | None, float], captured["Temp_bounds"])
+    captured_bounds = captured_temp_bounds["Temp_bounds"]
     assert captured_bounds[0] is None
     assert captured_bounds[1] == pytest.approx(120e-3)
     assert probe.temperature == pytest.approx(0.08)
@@ -430,6 +430,7 @@ def test_plot_purcell_temp_upper_bound_overlays_t1_samples_and_curve(
 ) -> None:
     data = _synthetic_prepared_data()
     captured: dict[str, object] = {}
+    captured_arrays: dict[str, NDArray[np.float64]] = {}
 
     def _fake_purcell(
         context: T1CurveContext,
@@ -438,7 +439,7 @@ def test_plot_purcell_temp_upper_bound_overlays_t1_samples_and_curve(
         *,
         Temp: float,
     ) -> NDArray[np.float64]:
-        captured["fluxs"] = fluxs
+        captured_arrays["fluxs"] = fluxs
         captured["Temp"] = Temp
         return np.linspace(50_000.0, 60_000.0, len(fluxs), dtype=np.float64)
 
@@ -455,7 +456,7 @@ def test_plot_purcell_temp_upper_bound_overlays_t1_samples_and_curve(
     try:
         assert captured["Temp"] == pytest.approx(58e-3)
         np.testing.assert_allclose(
-            cast(NDArray[np.float64], captured["fluxs"]),
+            captured_arrays["fluxs"],
             np.linspace(0.49, 0.51, 5),
         )
         _, labels = ax.get_legend_handles_labels()
@@ -525,6 +526,7 @@ def test_t1_mechanism_dipole_plot_uses_t1_after_purcell_subtraction(
 ) -> None:
     data = _synthetic_prepared_data()
     captured: dict[str, object] = {}
+    captured_arrays: dict[str, NDArray[np.float64]] = {}
 
     def _fake_purcell(
         context: T1CurveContext,
@@ -559,8 +561,8 @@ def test_t1_mechanism_dipole_plot_uses_t1_after_purcell_subtraction(
         Q_name: str = r"$Q_{cap}$",
         product2val: Callable[[float], float] = lambda x: x,
     ) -> tuple[Figure, Axes]:
-        captured["dipoles"] = dipoles
-        captured["T1s"] = T1s
+        captured_arrays["dipoles"] = dipoles
+        captured_arrays["T1s"] = T1s
         captured["T1errs"] = T1errs
         captured["Q_name"] = Q_name
         return plt.subplots()
@@ -578,12 +580,10 @@ def test_t1_mechanism_dipole_plot_uses_t1_after_purcell_subtraction(
     plt.close(fig)
 
     np.testing.assert_allclose(
-        cast(NDArray[np.float64], captured["T1s"]),
+        captured_arrays["T1s"],
         2.0 * data.fit.T1_ns,
     )
-    np.testing.assert_allclose(
-        cast(NDArray[np.float64], captured["dipoles"]), [2, 3, 4]
-    )
+    np.testing.assert_allclose(captured_arrays["dipoles"], [2, 3, 4])
     assert captured["Q_name"] == r"$Q_{cap}$"
 
 
@@ -592,6 +592,11 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
 ) -> None:
     data = _synthetic_prepared_data()
     captured: dict[str, object] = {}
+    captured_arrays: dict[str, NDArray[np.float64]] = {}
+    captured_components: dict[str, dict[str, NDArray[np.float64]] | None] = {}
+    captured_bands: dict[
+        str, dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]] | None
+    ] = {}
     pure_t1_limits = [20.0, 10.0, 5.0]
 
     def _fake_arrays(
@@ -647,9 +652,9 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
         parameter_text: str | None = None,
         show_value_axis: bool = False,
     ) -> tuple[Figure, Axes]:
-        captured["t1_effs"] = t1_effs
-        captured["component_t1s"] = component_t1s
-        captured["component_bands"] = component_bands
+        captured_arrays["t1_effs"] = t1_effs
+        captured_components["component_t1s"] = component_t1s
+        captured_bands["component_bands"] = component_bands
         captured["label"] = label
         captured["parameter_text"] = parameter_text
         captured["title"] = title
@@ -669,21 +674,20 @@ def test_t1_mechanism_limit_combines_plot_level_purcell_into_bounds(
     )
     plt.close(fig)
 
-    component_t1s = cast(dict[str, NDArray[np.float64]], captured["component_t1s"])
+    component_t1s = captured_components["component_t1s"]
+    assert component_t1s is not None
     assert captured["label"] == "capacitive + Purcell"
     assert "Purcell" in component_t1s
     np.testing.assert_allclose(component_t1s["Purcell"], 40.0)
     np.testing.assert_allclose(component_t1s["- lower"], 40.0 / 3.0)
     np.testing.assert_allclose(component_t1s["- upper"], 40.0 / 9.0)
-    component_bands = cast(
-        dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]],
-        captured["component_bands"],
-    )
+    component_bands = captured_bands["component_bands"]
+    assert component_bands is not None
     band_lower, band_upper = component_bands["capacitive bounds"]
     np.testing.assert_allclose(band_lower, 40.0 / 3.0)
     np.testing.assert_allclose(band_upper, 40.0 / 9.0)
     np.testing.assert_allclose(
-        cast(NDArray[np.float64], captured["t1_effs"]),
+        captured_arrays["t1_effs"],
         8.0,
     )
     parameter_text = str(captured["parameter_text"])
@@ -699,19 +703,25 @@ def test_fit_t1_curve_wrapper_passes_shared_policies_without_writeback(
 ) -> None:
     data = _synthetic_prepared_data()
     captured: dict[str, object] = {}
+    captured_arrays: dict[str, NDArray[np.float64]] = {}
+    captured_fit_bounds: dict[str, dict[str, tuple[float, float]]] = {}
 
     def _fake_fit(
         fluxs: NDArray[np.float64],
         T1s: NDArray[np.float64],
         params: tuple[float, float, float],
+        *,
+        init: T1FitParams,
+        bounds: dict[str, tuple[float, float]],
         **kwargs: object,
     ) -> T1FitResult:
-        captured["fluxs"] = fluxs
-        captured["T1s"] = T1s
+        captured_arrays["fluxs"] = fluxs
+        captured_arrays["T1s"] = T1s
         captured["params"] = params
-        captured.update(kwargs)
+        captured.update(kwargs, init=init, bounds=bounds)
+        captured_fit_bounds["bounds"] = bounds
         return T1FitResult(
-            params=kwargs["init"],  # type: ignore[arg-type]
+            params=init,
             stderr=T1FitParams(Q_cap=0.0, Temp=0.0),
             fixed=(),
             free=("Q_cap", "Temp"),
@@ -744,15 +754,11 @@ def test_fit_t1_curve_wrapper_passes_shared_policies_without_writeback(
         flux_weighting=flux_weighting,
     )
 
-    np.testing.assert_allclose(
-        cast(NDArray[np.float64], captured["fluxs"]), data.fit.fluxs
-    )
-    np.testing.assert_allclose(
-        cast(NDArray[np.float64], captured["T1s"]), data.fit.T1_ns
-    )
+    np.testing.assert_allclose(captured_arrays["fluxs"], data.fit.fluxs)
+    np.testing.assert_allclose(captured_arrays["T1s"], data.fit.T1_ns)
     assert captured["T1_error_policy"] is error_policy
     assert captured["flux_weighting"] is flux_weighting
-    captured_bounds = cast(dict[str, tuple[float, float]], captured["bounds"])
+    captured_bounds = captured_fit_bounds["bounds"]
     assert captured_bounds["Temp"] == pytest.approx((10e-3, 120e-3))
     assert combined.bounds == captured_bounds
     assert combined.fit_result.success
@@ -763,6 +769,7 @@ def test_fit_t1_curve_passes_purcell_rate_callable(
 ) -> None:
     data = _synthetic_prepared_data()
     captured: dict[str, object] = {}
+    captured_rates: dict[str, Callable[[T1FitParams], NDArray[np.float64]] | None] = {}
 
     def _fake_purcell(
         context: T1CurveContext,
@@ -778,14 +785,20 @@ def test_fit_t1_curve_passes_purcell_rate_callable(
         fluxs: NDArray[np.float64],
         T1s: NDArray[np.float64],
         params: tuple[float, float, float],
+        *,
+        init: T1FitParams,
+        extra_relaxation_rate_fn: Callable[[T1FitParams], NDArray[np.float64]] | None,
         **kwargs: object,
     ) -> T1FitResult:
         captured["fluxs"] = fluxs
         captured["T1s"] = T1s
         captured["params"] = params
-        captured.update(kwargs)
+        captured.update(
+            kwargs, init=init, extra_relaxation_rate_fn=extra_relaxation_rate_fn
+        )
+        captured_rates["extra_relaxation_rate_fn"] = extra_relaxation_rate_fn
         return T1FitResult(
-            params=kwargs["init"],  # type: ignore[arg-type]
+            params=init,
             stderr=T1FitParams(Q_cap=0.0, Temp=0.0),
             fixed=(),
             free=("Q_cap", "Temp"),
@@ -807,10 +820,7 @@ def test_fit_t1_curve_passes_purcell_rate_callable(
         purcell=_synthetic_purcell(),
     )
 
-    rate_fn = cast(
-        Callable[[T1FitParams], NDArray[np.float64]],
-        captured["extra_relaxation_rate_fn"],
-    )
+    rate_fn = captured_rates["extra_relaxation_rate_fn"]
     assert callable(rate_fn)
     rates = rate_fn(T1FitParams(Q_cap=7.0e5, Temp=0.07))
     np.testing.assert_allclose(rates, [0.01, 0.005, 0.0025])
@@ -1162,7 +1172,7 @@ def test_t1_explicit_rows_are_not_auto_corrected(
         }
     )
     calibration = _synthetic_calibration(samples)
-    captured: dict[str, object] = {}
+    captured: dict[str, NDArray[np.float64]] = {}
 
     def _fake_correct(
         raw_fluxs: NDArray[np.float64],
@@ -1188,7 +1198,7 @@ def test_t1_explicit_rows_are_not_auto_corrected(
     np.testing.assert_allclose(data.sample.raw_fluxs, [0.5, -0.5])
     assert data.sample.correction_skipped_reason == ("explicit_flux", "")
     np.testing.assert_allclose(
-        np.asarray(cast(NDArray[np.float64], captured["freq_ghz"])),
+        np.asarray(captured["freq_ghz"]),
         [0.350, 0.351],
     )
 
@@ -1306,7 +1316,7 @@ def test_t1_correction_disabled_preserves_raw_flux_and_reports_disabled(
 def test_run_t1_curve_analysis_threads_correction_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, object] = {}
+    captured: dict[str, dict[str, object]] = {}
     config = T1CurveAnalysisConfig(
         result_dir="/tmp/result",
         correct_flux_from_f01_enabled=False,
@@ -1337,7 +1347,7 @@ def test_run_t1_curve_analysis_threads_correction_setting(
 
     run_t1_curve_analysis(config)
 
-    prepare_kwargs = cast(dict[str, object], captured["prepare_kwargs"])
+    prepare_kwargs = captured["prepare_kwargs"]
     assert prepare_kwargs["correct_flux_from_f01_enabled"] is False
 
 
