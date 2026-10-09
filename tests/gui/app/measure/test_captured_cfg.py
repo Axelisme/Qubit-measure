@@ -190,12 +190,12 @@ def test_tab_creation_and_guard_keep_the_capture_after_focus_changes(
         call.args[0].parameters for call in adapter.make_default_cfg.call_args_list
     ] == [first, second]
     resources.refresh_all()
-    permit = GuardService(state).acquire_run_permit(
+    inputs = GuardService(state).capture_run_inputs(
         one, expected_revision=state.get_tab(one).cfg.observe().ref.revision
     )
-    assert permit.accepted_cfg.values == {"value": 10.0}
-    assert permit.request.cfg_context is not None
-    assert permit.request.cfg_context.modules is first.library
+    assert inputs.accepted_cfg.values == {"value": 10.0}
+    assert inputs.request.cfg_context is not None
+    assert inputs.request.cfg_context.modules is first.library
     assert state.get_tab(two).cfg.accept(
         state.get_tab(two).cfg.observe().ref.revision
     ).values == {"value": 20.0}

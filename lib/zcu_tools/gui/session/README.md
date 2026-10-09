@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-09，全域 alias 與固定參數投影
+**Last updated:** 2026-10-09，全域 alias、固定參數投影、entry/point Setup、operation channels 與 Inspect 元件樹
 
 # gui/session/ — 量測 session core
 

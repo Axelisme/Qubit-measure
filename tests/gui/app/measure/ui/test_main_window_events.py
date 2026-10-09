@@ -107,11 +107,6 @@ class RecordingHost:
     ) -> None:
         self._log.add("host", "refresh_tab_writeback", tab_id, snapshot)
 
-    def refresh_tab_save_paths(
-        self, tab_id: str, snapshot: object | None = None
-    ) -> None:
-        self._log.add("host", "refresh_tab_save_paths", tab_id, snapshot)
-
     def refresh_tab_figure(self, tab_id: str, snapshot: object | None = None) -> None:
         self._log.add("host", "refresh_tab_figure", tab_id, snapshot)
 
@@ -516,22 +511,20 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     assert tab_bar.tabToolTip(0) == "A"
 
 
-def test_context_event_refreshes_paths_and_interaction_without_writeback() -> None:
+def test_context_event_refreshes_interaction_without_writeback() -> None:
     snapshot = _snapshot()
     coordinator, log, _ctrl, _host = _coordinator(snapshot)
-
-    coordinator._on_context_switched(
-        ContextSwitchedPayload(cast(Any, None), cast(Any, None))
-    )
+    bus = BaseEventBus()
+    coordinator.bind(bus)
+    bus.emit(ContextSwitchedPayload(None, None))
+    coordinator.close()
 
     assert log.calls == [
         call("host", "refresh_context_panel"),
         call("host", "view_tab_ids"),
         call("ctrl", "get_tab_snapshot", "tab-1"),
-        call("host", "refresh_tab_save_paths", "tab-1", snapshot),
         call("host", "refresh_tab_interaction", "tab-1", snapshot),
         call("ctrl", "get_tab_snapshot", "tab-2"),
-        call("host", "refresh_tab_save_paths", "tab-2", snapshot),
         call("host", "refresh_tab_interaction", "tab-2", snapshot),
     ]
 

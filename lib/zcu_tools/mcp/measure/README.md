@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-09, single-Run target and temporary cfg preview
+**Last updated:** 2026-10-09, single-Run target, temporary cfg preview and synchronous Save/image contracts
 
 # `zcu_tools/mcp/measure/`
 

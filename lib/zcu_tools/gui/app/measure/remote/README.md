@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-09, global alias source events and synchronous Save reports
+**Last updated:** 2026-10-09, global aliases, explicit result-entry RPCs and synchronous Save reports
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
