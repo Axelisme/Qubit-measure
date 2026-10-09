@@ -43,8 +43,9 @@ class T1TuningPanel(QWidget):
         source/editor errors propagate. parent controls Qt lifetime.
         """
         super().__init__(parent)
-        self.host = TunablesHost(FormState(accepted_input), env, engine, run_id)
-        self.panel = T1TunablesPanel(self.host.state, env, self)
+        self.host = TunablesHost(FormState(accepted_input), env, run_id)
+        self.host.accept(engine)
+        self.panel = T1TunablesPanel(self.host.state, self.host.env, self)
         self._message = QLabel(self)
         self._message.setObjectName("workflow.tuning.message")
         apply_button = QPushButton("Apply", self)

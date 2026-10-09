@@ -23,38 +23,74 @@ from zcu_tools.gui.form import (
 
 
 class TunablesHost[F: FormModel, C]:
-    """Submit one accepted run's complete current input as an atomic batch.
+    """Own one run's fixed form binding before and after native acceptance.
 
-    Call on the GUI owner thread. state initially contains the complete form
-    input used to start run_id on engine; field paths match native tunables.
-    env is that input's fixed evaluation capture. This host borrows them and
-    owns accepted input/base for Apply/Discard, not a GUI revision guard.
-    It does not Start, schedule workers, capture sources, materialize native
-    cfg, or implement/check control identity. Holder enforcement will be added
-    by the shared control-identity owner after that mechanism lands.
+    state is the unique draft for this run; field paths match native tunables.
+    env is its fixed evaluation capture. The host retains submitted expression
+    input/base for Apply/Discard, not a GUI revision guard. Construct it before
+    admission, then accept the Engine after native Start succeeds. Apply rejects
+    pending acceptance before draft writes. The Controller checks current
+    binding identity and owns lifecycle/error cleanup for GUI and RPC callers.
+
+    Use on the owner thread, except accept may run in the startup producer
+    under the Controller's binding lock. This host does not Start, schedule,
+    capture sources, materialize cfg or enforce holder identity.
     """
 
     state: FormState[F]
 
-    def __init__(
-        self, state: FormState[F], env: FormEnv, engine: Engine[C], run_id: str
-    ) -> None:
-        """Bind accepted input to an existing run without writing native values.
+    def __init__(self, state: FormState[F], env: FormEnv, run_id: str) -> None:
+        """Retain Start's prepared input and evaluation capture without an Engine.
 
-        Wrong run IDs propagate. Caller supplies input corresponding to the
-        native run. Set this draft's base to that input; do not change Engine.
+        state holds complete submitted form input for run_id, the native Start
+        identity. env is the corresponding fixed capture. No native call or
+        source refresh occurs. The initial submitted input becomes the draft's
+        base; acceptance remains pending until accept succeeds.
         """
-        engine.tunables(run_id)
         self.state = state
         self._env = env
-        self._engine = engine
+        self._engine: Engine[C] | None = None
         self._run_id = run_id
         self._accepted_input = state.input
         state.reset(self._accepted_input)
 
     @property
+    def env(self) -> FormEnv:
+        """Return this binding's fixed Start capture, not a live refresh."""
+        return self._env
+
+    @property
+    def run_id(self) -> str:
+        """Return the native identity submitted at construction, even if pending."""
+        return self._run_id
+
+    @property
+    def engine(self) -> Engine[C] | None:
+        """Return the accepted Engine, or None before native acceptance."""
+        return self._engine
+
+    def accept(self, engine: Engine[C]) -> None:
+        """Attach native acceptance once without resetting draft or writing values.
+
+        engine must contain this run_id with tunables corresponding to Start's
+        submitted input. Native target/read failures propagate and leave the
+        binding pending. A second attachment raises RuntimeError before writes.
+        The Controller calls this under its lock after successful worker Start.
+        """
+        if self._engine is not None:
+            raise RuntimeError("Tunables binding already has native acceptance")
+        engine.tunables(self._run_id)
+        self._engine = engine
+
+    def _accepted_engine(self) -> Engine[C]:
+        """Require native acceptance before preview, draft writes or publication."""
+        if self._engine is None:
+            raise RuntimeError("Applying tunables requires native acceptance")
+        return self._engine
+
+    @property
     def accepted_input(self) -> FormInput[F]:
-        """Return latest successfully submitted input, including expressions."""
+        """Return latest submitted expression input; pending is not acceptance."""
         return self._accepted_input
 
     def apply(
@@ -73,8 +109,10 @@ class TunablesHost[F: FormModel, C]:
         fails rather than stringifying. Native run/lifecycle/validation/I/O or
         concurrent Engine revision failures propagate without retry.
         Success resets base to current input; failure retains draft/base.
+        Pending acceptance raises RuntimeError before preview or mutation.
         Even unchanged complete input is an accepted new Engine revision.
         """
+        engine = self._accepted_engine()
         if local_errors is not None and local_errors.messages:
             return local_errors
         preview = self.state.preview(self._env)
@@ -84,8 +122,8 @@ class TunablesHost[F: FormModel, C]:
             TunableChange(".".join(path), self._json_value(value))
             for path, value in preview.values.items()
         )
-        revision = self._engine.tunables(self._run_id).revision
-        snapshot = self._engine.update_tunables(
+        revision = engine.tunables(self._run_id).revision
+        snapshot = engine.update_tunables(
             self._run_id, changes, expected_revision=revision, actor=actor
         )
         self._accepted_input = self.state.input
@@ -106,7 +144,9 @@ class TunablesHost[F: FormModel, C]:
         Native failures propagate without retry. Success updates accepted input
         and resets draft base. There is no external-edit draft preservation or
         conflict guard. Caller clears renderer-local text only after success.
+        Pending acceptance raises RuntimeError before any draft write.
         """
+        self._accepted_engine()
         self.state.write(batch, self._env)
         return self.apply(actor=actor)
 

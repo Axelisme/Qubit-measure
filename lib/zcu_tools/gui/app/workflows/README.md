@@ -1,8 +1,8 @@
 # gui/app/workflows — Workflow form submission
 
-**Last updated:** 2026-10-09，same-owner T1 tunables RPC
+**Last updated:** 2026-10-09，pending／accepted run 的唯一 form binding
 
-TunablesHost owns accepted expression input and Apply/Discard for one native run. GUI and external edits submit complete current ordinary values through the same FormState/Engine seam. External edits use the same parsed GUI draft, without a GUI revision conflict guard. Engine owns numeric validation, revision, step capture and journal publication.
+TunablesHost owns one run's unique FormState, fixed evaluation capture and submitted expression input before native acceptance. It attaches the accepted Engine once without replacing draft or base. Pending Apply rejects before any draft write. GUI and external edits submit complete current ordinary values through the same FormState/Engine seam. External edits use the same parsed GUI draft, without a GUI revision conflict guard. Engine owns numeric validation, revision, step capture and journal publication. Controller binding checks and whole-run cleanup are separate from this form binding; pending Host acceptance alone does not implement them.
 
 Control identity will reject non-holder writes after it lands. This transition does not check holder and does not introduce a workflows-specific holder mechanism.
 

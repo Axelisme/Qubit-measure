@@ -11,6 +11,7 @@ from zcu_tools.experiment.workflows import (
     Done,
     InvalidRunState,
     RunIdentity,
+    RunMismatch,
     Step,
     TunableChange,
     WorkflowEnv,
@@ -42,7 +43,9 @@ def host(tmp_path: Path) -> tuple[TunablesHost[ValueForm, int], Rig]:
     rig.start(finish)
     env = FormEnv()
     state = FormState(ValueForm.default_input(env))
-    return TunablesHost(state, env, rig.engine, "run"), rig
+    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "run")
+    binding.accept(rig.engine)
+    return binding, rig
 
 
 def test_apply_publishes_numeric_value_but_retains_expression_input(
@@ -146,6 +149,69 @@ def test_native_lifecycle_failure_retains_draft_and_accepted_input(
     assert editor.state.base.data == editor.accepted_input.data == {"value": 1}
 
 
+@pytest.mark.parametrize("external", [False, True])
+def test_pending_binding_rejects_apply_before_draft_writes(external: bool) -> None:
+    env = FormEnv()
+    state = FormState(ValueForm.default_input(env))
+    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "pending")
+    before = state.input
+    base = state.base
+    if external:
+        with pytest.raises(RuntimeError, match="requires native acceptance"):
+            binding.apply_external({("value",): 7}, actor=Actor("agent", "rpc"))
+    else:
+        with pytest.raises(RuntimeError, match="requires native acceptance"):
+            binding.apply(actor=Actor("user", "gui"))
+    assert binding.engine is None
+    assert binding.run_id == "pending"
+    assert binding.env is env
+    assert state.input.data == before.data
+    assert state.base.data == base.data
+    assert binding.accepted_input.data == before.data
+
+
+def test_native_acceptance_preserves_unique_draft_and_submitted_base(
+    tmp_path: Path,
+) -> None:
+    rig = Rig(tmp_path)
+    env = FormEnv()
+    state = FormState(ValueForm.default_input(env))
+    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "run")
+    submitted = binding.accepted_input
+    state.write({("value",): {"expr": "2 + 3"}}, env)
+    rig.start(finish)
+    binding.accept(rig.engine)
+    assert binding.engine is rig.engine
+    assert binding.state is state
+    assert state.input.data == {"value": {"expr": "2 + 3"}}
+    assert state.base.data == binding.accepted_input.data == submitted.data
+    result = binding.apply(actor=Actor("user", "gui"))
+    assert not isinstance(result, FormErrors)
+    assert result.values == {"value": 5}
+    assert binding.accepted_input.data == {"value": {"expr": "2 + 3"}}
+
+
+def test_wrong_or_repeated_native_acceptance_does_not_replace_binding(
+    tmp_path: Path,
+) -> None:
+    rig = Rig(tmp_path)
+    rig.start(finish)
+    env = FormEnv()
+    state = FormState(ValueForm.default_input(env))
+    wrong: TunablesHost[ValueForm, int] = TunablesHost(state, env, "wrong")
+    with pytest.raises(RunMismatch) as caught:
+        wrong.accept(rig.engine)
+    assert caught.value.expected == "wrong"
+    assert caught.value.actual == "run"
+    assert wrong.engine is None
+    binding: TunablesHost[ValueForm, int] = TunablesHost(state, env, "run")
+    binding.accept(rig.engine)
+    with pytest.raises(RuntimeError, match="already has native acceptance"):
+        binding.accept(rig.engine)
+    assert binding.engine is rig.engine
+    assert binding.state is state
+
+
 class ArrayTunables(BaseModel):
     """Native whole-array leaf accepted by Engine."""
 
@@ -198,7 +264,8 @@ def test_whole_tuple_leaf_is_submitted_as_json_array(tmp_path: Path) -> None:
     )
     env = FormEnv()
     state = FormState(ArrayForm.default_input(env))
-    editor = TunablesHost(state, env, rig.engine, "arrays")
+    editor: TunablesHost[ArrayForm, int] = TunablesHost(state, env, "arrays")
+    editor.accept(rig.engine)
     state.write({("values",): [3, 4, 5]}, env)
     applied = editor.apply(actor=Actor("user", "gui"))
     assert not isinstance(applied, FormErrors)
