@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, TypedDict
 
+from zcu_tools.experiment.workflows import InvalidRunState, RunMismatch, RunStatus
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
     RemoteControlServiceBase,
 )
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod
 from zcu_tools.gui.session.ports import OwnerScheduler
 
@@ -131,25 +133,101 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
         _adapter: RemoteControlServiceBase,
         _params: Mapping[str, object],
     ) -> WorkflowReply:
-        raise NotImplementedError("RPC native status projection")
+        controller = self.ctrl.controller
+        if controller is None:
+            return {"run_id": None, "operation_id": None, "status": None}
+        return {
+            "run_id": controller.run_id,
+            "operation_id": controller.operation_id,
+            "status": _project_status(controller.status()),
+        }
 
     def _pause(
         self,
         _adapter: RemoteControlServiceBase,
         params: RunTarget,
     ) -> WorkflowReply:
-        raise NotImplementedError("RPC Window Pause binding")
+        try:
+            status = self.ctrl.pause(params["run_id"])
+        except (RunMismatch, InvalidRunState) as exc:
+            raise _project_control_error(exc) from exc
+        controller = self.ctrl.controller
+        return {
+            "run_id": None if controller is None else controller.run_id,
+            "operation_id": None if controller is None else controller.operation_id,
+            "status": _project_status(status),
+        }
 
     def _resume(
         self,
         _adapter: RemoteControlServiceBase,
         params: RunTarget,
     ) -> WorkflowReply:
-        raise NotImplementedError("RPC Window Resume binding")
+        try:
+            operation_id = self.ctrl.resume(params["run_id"])
+        except (RunMismatch, InvalidRunState) as exc:
+            raise _project_control_error(exc) from exc
+        controller = self.ctrl.controller
+        return {
+            "run_id": None if controller is None else controller.run_id,
+            "operation_id": operation_id,
+            "status": _project_status(
+                None if controller is None else controller.status()
+            ),
+        }
 
     def _stop(
         self,
         _adapter: RemoteControlServiceBase,
         params: RunTarget,
     ) -> WorkflowReply:
-        raise NotImplementedError("RPC Window Stop binding")
+        try:
+            status = self.ctrl.stop(params["run_id"])
+        except (RunMismatch, InvalidRunState) as exc:
+            raise _project_control_error(exc) from exc
+        controller = self.ctrl.controller
+        return {
+            "run_id": None if controller is None else controller.run_id,
+            "operation_id": None if controller is None else controller.operation_id,
+            "status": _project_status(status),
+        }
+
+
+def _project_status(status: RunStatus | None) -> NativeStatusReply | None:
+    """Project only native status fields; None preserves pending acceptance."""
+    if status is None:
+        return None
+    return {
+        "run_id": status.run_id,
+        "workflow": status.workflow,
+        "lifecycle": status.lifecycle,
+        "call_seq": status.call_seq,
+        "committed_seq": status.committed_seq,
+        "revision": status.revision,
+        "reason": status.reason,
+        "progress": [
+            {
+                "name": progress.name,
+                "total": progress.total,
+                "completed": progress.completed,
+            }
+            for progress in status.progress
+        ],
+    }
+
+
+def _project_control_error(exc: RunMismatch | InvalidRunState) -> RemoteError:
+    """Translate native target/lifecycle failures without classifying other errors."""
+    if isinstance(exc, RunMismatch):
+        return RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason="run_mismatch",
+            data={"expected": exc.expected, "actual": exc.actual},
+        )
+    return RemoteError(
+        ErrorCode.PRECONDITION_FAILED,
+        str(exc),
+        reason="invalid_run_state",
+        data={"action": exc.action, "lifecycle": exc.lifecycle},
+    )
