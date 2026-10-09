@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import replace
 from unittest.mock import MagicMock
 
@@ -18,6 +19,8 @@ from zcu_tools.gui.app.measure.cfg_binding import (
     MeasureCfgBindings,
 )
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.gui.cfg.binding.observation import CfgNodeObservation
 from zcu_tools.gui.cfg.resource import CfgResource, CfgStatus
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryDraft
@@ -164,6 +167,42 @@ def _specified_defaults() -> list[str]:
     ]
 
 
+def _sweep_centers(tree: CfgNodeObservation) -> Iterator[tuple[str, float]]:
+    value = tree.value
+    if (
+        isinstance(value, SweepValue)
+        and isinstance(value.start, EvalValue)
+        and isinstance(value.stop, EvalValue)
+    ):
+        start, stop = value.start.resolved, value.stop.resolved
+        if not isinstance(start, (int, float)) or not isinstance(stop, (int, float)):
+            raise AssertionError("Calibrated sweep must resolve real endpoints")
+        yield value.start.expr, (start + stop) / 2
+    for child in tree.children.values():
+        yield from _sweep_centers(child)
+
+
+def _assert_calibration_moves_sweep_centers(
+    before: CfgNodeObservation, after: CfgNodeObservation
+) -> None:
+    # These are fixture calibration changes, not a copy of adapter sweep spans.
+    shifts = {
+        "$qubit.freq": 200.0,
+        "$resonator.freq": 200.0,
+        "$jpa.pump_freq": 1000.0,
+        "$jpa.pump_power": 2.0,
+        "$jpa.flux": 0.002,
+    }
+    centers = dict(_sweep_centers(after))
+    checked = 0
+    for expression, center in _sweep_centers(before):
+        for path, shift in shifts.items():
+            if path in expression:
+                assert centers[expression] == pytest.approx(center + shift)
+                checked += 1
+    assert checked > 0
+
+
 @pytest.mark.parametrize("name", _specified_defaults())
 def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
     name: str,
@@ -225,7 +264,9 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
         environment = replace(environment, parameters=updated_parameters)
         updated = resource.refresh(calibrated.ref.revision)
         assert updated.status is CfgStatus.VALID, updated.diagnostics
-        assert resource.accept(updated.ref.revision).values != accepted.values
+        updated_values = resource.accept(updated.ref.revision).values
+        assert updated_values != accepted.values
+        _assert_calibration_moves_sweep_centers(calibrated.tree, updated.tree)
         environment = replace(
             environment,
             parameters=parameters.bind_aliases(
@@ -240,6 +281,35 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
         unbound = resource.refresh(updated.ref.revision)
         assert unbound.status is CfgStatus.INVALID
         assert any("qubit" in item.message for item in unbound.diagnostics)
+        environment = replace(environment, parameters=updated_parameters)
+        rebound = resource.refresh(unbound.ref.revision)
+        assert rebound.status is CfgStatus.VALID
+        assert resource.accept(rebound.ref.revision).values == updated_values
+        for component, fields in {
+            "Q1": {"freq": None},
+            "R1": {"freq": None},
+            "J1": {"pump_freq": None, "pump_power": None, "flux": None},
+        }.items():
+            point.components[component] = point.components[component].model_copy(
+                update=fields
+            )
+        environment = replace(
+            environment,
+            parameters=ParameterContext(
+                point=point,
+                library=parameters.library,
+                target=parameters.target,
+                roles=None,
+            ).bind_aliases(rows, adapter.parameter_roles()),
+        )
+        uncalibrated = resource.refresh(rebound.ref.revision)
+        assert uncalibrated.status is CfgStatus.INVALID
+        assert any(
+            "$qubit" in item.message
+            or "$resonator" in item.message
+            or "$jpa" in item.message
+            for item in uncalibrated.diagnostics
+        )
     finally:
         resource.revoke()
 
