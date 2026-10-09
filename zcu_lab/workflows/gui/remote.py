@@ -108,7 +108,8 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
     """RPC face of one T1 Window; it never owns a second run or capture.
 
     workflow.start submits partial path/value batches through Window.start;
-    FormErrors becomes invalid_params/form_errors with only path/message data.
+    FormErrors becomes invalid_params/form_errors; data is an object whose native
+    messages field contains the list of FormErrorReply path/message entries.
     Batch wire admission rejects malformed or duplicate paths without side effects.
     A successful reply is pending admission, not worker acceptance. GUI drafts are
     untouched on failure; success resets their bases through the existing owner.

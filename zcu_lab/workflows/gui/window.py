@@ -197,6 +197,8 @@ class T1WorkflowWindow(QWidget):
         Invalid batch/model input returns FormErrors without touching either panel,
         submission or files. Structural errors without a directed path are model-wide.
         Success resets both panel bases to the submitted input and clears local text.
+        Both editors display ordinary values in this same fixed Start capture,
+        not their old constructor capture; they do not poll later source changes.
         Draft/unbound storage, missing hardware, source/provenance and native
         failures raise without fallback/retry. The returned operation token is
         pending, not proof of accepted startup. Calibrated uses the validated

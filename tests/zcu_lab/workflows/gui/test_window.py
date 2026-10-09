@@ -10,7 +10,7 @@ from time import monotonic
 import pytest
 from matplotlib.figure import Figure
 from pydantic import JsonValue
-from qtpy.QtWidgets import QApplication, QLineEdit, QPushButton
+from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.workflows import (
@@ -1054,7 +1054,10 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
     assert window.tunables_panel.state.input.data["guess_us"] == {
         "expr": "general.ext.guess_us"
     }
+    shown = window.tunables_panel.editor.findChild(QLabel, "form.value.guess_us")
+    assert isinstance(shown, QLabel) and float(shown.text()) == 31.0
     context.set_parameter(context.read_context().target, "general.ext.guess_us", 88.0)
+    assert float(shown.text()) == 31.0
     harness.background.execute()
     assert len(observed) == 1
     seed, plan, tun = observed[0]
@@ -1103,7 +1106,9 @@ def test_rpc_start_model_errors_leave_both_panel_drafts_and_bases_untouched(
     error = reply["error"]
     assert isinstance(error, dict) and error["code"] == "invalid_params"
     assert error["reason"] == "form_errors"
-    data = error["data"]
+    envelope = error["data"]
+    assert isinstance(envelope, dict)
+    data = envelope["messages"]
     assert isinstance(data, list) and any(
         item["path"] == path and isinstance(item["message"], str) for item in data
     )
