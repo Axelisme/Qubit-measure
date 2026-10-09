@@ -79,14 +79,16 @@ class _WaveFromRegs:
     freq_reg: str | None = None
     gain_reg: str | None = None
 
-    def _expand_wave_from_regs(self, prog, port: int) -> list[AsmInst]:
+    def _expand_wave_from_regs(
+        self, prog, port: int, timed_macro: TimedMacro
+    ) -> list[Macro]:
         if self.freq_reg is None and self.gain_reg is None:
             raise ValueError("runtime wave playback requires at least one register")
         addr = _single_wave_addr(prog, self.name)
         time_reg = self.t_regs["t"]
-        insts: list[AsmInst] = []
+        insts: list[Macro] = []
         if not isinstance(time_reg, Integral):
-            insts.append(self.set_timereg(prog, "t"))  # type: ignore[attr-defined]
+            insts.append(timed_macro.set_timereg(prog, "t"))
         insts.append(_read_wmem(addr))
 
         if self.freq_reg is not None:
@@ -124,7 +126,7 @@ class PulseFromRegs(_WaveFromRegs, Pulse):
 
     def expand(self, prog) -> list[Macro]:
         port = int(prog.soccfg["gens"][self.ch]["tproc_ch"])
-        return self._expand_wave_from_regs(prog, port)
+        return self._expand_wave_from_regs(prog, port, self)
 
 
 class PulseFromLengthReg(TimedMacro):
@@ -218,7 +220,7 @@ class ConfigReadoutFromRegs(_WaveFromRegs, ConfigReadout):
 
     def expand(self, prog) -> list[Macro]:
         port = int(prog.soccfg["readouts"][self.ch]["tproc_ctrl"])
-        return self._expand_wave_from_regs(prog, port)
+        return self._expand_wave_from_regs(prog, port, self)
 
 
 def _single_wave_addr(prog, name: str) -> int:
