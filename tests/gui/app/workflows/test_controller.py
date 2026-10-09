@@ -569,6 +569,65 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
     assert controller.operation_id is None
 
 
+def test_stop_reports_idle_native_failure_once_and_discards_retained_progress(
+    tmp_path: Path,
+    progress_calls: tuple[list[int], list[int]],
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    finished: list[tuple[RunStatus | None, Exception | None]] = []
+
+    def completed(status: RunStatus | None, error: Exception | None) -> None:
+        finished.append((status, error))
+        if status is not None and status.lifecycle == "failed":
+            assert controller.stop("run") == status
+
+    controller = create_controller(harness, rig, completed)
+
+    @workflow("idle-failure", plan=Plan, tunables=Tunables, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        del plan, tun, state
+        env.pbar("retained", 1).refresh()
+        controller.pause("run")
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    token = controller.start(
+        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+    )
+    harness.complete_segment()
+    engine = controller.engine
+    assert engine is not None and controller.operation_id is None
+    assert finished[0][0] is not None and finished[0][0].lifecycle == "paused"
+    journal = rig.paths.metadata_root / "journal.jsonl"
+    original = journal.read_bytes()
+    journal.unlink()
+    journal.mkdir()
+    try:
+        with pytest.raises(IsADirectoryError):
+            engine.update_tunables(
+                "run",
+                (TunableChange("value", 2),),
+                expected_revision=0,
+                actor=Actor("agent", "test"),
+            )
+    finally:
+        journal.rmdir()
+        journal.write_bytes(original)
+    failed = controller.status()
+    assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
+    assert len(finished) == 1 and harness.progress.bars_for_owner("example")
+    assert not harness.gate.snapshot()
+    assert controller.stop("run") == failed
+    assert finished == [(finished[0][0], None), (failed, None)]
+    assert progress_calls == ([token], [token])
+    assert not harness.progress.bars_for_owner("example")
+    assert controller.stop("run") == failed and len(finished) == 2
+    assert progress_calls == ([token], [token])
+    assert harness.background.work is None and not harness.gate.snapshot()
+
+
 @pytest.mark.parametrize("failure", ["lease", "capture", "submit"])
 def test_resume_admission_failure_keeps_paused_run_and_progress(
     tmp_path: Path,

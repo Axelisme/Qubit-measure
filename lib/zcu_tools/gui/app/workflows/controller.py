@@ -392,7 +392,10 @@ class WorkflowController[C]:
         unwind when no producer exists. An already-delivered paused run with no
         admission in flight stops synchronously, reports on_finished and
         discards its retained progress. Native failures propagate; no hardware
-        rollback or cleanup occurs.
+        rollback or cleanup occurs. An idle native failed run can retain progress
+        after a synchronous tunables error. Stop reports that actual failed status
+        once and discards retained progress; it does not turn failed into stopped.
+        Later Stop calls do not repeat owner terminal delivery.
         """
         with self._lock:
             self.require_run_id(run_id)
@@ -412,4 +415,13 @@ class WorkflowController[C]:
                 self._on_finished(stopped, None)
             finally:
                 self._discard_progress()
+        elif (
+            status.lifecycle == "failed"
+            and not self._admitting
+            and self._operation_id is None
+            and self._progress_token is not None
+        ):
+            # Consume retained ownership before callbacks can reenter Stop.
+            self._discard_progress()
+            self._on_finished(stopped, None)
         return stopped

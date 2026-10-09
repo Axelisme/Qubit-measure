@@ -385,6 +385,9 @@ class T1WorkflowWindow(QWidget):
         source and native lifecycle/journal errors propagate without retry.
         Success updates accepted input/base and clears renderer-local text.
         Failure does neither; Engine owns revision and atomic publication.
+        If a native error ends an idle run, the existing Stop owner delivers its
+        actual failed terminal and finishes presentation. The original error is
+        reraised unchanged, even if owner cleanup fails; no batch is retried.
         """
         controller = self.controller
         if controller is None:
@@ -394,7 +397,18 @@ class T1WorkflowWindow(QWidget):
         panel = self.tuning_panel
         if panel is None:
             raise RuntimeError("Applying tunables requires accepted run")
-        return panel.apply_external(batch, actor=actor)
+        try:
+            return panel.apply_external(batch, actor=actor)
+        except Exception:
+            status = controller.status()
+            if status is not None and status.lifecycle == "failed":
+                try:
+                    controller.stop(run_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to finish owner cleanup after tunables error"
+                    )
+            raise
 
     def pause(self, run_id: str) -> RunStatus:
         """Request Pause of the explicit native target, retaining plan and plots.

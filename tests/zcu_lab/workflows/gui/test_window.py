@@ -1,7 +1,7 @@
 """Concrete Qt startup uses one fixed native capture and no hardware."""
 
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -21,11 +21,12 @@ from zcu_tools.experiment.workflows import (
     Next,
     RunMismatch,
     Step,
+    TunablesSnapshot,
     WorkflowEnv,
     workflow,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormWritePath
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
@@ -1460,28 +1461,86 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
             "workflow.tunables",
             {"run_id": "tuning", "batch": [{"path": ["guess_us"], "value": 45.0}]},
         )
+        error = reply["error"]
+        assert reply["ok"] is False and isinstance(error, dict)
+        if failure == "terminal":
+            assert (error["code"], error["reason"]) == (
+                "precondition_failed",
+                "invalid_run_state",
+            )
+            data = error["data"]
+            assert isinstance(data, dict) and data["lifecycle"] == "stopped"
+        else:
+            assert error["code"] == "controller_error"
+            assert "Is a directory" in error["message"]
     finally:
         if failure == "journal":
             # Restore the fault injection even when the request/test fails.
             journal.rmdir()
             journal.write_bytes(original_journal)
-    error = reply["error"]
-    assert reply["ok"] is False and isinstance(error, dict)
-    if failure == "terminal":
-        assert (error["code"], error["reason"]) == (
-            "precondition_failed",
-            "invalid_run_state",
-        )
-        data = error["data"]
-        assert isinstance(data, dict) and data["lifecycle"] == "stopped"
-    else:
-        assert error["code"] == "controller_error"
-        assert "Is a directory" in error["message"]
     assert controller.engine.tunables("tuning") == before
     assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
     assert panel.panel.state.input.data["guess_us"] == 45.0
     assert panel.panel.editor.local_parse_errors() is not None
     assert control.text() == "-" and not harness.gate.snapshot()
+    assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
+    start_button = window.findChild(QPushButton, "workflow.run.start")
+    assert start_button is not None and start_button.isEnabled()
+    assert not harness.progress.bars_for_owner("t1-workflow")
+    # A failed idle update must not leave unfinished presentation behind.
+    assert isinstance(window.start("after-failure"), int)
+    harness.complete_segment()
+    assert harness.background.error is None
+    window.close()
+    window.close()
+    assert not harness.progress.bars_for_owner("t1-workflow")
+
+
+def test_window_tunables_journal_failure_reraises_the_original_cause(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    paused_tuning: list[tuple[int, float, int]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del paused_tuning
+    window, harness, entry = attachment
+    panel = window.tuning_panel
+    assert panel is not None
+    native_errors: list[Exception] = []
+    original_apply = panel.apply_external
+
+    def observe_native_error(
+        batch: Mapping[FormWritePath, JsonValue],
+        *,
+        actor: Actor,
+    ) -> TunablesSnapshot | FormErrors:
+        try:
+            return original_apply(batch, actor=actor)
+        except Exception as error:
+            native_errors.append(error)
+            raise
+
+    # Observe the borrowed public panel boundary without replacing its behavior.
+    monkeypatch.setattr(panel, "apply_external", observe_native_error)
+    journal = entry.result_path / "workflows/tuning/journal.jsonl"
+    original = journal.read_bytes()
+    journal.unlink()
+    journal.mkdir()
+    try:
+        with pytest.raises(IsADirectoryError) as caught:
+            window.apply_tunables(
+                "tuning", {("guess_us",): 45.0}, actor=Actor("agent", "rpc")
+            )
+    finally:
+        journal.rmdir()
+        journal.write_bytes(original)
+    assert len(native_errors) == 1 and caught.value is native_errors[0]
+    assert window.controller is not None
+    status = window.controller.status()
+    assert status is not None and status.lifecycle == "failed"
+    assert not harness.progress.bars_for_owner("t1-workflow")
+    window.stop("tuning")
+    window.close()
+    window.close()
 
 
 def _start_plan_batch(_inputs: Inputs) -> list[FormWrite]:
