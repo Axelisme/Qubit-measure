@@ -19,15 +19,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_new",
         MethodSpec(
             10.0,
-            "Create a new tab for the named adapter. Optional target binds its "
-            "first declared alias to a concrete component without changing global "
-            "aliases. Omission uses current global aliases. Unresolved aliases return "
-            "precondition_failed/role_resolution_failed with role, focus, "
-            "required_kind and detail. Returns {tab_id}.",
-            (
-                required_string("adapter_name", "Adapter to instantiate"),
-                optional_string("target", "Concrete component for the primary alias"),
-            ),
+            "Create a new tab using current global aliases. Unbound aliases allow "
+            "creation with an Invalid cfg. The tab retains no source capture; "
+            "target overrides belong to a single Run. Returns {tab_id}.",
+            (required_string("adapter_name", "Adapter to instantiate"),),
         ),
         agent=AgentMethodPolicy(
             refresh_after_write=True,
