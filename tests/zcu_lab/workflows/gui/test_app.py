@@ -26,7 +26,12 @@ from zcu_tools.gui.runtime import GuiAssembly
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
-from zcu_tools.resources.entry import ResultEntry, component_registry
+from zcu_tools.resources.entry import (
+    ResultEntry,
+    RoleSpec,
+    component_registry,
+    role_registry,
+)
 
 from tests.resources.entry.fakes import registry_state, restore_registry
 from zcu_lab.components import QubitSchema
@@ -47,6 +52,10 @@ def qapp() -> QApplication:
 def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior]:
     before = registry_state()
     component_registry.register("qubit/workflow-app-test", QubitSchema)
+    try:
+        role_registry.get("qubit")
+    except ValueError:
+        role_registry.register("qubit", RoleSpec("qubit/*"))
     installed = registry_state()
     behavior = WorkflowsGuiBehavior(project_root=str(tmp_path))
     try:
@@ -141,7 +150,7 @@ def test_after_show_reuses_nonmodal_setup_without_selecting_entry(
     setup.close()
     button(app.window, "workflow.source.setup").click()
     assert app.window.setup_dialog is setup and setup.isVisible()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Window"):
         app.after_show(GuiAssembly(controller=object(), window=QWidget()))
 
 
