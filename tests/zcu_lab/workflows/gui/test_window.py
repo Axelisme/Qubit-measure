@@ -315,6 +315,84 @@ def test_admission_notification_can_cancel_current_start(
     assert window.close()
 
 
+@pytest.mark.parametrize("previous_start", [False, True])
+def test_gate_registration_reentrant_start_preserves_outer_controller(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+    previous_start: bool,
+) -> None:
+    window, harness, entry = attachment
+    calls: list[str] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        calls.append("init")
+
+    @workflow("reentry-observer", plan=T1Plan, tunables=T1Tunables, init=init)
+    def observe(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del env, plan, tun, state
+        calls.append("step")
+        yield from ()
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", observe)
+    if previous_start:
+        assert isinstance(window.start("previous"), int)
+        window.stop("previous")
+        harness.background.execute()
+        harness.background.deliver()
+        assert not harness.gate.snapshot()
+
+    observed: list[tuple[str | None, int | None, bool]] = []
+    rejections: list[InvalidRunState] = []
+    preserved: list[bool] = []
+
+    def reenter_on_register(payload: GateChangedPayload) -> None:
+        if not payload.active:
+            return
+        outer = window.controller
+        if outer is None:
+            return
+        observed.append((outer.run_id, outer.operation_id, outer.has_pending_segment))
+        try:
+            window.start("nested")
+        except InvalidRunState as exc:
+            rejections.append(exc)
+        finally:
+            preserved.append(window.controller is outer)
+
+    subscription = harness.bus.subscribe(GateChangedPayload, reenter_on_register)
+    try:
+        token = window.start("outer")
+    finally:
+        subscription.unsubscribe()
+    assert observed == [("outer", None, True)]
+    assert len(rejections) == 1 and rejections[0].action == "start"
+    assert rejections[0].lifecycle == "running" and preserved == [True]
+    controller = window.controller
+    assert isinstance(token, int) and controller is not None
+    assert (
+        controller.run_id == "outer"
+        and controller.operation_id == token
+        and controller.status() is None
+        and harness.gate.snapshot()
+    )
+    window.stop("outer")
+    harness.background.execute()
+    assert (
+        calls == []
+        and controller.status() is None
+        and harness.gate.snapshot()
+        and controller.operation_id == token
+    )
+    harness.background.deliver()
+    assert not harness.gate.snapshot() and harness.handles.live_count() == 0
+    assert controller.operation_id is None and window.controller is controller
+    assert not (entry.result_path / "workflows").exists()
+    assert not (entry.database_path / "workflows").exists()
+
+
 def test_real_t1_gui_caller_runs_native_offline_acquisitions(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
 ) -> None:
