@@ -377,9 +377,11 @@ def test_acquire_cancel_flag_does_not_cancel_inside_mock_signal_grid(
         totals.append(kwargs.get("total"))
         return reps_bar
 
-    with use_pbar_factory(factory):
-        with pytest.raises(StoppedPartialAcquireError, match="first round"):
-            prog.acquire(soc, progress=False, cancel_flag=cancel_flag)
+    with (
+        use_pbar_factory(factory),
+        pytest.raises(StoppedPartialAcquireError, match="first round"),
+    ):
+        prog.acquire(soc, progress=False, cancel_flag=cancel_flag)
 
     assert totals == [sw.expts]
     reps_bar.close.assert_called_once_with()
@@ -1120,6 +1122,7 @@ def test_engine_batched_population_chain_matches_scalar_reference(
             model.pre_readout_props,
             model.inter_shot_props,
             engine._detune_weights,
+            strict=False,
         ):
             at_readout = pre_prop @ state
             node_p = 0.5 * (1.0 + float(at_readout[2]))
