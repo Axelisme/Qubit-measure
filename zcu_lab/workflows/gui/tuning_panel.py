@@ -1,5 +1,6 @@
 """Concrete T1 tuning caller for the shared workflow submission policy."""
 
+import logging
 from collections.abc import Mapping
 
 from pydantic import JsonValue
@@ -14,6 +15,8 @@ from zcu_lab.workflows.calibration import Calibrated
 
 from .panel import T1TunablesPanel
 from .tunables import T1TunablesForm
+
+logger = logging.getLogger(__name__)
 
 
 class T1TuningPanel(QWidget):
@@ -104,6 +107,10 @@ class T1TuningPanel(QWidget):
         try:
             result = self.apply()
         except ValueError as exc:
+            self._message.setText(str(exc))
+            return
+        except Exception as exc:
+            logger.exception("T1 workflow Apply failed")
             self._message.setText(str(exc))
             return
         if isinstance(result, FormErrors):

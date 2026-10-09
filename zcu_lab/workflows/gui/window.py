@@ -546,13 +546,27 @@ class T1WorkflowWindow(QWidget):
         run_id = self.controller.run_id
         if self.controller.has_pending_segment:
             if run_id is not None:
-                self.stop(run_id)
+                try:
+                    self.stop(run_id)
+                except Exception as error:
+                    logger.exception("T1 workflow Stop on close failed")
+                    self._message.setText(str(error))
+                    if a0 is not None:
+                        a0.ignore()
+                    return
             if a0 is not None:
                 a0.ignore()
             return
         status = self.controller.status()
         if status is not None and status.lifecycle == "paused" and run_id is not None:
-            self.stop(run_id)
+            try:
+                self.stop(run_id)
+            except Exception as error:
+                logger.exception("T1 workflow Stop on close failed")
+                self._message.setText(str(error))
+                if a0 is not None:
+                    a0.ignore()
+                return
         self._poll.stop()
         if self._plots is not None:
             self._plots.release()
