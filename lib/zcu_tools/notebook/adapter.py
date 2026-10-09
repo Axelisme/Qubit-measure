@@ -256,9 +256,11 @@ class NotebookExperiment(Generic[CoreT]):
         ctx provides cached save-time context and exact entry storage. source
         must be the same object returned by the most recent successful run;
         loaded, stale, manual and other-adapter records fail before output I/O.
-        roles, if provided, must come from ctx.resolve; None records no roles.
-        Named figures create PNGs/copies, analysis supplies JSON-safe pane
-        results, and comment remains raw user text. A returned SavedRun can
+        roles must be resolved from the same bound entry, point and storage
+        roots as ctx; another handle of that point is valid. None records no
+        roles. Wrong role origins raise ValueError before outputs or
+        acquired/saved events. Named figures create PNGs/copies, analysis supplies
+        JSON-safe pane results, and comment remains raw user text. A returned SavedRun can
         explicitly rewrite the same run after later adapter operations.
         PartialSaveError retains that handle and latest output report; ledger
         errors propagate directly. Do not retry or guess a historical source.

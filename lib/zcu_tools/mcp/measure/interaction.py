@@ -25,7 +25,7 @@ def handoff_interaction(
 
     ctx supplies the fixed GUI binding; execution owns the admitted analysis.
     before_send optionally checks caller lifetime just before native dispatch.
-    Cancelled executions reject this read at that boundary. Query, PNG and path
+    Cancelled executions reject this read at that boundary. Query and PNG
     failures become delivery_error on the same owner, not a failed native outcome.
     Non-interactive executions need no handoff and perform no GUI request.
     """
@@ -66,6 +66,10 @@ def interact(
     Recipes supply their original analysis handle and phase admission. A reply
     for another operation cannot replace that execution's handoff. Done joins
     the existing completion owner; PNG failure preserves the accepted receipt.
+    Native figure bytes are consumed into ToolReply.images only, without a JSON
+    figure path, session temporary file or persistent identity. Other native
+    committed state/commands/info fields are preserved. Later live reads may
+    show a different image. There is no retry or hidden guard refresh.
     """
     done = params.get("payload", {}).get("command") == "done"
     if done:
@@ -75,6 +79,7 @@ def interact(
         raise GuiRpcError(
             "Interactive analysis has been replaced", reason="result_superseded"
         )
+    figure = reply.pop("figure", None)
     execution = ctx.session.executions.for_op(reply["handle"])
     if done:
         if execution is None:
@@ -92,19 +97,15 @@ def interact(
         execution.observe_interaction(ToolReply(reply), done=True)
         recipe = ctx.session.recipes.for_op(reply["handle"])
         return recipe.wait(300.0) if recipe is not None else execution.wait(2.0)
-    figure = reply["figure"]
     images: tuple[PngImage, ...] = ()
     delivery_error = False
     try:
         if figure is not None:
             image = validated_png(base64.b64decode(figure["png_b64"], validate=True))
-            path = ctx.session.write_png(image.data)
-            reply["figure"] = str(path)
             images = (image,)
-    except (ValueError, OSError) as exc:
+    except ValueError as exc:
         if execution is None:
             raise
-        reply["figure"] = None
         reply["delivery_error"] = str(exc)
         delivery_error = True
     if execution is not None:

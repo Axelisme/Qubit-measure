@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -12,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     LoadDataRequest,
     NoAnalyzeParams,
 )
-from zcu_tools.gui.app.measure.services.guard import LoadPermit
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.cfg import (
@@ -29,6 +29,7 @@ from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import make_cfg
+from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
 
@@ -61,7 +62,7 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
 
 
 @pytest.mark.parametrize("context_free", [False, True])
-def test_load_retains_request_source_without_run_evidence(
+def test_load_retains_request_source_and_native_history(
     result_sources: tuple[ParameterContext, ParameterContext],
     context_free: bool,
 ) -> None:
@@ -75,14 +76,17 @@ def test_load_retains_request_source_without_run_evidence(
         replace(state.session_env, parameters=make_parameters({"rate": 2.0}))
     )
     loaded: RunRecord[ExpCfgModel, object] = RunRecord(cfg=None, result=object())
+    metadata = historical_metadata()
 
-    def load_and_rebind(_request: LoadDataRequest) -> RunRecord[ExpCfgModel, object]:
+    def load_and_rebind(
+        _request: LoadDataRequest,
+    ) -> tuple[RunRecord[ExpCfgModel, object], RunMetadata]:
         tab.parameters = q2
-        return loaded
+        return loaded, metadata
 
     adapter.load.side_effect = load_and_rebind
     service, _emit, _writeback = _service(state)
-    service.load_result(LoadPermit(tab_id), "result.h5")
+    service.load_result(tab_id, "result.h5")
 
     request = adapter.load.call_args.args[0]
     assert isinstance(request, LoadDataRequest)
@@ -93,7 +97,7 @@ def test_load_retains_request_source_without_run_evidence(
     assert tab.run.result is loaded
     assert tab.run.parameters is captured
     assert tab.run.source_operation_id is None
-    assert tab.run.metadata is None
+    assert tab.run.metadata is metadata
     state.clear_tab_results(tab_id)
     assert tab.run.parameters is None
 
@@ -105,7 +109,8 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     state, tab_id, adapter = _make_state()
     stale_result = object()
     loaded = RunRecord(cfg=None if missing_cfg else ExpCfgModel(), result=object())
-    adapter.load.return_value = loaded
+    metadata = historical_metadata()
+    adapter.load.return_value = (loaded, metadata)
     tab = state.get_tab(tab_id)
     tab.run.result = stale_result
     tab.run.source_path = "/tmp/old.hdf5"
@@ -127,9 +132,11 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     save_path_version = state.version.get(f"tab:{tab_id}:save_path")
     svc, emit, writeback = _service(state)
 
-    outcome = svc.load_result(LoadPermit(tab_id), "/tmp/new.hdf5")
+    outcome = svc.load_result(tab_id, "/tmp/new.hdf5")
 
     assert tab.run.result is loaded
+    assert tab.run.metadata == metadata
+    assert tab.run.confirmed_run_id is None
     assert tab.run.source_path == "/tmp/new.hdf5"
     assert tab.analysis.result is None
     assert tab.analysis.plots is None
@@ -158,7 +165,7 @@ def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
     svc, _emit, writeback = _service(state)
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
-        svc.load_result(LoadPermit(tab_id), "/tmp/new.hdf5")
+        svc.load_result(tab_id, "/tmp/new.hdf5")
 
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
@@ -175,7 +182,7 @@ def test_load_result_error_leaves_state_unchanged() -> None:
     svc, _emit, writeback = _service(state)
 
     with pytest.raises(LoadDataError, match="Cannot load this data file") as exc_info:
-        svc.load_result(LoadPermit(tab_id), "/tmp/bad.hdf5")
+        svc.load_result(tab_id, "/tmp/bad.hdf5")
 
     assert exc_info.value.reason_code == "invalid_data_file"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
@@ -191,7 +198,7 @@ def test_load_result_wraps_unsupported_adapter() -> None:
     svc, _emit, writeback = _service(state)
 
     with pytest.raises(LoadDataError, match="does not support loading") as exc_info:
-        svc.load_result(LoadPermit(tab_id), "/tmp/file.hdf5")
+        svc.load_result(tab_id, "/tmp/file.hdf5")
 
     assert exc_info.value.reason_code == "unsupported_load"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION

@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.datafile.native_models import (
+    RunMetadata,
+    RunSnapshot,
+    SoftwareProvenance,
+)
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.app.measure.state import (
     DeviceState,
@@ -60,7 +66,6 @@ def test_tab_interaction_state_creation():
         global_run_active=True,
         is_running=False,
         is_analyzing=True,
-        is_saving_data=False,
         has_context=False,
         has_active_context=False,
         has_soc=True,
@@ -71,7 +76,6 @@ def test_tab_interaction_state_creation():
     assert state.global_run_active is True
     assert state.is_running is False
     assert state.is_analyzing is True
-    assert state.is_saving_data is False
 
 
 def test_add_tab_then_get_tab_returns_correct_tabstate():
@@ -205,10 +209,7 @@ def test_is_tab_busy_checks_per_tab_flags():
     _add_tab(state, "t1", adapter)
     _add_tab(state, "t2", adapter)
     assert state.is_tab_busy("t1") is False
-    state.set_tab_saving_data("t1", saving_data=True)
-    assert state.is_tab_busy("t1") is True
     assert state.is_tab_busy("t2") is False
-    state.set_tab_saving_data("t1", saving_data=False)
     state.set_tab_running("t2", running=True)
     assert state.is_tab_busy("t1") is False
     assert state.is_tab_busy("t2") is True
@@ -234,9 +235,35 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
     state = State(_make_ctx())
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
-    state.update_tab_loaded_result("t1", object(), "/tmp/loaded.hdf5")
+    result = object()
+    metadata = RunMetadata(
+        run_id="20261008T000000Z-a1b2c3",
+        experiment="test/native",
+        started_at="2026-10-08T00:00:00+00:00",
+        finished_at="2026-10-08T00:01:00+00:00",
+        completion="complete",
+        labber_path="/historical/measurement.hdf5",
+        snapshot=RunSnapshot(
+            entry_id=UUID("00000000-0000-0000-0000-000000000001"),
+            entry_name="historical-entry",
+            point="historical-point",
+            description="Original measurement context",
+            roles={"driver": "q1"},
+        ),
+        provenance=SoftwareProvenance(
+            software_versions={"test-software": "1.0"},
+            git_commit=None,
+            git_dirty=None,
+            qick_version=None,
+            soc_fingerprint=None,
+            hostname="historical-host",
+        ),
+    )
+    state.update_tab_loaded_result("t1", result, "/tmp/loaded.hdf5", metadata=metadata)
 
     tab = state.get_tab("t1")
+    assert tab.run.result is result
+    assert tab.run.metadata == metadata
     assert tab.run.source_path == "/tmp/loaded.hdf5"
     assert state.version.get("tab:t1:result") == 1
     assert state.version.get("tab:t1:analyze") == 1

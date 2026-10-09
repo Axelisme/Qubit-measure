@@ -49,9 +49,6 @@ class MainWindowEventHost(Protocol):
     def refresh_tab_writeback(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
-    def refresh_tab_save_paths(
-        self, tab_id: str, snapshot: TabSnapshot | None = None
-    ) -> None: ...
     def refresh_tab_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
@@ -82,7 +79,6 @@ class _TabReaction(Enum):
     POST_FIGURE = auto()
     INTERACTION = auto()
     CLEAR_PLOT = auto()
-    SAVE_PATHS = auto()
 
 
 _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
@@ -127,10 +123,7 @@ _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
     TabInteractionFact.ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.POST_ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.SAVE_PATHS_CHANGED: (),
-    TabInteractionFact.SAVE_DRAFT_COMMITTED: (
-        _TabReaction.SAVE_PATHS,
-        _TabReaction.INTERACTION,
-    ),
+    TabInteractionFact.SAVE_DRAFT_COMMITTED: (_TabReaction.INTERACTION,),
     TabInteractionFact.WRITEBACK_DRAFT_CHANGED: (_TabReaction.WRITEBACK,),
 }
 
@@ -271,7 +264,6 @@ class MainWindowEventCoordinator:
         self._host.refresh_context_panel()
         for tab_id in self._host.view_tab_ids():
             snapshot = self._ctrl.get_tab_snapshot(tab_id)
-            self._host.refresh_tab_save_paths(tab_id, snapshot)
             self._host.refresh_tab_interaction(tab_id, snapshot)
 
     def _on_tab_added(self, payload: TabAddedPayload) -> None:
@@ -313,9 +305,6 @@ class MainWindowEventCoordinator:
                 tab_id, snapshot
             ),
             _TabReaction.CLEAR_PLOT: lambda: self._host.clear_tab_plot(tab_id),
-            _TabReaction.SAVE_PATHS: lambda: self._host.refresh_tab_save_paths(
-                tab_id, snapshot
-            ),
         }
         for reaction in reactions:
             actions[reaction]()

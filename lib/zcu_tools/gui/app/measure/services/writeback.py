@@ -143,7 +143,14 @@ class WritebackDraft:
     the same draft is shared by the UI and remote editing surfaces.
     """
 
-    __slots__ = ("_service", "_identity", "_entries", "_closed", "_parameters")
+    __slots__ = (
+        "_service",
+        "_identity",
+        "_entries",
+        "_closed",
+        "_parameters",
+        "_run_id",
+    )
 
     def __init__(
         self,
@@ -151,11 +158,13 @@ class WritebackDraft:
         identity: str,
         entries: list[_DraftEntry],
         parameters: ParameterContext | None,
+        run_id: str | None = None,
     ) -> None:
         self._service = service
         self._identity = identity
         self._entries = entries
         self._parameters = parameters
+        self._run_id = run_id
         self._closed = False
 
     @property
@@ -166,6 +175,15 @@ class WritebackDraft:
         target. Later selection changes never replace it.
         """
         return self._parameters
+
+    @property
+    def run_id(self) -> str | None:
+        """Historical RunMetadata identity fixed at creation, or None without it.
+
+        Save does not change this value. It identifies a Run, not whether that
+        Run has a saved file; native Load retains the file's original identity.
+        """
+        return self._run_id
 
     @property
     def items(self) -> tuple[WritebackItem, ...]:
@@ -252,6 +270,7 @@ class WritebackService:
         items: Iterable[WritebackItem],
         *,
         parameters: ParameterContext | None,
+        run_id: str | None = None,
     ) -> WritebackDraft:
         """Create a draft and all item-local cfg sessions transactionally.
 
@@ -265,6 +284,10 @@ class WritebackService:
         target for the draft lifetime. None is valid for an empty/context-free
         proposal, but nonempty application fails without a destination. Baseline
         display uses this capture; no live selection provider is retained.
+        run_id is the source RunMetadata.run_id, including unsaved Runs and
+        historical native Loads; None means no native acquisition evidence.
+        It stays fixed through Save, selection changes, edits and application.
+        Application copies it into accepted evidence and destination provenance.
         """
         identity = uuid.uuid4().hex
         entries: list[_DraftEntry] = []
@@ -300,7 +323,7 @@ class WritebackService:
             # observable error and no draft is returned.
             self._teardown_entries(entries)
             raise
-        return WritebackDraft(self, identity, entries, parameters)
+        return WritebackDraft(self, identity, entries, parameters, run_id=run_id)
 
     def preview_draft(self, draft: WritebackDraft) -> list[WritebackItem]:
         self._require_draft(draft)
@@ -453,6 +476,8 @@ class WritebackService:
         Nonempty writes require a capture and its still-open entry. GUI defaults
         to the GUI origin; MCP callers explicitly identify the MCP frontend.
         Unknown/duplicate IDs or concrete destinations fail before any write.
+        Accepted payload and every destination provenance use draft.run_id;
+        application never re-reads Run or Save state to determine its identity.
         """
         self._require_draft(draft)
         selected_entries = _entries_to_apply(draft._entries, item_ids)
@@ -498,7 +523,9 @@ class WritebackService:
             at=datetime.now(timezone.utc).isoformat(),
             entry_id=parameters.target.entry_id,
             origin=origin.origin,
-            payload=AcceptedPayload(writes=tuple(writes), analysis_summary={}),
+            payload=AcceptedPayload(
+                writes=tuple(writes), analysis_summary={}, run_id=draft.run_id
+            ),
         )
         ledger.append(event)
         applied_ids: list[str] = []
@@ -507,7 +534,7 @@ class WritebackService:
             source = Provenance(
                 source=event.id,
                 kind=event.kind,
-                run_id=None,
+                run_id=draft.run_id,
                 at=event.at,
                 stderr=item.stderr,
             )

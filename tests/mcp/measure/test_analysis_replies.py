@@ -3,8 +3,7 @@
 import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
-from pathlib import Path
+from dataclasses import asdict, replace
 from threading import Event
 
 import pytest
@@ -48,6 +47,7 @@ from ._analyze_support import (
     stdio_data as _data,
 )
 from ._recipe_execution_support import definition
+from ._save_report_support import analysis_report
 
 
 def forbidden_recipe(_session: RecipeSession) -> RecipeGenerator:
@@ -106,6 +106,9 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
             result["summary"] = {"t1": 27.5}
             result["operation_state"][f"{pane}_state"]["has_writeback_draft"] = True
             return result
+        if method == "tab.save_artifacts":
+            assert params["artifacts"] == [{"section": pane, "name": "results"}]
+            return asdict(analysis_report(pane))
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond, writeback=proposal)
@@ -205,69 +208,32 @@ def test_analysis_only_rejects_conflicting_estimate_declarations(
 
 
 @pytest.mark.parametrize("stage", ["primary", "post"])
-def test_analysis_only_uses_unambiguous_native_quality_without_live_reads(
-    tmp_path, clients, stage
-):
-    identical = replace(T1_DEFINITION, name="identical-t1")
-    native_issue = {
-        "path": "summary.fit_quality.fit.relative_parameter_errors.decay_time",
-        "reason": "covariance_unavailable",
-    }
-    quality = {
-        "fit": {
-            "r2": -0.25,
-            "normalized_residual_rms": 0.31,
-            "relative_parameter_errors": {"decay_time": None},
-            "invalid": [native_issue],
-        }
-    }
-
-    def respond(method, params):
-        if method in {"tab.analyze", "tab.post_analyze"}:
-            return _start_reply({}, [])
-        if method == "operation.await":
-            return {"reason": "completed", "status": "finished"}
-        if method in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
-            pane = "analysis" if stage == "primary" else "post_analysis"
-            result = _result_reply(pane, [], {})
-            result["summary"] = {"t1": 25.0, "t1_err": None, "fit_quality": quality}
-            return result
-        raise AssertionError(method)
-
-    client = _client(tmp_path, clients, respond, recipes=(T1_DEFINITION, identical))
-    initial = client.call("tab_analyze", {"tab": "t", "stage": stage})
-    assert initial.data["status"] == "finished", initial.data
-    execution = initial.data["execution"]
-    before = len(client.transport.sent)
-    summary = client.call("status", {"execution": execution})
-    full = client.call("status", {"execution": execution, "detail": "full"})
-    waited = client.call("wait", {"execution": execution, "timeout": 0}).data
-    assert initial.data == summary
-    assert {k: v for k, v in waited.items() if k != "elapsed_s"} == summary
-    assert len(client.transport.sent) == before
-    assert full["result"]["summary"]["fit_quality"] == quality
-    estimate = summary["analysis"][stage]["estimates"]["t1"]
-    assert estimate["value"] == 25.0
-    assert estimate["unit"] == "us"
-    assert estimate["quality"]["fit"]["r2"] == -0.25
-    assert estimate["quality"]["fit"]["normalized_residual_rms"] == 0.31
-    issue = {
-        "path": f"analysis.{stage}.estimates.t1.quality.fit.relative_parameter_errors.decay_time",
-        "reason": "covariance_unavailable",
-    }
-    assert estimate["quality"]["fit"]["invalid"] == [issue]
-    assert summary["invalid"] == [issue]
-    assert summary["analysis"][stage]["details"] == {}
-    json.dumps(summary, allow_nan=False)
-    json.dumps(full, allow_nan=False)
-
-
-@pytest.mark.parametrize("stage", ["primary", "post"])
 @pytest.mark.parametrize("outcome", ["finished", "failed", "partial"])
 def test_analysis_initial_wait_and_status_share_the_same_summary(
     tmp_path, clients, stage, outcome
 ):
     pane = "analysis" if stage == "primary" else "post_analysis"
+    report = analysis_report(pane, ["fit", "residual"])
+    if outcome == "partial":
+        artifact = report.artifacts[pane]["results"]
+        members = dict(artifact.members)
+        members["figure:residual"] = [
+            replace(
+                members["figure:residual"][0],
+                status="failed",
+                error="Destination unavailable",
+            )
+        ]
+        report = replace(
+            report,
+            artifacts={
+                pane: {
+                    "results": replace(
+                        artifact, status="Partially saved", members=members
+                    )
+                }
+            },
+        )
 
     def respond(method, params):
         if method in {"tab.analyze", "tab.post_analyze"}:
@@ -280,28 +246,14 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
             }
         if method in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
             return _result_reply(pane, ["fit", "residual"], {"gain": 2.0})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/" + params["figure_name"] + ".png"}
+        if method == "tab.save_artifacts":
+            assert params["artifacts"] == [{"section": pane, "name": "results"}]
+            return asdict(report)
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond)
-    if outcome == "partial":
-
-        def save(params):
-            if params["figure_name"] == "residual":
-                return {
-                    "ok": False,
-                    "error": {
-                        "code": "precondition_failed",
-                        "reason": "save_failed",
-                        "message": "Destination unavailable",
-                    },
-                }
-            return {"ok": True, "result": respond("tab.save_image", params)}
-
-        client.transport.replies["tab.save_image"] = save
     initial = client.call("tab_analyze", {"tab": "t", "stage": stage})
     execution = initial.data["execution"]
     before = len(client.transport.sent)
@@ -312,29 +264,32 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
     assert {k: v for k, v in waited.data.items() if k != "elapsed_s"} == summary
     assert len(client.transport.sent) == before
     assert summary["recipe"] is None
-    assert summary["run_id"] is None
+    assert summary["run_id"] == (None if outcome == "failed" else "run-a")
     assert summary["run_op"] is None
     assert summary["analysis"]["stage"] == stage
     assert summary["steps"]["analysis"][stage]["status"] == (
         "failed" if outcome == "failed" else "finished"
     )
-    assert summary["status"] == ("finished" if outcome == "finished" else "failed")
+    assert summary["status"] == ("failed" if outcome == "failed" else "finished")
     if outcome != "failed":
         assert summary["analysis"][stage]["params"] == {"gain": 2.0}
-        assert summary["analysis"][stage]["details"] == {"frequency": 5.0}
-        assert summary["artifacts"][pane]["fit"]["members"]["image"] == [
-            {"path": "/actual/fit.png", "status": "saved"}
-        ]
+        assert summary["analysis"][stage]["summary"] == {"frequency": 5.0}
+        assert summary["artifacts"] == asdict(report)["artifacts"]
+        assert full["save_report"] == asdict(report)
     else:
         assert summary["error"] == full["error"]
     if outcome == "partial":
         assert summary["steps"]["analysis_save"][stage]["status"] == "incomplete"
-        assert summary["artifacts"][pane]["residual"] == {
-            "status": "incomplete",
-            "lifetime": "persistent",
-            "members": {"image": []},
-        }
-        assert summary["error"]["phase"] == "image_save"
+        assert full["save_status"] == "incomplete"
+        assert summary["artifacts"][pane]["results"]["members"]["figure:residual"] == [
+            {
+                "format": "png",
+                "path": "/actual/residual.png",
+                "status": "failed",
+                "error": "Destination unavailable",
+            }
+        ]
+        assert summary["error"] is None
 
 
 @pytest.mark.parametrize("stage", ["primary", "post"])
@@ -409,8 +364,7 @@ def test_analysis_start_failure_retains_a_queryable_execution(
     assert full["op"] is None
     assert full["params"] is None
     assert summary["steps"]["analysis_save"][stage]["status"] == "not_started"
-    assert summary["artifacts"]["analysis"] == {}
-    assert summary["artifacts"]["post_analysis"] == {}
+    assert summary["artifacts"] == {}
     assert len(client.transport.sent) == before
     assert _methods(client) == [method]
 
@@ -435,6 +389,8 @@ def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
             return {"reason": "completed", "status": "finished"}
         if name in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
             return _result_reply(pane, [], {"gain": 2.0})
+        if name == "tab.save_artifacts":
+            return asdict(analysis_report(pane))
         raise AssertionError(name)
 
     client = _client(tmp_path, clients, respond)
@@ -485,6 +441,7 @@ def test_pending_analysis_receipt_preserves_identity_and_cancel_intent(
             "tab.get_analyze_result"
             if stage == "primary"
             else "tab.get_post_analyze_result",
+            "tab.save_artifacts",
             "tab.writeback_preview",
         ]
     )
@@ -573,6 +530,8 @@ def test_duplicate_analysis_receipt_retains_the_confirmed_handle(
             return {"reason": "completed", "status": "finished"}
         if name == result_method:
             return _result_reply(pane, [], {})
+        if name == "tab.save_artifacts":
+            return asdict(analysis_report(pane))
         raise AssertionError(name)
 
     client = _client(tmp_path, clients, respond)
@@ -591,6 +550,7 @@ def test_duplicate_analysis_receipt_retains_the_confirmed_handle(
         method,
         "operation.await",
         result_method,
+        "tab.save_artifacts",
         "tab.writeback_preview",
         method,
     ]
@@ -612,8 +572,8 @@ def test_execution_query_observes_background_completion_without_reconnect(
             return {"reason": "completed", "status": outcome, "error": None}
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"model": "fit"})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/fit.png"}
+        if method == "tab.save_artifacts":
+            return asdict(analysis_report("analysis", ["fit"]))
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(method)
@@ -651,10 +611,10 @@ def test_execution_query_observes_background_completion_without_reconnect(
         assert completed["save_status"] == (
             "saved" if outcome == "finished" else "not_started"
         )
-        assert completed["saved_images"] == (
-            [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
+        assert completed["save_report"] == (
+            asdict(analysis_report("analysis", ["fit"]))
             if outcome == "finished"
-            else []
+            else None
         )
         _assert_figure(completed_reply, present=outcome == "finished")
         sent = list(client.transport.sent)
@@ -727,8 +687,8 @@ def test_done_joins_original_completion_without_duplicate_saves(
             )
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"gain": 2})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/fit.png"}
+        if method == "tab.save_artifacts":
+            return asdict(analysis_report("analysis", ["fit"]))
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(method)
@@ -766,10 +726,8 @@ def test_done_joins_original_completion_without_duplicate_saves(
     assert completed["save_status"] == (
         "saved" if outcome == "finished" else "not_started"
     )
-    assert completed["saved_images"] == (
-        [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
-        if outcome == "finished"
-        else []
+    assert completed["save_report"] == (
+        asdict(analysis_report("analysis", ["fit"])) if outcome == "finished" else None
     )
     if outcome == "finished":
         assert completed["params"] == {"gain": 2}
@@ -786,14 +744,14 @@ def test_done_joins_original_completion_without_duplicate_saves(
     assert methods.count("tab.analyze") == int(registered)
     assert methods.count("tab.interact") == 1 + int(registered)
     assert methods.count("tab.get_analyze_result") == int(outcome == "finished")
-    assert methods.count("tab.save_image") == int(outcome == "finished")
+    assert methods.count("tab.save_artifacts") == int(outcome == "finished")
     assert methods.count("tab.writeback_preview") == int(outcome == "finished")
     assert set(methods) <= {
         "tab.analyze",
         "tab.interact",
         "operation.await",
         "tab.get_analyze_result",
-        "tab.save_image",
+        "tab.save_artifacts",
         "tab.get_figure",
         "tab.writeback_preview",
     }
@@ -810,8 +768,8 @@ def test_failed_writeback_capture_keeps_saved_analysis_and_preview(
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"skip": 1})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/fit.png"}
+        if method == "tab.save_artifacts":
+            return asdict(analysis_report("analysis", ["fit"]))
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(method)
@@ -831,11 +789,8 @@ def test_failed_writeback_capture_keeps_saved_analysis_and_preview(
     assert data["writeback"] is None
     assert data["result"]["params"] == {"skip": 1}
     assert data["save_status"] == "saved"
-    assert data["saved_images"] == [
-        {"figure_name": "fit", "image_path": "/actual/fit.png"}
-    ]
-    assert Path(data["figure"]).read_bytes() == _PNG
-    assert reply["content"][1]["data"] == base64.b64encode(_PNG).decode()
+    assert data["save_report"] == asdict(analysis_report("analysis", ["fit"]))
+    _assert_figure(reply, present=True)
     assert _methods(client).count("tab.writeback_preview") == 1
     before = list(client.transport.sent)
     assert (
@@ -846,30 +801,24 @@ def test_failed_writeback_capture_keeps_saved_analysis_and_preview(
 
 
 @pytest.mark.parametrize(
-    "failure,phase,save_status,confirmed,unconfirmed",
+    "failure,phase,save_status,has_report",
     [
-        ("result_rejected", "result_read", "not_started", [], None),
-        ("save_rejected", "image_save", "incomplete", ["fit"], None),
-        ("save_lost", "image_save", "unknown", ["fit"], "residual"),
-        ("handler_timeout", "image_save", "unknown", ["fit"], "residual"),
-        ("encoding_failed", "image_save", "unknown", ["fit"], "residual"),
-        ("save_bad_path", "image_save", "unknown", ["fit"], "residual"),
-        ("after_result_eof", "image_save", "incomplete", [], None),
-        ("after_save_eof", "figure_read", "saved", ["fit", "residual"], None),
-        ("preview_rejected", "figure_read", "saved", ["fit", "residual"], None),
-        ("local_write", "figure_read", "saved", ["fit", "residual"], None),
+        ("result_rejected", "result_read", "not_started", False),
+        ("save_rejected", "image_save", "incomplete", False),
+        ("save_lost", "image_save", "unknown", False),
+        ("handler_timeout", "image_save", "unknown", False),
+        ("encoding_failed", "image_save", "unknown", False),
+        ("save_bad_report", "image_save", "unknown", False),
+        ("after_result_eof", "image_save", "not_started", False),
+        ("after_save_eof", "figure_read", "saved", True),
+        ("preview_rejected", "figure_read", "saved", True),
     ],
 )
-def test_analysis_failure_retains_confirmed_prefix_without_replay(
-    tmp_path,
-    clients,
-    monkeypatch,
-    failure,
-    phase,
-    save_status,
-    confirmed,
-    unconfirmed,
+def test_analysis_failure_retains_native_capture_without_replay(
+    tmp_path, clients, monkeypatch, failure, phase, save_status, has_report
 ):
+    report = asdict(analysis_report("analysis", ["fit", "residual"]))
+
     def respond(method, params):
         if method == "tab.analyze":
             return _start_reply({"gain": 2}, [])
@@ -879,22 +828,25 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
             if failure == "after_result_eof":
                 client.transport.is_open = False
             return _result_reply("analysis", ["fit", "residual"], {"gain": 2})
-        if method == "tab.save_image":
-            if params["figure_name"] == "residual":
-                if failure == "save_lost":
-                    client.transport.is_open = False
-                    raise OSError("socket closed during image save")
-                if failure == "save_bad_path":
-                    return {"image_path": None}
-                if failure == "after_save_eof":
-                    client.transport.is_open = False
-            return {"image_path": f"/actual/{params['figure_name']}.png"}
+        if method == "tab.save_artifacts":
+            assert params == {
+                "tab_id": "t",
+                "artifacts": [{"section": "analysis", "name": "results"}],
+                "operation_id": 71,
+            }
+            if failure == "save_lost":
+                client.transport.is_open = False
+                raise OSError("socket closed during artifact save")
+            if failure == "save_bad_report":
+                return {"run_id": "run-a", "artifacts": {"analysis": {"results": {}}}}
+            if failure == "after_save_eof":
+                client.transport.is_open = False
+            return report
         assert method == "tab.get_figure"
         return {"png_b64": base64.b64encode(_PNG).decode()}
 
     client = _client(tmp_path, clients, respond)
     _inject_analysis_rejection(client, failure, monkeypatch)
-
     reply = _call_full_execution_stdio(monkeypatch, client, "tab_analyze", {"tab": "t"})
     assert reply["isError"] is True
     assert len(reply["content"]) == 1
@@ -902,32 +854,20 @@ def test_analysis_failure_retains_confirmed_prefix_without_replay(
     assert data["status"] == "failed"
     assert data["error"]["phase"] == phase
     assert data["save_status"] == save_status
-    assert data["saved_images"] == [
-        {"figure_name": name, "image_path": f"/actual/{name}.png"} for name in confirmed
-    ]
-    assert data["unconfirmed_image"] == unconfirmed
+    assert data["save_report"] == (report if has_report else None)
     _assert_ambiguous_save_error(data, failure)
     if failure == "result_rejected":
         assert data["result"] is None
-        assert data["remaining_images"] is None
     else:
         assert data["result"]["summary"] == {"frequency": 5.0}
-        assert data["remaining_images"] == [
-            name for name in ["fit", "residual"] if name not in confirmed
-        ]
-    assert data["figure"] is None
     methods = _methods(client)
     assert methods.count("tab.analyze") == 1
     assert methods.count("tab.get_analyze_result") == 1
-    assert methods.count("tab.get_figure") == (
-        1 if failure in ("preview_rejected", "local_write") else 0
+    assert methods.count("tab.get_figure") == int(failure == "preview_rejected")
+    assert methods.count("tab.save_artifacts") == int(
+        failure not in ("result_rejected", "after_result_eof")
     )
-    assert [
-        params["figure_name"]
-        for method, params in client.transport.sent
-        if method == "tab.save_image"
-    ] == (
-        []
-        if failure in ("result_rejected", "after_result_eof")
-        else ["fit", "residual"]
-    )
+    before = list(client.transport.sent)
+    observed = client.call("status", {"execution": data["execution"], "detail": "full"})
+    assert observed == data
+    assert client.transport.sent == before

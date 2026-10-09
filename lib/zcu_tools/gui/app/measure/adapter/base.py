@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import dataclasses
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from inspect import signature
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
 
+from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.cfg_assembler import (
     ExperimentCfgInput,
     ExperimentCfgValue,
     assemble_experiment_cfg,
 )
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.native_persistence import (
+    PreparedRunData,
+    load_run_with_metadata,
+    prepare_run_data,
+)
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterCfgDefinition,
@@ -37,6 +45,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
+from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.resources.entry import RoleSpec
@@ -498,18 +507,32 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         cfg = self.build_exp_cfg(raw_cfg, req)
         return cast(T_Result, self.exp_cls().run(cfg, context=context))
 
-    def load(self, req: LoadDataRequest) -> T_Result:
+    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
+        """Read req.data_path as an exact native file using this core's spec.
+
+        Return the typed cfg/Result record and its full historical metadata.
+        req.parameters is the tab capture, not a replacement for file history.
+        Missing persistence declarations or required constructor arguments raise
+        NotImplementedError. Native validation raises ValueError; I/O and core
+        constructor failures propagate. No Labber fallback or history recapture.
+        """
         if not _can_construct_without_args(self.exp_cls):
             raise NotImplementedError(
-                f"{type(self).__name__} does not support loading canonical result files"
+                f"{type(self).__name__} does not support loading native result files"
             )
         exp = self.exp_cls()
-        load = getattr(exp, "load", None)
-        if not callable(load):
+        persistence_spec = getattr(exp, "persistence_spec", None)
+        if not callable(persistence_spec):
             raise NotImplementedError(
-                f"{type(self).__name__} does not support loading canonical result files"
+                f"{type(self).__name__} does not support loading native result files"
             )
-        return cast(T_Result, load(Path(req.data_path)))
+        try:
+            spec = exp.persistence_spec()
+        except NotImplementedError as exc:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support loading native result files"
+            ) from exc
+        return load_run_with_metadata(Path(req.data_path), spec=spec)
 
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]
@@ -555,6 +578,53 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     def make_save_paths(self, ctx: SessionEnv) -> SavePaths:
         return self.make_default_save_paths(ctx)
+
+    def capture_analysis_document(
+        self,
+        result: object,
+        parameters: object | None,
+        *,
+        pane: Literal["analysis", "post_analysis"],
+    ) -> AnalysisDocument:
+        """Capture one completed pane's historical inputs and numeric summary.
+
+        result must implement AnalyzeResult.to_summary_dict. parameters is the
+        dataclass instance used for that result, or None for no inputs, never
+        the next edited draft. Unsupported input/result types raise TypeError;
+        invalid/non-finite JSON raises ValueError. The datafile model isolates
+        containers once; this hook neither reads live context nor writes files.
+        """
+        if not isinstance(result, AnalyzeResult):
+            raise TypeError("Analysis result must implement to_summary_dict")
+        if parameters is None:
+            inputs: dict[str, object] = {}
+        elif dataclasses.is_dataclass(parameters) and not isinstance(parameters, type):
+            inputs = {
+                field.name: getattr(parameters, field.name)
+                for field in dataclasses.fields(parameters)
+            }
+        else:
+            raise TypeError(
+                "Historical analysis parameters must be a dataclass or None"
+            )
+        return AnalysisDocument.model_validate(
+            {"pane": pane, "parameters": inputs, "summary": result.to_summary_dict()}
+        )
+
+    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
+        """Map one completed RunRecord through this adapter's persistence spec.
+
+        The record must contain this experiment's typed cfg and Result. Return
+        the shared SI payload and cfg snapshot without paths, metadata capture
+        or I/O. Invalid record/cfg/Result/comment and missing declarations raise
+        the owning experiment's TypeError, ValueError or NotImplementedError.
+        Arrays remain shared; do not mutate the record while saving.
+        """
+        if not isinstance(result, RunRecord):
+            raise TypeError("Native saving requires a RunRecord")
+        return prepare_run_data(
+            result, spec=self.exp_cls().persistence_spec(), comment=comment
+        )
 
     def save(self, req: SaveDataRequest[T_Result]) -> None:
         self.exp_cls().save(req.run_result, Path(req.data_path), comment=req.comment)

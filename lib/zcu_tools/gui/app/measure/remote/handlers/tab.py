@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, TypedDict
 
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.app.measure.services.ports import TabPathsSnapshot
 from zcu_tools.gui.cfg import is_custom_reference_key
 from zcu_tools.gui.cfg.edit_codec import decode_edits, decode_ref, encode_ref
 from zcu_tools.gui.cfg.resource import (
@@ -20,7 +19,7 @@ from zcu_tools.resources.entry.errors import RoleResolutionError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ..artifact_keys import artifact_key_wire
+from ..save_types import project_save_snapshot
 from ._common import follow_tab, render_view
 
 
@@ -135,7 +134,6 @@ def tab_operation_state(
             "global_run_active": bool(interaction.global_run_active),
             "is_running": bool(interaction.is_running),
             "is_analyzing": bool(interaction.is_analyzing),
-            "is_saving_data": bool(interaction.is_saving_data),
             "has_context": bool(interaction.has_context),
             "has_active_context": bool(interaction.has_active_context),
             "has_soc": bool(interaction.has_soc),
@@ -144,19 +142,9 @@ def tab_operation_state(
             "has_post_analyze_result": bool(interaction.has_post_analyze_result),
             "has_figure": bool(interaction.has_figure),
         },
-        "save_paths": _save_paths_wire(snap.paths),
-        "artifacts": [
-            {
-                "key": artifact_key_wire(artifact.key),
-                "kind": artifact.key.kind.value,
-                "figure_name": artifact.key.figure_name,
-                "status": artifact.status.value,
-                "default_path": artifact.default_path,
-                "last_saved_path": artifact.last_saved_path,
-                "is_saveable": artifact.is_saveable,
-            }
-            for artifact in snap.artifacts
-        ],
+        **project_save_snapshot(snap.artifacts, run_id=snap.run.run_id).model_dump(
+            mode="json"
+        ),
         "result_source_path": snap.run.source_path,
         # Revisions distinguish replacements even when availability and source
         # path stay unchanged. Payload arrays remain with the application owner.
@@ -197,20 +185,6 @@ def h_tab_snapshot(
             raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
         tab_ids = [tab_id]
     return {"tabs": [tab_operation_state(adapter, tid) for tid in tab_ids]}
-
-
-def _save_paths_wire(paths: TabPathsSnapshot | None) -> dict[str, object] | None:
-    if paths is None:
-        return None
-    return {
-        "data_path": paths.data.path,
-        "analysis_images": {
-            name: path.path for name, path in paths.analysis_images.items()
-        },
-        "post_analysis_images": {
-            name: path.path for name, path in paths.post_analysis_images.items()
-        },
-    }
 
 
 class TabParameterRead(TypedDict):

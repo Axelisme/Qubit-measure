@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
+from pydantic import ValidationError
+
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.cfg.edit_codec import decode_ref
 from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.context_types import CommandOrigin
 
-from ..artifact_keys import artifact_key_wire, parse_artifact_key
 from ..cfg_observation import cfg_error_to_remote
+from ..save_types import SaveArtifactRefWire, project_save_report
 from ._common import follow_tab
 
 if TYPE_CHECKING:
@@ -28,7 +31,7 @@ def h_tab_run_start(
     try:
         expected = decode_ref(params["expected"])
         follow_tab(adapter, tab_id, "run")
-        operation_id = control.start_run(tab_id, expected)
+        operation_id = control.start_run(tab_id, expected, origin=CommandOrigin("mcp"))
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc
     return {"operation_id": operation_id}
@@ -78,19 +81,27 @@ def h_run_running_tab(
     return {"tab_id": adapter.run_analyze_control.get_running_tab_id()}
 
 
+def _operation_id(value: object, field: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"{field} must be an integer")
+    return value
+
+
 def h_tab_save_data(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    data_path = params["data_path"]
-    comment = params["comment"]
     written = adapter.save_control.save_data(
         tab_id,
-        str(data_path) if data_path is not None else None,
-        comment=str(comment) if comment is not None else None,
-        run_operation_id=cast(int | None, params["run_operation_id"]),
+        comment=str(params["comment"]) if params["comment"] is not None else None,
+        origin=CommandOrigin("mcp"),
+        run_operation_id=_operation_id(params["run_operation_id"], "run_operation_id"),
     )
-    return {"data_path": written.data_path, "operation_id": written.operation_id}
+    snap = adapter.tab_control.get_tab_snapshot(tab_id)
+    projection = project_save_report(written, snap.artifacts)
+    return projection.model_dump(mode="json")
 
 
 def h_tab_save_artifacts(
@@ -100,66 +111,46 @@ def h_tab_save_artifacts(
     if raw_artifacts == "all":
         artifacts = None
     elif isinstance(raw_artifacts, list):
-        artifacts = tuple(parse_artifact_key(key) for key in raw_artifacts)
+        try:
+            refs = [SaveArtifactRefWire.model_validate(item) for item in raw_artifacts]
+            artifacts = tuple(ArtifactRef(ref.section, ref.name) for ref in refs)
+        except (ValidationError, ValueError) as error:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, str(error)) from error
         if not artifacts or len(set(artifacts)) != len(artifacts):
             raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                "artifacts must be a nonempty list of unique keys",
+                ErrorCode.INVALID_PARAMS, "artifacts must be nonempty and unique"
             )
     else:
         raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "artifacts must be 'all' or a list of keys"
+            ErrorCode.INVALID_PARAMS, "artifacts must be all or artifact refs"
         )
-    raw_paths = params["paths"]
-    if not isinstance(raw_paths, dict):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "paths must be an object")
-    paths: dict[ArtifactKey, str] = {}
-    for key, path in raw_paths.items():
-        artifact_key = parse_artifact_key(key)
-        if not isinstance(path, str) or not path:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "artifact paths must be nonempty strings"
-            )
-        paths[artifact_key] = path
-    comment = params["comment"]
     tab_id = str(params["tab_id"])
     if not adapter.save_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    origin = CommandOrigin("mcp")
+    run_operation_id = _operation_id(params["run_operation_id"], "run_operation_id")
+    operation_id = _operation_id(params["operation_id"], "operation_id")
+    if run_operation_id is not None:
+        adapter.run_analyze_control.require_run_operation(tab_id, run_operation_id)
+    if operation_id is not None:
+        if (
+            artifacts is None
+            or len(artifacts) != 1
+            or artifacts[0].section not in ("analysis", "post_analysis")
+        ):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "operation_id requires one analysis artifact"
+            )
+        adapter.run_analyze_control.require_analysis_operation(
+            tab_id, artifacts[0].section, operation_id
+        )
     follow_tab(adapter, tab_id, "data")
     written = adapter.save_control.save_artifacts(
         tab_id,
         artifacts=artifacts,
-        paths=paths,
-        comment=str(comment) if comment is not None else None,
+        comment=str(params["comment"]) if params["comment"] is not None else None,
+        origin=origin,
     )
-    return {
-        "operation_id": written.operation_id,
-        "destinations": {
-            artifact_key_wire(item.key): item.path for item in written.destinations
-        },
-    }
-
-
-def h_tab_save_image(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    subtab_id = str(params["subtab_id"])
-    if subtab_id not in ("analysis", "post_analysis"):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"invalid subtab_id {subtab_id!r}; save_image only accepts analysis|post_analysis",
-        )
-    name = params["figure_name"]
-    if not isinstance(name, str) or not name:
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "figure_name must be nonempty")
-    kind = (
-        ArtifactKind.ANALYSIS if subtab_id == "analysis" else ArtifactKind.POST_ANALYSIS
-    )
-    image_path = params["image_path"]
-    path_str = str(image_path) if image_path is not None else None
-    operation_id = cast(int | None, params.get("operation_id"))
-    written = adapter.save_control.save_image(
-        tab_id, ArtifactKey(kind, name), path_str, operation_id=operation_id
-    )
-    return {"image_path": written}
+    snap = adapter.tab_control.get_tab_snapshot(tab_id)
+    projection = project_save_report(written, snap.artifacts)
+    return projection.model_dump(mode="json")

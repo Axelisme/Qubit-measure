@@ -111,15 +111,11 @@ def stdio_data(reply: dict[str, Any]) -> dict[str, Any]:
     return json.loads(reply["content"][0]["text"], parse_constant=_reject_json_constant)
 
 
-def assert_figure(reply: dict[str, Any], *, present: bool) -> Path | None:
-    data = stdio_data(reply)
+def assert_figure(reply: dict[str, Any], *, present: bool) -> None:
+    """Verify the current response delivers inline PNG bytes when available."""
     if not present:
-        assert data["figure"] is None
         assert len(reply["content"]) == 1
-        return None
-    path = Path(data["figure"])
-    assert path.is_absolute()
-    assert path.read_bytes() == PNG
+        return
     assert reply["content"][1:] == [
         {
             "type": "image",
@@ -127,7 +123,6 @@ def assert_figure(reply: dict[str, Any], *, present: bool) -> Path | None:
             "data": base64.b64encode(PNG).decode("ascii"),
         }
     ]
-    return path
 
 
 def sent_methods(client: MeasureClient) -> list[str]:
@@ -221,16 +216,6 @@ def inject_analysis_rejection(
             if failure in AMBIGUOUS_SAVE_ERRORS
             else rejection
         )
-        client.transport.replies["tab.save_image"] = lambda params: (
-            save_error
-            if params["figure_name"] == "residual"
-            else {"ok": True, "result": {"image_path": "/actual/fit.png"}}
-        )
+        client.transport.replies["tab.save_artifacts"] = save_error
     elif failure == "preview_rejected":
         client.transport.replies["tab.get_figure"] = rejection
-    elif failure == "local_write":
-
-        def reject_write(path, data):
-            raise OSError("preview filesystem is full")
-
-        monkeypatch.setattr(Path, "write_bytes", reject_write)

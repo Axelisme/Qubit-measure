@@ -35,11 +35,15 @@ def test_author_edits_preserve_defaults_and_use_each_returned_cfg_ref(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "busy,adapter,reason",
-    [(True, "lookback", "tab_busy"), (False, "other", "wrong_experiment")],
+    "busy_flag,adapter,reason",
+    [
+        ("is_running", "lookback", "tab_busy"),
+        ("is_analyzing", "lookback", "tab_busy"),
+        (None, "other", "wrong_experiment"),
+    ],
 )
 def test_author_reuse_rejects_busy_or_wrong_adapter_without_reset(
-    tmp_path, busy, adapter, reason
+    tmp_path, busy_flag, adapter, reason
 ):
     gui = LookbackGui()
 
@@ -47,7 +51,8 @@ def test_author_reuse_rejects_busy_or_wrong_adapter_without_reset(
         reply = gui(method, params)
         if method == "tab.snapshot":
             reply["tabs"][0]["adapter_name"] = adapter
-            reply["tabs"][0]["interaction"]["is_running"] = busy
+            if busy_flag is not None:
+                reply["tabs"][0]["interaction"][busy_flag] = True
         return reply
 
     with recipe_client(tmp_path, respond) as client:
@@ -65,6 +70,18 @@ def test_author_reuse_resets_the_observed_cfg_before_editing(tmp_path):
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback", reuse="t")
         tab.set("rounds", 9)
+        cfg_calls = [
+            (method, params)
+            for method, params in client.transport.sent
+            if method in {"tab.get_cfg", "tab.reset_cfg", "tab.edit_cfg", "tab.new"}
+        ]
+    assert [method for method, _ in cfg_calls] == [
+        "tab.get_cfg",
+        "tab.reset_cfg",
+        "tab.edit_cfg",
+    ]
+    assert cfg_calls[1][1]["expected"] == {"cfg_id": "cfg", "revision": "2"}
+    assert cfg_calls[2][1]["expected"] == {"cfg_id": "cfg", "revision": "3"}
     assert gui.publication["cfg_ref"]["revision"] == "4"
     assert gui.publication["tree"]["children"]["rounds"]["input"]["resolved"] == 9
 

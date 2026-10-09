@@ -1,6 +1,7 @@
 """One-call artifact persistence through exact format and ledger owners."""
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from io import BytesIO
@@ -160,6 +161,7 @@ def save_artifacts(
     metadata: RunMetadata,
     ledger: RecordsLedger,
     origin: Origin,
+    figure_encoder: Callable[[Figure], bytes] | None = None,
 ) -> SaveReport:
     """Rewrite every selected output, isolate failures, then append one saved event.
 
@@ -167,7 +169,10 @@ def save_artifacts(
     exact entry destinations and ledger belongs to that entry. origin is gui,
     notebook or mcp. Validate members,
     but do not preflight path/content conflicts or establish a transaction.
-    Encode each FileMember once through Figure.savefig or the analysis encoder.
+    Encode each FileMember once. figure_encoder receives each native Figure and
+    returns PNG bytes; None uses Figure.savefig. The callback runs synchronously
+    on the calling thread, so callers must encode a live GUI Figure on its owner
+    thread. AnalysisDocument always uses the datafile analysis encoder.
     Encoding failure marks all destinations of that member failed and still
     attempts other members. Do not encode in the caller or accept bytes aliases.
     Attempt Labber before native for each data member, retaining the previous
@@ -189,7 +194,7 @@ def save_artifacts(
                     member, outputs, current_metadata
                 )
             else:
-                attempts = _save_file(member, outputs)
+                attempts = _save_file(member, outputs, figure_encoder)
             results.extend(attempts)
     report = SaveReport(metadata.run_id, tuple(results))
     successful_labber = next(
@@ -279,13 +284,18 @@ def _save_data(
 
 
 def _save_file(
-    member: FileMember, outputs: tuple[Output, ...]
+    member: FileMember,
+    outputs: tuple[Output, ...],
+    figure_encoder: Callable[[Figure], bytes] | None,
 ) -> tuple[OutputResult, ...]:
     try:
         if isinstance(member.content, Figure):
-            with BytesIO() as stream:
-                member.content.savefig(stream, format="png")
-                content = stream.getvalue()
+            if figure_encoder is None:
+                with BytesIO() as stream:
+                    member.content.savefig(stream, format="png")
+                    content = stream.getvalue()
+            else:
+                content = figure_encoder(member.content)
         else:
             content = encode_analysis_document(member.content)
     except Exception as error:

@@ -140,14 +140,12 @@ def test_confirmation_cannot_discard_changed_state(app: App, change: str) -> Non
     assert app.loader.loads == 0
 
 
-@pytest.mark.parametrize("busy", ["operation", "save", "analysis", "shutdown"])
+@pytest.mark.parametrize("busy", ["operation", "analysis", "shutdown"])
 def test_busy_or_shutdown_prevents_reload(app: App, busy: str) -> None:
     tab_id = app.controls.new_tab("demo")
     preview = app.reload.prepare_reload()
     if busy == "operation":
         app.operations.return_value = 1
-    elif busy == "save":
-        app.state.get_tab(tab_id).is_saving_data = True
     elif busy == "analysis":
         app.state.get_tab(tab_id).is_analyzing = True
     else:

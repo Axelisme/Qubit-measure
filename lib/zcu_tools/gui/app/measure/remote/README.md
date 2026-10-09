@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-09, explicit result-entry RPCs
+**Last updated:** 2026-10-09, explicit entry RPCs and synchronous Save reports
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -231,9 +231,10 @@ version zero, are stale. Wire methods do not accept `expected_versions`.
 Run uses the explicit cfg ref and observed device snapshots, not live md/ml.
 Cfg admission uses only the resource identity and revision. A ref observed by
 another connection is valid, but tab, SoC and device seen guards still belong to
-the requesting connection. Run does not require exporting the entire context. Load, editor commit and writeback still
-use live context and retain their context guard; Run's change does not authorize
-removing those dependencies.
+the requesting connection. Run and existing-tab native Load do not require exporting
+active context. Load reads the tab capture and preserves the file's original metadata;
+it guards tab/result/analysis revisions, not session focus. Editor commit and writeback
+retain their existing context guards.
 
 GUI owns observation and write tracking:
 
@@ -296,7 +297,10 @@ failure into an HTTP-specific status without changing the wire enum (ADR-0068).
 including cfg backfill, cleanup on load failure and focus restoration. It requires
 an explicitly observed context, not observations of a tab that does not yet exist.
 Backfill failure retains the result and reports `not_applied`; cleanup failure
-reports `cleanup_failed`. Existing-tab `tab.load_data` keeps its stricter guards.
+reports `cleanup_failed`. Existing-tab `tab.load_data` requires an observed tab snapshot,
+not active context. Native Load restores historical metadata without acquired events
+or Save confirmation. Save rejects an entry mismatch before mapping or output I/O. Within the same
+entry, saving a loaded Run uses its captured historical point, not the tab birth point.
 
 ## Method Surface
 
@@ -310,7 +314,7 @@ The wire surface is grouped by ownership:
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
 - `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
   `PredictorControlPort`.
-- `tab.*`：tab lifecycle、cfg、run、load與save。`tab.save_image`要求`tab_id`、`subtab_id=analysis|post_analysis`與`figure_name`；`tab.save_artifacts`接受`data`、`analysis:<name>`及`post:<name>`完整key，不接受無名稱的analysis/post舊格式。`tab.snapshot`逐圖列出`figure_names`、`analysis_images`／`post_analysis_images`路徑與artifact status；explicit destinations修改相同key的GUI草稿。Run screenshot讀live FigureContainer；analysis/post screenshot讀目前選中的具名圖。`tab.save_artifacts`回傳保留路徑與operation id，保留不代表成功，完成後以terminal及artifact snapshot判讀。
+- `tab.*`：tab lifecycle、cfg、run、load與save。`tab.save_artifacts`接受 `all` 或唯一的 `{section,name}` refs，保存完整 artifact，不接受 caller paths。`tab.save_data` 與 `tab.save_artifacts` 同步回傳原 Run 的 run_id，即使全部輸出失敗也保留同一 ID，以及本次完整 paths/status/error，不建立 Save operation id。`tab.snapshot` 投影已提交的 sections/member/output 狀態，不計畫新路徑。Run screenshot 讀 live FigureContainer；analysis/post screenshot 讀目前選中的具名圖。
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
 - `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。`include_figure` 預設 true，figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。False 完全略過 PNG renderer 並回 figure=null，不改變 command 驗證、state 或原 operation_id。MCP done 用此 receipt 先接住原 operation，再觀察完成及保存；其他 command 與純讀保留預設圖像行為。此 method 不使用 seen guard；同一 owner loop 的較晚提交勝出。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
 - `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time). Preview accepts an optional `operation_id` to require the original analysis result rather than another run's draft.
@@ -319,8 +323,8 @@ The wire surface is grouped by ownership:
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
 
-Subtab locator is required and closed (`run|analysis|post_analysis`); save_image
-only accepts `analysis|post_analysis`. `tab.get_figure` may bind a Run preview to
+The `tab.get_figure` subtab locator is required and closed
+(`run|analysis|post_analysis`). It may bind a Run preview to
 `run_operation_id`, or an analysis preview to `operation_id`, never both.
 Omitting both retains the current-pane read. `device.snapshot.unit` comes from
 the registered device owner; `none` does not identify a physical flux unit. `method_entries/` owns the wire method
@@ -389,6 +393,15 @@ Agent-created sessions are garbage-collected on commit/discard/client drop;
 UI-owned independent drafts follow their own owner lifetime.
 
 ## Operation Handles
+
+`tab.save_data` and `tab.save_artifacts` complete synchronously on the GUI owner
+thread. They return the current complete Save report with the original Run ID,
+even when every output fails, and every output path/status/error. Output statuses
+and errors determine save success, not the presence of `run_id`. Readonly tab
+snapshots retain confirmed identity: null until a persistent output succeeds.
+They do not return a Save handle or require
+`operation.await` followed by `tab.snapshot`. Optional Run/Analyze source IDs
+still bind the result being saved; they are not Save IDs.
 
 Start methods return GUI-local operation ids on the wire. The GUI projects active
 run, analyze and device ids from their owners, regardless of who started them.

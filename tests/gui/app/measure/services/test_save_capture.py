@@ -1,4 +1,4 @@
-"""Fixed context/storage at the Context, Tab and Save worker seams."""
+"""Fixed context/storage through Context, Tab, synchronous Save and RunInputs."""
 
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -7,15 +7,12 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.datafile import RunMetadata, RunSnapshot, SoftwareProvenance
-from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    SaveDataRequest,
-    SavePaths,
-)
-from zcu_tools.gui.app.measure.services.guard import GuardService, SavePermit
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
+from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.save import SaveService
+from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
@@ -27,7 +24,6 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
     PointUseRequest,
 )
-from zcu_tools.gui.session.operation_runner import OperationSpec
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.types import SessionEnv
@@ -36,6 +32,7 @@ from zcu_tools.resources.entry.save_layout import ArtifactKey, SaveLayout
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources, make_cfg
+from tests.gui.app.measure._native_save_support import GUI_ORIGIN, native_save_session
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -192,119 +189,50 @@ def test_storage_rejects_mismatched_target(session: SaveSession) -> None:
         )
 
 
-@pytest.mark.parametrize("roleless", [False, True])
-def test_save_worker_uses_tab_capture_after_entry_switch(
-    session: SaveSession, tmp_path: Path, roleless: bool
-) -> None:
-    capture = _bound(session)
-    adapter = MagicMock()
-    adapter.parameter_roles.return_value = (
-        {} if roleless else {"driver": RoleSpec("fake/drive/*")}
-    )
-    adapter.make_default_cfg.return_value = CfgSchema(
-        CfgSectionSpec(), CfgSectionValue()
-    )
-    adapter.make_save_paths.return_value = SavePaths("unused.h5", "unused.png")
-    registry = MagicMock()
-    registry.create.return_value = adapter
-    tabs = TabService(
-        session.state,
-        registry,
-        MagicMock(),
-        cfg_resources(session.state),
-        cfg_resolution=lambda parameters: cfg_resolution(session.state, parameters),
-        captured_parameters=lambda _roles, _target: None if roleless else capture,
-    )
-    tab_id = tabs.new_tab("T1")
-    result = object()
-    storage = capture.capture_storage()
-    metadata = RunMetadata(
-        run_id="20261008T000000Z-a1b2c3",
-        experiment="test/native",
-        started_at="2026-10-08T00:00:00+00:00",
-        finished_at="2026-10-08T00:01:00+00:00",
-        completion="complete",
-        labber_path=None,
-        snapshot=RunSnapshot(
-            entry_id=storage.entry_id,
-            entry_name=storage.entry_name,
-            point=storage.point,
-            description=storage.description,
-            roles=storage.roles,
-        ),
-        provenance=SoftwareProvenance(
-            software_versions={},
-            git_commit=None,
-            git_dirty=None,
-            qick_version=None,
-            soc_fingerprint=None,
-            hostname=None,
-        ),
-    )
-    session.state.update_tab_result(tab_id, result, metadata=metadata)
-    destination = tmp_path / "out/data.h5"
-    session.state.get_tab(tab_id).save.data_path_override = str(destination)
-    other = ResultEntry.create(
-        "entry-b", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
-    )
-    session.context.install_entry(other)
-    received: list[SaveDataRequest[object]] = []
-    adapter.save.side_effect = received.append
-    runner = MagicMock()
-
-    def begin(spec: OperationSpec) -> int:
-        spec.work(MagicMock())
-        return 1
-
-    runner.begin.side_effect = begin
-    service = SaveService(
-        session.state, runner, session.bus, owner_scheduler=MagicMock()
-    )
-    service.start_save_data(SavePermit(tab_id), str(destination), "annotation")
-
-    request = received[0]
-    assert request.run_result is result
-    assert request.metadata is metadata
-    assert request.parameters is (None if roleless else capture)
-    assert request.storage.point == "p"
-    assert str(request.storage.entry_id) == session.entry.entry_id
-    assert dict(request.storage.roles) == ({} if roleless else {"driver": "Q1"})
-    assert request.comment == "annotation"
-    assert Path(request.data_path).parent == destination.parent
-
-
 def test_tab_created_without_context_does_not_gain_later_save_origin(
-    session: SaveSession, tmp_path: Path
+    tmp_path: Path, qapp: QApplication
 ) -> None:
-    empty_state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-    adapter = MagicMock()
-    adapter.parameter_roles.return_value = {}
-    adapter.make_default_cfg.return_value = CfgSchema(
-        CfgSectionSpec(), CfgSectionValue()
-    )
-    registry = MagicMock()
-    registry.create.return_value = adapter
-    tabs = TabService(
-        empty_state,
-        registry,
-        MagicMock(),
-        cfg_resources(empty_state),
-        cfg_resolution=lambda parameters: cfg_resolution(empty_state, parameters),
-        captured_parameters=lambda _roles, _target: None,
-    )
-    tab_id = tabs.new_tab("pure")
-    empty_state.update_tab_result(tab_id, object())
-    empty_state.set_context(session.state.session_env)
-    service = SaveService(
-        empty_state, MagicMock(), session.bus, owner_scheduler=MagicMock()
-    )
-    destination = tmp_path / "not-created/data.h5"
-    with pytest.raises(FailedPreconditionError, match="captured save context"):
-        service.start_save_data(SavePermit(tab_id), str(destination))
-    assert not destination.parent.exists()
+    with native_save_session(tmp_path, qapp) as native:
+        empty_state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+        adapter = MagicMock()
+        adapter.parameter_roles.return_value = {}
+        adapter.make_default_cfg.return_value = CfgSchema(
+            CfgSectionSpec(), CfgSectionValue()
+        )
+        registry = MagicMock()
+        registry.create.return_value = adapter
+        tabs = TabService(
+            empty_state,
+            registry,
+            MagicMock(),
+            cfg_resources(empty_state),
+            cfg_resolution=lambda parameters: cfg_resolution(empty_state, parameters),
+            captured_parameters=lambda _roles, _target: None,
+        )
+        tab_id = tabs.new_tab("pure")
+        empty_state.update_tab_result(
+            tab_id,
+            native.state.get_tab("tab").run.result,
+            metadata=native.metadata,
+        )
+        empty_state.set_context(native.state.session_env)
+        control = SaveControlFacet(
+            state=empty_state,
+            guard=GuardService(empty_state),
+            save=SaveService(empty_state, native.bus),
+            context=native.context,
+        )
+        before = empty_state.get_artifact_snapshots(tab_id)
+        with pytest.raises(FailedPreconditionError, match="captured storage"):
+            control.save_data(tab_id, comment="rejected", origin=GUI_ORIGIN)
+        assert empty_state.get_tab(tab_id).save_context is None
+        assert empty_state.get_tab(tab_id).save.comment == ""
+        assert empty_state.get_artifact_snapshots(tab_id) == before
+        assert not (native.entry.database_path / "runs").exists()
+        assert native.entry.ledger.events() == ()
 
 
-def test_guard_keeps_original_tab_entry_point_and_roles_in_run_permit(
+def test_guard_keeps_original_tab_entry_point_and_roles_in_run_inputs(
     session: SaveSession, tmp_path: Path
 ) -> None:
     capture = _bound(session)
@@ -331,15 +259,15 @@ def test_guard_keeps_original_tab_entry_point_and_roles_in_run_permit(
     session.context.install_entry(other)
     session.control.use_point(PointUseRequest("q"))
     tab = session.state.get_tab(tab_id)
-    permit = GuardService(session.state).acquire_run_permit(
+    inputs = GuardService(session.state).capture_run_inputs(
         tab_id, expected_revision=tab.cfg.observe().ref.revision
     )
-    assert permit.snapshot is not None
-    assert str(permit.snapshot.entry_id) == session.entry.entry_id
-    assert permit.snapshot.entry_name == "entry-a"
-    assert permit.snapshot.point == "p"
-    assert dict(permit.snapshot.roles) == {"driver": "Q1"}
-    assert permit.experiment_tag == "test/native"
+    assert inputs.snapshot is not None
+    assert str(inputs.snapshot.entry_id) == session.entry.entry_id
+    assert inputs.snapshot.entry_name == "entry-a"
+    assert inputs.snapshot.point == "p"
+    assert dict(inputs.snapshot.roles) == {"driver": "Q1"}
+    assert inputs.experiment_tag == "test/native"
     session.context.clear_context()
-    assert permit.snapshot.point == "p"
-    assert dict(permit.snapshot.roles) == {"driver": "Q1"}
+    assert inputs.snapshot.point == "p"
+    assert dict(inputs.snapshot.roles) == {"driver": "Q1"}

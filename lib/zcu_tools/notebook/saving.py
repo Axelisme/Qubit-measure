@@ -85,13 +85,15 @@ class SavedRun(Generic[CfgT, ResultT]):
 
         Adapter-internal construction: source is its current successful record
         and acquisition is acquisition_for(source). spec is the core's declared
-        persistence mapping. roles, if given, is resolved from ctx; None records
-        no roles. Snapshot only cached context and prepare typed data. Do not
-        create run folders or append events until save. Invalid source/spec
-        raises TypeError/ValueError; bound storage errors propagate.
+        persistence mapping. roles must be resolved from the same bound entry,
+        point and storage roots as ctx; another handle of that point is valid.
+        None records no roles. Wrong role origins raise ValueError before any
+        output or event. Snapshot only cached context and prepare typed data.
+        Do not create run folders or append events until save. Invalid
+        source/spec raises TypeError/ValueError; bound storage errors propagate.
         """
         self._data = prepare_run_data(source, spec=spec, comment="")
-        self._storage = capture_point_storage(ctx)
+        self._storage = capture_point_storage(ctx, roles=roles)
         self._point = ctx
         self._metadata = RunMetadata(
             run_id=acquisition.run_id,
@@ -105,7 +107,7 @@ class SavedRun(Generic[CfgT, ResultT]):
                 entry_name=self._storage.entry_name,
                 point=self._storage.point,
                 description=self._storage.description,
-                roles=dict(roles.components) if roles is not None else {},
+                roles=dict(self._storage.roles),
             ),
             provenance=deepcopy(acquisition.provenance),
         )

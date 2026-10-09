@@ -7,7 +7,6 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     optional_integer,
-    optional_string,
     required_object,
     required_string,
     save_comment,
@@ -48,7 +47,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_load_data",
         MethodSpec(
             30.0,
-            "Load a canonical result file into an already-open adapter tab. The tab "
+            "Load an exact native result file and its original history into an "
+            "already-open adapter tab. The tab "
             "then has a run result and can be analyzed without a SoC connection. "
             "Compatible snapshot values backfill Config automatically, replacing "
             "unsubmitted edits. cfg_backfill reports applied or not_applied; a "
@@ -57,7 +57,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "has_analyze_params is false until preparation succeeds.",
             (
                 required_string("tab_id"),
-                required_string("data_path", "Canonical HDF5 result file to load"),
+                required_string("data_path", "Exact native data.h5 file to load"),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -65,7 +65,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}",
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:analyze",
-                "context",
             ),
             refresh_after_write=True,
         ),
@@ -97,26 +96,20 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_save_data",
         MethodSpec(
             30.0,
-            "Start non-cancellable data saving without a hardware lease. Explicit "
-            "data_path/comment update the GUI draft; omitted values keep it. "
-            "Returns an operation handle and reserved path, not proof of success. "
-            "Wait for completion and read artifacts for the last successful path. "
-            "Optional run_operation_id requires that Run result before any draft "
-            "edit or save; a replaced result returns result_superseded. "
-            "This token does not replace the connection observation guards.",
+            "Synchronously save measurement_data to every native/Labber output on "
+            "the GUI owner thread. Returns the original Run ID, even if all outputs "
+            "fail, and the complete "
+            "current artifacts with paths/status/error; no Save handle or await. "
+            "Partial failures stay in the report. run_operation_id optionally "
+            "binds the Run source and does not replace seen guards.",
             (
                 required_string("tab_id"),
-                optional_string("data_path", "Override data path"),
                 save_comment(),
                 optional_integer("run_operation_id"),
             ),
         ),
         agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:path:data",
-            ),
-            operation_key="tab:{tab_id}",
+            guard_deps=("tab:{tab_id}:result", "tab:{tab_id}:save"),
             refresh_after_write=True,
         ),
     ),
@@ -125,24 +118,22 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_save_artifacts",
         MethodSpec(
             30.0,
-            "Start one non-cancellable save operation over selected artifacts. "
-            "Keys are data, analysis:<name> and post:<name>; all selects unsaved artifacts. "
-            "Explicit paths/comment update the shared drafts. Returns operation_id "
-            "and reserved destinations, not proof of completion. Read artifacts "
-            "after terminal failure for partial successes. Via rpc_call the operation_id "
-            "becomes a handle: use wait(op=handle), then tab.snapshot for actual paths. "
-            "Explicitly read tab.snapshot before this guarded mutation.",
+            "Synchronously save complete artifacts, including all figures, JSON "
+            "and destinations. artifacts is all (including Saved) or unique "
+            "{section,name} refs. No caller paths. Returns the original Run ID, "
+            "even if all outputs fail, and "
+            "this attempt's complete paths/status/error; no Save handle or await. "
+            "run_operation_id binds the Run source. operation_id optionally binds "
+            "one explicitly selected analysis/post_analysis artifact to its "
+            "analysis source, not to a Save operation.",
             (
                 required_string("tab_id"),
                 ParamSpec("artifacts", JsonType.JSON, required=False, default="all"),
-                ParamSpec(
-                    "paths",
-                    JsonType.OBJECT,
-                    required=False,
-                    default={},
-                    description="Artifact key to destination path",
-                ),
                 save_comment(),
+                optional_integer("run_operation_id"),
+                optional_integer(
+                    "operation_id", "Require the selected analysis source"
+                ),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -151,40 +142,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:analyze",
                 "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:path:data",
-                "tab:{tab_id}:path:analysis_image",
-                "tab:{tab_id}:path:post_analysis_image",
-            ),
-            operation_key="tab:{tab_id}",
-            refresh_after_write=True,
-        ),
-    ),
-    method_entry(
-        "tab.save_image",
-        "run_save:h_tab_save_image",
-        MethodSpec(
-            30.0,
-            "Save one named canonical image (analysis|post_analysis only; run "
-            "has no canonical image). Requires tab_id, subtab_id and figure_name. "
-            "The pane is analysis|post_analysis. Explicit image_path updates the GUI "
-            "draft before saving; omission keeps the draft, and an empty path is rejected. "
-            "Optional operation_id rejects a replaced result before changing paths or exporting.",
-            (
-                required_string("tab_id"),
-                required_string("subtab_id", "Pane: analysis|post_analysis"),
-                required_string("figure_name"),
-                optional_string("image_path", "Override image path"),
-                optional_integer(
-                    "operation_id", "Require this analysis operation's current result"
-                ),
-            ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:path:analysis_image",
-                "tab:{tab_id}:path:post_analysis_image",
+                "tab:{tab_id}:save",
             ),
             refresh_after_write=True,
         ),

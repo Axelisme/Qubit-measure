@@ -5,6 +5,7 @@ import os
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import h5py as h5
 import numpy as np
@@ -131,6 +132,26 @@ def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
             dataset.coords["frequency"].values, recovered.axes[0].values
         )
         assert dataset["signal"].attrs["units"] == "V"
+
+
+def test_readonly_metadata_mappings_round_trip_through_native_io(
+    tmp_path: Path,
+) -> None:
+    metadata = native_metadata()
+    metadata = replace(
+        metadata,
+        snapshot=replace(metadata.snapshot, roles=MappingProxyType({"driver": "Q1"})),
+        provenance=replace(
+            metadata.provenance,
+            software_versions=MappingProxyType({"zcu_tools": "1.0"}),
+        ),
+    )
+    destination = tmp_path / "readonly.h5"
+    save_run_data(destination, native_payload(), metadata, cfg=native_cfg())
+    restored = load_run_data(destination).metadata
+    assert restored.snapshot.roles == {"driver": "Q1"}
+    assert restored.provenance.software_versions == {"zcu_tools": "1.0"}
+    assert restored == metadata
 
 
 @pytest.mark.parametrize("count", [1, 2])

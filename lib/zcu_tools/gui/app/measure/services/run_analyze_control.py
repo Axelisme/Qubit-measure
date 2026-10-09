@@ -15,10 +15,12 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.cfg.resource import CfgRef, CfgStaleError
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import CommandOrigin
 
 from .plot_lifecycle import discard_unpublished_plots
 
 logger = logging.getLogger(__name__)
+_GUI_ORIGIN = CommandOrigin("gui")
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
@@ -32,7 +34,7 @@ if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
     from .analyze import ActiveInteractive, AnalyzeService
-    from .guard import AnalyzePermit, GuardService
+    from .guard import GuardService
     from .load import LoadService, LoadTabResultOutcome
     from .ports import TabSnapshot
     from .post_analyze import PostAnalyzeService
@@ -80,7 +82,12 @@ class RunAnalyzeControlPort(Protocol):
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
-    def start_run(self, tab_id: str, expected: CfgRef) -> int: ...
+    def start_run(
+        self, tab_id: str, expected: CfgRef, *, origin: CommandOrigin = _GUI_ORIGIN
+    ) -> int:
+        """Start the exact publication; attribute acquired to gui/mcp origin."""
+        ...
+
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome: ...
     def cancel_run(self) -> bool: ...
 
@@ -181,24 +188,36 @@ class RunAnalyzeControlFacet:
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
 
-    def start_run(self, tab_id: str, expected: CfgRef) -> int:
-        """Accept exactly the caller's publication, without refresh or substitution."""
+    def start_run(
+        self, tab_id: str, expected: CfgRef, *, origin: CommandOrigin = _GUI_ORIGIN
+    ) -> int:
+        """Start tab_id's exact publication and return an asynchronous token.
+
+        expected is the observed CfgRef; stale refs and unavailable/busy tabs
+        raise before start. origin identifies the initiating gui/mcp frontend for
+        acquired. Native terminal ledger failures settle failed on that token
+        with ERROR diagnostics, retaining the published result for Save;
+        missing saved-point storage emits a diagnostic instead of an event.
+        No refresh, focus substitution, Save or automatic retry occurs.
+        """
         self._access.require_available()
         actual = self._state.get_tab(tab_id).cfg.observe().ref
         if expected != actual:
             raise CfgStaleError(expected, actual)
-        permit = self._guard.acquire_run_permit(
+        inputs = self._guard.capture_run_inputs(
             tab_id, expected_revision=expected.revision
         )
         self._ensure_tab_idle(tab_id)
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None
-        return self._run.start_run(permit, plots=self._new_plots(live_container))
+        return self._run.start_run(
+            inputs, plots=self._new_plots(live_container), origin=origin
+        )
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         self._access.require_available()
-        permit = self._guard.acquire_load_permit(tab_id)
-        outcome = self._load.load_result(permit, data_path)
+        self._guard.check_load(tab_id)
+        outcome = self._load.load_result(tab_id, data_path)
         self._run.release_view_plots(tab_id)
         preparation = self._tab.prepare_result_analysis(tab_id)
         self._bus.emit(
@@ -270,23 +289,21 @@ class RunAnalyzeControlFacet:
         self._access.require_available()
         if run_operation_id is not None:
             self._state.require_run_operation(tab_id, run_operation_id)
-        permit = self._guard.acquire_analyze_permit(tab_id)
+        self._guard.check_analyze(tab_id)
         self._ensure_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
         if tab.adapter.capabilities.analysis is AnalysisMode.INTERACTIVE:
-            return self._start_interactive_analyze(
-                tab_id, permit, analyze_params_instance
-            )
+            return self._start_interactive_analyze(tab_id, analyze_params_instance)
         host = self._render_host()
         figure_container = (
             host.make_analysis_container(tab_id) if host is not None else None
         )
         return self._analyze.start_analyze(
-            permit, analyze_params_instance, plots=self._new_plots(figure_container)
+            tab_id, analyze_params_instance, plots=self._new_plots(figure_container)
         )
 
     def _start_interactive_analyze(
-        self, tab_id: str, permit: AnalyzePermit, analyze_params_instance: object
+        self, tab_id: str, analyze_params_instance: object
     ) -> int:
         tab = self._state.get_tab(tab_id)
         ctx = self._state.session_env
@@ -307,7 +324,7 @@ class RunAnalyzeControlFacet:
             if self._run_background is not None:
                 plugin.bind_background(self._run_background)
             token = self._analyze.start_plugin(
-                permit,
+                tab_id,
                 plugin,
                 self._owner_scheduler,
                 analyze_params_instance=analyze_params_instance,

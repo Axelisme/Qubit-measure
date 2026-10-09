@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
 
 if TYPE_CHECKING:
+    from zcu_tools.datafile import AnalysisDocument, RunMetadata
     from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
     from zcu_tools.experiment.context import RunContext
+    from zcu_tools.experiment.native_persistence import PreparedRunData
     from zcu_tools.plotting.plots import Plots
     from zcu_tools.resources.entry import RoleSpec
 
@@ -147,8 +149,15 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """
         ...
 
-    def load(self, req: LoadDataRequest) -> Any:
-        """Load a canonical result file and return its run-result object."""
+    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
+        """Read the exact native req.data_path and return (record, history).
+
+        The record stays adapter-owned and opaque to the framework. History is
+        the original RunMetadata, including identity, times and source. Do not
+        recapture it from req.parameters. Raise NotImplementedError for an
+        unsupported core, ValueError for invalid native data and OSError for
+        unreadable files; other core failures propagate.
+        """
         ...
 
     def analyze(self, req: AnalyzeRequest[Any, Any], *, plots: Plots) -> Any:
@@ -180,6 +189,31 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         self, req: PostWritebackRequest[Any, Any, Any]
     ) -> Sequence[WritebackItem]:
         """Return the writeback items proposed from one post-analysis result."""
+        ...
+
+    def capture_analysis_document(
+        self,
+        result: object,
+        parameters: object | None,
+        *,
+        pane: Literal["analysis", "post_analysis"],
+    ) -> AnalysisDocument:
+        """Capture a completed result and its historical dataclass inputs.
+
+        None parameters means no inputs. Return finite JSON without figures or
+        arrays; invalid result/input types or values raise TypeError/ValueError.
+        The returned document isolates containers at the datafile boundary.
+        No live-context lookup or I/O. BaseAdapter supplies the implementation.
+        """
+        ...
+
+    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
+        """Prepare this experiment's RunRecord for both native data writers.
+
+        No I/O or metadata capture occurs. Invalid record/cfg/Result/comment or
+        a missing persistence declaration raises TypeError, ValueError or
+        NotImplementedError. Do not mutate result arrays during saving.
+        """
         ...
 
     def save(self, req: SaveDataRequest[Any]) -> None:

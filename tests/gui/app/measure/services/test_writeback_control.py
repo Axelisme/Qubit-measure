@@ -53,9 +53,8 @@ class RecordingGuard:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def acquire_writeback_permit(self, tab_id: str) -> str:
-        self._log.add("guard", "acquire_writeback_permit", tab_id)
-        return f"permit:{tab_id}"
+    def check_writeback(self, tab_id: str) -> None:
+        self._log.add("guard", "check_writeback", tab_id)
 
 
 class RecordingWriteback:
@@ -280,7 +279,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
         assert [item.id for item in result] == ["md-1"]
         assert len(entry.ledger.events()) == accepted_before + 1
         assert control.read_context().value("general.ext.a") == 11
-    guard.acquire_writeback_permit.assert_called_once_with("tab-1")
+    guard.check_writeback.assert_called_once_with("tab-1")
     assert observed == [
         ("tab-1", TabInteractionFact.WRITEBACK_DRAFT_CHANGED, 11),
     ]

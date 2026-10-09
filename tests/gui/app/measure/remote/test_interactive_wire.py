@@ -17,7 +17,6 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
-from zcu_tools.gui.app.measure.services.guard import AnalyzePermit
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -151,7 +150,7 @@ def _start(fx, *, background=None):
     # Set up a real AnalyzeService operation; RPC interactions below always go
     # through the shipped socket and RunAnalyzeControlFacet, not a handler stub.
     token = fx.ctrl._analyze_svc.start_plugin(
-        AnalyzePermit(tab_id=tab_id),
+        tab_id,
         plugin,
         QtOwnerScheduler(),
         analyze_params_instance=analyze_params,

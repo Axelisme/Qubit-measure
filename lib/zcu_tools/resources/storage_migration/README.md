@@ -1,6 +1,6 @@
 # `zcu_tools.resources.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-07，typed library 轉換與 legacy evidence owner
+**Last updated:** 2026-10-07，Legacy evidence owner、native 2.0 與 point-local typed library 轉換
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 

@@ -30,7 +30,7 @@ from zcu_tools.mcp.measure.analysis_execution import (
 from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
 from zcu_tools.mcp.measure.interaction import handoff_interaction
 from zcu_tools.mcp.measure.operation_wait import await_operation
-from zcu_tools.mcp.measure.raw_save import RawSaveReceipt, RawSaveRequest, save_raw_data
+from zcu_tools.mcp.measure.raw_save import RawSaveRequest, SaveReport, save_raw_data
 from zcu_tools.mcp.measure.recipe_capture import (
     ActualField,
     RecipeActual,
@@ -204,14 +204,6 @@ class RecipeAnalysis:
 
 
 @dataclass(frozen=True)
-class RunPreview:
-    """Run preview path owned by this MCP session; kind is always run_preview."""
-
-    path: str
-    kind: Literal["run_preview"] = "run_preview"
-
-
-@dataclass(frozen=True)
 class RecipeRunSnapshot:
     """Detached Run facts for framework delivery; reading them sends no RPCs.
 
@@ -221,13 +213,11 @@ class RecipeRunSnapshot:
     start_reason captures a rejected start's reason, or None. outcome is the native
     Run terminal reply, or None before completion. result_state is its captured
     native data availability/provenance, or None before capture or after tab close.
-    save_op is the latest admitted raw-save handle, or None before its receipt.
-    raw_save retains the latest save receipt and any confirmed prefix. analyses
-    maps primary/post to each stage's latest local start/completion attempt,
+    raw_save is the latest synchronous native Save report, or None before its
+    reply. analyses maps primary/post to each stage's latest local completion,
     including failures and partial artifacts; a suppressed start has no entry.
-    preview_status is not_started, reading (also an uncertain/failed read), or
-    captured. preview and preview_images retain the last confirmed session path
-    and validated PNG tuple; a later failure never erases that confirmed prefix.
+    images contains validated PNG bytes for the current reply, without files
+    or persistent identity. A later live GUI image may differ.
     """
 
     tab: str
@@ -237,12 +227,9 @@ class RecipeRunSnapshot:
     start_reason: str | None = None
     outcome: Mapping[str, object] | None = None
     result_state: Mapping[str, object] | None = None
-    raw_save: RawSaveReceipt = field(default_factory=RawSaveReceipt)
-    save_op: int | None = None
+    raw_save: SaveReport | None = None
     analyses: Mapping[AnalysisStage, ExecutionSnapshot] = field(default_factory=dict)
-    preview_status: Literal["not_started", "reading", "captured"] = "not_started"
-    preview: RunPreview | None = None
-    preview_images: tuple[PngImage, ...] = ()
+    images: tuple[PngImage, ...] = ()
 
 
 class RunOperation:
@@ -330,13 +317,14 @@ class AnalyzeOperation:
 
     Yield once to receive (RecipeAnalysis, completed) or (None, cancelled).
     Interactive handoff does not finish the yield; GUI done resumes observation.
-    Completed delivery captures the native result, persistently saves each named
-    stage image at the GUI's canonical destination, creates a session-only PNG
-    preview, and captures writeback candidates once without writing them.
-    No named images means no image saves or preview, but still captures writeback.
-    Failure, including image-save failure, or superseded source is thrown back at
-    the yield expression. snapshot retains any result and confirmed saved prefix;
-    session previews are not persistent images and are removed on session close.
+    Completed delivery captures the native result, synchronously saves the whole
+    stage artifact and reads writeback candidates once without writing them.
+    The artifact includes JSON even without named figures. Its Save report retains
+    every output status/error; output failures do not raise at the yield.
+    Available PNGs are delivered as in-memory images, not session files.
+    Native operation, transport, superseded-source and later capture failures
+    raise GuiRpcError at the yield. snapshot retains the captured result and whole
+    Save report, including successful and failed outputs.
     Construction is framework-only: execution is the registered completion owner,
     or None for one suppressed start. Authors use RecipeRun.analyze.
     """
@@ -370,11 +358,12 @@ class AnalyzeOperation:
         """Complete on the recipe's worker without starting or joining another one.
 
         A suppressed or cancelled analysis delivers (None, cancelled). Finished
-        analysis delivers (RecipeAnalysis, completed) after this handle's result,
-        persistent-image, session-preview and writeback capture. Failed native
-        operations, superseded sources and continuation failures raise GuiRpcError
-        for the driver to throw at the yield. Snapshot/image reads retain confirmed
-        prefix facts. Raise ValueError if completion already started or has no receipt.
+        analysis delivers (RecipeAnalysis, completed) after result, whole-artifact
+        Save report, in-memory image and writeback capture. Per-output save failures
+        remain in the report. Failed native operations, superseded sources and
+        continuation failures raise GuiRpcError for the driver to throw at the yield.
+        Snapshot/image reads retain available capture without new GUI requests.
+        Raise ValueError if completion already started or has no receipt.
         """
         if self._execution is None:
             return None, "cancelled"
@@ -706,10 +695,7 @@ class RecipeSession:
                     "Tab has a different experiment", reason="wrong_experiment"
                 )
             interaction = _cfg_object(snapshot["interaction"])
-            if any(
-                interaction[key]
-                for key in ("is_running", "is_analyzing", "is_saving_data")
-            ):
+            if interaction["is_running"] or interaction["is_analyzing"]:
                 raise GuiRpcError("Tab is busy", reason="tab_busy")
             observed_cfg = self._tools.send_gui_rpc("tab.get_cfg", {"tab_id": tab})
             publication = self._tools.send_gui_rpc(
@@ -1413,19 +1399,19 @@ class RecipeRun:
         """Read this Run's detached conditions/save facts without GUI requests."""
         return self._binding.snapshot()
 
-    def save_raw(self) -> RawSaveReceipt:
-        """Save this Run's raw data synchronously and return its actual receipt.
+    def save_raw(self) -> SaveReport:
+        """Save this Run once and return its complete synchronous native report.
 
-        Reject superseded or unavailable source data; await an admitted save's
-        true outcome even when cancel arrives. Failures retain confirmed prefix
-        facts and propagate. A reserved path is never reported as a saved path.
+        Reject unavailable/superseded sources and closed sessions. Native output
+        failures stay in the report; transport/admission errors propagate.
+        Replace the previous attempt, without a Save handle or successful prefix.
         """
         binding = self._binding
         run_op = binding.run_source()
         capture = binding.snapshot()
 
-        def observe(op: int | None, receipt: RawSaveReceipt) -> None:
-            binding.publish(replace(binding.capture, raw_save=receipt, save_op=op))
+        def observe(report: SaveReport | None) -> None:
+            binding.publish(replace(binding.capture, raw_save=report))
 
         def admit() -> None:
             if binding.tab.closed.is_set():
@@ -1434,24 +1420,19 @@ class RecipeRun:
         return save_raw_data(
             binding.tab.tools.gui,
             RawSaveRequest(capture.tab, run_op, admit),
-            closed=binding.tab.closed,
-            condition=binding.tab.condition,
-            previous=capture.raw_save,
             observe=observe,
         )
 
     def preview(self) -> None:
-        """Capture this Run's validated PNG in session storage, without analysis.
+        """Read this Run's current PNG bytes for inline reply, without files.
 
-        This synchronous fast step does not consume pending cancel. Missing Run
-        data, superseded source, closed session and GUI/PNG/storage failures raise
-        at this call. Failed repeated reads retain the prior confirmed path/image.
-        snapshot exposes local delivery facts; preview files live until session
-        close and are not persistent saved artifacts. No retry or guard refresh.
+        This synchronous step does not consume pending cancel. Unavailable or
+        superseded Run data, closed session and GUI/PNG failures raise here.
+        It does not save an artifact, create a persistent identity, retry or
+        refresh a guard. Later GUI reads need not show the same image.
         """
         binding = self._binding
         run_op = binding.run_source()
-        binding.publish(replace(binding.capture, preview_status="reading"))
 
         def admit() -> None:
             if binding.tab.closed.is_set():
@@ -1467,15 +1448,7 @@ class RecipeRun:
         if not isinstance(encoded, str):
             raise GuiRpcError("Invalid Run preview reply", reason="incompatible_wire")
         image = validated_png(base64.b64decode(encoded, validate=True))
-        path = binding.tab.tools.session.write_png(image.data)
-        binding.publish(
-            replace(
-                binding.capture,
-                preview_status="captured",
-                preview=RunPreview(str(path)),
-                preview_images=(image,),
-            )
-        )
+        binding.publish(replace(binding.capture, images=(image,)))
 
     def analyze(
         self,
@@ -1492,13 +1465,14 @@ class RecipeRun:
         suppresses this one start and is consumed once. Rejection fails immediately;
         the yielded handle delivers cancellation or throws completion failures.
 
-        Before completed yield delivery, capture the native result, persistently
-        save every named stage image at the GUI's canonical destination, create
-        a session-only PNG preview, and capture writeback candidates once without
-        writing them. No named images skips saves/preview, not writeback capture.
-        Image-save or later capture failure raises GuiRpcError at yield and leaves
-        the confirmed saved prefix in the handle snapshot. Session previews are
-        separate from persistent images and are removed on session close.
+        Before completed yield delivery, capture the native result, synchronously
+        save the whole stage artifact and read writeback candidates once without
+        writing them. JSON is saved even without named figures. Output failures
+        remain in the whole Save report, not exceptions at yield. Available PNGs
+        are delivered as in-memory images; no session preview files are created.
+        Native operation, transport, superseded-source and later capture failures
+        raise GuiRpcError at yield. The handle snapshot retains available result
+        and Save report capture.
         """
         from zcu_tools.mcp.measure.recipe_inputs import copy_recipe_parameters
 

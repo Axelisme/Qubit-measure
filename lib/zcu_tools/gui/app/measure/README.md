@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，WB 靜態單位標籤
+**Last updated:** 2026-10-09，WB 靜態單位與原 run／point 的 Save
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -10,25 +10,30 @@ framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/bas
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
 lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
 
-Run permit 固定 tab 的歷史 entry／point／roles 與 adapter 的 persistence tag。
-`RunService` 在 adapter 呼叫邊界記錄 UTC 時間、run ID 與 software provenance，
-再由 State 一次發布結果與 `RunPaneState.metadata`。Save request 取用這份歷史
+RunInputs 固定 tab 的歷史 entry／point、admission 的角色、storage capability 與 adapter 的 persistence tag。
+`RunService` 在 adapter 呼叫邊界記錄 UTC 時間、run ID 與 software provenance。
+可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
+再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
+但不建立 run 資料夾。Draft、未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
+Ledger 失敗使 operation failed 並記錄 ERROR，但保留已發布的結果供 Save。
+不重試、回滾或釋放已發布的結果資源。Save request 取用這份歷史
 metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。未宣告 native evidence
-或沒有 saved origin 時 metadata 為 None；新 Run 清舊 evidence，Load 不製造新的量測歷史。
+或沒有 saved origin 時 metadata 為 None；新 Run 清舊 evidence。Native Load 保留檔案的完整歷史 metadata，不製造 acquired 事件或 Save confirmation。
 
-Run permit 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
+RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
-Load 保存 LoadDataRequest 的 capture，但不新增 Run token 或 metadata。
+Load 保存 LoadDataRequest 的 capture 與 native 檔案的原 metadata，不新增 Run token 或量測歷史。
 純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。predictor 仍跨 tab 共享。
 
 ## 局部設計與閱讀入口
 
 此 app 的 View（Qt UI）與 `RemoteControlAdapter`（`remote/`）共用可用的
 application commands，但 capability 驗證尚未覆蓋全部入口。`GuardService` 對
-run、load、save、analyze、writeback 的既有檢查發放不同型別的 Permit；
+load、save、analyze、writeback 提供 `check_*`，成功返回 None，失敗 raise
+`GuardError`。Run admission 檢查並捕捉 `RunInputs`，不把資料型別當 proof。
 analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬體互斥
-由 owning service 或 app-local `OperationGate` 處理。Permit、lease、handle
-各有不同的生命週期，不以 handle 推斷取得硬體 lease。詳見
+由 owning service 或 app-local `OperationGate` 處理。Inputs 不需釋放，lease
+須在終局釋放，handle 只追蹤 operation，不證明持有硬體。詳見
 [Operation ADR](../../../../../docs/adr/0066-operation-lifecycle.md) 與
 [capability draft](../../../../../docs/adr/draft/gui-adapter-capability-guards.md)。
 
@@ -142,25 +147,39 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   retargets the worker (ADR-0067). Run terminal reactions refresh canonical
   presentation without selecting a subtab; Analysis remains an explicit user
   selection. `ExpTabWidget` delegates the Data pane to an
-  internal `ArtifactSaveCenter` which把capability-driven `Load Data` / `Save All`
-  action row放在`Measurement data`card之前，並從`TabSnapshot`呈現DATA與目前每張
-  具名圖的status、saveability與路徑草稿。每個`Session`的Qt-free `ArtifactTracker`是唯一狀態來源；
-  `SaveService`於真實terminal成功後記錄實際路徑，失敗不清除先前成功的紀錄。
-  Data save使用既有OperationRunner/Handles，不可取消、不持硬體lease；GUI與remote
-  都取得同一SaveDataSubmission，包含operation ID與保留路徑，後者不代表成功。
-  Save All 只選可保存且尚未保存的項目，也包含 DATA 的既有 path/comment 變更。
-  同次請求的新 DATA draft 先參與選取預檢，驗證成功後才發布草稿。
-  `ArtifactSnapshot.needs_save` 同時供 facade 選取與 Qt 按鈕 gating 使用；全數已保存時
-  Save All 停用，明確單項匯出仍可再次保存。修改圖形目的地不取消已保存狀態。
-  SaveService 依 analysis逐圖→post逐圖→data 順序，以單一 operation 執行並 Fast Fail，
-  不回滾已完成的存檔；再次 Save All 省略成功項。Qt 按鈕不編排各項存檔。
-  AppServices獨立注入OwnerScheduler，image export回owner thread，data I/O在worker。
-  Batch completion在State/handle terminal之後發布，Controller沿既有diagnostic port呈現結果。
-  GUI只警告尚未儲存的measurement data；`MainWindow`在使用者關閉tab/app前
-  查詢其投影，並將app關閉的資料流失與active-operation風險合併確認。
-  Programmatic RPC shutdown不彈互動式確認。
-  Save All updates that center in place: terminal status updates do not replace the Data
-  pane or its widgets, and the data-path editor retains focus, cursor and selection.
+  `ArtifactSaveCenter`。State 在 Run、Analysis、Post-analysis 的成功 terminal
+  宣告目前可保存的 sections。每個 artifact 可以包含 data、具名 Figure 與窗格 JSON。
+  沒有結果就沒有佔位 artifact；沒有圖的成功分析仍可以保存 JSON。
+  Session 的 Qt-free `ArtifactTracker` 是保存狀態的唯一來源。
+  TabService 與 Qt 讀取相同的 section/member/output 快照，不在 getter 計畫路徑。
+  新 Run 清空全部 sections，Primary replacement 清除舊 Post。
+  Save 按鈕提交整個 artifact ref，Save All 提交全部宣告，包含 Saved。
+  每個 output 列顯示唯讀路徑、最新 status 與 error，刷新保留已有 widgets 與文字選取。
+  `Open folder` 開啟該列最新路徑的父目錄，不建立目錄。
+  GUI 不接受手動保存目的地。Comment 變更只把已有成功輸出的 run artifact 標為
+  Unsaved changes。部分成功顯示 Partially saved，重存失敗不沿用前次成功狀態。
+  關閉警告只看 measurement data 是否完整 Saved，不因圖片或 JSON 未存而阻擋。
+
+  GUI 直接呼 SaveControlFacet。SaveService 捕捉 tab 的固定 storage、歷史
+  RunMetadata、窗格結果與 result_params，再用一次 shared saver 保存全部選集。
+  Data 寫 canonical `runs/<run_id>/data.h5`，每次保存另取新的 Labber filename。
+  Data mapping、Figure 編碼、檔案 I/O 與一次 saved ledger event 都在 owner thread
+  同步完成。shared saver 每個 member 編碼一次，隔離逐輸出失敗。
+  Save 不持硬體 lease，不建立 worker、handle 或 save-busy phase。
+  State 提交完整 report 後才發布同步 completion fact，再回傳同一份 SaveReport。
+  Qt 顯示本次輸出的 path/status/error，包含實際 Labber path。
+  Mapping／ledger 錯誤直接傳遞，不偽造 report 或回滾已寫文件。
+  保存不產生 acquisition identity，也不重讀 live point。
+  RPC／MCP 直接投影回傳報告。Native Load 讀回 typed record 與原 RunMetadata。
+  Save 在 mapping 或輸出 I/O 前比對歷史 entry 與 tab captured storage。
+  跨 entry 時顯示雙方來源並拒絕。同 entry 的不同 point 仍保存，沿用原 run_id
+  與資料自己的 point，覆寫原 run 目錄，saved event 保留原 point。
+  Tab 的 point 不參與，也不重綁 tab 或寫到其他 entry。
+  Load Data 的 RunLoadDialog 由既有 SaveControlFacet 查詢 opened entry ledger，
+  按 run_id 合併 acquired／saved，保留最近成功 native path。未存 native 的列不可 Load。
+  Point／experiment／Recorded at 篩選只看 ledger，Recorded at 不冒充量測開始時間。
+  清單不讀 data.h5 或檢查輸出是否仍存在；File 選檔與清單選定後都交既有 native Load。
+  Ledger 或附檔錯誤明確回報，不偽裝空清單。
   Analysis/Post panes no longer own image-path/Save Image; Run's live figure
   remains view-only (display + screenshot, no canonical Save). Data's right pane
   is a `DataFigurePreviewGallery` Variant A responsive rail: capability-declared at
@@ -230,7 +249,7 @@ for setup/context/device/predictor/progress domains.
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
-active/running identity, tab read model, cfg resource lookup, save path overrides)
+active/running identity, tab read model, cfg resource lookup)
 by composing `WorkspaceService`, `TabService`, `State`, and `EventBus`; remote
 tab handlers use this facet instead of the giant `Controller` surface.
 `RunAnalyzeControlPort` / `RunAnalyzeControlFacet` expose the run/load/analyze
@@ -240,9 +259,8 @@ render-host provider. Remote run/analyze handlers use this facet instead of the
 giant `Controller` surface. `OperationControlPort` / `OperationControlFacet`
 expose the op-agnostic handle/progress surface used by generic `operation.*`
 handlers, including device setup handles. `SaveControlPort` / `SaveControlFacet`
-expose save artifact creation and save-path mutation by composing `GuardService`,
-`TabService`, `SaveService`, `State`, and `EventBus`; remote save handlers use
-this facet instead of the giant `Controller` surface. `WritebackControlPort` /
+以 `GuardService`、`SaveService` 與 `State` 組合 native Save 與 annotation commands。
+Qt 與 remote 直接呼 facet；remote 投影同步 native Save report。 `WritebackControlPort` /
 `WritebackControlFacet` expose persistent writeback draft read/edit/apply by
 composing `GuardService`, `WritebackService`, `State`, and a resource-version
 provider; remote writeback handlers use this facet instead of the giant
@@ -261,10 +279,9 @@ Operation start clears only the affected pane's presentation while retaining the
 previous canonical pane for failure recovery; success shows the new pane's figure
 and draft, failure/cancel restores the retained pane (primary failure restores
 primary then post). Save/Guide show a placeholder and never borrow another pane's
-figure. Local analyze/post/save-path edits keep synchronous State commit timing
-but have no Qt reaction. Explicit image destinations committed by a save command
-publish a separate save-draft fact. The coordinator projects those State paths
-into open editors before export, including when export subsequently fails.
+figure. Local analyze/post parameter edits keep synchronous State commit timing.
+Save 路徑由已提交的 artifact outputs 投影，不是 editor draft。Save 同步完成後的 domain facts
+更新同一 Data pane 的 status 與 path，不替換整個 pane。
 Analyze forms commit `QLineEdit` changes on `editingFinished` so partial text does
 not trigger interaction refresh; choice, checkbox, and numeric controls retain
 immediate value-change commits. The shared cfg widget layer owns this signal policy.
@@ -286,10 +303,11 @@ Key ownership rules:
   once; failures leave the live entry untouched.
 - `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
   happen on the owner thread and return retired resources for post-commit cleanup.
-- `GuardService` checks the static preconditions it implements and returns typed
-  permits for run/save/analyze/writeback. The analyze permit does not check adapter
-  capability, and post-analyze has no capability permit; Qt and remote entry points
-  keep their own checks (see the GUI capability draft).
+- `GuardService` owns the implemented domain checks. Qt and remote controls
+  call `check_save/load/analyze/writeback` before the service command on the
+  same owner thread. Run uses `capture_run_inputs` once for the exact cfg and
+  observed inputs. Analyze capability and post-analyze checks remain at their
+  existing entry points (see the GUI capability draft).
 - `OperationGate` is the app-local thin wrapper over the shared
   `RunBlocksHardwareGate` hardware exclusion policy。active lease另投影captured
   origin、domain note與duration；`state.hardware_gate`是read-only internal RPC，
@@ -323,7 +341,7 @@ Shutdown 暫停 experiment entries；settle 後的未保存資料確認若取消
 catalog。開始 shutdown 若拋錯，Controller 恢復原 gate 狀態並保留例外。
 
 Reload 在 owner thread 同步執行，不 pump Qt events；進行中 handle 與 tab busy flags
-共同阻止 reload，包含 handle-backed data及artifact batch save。共用 `ExperimentAccess` 阻止 local/remote
+共同阻止 reload。Save 在同一 owner thread 同步完成，不建立 handle。共用 `ExperimentAccess` 阻止 local/remote
 experiment driving facets 在切換時重入。確認等待期間 tab identity、resource versions 或 run
 result 改變會使確認失效。重新建立的 tabs 使用新 id，舊 RPC locator 不可沿用。
 
@@ -346,9 +364,9 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 3. `Controller.start_run(tab_id, expected)` requires the observed `CfgRef`.
    Qt supplies the form's displayed ref; remote callers supply their observed ref.
    A different cfg identity or revision rejects Run without refresh or fallback.
-   `GuardService` accepts that exact Valid revision and freezes a permit with
+   `GuardService.capture_run_inputs` accepts that exact Valid revision and captures RunInputs with
    `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
-   settings for a live device reject the permit without querying hardware.
+   settings for a live device reject admission without querying hardware.
    `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
 4. RunService captures borrowed drivers and creates a fresh RunContext with
    operation plots and one StopSignal. The adapter passes this context to the core;
@@ -367,7 +385,15 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    convert values. Draft-local retarget refreshes the destination facts and unit.
    Module/waveform items show bounded change summaries without units and keep
    full cfg editing in `Edit`. Primary and post workflows own proposal timing;
-   the Writeback service remains stage-free.
+   the Writeback service remains stage-free. Primary FIT and interactive
+   operations capture the source `RunMetadata.run_id` at start and pass it to
+   the opaque draft. Post captures the Primary draft's identity at operation
+   start and passes it to its new draft. A missing Primary identity stays None,
+   even if live Run metadata or Save has an id. Accepted ledger events and
+   destination provenance use that identity whether or not Save occurred.
+   The identity does not imply a saved file; consult saved events for persistence.
+   Native Load retains the original identity, and analysis without native metadata
+   uses `None`.
 
 - `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。缺 cfg 時保留可用資料，不捏造設定。有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource identity 並推進 revision。Run/Load 先提交 primary result；analysis preparation 失敗不撤回它，只報 diagnostic。Named figures 和各 pane 的 presentation lifecycle 分開管理。
 dynamic selectors must match live options and the new complete draft must be valid
@@ -392,19 +418,19 @@ partial success. A genuine load or run failure keeps its existing failure contra
 `Session` is the aggregate root and its fixed pane carriers are the resource owners:
 Run stores only the run result/source. Analysis and Post-Analysis each store params,
 result, a named `Plots` collection and an opaque writeback draft (with S2 baseline
-snapshot). Save stores the data-path override. Each image path override belongs to
-one `(stage, figure_name)` key; the read model projects DATA and current named
-images separately. Run live figures remain view-only and
+snapshot). Save stores the annotation; ArtifactTracker stores each member's latest
+output paths/status/error. Run live figures remain view-only and
 are not stored in State. Writeback baseline is a display-only draft-creation
 snapshot；同一opaque draft另擁有per-item applied state，只有成功write包含的items才標記applied，
 selection本身不改狀態，retarget或內容修改會重設；同kind items不得指向重複destination，
 避免batch覆寫卻誤標applied。狀態不跨draft/process持久化，也不提供
 concurrent-write detection或apply-conflict policy。
 
-Analysis/Post 逐圖記錄目前 result／Figure 產物是否曾成功保存，不追蹤
-artist、視圖或目的地的 dirty 變更。新圖從未保存開始；舊圖晚到的保存完成
-只更新提交時捕捉的record，不將同名新圖標成已保存。再次匯出失敗保留先前成功紀錄。DATA 仍追蹤原有
-result、path 與 comment 的保存 signature。
+Analysis/Post 的 artifact 記錄目前 result／Figure 各 member 的最新保存輸出，
+不追蹤 artist 或視圖的 dirty 變更。新結果從未保存開始；同步 Save 返回前
+提交本次完整 report。重存失敗取代前次成功輸出狀態，不沿用舊 success 清單。
+至少一個輸出成功才確認 run_id；failed resave 保留已確認的身分。
+Comment 變更把已有成功輸出的 Run artifact 標為 Unsaved changes。
 
 Analysis/Post result services prepare proposals, named plots and drafts before calling one
 owner-thread State swap. The swap returns every retired pane resource; services tear
@@ -606,6 +632,9 @@ controlled fields.
 ## Operation Model
 
 - Run, device setup, and SoC connect use hardware exclusion.
+- GUI Save and Save All complete synchronously on the owner thread. They have
+  no worker, operation handle or save-busy state. The existing SaveReport carries
+  every attempted output, including failures; RPC returns its complete projection.
 - Analyze and post-analyze use async handles but no hardware exclusion.
 - `OperationChannel` is the ordered cross-thread channel for terminal state
   and Stop requests with optional cancellation reasons.

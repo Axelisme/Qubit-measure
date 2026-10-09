@@ -8,7 +8,7 @@ only what the consumer uses; an existing implementer need not inherit the port.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -19,34 +19,6 @@ from typing import (
 
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.types import ParameterContext
-
-
-@dataclass(frozen=True, slots=True)
-class SaveDataSubmission:
-    """Accepted save work; the reserved path is not proof of successful I/O."""
-
-    operation_id: int
-    data_path: str
-
-
-@dataclass(frozen=True, slots=True)
-class SaveDestination:
-    key: ArtifactKey
-    path: str
-
-
-@dataclass(frozen=True, slots=True)
-class SaveArtifactsSubmission:
-    """Reserved destinations; only a finished outcome establishes successful I/O."""
-
-    operation_id: int
-    destinations: tuple[SaveDestination, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ActiveSaveOperation:
-    operation_id: int
-    tab_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,10 +56,7 @@ if TYPE_CHECKING:
         AdapterCapabilities,
         WritebackItem,
     )
-    from zcu_tools.gui.app.measure.artifact_tracker import (
-        ArtifactKey,
-        ArtifactSnapshot,
-    )
+    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactSectionSnapshot
     from zcu_tools.gui.app.measure.state import (
         RetiredPaneResources,
         Session,
@@ -100,21 +69,23 @@ if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
     from .persistence_types import AppPersistedState
-
-
-@dataclass(frozen=True, slots=True)
-class PathResourceSnapshot:
-    """Read model for one independently-owned path resource."""
-
-    override: str | None
-    path: str | None
+    from .writeback import WritebackDraft
 
 
 @dataclass(frozen=True, slots=True)
 class RunPaneSnapshot:
+    """Current Run and confirmed persistence identity.
+
+    result is the adapter-owned record or None; source_path is the loaded file
+    or None. source_operation_id identifies the publishing acquisition or None
+    after Load. run_id is None until at least one persistent output succeeds;
+    it survives failed resaves, but does not survive Run replacement.
+    """
+
     result: object | None
     source_path: str | None
     source_operation_id: int | None = None
+    run_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +94,6 @@ class AnalysisPaneSnapshot:
     result: object | None
     figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
-    image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
@@ -135,7 +105,6 @@ class PostAnalysisPaneSnapshot:
     result: object | None
     figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
-    image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
@@ -143,17 +112,9 @@ class PostAnalysisPaneSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class SavePaneSnapshot:
-    data_path: PathResourceSnapshot
+    """Current annotation; destinations belong only to artifact outputs."""
+
     comment: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class TabPathsSnapshot:
-    """Data and each named image path, projected independently by a tab."""
-
-    data: PathResourceSnapshot
-    analysis_images: Mapping[str, PathResourceSnapshot]
-    post_analysis_images: Mapping[str, PathResourceSnapshot]
 
 
 @dataclass(frozen=True)
@@ -162,7 +123,7 @@ class TabSnapshot:
 
     Render (``TabService.get_snapshot``) populates every field; persist/restore
     uses only the serializable head (adapter_name + cfg_schema). Pane-owned
-    read models (run/analysis/post_analysis/save/paths) are the only
+    read models (run/analysis/post_analysis/save/artifacts) are the only
     runtime/read-model contract — no flat projections for legacy callers.
     """
 
@@ -175,8 +136,7 @@ class TabSnapshot:
     analysis: AnalysisPaneSnapshot | None = None
     post_analysis: PostAnalysisPaneSnapshot | None = None
     save: SavePaneSnapshot | None = None
-    paths: TabPathsSnapshot | None = None
-    artifacts: tuple[ArtifactSnapshot, ...] = ()
+    artifacts: tuple[ArtifactSectionSnapshot, ...] = ()
     parameters: ParameterContext | None = None
     """Fixed tab point/library capture for source reads; None for source-free tabs.
 
@@ -269,7 +229,16 @@ class WritebackLifecyclePort(Protocol):
         items: Iterable[WritebackItem],
         *,
         parameters: ParameterContext | None,
-    ) -> Any: ...
+        run_id: str | None = None,
+    ) -> WritebackDraft:
+        """Fix proposals, destination and native Run identity in one draft.
+
+        run_id is historical RunMetadata.run_id, even before Save, or None
+        without native evidence. Save does not change the draft's identity.
+        Editor failure propagates after retiring any newly opened sessions.
+        """
+        ...
+
     def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
     def teardown_draft(self, draft: Any) -> None: ...
 

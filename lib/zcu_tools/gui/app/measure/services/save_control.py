@@ -1,32 +1,56 @@
-"""App-facing save control facet for UI and remote driving adapters."""
+"""Guarded synchronous native Save commands for GUI and remote adapters."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-from zcu_tools.gui.app.measure.events.tab import (
-    TabInteractionChangedPayload,
-    TabInteractionFact,
-)
+from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
 from zcu_tools.gui.expected_error import FailedPreconditionError
-
-from .ports import SaveDestination
-from .save import resolve_artifact_destinations
+from zcu_tools.gui.session.context_types import CommandOrigin
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.resources.entry import AcquiredPayload, SavedPayload
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.resources.entry import RecordsLedger
 
     from .guard import GuardService
-    from .ports import SaveArtifactsSubmission, SaveDataSubmission
     from .save import SaveService
-    from .tab import TabService
+
+
+@dataclass(frozen=True)
+class SavedRunInfo:
+    """One opened-entry ledger run, without inspecting its data file.
+
+    run_id is the opaque acquisition identity. point is its label or None;
+    experiment is the recorded spec tag. recorded_at is the first acquired
+    event time, or first saved event time for saved-only runs, never started_at.
+    data_path is the latest successful data_h5 output, or None if none exists;
+    it is historical evidence and need not still exist on disk.
+    """
+
+    run_id: str
+    point: str | None
+    experiment: str
+    recorded_at: str
+    data_path: Path | None
 
 
 class SaveControlPort(Protocol):
-    """App-facing save surface for driving adapters."""
+    """Existing app-facing Save surface shared by GUI and remote adapters."""
+
+    def list_saved_runs(self, *, point: str | None = None) -> tuple[SavedRunInfo, ...]:
+        """Return opened-entry runs in first-event order, optionally at one point.
+
+        None lists all points. Acquired metadata wins over saved-only metadata;
+        later failed/non-native saves do not erase a successful native path.
+        No opened entry raises FailedPreconditionError(no_entry). Ledger and
+        saved attachment schema/I/O errors propagate, including missing records.
+        Reads do not inspect HDF5, stat outputs, create folders or append events.
+        """
+        ...
 
     def has_tab(self, tab_id: str) -> bool: ...
 
@@ -35,187 +59,154 @@ class SaveControlPort(Protocol):
     def save_data(
         self,
         tab_id: str,
-        data_path: str | None = None,
         comment: str | None = None,
         *,
+        origin: CommandOrigin,
         run_operation_id: int | None = None,
-    ) -> SaveDataSubmission: ...
+    ) -> SaveReport:
+        """Save both data formats synchronously on the owner thread.
+
+        tab_id identifies an idle completed active-context tab. comment=None
+        retains its annotation. run_operation_id optionally binds the current
+        Run source, not a Save handle. Guards/missing evidence raise
+        FailedPreconditionError before mutation. Output failures are reported;
+        mapping/ledger errors propagate. Return follows State publication.
+        """
+        ...
 
     def save_artifacts(
         self,
         tab_id: str,
         *,
-        artifacts: tuple[ArtifactKey, ...] | None = None,
-        paths: Mapping[ArtifactKey, str] | None = None,
+        artifacts: tuple[ArtifactRef, ...] | None = None,
         comment: str | None = None,
-    ) -> SaveArtifactsSubmission: ...
+        origin: CommandOrigin,
+    ) -> SaveReport:
+        """Synchronously save complete selected artifacts and every destination.
 
-    def save_image(
-        self,
-        tab_id: str,
-        key: ArtifactKey,
-        image_path: str | None = None,
-        *,
-        operation_id: int | None = None,
-    ) -> str: ...
+        None selects all declarations, including Saved. Explicit refs must be
+        ordered, unique and nonempty. Invalid refs/missing evidence raise
+        FailedPreconditionError before mutation; invalid pane content raises
+        TypeError/ValueError. comment=None retains the annotation. Output errors
+        stay in the complete report; mapping/ledger errors propagate.
+        """
+        ...
+
+
+def _saved_run_info(
+    ledger: RecordsLedger, event_id: str, payload: SavedPayload, recorded_at: str
+) -> SavedRunInfo:
+    record = ledger.get(event_id).record
+    if record is None:
+        raise ValueError(f"Saved event {event_id} has no record")
+    point = record.get("point")
+    experiment = record.get("experiment")
+    if "point" not in record or (point is not None and not isinstance(point, str)):
+        raise ValueError(
+            f"Saved event {event_id} record point must be a string or None"
+        )
+    if not isinstance(experiment, str):
+        raise ValueError(f"Saved event {event_id} record experiment must be a string")
+    data_path = next(
+        (
+            Path(output.path)
+            for output in reversed(payload.outputs)
+            if output.format == "data_h5" and output.status == "saved"
+        ),
+        None,
+    )
+    return SavedRunInfo(payload.run_id, point, experiment, recorded_at, data_path)
 
 
 class SaveControlFacet:
-    """Composite adapter over save guards, save service, and save path state."""
+    """Compose existing guards and synchronous native Save commands."""
 
     def __init__(
         self,
         *,
         state: State,
-        bus: EventBus,
         guard: GuardService,
-        tab: TabService,
         save: SaveService,
-        notify_info: Callable[[str], None],
+        context: ContextService,
     ) -> None:
-        """Compose save intentions without owning readiness or output state.
-
-        ``guard`` validates static save prerequisites; ``save`` owns dynamic
-        driving-entry preflight and the operations. ``tab`` and ``state`` own
-        path/comment drafts; ``bus`` publishes their changes. ``notify_info``
-        presents a successful synchronous image export message.
-        """
+        """Inject State, Save owners and the current opened-entry context owner."""
         self._state = state
-        self._bus = bus
         self._guard = guard
-        self._tab = tab
         self._save = save
-        self._notify_info = notify_info
+        self._context = context
+
+    def list_saved_runs(self, *, point: str | None = None) -> tuple[SavedRunInfo, ...]:
+        """Read the ledger under SaveControlPort.list_saved_runs's contract."""
+        entry = self._context.get_entry_info()
+        if entry is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        ledger = self._context.entry_ledger(entry.entry_id)
+        runs: dict[str, SavedRunInfo] = {}
+        acquired: set[str] = set()
+        for event in ledger.events():
+            payload = event.payload
+            if isinstance(payload, AcquiredPayload):
+                if payload.run_id in acquired:
+                    continue
+                previous = runs.get(payload.run_id)
+                runs[payload.run_id] = SavedRunInfo(
+                    run_id=payload.run_id,
+                    point=payload.point,
+                    experiment=payload.experiment,
+                    recorded_at=event.at,
+                    data_path=previous.data_path if previous is not None else None,
+                )
+                acquired.add(payload.run_id)
+            elif isinstance(payload, SavedPayload):
+                saved = _saved_run_info(ledger, event.id, payload, event.at)
+                previous = runs.get(payload.run_id)
+                if previous is None:
+                    runs[payload.run_id] = saved
+                elif saved.data_path is not None:
+                    runs[payload.run_id] = replace(previous, data_path=saved.data_path)
+        return tuple(
+            run for run in runs.values() if point is None or run.point == point
+        )
 
     def has_tab(self, tab_id: str) -> bool:
+        """Return whether tab_id is a current State resource."""
         return self._state.has_tab(tab_id)
 
     def set_comment(self, tab_id: str, comment: str) -> None:
+        """Update an idle tab's annotation and mark saved Run evidence dirty.
+
+        Busy/unavailable tabs raise FailedPreconditionError without mutation;
+        unknown tabs propagate their lookup error.
+        """
+        self._save.require_save_available(tab_id)
         self._state.update_tab_comment(tab_id, comment)
 
     def save_data(
         self,
         tab_id: str,
-        data_path: str | None = None,
         comment: str | None = None,
         *,
+        origin: CommandOrigin,
         run_operation_id: int | None = None,
-    ) -> SaveDataSubmission:
+    ) -> SaveReport:
+        """Execute SaveControlPort.save_data's synchronous command contract."""
         if run_operation_id is not None:
             self._state.require_run_operation(tab_id, run_operation_id)
-        if data_path is not None and not data_path.strip():
-            raise FailedPreconditionError(f"Tab {tab_id!r} has an empty data path")
-        permit = self._guard.acquire_save_permit(tab_id)
+        self._guard.check_save(tab_id)
         self._save.require_save_available(tab_id)
-        if data_path is not None:
-            self._tab.update_tab_data_path_override(tab_id, data_path)
-        if comment is not None:
-            self._state.update_tab_comment(tab_id, comment)
-        resolved = self._tab.get_tab_data_path(tab_id)
-        if not resolved:
-            raise FailedPreconditionError(f"Tab {tab_id!r} has no data path configured")
-        draft_comment = self._state.get_tab(tab_id).save.comment
-        return self._save.start_save_data(permit, resolved, comment=draft_comment)
+        return self._save.save_data(tab_id, comment=comment, origin=origin)
 
     def save_artifacts(
         self,
         tab_id: str,
         *,
-        artifacts: tuple[ArtifactKey, ...] | None = None,
-        paths: Mapping[ArtifactKey, str] | None = None,
+        artifacts: tuple[ArtifactRef, ...] | None = None,
         comment: str | None = None,
-    ) -> SaveArtifactsSubmission:
-        permit = self._guard.acquire_save_permit(tab_id)
+        origin: CommandOrigin,
+    ) -> SaveReport:
+        """Execute SaveControlPort.save_artifacts's whole-artifact contract."""
+        self._guard.check_save(tab_id)
         self._save.require_save_available(tab_id)
-        available = {a.key: a for a in self._state.get_artifact_snapshots(tab_id)}
-        overrides = paths if paths is not None else {}
-        data_key = ArtifactKey(ArtifactKind.DATA)
-        if artifacts is None:
-            data_draft_changed = (
-                data_key in overrides
-                and overrides[data_key] != available[data_key].default_path
-            ) or (
-                comment is not None
-                and comment != self._state.get_tab(tab_id).save.comment
-            )
-            selected = tuple(
-                key
-                for key, artifact in available.items()
-                if artifact.needs_save
-                or (key == data_key and artifact.is_saveable and data_draft_changed)
-            )
-        else:
-            selected = artifacts
-        if not selected or len(set(selected)) != len(selected):
-            raise FailedPreconditionError(
-                "Save requires a nonempty unique artifact set"
-            )
-        if set(overrides) - set(selected):
-            raise FailedPreconditionError("Save paths must name selected artifacts")
-        destinations = []
-        for key in selected:
-            if key not in available or not available[key].is_saveable:
-                raise FailedPreconditionError(f"Artifact {key!r} is not saveable")
-            path = overrides.get(key, available[key].default_path)
-            if path is None or not path.strip():
-                raise FailedPreconditionError(f"Artifact {key!r} has an empty path")
-            destinations.append(SaveDestination(key, path))
-        resolve_artifact_destinations(tuple(destinations))
-        for key, path in overrides.items():
-            if key.kind is ArtifactKind.DATA:
-                self._tab.update_tab_data_path_override(tab_id, path)
-            else:
-                self._tab.update_tab_image_path_override(tab_id, key, path)
-        if comment is not None:
-            self._state.update_tab_comment(tab_id, comment)
-        if overrides or comment is not None:
-            self._bus.emit(
-                TabInteractionChangedPayload(
-                    tab_id, TabInteractionFact.SAVE_DRAFT_COMMITTED
-                )
-            )
-        return self._save.start_save_artifacts(
-            permit, tuple(destinations), self._state.get_tab(tab_id).save.comment
+        return self._save.save_artifacts(
+            tab_id, artifacts, comment=comment, origin=origin
         )
-
-    def save_image(
-        self,
-        tab_id: str,
-        key: ArtifactKey,
-        image_path: str | None = None,
-        *,
-        operation_id: int | None = None,
-    ) -> str:
-        if key.kind is ArtifactKind.DATA:
-            raise FailedPreconditionError("Data is not an image artifact")
-        if operation_id is not None:
-            self._state.require_analysis_operation(
-                tab_id,
-                "analysis" if key.kind is ArtifactKind.ANALYSIS else "post_analysis",
-                operation_id,
-            )
-        if image_path is not None and not image_path.strip():
-            raise FailedPreconditionError(f"Tab {tab_id!r} has an empty image path")
-        permit = self._guard.acquire_save_permit(tab_id)
-        self._save.require_save_available(tab_id)
-        artifacts = {a.key: a for a in self._state.get_artifact_snapshots(tab_id)}
-        if key not in artifacts or not artifacts[key].is_saveable:
-            raise FailedPreconditionError(f"Artifact {key!r} is not saveable")
-        path = image_path if image_path is not None else artifacts[key].default_path
-        if path is None or not path.strip():
-            raise FailedPreconditionError(
-                f"Tab {tab_id!r} has no image path configured"
-            )
-        resolved = resolve_artifact_destinations(
-            (SaveDestination(key=key, path=path),)
-        )[0].path
-        if image_path is not None:
-            self._tab.update_tab_image_path_override(tab_id, key, image_path)
-            self._bus.emit(
-                TabInteractionChangedPayload(
-                    tab_id, TabInteractionFact.SAVE_DRAFT_COMMITTED
-                )
-            )
-        self._save.save_image_sync(permit, key, resolved)
-        self._notify_info(f"Image saved to {resolved}")
-        return resolved

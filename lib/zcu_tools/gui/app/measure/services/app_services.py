@@ -9,7 +9,6 @@ from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgRevision, SourceRevision
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -127,7 +126,6 @@ def build_app_services(
     registry: Registry,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
-    notify_info: Callable[[str], None],
     resource_versions: Callable[[], Mapping[str, int]],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
     owner_scheduler: OwnerScheduler,
@@ -246,9 +244,7 @@ def build_app_services(
     )
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
-    save = SaveService(
-        state, runner, bus, owner_scheduler=QtOwnerScheduler(), access=access
-    )
+    save = SaveService(state, bus, access=access)
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,
@@ -274,19 +270,13 @@ def build_app_services(
         access=access,
     )
     operation_control = OperationControlFacet(
-        save=save,
         handles=handles,
         progress=progress,
         run_analyze=run_analyze_control,
         device=session.device_control,
     )
     save_control = SaveControlFacet(
-        state=state,
-        bus=bus,
-        guard=guard,
-        tab=tab,
-        save=save,
-        notify_info=notify_info,
+        state=state, guard=guard, save=save, context=context
     )
     writeback_control = WritebackControlFacet(
         state=state,

@@ -77,10 +77,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .arb_waveform import ArbWaveformPort
-    from .artifact_tracker import ArtifactKey
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
-    from .services.ports import SaveArtifactsSubmission, SaveDataSubmission
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
     from .services.tab_cfg import TabCfgLookup
@@ -303,7 +301,6 @@ class Controller(SessionControllerMixin):
             registry=registry,
             cfg_editor_ctrl=self,
             progress_transport=transport,
-            notify_info=self._info,
             resource_versions=self.resources_versions,
             render_host=lambda: self._render_host,
             owner_scheduler=owner_scheduler,
@@ -468,16 +465,26 @@ class Controller(SessionControllerMixin):
     def _on_save_artifacts_finished(
         self, outcome: SaveArtifactsFinishedPayload
     ) -> None:
+        detail = ""
+        if outcome.report is not None:
+            detail = "\n".join(
+                f"{item.output.path}: {item.status}"
+                + (f" ({item.error})" if item.error is not None else "")
+                for item in outcome.report.outputs
+            )
         if outcome.error is None:
-            self._info("Artifacts saved")
+            self._info(detail)
         else:
-            self._notify("error", "Save failed", outcome.error)
+            self._notify("error", "Save failed", detail or outcome.error)
 
     def _on_save_data_finished(self, outcome: SaveDataFinishedPayload) -> None:
-        if outcome.error is None:
-            self._info(f"Data saved to {outcome.data_path}")
-            return
-        self._notify("error", "Save data failed", outcome.error)
+        if outcome.report is not None:
+            outputs = "\n".join(
+                f"{item.output.path}: {item.status}" for item in outcome.report.outputs
+            )
+            self._info(f"Data save outputs:\n{outputs}")
+        if outcome.error is not None:
+            self._notify("error", "Save data failed", outcome.error)
 
     def _on_device_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
         if payload.outcome == "finished":
@@ -842,23 +849,6 @@ class Controller(SessionControllerMixin):
         return self._writeback_control.get_writeback_applied_for_pane(tab_id, pane)
 
     # ------------------------------------------------------------------
-    # Save (TabService)
-    # ------------------------------------------------------------------
-
-    def save_artifacts(self, tab_id: str) -> SaveArtifactsSubmission:
-        return self._save_control.save_artifacts(tab_id)
-
-    def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str | None = None
-    ) -> SaveDataSubmission:
-        return self._save_control.save_data(tab_id, data_path, comment=comment)
-
-    def save_image(
-        self, tab_id: str, key: ArtifactKey, image_path: str | None = None
-    ) -> str:
-        return self._save_control.save_image(tab_id, key, image_path)
-
-    # ------------------------------------------------------------------
     # Context / IO (ContextService)
     # ------------------------------------------------------------------
 
@@ -1158,27 +1148,6 @@ class Controller(SessionControllerMixin):
             TabInteractionChangedPayload(
                 tab_id=tab_id,
                 fact=TabInteractionFact.ANALYZE_PARAMS_CHANGED,
-            ),
-        )
-
-    def update_tab_data_path(self, tab_id: str, data_path: str | None) -> None:
-        """Per-pane Save data-path override (Save pane)."""
-        self._tab_svc.update_tab_data_path_override(tab_id, data_path)
-        self._bus.emit(
-            TabInteractionChangedPayload(
-                tab_id=tab_id,
-                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
-            ),
-        )
-
-    def update_tab_image_path(
-        self, tab_id: str, key: ArtifactKey, image_path: str | None
-    ) -> None:
-        self._tab_svc.update_tab_image_path_override(tab_id, key, image_path)
-        self._bus.emit(
-            TabInteractionChangedPayload(
-                tab_id=tab_id,
-                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
             ),
         )
 

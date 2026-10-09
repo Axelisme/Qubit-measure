@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import math
-import tempfile
-import uuid
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -206,14 +204,13 @@ class MeasureMcpSession:
         recipes is an explicit sequence, possibly empty, validated before GUI
         operations. Invalid/duplicate definitions raise ValueError. bridge may be
         attached now or later; resolver/probe supply the existing connection policy.
-        close drains workers and PNGs, never closes the GUI or stops hardware.
+        close drains workers, never closes the GUI or stops hardware.
         """
         from zcu_tools.mcp.measure.analysis_execution import AnalysisExecutions
         from zcu_tools.mcp.measure.recipe_execution import RecipeExecutions
 
         self._config = config
         self._rpc_lock = RLock()
-        self._resource_lock = RLock()
         self._close_lock = Lock()
         self._closed = Event()
         self.executions = AnalysisExecutions(self, self._closed)
@@ -232,27 +229,9 @@ class MeasureMcpSession:
         self._auth_token: str | None = None
         self._versions: dict[str, int] = {}
         self._launched = False
-        self._png_directory: tempfile.TemporaryDirectory[str] | None = None
-
-    def new_png_path(self) -> Path:
-        """Reserve a fresh session-owned path; the GUI writes the image."""
-        with self._resource_lock:
-            self._require_open()
-            if self._png_directory is None:
-                self._png_directory = tempfile.TemporaryDirectory(
-                    prefix="measure-mcp-png-"
-                )
-            return Path(self._png_directory.name) / f"{uuid.uuid4().hex}.png"
-
-    def write_png(self, png: bytes) -> Path:
-        """Write one validated image under session ownership; reject after close."""
-        with self._resource_lock:
-            path = self.new_png_path()
-            path.write_bytes(png)
-            return path
 
     def close(self) -> None:
-        """Permanently stop admission, disconnect, drain work, then remove PNGs."""
+        """Permanently stop admission, disconnect and drain work."""
         self._closed.set()
         self.recipes.stop_admission()
         self.executions.stop_admission()
@@ -267,17 +246,10 @@ class MeasureMcpSession:
                 self._bridge.disconnect()
             self.recipes.join()
             self.executions.join()
-            self.cleanup_pngs()
 
     def _require_open(self) -> None:
         if self._closed.is_set():
             raise GuiRpcError("MCP session is closed", reason="session_closed")
-
-    def cleanup_pngs(self) -> None:
-        with self._resource_lock:
-            if self._png_directory is not None:
-                self._png_directory.cleanup()
-                self._png_directory = None
 
     @property
     def bridge(self) -> McpBridge:

@@ -1,25 +1,34 @@
 """Accepted evidence and fixed destinations at the real writeback/owner seam."""
 
 from collections.abc import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import (
+    AnalyzeRequest,
     MetaDictWriteback,
     ModuleWriteback,
+    PostAnalyzeRequest,
+    PostWritebackRequest,
     WaveformWriteback,
+    WritebackItem,
+    WritebackRequest,
 )
 from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
+from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
+from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.writeback import (
+    WritebackDraft,
     WritebackEdit,
     WritebackService,
     WritebackWritten,
@@ -27,6 +36,8 @@ from zcu_tools.gui.app.measure.services.writeback import (
 from zcu_tools.gui.cfg import CfgSchema, EvalValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.interactive import PluginDefinition
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -34,9 +45,11 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
+from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.ledger import RecordsLedger
 from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
@@ -44,6 +57,7 @@ from zcu_tools.resources.entry.provenance import Provenance
 from zcu_tools.resources.entry.registry import RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui.app.measure._native_save_support import PaneSummary, native_save_session
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -82,6 +96,269 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         assert registry_state() == installed
     finally:
         restore_registry(before)
+
+
+@pytest.mark.parametrize("save_before_accept", [False, True])
+def test_accepted_retains_run_identity_with_or_without_save(
+    tmp_path: Path, qapp: QApplication, save_before_accept: bool
+) -> None:
+    with native_save_session(tmp_path, qapp) as native:
+        control = ContextControlFacet(context=native.context)
+        editor = CfgEditorService(
+            MagicMock(), control, MagicMock(), MagicMock(), native.bus
+        )
+        service = WritebackService(
+            editor, write_port=control, entry_ledger=native.context.entry_ledger
+        )
+        tab = native.state.get_tab("tab")
+        captured = control.read_context()
+        assert tab.run.metadata is not None
+        source_run_id = tab.run.metadata.run_id
+        draft = service.create_draft(
+            [MetaDictWriteback("general.flux_value", "Flux", proposed_value=2.0)],
+            parameters=captured,
+            run_id=source_run_id,
+        )
+        if save_before_accept:
+            native.save()
+        assert (
+            any(event.kind == "saved" for event in native.entry.ledger.events())
+            is save_before_accept
+        )
+        tab.run.metadata = replace(native.metadata, run_id="later-run")
+        service.apply_draft(draft)
+        event = native.entry.ledger.events()[-1]
+        assert event.kind == "accepted"
+        assert isinstance(event.payload, AcceptedPayload)
+        assert event.payload.run_id == source_run_id
+        source = control.read_target(captured.target).meta("general.flux_value")
+        assert source is not None
+        assert source.source == event.id
+        assert source.run_id == source_run_id
+        assert draft.run_id == source_run_id
+        service.teardown_draft(draft)
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+@pytest.mark.parametrize("source", ["run", "load", "without_metadata", "context_free"])
+def test_analysis_draft_uses_start_run_identity(
+    tmp_path: Path,
+    qapp: QApplication,
+    interactive: bool,
+    source: str,
+    monkeypatch,
+) -> None:
+    with native_save_session(tmp_path, qapp) as native:
+        tab = native.state.get_tab("tab")
+        if source == "load":
+            native.state.update_tab_loaded_result(
+                "tab",
+                tab.run.result,
+                "historical.h5",
+                metadata=native.metadata,
+                parameters=tab.run.parameters,
+            )
+        elif source in ("without_metadata", "context_free"):
+            tab.run.metadata = None
+            if source == "context_free":
+                tab.run.parameters = None
+        captured = tab.run.parameters
+        expected = tab.run.metadata.run_id if tab.run.metadata is not None else None
+        seen_analyze: list[AnalyzeRequest[object, object]] = []
+        seen_proposals: list[WritebackRequest[object, PaneSummary]] = []
+
+        def analyze(
+            request: AnalyzeRequest[object, object], *, plots: Plots
+        ) -> PaneSummary:
+            del plots
+            seen_analyze.append(request)
+            return PaneSummary()
+
+        def proposals(
+            request: WritebackRequest[object, PaneSummary],
+        ) -> list[WritebackItem]:
+            seen_proposals.append(request)
+            return []
+
+        monkeypatch.setattr(tab.adapter, "analyze", analyze)
+        monkeypatch.setattr(tab.adapter, "get_writeback_items", proposals)
+        control = ContextControlFacet(context=native.context)
+        editor = CfgEditorService(
+            MagicMock(), control, MagicMock(), MagicMock(), native.bus
+        )
+        writeback = WritebackService(
+            editor, write_port=control, entry_ledger=native.context.entry_ledger
+        )
+        runner = OperationRunner(
+            None, native.handles, None, native.background, native.bus
+        )
+        service = AnalyzeService(
+            native.state, runner, native.bus, writeback, native.handles
+        )
+        plots = Plots(NonPresentingHost())
+        tab.parameters = control.read_context() if captured is None else None
+        native.state.set_context(
+            replace(native.state.session_env, parameters=tab.parameters)
+        )
+        if interactive:
+            plugin = PluginDefinition(
+                "pick", 2, (), lambda _state: None, lambda _state: PaneSummary()
+            )
+            service.start_plugin(
+                "tab",
+                plugin,
+                ManualOwnerScheduler(),
+                analyze_params_instance="submitted",
+                plots=plots,
+            )
+        else:
+            service.start_analyze("tab", object(), plots=plots)
+        tab.run.metadata = replace(native.metadata, run_id="later-run")
+        if interactive:
+            assert service.finish_plugin("tab")
+        else:
+            assert native.background.quiesce()
+            assert not tab.is_analyzing
+        assert isinstance(tab.analysis.result, PaneSummary)
+        draft = tab.analysis.writeback_draft
+        assert isinstance(draft, WritebackDraft)
+        assert draft.run_id == expected
+        assert draft.parameters is captured
+        assert len(seen_proposals) == 1
+        assert seen_proposals[0].ctx.parameters is captured
+        if not interactive:
+            assert len(seen_analyze) == 1
+            assert seen_analyze[0].parameters is captured
+        writeback.teardown_draft(draft)
+
+
+@pytest.mark.parametrize("save_before_accept", [False, True], ids=["unsaved", "saved"])
+@pytest.mark.parametrize(
+    "source",
+    ["run", "load", "without_metadata", "context_free", "without_primary_draft"],
+)
+def test_post_analysis_draft_retains_primary_identity(
+    tmp_path: Path,
+    qapp: QApplication,
+    source: str,
+    save_before_accept: bool,
+    monkeypatch,
+) -> None:
+    with native_save_session(tmp_path, qapp) as native:
+        tab = native.state.get_tab("tab")
+        original_capture = tab.run.parameters
+        if source == "load":
+            native.state.update_tab_loaded_result(
+                "tab",
+                tab.run.result,
+                "historical.h5",
+                metadata=native.metadata,
+                parameters=original_capture,
+            )
+        elif source in ("without_metadata", "context_free"):
+            tab.run.metadata = None
+            if source == "context_free":
+                tab.run.parameters = None
+        captured = tab.run.parameters
+        expected = native.metadata.run_id if source in ("run", "load") else None
+        control = ContextControlFacet(context=native.context)
+        editor = CfgEditorService(
+            MagicMock(), control, MagicMock(), MagicMock(), native.bus
+        )
+        writeback = WritebackService(
+            editor, write_port=control, entry_ledger=native.context.entry_ledger
+        )
+        primary_draft = (
+            None
+            if source == "without_primary_draft"
+            else writeback.create_draft([], parameters=captured, run_id=expected)
+        )
+        primary_result = PaneSummary()
+        native.state.update_tab_analyze(
+            "tab", primary_result, None, writeback_draft=primary_draft
+        )
+        if save_before_accept:
+            # Save is independent of whether Primary has a native identity.
+            tab.run.metadata = native.metadata
+            native.save()
+        seen_requests: list[PostAnalyzeRequest[object, PaneSummary, object]] = []
+        seen_proposals: list[
+            PostWritebackRequest[object, PaneSummary, PaneSummary]
+        ] = []
+
+        def post_analyze(
+            request: PostAnalyzeRequest[object, PaneSummary, object], *, plots: Plots
+        ) -> PaneSummary:
+            del plots
+            seen_requests.append(request)
+            return PaneSummary()
+
+        def proposals(
+            request: PostWritebackRequest[object, PaneSummary, PaneSummary],
+        ) -> list[WritebackItem]:
+            seen_proposals.append(request)
+            return (
+                []
+                if captured is None
+                else [
+                    MetaDictWriteback("general.flux_value", "Flux", proposed_value=3.0)
+                ]
+            )
+
+        monkeypatch.setattr(tab.adapter, "post_analyze", post_analyze)
+        monkeypatch.setattr(tab.adapter, "get_post_writeback_items", proposals)
+        runner = OperationRunner(
+            None, native.handles, None, native.background, native.bus
+        )
+        service = PostAnalyzeService(
+            native.state, runner, native.bus, native.handles, writeback
+        )
+        # A later live Run id must not replace the Primary draft's identity.
+        tab.run.metadata = replace(native.metadata, run_id="not-primary-source")
+        native.entry.new_point("later-point")
+        control.use_point(PointUseRequest("later-point"))
+        tab.parameters = control.read_context()
+        assert tab.parameters is not captured
+        service.start_post_analyze("tab", object(), plots=Plots(NonPresentingHost()))
+        # Terminal delivery must use the operation-start identity and context.
+        tab.analysis.writeback_draft = None
+        tab.run.metadata = replace(native.metadata, run_id="terminal-live-run")
+        tab.run.parameters = tab.parameters
+        assert native.background.quiesce()
+        draft = tab.post_analysis.writeback_draft
+        assert isinstance(draft, WritebackDraft)
+        assert draft.run_id == expected
+        assert draft.parameters is captured
+        assert [request.parameters is captured for request in seen_requests] == [True]
+        assert [proposal.ctx.parameters is captured for proposal in seen_proposals] == [
+            True
+        ]
+        writeback.teardown_draft(draft)
+        if primary_draft is not None:
+            writeback.teardown_draft(primary_draft)
+
+
+def test_post_rejects_incompatible_primary_draft_before_submission(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    with native_save_session(tmp_path, qapp) as native:
+        native.state.update_tab_analyze(
+            "tab", PaneSummary(), None, writeback_draft=object()
+        )
+        runner = OperationRunner(
+            None, native.handles, None, native.background, native.bus
+        )
+        service = PostAnalyzeService(
+            native.state, runner, native.bus, native.handles, MagicMock()
+        )
+        plots = Plots(NonPresentingHost())
+        try:
+            with pytest.raises(TypeError, match="Primary writeback draft"):
+                service.start_post_analyze("tab", object(), plots=plots)
+            assert not native.state.get_tab("tab").is_analyzing
+        finally:
+            assert native.background.quiesce()
+            plots.finish()
 
 
 def test_writeback_lowers_waveform_expression_from_creation_capture(
@@ -148,6 +425,7 @@ def test_setter_failure_retains_accepted_and_successful_prefix(
             MetaDictWriteback("general.flux_unit", "Not started", proposed_value="mA"),
         ],
         parameters=captured,
+        run_id="original-run",
     )
     original = session.control.set_parameter
 
@@ -174,8 +452,10 @@ def test_setter_failure_retains_accepted_and_successful_prefix(
     event = session.entry.ledger.events()[-1]
     assert event.kind == "accepted" and event.origin == "mcp"
     assert isinstance(event.payload, AcceptedPayload) and len(event.payload.writes) == 3
+    assert event.payload.run_id == "original-run"
     source = current.meta("general.flux_value")
     assert source is not None and source.source == event.id
+    assert source.run_id == "original-run"
 
 
 def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
@@ -273,6 +553,7 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     draft = session.service.create_draft(
         [MetaDictWriteback("driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
         parameters=captured,
+        run_id="original-run",
     )
     session.control.set_parameter(first, "Q1.rate", 0.6)
     session.entry.new_point("b")
@@ -296,6 +577,8 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     assert event.origin == "mcp"
     source = session.control.read_target(first).meta("Q1.rate")
     assert source is not None and source.source == event.id and source.stderr == 0.05
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id == source.run_id == draft.run_id == "original-run"
 
 
 @pytest.mark.parametrize("kind", ["module", "waveform"])
@@ -334,7 +617,9 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
             captured.target, item.target_name, ConstWaveformCfg(length=0.6)
         )
         item_id, field = "wf-1", "length"
-    draft = session.service.create_draft([item], parameters=captured)
+    draft = session.service.create_draft(
+        [item], parameters=captured, run_id="original-run"
+    )
     session.control.set_parameter(captured.target, "general.flux_value", 9.0)
     preview = session.service.preview_values(draft)[item_id]
     assert isinstance(preview.current, dict) and preview.current[field] == 0.6
@@ -345,6 +630,9 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
     assert isinstance(receipt.after, dict) and receipt.after[field] == 0.2
     source = session.control.read_context().library.meta(f"{item.target_name}.{field}")
     assert source is not None and source.stderr == item.stderr
+    event = session.entry.ledger.events()[-1]
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id == source.run_id == draft.run_id == "original-run"
 
 
 def test_each_parameter_write_preserves_its_own_stderr(
@@ -373,6 +661,11 @@ def test_each_parameter_write_preserves_its_own_stderr(
         None,
     ]
     assert len({source.source for source in sources if source is not None}) == 1
+    event = session.entry.ledger.events()[-1]
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id is None
+    assert all(source.run_id is None for source in sources if source is not None)
+    assert draft.run_id is None
 
 
 def test_duplicate_concrete_role_destinations_fail_before_accepted(

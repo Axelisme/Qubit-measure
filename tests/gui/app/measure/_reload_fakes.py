@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import ClassVar, Literal
 
-from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.datafile import AnalysisDocument, RunMetadata
+from zcu_tools.experiment.native_persistence import PreparedRunData
+from zcu_tools.gui.app.measure.adapter import LoadDataRequest, SessionEnv
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.cfg import (
@@ -19,6 +22,31 @@ from tests.gui._adapter_fakes import DummyAdapter
 
 
 class OldAdapter(DummyAdapter):
+    """Context-free cfg adapter for reload tests, without native persistence."""
+
+    experiment_tag: ClassVar[str | None] = None
+
+    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
+        """Reject native Load requests; this reload-only fake has no loader."""
+        del req
+        raise NotImplementedError("Reload fake does not load native data")
+
+    def capture_analysis_document(
+        self,
+        result: object,
+        parameters: object | None,
+        *,
+        pane: Literal["analysis", "post_analysis"],
+    ) -> AnalysisDocument:
+        """Reject result/parameters for either pane; no analysis is persisted."""
+        del result, parameters, pane
+        raise TypeError("Reload fake does not capture analysis documents")
+
+    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
+        """Reject any result/comment; this fake has no persistence declaration."""
+        del result, comment
+        raise NotImplementedError("Reload fake does not prepare native data")
+
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         del ctx
         return CfgSchema(

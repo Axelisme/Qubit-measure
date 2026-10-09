@@ -3,8 +3,6 @@
 from contextlib import closing
 from copy import deepcopy
 from dataclasses import replace
-from pathlib import Path
-from threading import Event
 
 import pytest
 from zcu_tools.mcp.measure.assembly import build_measure_tools
@@ -175,8 +173,21 @@ def test_primary_and_post_done_return_recipe_continuation_then_question(tmp_path
         assert question.data["execution"] == key
         assert question.data["status"] == "awaiting_answer"
         assert question.data["question_items"] == ("frequency", "linewidth")
-        assert len(question.data["previews"]["primary"]) == 1
-        assert len(question.data["previews"]["post"]) == 1
+        primary_artifact = question.data["artifacts"]["analysis"]["results"]
+        post_artifact = question.data["artifacts"]["post_analysis"]["results"]
+        assert primary_artifact["status"] == post_artifact["status"] == "Saved"
+        assert set(primary_artifact["members"]) == {
+            "analysis:primary",
+            "figure:fit",
+            "figure:residual",
+        }
+        assert set(post_artifact["members"]) == {"analysis:post", "figure:post-fit"}
+        for artifact in (primary_artifact, post_artifact):
+            assert all(
+                output["status"] == "saved"
+                for outputs in artifact["members"].values()
+                for output in outputs
+            )
         result = client.call("answer", {"recipe": key, "decision": "skipped"})
         assert result.data["status"] == "finished"
         assert gui.writes == []
@@ -289,7 +300,7 @@ def test_op_control_resolves_original_run_and_preserves_native_outcome(
         )
         assert not result.is_error
         if control == "finish_early":
-            assert result.data["artifacts"]["raw"]["data"]["status"] == "saved"
+            assert result.data["artifacts"]["raw"]["data"]["status"] == "Saved"
             client.call("answer", {"recipe": key, "decision": "skipped"})
         else:
             assert not gui.raw_saved
@@ -329,32 +340,6 @@ def test_question_blocks_new_recipe_and_nonrun_finish_early(tmp_path):
         client.call("cancel", {"execution": key})
         result = client.call("wait", {"execution": key, "timeout": 2})
         assert result.data["status"] == "cancelled"
-
-
-def test_session_close_drains_generator_finally_before_removing_previews(tmp_path):
-    observed: list[bool] = []
-    finally_ran = Event()
-    preview: list[str] = []
-
-    def sample(session: RecipeSession) -> RecipeGenerator:
-        try:
-            run, _ = yield session.open_tab("lookback").run()
-            assert isinstance(run, RecipeRun)
-            _, _ = yield run.analyze("primary")
-            _, _ = yield run.propose_writeback()
-        finally:
-            observed.append(bool(preview) and Path(preview[0]).is_file())
-            finally_ran.set()
-
-    client = make_client(tmp_path, WritebackGui(), recipes=(definition(sample),))
-    question = client.call("sample", {})
-    preview.extend(question.data["previews"]["primary"])
-    client.context.session.close()
-    assert finally_ran.is_set() and observed == [True]
-    assert all(not Path(path).exists() for path in preview)
-    with pytest.raises(GuiRpcError) as error:
-        client.call("sample", {})
-    assert error.value.reason == "session_closed"
 
 
 def test_injected_guide_and_estimates_share_the_owning_registry(tmp_path):
