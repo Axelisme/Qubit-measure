@@ -36,6 +36,7 @@ from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import WaveformAssetInfo
     from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.operation_handles import OperationHandles
@@ -85,6 +86,7 @@ def build_session_services(
     project_root: str = "",
     driver_factory: DriverFactoryPort | None = None,
     device_registry: DeviceRegistryPort | None = None,
+    alias_rows: tuple[AliasRow, ...] = (),
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
@@ -99,6 +101,9 @@ def build_session_services(
     ``driver_factory`` defaults to the device service's built-in hardware factory
     when omitted; ``device_registry`` defaults to a new session-owned
     DeviceManager. Callers sharing drivers must supply the same registry.
+    alias_rows supplies the app's ordered session-memory defaults; ContextService
+    initializes an empty primary row once from the registered sole candidate.
+    Empty rows enable no aliases. Syntax/order errors propagate at construction.
     """
     value_registry = ValueRegistry()
     device = DeviceService(
@@ -115,7 +120,13 @@ def build_session_services(
     predictor = PredictorService(state, bus)
     predictor_control = PredictorControlFacet(bus=bus, predictor=predictor)
     progress_control = ProgressControlFacet(progress)
-    context = ContextService(state, bus, values=value_registry, bind_assets=bind_assets)
+    context = ContextService(
+        state,
+        bus,
+        values=value_registry,
+        bind_assets=bind_assets,
+        alias_rows=alias_rows,
+    )
     context_control = ContextControlFacet(context=context)
     device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)

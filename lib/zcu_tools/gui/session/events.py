@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 from zcu_tools.gui.event_bus import BasePayload, OriginKind
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_types import (
         ComponentFocus,
         ContextSourceBinding,
@@ -35,6 +36,7 @@ class SessionEvent(str, Enum):
     ML_CHANGED = "ml_changed"  # published library content/health changed
     CONTEXT_SWITCHED = "context_switched"  # parameter binding switched
     COMPONENT_FOCUS_CHANGED = "component_focus_changed"
+    ALIASES_CHANGED = "aliases_changed"
     SOC_CHANGED = "soc_changed"  # soc/soccfg connection changed
     PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed
     DEVICE_CHANGED = "device_changed"  # device registered or dropped
@@ -91,6 +93,18 @@ class ContextSwitchedPayload(SessionPayload):
     EVENT: ClassVar[SessionEvent] = SessionEvent.CONTEXT_SWITCHED
     binding_id: int | None
     sources: ContextSourceBinding | None
+
+
+@dataclass(frozen=True)
+class AliasesChangedPayload(SessionPayload):
+    """Committed global table; rows are immutable authored values in row order.
+
+    No links are expanded in this fact. Consumers read the installed current
+    context to prepare cfg publications; no tab or Run capture is modified.
+    """
+
+    EVENT: ClassVar[SessionEvent] = SessionEvent.ALIASES_CHANGED
+    rows: tuple[AliasRow, ...]
 
 
 @dataclass(frozen=True)

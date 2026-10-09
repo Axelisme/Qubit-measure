@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，WB 靜態單位與原 run／point 的 Save
+**Last updated:** 2026-10-09，全域 alias 初值的 composition owner
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -246,6 +246,11 @@ pre-Qt plotting policy.
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
+
+Measure composition 在一處宣告 session-memory alias 初值：qubit 留空，resonator
+保存 `$qubit.resonator`。ContextService 在第一份非空元件 snapshot 以 registry
+的唯一候選填 qubit，不硬編 component kind。之後切 point 不重設表。參數捕捉
+經 `read_alias_context`，不再從 GUI focus 或 adapter 的 via 推論 alias。
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,

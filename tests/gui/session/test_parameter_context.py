@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.expected_error import ExpectedErrorCategory, InvalidInputError
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
@@ -493,3 +494,83 @@ def test_fault_capture_refuses_data_but_keeps_diagnostics(
     assert error.value.reason_code == "source_unavailable"
     assert error.value.faults == (fault,)
     assert healthy.value("Q1.rate") == 4300.0
+
+
+def test_authored_alias_reads_keep_the_fixed_point_and_distinct_concrete_namespace(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    point, _library = source
+    point.components["capture_driver"] = point.components["Q2"].model_copy(deep=True)
+    table = AliasTable(
+        (
+            AliasRow("capture_driver", "Q1"),
+            AliasRow("capture_sensor", "$capture_driver.sense"),
+        )
+    )
+    context = capture(source).bind_aliases(table.rows, declarations())
+    assert context.value("$capture_driver.rate") == 4300.0
+    assert context.resolve_path("$capture_sensor.rate") == "R1.rate"
+    assert context.value("capture_driver.rate") == 5100.0
+    assert context.roles is not None
+    assert context.roles.names == {"capture_driver": "Q1", "capture_sensor": "R1"}
+    table.replace((AliasRow("capture_driver", "Q2"), *table.rows[1:]))
+    point.components["Q1"] = point.components["Q2"].model_copy(deep=True)
+    assert context.value("$capture_driver.rate") == 4300.0
+    assert context.value("$capture_sensor.rate") == 6500.0
+    assert context.aliases[0].value == "Q1"
+
+
+def test_authored_aliases_can_remain_unbound_until_read(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    point, _library = source
+    point.components["capture_driver"] = point.components["Q1"].model_copy(deep=True)
+    context = capture(source).bind_aliases(
+        (
+            AliasRow("capture_driver", ""),
+            AliasRow("capture_sensor", "$capture_driver.sense"),
+        ),
+        declarations(),
+    )
+    assert context.roles is not None
+    assert context.roles.names == {}
+    assert context.value("capture_driver.rate") == 4300.0
+    assert context.value("general.ext.nested.number") == 2.0
+    with pytest.raises(RoleResolutionError) as caught:
+        context.value("$capture_sensor.rate")
+    assert caught.value.role == "capture_sensor"
+
+
+def test_authored_aliases_route_library_and_point_provenance_from_one_capture(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    point, _library = source
+    point.components["Q1"] = CaptureDrive(
+        kind="capture/drive",
+        rate=4300.0,
+        sense="R1",
+        module={"x180": "$capture_driver.pulses.pi"},
+    )
+    context = capture(source).bind_aliases(
+        (AliasRow("capture_driver", "Q1"),), declarations()
+    )
+    assert context.library_key("$capture_driver.module.x180") == "Q1.pulses.pi"
+    assert context.value("$capture_driver.module.x180.gain") == 0.25
+    assert context.value("$capture_driver.pulses.pi.waveform.length") == 0.05
+    assert context.lookup_point("$capture_driver.rate") == DocumentValue(True, 4300.0)
+    assert context.meta("$capture_driver.pulses.pi.gain") is None
+
+
+def test_wrong_kind_authored_alias_is_reported_only_when_consumed(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    context = capture(source).bind_aliases(
+        (AliasRow("capture_driver", "R1"),), declarations()
+    )
+    assert context.value("Q1.rate") == 4300.0
+    with pytest.raises(RoleResolutionError) as caught:
+        context.value("$capture_driver.rate")
+    assert caught.value.role == "capture_driver"
+    assert caught.value.required_kind == "capture/drive"
+    with pytest.raises(RoleResolutionError):
+        _ = context.roles

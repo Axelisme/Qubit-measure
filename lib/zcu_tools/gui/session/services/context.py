@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import (
     ComponentFocus,
     ComponentOption,
@@ -24,6 +25,7 @@ from zcu_tools.gui.session.context_types import (
     WorkingPointInfo,
 )
 from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
     ComponentFocusChangedPayload,
     ContextSwitchedPayload,
     MdChangedPayload,
@@ -68,7 +70,13 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import SessionEnv
-    from zcu_tools.resources.entry import PointView, ResultEntry, RoleSpec, SetupView
+    from zcu_tools.resources.entry import (
+        ComponentSchema,
+        PointView,
+        ResultEntry,
+        RoleSpec,
+        SetupView,
+    )
     from zcu_tools.resources.entry.ledger import RecordsLedger
     from zcu_tools.resources.entry.provenance import Provenance
 
@@ -90,6 +98,7 @@ class ContextService:
         values: ValueLookup | None = None,
         *,
         bind_assets: Callable[[Path], WaveformAssetInfo],
+        alias_rows: tuple[AliasRow, ...] = (),
     ) -> None:
         """Use owner State/bus, optional value facade, and explicit asset binding.
 
@@ -97,6 +106,11 @@ class ContextService:
         installation. Its capability stays with the library capture, not a
         global Database selection. Binding errors abort publication. values
         defaults to State's facade and does not change parameter content/version.
+        alias_rows supplies the app's session-only default table. On the first
+        nonempty component publication, its empty primary shorthand row gets
+        the registry's sole default-focus candidate, or remains empty. Defaults
+        never reset on later point changes. An explicit set_alias_rows command,
+        even before any point, disables this one-time default initialization.
         """
         self._owner = OwnerThreadGuard()
         self._state = state
@@ -112,6 +126,8 @@ class ContextService:
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
         self._focus = ComponentFocus(None, None, ())
+        self._aliases = AliasTable(alias_rows)
+        self._aliases_initialized = False
         if state.session_env.values is not self._values:
             state.set_context(replace(state.session_env, values=self._values))
 
@@ -354,6 +370,65 @@ class ContextService:
             source_faults=parameters.source_faults,
             storage=parameters.storage,
         )
+
+    def get_alias_rows(self) -> tuple[AliasRow, ...]:
+        """Read immutable authored global rows without expanding links or I/O."""
+        self._owner.assert_owner()
+        return self._aliases.rows
+
+    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Commit the dialog's complete ordered table on the owner sequence.
+
+        Invalid syntax, duplicate names and non-backward $ links raise
+        InvalidInputError(alias_invalid) without changing rows or versions.
+        Bindings are checked only when read, not against the current point here.
+        A changed table bumps context once and publishes AliasesChangedPayload
+        after installation. An identical explicit submission publishes nothing
+        but still prevents later default initialization. No file or ledger write.
+        """
+        self._owner.assert_owner()
+        previous = self._aliases.rows
+        self._aliases.replace(rows)
+        self._aliases_initialized = True
+        if self._aliases.rows != previous:
+            self._state.version.bump("context")
+            self._bus.emit(AliasesChangedPayload(rows=self._aliases.rows))
+
+    def read_alias_context(
+        self,
+        declarations: Mapping[str, RoleSpec],
+        target: str | None = None,
+    ) -> ParameterContext | None:
+        """Capture current point/library/storage and authored global aliases.
+
+        Consumer declarations constrain kinds, never focus/via inference. No
+        target means lazy bindings: unbound aliases fail only when read. EMPTY
+        returns None for deferred cfg construction. Unavailable sources raise.
+        A target temporarily binds the first declared alias; its component and
+        kind must resolve now. Empty declarations/target raise InvalidInputError;
+        target with EMPTY raises FailedPreconditionError(no_context). Neither
+        global rows, source versions nor publications are changed by a target.
+        Returned captures retain no live callback and never follow later edits.
+        """
+        self._owner.assert_owner()
+        parameters = self._state.session_env.parameters
+        if parameters is None:
+            if target is not None:
+                raise FailedPreconditionError(
+                    "No parameter context is installed", reason_code="no_context"
+                )
+            return None
+        table = self._aliases
+        if target is not None:
+            if not declarations:
+                raise InvalidInputError("target requires a declared alias")
+            alias = next(iter(declarations))
+            table = table.with_override(alias, target)
+        captured = parameters.bind_aliases(table.rows, declarations)
+        if target is not None:
+            # Validate the one-use destination without copying or reading its fields.
+            captured.resolve_path(f"${next(iter(declarations))}.kind")
+        return captured
 
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.
@@ -707,8 +782,26 @@ class ContextService:
             return self._library
         return entry.module_library(target.point)
 
+    def _initialize_aliases(self, components: Mapping[str, ComponentSchema]) -> None:
+        if self._aliases_initialized or not components:
+            return
+        self._aliases_initialized = True
+        if not role_registry.shorthand:
+            return
+        primary = role_registry.shorthand[0]
+        self._aliases.replace(
+            tuple(
+                AliasRow(row.alias, role_registry.default_focus(components) or "")
+                if row.alias == primary and not row.value
+                else row
+                for row in self._aliases.rows
+            )
+        )
+
     def _publish_write(self, parameters: ParameterContext, *, parameter: bool) -> None:
         """Install a committed projection/version before its single content fact."""
+        if not self._aliases_initialized and not parameters.source_faults:
+            self._initialize_aliases(parameters.document().components)
         self._state.set_context(replace(self._state.session_env, parameters=parameters))
         self._state.version.bump("context")
         payload = MdChangedPayload if parameter else MlChangedPayload
@@ -775,6 +868,7 @@ class ContextService:
         active_label: str,
     ) -> None:
         components = parameters.document().components if parameters is not None else {}
+        self._initialize_aliases(components)
         self._focus = ComponentFocus(
             target=parameters.target if parameters is not None else None,
             name=role_registry.default_focus(components),

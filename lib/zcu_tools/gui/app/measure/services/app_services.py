@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgRevision, SourceRevision
-from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
     ContextSwitchedPayload,
     DeviceChangedPayload,
     MdChangedPayload,
@@ -158,6 +159,7 @@ def build_app_services(
         runner=runner,
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
+        alias_rows=(AliasRow("qubit", ""), AliasRow("resonator", "$qubit.resonator")),
     )
     context = session.context
     device = session.device
@@ -169,20 +171,7 @@ def build_app_services(
         declarations: Mapping[str, RoleSpec],
         target: str | None,
     ) -> ParameterContext | None:
-        if not declarations:
-            if target is not None:
-                raise InvalidInputError(
-                    "target requires an adapter with declared roles"
-                )
-            return None
-        if target is None:
-            focus = context.get_component_focus().name
-            explicit = {}
-        else:
-            focus = target
-            explicit = {next(iter(declarations)): target}
-        roles = context.capture_roles(declarations, focus=focus, explicit=explicit)
-        return context.read_context(roles=roles)
+        return context.read_alias_context(declarations, target)
 
     def cfg_resolution(parameters: ParameterContext | None) -> CfgResolution:
         captured = session.value_sources.snapshot()
@@ -205,6 +194,7 @@ def build_app_services(
         tab_cfg.refresh_all()
 
     for event_type in (
+        AliasesChangedPayload,
         ContextSwitchedPayload,
         DeviceChangedPayload,
         MdChangedPayload,
