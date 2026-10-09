@@ -262,7 +262,11 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
     disconnected = Event()
 
     def respond(method, params):
-        if method == "operation.await" and params["operation_id"] == held_op:
+        if (held_op == 82 and method == "tab.save_data") or (
+            held_op != 82
+            and method == "operation.await"
+            and params["operation_id"] == held_op
+        ):
             pending.set()
             assert disconnected.wait(2), "Session must disconnect before joining"
         return gui(method, params)
@@ -446,13 +450,15 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
     release_save = Event()
 
     def respond(method, params):
-        if method == "operation.await" and params["operation_id"] == 82:
+        if method == "tab.save_data":
             saving.set()
-            if not release_save.is_set():
-                return {"reason": "timeout"}
-            if not save_succeeds:
-                return {"reason": "completed", "status": "failed", "error": "disk full"}
-        return gui(method, params)
+            assert release_save.wait(2)
+        reply = gui(method, params)
+        return (
+            expected_report
+            if method == "tab.save_data" and not save_succeeds
+            else reply
+        )
 
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
@@ -657,7 +663,7 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
     def respond(method, params):
         at_boundary = method == pending_method and (
             (method == "tab.snapshot" and gui.ran)
-            or (method == "operation.await" and params["operation_id"] == 82)
+            or method == "tab.save_data"
             or method == "tab.get_figure"
         )
         if at_boundary:
