@@ -697,9 +697,9 @@ pane figure details stay internal to `MainWindowEventCoordinator`. The wire even
 name and payload are not the internal fact enum. Context/value/md/ml RPC handlers use
 the controller-exposed `ContextControlPort` facet; device RPC handlers use
 `DeviceControlPort` for device lifecycle/query/progress; predictor RPC handlers
-use `PredictorControlPort` for predictor load/query/compute. SoC and
-`project.apply` handlers remain on the app controller façade because they span
-project setup and connection policy rather than a single session-control domain.
+use `PredictorControlPort` for predictor load/query/compute. SoC handlers remain
+on the app controller façade for connection policy. Entry list/info/new/open RPCs
+use `SetupControlPort` and explicit entry names; there is no project identity mapping.
 
 `zcu_tools.mcp.measure` is the agent-facing bridge: fixed tool declarations,
 short waits and live catalog. The GUI remote adapter owns per-connection seen
