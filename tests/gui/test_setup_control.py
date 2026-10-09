@@ -235,18 +235,6 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
             "cfg",
             call("connection", "get_soccfg"),
         ),
-        (
-            "list_devices",
-            facet.list_devices,
-            [DeviceEntry(name="flux", type_name="YOKOGS200", status="connected")],
-            call("device", "list_devices"),
-        ),
-        (
-            "get_device_unit",
-            lambda: facet.get_device_unit("flux"),
-            "V",
-            call("device", "get_device_unit", "flux"),
-        ),
     )
 
     assert facet.get_bus() is bus

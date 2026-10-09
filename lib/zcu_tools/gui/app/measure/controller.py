@@ -52,7 +52,6 @@ from .services import (
     AppPersistedState,
     LoadTabResultOutcome,
     PersistenceError,
-    ProjectRequest,
     RestoreReport,
     TabSnapshot,
     build_app_services,
@@ -235,8 +234,7 @@ class Controller(SessionControllerMixin):
 
     The identical shared controller forwards live in SessionControllerMixin
     (read through the _*_svc accessors assigned in __init__); app-specific methods
-    are kept here (apply_project /
-    get_project_root / get_bus, plus everything app-specific). Shared setup,
+    are kept here (get_project_root / get_bus, plus everything app-specific). Shared setup,
     context / inspect, and value-md-ml consumers use their own control facets
     instead of this facade.
     """
@@ -851,17 +849,8 @@ class Controller(SessionControllerMixin):
         return self._writeback_control.get_writeback_applied_for_pane(tab_id, pane)
 
     # ------------------------------------------------------------------
-    # Save (TabService)
+    # Context / IO (ContextService)
     # ------------------------------------------------------------------
-
-    def apply_project(self, req: ProjectRequest) -> dict[str, str]:
-        # Applies the project to the active context AND records it as the
-        # remembered prefs (in State); persisted to disk only at close.
-        # An unchanged project is a no-op inside the service; a failure raises.
-        # Either way we echo the resolved project rather than a bool.
-        # ProjectSettingsService owns result-scope resolution so callers cannot
-        # inject arbitrary result/database paths.
-        return self._settings_svc.apply_project(req).as_wire_dict()
 
     def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
         """Capture published sources with fixed roles; EMPTY/source errors propagate."""
@@ -1112,10 +1101,11 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def get_project_root(self) -> str:
-        """The base directory default result/database paths are anchored under
-        (the repo root, injected by the entry script). Setup dialog + project RPC
-        derive defaults through ``derive_project_paths`` against this, NOT cwd, so
-        a .bat launcher that cd's into scripts/ still scopes under the repo root."""
+        """Return the injected base directory for result and Database roots.
+
+        Session composition passes its explicit roots to the entry owner;
+        opening an entry never derives chip/qubit identity from the current cwd.
+        """
         return self._project_root
 
     # ------------------------------------------------------------------

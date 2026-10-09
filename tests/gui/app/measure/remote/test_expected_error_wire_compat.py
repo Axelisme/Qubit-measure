@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.remote.handlers.arb_waveform import (
 )
 from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     h_device_connect,
-    h_project_apply,
 )
 from zcu_tools.gui.app.measure.remote.handlers.context import (
     h_context_md_del_attr,
@@ -43,7 +42,6 @@ from zcu_tools.gui.remote.errors import (
     RemoteError,
     remote_error_from_expected,
 )
-from zcu_tools.gui.result_scope import ResultScopeError
 
 WireTuple = tuple[ErrorCode, str, str, dict | None]
 
@@ -292,43 +290,3 @@ def test_dialog_screenshot_expected_errors_use_producer_taxonomy() -> None:
         "",
         None,
     )
-
-
-@pytest.mark.parametrize(
-    ("category", "reason", "code"),
-    [
-        (
-            ExpectedErrorCategory.INVALID_INPUT,
-            "params_read_failed",
-            ErrorCode.INVALID_PARAMS,
-        ),
-        (
-            ExpectedErrorCategory.FAILED_PRECONDITION,
-            "scope_prefix_is_not_semantics",
-            ErrorCode.PRECONDITION_FAILED,
-        ),
-    ],
-)
-def test_result_scope_projection_uses_category_not_reason_prefix(
-    category: ExpectedErrorCategory,
-    reason: str,
-    code: ErrorCode,
-) -> None:
-    ctrl = MagicMock()
-    ctrl.apply_project.side_effect = ResultScopeError(
-        "scope failure", category=category, reason_code=reason
-    )
-    adapter = SimpleNamespace(ctrl=ctrl)
-
-    actual = _remote_error(
-        lambda: h_project_apply(
-            cast(Any, adapter),
-            {
-                "chip_name": "chip",
-                "qub_name": "qubit",
-                "res_name": "resonator",
-            },
-        )
-    )
-
-    assert actual == (code, "scope failure", reason, None)

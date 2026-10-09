@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-09, reuse busy flags and Save/image public contracts
+**Last updated:** 2026-10-09, explicit entry status and synchronous Save/image contracts
 
 # `zcu_tools/mcp/measure/`
 
@@ -29,6 +29,8 @@ Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核
 `onetone_spectrum_over_flux` 必填 `flux_device` 與 `flux_unit`，不從 GUI 選擇預設裝置或單位。`flux_unit` 必須符合 GUI 裝置的實體單位，不換算數字。FakeDevice 的 snapshot unit=`none`，caller 必須明確傳 `native`。Recipe 確認裝置後使用 native 座標，回覆保留此單位標記。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。
 
 Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server 同步處理請求，首次等待期間不保證同連線的另一控制請求立即處理。Client timeout 不等於取消，不可因此自動重跑。
+
+全域 `status` 的 `entry` 是 null 或 GUI `entry.info` 的 UUID、name、result_path、database_path，不投影 chip／qubit／resonator。它只讀 metadata，不建立 context observation。未 opened entry 時 `ready.missing` 包含 `entry`。
 
 全域 `status` 列出 GUI operations 與目前 MCP session 的非終態 executions，終態只給數量及按 ID 查詢提示。`status(execution)` 讀指定 execution 的本地摘要，不重新連線。`wait(op)` 只觀察 GUI operation；`wait(execution)` 包含後續結果讀取、同步保存及當次 image content 交付。已接受的分析失敗以 outcome data 回報，和查詢失敗分開。Execution ID 不跨 MCP server session，也不是持久恢復機制。
 

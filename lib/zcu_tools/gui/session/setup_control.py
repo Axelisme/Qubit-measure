@@ -27,7 +27,6 @@ if TYPE_CHECKING:
         ConnectRequest,
         SoCConnectionService,
     )
-    from zcu_tools.gui.session.services.device import DeviceEntry
     from zcu_tools.gui.session.services.project_settings import (
         ConnectionPreferences,
         ProjectSettingsService,
@@ -41,7 +40,14 @@ if TYPE_CHECKING:
 
 
 class SetupControlPort(Protocol):
-    """Project/context/connection surface for the shared setup dialog."""
+    """Entry/point/connection surface for the shared setup dialog.
+
+    devices exposes the already-injected DeviceControlPort. Setup uses its
+    State-only list/value/unit queries to suggest an editable working-point
+    label; it does not poll hardware or bind a point to a device.
+    """
+
+    devices: DeviceControlPort
 
     def get_bus(self) -> BaseEventBus: ...
     def get_setup_preferences(self) -> SetupPreferences: ...
@@ -85,9 +91,6 @@ class SetupControlPort(Protocol):
     def remember_connection(self, prefs: ConnectionPreferences) -> None: ...
     def get_soccfg(self) -> SocCfgHandle | None: ...
 
-    def list_devices(self) -> list[DeviceEntry]: ...
-    def get_device_unit(self, name: str) -> str: ...
-
 
 class SetupControlFacet(SetupControlPort):
     """Composition facade over the services used by SetupDialog."""
@@ -107,7 +110,7 @@ class SetupControlFacet(SetupControlPort):
         self._context = context
         self._connection = connection
         self._simulated_environment = simulated_environment
-        self._device = device
+        self.devices = device
         self._connection_outcome_subscriptions = EventSubscriptions()
 
     def get_bus(self) -> BaseEventBus:
@@ -173,9 +176,3 @@ class SetupControlFacet(SetupControlPort):
 
     def get_soccfg(self) -> SocCfgHandle | None:
         return self._connection.get_soccfg()
-
-    def list_devices(self) -> list[DeviceEntry]:
-        return self._device.list_devices()
-
-    def get_device_unit(self, name: str) -> str:
-        return self._device.get_device_unit(name)

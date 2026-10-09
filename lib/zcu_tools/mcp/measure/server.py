@@ -64,7 +64,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v108: analysis results retain invalid paths from the GUI's wire projection.
 # v109: flux unit assertions and explicit native coordinate opt-in for FakeDevice.
 # v111: injected generator recipes, captured questions and explicit answer/writeback.
-MCP_VERSION = 111
+# v112: status projects the opened EntryInfo rather than chip/qubit identity.
+MCP_VERSION = 112
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
