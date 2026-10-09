@@ -4,99 +4,76 @@ import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from dataclasses import asdict, replace
 from threading import Event
 from typing import Any
 
 import pytest
-from zcu_tools.mcp.core.bridge import GuiRpcError, GuiTransportTimeoutError
+from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.recipe import RecipeAnalysis, RecipeRun, RecipeSession
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_support import PNG, LookbackGui, scalar
 from ._support import MeasureClient, full_execution_reply, make_client
 
-RAW_REPORT = {
-    "run_id": "run-a",
-    "artifacts": {
+RAW_REPORT = SaveReport(
+    "run-a",
+    {
         "raw": {
-            "data": {
-                "status": "Saved",
-                "members": {
+            "data": SaveArtifact(
+                "Saved",
+                {
                     "data": [
-                        {
-                            "format": "data_h5",
-                            "path": "/runs/run-a/data.h5",
-                            "status": "saved",
-                            "error": None,
-                        },
-                        {
-                            "format": "labber",
-                            "path": "/labber/raw.hdf5",
-                            "status": "saved",
-                            "error": None,
-                        },
+                        SaveOutput("data_h5", "/runs/run-a/data.h5", "saved"),
+                        SaveOutput("labber", "/labber/raw.hdf5", "saved"),
                     ]
                 },
-            }
+            )
         }
     },
-}
-PRIMARY_REPORT = {
-    "run_id": "run-a",
-    "artifacts": {
+)
+PRIMARY_REPORT = SaveReport(
+    "run-a",
+    {
         "analysis": {
-            "results": {
-                "status": "Saved",
-                "members": {
+            "results": SaveArtifact(
+                "Saved",
+                {
                     "analysis:primary": [
-                        {
-                            "format": "json",
-                            "path": "/runs/run-a/analysis/results.json",
-                            "status": "saved",
-                            "error": None,
-                        }
+                        SaveOutput("json", "/runs/run-a/analysis/results.json", "saved")
                     ],
                     "figure:trace": [
-                        {
-                            "format": "png",
-                            "path": "/runs/run-a/analysis/trace.png",
-                            "status": "saved",
-                            "error": None,
-                        }
+                        SaveOutput("png", "/runs/run-a/analysis/trace.png", "saved")
                     ],
                 },
-            }
+            )
         }
     },
-}
-POST_REPORT = {
-    "run_id": "run-a",
-    "artifacts": {
+)
+POST_REPORT = SaveReport(
+    "run-a",
+    {
         "post_analysis": {
-            "results": {
-                "status": "Saved",
-                "members": {
+            "results": SaveArtifact(
+                "Saved",
+                {
                     "analysis:post": [
-                        {
-                            "format": "json",
-                            "path": "/runs/run-a/post_analysis/results.json",
-                            "status": "saved",
-                            "error": None,
-                        }
+                        SaveOutput(
+                            "json", "/runs/run-a/post_analysis/results.json", "saved"
+                        )
                     ],
                     "figure:cloud": [
-                        {
-                            "format": "png",
-                            "path": "/runs/run-a/post_analysis/cloud.png",
-                            "status": "saved",
-                            "error": None,
-                        }
+                        SaveOutput(
+                            "png", "/runs/run-a/post_analysis/cloud.png", "saved"
+                        )
                     ],
                 },
-            }
+            )
         }
     },
-}
+)
 
 
 def start_ge(client: MeasureClient) -> ToolReply:
@@ -348,7 +325,7 @@ def test_ge_unconfirmed_analysis_start_retains_unknown_and_saved_prefix(
         assert full["analysis_starts"][stage]["status"] == "unknown"
         assert (
             summary["artifacts"]["raw"]["data"]["members"]["data"]
-            == RAW_REPORT["artifacts"]["raw"]["data"]["members"]["data"]
+            == asdict(RAW_REPORT)["artifacts"]["raw"]["data"]["members"]["data"]
         )
         if stage == "post":
             assert summary["artifacts"]["analysis"]["results"]["status"] == "Saved"
@@ -426,7 +403,7 @@ def test_ge_cancel_during_writeback_retains_stage_and_prevents_next_admission(
         assert data["analysis"]["status"] == (
             "cancelled" if stage == "primary" else "finished"
         )
-        assert data["raw_save"] == RAW_REPORT
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert len(terminal.images) == (1 if stage == "primary" else 2)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.post_analyze") == (0 if stage == "primary" else 1)
@@ -494,7 +471,7 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
         assert current["status"] == outcome
         assert current["cancel_requested"]
         assert current["operation_outcome"]["status"] == outcome
-        assert data["raw_save"] == RAW_REPORT
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert len(terminal.images) == (1 if stage == "post" else 0)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("operation.cancel") == 1
@@ -563,10 +540,10 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
             "incomplete" if save_failed else "saved"
         )
         assert data["post_analysis"]["save_report"] == (
-            None if save_failed else POST_REPORT
+            None if save_failed else asdict(POST_REPORT)
         )
         assert data["analysis"]["status"] == "finished"
-        assert data["raw_save"] == RAW_REPORT
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert len(terminal.images) == 1
         assert data["post_writeback"] is None
         assert not any(
@@ -616,14 +593,14 @@ def test_ge_close_stops_stage_admission_without_reconnect(
         assert data["status"] == "cancelled", data
         assert data["phase"] == "terminal"
         assert data["error"] is None
-        assert data["raw_save"] == RAW_REPORT
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == (
             "failed" if method_pending == "tab.writeback_preview" else "finished"
         )
         if method_pending == "tab.writeback_preview":
             assert data["analysis"]["error"]["phase"] == "writeback_read"
             assert data["analysis"]["writeback"] is None
-        assert data["analysis"]["save_report"] == PRIMARY_REPORT
+        assert data["analysis"]["save_report"] == asdict(PRIMARY_REPORT)
         assert len(client.transport.sent) == before
         client.context.session.close()
     finally:
@@ -764,7 +741,7 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
     data = reply.data
     assert data["status"] == "failed", data
     assert data["tab"] == "t"
-    assert data["raw_save"] == RAW_REPORT
+    assert data["raw_save"] == asdict(RAW_REPORT)
     assert data["analysis_stage"] == stage
     methods = [method for method, _ in client.transport.sent]
     assert methods.count("tab.run_start") == 1
@@ -772,7 +749,7 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
     assert data["post_writeback"] is None
     if stage == "post":
         assert data["analysis"]["status"] == "finished"
-        assert data["analysis"]["save_report"] == PRIMARY_REPORT
+        assert data["analysis"]["save_report"] == asdict(PRIMARY_REPORT)
         assert data["writeback"]["items"][0]["id"] == "md-1"
     else:
         assert data["writeback"] is None
@@ -789,7 +766,7 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
         assert current["save_report"] is None
     elif failure in ("png", "writeback"):
         assert current["save_report"] == (
-            POST_REPORT if stage == "post" else PRIMARY_REPORT
+            asdict(POST_REPORT) if stage == "post" else asdict(PRIMARY_REPORT)
         )
     assert len(reply.images) == (1 if stage == "post" else 0) + (
         1 if failure == "writeback" else 0
@@ -883,7 +860,7 @@ def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_clie
     reply = full_execution_reply(client, skip_writeback(client, reply))
     data = json.loads(json.dumps(reply.data, allow_nan=False))
     assert data["status"] == "finished"
-    assert data["raw_save"] == RAW_REPORT
+    assert data["raw_save"] == asdict(RAW_REPORT)
     for stage, summary, image in (
         ("analysis", {"offset": 0.24, "stderr": None}, "trace"),
         ("post_analysis", {"fidelity": 0.98, "stderr": None}, "cloud"),
@@ -893,7 +870,7 @@ def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_clie
             {"path": "summary.stderr", "reason": "non_finite"}
         ]
         assert data[stage]["save_report"] == (
-            PRIMARY_REPORT if image == "trace" else POST_REPORT
+            asdict(PRIMARY_REPORT) if image == "trace" else asdict(POST_REPORT)
         )
     assert "tab.writeback_apply" not in [method for method, _ in client.transport.sent]
 
@@ -985,7 +962,7 @@ def test_ge_answer_failure_keeps_confirmed_primary_write_and_all_previews(ge_cli
     full = client.call(
         "status", {"execution": failed.data["execution"], "detail": "full"}
     )
-    assert full["raw_save"] == RAW_REPORT
+    assert full["raw_save"] == asdict(RAW_REPORT)
     assert full["analysis"]["status"] == full["post_analysis"]["status"] == "finished"
 
 
@@ -1043,12 +1020,12 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
             "populations": {"ground": 0.97, "excited": 0.03},
         }
         assert summary["artifacts"] == {
-            **RAW_REPORT["artifacts"],
-            **PRIMARY_REPORT["artifacts"],
-            **POST_REPORT["artifacts"],
+            **asdict(RAW_REPORT)["artifacts"],
+            **asdict(PRIMARY_REPORT)["artifacts"],
+            **asdict(POST_REPORT)["artifacts"],
         }
-        assert data["analysis"]["save_report"] == PRIMARY_REPORT
-        assert data["post_analysis"]["save_report"] == POST_REPORT
+        assert data["analysis"]["save_report"] == asdict(PRIMARY_REPORT)
+        assert data["post_analysis"]["save_report"] == asdict(POST_REPORT)
         assert data["writeback"]["items"][0]["id"] == "md-1"
         assert data["post_writeback"]["items"][0]["id"] == "classifier"
         assert len(reply.images) == 2
@@ -1101,15 +1078,12 @@ def test_ge_author_post_capture_retains_reports_images_and_original_sources(
         assert primary.snapshot.save_report == PRIMARY_REPORT
         expected = deepcopy(POST_REPORT)
         if outcome == "partial":
-            artifact = expected["artifacts"]["post_analysis"]["results"]
-            artifact["status"] = "Partially saved"
-            artifact["members"]["figure:cloud"].append(
-                {
-                    "format": "png",
-                    "path": "/copies/cloud.png",
-                    "status": "failed",
-                    "error": "copy unavailable",
-                }
+            artifact = expected.artifacts["post_analysis"]["results"]
+            artifact.members["figure:cloud"].append(
+                SaveOutput("png", "/copies/cloud.png", "failed", "copy unavailable")
+            )
+            expected.artifacts["post_analysis"]["results"] = replace(
+                artifact, status="Partially saved"
             )
 
         def save(params):
@@ -1127,7 +1101,7 @@ def test_ge_author_post_capture_retains_reports_images_and_original_sources(
                         "message": "source replaced",
                     },
                 }
-            return {"ok": True, "result": expected}
+            return {"ok": True, "result": asdict(expected)}
 
         if outcome in ("partial", "transport"):
             client.transport.replies["tab.save_artifacts"] = save
