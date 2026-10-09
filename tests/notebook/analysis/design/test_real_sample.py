@@ -9,6 +9,9 @@ coordinate columns fail before any physics or comparison runs.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from copy import deepcopy
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -28,8 +31,18 @@ from zcu_tools.resources.sample_table import (
 
 _NOISE_CHANNELS: list[tuple[str, dict[str, object]]] = []
 
-# Physics-call counter shared with the fake implementations; reset per test.
+# Physics-call counter shared with the fakes; restored by the fixture.
 _PHYSICS_CALLS = {"physics": 0}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def guard_shared_state() -> Iterator[None]:
+    """Name this module if its tests leak changes to shared recording state."""
+    noise_channels = deepcopy(_NOISE_CHANNELS)
+    physics_calls = _PHYSICS_CALLS.copy()
+    yield
+    assert noise_channels == _NOISE_CHANNELS, f"{__name__} leaked noise channels"
+    assert physics_calls == _PHYSICS_CALLS, f"{__name__} leaked physics calls"
 
 
 def _scatter_traces(fig: Figure) -> list[Scatter]:
@@ -73,7 +86,7 @@ def result_dir(tmp_path, monkeypatch) -> str:
     params_file.set_dispersive_fit(DispersiveFit(g=0.1, bare_rf=7.0))
 
     calls = _PHYSICS_CALLS
-    calls["physics"] = 0
+    monkeypatch.setitem(calls, "physics", 0)
 
     def _fake_calc_ge_snr(*_args, **_kwargs):
         calls["physics"] += 1

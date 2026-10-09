@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -32,13 +33,13 @@ from zcu_tools.resources.sample_table import (
 def _target_frame(
     *,
     label: str = "target",
-    dev_unit: str = "A",
+    dev_unit: Literal["A", "V"] = "A",
     flux_int: float = -11.1,
     flux_period: float = 24.5,
 ) -> FluxFrame:
     return FluxFrame(
         params=(3.5, 1.0, 0.6),
-        dev_unit=dev_unit,  # type: ignore[arg-type]
+        dev_unit=dev_unit,
         flux_int=flux_int,
         flux_period=flux_period,
         label=label,
