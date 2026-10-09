@@ -312,9 +312,9 @@ class LabberData:
 
     @classmethod
     def load(cls, path: str) -> LabberData:
-        from .labber import _load_labber_data
+        from .labber import load_labber_data
 
-        return _load_labber_data(path)
+        return load_labber_data(path)
 
     def __repr__(self) -> str:
         vals = self.data.values
