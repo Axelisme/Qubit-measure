@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 import zcu_tools.simulate.fluxonium as fluxonium
 import zcu_tools.simulate.fluxonium.coherence as coherence
 
