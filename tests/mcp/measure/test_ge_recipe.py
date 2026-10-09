@@ -250,10 +250,41 @@ class GeGui(LookbackGui):
                     ].update(valid=False, error="unknown library")
 
     def _post_result(self, method, params):
+        if method == "tab.save_artifacts":
+            assert params == {
+                "tab_id": "t",
+                "artifacts": [{"section": "post_analysis", "name": "results"}],
+                "operation_id": 104,
+            }
+            return {
+                "run_id": "run-a",
+                "artifacts": {
+                    "post_analysis": {
+                        "results": {
+                            "status": "Saved",
+                            "members": {
+                                "analysis:post": [
+                                    {
+                                        "format": "json",
+                                        "path": "/runs/run-a/post_analysis/results.json",
+                                        "status": "saved",
+                                        "error": None,
+                                    }
+                                ],
+                                "figure:cloud": [
+                                    {
+                                        "format": "png",
+                                        "path": "/runs/run-a/post_analysis/cloud.png",
+                                        "status": "saved",
+                                        "error": None,
+                                    }
+                                ],
+                            },
+                        }
+                    }
+                },
+            }
         assert params["subtab_id"] == "post_analysis"
-        if method == "tab.save_image":
-            assert params["figure_name"] in ("cloud", "histogram")
-            return {"image_path": f"/actual/{params['figure_name']}.png"}
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(PNG).decode()}
         if method == "tab.writeback_preview":
