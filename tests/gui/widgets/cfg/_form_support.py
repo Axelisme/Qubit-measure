@@ -27,7 +27,7 @@ def section_schema(
 
 def attach_draft(w, schema: CfgSchema, ctrl):
     """Build a caller-owned draft, attach the widget, and return its root field."""
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     w.attach(draft)
     return draft.root
 

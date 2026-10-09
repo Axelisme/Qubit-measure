@@ -28,7 +28,7 @@ from ._helpers import Fixture, call, open_client
 def _make_draft(
     ctrl: MagicMock, spec: CfgSectionSpec, value: CfgSectionValue
 ) -> CfgDraft:
-    return MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, value))
+    return MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, value), parameters=None)
 
 
 def _set(draft: CfgDraft, path: str, value: object) -> None:
@@ -646,15 +646,12 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
 
 def _fakefreq_root():
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
     cfg = FakeFreqAdapter().make_default_cfg(ctx)
     ctrl = MagicMock()
-    ctrl.get_current_ml.return_value = ctx.ml
-    ctrl.get_current_md.return_value = ctx.md
     return _make_draft(ctrl, cfg.spec, cfg.value)
 
 
