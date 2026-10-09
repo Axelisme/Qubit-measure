@@ -182,7 +182,7 @@ def test_production_capture_uses_published_cache_without_live_provider(
     monkeypatch.setattr(application.ctrl, "read_value_source", live_read_forbidden)
     published = editor.edit(
         editor.observe().ref.revision,
-        (CfgEdit(("gain",), EvalValue("$device.flux.value")),),
+        (CfgEdit(("gain",), EvalValue("@{device.flux.value}")),),
     )
     accepted = application.state.get_tab(tab_id).cfg.accept(published.ref.revision)
     assert accepted.values == {"gain": 0.25}
@@ -419,6 +419,24 @@ def test_existing_tab_and_run_admission_use_current_point(
     assert first.storage.point == "first"
 
 
+def test_dollar_cfg_refreshes_with_aliases_and_retains_authored_input(
+    global_sources: tuple[AppServices, State],
+) -> None:
+    services, state = global_sources
+    tab_id = services.tab.new_tab("global-source")
+    cfg = state.get_tab(tab_id).cfg
+    initial = cfg.edit(
+        cfg.observe().ref.revision, (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
+    )
+    assert cfg.accept(initial.ref.revision).values["gain"] == 10.0
+    services.context.set_alias_rows((AliasRow("qubit", "Q2"), AliasRow("custom", "Q1")))
+    refreshed = cfg.observe()
+    assert refreshed.ref.cfg_id == initial.ref.cfg_id
+    assert cfg.accept(refreshed.ref.revision).values["gain"] == 20.0
+    value = refreshed.tree.children["gain"].value
+    assert isinstance(value, EvalValue) and value.expr == "$qubit.gain"
+
+
 def test_run_target_capture_does_not_mutate_global_rows_or_cfg(
     global_sources: tuple[AppServices, State],
 ) -> None:
@@ -427,6 +445,9 @@ def test_run_target_capture_does_not_mutate_global_rows_or_cfg(
     cfg = state.get_tab(tab_id).cfg
     observed = cfg.observe()
     rows = services.context.get_alias_rows()
+    observed = cfg.edit(
+        observed.ref.revision, (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
+    )
     admitted = services.guard.capture_run_inputs(
         tab_id, expected_revision=observed.ref.revision, target="Q2"
     )
@@ -434,7 +455,8 @@ def test_run_target_capture_does_not_mutate_global_rows_or_cfg(
     assert admitted.snapshot.roles == {"qubit": "Q2", "custom": "Q2"}
     assert admitted.parameters is not None
     assert admitted.parameters.value("$qubit.gain") == 20.0
-    assert admitted.accepted_cfg.values["gain"] == 10.0
+    assert admitted.accepted_cfg.values["gain"] == 20.0
+    assert cfg.accept(observed.ref.revision).values["gain"] == 10.0
     assert services.context.get_alias_rows() == rows
     assert cfg.observe() == observed
     cfg.edit(observed.ref.revision, (CfgEdit(("gain",), 15.0),))
@@ -456,6 +478,9 @@ def test_run_control_delivers_target_capture_to_execution_without_publication_ch
     cfg = state.get_tab(tab_id).cfg
     observed = cfg.observe()
     rows = services.context.get_alias_rows()
+    observed = cfg.edit(
+        observed.ref.revision, (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
+    )
     admitted: list[RunInputs] = []
 
     def receive_run(
@@ -476,6 +501,8 @@ def test_run_control_delivers_target_capture_to_execution_without_publication_ch
     assert inputs.parameters is not None
     assert inputs.parameters.value("$qubit.gain") == (10.0 if target is None else 20.0)
     assert inputs.accepted_cfg.ref == observed.ref
+    assert inputs.accepted_cfg.values["gain"] == (10.0 if target is None else 20.0)
+    assert cfg.accept(observed.ref.revision).values["gain"] == 10.0
     assert cfg.observe() == observed
     assert services.context.get_alias_rows() == rows
     cfg.edit(observed.ref.revision, (CfgEdit(("gain",), 15.0),))

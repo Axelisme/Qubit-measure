@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
@@ -8,6 +8,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickState,
     fold_initial_lines,
 )
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -120,7 +121,11 @@ class FluxDepAdapter(
     )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> FluxDepRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FreqFluxExp().run(cfg, context=context)
@@ -166,9 +171,9 @@ class FluxDepAdapter(
     ) -> FluxPickPlugin:
         """Build a phase-aware picker from the fixed Run/Load result source.
 
-        req.parameters=None or absent/null qubit.flux_half/flux_int uses the
+        req.parameters=None or absent/null $qubit.flux_half/flux_int uses the
         line owner's defaults. A supplied capture resolves those paths using
-        its fixed roles; scalar, role and source failures propagate. No live
+        its fixed aliases; scalar, alias and source failures propagate. No live
         context or legacy md/ml is read. plots receives the pick figure on Done.
         """
         result = req.run_result.result
@@ -177,12 +182,12 @@ class FluxDepAdapter(
         flux_half = (
             None
             if parameters is None
-            else optional_parameter_float(parameters, "qubit.flux_half")
+            else optional_parameter_float(parameters, "$qubit.flux_half")
         )
         flux_int = (
             None
             if parameters is None
-            else optional_parameter_float(parameters, "qubit.flux_int")
+            else optional_parameter_float(parameters, "$qubit.flux_int")
         )
         half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
         # Two-tone spectra may carry useful phase information.
@@ -215,23 +220,25 @@ class FluxDepAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                target_name="flx_half",
+                target_name="$qubit.flux_half",
                 description="Half-flux (Φ₀/2) sweet-spot device value",
                 proposed_value=result.flx_half,
             ),
             MetaDictWriteback(
-                target_name="flx_int",
+                target_name="$qubit.flux_int",
                 description="Integer-flux sweet-spot device value",
                 proposed_value=result.flx_int,
             ),
             MetaDictWriteback(
-                target_name="flx_period",
+                target_name="$qubit.flux_period",
                 description="Flux period (device units) = 2·|flx_int − flx_half|",
                 proposed_value=result.flx_period,
             ),
         ]
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqFluxCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> FreqFluxCfg:
         cfg_raw = dict(raw_cfg)
         dev_raw = cfg_raw.pop("dev")
         if not isinstance(dev_raw, dict):

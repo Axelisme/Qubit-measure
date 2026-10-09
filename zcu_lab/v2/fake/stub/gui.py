@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -46,7 +47,7 @@ class FakeAnalyzeParams:
     threshold: Annotated[float, ParamMeta(label="Threshold", decimals=2)] = 0.5
 
 
-def _require_int(raw_cfg: dict[str, object], key: str) -> int:
+def _require_int(raw_cfg: Mapping[str, ExperimentCfgValue], key: str) -> int:
     value = raw_cfg.get(key)
     if not isinstance(value, int):
         raise RuntimeError(
@@ -55,7 +56,7 @@ def _require_int(raw_cfg: dict[str, object], key: str) -> int:
     return value
 
 
-def _require_float(raw_cfg: dict[str, object], key: str) -> float:
+def _require_float(raw_cfg: Mapping[str, ExperimentCfgValue], key: str) -> float:
     value = raw_cfg.get(key)
     if not isinstance(value, (int, float)):
         raise RuntimeError(
@@ -90,7 +91,9 @@ class FakeAdapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeExpCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> FakeExpCfg:
         return FakeExpCfg(
             reps=_require_int(raw_cfg, "reps"),
             rounds=_require_int(raw_cfg, "rounds"),
@@ -101,7 +104,11 @@ class FakeAdapter(
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> FakeRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FakeExp().run(cfg, context=context)

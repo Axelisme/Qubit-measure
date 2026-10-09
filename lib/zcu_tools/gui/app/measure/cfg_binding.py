@@ -31,6 +31,7 @@ from zcu_tools.gui.session.value_lookup import (
     name_from_type,
 )
 from zcu_tools.resources.context.library import LibrarySnapshot
+from zcu_tools.resources.entry import RoleResolutionError
 
 from .arb_waveform import ArbWaveformKeys
 from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
@@ -245,13 +246,12 @@ def _resolve_reference(
 ) -> ResolvedReference | None:
     if kind not in ("module", "waveform"):
         raise RuntimeError(f"Unsupported measure cfg reference kind {kind!r}")
-    roles = parameters.roles
-    prefix = key.split(".", 1)[0]
-    if roles is not None and prefix in roles.declarations and prefix not in roles.names:
-        return None
     library = parameters.library
     try:
         root = parameters.library_key(key)
+    except RoleResolutionError:
+        # An unresolved alias is a missing reference, not an unavailable source.
+        return None
     except AttributeError:
         # The path owner defines unset and dangling module slots.
         return None

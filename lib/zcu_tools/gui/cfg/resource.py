@@ -30,6 +30,7 @@ from .model import (
     EvalValue,
     ReferenceSpec,
     ReferenceValue,
+    SweepValue,
 )
 from .resolved import lower_resolved_cfg
 
@@ -707,6 +708,16 @@ def _diagnostics(tree: CfgNodeObservation, path: CfgPath = ()):
         message = "input is incomplete or invalid"
         if isinstance(value, (DirectValue, EvalValue)):
             message = value.error or value.validation_error or message
+        elif isinstance(value, SweepValue):
+            errors = [
+                endpoint.error or endpoint.validation_error
+                for endpoint in (value.start, value.stop)
+                if isinstance(endpoint, (DirectValue, EvalValue))
+                and (endpoint.error or endpoint.validation_error)
+            ]
+            message = (
+                "; ".join(error for error in errors if error is not None) or message
+            )
         yield CfgDiagnostic(path, "invalid_input", message)
     for key, child in tree.children.items():
         yield from _diagnostics(child, (*path, key))

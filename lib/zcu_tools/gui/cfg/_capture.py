@@ -5,6 +5,7 @@ import math
 import tokenize
 from collections.abc import Callable
 
+from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.expected_error import InvalidInputError
 
 from .resource import (
@@ -52,6 +53,14 @@ class ExpressionCapture:
                     CfgPreconditionReason.CAPTURE_UNAVAILABLE,
                     f"Capture source {name!r} is unavailable",
                 ) from exc
+            if isinstance(value, dict) and "__complex__" in value:
+                try:
+                    value = decode_complex(value)
+                except (ValueError, OverflowError) as exc:
+                    raise CfgInputError(
+                        CfgInputReason.INVALID_VALUE,
+                        f"Invalid complex capture {name!r}: {exc}",
+                    ) from exc
             if isinstance(value, bool) or not isinstance(value, (int, float, complex)):
                 raise CfgInputError(
                     CfgInputReason.INVALID_VALUE, "capture must be numeric"
@@ -78,7 +87,7 @@ def _capture_spans(expression: str) -> list[tuple[int, int, str]]:
         tokens.extend(tokenize.generate_tokens(io.StringIO(expression).readline))
     except (tokenize.TokenError, IndentationError) as exc:
         if any(
-            token.string == "$" and token.type in (tokenize.OP, tokenize.ERRORTOKEN)
+            token.string == "@" and token.type in (tokenize.OP, tokenize.ERRORTOKEN)
             for token in tokens
         ):
             raise CfgInputError(CfgInputReason.CAPTURE_SYNTAX, str(exc)) from exc
@@ -88,7 +97,7 @@ def _capture_spans(expression: str) -> list[tuple[int, int, str]]:
         offsets.append(offsets[-1] + len(line))
     spans: list[tuple[int, int, str]] = []
     for index, token in enumerate(tokens):
-        if token.string != "$" or token.type not in (tokenize.OP, tokenize.ERRORTOKEN):
+        if token.string != "@" or token.type not in (tokenize.OP, tokenize.ERRORTOKEN):
             continue
         start = offsets[token.start[0] - 1] + token.start[1]
         end, name = _reference(tokens, index)
@@ -99,6 +108,16 @@ def _capture_spans(expression: str) -> list[tuple[int, int, str]]:
 def _reference(
     tokens: list[tokenize.TokenInfo], index: int
 ) -> tuple[tuple[int, int], str]:
+    marker = tokens[index]
+    index += 1
+    if (
+        index >= len(tokens)
+        or tokens[index].string != "{"
+        or tokens[index].start != marker.end
+    ):
+        raise CfgInputError(
+            CfgInputReason.CAPTURE_SYNTAX, "capture requires adjacent @{key}"
+        )
     previous = tokens[index]
     parts: list[str] = []
     index += 1
@@ -108,14 +127,19 @@ def _reference(
             break
         parts.append(name.string)
         index += 1
-        if index >= len(tokens) or tokens[index].string != ".":
-            return name.end, ".".join(parts)
-        previous = tokens[index]
-        if previous.start != name.end:
+        if index >= len(tokens):
             break
+        following = tokens[index]
+        if following.start != name.end:
+            break
+        if following.string == "}":
+            return following.end, ".".join(parts)
+        if following.string != ".":
+            break
+        previous = following
         index += 1
     raise CfgInputError(
-        CfgInputReason.CAPTURE_SYNTAX, "capture requires an adjacent dotted identifier"
+        CfgInputReason.CAPTURE_SYNTAX, "capture requires adjacent @{dotted.identifier}"
     )
 
 
