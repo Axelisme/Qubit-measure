@@ -6,10 +6,10 @@ from typing import Literal
 
 import pytest
 from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec, waveform_spec_from_raw
-from zcu_tools.gui.event_bus import MdChangedPayload, MlChangedPayload
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import ContextSourceFault
+from zcu_tools.gui.session.events import MdChangedPayload, MlChangedPayload
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformError
