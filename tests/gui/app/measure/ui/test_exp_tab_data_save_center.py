@@ -1,895 +1,322 @@
-"""Focused Data-center behavior tests for TKT-001 save-subtab-redesign.
+"""Data-center projection through public State, Controller and Qt seams."""
 
-Validates S1-S3 acceptance via production ExpTabWidget / MainWindow seams.
-"""
-
-from __future__ import annotations
-
+from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
-from matplotlib.figure import Figure
-from qtpy.QtWidgets import (
-    QApplication,
-    QComboBox,
-    QLabel,
-    QLineEdit,
-    QPushButton,
-    QTextEdit,
-)
-from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
-    ContextReadiness,
-    SessionEnv,
-)
-from zcu_tools.gui.app.measure.artifact_tracker import (
-    ArtifactKey,
-    ArtifactKind,
-    SaveStatus,
-)
+from qtpy.QtCore import QEvent, Qt
+from qtpy.QtGui import QKeyEvent
+from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit, QTextEdit
+from zcu_tools.experiment.run_saving import ArtifactRef, OutputResult, SaveReport
+from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
+from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_save_image
-from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
-from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.resources.entry import Output
 
-from tests.gui.app.measure._cfg_fakes import cfg_resources, configure_cfg_lookup
-from tests.gui.app.measure.ui._artifact_snapshots import (
-    make_tab_snapshot,
-    with_artifacts,
+from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui.app.measure._native_save_support import (
+    GUI_ORIGIN,
+    AnalysisSavingAdapter,
+    NativeSaveSession,
+    PaneParams,
+    PaneSummary,
+    native_save_session,
 )
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
-_DATA = ArtifactKey(ArtifactKind.DATA)
-_FIT = ArtifactKey(ArtifactKind.ANALYSIS, "fit")
-_POST_FIT = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
-
-
-def _require_qapp() -> QApplication:
-    app = QApplication.instance()
-    assert isinstance(app, QApplication)
-    return app
-
-
-def _plots_for(figure: Figure) -> Plots:
-    plots = Plots(NonPresentingHost())
-    plots.adopt("fit", figure)
-    plots.finish()
-    return plots
-
-
-def _mock_ctrl() -> MagicMock:
-    ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
-    ctrl.get_left_panel_width.return_value = 500
-    ctrl.get_tab_adapter_name.return_value = "fake"
-    ctrl.get_adapter_guide.return_value = {}
-    ctrl.progress_control.attach_progress.return_value = lambda: None
-    ctrl.progress_control.progress_bars.return_value = []
-    ctrl.active_operation_count.return_value = 0
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.measure.specs import make_pulse_spec
-    from zcu_tools.gui.cfg import CfgSchema, make_default_value
-
-    spec = make_pulse_spec()
-    draft = MeasureCfgBindings(ctrl).new_draft(
-        CfgSchema(spec, make_default_value(spec))
-    )
-    ctrl.open_seeded_cfg_editor.return_value = ("editor-tab", ())
-    ctrl.get_cfg_editor_draft.return_value = draft
-    return ctrl
+_RUN = ArtifactRef("run", "measurement_data")
 
 
 @pytest.fixture
-def exp_tab_factory(qapp, monkeypatch):
-    import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
-
-    orig_attach = mod.attach_existing_figure_to_container
-
-    def mock_attach(fig, container):
-        from qtpy.QtWidgets import QWidget
-
-        w = QWidget()
-        w.figure = fig  # type: ignore[attr-defined]
-        container.attach_canvas(w)
-        w.draw = lambda: None  # type: ignore[attr-defined]
-        return w
-
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
-    yield mod.ExpTabWidget
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
-
-
-# ---------------------------------------------------------------------------
-# A1 composition
-# ---------------------------------------------------------------------------
-
-
-def test_data_subtab_contains_save_center_and_order(exp_tab_factory):
-    ctrl = _mock_ctrl()
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
-    )
-    snap = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        has_post=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=True,
-    )
-    tab = exp_tab_factory("tab-1", ctrl, caps)
-    tab.attach(snap, MagicMock())
-    labels = [tab._left_tabs.tabText(i) for i in range(tab._left_tabs.count())]
-    assert labels == ["Run", "Analysis", "Post-Analysis", "Data", "Guide"]
-    heading = tab._save_center.findChildren(QLabel)
-    assert any(lbl.text() == "Save results" for lbl in heading)
-    assert tab._save_center.artifact_keys == [_DATA, _FIT, _POST_FIT]
-    # Analysis/Post panels no longer own image save controls
-    assert not any(
-        isinstance(c, QLineEdit) and c.placeholderText() == "/tmp/image.png"
-        for c in tab._analysis_panel.findChildren(QLineEdit)
-    )
-    assert not any(
-        isinstance(c, QPushButton) and c.text() == "Save Image"
-        for c in tab._analysis_panel.findChildren(QPushButton)
-    )
-    # Data center hosts them via its narrow interface
-    assert tab._save_center.has_artifact(_DATA)
-    assert tab._save_center.has_artifact(_FIT)
-    assert tab._save_center.has_artifact(_POST_FIT)
-    # Verify placeholder via findChildren on center
-    placeholders = {
-        c.placeholderText() for c in tab._save_center.findChildren(QLineEdit)
-    }
-    assert "/tmp/data.hdf5" in placeholders
-    assert "/tmp/image.png" in placeholders
-    assert len(placeholders) == 2  # DATA and named image path hints
-    tab.deleteLater()
-    _require_qapp().processEvents()
+def live_ui(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> Generator[tuple[NativeSaveSession, Controller, MainWindow, str]]:
+    """Open a real tab and view over the existing offline native Save fixture."""
+    with native_save_session(tmp_path, qapp) as session:
+        registry = Registry()
+        registry.register("saving", AnalysisSavingAdapter)
+        monkeypatch.setattr(
+            "zcu_tools.gui.app.measure.services.app_services.BackgroundRunner",
+            lambda: session.background,
+        )
+        ctrl = Controller(
+            session.state,
+            registry,
+            None,
+            session.bus,
+            progress_transport=DirectProgressTransport(),
+            project_root=str(tmp_path),
+        )
+        tab_id = ctrl.new_tab("saving")
+        original = session.state.get_tab("tab")
+        session.state.update_tab_result(
+            tab_id,
+            original.run.result,
+            metadata=session.metadata,
+            parameters=original.run.parameters,
+        )
+        window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+        window.add_tab_widget(tab_id, "saving")
+        try:
+            yield session, ctrl, window, tab_id
+        finally:
+            assert session.background.quiesce()
+            ctrl.tab_control.close_tab(tab_id)
+            window.deleteLater()
+            qapp.processEvents()
 
 
 def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
-    exp_tab_factory, qapp
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
 ) -> None:
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-    ctrl = _mock_ctrl()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.has_tab.return_value = True
+    session, ctrl, window, tab_id = live_ui
     plots = Plots(NonPresentingHost())
     for name, ys in (("fit", [0, 1]), ("diagnostic", [1, 0])):
         _, axes = plots.subplots(name)
         axes.plot([0, 1], ys)
-    plots.finish()
-    base = make_tab_snapshot("tab-1", has_run=True, has_analysis=True)
-    assert base.analysis is not None and base.paths is not None
-    fit_path = base.paths.analysis_images["fit"]
-    diagnostic_path = replace(fit_path, path="/tmp/diagnostic.png")
-    snap = with_artifacts(
-        replace(
-            base,
-            analysis=replace(
-                base.analysis,
-                figures=plots,
-                image_paths={"fit": fit_path, "diagnostic": diagnostic_path},
-            ),
-            paths=replace(
-                base.paths,
-                analysis_images={"fit": fit_path, "diagnostic": diagnostic_path},
-            ),
-        )
+    plots.finish(present=False)
+    session.state.update_tab_analyze(
+        tab_id, PaneSummary(), plots, analyze_params_instance=PaneParams()
     )
-    assert snap.analysis is not None and snap.paths is not None
-    ctrl.get_tab_snapshot.return_value = snap
-    window = MainWindow(ctrl)
-    try:
-        window.add_tab_widget("tab-1", "fake")
-        window.refresh_tab_figure("tab-1", snap)
-        selector = next(
-            widget
-            for widget in window.findChildren(QComboBox)
-            if widget.accessibleName() == "Analysis figure"
-        )
-        center = window.findChild(ArtifactSaveCenter)
-        assert center is not None
-        assert center.artifact_keys == [
-            _DATA,
-            _FIT,
-            ArtifactKey(ArtifactKind.ANALYSIS, "diagnostic"),
-        ]
-        assert selector.currentText() == "fit"
-        fit_png = window.take_figure_screenshot_for_subtab("tab-1", "analysis")
-        selector.setCurrentText("diagnostic")
-        diagnostic_png = window.take_figure_screenshot_for_subtab("tab-1", "analysis")
-        assert fit_png.startswith(b"\x89PNG") and diagnostic_png.startswith(b"\x89PNG")
-        assert fit_png != diagnostic_png
-        window.refresh_tab_figure("tab-1", snap)
-        assert selector.currentText() == "diagnostic"
-        assert (
-            window.take_figure_screenshot_for_subtab("tab-1", "analysis")
-            == diagnostic_png
-        )
-
-        replacement = Plots(NonPresentingHost())
-        replacement.subplots("new-fit")
-        replacement.finish()
-        window.refresh_tab_figure(
-            "tab-1", replace(snap, analysis=replace(snap.analysis, figures=replacement))
-        )
-        assert selector.currentText() == "new-fit"
-
-        cleared = with_artifacts(
-            replace(
-                snap,
-                analysis=replace(
-                    snap.analysis, result=None, figures=None, image_paths={}
-                ),
-                paths=replace(snap.paths, analysis_images={}),
-            )
-        )
-        ctrl.get_tab_snapshot.return_value = cleared
-        window.refresh_tab_figure("tab-1", cleared)
-        window.refresh_tab_interaction("tab-1", cleared)
-        assert selector.currentText() == ""
-        assert center.artifact_keys == [_DATA]
-        with pytest.raises(FailedPreconditionError, match="no selected figure"):
-            window.take_figure_screenshot_for_subtab("tab-1", "analysis")
-    finally:
-        window.deleteLater()
-        qapp.processEvents()
-
-
-def test_measurement_always_post_conditional(exp_tab_factory):
-    ctrl = _mock_ctrl()
-    caps_none = AdapterCapabilities(
-        analysis=AnalysisMode.NONE, post_analysis=False, load_data=False
+    snap = ctrl.get_tab_snapshot(tab_id)
+    window.refresh_tab_figure(tab_id, snap)
+    window.refresh_tab_interaction(tab_id, snap)
+    selector = next(
+        widget
+        for widget in window.findChildren(QComboBox)
+        if widget.accessibleName() == "Analysis figure"
     )
-    tab_none = exp_tab_factory("tab-1", ctrl, caps_none)
-    snap_none = make_tab_snapshot(
-        "tab-1",
-        has_run=False,
-        analysis_mode=AnalysisMode.NONE,
-        post_cap=False,
-        load_cap=False,
+    assert selector.currentText() == "fit"
+    fit_png = window.take_figure_screenshot_for_subtab(tab_id, "analysis")
+    selector.setCurrentText("diagnostic")
+    diagnostic_png = window.take_figure_screenshot_for_subtab(tab_id, "analysis")
+    assert fit_png.startswith(b"\x89PNG") and diagnostic_png.startswith(b"\x89PNG")
+    assert fit_png != diagnostic_png
+    window.refresh_tab_figure(tab_id, snap)
+    assert selector.currentText() == "diagnostic"
+    assert (
+        window.take_figure_screenshot_for_subtab(tab_id, "analysis") == diagnostic_png
     )
-    tab_none.attach(snap_none, MagicMock())
-    assert tab_none._save_center.artifact_keys == [_DATA]
-    assert not tab_none._save_center.has_artifact(_FIT)
-    caps_a = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
+    analysis = next(
+        section for section in snap.artifacts if section.section == "analysis"
     )
-    tab_a = exp_tab_factory("tab-2", ctrl, caps_a)
-    snap_a = make_tab_snapshot(
-        "tab-2",
-        has_run=True,
-        has_analysis=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-    )
-    tab_a.attach(snap_a, MagicMock())
-    assert tab_a._save_center.artifact_keys == [_DATA]  # no completed figure yet
-    caps_both = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=False
-    )
-    tab_both = exp_tab_factory("tab-3", ctrl, caps_both)
-    snap_both = make_tab_snapshot(
-        "tab-3",
-        has_run=True,
-        has_analysis=True,
-        has_post=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=False,
-    )
-    tab_both.attach(snap_both, MagicMock())
-    assert tab_both._save_center.artifact_keys == [_DATA, _FIT, _POST_FIT]
+    assert [artifact.ref for artifact in analysis.artifacts] == [
+        ArtifactRef("analysis", "results")
+    ]
+    assert [
+        member.key.member_name
+        for member in analysis.artifacts[0].members
+        if member.key.member == "figure"
+    ] == ["fit", "diagnostic"]
 
-    # ---------------------------------------------------------------------------
-    # A2 row composition and bottom layout
-    # ---------------------------------------------------------------------------
-    tab_none.deleteLater()
-    tab_a.deleteLater()
-    tab_both.deleteLater()
-    _require_qapp().processEvents()
+    replacement = Plots(NonPresentingHost())
+    replacement.subplots("new-fit")
+    replacement.finish(present=False)
+    session.state.update_tab_analyze(
+        tab_id, PaneSummary(), replacement, analyze_params_instance=PaneParams()
+    )
+    window.refresh_tab_figure(tab_id, ctrl.get_tab_snapshot(tab_id))
+    assert selector.currentText() == "new-fit"
+    session.state.update_tab_analyze(tab_id, None, None)
+    cleared = ctrl.get_tab_snapshot(tab_id)
+    window.refresh_tab_figure(tab_id, cleared)
+    window.refresh_tab_interaction(tab_id, cleared)
+    assert selector.currentText() == ""
+    assert [section.section for section in cleared.artifacts] == ["run"]
+    with pytest.raises(FailedPreconditionError, match="no selected figure"):
+        window.take_figure_screenshot_for_subtab(tab_id, "analysis")
 
 
-def test_artifact_rows_have_status_path_save_and_comment(exp_tab_factory):
-    ctrl = _mock_ctrl()
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
-    )
-    snap = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        has_post=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=True,
-    )
-    tab = exp_tab_factory("tab-1", ctrl, caps)
-    tab.attach(snap, MagicMock())
-    center = tab._save_center
-    for key in center.artifact_keys:
-        text = center.status_text(key)
-        assert any(sym in text for sym in ["—", "○", "●", "✓"])
-        ss = center.status_color(key)
-        assert ss  # high contrast color
-        assert center.has_artifact(key)
-        assert center.is_path_enabled(key) is True
-    # Measurement comment
-    assert center.get_comment() == ""
-    # Set comment and verify
-    center.set_comment_text("hello")
-    assert center.get_comment() == "hello"
-    # Bottom Load/Save All
-    assert center.load_button.text() == "Load Data"
-    assert center.save_all_button.text() == "Save All"
-    assert center.load_button.height() == center.save_all_button.height() == 36
-    assert center.is_load_visible()
-    caps_no_load = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
-    )
-    tab2 = exp_tab_factory("tab-2", ctrl, caps_no_load)
-    snap2 = make_tab_snapshot(
-        "tab-2",
-        has_run=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-    )
-    tab2.attach(snap2, MagicMock())
-    assert not tab2._save_center.is_load_visible()
-    assert not tab2._save_center.save_all_button.isHidden()
-    assert tab2._save_center.is_save_all_enabled() is True
-
-    # ---------------------------------------------------------------------------
-    # A3 status lifecycle
-    # ---------------------------------------------------------------------------
-    tab.deleteLater()
-    tab2.deleteLater()
-    _require_qapp().processEvents()
-
-
-def test_data_actions_appear_before_measurement_data_card(
-    exp_tab_factory,
-):
-    ctrl = _mock_ctrl()
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
-    )
-    snap = make_tab_snapshot(
-        "tab-1",
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=True,
-    )
-    tab = exp_tab_factory("tab-1", ctrl, caps)
-    tab.attach(snap, MagicMock())
-    tab.resize(1000, 900)
-    tab._left_tabs.setCurrentWidget(tab._save_panel)
-    tab.show()
-    _require_qapp().processEvents()
-
-    center = tab._save_center
-    title = next(
-        label
-        for label in center.findChildren(QLabel)
-        if label.text() == "Measurement data"
-    )
-    path_edit = center._path_edits[_DATA]
-    title_top = title.mapTo(center, title.rect().topLeft()).y()
-    title_bottom = title.mapTo(center, title.rect().bottomLeft()).y()
-    path_top = path_edit.mapTo(center, path_edit.rect().topLeft()).y()
-    actions_top = center.save_all_button.mapTo(
-        center, center.save_all_button.rect().topLeft()
-    ).y()
-
-    assert title.height() <= title.sizeHint().height() + 4
-    assert path_top - title_bottom <= 16
-    assert actions_top < title_top
-
-    tab.close()
-    tab.deleteLater()
-    _require_qapp().processEvents()
-
-
-def test_status_no_result_and_not_saved(exp_tab_factory):
-    ctrl = _mock_ctrl()
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=False
-    )
-    tab = exp_tab_factory("tab-1", ctrl, caps)
-    snap_none = make_tab_snapshot(
-        "tab-1",
-        has_run=False,
-        has_analysis=False,
-        has_post=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=False,
-    )
-    tab.attach(snap_none, MagicMock())
-    center = tab._save_center
-    assert center.artifact_keys == [_DATA]
-    assert center.status_text(_DATA) == "— NO RESULT"
-    assert not center.is_save_enabled(_DATA)
-    assert center.is_path_enabled(_DATA)
-    snap_run = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=False,
-        has_post=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=False,
-    )
-    tab.update_interaction_state(snap_run)
-    assert center.status_text(_DATA) == "○ NOT SAVED"
-    assert center.is_save_enabled(_DATA)
-    assert not center.has_artifact(_FIT)
-    snap_ana = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        has_post=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=False,
-    )
-    tab.update_interaction_state(snap_ana)
-    assert center.status_text(_FIT) == "○ NOT SAVED"
-    assert center.is_save_enabled(_FIT)
-    assert not center.has_artifact(_POST_FIT)
-    tab.deleteLater()
-    _require_qapp().processEvents()
-
-
-def test_status_text_renders_shared_snapshot(exp_tab_factory):
-    tab = exp_tab_factory(
-        "tab-1",
-        _mock_ctrl(),
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
-    )
-    tab.attach(make_tab_snapshot("tab-1", has_run=True), MagicMock())
-    center = tab._save_center
-    assert center.status_text(_DATA) == "○ NOT SAVED"
-    for status, label in (
-        (SaveStatus.SAVED, "✓ SAVED"),
-        (SaveStatus.UNSAVED_CHANGES, "● UNSAVED CHANGES"),
-        (SaveStatus.NO_RESULT, "— NO RESULT"),
-    ):
-        tab.update_interaction_state(
-            make_tab_snapshot(
-                "tab-1", has_run=status is not SaveStatus.NO_RESULT, data_status=status
-            )
-        )
-        assert center.status_text(_DATA) == label
-    tab.deleteLater()
-    _require_qapp().processEvents()
-
-
-def test_save_all_disabled_when_no_result(exp_tab_factory):
-    ctrl = _mock_ctrl()
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
-    )
-    tab = exp_tab_factory("tab-1", ctrl, caps)
-    snap_none = make_tab_snapshot(
-        "tab-1",
-        has_run=False,
-        has_analysis=False,
-        has_post=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=True,
-    )
-    tab.attach(snap_none, MagicMock())
-    assert tab._save_center.is_save_all_enabled() is False
-    snap_some = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=False,
-        has_post=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=True,
-        load_cap=True,
-        has_active_context=True,
-    )
-    tab.update_interaction_state(snap_some)
-    assert tab._save_center.is_save_all_enabled() is True
-
-    saved = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        post_cap=True,
-        load_cap=True,
-        data_status=SaveStatus.SAVED,
-        analysis_status=SaveStatus.SAVED,
-    )
-    tab.update_interaction_state(saved)
-    assert tab._save_center.is_save_all_enabled() is False
-    assert tab._save_center.is_save_enabled(_DATA)
-    assert tab._save_center.is_save_enabled(_FIT)
-    changed = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        post_cap=True,
-        load_cap=True,
-        data_status=SaveStatus.UNSAVED_CHANGES,
-        analysis_status=SaveStatus.SAVED,
-    )
-    tab.update_interaction_state(changed)
-    assert tab._save_center.is_save_all_enabled() is True
-    tab.deleteLater()
-    _require_qapp().processEvents()
-
-
-def test_load_data_gates(exp_tab_factory):
-    ctrl = _mock_ctrl()
-    caps_load = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
-    )
-    tab = exp_tab_factory("tab-1", ctrl, caps_load)
-    snap_idle = make_tab_snapshot(
-        "tab-1",
-        has_run=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=True,
-        has_context=True,
-        has_active_context=False,
-    )
-    tab.attach(snap_idle, MagicMock())
-    assert tab._save_center.is_load_enabled() is True
-    snap_no_ctx = make_tab_snapshot(
-        "tab-1",
-        has_run=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=True,
-        has_context=False,
-        has_active_context=False,
-    )
-    tab.update_interaction_state(snap_no_ctx)
-    assert tab._save_center.is_load_enabled() is False
-    snap_busy = make_tab_snapshot(
-        "tab-1",
-        has_run=False,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=True,
-        has_context=True,
-        is_analyzing=True,
-    )
-    tab.update_interaction_state(snap_busy)
-    assert tab._save_center.is_load_enabled() is False
-    caps_no = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
-    )
-    tab2 = exp_tab_factory("tab-2", ctrl, caps_no)
-    snap2 = make_tab_snapshot(
-        "tab-2",
-        has_run=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-    )
-    tab2.attach(snap2, MagicMock())
-    assert not tab2._save_center.is_load_visible()
-    assert not tab2._save_center.save_all_button.isHidden()
-    tab.deleteLater()
-    tab2.deleteLater()
-    _require_qapp().processEvents()
-
-
-def test_remote_save_completion_refreshes_state_owned_status(qapp):
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-
-    ctrl = _mock_ctrl()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.active_operation_count.return_value = 0
-    ctrl.has_tab.return_value = True
-    window = MainWindow(ctrl)
-    snap = make_tab_snapshot("tab-1", has_run=True, data_path="/gui.h5")
-    ctrl.get_tab_snapshot.return_value = snap
-    window.add_tab_widget("tab-1", "fake")
-    tab = window.findChild(ExpTabWidget)
-    assert tab is not None
-    center = tab.findChild(ArtifactSaveCenter)
-    assert center is not None
-    assert center.status_text(_DATA) == "○ NOT SAVED"
-
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
-        "tab-1", has_run=True, data_path="/gui.h5", data_status=SaveStatus.SAVED
-    )
-    window.handle_save_data_finished(
-        SaveDataFinishedPayload(tab_id="tab-1", data_path="/gui_1.h5")
-    )
-
-    assert center.status_text(_DATA) == "✓ SAVED"
-    assert center.get_data_path() == "/gui.h5"
-    window.deleteLater()
-    tab.deleteLater()
-    qapp.processEvents()
-
-
-def test_comment_edit_updates_shared_draft_without_touching_paths(
-    exp_tab_factory, qapp
-):
-    ctrl = _mock_ctrl()
-    ctrl.save_control.set_comment = MagicMock()
-    ctrl.update_tab_data_path = MagicMock()
-    ctrl.update_tab_image_path = MagicMock()
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
-    )
-    tab = exp_tab_factory("tab-1", ctrl, caps)
-    snap = make_tab_snapshot("tab-1", has_run=True)
-    save = snap.save
-    assert save is not None
-    ctrl.get_tab_snapshot.return_value = snap
-
-    def publish_comment(_tab_id: str, text: str) -> None:
-        ctrl.get_tab_snapshot.return_value = replace(
-            snap, save=replace(save, comment=text)
-        )
-
-    ctrl.save_control.set_comment.side_effect = publish_comment
-    tab.attach(snap, MagicMock())
-    ctrl.update_tab_data_path.reset_mock()
-    center = tab._save_center
-    center.set_comment_text("programmatic")
-    ctrl.save_control.set_comment.assert_not_called()
-    center._comment_edit.setPlainText("typed by user")
-    _require_qapp().processEvents()
-    ctrl.save_control.set_comment.assert_called_once_with("tab-1", "typed by user")
-    ctrl.update_tab_data_path.assert_not_called()
-    ctrl.update_tab_image_path.assert_not_called()
-    tab.deleteLater()
-    _require_qapp().processEvents()
-
-
-def _live_save_ui(tmp_path: Path):
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-
-    state = State(
-        SessionEnv(
-            md=MagicMock(),
-            ml=MagicMock(),
-            soc=MagicMock(),
-            soccfg=MagicMock(),
-            result_dir=str(tmp_path / "result"),
-            database_path=str(tmp_path / "database"),
-            active_label="ctx001",
-            readiness=ContextReadiness.ACTIVE,
-        )
-    )
-    registry = Registry()
-    registry.register("fake", FakeAdapter)
-    tabs = TabService(state, registry, MagicMock(), cfg_resources(state))
-    tab_id = tabs.new_tab("fake")
-    state.update_tab_result(tab_id, object())
-    save = MagicMock()
-    save.start_save_data.return_value = "saved"
-    ctrl = _mock_ctrl()
-    ctrl.get_bus.return_value = EventBus()
-    ctrl.has_tab.side_effect = state.has_tab
-    ctrl.get_tab_snapshot.side_effect = tabs.get_snapshot
-    ctrl.update_tab_data_path.side_effect = tabs.update_tab_data_path_override
-    ctrl.update_tab_image_path.side_effect = tabs.update_tab_image_path_override
-    ctrl.save_control = SaveControlFacet(
-        state=state,
-        bus=ctrl.get_bus(),
-        guard=MagicMock(),
-        tab=tabs,
-        save=save,
-        notify_info=MagicMock(),
-    )
-    ctrl.save_data.side_effect = ctrl.save_control.save_data
-    ctrl.save_artifacts.side_effect = ctrl.save_control.save_artifacts
-    ctrl.save_image.side_effect = ctrl.save_control.save_image
-    window = MainWindow(ctrl)
-    window.add_tab_widget(tab_id, "fake")
-    return window, state, tabs, save, tab_id, ctrl
-
-
-@pytest.mark.parametrize("kind", [ArtifactKind.ANALYSIS, ArtifactKind.POST_ANALYSIS])
-@pytest.mark.parametrize("fails", [False, True])
-def test_remote_image_draft_updates_open_gui_and_next_save(
-    exp_tab_factory, qapp, tmp_path: Path, monkeypatch, kind: ArtifactKind, fails: bool
+@pytest.mark.parametrize(
+    ("context", "running", "analyzing", "enabled"),
+    [
+        (True, False, False, True),
+        (False, False, False, False),
+        (True, True, False, False),
+        (True, False, True, False),
+    ],
+)
+def test_load_data_gates(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    context: bool,
+    running: bool,
+    analyzing: bool,
+    enabled: bool,
 ) -> None:
-    monkeypatch.setattr(
-        FakeAdapter,
-        "capabilities",
-        replace(FakeAdapter.capabilities, post_analysis=True),
+    _, ctrl, window, tab_id = live_ui
+    snap = ctrl.get_tab_snapshot(tab_id)
+    assert snap.interaction is not None
+    center = window.findChild(ArtifactSaveCenter)
+    assert center is not None
+    center.update_interaction(
+        replace(
+            snap,
+            interaction=replace(
+                snap.interaction,
+                has_context=context,
+                is_running=running,
+                is_analyzing=analyzing,
+            ),
+        )
     )
-    window, state, tabs, save, tab_id, ctrl = _live_save_ui(tmp_path)
+    assert center.load_button.isEnabled() is enabled
+    assert snap.capabilities is not None
+    unsupported = ArtifactSaveCenter(replace(snap.capabilities, load_data=False))
     try:
-        state.update_tab_analyze(tab_id, object(), _plots_for(Figure()))
-        state.update_tab_post_analyze(tab_id, object(), _plots_for(Figure()))
-        window.refresh_tab_interaction(tab_id)
-        center = window.findChild(ArtifactSaveCenter)
-        assert center is not None
-        key = _FIT if kind is ArtifactKind.ANALYSIS else _POST_FIT
-        before = center.path_for(key)
-        path = str(tmp_path / "remote.png")
-        assert before != path
-        params = {
-            "tab_id": tab_id,
-            "subtab_id": kind.value,
-            "figure_name": "fit",
-            "image_path": path,
-        }
-        export = save.save_image_sync
-        if fails:
-            export.side_effect = OSError("export failed")
-            with pytest.raises(OSError, match="export failed"):
-                h_tab_save_image(ctrl, params)
-            export.side_effect = None
-        else:
-            assert h_tab_save_image(ctrl, params) == {"image_path": path}
-        # No manual UI refresh between the remote command and the GUI action.
-        assert center.path_for(key) == path
-        button = center.save_button(key)
-        assert button.isEnabled()
-        button.click()
-        assert export.call_count == 2
-        assert [call.args[1:] for call in export.call_args_list] == [(key, path)] * 2
-        projected = next(a for a in tabs.get_snapshot(tab_id).artifacts if a.key == key)
-        assert projected.default_path == path
+        unsupported.update_interaction(snap)
+        assert unsupported.load_button.isHidden()
     finally:
-        window.deleteLater()
-        qapp.processEvents()
+        unsupported.deleteLater()
+
+
+def test_remote_save_completion_refreshes_state_owned_status(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+) -> None:
+    session, ctrl, window, tab_id = live_ui
+    tab = window.findChild(ExpTabWidget)
+    center = window.findChild(ArtifactSaveCenter)
+    assert tab is not None and center is not None
+    assert tab.has_unsaved_data()
+    before = ctrl.get_tab_snapshot(tab_id)
+    report = ctrl.save_control.save_data(tab_id, origin=GUI_ORIGIN)
+    after = ctrl.get_tab_snapshot(tab_id)
+    assert after.artifacts[0].artifacts[0].status is SaveStatus.SAVED
+    # Restore the view alone: the completion must read already-committed State.
+    center.update_interaction(before)
+    assert tab.has_unsaved_data()
+    data = next(
+        output for output in report.outputs if output.output.format == "data_h5"
+    )
+    session.bus.emit(
+        SaveDataFinishedPayload(
+            tab_id=tab_id, data_path=str(data.output.path), report=report
+        )
+    )
+    assert not tab.has_unsaved_data()
+    paths = [edit.text() for edit in center.findChildren(QLineEdit)]
+    assert paths == [str(output.output.path) for output in report.outputs]
 
 
 def test_live_comment_typing_preserves_undo_through_state_projection(
-    exp_tab_factory, qapp, tmp_path: Path
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    qapp: QApplication,
 ) -> None:
-    from qtpy.QtCore import QEvent, Qt
-    from qtpy.QtGui import QKeyEvent
-
-    window, state, tabs, _save, tab_id, _ctrl = _live_save_ui(tmp_path)
-    try:
-        state.update_tab_comment(tab_id, "original")
-        assert tabs.get_snapshot(tab_id).artifacts[0].status is SaveStatus.NOT_SAVED
-        attempt = state.get_tab(tab_id).artifacts.started(_DATA)
-        default = tabs.get_tab_data_path(tab_id)
-        assert default is not None
-        attempt.succeed(default)
-        assert tabs.get_snapshot(tab_id).artifacts[0].status is SaveStatus.SAVED
-        window.refresh_tab_interaction(tab_id)
-        center = window.findChild(ArtifactSaveCenter)
-        assert center is not None
-        editor = center.findChild(QTextEdit)
-        assert editor is not None
-        editor.setFocus()
-        cursor = editor.textCursor()
-        cursor.setPosition(4)
-        editor.setTextCursor(cursor)
-        for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
-            qapp.sendEvent(
-                editor,
-                QKeyEvent(
-                    event_type,
-                    Qt.Key.Key_Exclam,
-                    Qt.KeyboardModifier.NoModifier,
-                    "!",
-                ),
-            )
-        qapp.processEvents()
-        assert editor.toPlainText() == "orig!inal"
-        assert state.get_tab(tab_id).save.comment == "orig!inal"
-        assert (
-            tabs.get_snapshot(tab_id).artifacts[0].status is SaveStatus.UNSAVED_CHANGES
+    session, ctrl, window, tab_id = live_ui
+    ctrl.save_control.set_comment(tab_id, "original")
+    report = ctrl.save_control.save_data(tab_id, origin=GUI_ORIGIN)
+    window.refresh_tab_interaction(tab_id)
+    center = window.findChild(ArtifactSaveCenter)
+    assert center is not None
+    editor = center.findChild(QTextEdit)
+    assert editor is not None
+    center.set_comment_text("programmatic")
+    assert session.state.get_tab(tab_id).save.comment == "original"
+    window.refresh_tab_interaction(tab_id)
+    assert editor.toPlainText() == "original"
+    editor.setFocus()
+    cursor = editor.textCursor()
+    cursor.setPosition(4)
+    editor.setTextCursor(cursor)
+    for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+        qapp.sendEvent(
+            editor,
+            QKeyEvent(
+                event_type, Qt.Key.Key_Exclam, Qt.KeyboardModifier.NoModifier, "!"
+            ),
         )
-        assert editor.textCursor().position() == 5
-        document = editor.document()
-        assert document is not None and document.isUndoAvailable()
-        window.refresh_tab_interaction(tab_id)
-        assert editor.textCursor().position() == 5
-        editor.undo()
-        qapp.processEvents()
-        assert state.get_tab(tab_id).save.comment == "original"
-        assert tabs.get_snapshot(tab_id).artifacts[0].status is SaveStatus.SAVED
-        state.update_tab_comment(tab_id, "external edit")
-        window.refresh_tab_interaction(tab_id)
-        assert editor.toPlainText() == "external edit"
-    finally:
-        window.deleteLater()
-        qapp.processEvents()
+    qapp.processEvents()
+    assert editor.toPlainText() == "orig!inal"
+    assert session.state.get_tab(tab_id).save.comment == "orig!inal"
+    dirty = ctrl.get_tab_snapshot(tab_id).artifacts[0].artifacts[0]
+    assert dirty.status is SaveStatus.UNSAVED_CHANGES
+    assert editor.textCursor().position() == 5
+    document = editor.document()
+    assert document is not None and document.isUndoAvailable()
+    window.refresh_tab_interaction(tab_id)
+    assert editor.textCursor().position() == 5
+    editor.undo()
+    qapp.processEvents()
+    assert session.state.get_tab(tab_id).save.comment == "original"
+    assert (
+        ctrl.get_tab_snapshot(tab_id).artifacts[0].artifacts[0].status
+        is SaveStatus.UNSAVED_CHANGES
+    )
+    assert [edit.text() for edit in center.findChildren(QLineEdit)] == [
+        str(output.output.path) for output in report.outputs
+    ]
+    ctrl.save_control.save_data(tab_id, origin=GUI_ORIGIN)
+    assert (
+        ctrl.get_tab_snapshot(tab_id).artifacts[0].artifacts[0].status
+        is SaveStatus.SAVED
+    )
+    ctrl.save_control.set_comment(tab_id, "external edit")
+    window.refresh_tab_interaction(tab_id)
+    assert editor.toPlainText() == "external edit"
 
 
-def test_analysis_save_requires_figure(exp_tab_factory):
-    ctrl = _mock_ctrl()
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=False, load_data=False
-    )
-    # Result present but figure absent -> NOT saveable; data not present to isolate
-    snap_no_fig = make_tab_snapshot(
-        "tab-1",
-        has_run=False,
-        has_analysis=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-        analysis_has_figure=False,
-    )
-    tab = exp_tab_factory("tab-1", ctrl, caps)
-    tab.attach(snap_no_fig, MagicMock())
-    center = tab._save_center
-    # A numeric-only analysis has no image artifact and no save row.
-    assert not center.has_artifact(_FIT)
-    assert not center.is_save_all_enabled()
-    # With figure, enabled
-    snap_with_fig = make_tab_snapshot(
-        "tab-1",
-        has_run=False,
-        has_analysis=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-        analysis_has_figure=True,
-    )
-    tab.update_interaction_state(snap_with_fig)
-    assert center.is_save_enabled(_FIT)
-    assert center.is_save_all_enabled()
-    # When data also present, Save All remains enabled even if analysis figure missing, but analysis save stays disabled
-    snap_mixed = make_tab_snapshot(
-        "tab-1",
-        has_run=True,
-        has_analysis=True,
-        analysis_mode=AnalysisMode.FIT,
-        post_cap=False,
-        load_cap=False,
-        analysis_has_figure=False,
-    )
-    tab.update_interaction_state(snap_mixed)
-    assert not center.has_artifact(_FIT)
-    assert center.is_save_enabled(_DATA)
-    assert center.is_save_all_enabled()
-    tab.deleteLater()
-    _require_qapp().processEvents()
-
-
-def test_tab_close_query_reads_only_data_artifact(exp_tab_factory):
-    tab = exp_tab_factory(
-        "tab-1",
-        _mock_ctrl(),
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
-    )
-    tab.attach(make_tab_snapshot("tab-1", has_run=False), MagicMock())
-    assert tab.has_unsaved_data() is False
-
-    for status, expected in (
+@pytest.mark.parametrize(
+    ("status", "unsaved"),
+    [
         (SaveStatus.NOT_SAVED, True),
+        (SaveStatus.PARTIALLY_SAVED, True),
         (SaveStatus.UNSAVED_CHANGES, True),
         (SaveStatus.SAVED, False),
-    ):
-        tab.update_interaction_state(
-            make_tab_snapshot(
-                "tab-1",
-                has_run=True,
-                has_analysis=True,
-                data_status=status,
-                analysis_status=SaveStatus.NOT_SAVED,
+    ],
+)
+def test_tab_close_query_reads_only_data_artifact(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    status: SaveStatus,
+    unsaved: bool,
+) -> None:
+    session, ctrl, window, tab_id = live_ui
+    tab = window.findChild(ExpTabWidget)
+    assert tab is not None
+    if status is not SaveStatus.NOT_SAVED:
+        current = ctrl.get_tab_snapshot(tab_id)
+        outputs = tuple(
+            OutputResult(
+                member.key,
+                Output(output.format, output.path),
+                "failed"
+                if status is SaveStatus.PARTIALLY_SAVED and index == 1
+                else "saved",
+                "blocked output"
+                if status is SaveStatus.PARTIALLY_SAVED and index == 1
+                else None,
             )
+            for section in current.artifacts
+            for artifact in section.artifacts
+            for member in artifact.members
+            for index, output in enumerate(member.outputs)
         )
-        assert tab.has_unsaved_data() is expected
-
-    tab.deleteLater()
-    _require_qapp().processEvents()
+        session.state.commit_save_report(
+            tab_id, SaveReport(session.metadata.run_id, outputs)
+        )
+        if status is SaveStatus.UNSAVED_CHANGES:
+            ctrl.save_control.set_comment(tab_id, "changed")
+    session.state.update_tab_analyze(
+        tab_id, PaneSummary(), None, analyze_params_instance=PaneParams()
+    )
+    current = ctrl.get_tab_snapshot(tab_id)
+    assert (
+        next(
+            artifact.status
+            for section in current.artifacts
+            for artifact in section.artifacts
+            if artifact.ref == _RUN
+        )
+        is status
+    )
+    window.refresh_tab_interaction(tab_id, current)
+    assert tab.has_unsaved_data() is unsaved
+    session.state.clear_tab_results(tab_id)
+    window.refresh_tab_interaction(tab_id)
+    assert not tab.has_unsaved_data()
