@@ -3,14 +3,33 @@
 import base64
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import asdict
 from threading import Event
 from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 
 from ._recipe_support import PNG, LookbackGui, scalar, section
 from ._support import MeasureClient, full_execution_reply, make_client
+
+RAW_REPORT = SaveReport(
+    "run-a",
+    {
+        "raw": {
+            "data": SaveArtifact(
+                "Saved",
+                {
+                    "data": [
+                        SaveOutput("data_h5", "/runs/run-a/data.h5", "saved"),
+                        SaveOutput("labber", "/labber/raw.hdf5", "saved"),
+                    ]
+                },
+            )
+        }
+    },
+)
 
 
 @contextmanager
@@ -334,7 +353,7 @@ def test_coherence_failure_retains_tab_and_already_saved_paths(tmp_path, recipe,
         assert data["status"] == "failed"
         assert data["tab"] == "t"
         if stage != "tab.run_start":
-            assert data["raw_save"]["path"] == "/actual/raw.h5"
+            assert data["raw_save"] == asdict(RAW_REPORT)
             assert data["run_outcome"]["status"] == "finished"
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
@@ -425,7 +444,7 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
         assert fields["reps"]["value"] == 7
         assert fields["rounds"]["value"] == 5
         assert data["tab"] == "t"
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
         assert reply.images
         assert [method for method, _ in client.transport.sent].count(
@@ -530,7 +549,7 @@ def test_coherence_primary_handoff_waits_before_question_and_actual_writes(
             assert reply.data["execution"] == execution
         assert reply.data["status"] == "awaiting_answer", reply.data
         assert tuple(reply.data["question_items"]) == ("decay_time",)
-        assert reply.data["previews"]["primary"]
+        assert [image.data for image in reply.images] == [PNG]
         assert not gui.writes
         before = list(client.transport.sent)
         status = client.call("status", {"execution": execution})
@@ -591,7 +610,7 @@ def test_coherence_cancelled_question_stops_without_writing(tmp_path, recipe):
         client.call("cancel", {"execution": execution})
         reply = client.call("wait", {"execution": execution, "timeout": 5})
         assert reply.data["status"] == "cancelled", reply.data
-        assert reply.data["previews"]["primary"]
+        assert [image.data for image in reply.images] == [PNG]
         assert not reply.data["writeback"]["receipts"]
         assert client.transport.sent == before
         assert not gui.writes
@@ -800,21 +819,22 @@ def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
         assert fields["reps"]["value"] == 13
         assert fields["rounds"]["value"] == 9
         assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5100.0
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
         before = len(client.transport.sent)
         summary = client.call("status", {"execution": data["execution"]})
         assert len(client.transport.sent) == before
-        assert summary["analysis"]["primary"] == {
-            "params": {"threshold": 0.5},
-            "estimates": {
-                "t1": {"value": 42.0, "stderr": None, "unit": "us", "quality": None}
-            },
-            "details": {},
+        assert summary["analysis"]["primary"]["params"] == {"threshold": 0.5}
+        assert summary["analysis"]["primary"]["estimates"] == {
+            "t1": {"value": 42.0, "stderr": None, "unit": "us"}
+        }
+        assert summary["analysis"]["primary"]["summary"] == {
+            "t1": 42.0,
+            "t1_err": None,
             "warnings": ["singular error"],
         }
-        assert summary["invalid"] == [
-            {"path": "analysis.primary.estimates.t1.stderr", "reason": "non_finite"}
+        assert summary["analysis"]["primary"]["invalid"] == [
+            {"path": "summary.t1_err", "reason": "non_finite"}
         ]
         assert data["analysis"]["result"]["summary"]["t1"] == 42.0
         assert summary["actual"]["parameters"]["delay"]["value"] == {
