@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -97,13 +96,7 @@ class _MainWindowTabActions:
 
 
 class MainWindow(QMainWindow):
-    """Present session focus and each tab's immutable role capture.
-
-    The always-visible component_focus combo projects context_control focus.
-    Selection calls the owner; it affects only newly created tabs. Tab titles
-    and tooltips use their own TabSnapshot.parameters.roles, never live focus.
-    Expected role failures during create_tab are shown without creating a tab.
-    """
+    """Present current session sources and pane-owned historical results."""
 
     def __init__(
         self,
@@ -169,7 +162,7 @@ class MainWindow(QMainWindow):
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
     def _build_context_bar(self) -> QHBoxLayout:
-        """Assemble the persistent entry/point/focus/predictor controls."""
+        """Assemble the persistent entry/point/predictor controls."""
         ctx_bar = QHBoxLayout()
         ctx_bar.addWidget(QLabel("Entry:"))
         self._entry_label = QLabel("No entry open")
@@ -179,59 +172,12 @@ class MainWindow(QMainWindow):
         self._point_label = QLabel("No point selected")
         self._point_label.setObjectName("current_point")
         ctx_bar.addWidget(self._point_label)
-        ctx_bar.addWidget(QLabel("Focus:"))
-        self._focus_combo = QComboBox(self)
-        self._focus_combo.setObjectName("component_focus")
-        self._focus_combo.currentIndexChanged.connect(self._on_focus_selected)
-        ctx_bar.addWidget(self._focus_combo)
         ctx_bar.addSpacing(24)
         ctx_bar.addWidget(QLabel("Predictor:"))
         self._predictor_label = QLabel("none")
         ctx_bar.addWidget(self._predictor_label)
         ctx_bar.addStretch()
-        self._render_component_focus()
         return ctx_bar
-
-    def _on_focus_selected(self, index: int) -> None:
-        """Translate a combo selection into the session owner's focus command."""
-        if index < 0:
-            return
-        name = self._focus_combo.itemData(index)
-        if name is not None and not isinstance(name, str):
-            raise TypeError("Component focus item data must be a name or None")
-        self._ctrl.context_control.set_component_focus(name)
-
-    def _render_component_focus(self) -> None:
-        """Project all owner options in kind groups without sending commands."""
-        focus = self._ctrl.context_control.get_component_focus()
-        signals_blocked = self._focus_combo.blockSignals(True)
-        try:
-            self._focus_combo.clear()
-            self._focus_combo.addItem("(none)", None)
-            previous_kind: str | None = None
-            for option in sorted(
-                focus.components, key=lambda option: (option.kind, option.name)
-            ):
-                if previous_kind != option.kind:
-                    self._focus_combo.insertSeparator(self._focus_combo.count())
-                self._focus_combo.addItem(f"{option.name} ({option.kind})", option.name)
-                previous_kind = option.kind
-            self._focus_combo.setCurrentIndex(self._focus_combo.findData(focus.name))
-        finally:
-            self._focus_combo.blockSignals(signals_blocked)
-
-    @staticmethod
-    def _captured_tab_label(adapter_name: str, snapshot: TabSnapshot) -> str:
-        """Format only this tab's fixed role names, never the current focus."""
-        roles = snapshot.parameters.roles if snapshot.parameters is not None else None
-        if roles is None:
-            return adapter_name
-        return " · ".join(
-            [
-                adapter_name,
-                *(f"{role}={roles.names.get(role, '')}" for role in roles.declarations),
-            ]
-        )
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         self._events.close()
@@ -244,7 +190,7 @@ class MainWindow(QMainWindow):
         # Construct the tab from the same immutable capabilities snapshot used
         # for its initial attach, so optional panes never need dynamic rebuilds.
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        tab_label = self._captured_tab_label(adapter_name, snapshot)
+        tab_label = adapter_name
         caps = snapshot.capabilities
         if caps is None:
             raise RuntimeError(
@@ -427,24 +373,6 @@ class MainWindow(QMainWindow):
         # the run's terminal path drops the container and notifies the tab's
         # listener, which re-renders to empty.
 
-    def refresh_tab_roles(self, tab_id: str, snapshot: TabSnapshot) -> None:
-        """Render committed roles/title from one snapshot, retaining the Run marker.
-
-        Does not refresh results, drafts, figures or selected panes.
-        """
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        tab_w.refresh_roles(snapshot)
-        index = self._tabs.indexOf(tab_w)
-        if index >= 0:
-            self._tabs.setTabText(
-                index, self._captured_tab_label(snapshot.adapter_name, snapshot)
-            )
-            self._set_tab_activity_marker(
-                tab_id, active=self._ctrl.get_running_tab_id() == tab_id
-            )
-
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
@@ -454,16 +382,11 @@ class MainWindow(QMainWindow):
         tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_context_panel(self) -> None:
-        """Project entry, published point and focus without changing captures.
+        """Project current entry and point without submitting source commands.
 
-        Entry shows the owner's entry name or "No entry open". Point shows the
-        published SavedPoint name, "Draft (in-memory)" for memory parameters, or
-        "No point selected" when parameters are absent, never a focus-derived
-        qubit name. Focus options include all components grouped by kind.
-        Empty/ambiguous focus remains unselected; rendering must not submit a
-        focus command or change tab titles. Refresh tab interaction state too.
+        Show the SavedPoint name, "Draft (in-memory)", or "No point selected".
+        Refresh tab interaction state without changing titles or result panes.
         """
-        self._render_component_focus()
         entry = self._ctrl.context_control.get_entry_info()
         parameters = self._ctrl.get_session_env().parameters
         target = parameters.target if parameters is not None else None
@@ -617,13 +540,10 @@ class MainWindow(QMainWindow):
         return self._ctrl.get_adapter_names()
 
     def create_tab(self, adapter_name: str) -> None:
-        """Create from focus, allowing unresolved automatic aliases.
+        """Create a registered adapter tab using current global aliases.
 
-        adapter_name is a registered measure adapter key. Automatic ambiguity
-        leaves roles unbound and still creates the tab. Invalid explicit choices
-        or dangling/wrong-kind references appear through the dialog presenter
-        and leave the tab list unchanged.
-        Other failures propagate to the existing UI error boundary.
+        Unbound aliases permit creation with Invalid cfg. Role resolution
+        failures are shown through the presenter; other failures propagate.
         """
         try:
             self._ctrl.new_tab(adapter_name)

@@ -169,28 +169,6 @@ class PointBindingError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class ComponentOption:
-    """Point component name and its registered kind, in document order."""
-
-    name: str
-    kind: str
-
-
-@dataclass(frozen=True)
-class ComponentFocus:
-    """Cached session focus, detached from consumer roles and selection IDs.
-
-    target is None for EMPTY, EntryDraft for DRAFT, or SavedPoint for ACTIVE.
-    name is the selected component or None for no selection.
-    components lists all current component names/kinds in document order.
-    """
-
-    target: ContextTarget | None
-    name: str | None
-    components: tuple[ComponentOption, ...]
-
-
-@dataclass(frozen=True)
 class ContextSource:
     """A bound persistent source and its last published health diagnostic.
 

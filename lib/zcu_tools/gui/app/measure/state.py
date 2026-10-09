@@ -179,11 +179,6 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter: ExpAdapterProtocol
     # A handle to the tab's sole cfg authority, not a second input tree.
     cfg: CfgResource
-    # Fixed role/target capture from tab creation; None for context-free adapters.
-    parameters: ParameterContext | None = None
-    # Fixed origin for Save, also on roleless tabs whose cfg parameters stay None.
-    # None means no context at creation, not permission to use a later context.
-    save_context: ParameterContext | None = None
 
     # Canonical pane-owned resources.
     run: RunPaneState[T_Result] = field(
@@ -758,16 +753,6 @@ class State(SessionState):
                 figures + (ArtifactKey(section, ref.name, "analysis", section),),
             ),
         )
-
-    def update_tab_parameters(self, tab_id: str, parameters: ParameterContext) -> None:
-        """Owner-thread commit of the next-operation capture, bumping tab version.
-
-        Preserve run/analysis/post/save captures, results, drafts and artifacts.
-        Missing tab raises KeyError. Caller owns admission and cfg publication.
-        """
-        self._assert_owner()
-        self.tabs[tab_id].parameters = parameters
-        self.version.bump(f"tab:{tab_id}")
 
     def update_tab_comment(self, tab_id: str, comment: str) -> None:
         """Publish the Data comment draft shared by GUI and remote saves."""
