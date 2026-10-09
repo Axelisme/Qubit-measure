@@ -22,7 +22,6 @@ from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_types import ComponentFocus
 from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -111,9 +110,6 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     ctrl.get_active_context_label.return_value = None
     ctrl.has_draft_context.return_value = False
     ctrl.has_project.return_value = False
-    ctrl.context_control.get_component_focus.return_value = ComponentFocus(
-        None, None, ()
-    )
     ctrl.get_session_env.return_value = SessionEnv(
         parameters=None,
         soc=None,

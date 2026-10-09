@@ -82,10 +82,9 @@ def test_setup_edits_do_not_change_existing_points(component_session):
     assert entry.use_point("a").Q1.rate == 4300.0
 
 
-def test_add_saved_component_updates_focus_options_and_persists(component_session):
+def test_add_saved_component_updates_document_and_persists(component_session):
     control, entry = component_session
     control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
     control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     assert entry.use_point("a").Q1.rate == 4300.0
-    control.set_component_focus("Q1")
-    assert control.get_component_focus().name == "Q1"
+    assert control.read_context().value("Q1.rate") == 4300.0

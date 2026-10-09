@@ -202,8 +202,8 @@ class T1WorkflowWindow(QWidget):
         state/services/runner/progress must be the same owning session. The
         progress service is borrowed directly from its composition root, not
         obtained through a wider control facet. owner marshals
-        plot commands to this thread. A readable context and resolvable qubit
-        focus are required to build form defaults. Startup also requires a saved
+        plot commands to this thread. Form defaults use the readable context
+        and its fixed global qubit alias capture. Startup also requires a saved
         point, native QickConfig and connected SoC. Source errors propagate.
         parent controls Qt lifetime; closing during work requests Stop and keeps
         the window alive until terminal delivery. No instrument is contacted.
@@ -266,12 +266,11 @@ class T1WorkflowWindow(QWidget):
 
     def _capture_env(self, devices: DeviceSnapshot) -> FormEnv:
         context = self._services.context
-        roles = context.capture_roles(
-            {"qubit": RoleSpec("qubit/*")},
-            focus=context.get_component_focus().name,
-            explicit={},
-        )
-        parameters = context.read_context(roles=roles)
+        parameters = context.read_alias_context({"qubit": RoleSpec("qubit/*")})
+        if parameters is None:
+            raise FailedPreconditionError(
+                "No parameter context is installed", reason_code="no_context"
+            )
         return FormEnv(
             parameters=parameters, library=parameters.library, devices=devices.items
         )
