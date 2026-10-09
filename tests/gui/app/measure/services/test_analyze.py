@@ -10,25 +10,26 @@ Tests drive terminal paths by capturing bg.last_on_done / on_error.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import replace
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from qtpy.QtWidgets import QApplication
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickAnalysis,
     FluxPickInputs,
     FluxPickState,
 )
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, ContextReadiness
 from zcu_tools.gui.app.measure.artifact_tracker import (
-    ArtifactKey,
-    ArtifactKind,
     SaveStatus,
 )
 from zcu_tools.gui.app.measure.events.tab import (
@@ -49,22 +50,33 @@ from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.resources.entry import ArtifactKey
 
 from tests.gui._completion_helpers import on_analyze_failed
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui.app.measure._native_save_support import (
+    NativeSaveSession,
+    native_save_session,
+)
 from tests.gui.session.ui._parameter_fakes import make_parameters
 from zcu_lab.v2._support.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
 )
-from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepResult
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepExp, FluxDepResult
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Result
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
 from zcu_lab.v2.twotone.time_domain.t1.gui import (
     T1Adapter,
     T1AnalyzeParams,
     T1AnalyzeResult,
 )
+
+
+@pytest.fixture
+def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSession]:
+    with native_save_session(tmp_path, qapp) as session:
+        yield session
 
 
 def _plots() -> Plots:
@@ -85,7 +97,7 @@ def _make_state(tab_id: str = "tab1") -> State:
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     # Provide a fake run_result so the tab is not empty
-    state.update_tab_loaded_result(tab_id, object(), "memory")
+    state.update_tab_result(tab_id, object())
     return state
 
 
@@ -139,7 +151,7 @@ def _make_two_tab_state() -> State:
         "tab2",
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
-    state.update_tab_loaded_result("tab2", object(), "memory")
+    state.update_tab_result("tab2", object())
     return state
 
 
@@ -221,35 +233,58 @@ def test_start_analyze_passes_operation_plots_to_worker_adapter(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(qapp) -> None:
-    state = _make_state()
-    tab = state.get_tab("tab1")
+def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(
+    native_session: NativeSaveSession,
+) -> None:
+    state = native_session.state
+    tab = state.get_tab("tab")
     tab.adapter = T1Adapter()
     times = np.linspace(0, 100, 101)
     signals = (0.2 + 0.8 * np.exp(-times / 20)).astype(np.complex128)
     source = RunRecord[T1Cfg, T1Result](cfg=None, result=T1Result(times, signals))
-    state.update_tab_result("tab1", source)
+    state.update_tab_result(
+        "tab",
+        source,
+        metadata=replace(
+            native_session.metadata, experiment=T1Exp().persistence_spec().tag
+        ),
+        parameters=tab.parameters,
+    )
     handles = OperationHandles()
     service, bg = _make_service(state, EventBus(), handles=handles)
     plots = _plots()
-    token = service.start_analyze("tab1", T1AnalyzeParams(skip=3), plots=plots)
+    token = service.start_analyze("tab", T1AnalyzeParams(skip=3), plots=plots)
     assert bg.last_work is not None and bg.last_on_done is not None
     bg.last_on_done(bg.last_work())
 
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
-    pane = state.get_tab("tab1").analysis
+    pane = state.get_tab("tab").analysis
     assert isinstance(pane.result, T1AnalyzeResult)
     assert pane.result.t1 == pytest.approx(20, rel=0.01)
     assert pane.plots is plots
     assert tuple(plots) == ("fit",)
-    images = [
-        item
-        for item in state.get_artifact_snapshots("tab1")
-        if item.key == ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    artifacts = [
+        artifact
+        for section in state.get_artifact_snapshots("tab")
+        for artifact in section.artifacts
+        if artifact.ref == ArtifactRef("analysis", "results")
     ]
-    assert len(images) == 1 and images[0].status is SaveStatus.NOT_SAVED
-    assert images[0].is_saveable
+    assert len(artifacts) == 1 and artifacts[0].status is SaveStatus.NOT_SAVED
+    assert [member.key for member in artifacts[0].members] == [
+        ArtifactKey("analysis", "results", "figure", "fit"),
+        ArtifactKey("analysis", "results", "analysis", "analysis"),
+    ]
+    assert [output.format for output in artifacts[0].members[0].outputs] == [
+        "png",
+        "png",
+    ]
+    assert [output.format for output in artifacts[0].members[1].outputs] == ["json"]
+    assert all(
+        output.status == "reserved"
+        for member in artifacts[0].members
+        for output in member.outputs
+    )
     output = BytesIO()
     plots["fit"].savefig(output, format="png")
     assert output.getvalue().startswith(b"\x89PNG")
@@ -263,8 +298,9 @@ def _start_onetone_plugin(
     handles: OperationHandles,
     *,
     writeback: MagicMock | None = None,
+    tab_id: str = "tab1",
 ) -> tuple[AnalyzeService, PluginDefinition[Any, Any], int]:
-    adapter = state.get_tab("tab1").adapter
+    adapter = state.get_tab(tab_id).adapter
     assert isinstance(adapter, OneToneFluxDepAdapter)
     ctx = state.session_env
     plugin = adapter.make_interactive_plugin(
@@ -275,7 +311,7 @@ def _start_onetone_plugin(
         state, EventBus(), handles=handles, writeback=writeback
     )
     token = service.start_plugin(
-        "tab1",
+        tab_id,
         plugin,
         ManualOwnerScheduler(),
         analyze_params_instance=FluxPickParams(),
@@ -284,9 +320,11 @@ def _start_onetone_plugin(
     return service, plugin, token
 
 
-def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(qapp) -> None:
-    state = _make_state()
-    tab = state.get_tab("tab1")
+def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
+    native_session: NativeSaveSession,
+) -> None:
+    state = native_session.state
+    tab = state.get_tab("tab")
     tab.adapter = OneToneFluxDepAdapter()
     values = np.linspace(-0.5, 0.5, 9)
     freqs = np.linspace(4.8, 5.4, 7)
@@ -296,7 +334,14 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(qapp) -> N
         dtype=np.complex128,
     )
     source = RunRecord(cfg=None, result=FluxDepResult(values, freqs, signals))
-    state.update_tab_result("tab1", source)
+    state.update_tab_result(
+        "tab",
+        source,
+        metadata=replace(
+            native_session.metadata, experiment=FluxDepExp().persistence_spec().tag
+        ),
+        parameters=tab.parameters,
+    )
     ctx = state.session_env
     ctx.md.flx_half = -0.2
     ctx.md.flx_int = 0.3
@@ -304,18 +349,18 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(qapp) -> N
     handles = OperationHandles()
     writeback = MagicMock()
     service, plugin, token = _start_onetone_plugin(
-        state, source, plots, handles, writeback=writeback
+        state, source, plots, handles, writeback=writeback, tab_id="tab"
     )
-    active = service.get_interactive("tab1")
+    active = service.get_interactive("tab")
     assert active is not None
     assert tuple(plots) == ()
     plugin.execute_command(active.session, "swap_lines", {})
     committed = active.session.snapshot()
-    assert service.finish_plugin("tab1") is True
-    assert service.get_interactive("tab1") is None
+    assert service.finish_plugin("tab") is True
+    assert service.get_interactive("tab") is None
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
-    pane = state.get_tab("tab1").analysis
+    pane = state.get_tab("tab").analysis
     assert isinstance(pane.result, FluxPickResult)
     assert pane.result.flx_half == committed.flux_half
     assert pane.result.flx_int == committed.flux_int
@@ -332,13 +377,26 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(qapp) -> N
         np.asarray(plots["pick"].axes[0].lines[0].get_xdata(), dtype=np.float64),
         [committed.flux_half],
     )
-    image = [
-        item
-        for item in state.get_artifact_snapshots("tab1")
-        if item.key == ArtifactKey(ArtifactKind.ANALYSIS, "pick")
+    artifacts = [
+        artifact
+        for section in state.get_artifact_snapshots("tab")
+        for artifact in section.artifacts
+        if artifact.ref == ArtifactRef("analysis", "results")
     ]
-    assert len(image) == 1 and image[0].is_saveable
-    assert image[0].status is SaveStatus.NOT_SAVED
+    assert len(artifacts) == 1 and artifacts[0].status is SaveStatus.NOT_SAVED
+    assert [member.key for member in artifacts[0].members] == [
+        ArtifactKey("analysis", "results", "figure", "pick"),
+        ArtifactKey("analysis", "results", "analysis", "analysis"),
+    ]
+    assert [output.format for output in artifacts[0].members[0].outputs] == [
+        "png",
+        "png",
+    ]
+    assert all(
+        output.status == "reserved"
+        for member in artifacts[0].members
+        for output in member.outputs
+    )
     plots.release()
     output = BytesIO()
     plots["pick"].savefig(output, format="png")
