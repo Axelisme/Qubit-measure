@@ -2,17 +2,34 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from unittest.mock import MagicMock
+
 import pytest
+from zcu_tools.cfg_model import NoneResetCfg, PulseReadoutSpec, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ExpAdapterProtocol,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.cfg_binding import (
+    MeasureCfgBindingHost,
+    MeasureCfgBindings,
+)
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.program.v2 import ModuleCfgFactory
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.cfg.resource import CfgResource, CfgStatus
+from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.resources.context.library import (
+    ComponentLibrary,
+    LibrarySnapshot,
+    ModuleLibraryDocument,
+)
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
+from zcu_lab.components import JpaSchema, QubitSchema, ResonatorSchema
 from zcu_lab.definitions import register_all
 
 
@@ -29,6 +46,7 @@ def _pulse_raw(*, freq: float, gain: float) -> dict[str, object]:
         "ch": 3,
         "nqz": 2,
         "freq": freq,
+        "mixer_freq": 1000.0,
         "gain": gain,
     }
 
@@ -53,34 +71,177 @@ def _readout_raw() -> dict[str, object]:
 
 
 def _ctx(*, rich: bool) -> SessionEnv:
-    md = MetaDict()
-    ml = ModuleLibrary()
-    if rich:
-        for key, value in {
-            "t1": 12.0,
-            "q_f": 4200.0,
-            "r_f": 6000.0,
-            "rf_w": 20.0,
-            "rabi_f": 10.0,
-            "res_probe_len": 1.0,
-            "qub_ch": 3,
-            "res_ch": 1,
-            "ro_ch": 2,
-            "timeFly": 0.45,
-        }.items():
-            setattr(md, key, value)
-        ml.register_module(
-            pi_amp=ModuleCfgFactory.from_raw(
-                _pulse_raw(freq=4200.0, gain=0.4),
-                ml=ml,
+    if not rich:
+        return SessionEnv(parameters=None, soc=None, soccfg=None)
+    point = PointDocument.model_construct(
+        format="zcu.parameter-container",
+        format_version="1.0",
+        general=PointGeneral(created_at="2026-10-09T00:00:00Z"),
+        components={
+            "Q1": QubitSchema.model_validate(
+                {
+                    "kind": "qubit/fluxonium",
+                    "freq": 4200.0,
+                    "kappa": 10.0,
+                    "t1": 12.0,
+                    "resonator": "R1",
+                    "flux_half": 0.001,
+                    "flux_int": 0.003,
+                    "wiring": {"L01": {"ch": 3}},
+                    "module": {
+                        "x180": "Q1.pulses.cal",
+                        "x90": "Q1.pulses.half",
+                        "readout": "Q1.readout.cal",
+                        "reset": "Q1.reset.cal",
+                    },
+                    "ext": {
+                        "best_ro_freq": 6100.0,
+                        "best_ro_gain": 0.2,
+                        "best_ro_length": 1.0,
+                        "readout_cal": {
+                            "g_center": 0.0,
+                            "e_center": 1.0,
+                            "radius": 0.5,
+                        },
+                    },
+                }
             ),
-            pi2_amp=ModuleCfgFactory.from_raw(
-                _pulse_raw(freq=4200.0, gain=0.2),
-                ml=ml,
+            "R1": ResonatorSchema.model_validate(
+                {
+                    "kind": "resonator",
+                    "freq": 6000.0,
+                    "kappa": 20.0,
+                    "amplifier": "J1",
+                    "wiring": {"ch": 1, "ro_ch": 2},
+                    "ext": {"time_of_fly": 0.45},
+                }
             ),
-            readout_rf=ModuleCfgFactory.from_raw(_readout_raw(), ml=ml),
+            "J1": JpaSchema(
+                kind="amplifier/jpa", pump_freq=12000.0, pump_power=-10.0, flux=0.002
+            ),
+        },
+    )
+    library = LibrarySnapshot(
+        ModuleLibraryDocument(
+            format="zcu.module-library",
+            format_version="1.0",
+            components={
+                "Q1": ComponentLibrary(
+                    pulses={
+                        "cal": PulseSpec.model_validate(
+                            _pulse_raw(freq=4200.0, gain=0.4)
+                        ),
+                        "half": PulseSpec.model_validate(
+                            _pulse_raw(freq=4200.0, gain=0.2)
+                        ),
+                    },
+                    readout={"cal": PulseReadoutSpec.model_validate(_readout_raw())},
+                    reset={"cal": NoneResetCfg()},
+                )
+            },
         )
-    return SessionEnv(md=md, ml=ml, soc=None, soccfg=None)
+    )
+    parameters = ParameterContext(
+        point=point, library=library, target=EntryDraft(entry_id="entry"), roles=None
+    ).bind_aliases(
+        (
+            AliasRow("qubit", "Q1"),
+            AliasRow("resonator", "$qubit.resonator"),
+            AliasRow("jpa", "$resonator.amplifier"),
+        ),
+        {},
+    )
+    return SessionEnv(parameters=parameters, soc=None, soccfg=None)
+
+
+def _specified_defaults() -> list[str]:
+    registry = _registry()
+    return [
+        name
+        for name in registry.list_names()
+        if "jpa" in registry.create(name).parameter_roles()
+        or name == "singleshot/ac_stark"
+    ]
+
+
+@pytest.mark.parametrize("name", _specified_defaults())
+def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
+    name: str,
+) -> None:
+    adapter = _registry().create(name)
+    environment = _ctx(rich=False)
+    host = MagicMock(spec=MeasureCfgBindingHost)
+    host.list_device_names.return_value = ["flux_yoko"]
+    host.arb_waveforms.list_data_keys.return_value = []
+    bindings = MeasureCfgBindings(host)
+    resource = CfgResource(
+        defaults=lambda: adapter.make_default_cfg(environment),
+        resolution=lambda: bindings.snapshot(
+            (), captured_values={}, parameters=environment.parameters
+        ),
+    )
+    try:
+        missing = resource.observe()
+        assert missing.status is CfgStatus.INVALID
+        assert any(
+            "$qubit" in item.message
+            or "$resonator" in item.message
+            or "$jpa" in item.message
+            for item in missing.diagnostics
+        )
+        inputs = resource.snapshot_inputs()
+        environment = _ctx(rich=True)
+        parameters = environment.parameters
+        assert parameters is not None
+        rows = (
+            AliasRow("qubit", "Q1"),
+            AliasRow("resonator", "$qubit.resonator"),
+            AliasRow("jpa", "$resonator.amplifier"),
+        )
+        environment = replace(
+            environment,
+            parameters=parameters.bind_aliases(rows, adapter.parameter_roles()),
+        )
+        calibrated = resource.refresh(missing.ref.revision)
+        assert calibrated.status is CfgStatus.VALID, calibrated.diagnostics
+        assert resource.snapshot_inputs() == inputs
+        accepted = resource.accept(calibrated.ref.revision)
+        point = parameters.document()
+        point.components["Q1"] = point.components["Q1"].model_copy(
+            update={"freq": 4400.0}
+        )
+        point.components["J1"] = point.components["J1"].model_copy(
+            update={"pump_freq": 13000.0, "pump_power": -8.0, "flux": 0.004}
+        )
+        point.components["R1"] = point.components["R1"].model_copy(
+            update={"freq": 6200.0}
+        )
+        updated_parameters = ParameterContext(
+            point=point,
+            library=parameters.library,
+            target=parameters.target,
+            roles=None,
+        ).bind_aliases(rows, adapter.parameter_roles())
+        environment = replace(environment, parameters=updated_parameters)
+        updated = resource.refresh(calibrated.ref.revision)
+        assert updated.status is CfgStatus.VALID, updated.diagnostics
+        assert resource.accept(updated.ref.revision).values != accepted.values
+        environment = replace(
+            environment,
+            parameters=parameters.bind_aliases(
+                (
+                    AliasRow("qubit", ""),
+                    AliasRow("resonator", "$qubit.resonator"),
+                    AliasRow("jpa", "$resonator.amplifier"),
+                ),
+                adapter.parameter_roles(),
+            ),
+        )
+        unbound = resource.refresh(updated.ref.revision)
+        assert unbound.status is CfgStatus.INVALID
+        assert any("qubit" in item.message for item in unbound.diagnostics)
+    finally:
+        resource.revoke()
 
 
 @pytest.mark.parametrize("name", _registry().list_names())
