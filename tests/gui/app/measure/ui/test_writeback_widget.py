@@ -6,7 +6,7 @@ from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEvent, Qt
+from qtpy.QtCore import QCoreApplication, QEvent, QPoint, Qt
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -37,6 +37,7 @@ from zcu_tools.gui.app.measure.services.writeback import (
 )
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.cfg.binding.fields import ScalarField
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.services.context import ContextService
@@ -405,6 +406,42 @@ def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qap
         widget.close()
 
 
+def _assert_matrix_row_reflows(row: QFrame, *, narrow: bool) -> None:
+    checks = row.findChildren(QCheckBox)
+    currents = row.findChildren(QLabel, "writebackCurrent")
+    paths = row.findChildren(QLabel, "writebackActualPath")
+    actions = row.findChildren(QPushButton)
+    tables = row.findChildren(QTableWidget)
+    assert (
+        len(checks) == len(currents) == len(paths) == len(actions) == len(tables) == 1
+    )
+    check, current, path, action, table = (
+        checks[0],
+        currents[0],
+        paths[0],
+        actions[0],
+        tables[0],
+    )
+    assert all(child.isVisible() for child in (check, current, path, action, table))
+    check_y = check.mapTo(row, QPoint()).y() + check.height() / 2
+    current_y = current.mapTo(row, QPoint()).y() + current.height() / 2
+    action_y = action.mapTo(row, QPoint()).y() + action.height() / 2
+    assert abs(check_y - action_y) < (check.height() + action.height()) / 2
+    if narrow:
+        assert check_y + 10 < current_y
+    else:
+        assert abs(check_y - current_y) < (check.height() + current.height()) / 2
+    assert path.mapTo(row, QPoint()).y() > current.mapTo(row, QPoint()).y()
+    assert table.mapTo(row, QPoint()).y() > path.mapTo(row, QPoint()).y()
+    assert table.rowCount() == table.columnCount() == 2
+    assert table.editTriggers() == QTableWidget.EditTrigger.NoEditTriggers
+    for (r, c), expected in (((0, 1), 0.1), ((1, 0), 0.2)):
+        cell = table.item(r, c)
+        assert cell is not None
+        assert float(cell.text()) == expected
+        assert not cell.flags() & Qt.ItemFlag.ItemIsEditable
+
+
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
 def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
     qapp, pane: Literal["analysis", "post_analysis"]
@@ -436,8 +473,8 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
     try:
         widget.populate([scalar, table], values)
         widget.show()
-        for width in (620, 360):
-            widget.resize(width, 400)
+        for width in (620, 360, 620):
+            widget.resize(width, 600)
             qapp.processEvents()
             texts = [label.text() for label in widget.findChildren(QLabel)]
             assert any("Q1.ext.value" in text for text in texts)
@@ -453,6 +490,7 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
                     for label in row.findChildren(QLabel)
                 )
             )
+            _assert_matrix_row_reflows(matrix_row, narrow=width == 360)
             assert all(
                 "±" not in label.text() for label in matrix_row.findChildren(QLabel)
             )
@@ -504,6 +542,73 @@ def test_nonempty_preview_requires_each_service_fact(qapp) -> None:
     try:
         with pytest.raises(KeyError, match="md-1"):
             widget.populate([item], {})
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("invalid_text", ["", "not-a-number"])
+def test_invalid_cfg_edit_can_close_and_repair_without_stale_applied_state(
+    qapp,
+    waveform_writeback,
+    pane: Literal["analysis", "post_analysis"],
+    invalid_text: str,
+) -> None:
+    _control, service, draft = waveform_writeback
+    item = draft.items[0]
+    model = service.get_item_draft(draft, item.session_id)
+    field = model.root.fields["length"]
+    assert isinstance(field, ScalarField)
+    ctrl = MagicMock()
+    ctrl.get_writeback_item_draft_for_pane.return_value = model
+    ctrl.get_writeback_applied_for_pane.side_effect = lambda *_: (
+        service.get_all_applied(draft)
+    )
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = lambda *_: (
+        service.preview_values(draft)
+    )
+    widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
+    try:
+        widget.populate(service.preview_draft(draft), service.preview_values(draft))
+        widget.show()
+        edit = next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Edit"
+        )
+        edit.click()
+        field.set_text(invalid_text)
+        assert not model.is_valid()
+        assert widget.findChildren(QCheckBox)[0].text() == "Q1.waveforms.base*"
+        assert (
+            widget.findChildren(QLabel, "writebackProposed")[0].text()
+            == "Invalid configuration"
+        )
+        for name in ("writebackCurrent", "writebackActualPath"):
+            assert (
+                widget.findChildren(QLabel, name)[0].text()
+                == "Unavailable (invalid configuration)"
+            )
+        with pytest.raises(RuntimeError):
+            service.preview_values(draft)
+        dialog = widget.findChildren(QDialog)[0]
+        dialog.reject()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        edit.click()
+        field.set_text("0.5")
+        assert model.is_valid()
+        facts = service.preview_values(draft)[item.session_id]
+        assert facts.proposed["length"] == 0.5
+        assert (
+            widget.findChildren(QLabel, "writebackActualPath")[0].text()
+            == facts.actual_path
+        )
+        assert widget.findChildren(QLabel, "writebackCurrent")[0].text() == "map[2]"
+        assert widget.findChildren(QLabel, "writebackProposed")[0].text() == "map[2]"
+        widget.findChildren(QDialog)[0].reject()
+        assert widget.findChildren(QCheckBox)[0].isChecked()
     finally:
         widget.close()
         widget.deleteLater()

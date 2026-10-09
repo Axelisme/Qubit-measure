@@ -301,6 +301,12 @@ class WritebackWidget(QWidget):
         values and optional stderr in working units, without a unit label.
         Empty items clear the view. Items remain the persistent draft objects
         so checkbox and Edit commands use the same stable identities.
+        Local cfg editing may retain invalid input. Its row shows proposed as
+        "Invalid configuration" and current/path as "Unavailable (invalid
+        configuration)", while preserving selection and updating unapplied
+        state. Repairing input restores owner preview facts. Valid preview
+        target/source/I/O failures still propagate; invalid input never becomes
+        a missing value or an unmarked stale preview.
         """
         for item in items:
             values[item.session_id]
