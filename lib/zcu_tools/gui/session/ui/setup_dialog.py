@@ -372,8 +372,16 @@ class SetupDialog(QDialog):
         self._on_device_changed(self._device_combo.currentText())
 
     def _on_device_changed(self, _text: str) -> None:
-        # Internal writer supplies the cached value/unit suggestion.
-        pass
+        if self._label_edit.isModified():
+            return
+        name: str | None = self._device_combo.currentData()
+        if name is None:
+            return
+        value = self._ctrl.devices.get_cached_device_value(name)
+        if value is None:
+            return
+        unit = self._ctrl.devices.get_device_unit(name)
+        self._label_edit.setText(f"{value}{unit}")
 
     def _on_new_entry_clicked(self) -> None:
         name, accepted = QInputDialog.getText(self, "New entry", "Entry name:")
@@ -449,22 +457,22 @@ class SetupDialog(QDialog):
 
     def _refresh_context_list(self) -> None:
         self._ctx_list.clear()
-        labels = [point.label for point in self._ctrl.list_points()]
-        for label in labels:
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, label)
+        points = self._ctrl.list_points()
+        labels = [point.label for point in points]
+        for point in points:
+            item = QListWidgetItem(f"{point.label} — {point.description}")
+            item.setData(Qt.ItemDataRole.UserRole, point.label)
             self._ctx_list.addItem(item)
         if self._ctx_list.count() > 0:
             self._ctx_list.setCurrentRow(0)
         self._refresh_clone_combo(labels)
 
     def _refresh_clone_combo(self, labels: list[str]) -> None:
-        # Clone source = any existing context under the active project; default
-        # "(none)" -> clone_from=None. Same label set as the context list above.
+        # "(empty)" uses the owner's setup seed and empty library, not memory DRAFT.
         prev: str | None = self._clone_combo.currentData()
         self._clone_combo.blockSignals(True)
         self._clone_combo.clear()
-        self._clone_combo.addItem("(none)", userData=None)
+        self._clone_combo.addItem("(empty)", userData=None)
         for label in labels:
             self._clone_combo.addItem(label, userData=label)
         self._clone_combo.blockSignals(False)
