@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
@@ -25,13 +25,29 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import (
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+)
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import scaled_md
+from zcu_lab.v2._support.measure.seeds import (
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.singleshot.ge.core import (
     GE_Cfg,
     GE_Exp,
@@ -45,6 +61,42 @@ if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
 GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
+
+
+def _blank_pulse(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.1)
+    value.with_field("waveform.length", 5.1)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field(
+        "ro_cfg.trig_offset",
+        path_seed(
+            "resonator.ext.time_of_fly",
+            expr="resonator.ext.time_of_fly + 0.05",
+            fallback=0.55,
+        ).resolve(ctx),
+    )
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -107,18 +159,20 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
             "running the readout twice (probe off / on) internally."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 't1' — sets the relax "
-            "delay as 5*t1 (absent → a fixed 100 us); 'r_f' / 'res_ch' / "
-            "'ro_ch' / 'timeFly' / 'best_ro_*' seed the pulse-readout module; "
-            "'q_f' / 'qub_ch' seed the probe pi-pulse drive."
+            "Defaults use the tab's fixed qubit and referenced resonator. "
+            "Relax delay is 5 * qubit.t1 (fallback 100 us). Inline probe "
+            "reads qubit.freq and qubit.wiring.L01.ch. Inline pulse-readout "
+            "reads resonator.freq, resonator.wiring.ch/ro_ch and "
+            "resonator.ext.time_of_fly + 0.05 us (fallback 0.55 us). "
+            "Missing or null calibration uses fallback; unbound roles "
+            "remain Invalid until supplied."
         ),
         expects_ml=(
-            "Needs a probe pulse (a library pi pulse — 'pi_amp' — when "
-            "present) and a pulse-readout module (references a calibrated "
-            "library readout 'readout_dpm' / 'readout_rf' when present, else a "
-            "blank inline pulse readout). Optionally references a calibrated "
-            "reset and an init pulse — both disabled when no library entry "
-            "exists."
+            "Uses captured qubit.module.x180 for init and probe and "
+            "qubit.module.readout for pulse-readout. Missing or dangling "
+            "probe/readout slots seed fresh inline defaults. Optional init "
+            "and qubit.module.reset remain disabled when absent. Verify "
+            "the inline pulse and readout timing before Run."
         ),
         typical_writeback=(
             "Primary proposes the fitted assignment fidelity into MetaDict 'fid', the "
@@ -142,15 +196,51 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         ),
     )
 
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        """Declare the qubit and its referenced resonator for tab capture."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+        }
+
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
+        """Declare static shape and fresh defaults on the supplied capture.
+
+        Instantiate with SessionEnv.parameters. Bound missing/null scalar
+        calibration uses the guide's fallback. Missing module slots disable
+        optional init/reset and seed required probe/readout inline. Unbound
+        roles remain cfg Invalid; source/materialization faults propagate.
+        """
         return (
             MeasureCfgBuilder()
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .pulse("probe_pulse", role_id="pi_pulse", label="Probe Pulse")
-            .readout(pulse_only=True)
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("qubit.module.reset", fallback=None),
+            )
+            .field(
+                "modules.init_pulse",
+                spec=make_pulse_module_spec(optional=True),
+                default=module_seed("qubit.module.x180", fallback=None),
+            )
+            .field(
+                "modules.probe_pulse",
+                spec=make_pulse_module_spec(label="Probe Pulse"),
+                default=module_seed(
+                    "qubit.module.x180",
+                    fallback=custom(_blank_pulse, description="inline probe pulse"),
+                ),
+            )
+            .field(
+                "modules.readout",
+                spec=make_pulse_readout_module_spec(),
+                default=module_seed(
+                    "qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
+            .relax_delay(scaled_path_seed("qubit.t1", factor=5.0, fallback_value=100.0))
             .int("shots", label="Shots", default=100000)
             .reps(1, locked=True)
             .rounds(1, locked=True)
