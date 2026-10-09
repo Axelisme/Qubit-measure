@@ -80,7 +80,7 @@ class DelayAuto(Module):
         if isinstance(self.t, str):
             prog.delay_reg_auto(time_reg=self.t, gens=self.gens, ros=self.ros)
         else:
-            prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=self.tag)  # type: ignore
+            prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=self.tag)
         return 0.0
 
     def allow_rerun(self) -> bool:
