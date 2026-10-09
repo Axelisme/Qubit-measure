@@ -292,7 +292,7 @@ def test_rf_slider_refreshes_sample_dots_after_debounce(qapp, monkeypatch):
 
     monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", echo_rf)
     panel._on_add_sample()
-    artists = panel._tune_artists
+    artists = panel._tune_artists  # pyright: ignore[reportPrivateUsage]
     assert artists is not None
     s = artists.samples[0]
 
@@ -312,7 +312,7 @@ def test_g_change_refreshes_sample_dots_after_debounce(qapp, monkeypatch):
 
     monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", echo_g)
     panel._on_add_sample()
-    artists = panel._tune_artists
+    artists = panel._tune_artists  # pyright: ignore[reportPrivateUsage]
     assert artists is not None
     s = artists.samples[0]
 
@@ -336,7 +336,7 @@ def test_drag_moves_line_without_recompute_until_drop(qapp, monkeypatch):
 
     monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", echo_flux)
     panel._on_add_sample()
-    artists = panel._tune_artists
+    artists = panel._tune_artists  # pyright: ignore[reportPrivateUsage]
     assert artists is not None
     s = artists.samples[0]
     assert s.dot_ground is not None
@@ -356,7 +356,7 @@ def test_drag_moves_line_without_recompute_until_drop(qapp, monkeypatch):
 def test_drag_clamps_flux_to_axis_range(qapp, monkeypatch):
     panel = _tune_panel(qapp, monkeypatch)
     panel._on_add_sample()
-    artists = panel._tune_artists
+    artists = panel._tune_artists  # pyright: ignore[reportPrivateUsage]
     assert artists is not None
     s = artists.samples[0]
     panel._on_sample_drag(s, 5.0)  # way past the 0..1 flux axis
@@ -367,11 +367,11 @@ def test_clear_samples_removes_all(qapp, monkeypatch):
     panel = _tune_panel(qapp, monkeypatch)
     panel._on_add_sample()
     panel._on_add_sample()
-    artists = panel._tune_artists
+    artists = panel._tune_artists  # pyright: ignore[reportPrivateUsage]
     assert artists is not None
     assert len(artists.samples) == 2
     panel._on_clear_samples()
-    artists = panel._tune_artists
+    artists = panel._tune_artists  # pyright: ignore[reportPrivateUsage]
     assert artists is not None
     assert artists.samples == []
 
@@ -379,12 +379,12 @@ def test_clear_samples_removes_all(qapp, monkeypatch):
 def test_fresh_preprocess_drops_sample_lines(qapp, monkeypatch):
     panel = _tune_panel(qapp, monkeypatch)
     panel._on_add_sample()
-    artists = panel._tune_artists
+    artists = panel._tune_artists  # pyright: ignore[reportPrivateUsage]
     assert artists is not None
     assert len(artists.samples) == 1
     # re-initialising the tune view (a new preprocess) starts with no sample lines
     panel._init_tune_view(_preprocess())
-    artists = panel._tune_artists
+    artists = panel._tune_artists  # pyright: ignore[reportPrivateUsage]
     assert artists is not None
     assert artists.samples == []
 
