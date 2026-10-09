@@ -113,10 +113,7 @@ class MainWindowToolbar:
             cached = submenus.get(path)
             if cached is not None:
                 return cached
-            if len(path) == 1:
-                parent_menu = menu
-            else:
-                parent_menu = _get_or_create_submenu(path[:-1])
+            parent_menu = menu if len(path) == 1 else _get_or_create_submenu(path[:-1])
             sub_menu = parent_menu.addMenu(path[-1])
             if sub_menu is None:
                 raise RuntimeError(f"Failed to create submenu: {'/'.join(path)}")
