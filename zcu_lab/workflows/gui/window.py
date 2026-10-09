@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from math import isfinite
 from typing import Literal
 from uuid import uuid4
@@ -53,6 +53,7 @@ from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
@@ -196,17 +197,25 @@ class T1WorkflowWindow(QWidget):
         owner: OwnerScheduler,
         progress: ProgressService,
         parent: QWidget | None = None,
+        *,
+        on_close: Callable[[], None] | None = None,
     ) -> None:
         """Build form/plot attachments on the GUI owner with a QApplication.
 
         state/services/runner/progress must be the same owning session. The
         progress service is borrowed directly from its composition root, not
         obtained through a wider control facet. owner marshals
-        plot commands to this thread. A readable context and resolvable qubit
-        focus are required to build form defaults. Startup also requires a saved
-        point, native QickConfig and connected SoC. Source errors propagate.
+        plot commands to this thread. EMPTY or unselected focus builds partial
+        source-free drafts. A selected focus captures defaults; source errors
+        propagate without fallback. Start requires a saved point, native
+        QickConfig and connected SoC. setup_dialog is the retained shared Setup
+        instance over this session's setup_control. Selecting a qubit changes
+        Context focus only; Use source calls prepare_forms explicitly.
         parent controls Qt lifetime; closing during work requests Stop and keeps
-        the window alive until terminal delivery. No instrument is contacted.
+        the window alive until terminal delivery. Once native work ends, on_close
+        releases composition-owned resources. If it raises, close is rejected
+        and the error is displayed, so resources remain alive for another attempt.
+        No instrument is contacted by construction.
         """
         super().__init__(parent)
         self._state = state
@@ -263,6 +272,30 @@ class T1WorkflowWindow(QWidget):
         self._poll = QTimer(self)
         self._poll.setInterval(50)
         self._poll.timeout.connect(self._refresh_run)
+
+    setup_dialog: SetupDialog
+
+    def open_setup(self) -> None:
+        """Show the same retained shared Setup non-modally on the GUI owner.
+
+        Reopening refreshes the dialog's cached inputs, not form captures. No
+        entry is opened or hardware connected by showing. Closing Setup updates
+        qubit choices from ContextControlPort without replacing form drafts.
+        """
+        raise NotImplementedError
+
+    def prepare_forms(self) -> None:
+        """Replace both Start drafts and bases with current captured defaults.
+
+        Call on the GUI owner after selecting a qubit through Context focus.
+        Capture parameters/library and cached device values once, then replace
+        this Window's form attachments. Previous edits and local parse text are
+        discarded on success; subsequent source changes do not update the forms.
+        No live device reads, submission, storage write or input reload occurs.
+        Source/editor failures propagate without replacing the existing panels.
+        Pending, running or paused operations raise InvalidRunState before capture.
+        """
+        raise NotImplementedError
 
     def _capture_env(self, devices: DeviceSnapshot) -> FormEnv:
         context = self._services.context

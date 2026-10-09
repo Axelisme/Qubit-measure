@@ -1041,6 +1041,40 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
 
 
 @pytest.mark.parametrize("command", ["pause", "resume", "stop"])
+def test_prepare_forms_rejects_pending_and_paused_run(
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, harness, _entry = run_attachment
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("prepare-guard", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del plan, tun, state
+        window.pause("prepare-guard")
+        with pytest.raises(InvalidRunState):
+            window.prepare_forms()
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    before = window.plan_panel
+    assert isinstance(window.start("prepare-guard"), int)
+    with pytest.raises(InvalidRunState):
+        window.prepare_forms()
+    harness.complete_segment()
+    status = window.controller.status()
+    assert status is not None and status.lifecycle == "paused"
+    with pytest.raises(InvalidRunState):
+        window.prepare_forms()
+    assert window.plan_panel is before
+    window.stop("prepare-guard")
+
+
 def test_window_without_run_rejects_explicit_target(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     command: str,
