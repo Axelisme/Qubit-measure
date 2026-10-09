@@ -493,13 +493,18 @@ class T1WorkflowWindow(QWidget):
             )
 
     def _finished(self, status: RunStatus | None, error: Exception | None) -> None:
+        """Display native delivery; terminal admission is already released.
+
+        Paused delivery keeps the same operation, lease, plots and run inputs.
+        View errors belong to logging, not the native operation outcome.
+        """
         self._refresh_run()
         self._pause_button.setEnabled(False)
         self._resume_button.setEnabled(
             error is None and status is not None and status.lifecycle == "paused"
         )
         if error is None and status is not None and status.lifecycle == "paused":
-            # Keep polling across segments; admission still guards owner delivery.
+            # Paused delivery retains the operation and run resources.
             self._poll.start()
             return
         self._poll.stop()

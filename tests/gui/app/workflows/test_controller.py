@@ -346,12 +346,23 @@ def test_native_step_failure_is_not_reported_as_finished(tmp_path: Path) -> None
     assert not harness.gate.snapshot()
 
 
-def test_owner_callback_failure_cannot_leak_lease_or_pending_admission(
+def test_owner_view_failure_preserves_native_outcome_after_terminal_cleanup(
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
+    callback_observations: list[tuple[OperationOutcome | None, bool, bool]] = []
 
-    def fail_callback(_status: RunStatus | None, _error: Exception | None) -> None:
+    def fail_callback(status: RunStatus | None, error: Exception | None) -> None:
+        callback_observations.append(
+            (
+                harness.handles.known_outcome(token),
+                not harness.gate.snapshot(),
+                controller.operation_id is None,
+            )
+        )
+        assert status is not None and status.lifecycle == "done"
+        assert error is None
         raise ValueError("view failed")
 
     controller = create_controller(harness, rig, fail_callback)
@@ -364,11 +375,11 @@ def test_owner_callback_failure_cannot_leak_lease_or_pending_admission(
     )
     harness.background.execute()
     harness.background.deliver()
+    assert callback_observations == [(OperationOutcome("finished"), True, True)]
     assert controller.operation_id is None
-    assert harness.handles.known_outcome(token) == OperationOutcome(
-        "failed", "view failed"
-    )
+    assert harness.handles.known_outcome(token) == OperationOutcome("finished")
     assert not harness.gate.snapshot()
+    assert "view failed" in caplog.text
 
 
 def test_native_execution_is_off_owner_and_terminal_delivery_returns_to_owner(

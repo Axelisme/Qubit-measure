@@ -69,10 +69,13 @@ class WorkflowController[C]:
         Resume reuses it, without consulting ambient progress or ports.progress.
         on_finished receives
         the authoritative status (None if startup was never accepted) and the
-        original startup/worker error when present. Producer owner delivery runs
-        the callback before handle settle and lease release; reentrant Start
-        remains blocked until that segment cleanup. Synchronous Resume admission
-        failure has no producer: begin has already unwound any segment resources.
+        original startup/worker error when present. Terminal owner delivery fixes
+        the handle's native outcome and releases admission and the run lease
+        before notifying the view. View exceptions are logged and never change
+        the native outcome or write the run binding. A paused notification retains
+        the handle, lease and progress; it is not terminal cleanup. Synchronous
+        Resume admission failure has no producer: begin has already unwound any
+        segment resources.
         If Stop terminated the native run during admission, on_finished then
         receives that stopped status with error=None, retained progress is
         discarded, and the original admission error is reraised to the caller.
