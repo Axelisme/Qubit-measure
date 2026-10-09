@@ -1,8 +1,11 @@
 """Concrete Qt startup uses one fixed native capture and no hardware."""
 
+import json
 from collections.abc import Callable, Iterator
-from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, replace
 from pathlib import Path
+from time import monotonic
 
 import pytest
 from matplotlib.figure import Figure
@@ -20,6 +23,10 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
+from zcu_tools.gui.remote.control_service import ControlOptions
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.remote.rpc_endpoint import ClientLink
+from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import GateChangedPayload
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
@@ -702,3 +709,314 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
     assert controller.run_id == "run-B" and window.plan_panel.isEnabled()
     assert harness.progress.bars_for_owner("t1-workflow") == ()
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
+
+
+RpcRequest = Callable[[str, dict[str, object]], dict[str, object]]
+
+
+@pytest.fixture
+def rpc(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+) -> Iterator[RpcRequest]:
+    """Use public route and encoded replies; pump the real owner queue explicitly."""
+    window, harness, _entry = attachment
+    service = window.create_remote_service(ControlOptions(port=0), harness.bus)
+    link = ClientLink("workflow-contract", token_required=False)
+    service.on_client_open(link)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as io:
+
+            def request(method: str, params: dict[str, object]) -> dict[str, object]:
+                pending = io.submit(
+                    service.route, link, Request("request", method, params)
+                )
+                deadline = monotonic() + 3
+                while not pending.done():
+                    assert monotonic() < deadline, "RPC did not settle on the owner"
+                    harness.owner.pump_once(block=True, timeout=0.01)
+                pending.result(timeout=1)
+                return json.loads(link.outbound.get(timeout=1))
+
+            yield request
+    finally:
+        service.on_client_close(link, on_owner_thread=True)
+        service.stop()
+
+
+def test_rpc_pending_status_and_stop(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    rpc: RpcRequest,
+) -> None:
+    window, harness, entry = attachment
+    assert rpc("workflow.status", {})["result"] == {
+        "run_id": None,
+        "operation_id": None,
+        "status": None,
+    }
+    token = window.start("pending-rpc")
+    assert isinstance(token, int)
+    expected = {"run_id": "pending-rpc", "operation_id": token, "status": None}
+    assert rpc("workflow.status", {})["result"] == expected
+    assert rpc("workflow.stop", {"run_id": "pending-rpc"})["result"] == expected
+    assert harness.gate.snapshot()
+    harness.complete_segment()
+    assert not harness.gate.snapshot()
+    assert not (entry.result_path / "workflows/pending-rpc").exists()
+    assert window.plan_panel.isEnabled()
+
+
+@pytest.mark.parametrize("method", ["workflow.pause", "workflow.resume"])
+def test_rpc_pending_commands_do_not_claim_acceptance(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    rpc: RpcRequest,
+    method: str,
+) -> None:
+    window, harness, _entry = attachment
+    token = window.start("pending-rpc")
+    assert isinstance(token, int)
+    native_command = window.pause if method == "workflow.pause" else window.resume
+    with pytest.raises(RuntimeError) as native:
+        native_command("pending-rpc")
+    reply = rpc(method, {"run_id": "pending-rpc"})
+    error = reply["error"]
+    assert reply["ok"] is False and isinstance(error, dict)
+    assert error["code"] == "controller_error"
+    assert error["message"] == str(native.value)
+    assert window.controller is not None and window.controller.status() is None
+    assert window.controller.operation_id == token and harness.gate.snapshot()
+
+
+@pytest.mark.parametrize(
+    "method", ["workflow.pause", "workflow.resume", "workflow.stop"]
+)
+@pytest.mark.parametrize(
+    "params", [{}, {"run_id": None}, {"run_id": 3}, {"run_id": ""}]
+)
+def test_rpc_target_parameter_admission(
+    rpc: RpcRequest,
+    method: str,
+    params: dict[str, object],
+) -> None:
+    # Public route exposes ParamSpec errors; the endpoint envelopes these on the wire.
+    with pytest.raises(RemoteError) as raised:
+        rpc(method, params)
+    assert raised.value.code is ErrorCode.INVALID_PARAMS
+
+
+@pytest.mark.parametrize(
+    "method", ["workflow.pause", "workflow.resume", "workflow.stop"]
+)
+def test_rpc_without_attached_run_reports_native_target(
+    rpc: RpcRequest,
+    method: str,
+) -> None:
+    reply = rpc(method, {"run_id": "absent"})
+    error = reply["error"]
+    assert reply["ok"] is False and isinstance(error, dict)
+    assert (error["code"], error["reason"], error["data"]) == (
+        "precondition_failed",
+        "run_mismatch",
+        {"expected": "absent", "actual": None},
+    )
+
+
+def test_rpc_pause_resume_uses_same_native_run_and_cached_capture(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    rpc: RpcRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, harness, entry = attachment
+    attempts: list[float] = []
+    receipts: list[dict[str, object]] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("rpc-pause", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated],
+        plan: T1Plan,
+        tun: T1Tunables,
+        state: None,
+    ) -> Step[None, int]:
+        del plan, tun, state
+        attempts.append(env.context.pi_length_us)
+        env.pbar("rpc-work", 2).set_progress(len(attempts))
+        if len(attempts) == 1:
+            receipts.append(rpc("workflow.pause", {"run_id": "rpc-run"}))
+            assert harness.gate.snapshot()
+            yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    token = window.start("rpc-run")
+    assert isinstance(token, int)
+    harness.complete_segment()
+    assert receipts[0]["ok"] is True
+    requested = receipts[0]["result"]
+    assert isinstance(requested, dict) and isinstance(requested["status"], dict)
+    assert (
+        requested["operation_id"] == token
+        and requested["status"]["lifecycle"] == "pausing"
+    )
+    paused = rpc("workflow.status", {})["result"]
+    assert isinstance(paused, dict) and isinstance(paused["status"], dict)
+    assert paused["run_id"] == "rpc-run" and paused["operation_id"] is None
+    assert paused["status"]["lifecycle"] == "paused"
+    assert window.controller is not None
+    native = window.controller.status()
+    assert native is not None
+    assert paused["status"] == json.loads(json.dumps(asdict(native)))
+    assert paused["status"]["progress"][0]["name"] == "rpc-work"
+    assert not harness.gate.snapshot()
+
+    entry.new_point("later-rpc")
+    harness.services.context.use_point(PointUseRequest("later-rpc"))
+    harness.services.context.set_component_focus(None)
+    captures: list[bool] = []
+    original = harness.services.device.capture_native_device_info
+
+    def capture() -> dict[str, DeviceInfo]:
+        captures.append(bool(harness.gate.snapshot()))
+        return original()
+
+    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
+    resumed = rpc("workflow.resume", {"run_id": "rpc-run"})["result"]
+    assert isinstance(resumed, dict)
+    assert resumed["run_id"] == "rpc-run"
+    assert isinstance(resumed["operation_id"], int) and resumed["operation_id"] != token
+    assert captures == [True] and not window.plan_panel.isEnabled()
+    harness.complete_segment()
+    terminal = rpc("workflow.status", {})["result"]
+    assert isinstance(terminal, dict) and isinstance(terminal["status"], dict)
+    assert (
+        terminal["operation_id"] is None
+        and terminal["status"]["lifecycle"] == "done"
+        and terminal["status"]["run_id"] == "rpc-run"
+    )
+    assert len(attempts) == 2 and attempts[0] == attempts[1]
+    assert harness.background.error is None
+    assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
+
+
+@pytest.mark.parametrize("phase", ["pending", "paused"])
+def test_rpc_old_target_does_not_change_current_run(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    rpc: RpcRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    window, harness, _entry = attachment
+    attempts: list[str] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("rpc-target", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated],
+        plan: T1Plan,
+        tun: T1Tunables,
+        state: None,
+    ) -> Step[None, int]:
+        del plan, tun, state
+        attempts.append("step")
+        window.pause("current")
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    assert isinstance(window.start("old"), int)
+    window.stop("old")
+    harness.complete_segment()
+    assert isinstance(window.start("current"), int)
+    if phase == "paused":
+        harness.complete_segment()
+    before = rpc("workflow.status", {})["result"]
+    gate = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
+    captures: list[str] = []
+    original = harness.services.device.capture_native_device_info
+
+    def capture() -> dict[str, DeviceInfo]:
+        captures.append("devices")
+        return original()
+
+    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
+    for method in ("workflow.pause", "workflow.resume", "workflow.stop"):
+        reply = rpc(method, {"run_id": "old"})
+        error = reply["error"]
+        assert reply["ok"] is False and isinstance(error, dict)
+        assert (error["code"], error["reason"], error["data"]) == (
+            "precondition_failed",
+            "run_mismatch",
+            {"expected": "old", "actual": "current"},
+        )
+        assert rpc("workflow.status", {})["result"] == before
+        assert (
+            tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
+            == gate
+        )
+    assert captures == [] and attempts == ([] if phase == "pending" else ["step"])
+    stopped = rpc("workflow.stop", {"run_id": "current"})["result"]
+    assert isinstance(stopped, dict)
+    if phase == "pending":
+        assert stopped["status"] is None
+        harness.complete_segment()
+    else:
+        assert (
+            isinstance(stopped["status"], dict)
+            and stopped["status"]["lifecycle"] == "stopped"
+        )
+        assert harness.background.work is None
+        rejected = rpc("workflow.resume", {"run_id": "current"})
+        error = rejected["error"]
+        assert rejected["ok"] is False and isinstance(error, dict)
+        assert (error["code"], error["reason"], error["data"]) == (
+            "precondition_failed",
+            "invalid_run_state",
+            {"action": "resume", "lifecycle": "stopped"},
+        )
+    assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
+
+
+def test_rpc_running_stop_retains_lease_until_owner_delivery(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    rpc: RpcRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, harness, _entry = attachment
+    receipts: list[dict[str, object]] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("rpc-stop", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated],
+        plan: T1Plan,
+        tun: T1Tunables,
+        state: None,
+    ) -> Step[None, int]:
+        del plan, tun, state
+        receipts.append(rpc("workflow.stop", {"run_id": "stop-rpc"}))
+        assert harness.gate.snapshot()
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    assert isinstance(window.start("stop-rpc"), int)
+    harness.background.execute()
+    assert harness.gate.snapshot() and not window.plan_panel.isEnabled()
+    assert receipts[0]["ok"] is True
+    requested = receipts[0]["result"]
+    assert isinstance(requested, dict) and isinstance(requested["status"], dict)
+    assert requested["status"]["lifecycle"] == "stopping"
+    harness.owner.pump_all()
+    harness.background.deliver()
+    terminal = rpc("workflow.status", {})["result"]
+    assert isinstance(terminal, dict) and isinstance(terminal["status"], dict)
+    assert (
+        terminal["status"]["lifecycle"] == "stopped"
+        and terminal["operation_id"] is None
+    )
+    assert not harness.gate.snapshot() and window.plan_panel.isEnabled()

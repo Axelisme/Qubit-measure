@@ -25,9 +25,11 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
 from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
+from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
@@ -41,6 +43,7 @@ from zcu_tools.resources.entry.save_layout import workflow_roots
 from ..calibration import Calibrated
 from ..t1 import T1Plan, t1_fluxdep
 from .panel import T1PlanPanel, T1TunablesPanel
+from .remote import T1RemoteControlAdapter
 from .tunables import T1TunablesForm
 from .tuning_panel import T1TuningPanel
 
@@ -66,8 +69,8 @@ class T1WorkflowWindow(QWidget):
     controller is None before the first submitted Start; its native engine is
     None until startup acceptance. tuning_panel attaches only after acceptance.
     The supplied session/runner own shared hardware, exclusion and workers.
-    This window does not create a second registry, launch a GUI process, expose
-    RPC or refresh YAML. Pause retains plan, plots and input capture; Resume only
+    This window does not create a second registry, launch a GUI process or
+    refresh YAML. Its RPC adapter calls the same controls. Pause retains plan, plots and input capture; Resume only
     captures current cached devices after reacquiring the lease. Each Start captures current
     published parameters and cached device data in one owner sequence.
     """
@@ -276,6 +279,19 @@ class T1WorkflowWindow(QWidget):
         self._message.setText("Startup pending")
         self._poll.start()
         return token
+
+    def create_remote_service(
+        self, opts: ControlOptions, bus: BaseEventBus
+    ) -> T1RemoteControlAdapter:
+        """Create an inert RPC adapter of these controls on this Window's owner.
+
+        opts configures shared transport; bus must be this Window's session bus.
+        The composition caller owns adapter.start()/stop() and stops the socket
+        before destroying this Window. This call does not open a socket, capture
+        new inputs or touch hardware. Remote Stop requires explicit run_id;
+        stopping the transport does not cancel a native run.
+        """
+        return T1RemoteControlAdapter(self, opts, bus=bus, owner_scheduler=self._owner)
 
     def pause(self, run_id: str) -> RunStatus:
         """Request Pause of the explicit native target, retaining plan and plots.
