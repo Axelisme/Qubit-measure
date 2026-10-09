@@ -7,7 +7,11 @@ from zcu_tools.cfg_model import PulseResetSpec
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import (
+    ContextSourceFault,
+    ContextSourceUnavailableError,
+    EntryDraft,
+)
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.program.v2.modules import PulseResetCfg
 from zcu_tools.resources.context.library import (
@@ -111,15 +115,72 @@ def test_reset_proposal_without_parameter_capture_does_not_read_current_globals(
     )
 
 
-def test_reset_proposal_waits_for_all_calibration_fields(reset_calibration) -> None:
+@pytest.mark.parametrize(
+    "path", ["$qubit.ext.not_calibrated", "$qubit.ext.null_calibration"]
+)
+def test_reset_proposal_waits_for_all_calibration_fields(
+    reset_calibration, path: str
+) -> None:
     parameters, snapshot = reset_calibration
+    point = parameters.document()
+    point.components["Q1"] = point.components["Q1"].model_copy(
+        update={"ext": {"null_calibration": None}}
+    )
+    parameters = ParameterContext(
+        point=point, library=parameters.library, target=parameters.target, roles=None
+    ).bind_aliases(parameters.aliases, {})
     assert (
         reset_module_writeback_items(
             SessionEnv(parameters=parameters, soc=None, soccfg=None),
             snapshot,
             target="reset_10",
             desc="calibrated reset",
-            field_md_map=[("pulse_cfg.freq", "$qubit.ext.not_calibrated")],
+            field_md_map=[("pulse_cfg.freq", path)],
         )
         == []
     )
+
+
+@pytest.mark.parametrize("slot", [None, "Q1.reset.missing"])
+def test_reset_proposal_propagates_unset_and_dangling_slot_errors(
+    reset_calibration, slot: str | None
+) -> None:
+    parameters, snapshot = reset_calibration
+    point = parameters.document()
+    point.components["Q1"] = point.components["Q1"].model_copy(
+        update={"module": {} if slot is None else {"sideband": slot}}
+    )
+    parameters = ParameterContext(
+        point=point, library=parameters.library, target=parameters.target, roles=None
+    ).bind_aliases(parameters.aliases, {})
+    with pytest.raises(
+        AttributeError, match=r"(Unset|Dangling) module slot: .*sideband"
+    ):
+        reset_module_writeback_items(
+            SessionEnv(parameters=parameters, soc=None, soccfg=None),
+            snapshot,
+            target="reset_10",
+            desc="calibrated reset",
+            field_md_map=[("pulse_cfg.freq", "$qubit.module.sideband.pulse_cfg.freq")],
+        )
+
+
+def test_reset_proposal_propagates_source_fault(reset_calibration, tmp_path) -> None:
+    parameters, snapshot = reset_calibration
+    unavailable = ParameterContext(
+        point=parameters.document(),
+        library=parameters.library,
+        target=parameters.target,
+        roles=parameters.roles,
+        source_faults=(
+            ContextSourceFault("point", tmp_path / "point.yaml", "OSError", "gone"),
+        ),
+    )
+    with pytest.raises(ContextSourceUnavailableError):
+        reset_module_writeback_items(
+            SessionEnv(parameters=unavailable, soc=None, soccfg=None),
+            snapshot,
+            target="reset_10",
+            desc="calibrated reset",
+            field_md_map=[("pulse_cfg.freq", "$qubit.module.sideband.pulse_cfg.freq")],
+        )
