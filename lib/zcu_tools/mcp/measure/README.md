@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-08, synchronous Save reports and in-memory images
+**Last updated:** 2026-10-09, persistent output reports without lifetime fields
 
 # `zcu_tools/mcp/measure/`
 
@@ -65,7 +65,7 @@ Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一
 
 當次工具回覆可附記憶體中的 MCP image content，不落地 session 暫存 PNG。之後要看圖，用 `tab.get_figure` 取得 GUI 當下圖像，不保證是先前回覆的圖。`status` 不附圖片，也不重新擷取圖像。
 
-`artifacts` 只記錄持久輸出的當次保存結果。Execution 有效期屬 MCP session；持久路徑是本機已確認輸出。同一 run 再 Save 可覆寫 run 成員，Labber 每次另產新檔。保存紀錄不保證檔案仍存在，查詢不自動 stat 或補存。
+`artifacts` 只記錄持久輸出的當次保存結果，不帶 `lifetime` 欄位。Execution ID 只在 MCP session 有效。持久路徑是本機已確認的輸出。同一 run 再 Save 可覆寫 run 成員，Labber 每次另產新檔。保存紀錄不保證檔案仍存在，查詢不自動 stat 或補存。
 
 `apply_writeback(tab, items=None)` 按 preview 的穩定 `target_name` 選擇當前候選。省略 items 或傳 null 寫全部，空陣列寫零項。它不看 GUI 勾選，也不回答 recipe。工具先讀 Primary 與既有 Post 的當前 preview，再檢查未知、重複及跨 stage 同名；全部檢查通過後才用當前 session ID 寫入。寫入順序是 Primary 再 Post，首錯停止，不 retry 或 rollback。收據只列 GUI-confirmed completed，並保留 skipped、failed stage、not_started 及失敗 stage 的不確定性。
 
