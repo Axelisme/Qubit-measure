@@ -38,7 +38,7 @@ class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
         super().__init__(address, rm)
 
     def get_output(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
+        return STATUS_MAP_INV[self.query(":OUTPut?")]  # pyright: ignore[reportReturnType]
 
     @device_operation
     def set_output(self, status: Literal["on", "off"]) -> None:
@@ -57,7 +57,7 @@ class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
     # ==========================================================================#
 
     def get_IQ_state(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":IQ:STAT?")]  # type: ignore
+        return STATUS_MAP_INV[self.query(":IQ:STAT?")]  # pyright: ignore[reportReturnType]
 
     @device_operation
     def set_IQ_state(self, state: Literal["on", "off"]) -> None:
