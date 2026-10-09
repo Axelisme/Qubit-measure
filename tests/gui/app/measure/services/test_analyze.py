@@ -10,15 +10,17 @@ Tests drive terminal paths by capturing bg.last_on_done / on_error.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import replace
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from qtpy.QtWidgets import QApplication
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickAnalysis,
     FluxPickInputs,
@@ -72,7 +74,7 @@ from zcu_lab.v2.twotone.time_domain.t1.gui import (
 
 
 @pytest.fixture
-def native_session(tmp_path, qapp):
+def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSession]:
     with native_save_session(tmp_path, qapp) as session:
         yield session
 
@@ -95,7 +97,7 @@ def _make_state(tab_id: str = "tab1") -> State:
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     # Provide a fake run_result so the tab is not empty
-    state.update_tab_loaded_result(tab_id, object(), "memory")
+    state.update_tab_result(tab_id, object())
     return state
 
 
@@ -149,7 +151,7 @@ def _make_two_tab_state() -> State:
         "tab2",
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
-    state.update_tab_loaded_result("tab2", object(), "memory")
+    state.update_tab_result("tab2", object())
     return state
 
 
