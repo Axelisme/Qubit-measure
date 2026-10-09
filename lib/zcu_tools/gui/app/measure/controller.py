@@ -646,7 +646,7 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def has_project(self) -> bool:
-        return self._ctx_svc.has_project()
+        return self._ctx_svc.get_entry_info() is not None
 
     def has_context(self) -> bool:
         return self._ctx_svc.has_context()
