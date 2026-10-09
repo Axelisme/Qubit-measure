@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow run and form ownership
 
-**Last updated:** 2026-10-09，Resume capture Stop 與 producer delivery
+**Last updated:** 2026-10-10，獨立 app、同一 run 與安全關閉
 
 WorkflowController stays fixed for its Window's lifetime. Each Start supplies EnginePorts and a pending TunablesHost. One private run state concentrates the binding, native acceptance, token, producer phase and retained Runner settlement. Replacement waits for terminal cleanup. Native Engine status and artifacts remain authoritative; the operation token is only a receipt.
 
@@ -10,4 +10,10 @@ Pause retains the original operation, local RUN lease, progress and run inputs a
 
 Concrete T1WorkflowWindow and T1TuningPanel stay in zcu_lab. Window supplies per-Start resources and the fixed capture. Tuning presents the Controller-owned Host directly. RPC uses the same Window controls and shared transport. Start accepts optional leaf batches against current captured defaults; tunables edits submit the current shared draft, not Start defaults. Start and Resume call DeviceService's synchronous live capture of every connected driver through get_device_info. A named read failure rejects capture without cached fallback. Successful reads refresh session cache and return detached native models. Cached capture retains its separate public semantics.
 
-Cross-lane integration requires acceptance. Concrete records/PNG RPC and MCP forwarding are connected. The same Window also exposes form schema/read and call-local batch preview without changing core write semantics or adding a persistent editing state. Independent GUI app composition, reload and CP remain incomplete. Offline evidence does not authorize hardware use or establish full F5/P2 acceptance.
+`scripts/run_workflows_gui.py` launches the independent concrete app through shared gui.runtime. Composition stays in zcu_lab.workflows.gui.app: one fresh EMPTY session, one top-level T1WorkflowWindow and this same Controller, with an optional remote adapter. Shared Setup opens non-modally. The global qubit alias comes from shared AliasDialog; explicit Prepare forms replaces both drafts with defaults from one fixed capture, not a source reload.
+
+Concrete records/PNG RPC and MCP forwarding are connected. MCP holds only the GUI connection, not another Engine, run state or hardware session. The same Window exposes form schema/read and call-local batch preview without changing core write semantics or adding persistent editing state. Status, records and named Figures refer to the same native run. Pending Start/Resume receipts are not acceptance; Pause/Stop receipts are requests. A timeout or disconnect does not cancel.
+
+Close stops pending/paused runs to terminal before shutdown. The executor closes submission admission, then the app cancels and drains workers and owner deliveries before closing drivers and stopping RPC. Failed drain/close keeps the Window alive and admission closed; closing can be retried, but work does not automatically resume. The Controller rejects Resume after terminal state without submitting a continuation.
+
+S1–S3 have native in-process simulator coverage, including env.set_device driver-limit failure, retained Pause ownership, native persistence and final PNG. cfg.dev setup coverage remains deferred pending the upstream device interface change. Source reload S4 and input persistence U7 remain unimplemented; workflows-p3 owns them. Startup-failure scenario 14 is not fully verified. Offline evidence does not authorize hardware use or establish user CP-B acceptance.

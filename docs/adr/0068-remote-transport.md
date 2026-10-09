@@ -8,7 +8,7 @@ Qt 視窗、socket client 與 MCP agent 都能接觸同一個 GUI application。
 
 ## 分層與連線
 
-`gui.remote` 提供 NDJSON framing、request／reply、握手、per-client queue、backpressure 和 lazy push endpoint。`mcp.core.bridge` 持有 agent 程序的 GUI socket、連線與可選的 GUI subprocess；`mcp.core.stdio_server` 提供 stdio MCP 機制。四個 app 使用共用 GUI remote 機制，但各自註冊 wire method、驗證與 event serializer。共用 `RemoteControlServiceBase` 擁有 seen map 與 observation 演算法。App 以 `ResourceObservationPolicy` 宣告自己的依賴、完整讀取與 write tracking，並注入 owner version snapshot。Measure 另外擁有 operation tracking、診斷、writeback pane mapping 和 editor 清理。Fluxdep 透過同一 Controller 提供 pipeline commands、app-owned search 與四種 interactive Session。Interactive state／PNG 不建立 published-resource observation；身份與 terminal receipts 由 app owner 和 wire projection 決定。Fluxdep MCP 從 GUI declarations 產生 pipeline tools，interactive replies 附同次 capture 的 MCP image content，文字只保留 MIME／bytes。Lifecycle 與 PNG integrity producer 與現存 MCP callers 共用，server exit 只 disconnect；不重試、不隱藏預讀或另建 operation registry。MCP→GUI remote consumption 由 C13 約束。Dispersive 與 autofluxdep 的 remote 接口仍只讀。共用機制接收 app 注入的 metadata 和 owner scheduler，不決定實驗或資源政策。精確封套、上限、版本與 method 說明見 [measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
+`gui.remote` 提供 NDJSON framing、request／reply、握手、per-client queue、backpressure 和 lazy push endpoint。`mcp.core.bridge` 持有 agent 程序的 GUI socket、連線與可選的 GUI subprocess；`mcp.core.stdio_server` 提供 stdio MCP 機制。四個 app 使用共用 GUI remote 機制，但各自註冊 wire method、驗證與 event serializer。共用 `RemoteControlServiceBase` 擁有 seen map 與 observation 演算法。App 以 `ResourceObservationPolicy` 宣告自己的依賴、完整讀取與 write tracking，並注入 owner version snapshot。Measure 另外擁有 operation tracking、診斷、writeback pane mapping 和 editor 清理。Fluxdep 透過同一 Controller 提供 pipeline commands、app-owned search 與四種 interactive Session。Interactive state／PNG 不建立 published-resource observation；身份與 terminal receipts 由 app owner 和 wire projection 決定。Fluxdep MCP 從 GUI declarations 產生 pipeline tools，interactive replies 附同次 capture 的 MCP image content，文字只保留 MIME／bytes。Lifecycle 與 PNG integrity producer 與現存 MCP callers 共用，server exit 只 disconnect；不重試、不隱藏預讀或另建 operation registry。MCP→GUI remote consumption 由 C13 約束。Dispersive 的 remote 接口仍只讀。Workflows 的 remote 呼叫同一 T1 Window／Controller，提供 native run 控制、表單、records 與 PNG，不另建 Engine。共用機制接收 app 注入的 metadata 和 owner scheduler，不決定實驗或資源政策。精確封套、上限、版本與 method 說明見 [measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
 
 同機跨程序的 MCP 使用 socket；同機並不等於同程序呼叫。GUI 可停用 remote socket，GUI core 不依賴 MCP。MCP `connect` 可接上現有 GUI，或經明確選項啟動 GUI；MCP server 結束只斷開連線，不關閉 GUI。外部 CLI／MCP workflow 擁有 agent 的啟動。GUI 不啟動 agent terminal、不管理可恢復的 agent session，也不注入 bootstrap prompt。Connection authentication 與 method exposure 是兩道不同的邊界：有 token 時 GUI 在 method 前驗證；沒有 token 的 loopback 允許本機可連線程序控制 GUI。隱藏 method 不等於授權機制，現有連線方式不承諾任意跨機部署。
 
@@ -37,6 +37,20 @@ Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數�
 其他 guarded resources 由共用 GUI remote 在 owner 序列中比較每條連線的 seen map。`ResourceObservationPolicy` 擁有 guard／reveal／write tracking 欄位，measure 的 `AgentMethodPolicy` 繼承這些欄位並另加 exposure 與 operation metadata。Shared base 在組裝時拒絕不完整的 method policy mapping，以及 off-main method 的 observation 宣告。Prefix wildcard dependency 比較 current 與 seen 兩份 key 集，包含已刪除的資源。成功的完整讀取才建立宣告的觀察；部分讀取、失敗與回覆編碼失敗不建立新觀察，版本零也不能代替未曾觀察。成功寫入只推進先前看過且版本相符的資源。建立新 tab 的例外只認證存在性，`tab.new` 與 `tab.open_file` 成功回傳 tab ID，且存在版本由 0 變 1 時，GUI 將該資源記入該連線的 seen。Result 等其他 guarded resources 仍須明確完整讀取。Load、library commit 與 writeback 仍保留各自的 context guard。
 
 MCP 不保存第二份 seen，也不用 wire expected-version table 或隱藏預讀解鎖。其他資源的 Stale 須重讀對應完整 snapshot，再由 caller 決定是否重試；event origin 不能授權寫入。Guard 不替代 operation snapshot、互斥及後續提交檢查，生命週期歸 [[0066]]。Timeout、斷線或回覆編碼失敗不證明命令沒有副作用。Reply failure 可撤回該回覆建立的 seen observation，但不回滾 business publication。沒有明確冪等契約時不自動重送。
+
+## Workflows 的同一 run
+
+`scripts/run_workflows_gui.py` 經共用 runtime 組裝獨立 app，具體 owner 在 `zcu_lab.workflows.gui.app`。一份 EMPTY session、一個 top-level T1WorkflowWindow 與固定 WorkflowController 同時服務 GUI 和 RPC。Shared Setup 非 modal 開啟，global qubit alias 由 shared AliasDialog 修改；Prepare forms 以一次固定 capture 替換 defaults，不是 reload。啟動不還原 input 或連硬體。共用 framework 不反向依賴 zcu_lab，依賴方向由 C16 約束；共用 mcp.core 只消費 GUI remote 的依賴邊界由 C13 約束。
+
+`scripts/run_workflows_mcp.py` 啟動 stdio MCP attachment。Workflow tools 由同一份 app method declarations 產生，lifecycle tools 明確 launch／connect／disconnect。MCP 不持 Engine、hardware session、operation registry 或另一份 draft。Start 用當次 defaults 加 path/value batch，不讀 GUI draft；tunables edit 則提交同一 Host 的完整當前 input。Form batch preview 只在呼叫內求值，不提交。Engine journal 只記普通值，expression 留在 FormInput，過渡期不檢查 holder 或 GUI draft revision。
+
+Start／Resume 回 operation receipt，不代表 native acceptance。Pause／Stop 回控制請求，不代表 producer 已停止。Caller 明填 run_id，stale target 拒絕，不重送。一個 run 從 Start 到 terminal 只有一個 operation／handle。Pause 後 worker 返回但 handle 不 settle，保留本程序 RUN lease；Resume 重用原 handle。每次 Start／Resume 都同步讀所有 connected devices，任一失敗拒絕該次 admission，不使用 cached fallback。這是本程序互斥，不是跨程序硬體仲裁。Run 與 operation 分工見 [[0062]]、[[0066]]。
+
+Status 與 records 讀 Engine facts，不從 artists 反推數值。圖名來自同一 Window 的 Plots，PNG 在 owner thread 由 shared renderer 讀原生 Figure。QtPlotHost 只收合 presentation，每次 owner 同步更新 artists，final refresh 立即 flush。MCP 驗證 PNG 並附 image content，不保存 preview 檔或序列化 Figure。Status-only 不渲染，terminal 圖保留到新 Start 或成功 close。Timeout／斷線不取消 run，也不證明命令沒有副作用。
+
+Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<run_id>/`，native acquisition 與圖在條目 Database 的 `workflows/<run_id>/iter/`。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
+
+Source reload S4 與 input 保存還原 U7 尚未實作，由 workflows-p3 承接。S1–S3 有真 in-process simulator 證據，env.set_device driver limits 已驗，cfg.dev setup 半邊仍待上游介面變更後重核。Startup-failure scenario 14 未完成完整驗證。這些軟體證據不代表使用者已接受 CP-B，不授權硬體或真實資料。
 
 ## 事件與錯誤
 

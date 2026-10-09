@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-10，executor-owned terminal admission
+**Last updated:** 2026-10-10，workflows 獨立 app 與 terminal admission
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -168,10 +168,13 @@ entrypoints and call `launch_gui_runtime(...)` directly.
 
 The runtime seam deliberately stops above remote method/domain/session policy:
 `gui.remote` still owns transport, each app owns dispatch/domain handlers, and
-`gui.session` owns measurement-session primitives. All three standalone GUI
-launchers (`measure`, `fluxdep`, `dispersive`) use this runtime
-directly; measurement-session apps keep their domain composition in app behavior
-classes and launcher-provided factories.
+`gui.session` owns measurement-session primitives. All four standalone GUI
+launchers (`measure`, `fluxdep`, `dispersive`, `workflows`) use this runtime
+directly. Measurement-session apps keep their domain composition in app behavior
+classes and launcher-provided factories. The workflows launcher composes
+`zcu_lab.workflows.gui.app.WorkflowsGuiBehavior`: one fresh EMPTY session, one
+T1 Window/Controller, and an optional RPC adapter over those same owners. It opens
+shared Setup non-modally; launch does not restore input or connect hardware.
 
 `gui.launcher` is the import-light CLI edge companion for runtime launchers. It
 declares shared logging/control/project flags and converts parser output into
@@ -361,7 +364,7 @@ state.
 ## Logging (`logging_setup.py`)
 
 `logging_setup.setup_gui_logging` is the single place that decides *how* every
-GUI entry point configures logging. All three `scripts/run_*_gui.py` launchers and
+GUI entry point configures logging. All four `scripts/run_*_gui.py` launchers and
 the measure MCP server (`mcp/measure/server.py:main`) call it instead of each
 rolling their own handler set.
 
