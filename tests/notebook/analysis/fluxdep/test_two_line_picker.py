@@ -29,11 +29,13 @@ def _spectrum(n_dev: int = 60, n_freq: int = 30):
     return sig, devs, freqs
 
 
-def _make_picker(**kwargs) -> TwoLinePicker:
+def _make_picker(
+    *, figure: Figure | None = None, force_magnitude: bool = False
+) -> TwoLinePicker:
     sig, devs, freqs = _spectrum()
-    fig = Figure()
+    fig = Figure() if figure is None else figure
     FigureCanvasAgg(fig)  # headless renderer so tight_layout works
-    return TwoLinePicker(fig, sig, devs, freqs, **kwargs)
+    return TwoLinePicker(fig, sig, devs, freqs, force_magnitude=force_magnitude)
 
 
 # --- pure helpers (re-exported from the core) ------------------------------
@@ -130,7 +132,8 @@ def test_min_distance_clamp_keeps_lines_apart():
     picker.on_press(half0)
     picker.on_move(int0 - 0.001)
     half1, int1 = picker.positions()
-    assert abs(half1 - int1) >= picker._min_flux_dist - 1e-9
+    # The minimum separation is 1% of this spectrum's 10-unit span.
+    assert half1 == pytest.approx(int1 - 0.1)
 
 
 def test_swap_exchanges_positions():
@@ -141,29 +144,29 @@ def test_swap_exchanges_positions():
     assert (half1, int1) == (int0, half0)
 
 
-# --- live mirror-loss refresh (picker-owned throttle timer) ----------------
+# --- mirror-loss refresh through the public release gesture ----------------
 
 
-def test_loss_timer_refreshes_view_at_picked_line():
-    # Dragging only moves the line; the throttle timer is what recomputes the
-    # mirror-loss view at the line's LATEST position. Fire it directly: the loss
-    # subplot's x-zoom must re-centre on the dragged line.
-    picker = _make_picker()
+def test_release_refreshes_loss_view_at_latest_picked_position():
+    fig = Figure()
+    picker = _make_picker(figure=fig)
     half0, _int0 = picker.positions()
-    picker.on_press(half0)  # grab the half line
+    picker.on_press(half0)
     target = half0 + 1.5
-    picker.on_move(target)  # line follows; loss not refreshed yet
-    picker._on_loss_timer()
-    lo, hi = picker._ax_loss.get_xlim()
-    assert abs((lo + hi) / 2 - target) < 1e-6
+    picker.on_move(target)
+    picker.on_release(target, 4.5)
+    loss_axes = next(ax for ax in fig.axes if not picker.is_main_axes(ax))
+    lo, hi = loss_axes.get_xlim()
+    assert (lo + hi) / 2 == pytest.approx(target)
 
 
-def test_loss_refresh_is_noop_without_a_picked_line():
-    picker = _make_picker()
-    # Nothing picked -> scheduling does not arm, and firing is a safe no-op.
-    picker._schedule_loss_refresh()
-    assert picker._loss_refresh_pending is False
-    picker._on_loss_timer()  # must not raise
+def test_release_preserves_loss_view_without_a_picked_line():
+    fig = Figure()
+    picker = _make_picker(figure=fig)
+    loss_axes = next(ax for ax in fig.axes if not picker.is_main_axes(ax))
+    before = (loss_axes.get_xlim(), loss_axes.get_ylim(), loss_axes.get_title())
+    picker.on_release(0.0, 4.5)
+    assert (loss_axes.get_xlim(), loss_axes.get_ylim(), loss_axes.get_title()) == before
 
 
 # --- heavy action: compute (pure) + apply (main-thread mutate) -------------

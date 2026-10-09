@@ -142,52 +142,66 @@ def resolve_measurement_errors(
     finite_mask = np.isfinite(effective)
     effective[finite_mask] = np.maximum(effective[finite_mask], floor[finite_mask])
 
-    nan_mask = np.isnan(effective)
-    bin_fill_mask = np.zeros_like(nan_mask, dtype=bool)
-    global_fill_mask = np.zeros_like(nan_mask, dtype=bool)
-    fallback_fill_mask = np.zeros_like(nan_mask, dtype=bool)
-
-    if np.any(nan_mask) and resolved_policy.nan_policy != "unweighted":
-        global_value, global_used_fallback = _global_fill_value(
-            effective,
-            floor,
-            resolved_policy,
-            name,
-        )
-        if resolved_policy.nan_policy == "global_median":
-            effective[nan_mask] = np.maximum(global_value, floor[nan_mask])
-            if global_used_fallback:
-                fallback_fill_mask[nan_mask] = True
-            else:
-                global_fill_mask[nan_mask] = True
-        elif resolved_policy.nan_policy == "bin_median":
-            if flux_weights is None:
-                raise ValueError("flux_weights are required for bin_median error fill")
-            for bin_index in np.unique(flux_weights.bin_indices[nan_mask]):
-                in_bin = flux_weights.bin_indices == bin_index
-                known = effective[in_bin & np.isfinite(effective)]
-                fill_value = float(np.nanmedian(known)) if known.size else global_value
-                fill_mask = nan_mask & in_bin
-                effective[fill_mask] = np.maximum(fill_value, floor[fill_mask])
-                if known.size:
-                    bin_fill_mask[fill_mask] = True
-                elif global_used_fallback:
-                    fallback_fill_mask[fill_mask] = True
-                else:
-                    global_fill_mask[fill_mask] = True
-        else:
-            raise ValueError(f"unknown error nan policy: {resolved_policy.nan_policy}")
-
-    floor_mask = np.isfinite(effective) & (effective <= floor) & (floor > 0.0)
-    return ErrorResolutionResult(
+    result = ErrorResolutionResult(
         raw_errors=errors_arr,
         effective_errors=effective,
-        nan_mask=nan_mask,
-        bin_fill_mask=bin_fill_mask,
-        global_fill_mask=global_fill_mask,
-        fallback_fill_mask=fallback_fill_mask,
-        floor_mask=floor_mask,
+        nan_mask=np.isnan(effective),
+        bin_fill_mask=np.zeros_like(effective, dtype=bool),
+        global_fill_mask=np.zeros_like(effective, dtype=bool),
+        fallback_fill_mask=np.zeros_like(effective, dtype=bool),
+        floor_mask=np.zeros_like(effective, dtype=bool),
     )
+    if np.any(result.nan_mask) and resolved_policy.nan_policy != "unweighted":
+        _fill_missing_errors(result, floor, resolved_policy, flux_weights, name)
+    result.floor_mask[:] = np.isfinite(effective) & (effective <= floor) & (floor > 0.0)
+    return result
+
+
+def _fill_missing_errors(
+    result: ErrorResolutionResult,
+    floor: NDArray[np.float64],
+    policy: MeasurementErrorPolicy,
+    flux_weights: FluxResidualWeights | None,
+    name: str,
+) -> None:
+    """Fill missing effective errors in place and mark bin/global/fallback provenance.
+
+    Requires a validated policy other than ``unweighted`` and at least one NaN.
+    Raises ValueError when bin filling has no flux weights or no usable fallback.
+    """
+    effective, nan_mask = result.effective_errors, result.nan_mask
+    bin_fill_mask = result.bin_fill_mask
+    global_fill_mask = result.global_fill_mask
+    fallback_fill_mask = result.fallback_fill_mask
+    global_value, global_used_fallback = _global_fill_value(
+        effective,
+        floor,
+        policy,
+        name,
+    )
+    if policy.nan_policy == "global_median":
+        effective[nan_mask] = np.maximum(global_value, floor[nan_mask])
+        if global_used_fallback:
+            fallback_fill_mask[nan_mask] = True
+        else:
+            global_fill_mask[nan_mask] = True
+    elif policy.nan_policy == "bin_median":
+        if flux_weights is None:
+            raise ValueError("flux_weights are required for bin_median error fill")
+        for bin_index in np.unique(flux_weights.bin_indices[nan_mask]):
+            in_bin = flux_weights.bin_indices == bin_index
+            known = effective[in_bin & np.isfinite(effective)]
+            fill_value = float(np.nanmedian(known)) if known.size else global_value
+            fill_mask = nan_mask & in_bin
+            effective[fill_mask] = np.maximum(fill_value, floor[fill_mask])
+            if known.size:
+                bin_fill_mask[fill_mask] = True
+            elif global_used_fallback:
+                fallback_fill_mask[fill_mask] = True
+            else:
+                global_fill_mask[fill_mask] = True
+    else:
+        raise ValueError(f"unknown error nan policy: {policy.nan_policy}")
 
 
 def _validate_error_policy(policy: MeasurementErrorPolicy) -> None:

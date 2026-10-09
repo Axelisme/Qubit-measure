@@ -186,50 +186,20 @@ def fit_t2_noise_params(
     upper_log = np.log(np.array([upper[name] for name in free_names]))
     init_log = np.log(np.array([init_values[name] for name in free_names]))
 
-    def model(
-        current: T2FitParams,
-    ) -> tuple[
-        NDArray[np.float64],
-        NDArray[np.float64],
-        NDArray[np.float64],
-        NDArray[np.float64],
-    ]:
-        values = _params_to_values(current, active_names)
-        gamma_flux = (
-            flux_noise_gamma_phi_per_us(values["A_phi"], data.domega_dflux)
-            if "A_phi" in active_names
-            else np.zeros_like(data.T2s)
-        )
-        gamma_photon = (
-            np.asarray(
-                thermal_photon_gamma_phi_per_us(
-                    values["n_th"],
-                    kappa_over_2pi_mhz=kappa_over_2pi_mhz,
-                    chi_over_2pi_mhz=data.chi_over_2pi_mhz,
-                ),
-                dtype=np.float64,
-            )
-            if "n_th" in active_names
-            else np.zeros_like(data.T2s)
-        )
-        gamma_model = gamma_flux + gamma_photon
-        model_T2s = 1.0 / (1.0 / (2.0 * data.T1s) + gamma_model)
-        return gamma_flux, gamma_photon, gamma_model, model_T2s
-
     def residual_from_params(current: T2FitParams) -> NDArray[np.float64]:
-        _, _, gamma_model, model_T2s = model(current)
+        prediction = _model_t2_noise(current, data, active_names, kappa_over_2pi_mhz)
         return _calc_residuals(
-            gamma_model,
-            model_T2s,
+            prediction.gamma_model,
+            prediction.model_T2s,
             data,
             residual_mode=residual_mode,
         )
 
     if not free_names:
-        gamma_flux, gamma_photon, gamma_model, model_T2s = model(init)
+        prediction = _model_t2_noise(init, data, active_names, kappa_over_2pi_mhz)
         residuals = _calc_residuals(
-            gamma_model,
-            model_T2s,
+            prediction.gamma_model,
+            prediction.model_T2s,
             data,
             residual_mode=residual_mode,
         )
@@ -244,10 +214,10 @@ def fit_t2_noise_params(
             T1_error_resolution=data.T1_error_resolution,
             T2_error_resolution=data.T2_error_resolution,
             flux_weights=data.flux_weights,
-            gamma_phi_flux=gamma_flux,
-            gamma_phi_photon=gamma_photon,
-            model_gamma_phi=gamma_model,
-            model_T2s=model_T2s,
+            gamma_phi_flux=prediction.gamma_flux,
+            gamma_phi_photon=prediction.gamma_photon,
+            model_gamma_phi=prediction.gamma_model,
+            model_T2s=prediction.model_T2s,
             residuals=residuals,
             cost=cost,
             reduced_chi2=reduced_chi2_from_cost(
@@ -296,10 +266,10 @@ def fit_t2_noise_params(
     for name, value in zip(free_names, np.exp(opt.x), strict=True):
         fit_values[name] = float(value)
     fit_params = _values_to_params(fit_values)
-    gamma_flux, gamma_photon, gamma_model, model_T2s = model(fit_params)
+    prediction = _model_t2_noise(fit_params, data, active_names, kappa_over_2pi_mhz)
     residuals = _calc_residuals(
-        gamma_model,
-        model_T2s,
+        prediction.gamma_model,
+        prediction.model_T2s,
         data,
         residual_mode=residual_mode,
     )
@@ -322,10 +292,10 @@ def fit_t2_noise_params(
         T1_error_resolution=data.T1_error_resolution,
         T2_error_resolution=data.T2_error_resolution,
         flux_weights=data.flux_weights,
-        gamma_phi_flux=gamma_flux,
-        gamma_phi_photon=gamma_photon,
-        model_gamma_phi=gamma_model,
-        model_T2s=model_T2s,
+        gamma_phi_flux=prediction.gamma_flux,
+        gamma_phi_photon=prediction.gamma_photon,
+        model_gamma_phi=prediction.gamma_model,
+        model_T2s=prediction.model_T2s,
         residuals=residuals,
         cost=cost,
         reduced_chi2=reduced_chi2_from_cost(
@@ -350,6 +320,46 @@ class _T2FitData:
     T1_error_resolution: ErrorResolutionResult | None
     T2_error_resolution: ErrorResolutionResult | None
     flux_weights: FluxResidualWeights
+
+
+@dataclass(frozen=True)
+class _T2Model:
+    """Flux and photon rates (1/us), their sum, and relaxation-limited T2 (us)."""
+
+    gamma_flux: NDArray[np.float64]
+    gamma_photon: NDArray[np.float64]
+    gamma_model: NDArray[np.float64]
+    model_T2s: NDArray[np.float64]
+
+
+def _model_t2_noise(
+    current: T2FitParams,
+    data: _T2FitData,
+    active_names: tuple[ParameterName, ...],
+    kappa_over_2pi_mhz: float,
+) -> _T2Model:
+    """Calculate active channel rates and total T2 for validated observations."""
+    values = _params_to_values(current, active_names)
+    gamma_flux = (
+        flux_noise_gamma_phi_per_us(values["A_phi"], data.domega_dflux)
+        if "A_phi" in active_names
+        else np.zeros_like(data.T2s)
+    )
+    gamma_photon = (
+        np.asarray(
+            thermal_photon_gamma_phi_per_us(
+                values["n_th"],
+                kappa_over_2pi_mhz=kappa_over_2pi_mhz,
+                chi_over_2pi_mhz=data.chi_over_2pi_mhz,
+            ),
+            dtype=np.float64,
+        )
+        if "n_th" in active_names
+        else np.zeros_like(data.T2s)
+    )
+    gamma_model = gamma_flux + gamma_photon
+    model_T2s = 1.0 / (1.0 / (2.0 * data.T1s) + gamma_model)
+    return _T2Model(gamma_flux, gamma_photon, gamma_model, model_T2s)
 
 
 def _validate_data(
@@ -532,7 +542,9 @@ def _validate_bounds(
     bounds: Mapping[str, tuple[float, float]] | None,
     active_names: tuple[ParameterName, ...],
 ) -> tuple[dict[ParameterName, float], dict[ParameterName, float]]:
-    merged = dict(_DEFAULT_BOUNDS)
+    merged: dict[str, tuple[float, float]] = {
+        name: limits for name, limits in _DEFAULT_BOUNDS.items()
+    }
     if bounds is not None:
         unknown = set(bounds) - set(_PARAMETER_NAMES)
         if unknown:
@@ -542,7 +554,7 @@ def _validate_bounds(
             raise ValueError(
                 f"bounds contain inactive parameter(s): {sorted(inactive)}"
             )
-        merged.update(bounds)  # type: ignore[arg-type]
+        merged.update(bounds)
 
     lower: dict[ParameterName, float] = {}
     upper: dict[ParameterName, float] = {}
