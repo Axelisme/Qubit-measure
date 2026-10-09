@@ -1,6 +1,5 @@
 from collections.abc import Callable, Iterator
 from io import BytesIO
-from typing import cast
 
 import IPython.display
 import matplotlib.pyplot as plt
@@ -19,7 +18,7 @@ from tests.notebook._adapter_fakes import Cfg, Options, RecordingCore
 
 def widget_ids() -> set[str]:
     # Snapshot membership without serializing unrelated widgets' transient state.
-    return set(cast("dict[str, Widget]", Widget.widgets))
+    return set(Widget.widgets)
 
 
 @pytest.fixture(scope="module", autouse=True)
