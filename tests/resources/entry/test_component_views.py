@@ -65,8 +65,8 @@ def test_complex_view_reads_decode_leaves_while_document_reads_remain_raw(
         assert rows["general.ext.center.__complex__"] == [1.25, -2.5]
         if owner == "point":
             point = entry.use_point("working")
-            roles = point.resolve({"sensor": RoleSpec(kind=kind)}, sensor="N1")
-            assert roles.sensor.center == 1.25 - 2.5j
+            roles = point.resolve({"sense": RoleSpec(kind=kind)}, sense="N1")
+            assert roles.sense.center == 1.25 - 2.5j
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
