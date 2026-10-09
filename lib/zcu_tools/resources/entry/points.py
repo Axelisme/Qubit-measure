@@ -28,7 +28,10 @@ class PointView:
     """A bound point's cached working-unit values, independent of setup.
 
     Obtain a view from ResultEntry.use_point or new_point. Component and general
-    reads do no I/O. Unknown components or unset fields raise AttributeError.
+    reads do no I/O. Complex tags read as native complex scalars; manual
+    scalar writes encode through the core codec before schema validation.
+    Package snapshot/document reads retain raw YAML tags. Malformed tag reads
+    propagate the core codec error. Unknown components or unset fields raise AttributeError.
     Assignments and edit() commit only this point's document. Successful field
     writes clear cloned_from even when the value is unchanged. Call refresh()
     to observe disk edits; another view does not change this view's binding.
@@ -70,7 +73,7 @@ class PointView:
 
     @property
     def general(self) -> GeneralView:
-        """Return this point's cached creation time, description and YAML ext."""
+        """Return cached general fields; tagged ext leaves read as native complex."""
         return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
 
     @contextmanager

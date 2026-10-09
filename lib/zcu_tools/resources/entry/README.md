@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-09，角色手動清空
+**Last updated:** 2026-10-09，所有 view 的複數讀寫
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -40,9 +40,9 @@ ComponentSchema 只要求字串 kind。原 model 決定必填欄位、型別、e
 
 ## 視圖與來源
 
-所有 dict 與巢狀 BaseModel 欄位回傳 FieldView。子 view 保留完整路徑，每次讀取都跟隨 owning view 的最新快照。Scalar、null 與 list 回傳獨立 YAML 值，沒有 list index 子 view。Item access 使用單一 literal key，set／meta 使用點分路徑。空 key 或含點號的 key 無法以點分路徑定址，框架不拒絕這些 key，也不提供 escaping。
+SetupView、PointView 與 EditView 共用的 FieldView 將 `{"__complex__": [re, im]}` 葉值讀成 Python complex，RoleView 也沿同一讀取路徑。其他 dict 與巢狀 BaseModel 欄位回傳 FieldView。子 view 保留完整路徑，每次讀取都跟隨 owning view 的最新快照。Scalar、null 與 list 回傳獨立 YAML 值，沒有 list index 子 view，list 內保留原始 YAML 元素。Malformed tag 由唯一的 core.complex_codec 拒絕，不當作一般子 view。Item access 使用單一 literal key，set／meta 使用點分路徑。空 key 或含點號的 key 無法以點分路徑定址，框架不拒絕這些 key，也不提供 escaping。
 
-每次寫入複製完整父元件 candidate，保留 dict 內的 model 型別，再由原完整 model 驗證。Schema 或 body 失敗不污染 draft、來源或磁碟。EditView 的元件、general、子 view 與 set 共用同一份 draft。元件名稱必須是 public identifier，不得遮蔽 view 方法。
+手動 scalar 賦值與 EditView.set 將 native complex 委派 core.complex_codec 編回既有 tag，再走原本的 schema 與 provenance 驗證。Container assignments 仍使用既有 YAML/model 契約。Snapshot、document_value、document_fields 與 ParameterContext 等 non-view 路徑保留 raw tag，文件格式不變。每次寫入複製完整父元件 candidate，保留 dict 內的 model 型別，再由原完整 model 驗證。Schema 或 body 失敗不污染 draft、來源或磁碟。EditView 的元件、general、子 view 與 set 共用同一份 draft。元件名稱必須是 public identifier，不得遮蔽 view 方法。
 
 值與 provenance 在同一文件、同一交易提交。普通賦值、draft set、加入元件與子 view 寫入記錄 manual 來源和 UTC 時間。重新接受同值也更新來源並清除 clone 標記。`meta` 沒有值或來源時回 None，否則回傳獨立 Provenance。Stderr 保存 caller 提供的工作單位數字，不換算。
 

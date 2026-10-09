@@ -628,19 +628,25 @@ class FieldView:
         self._edit = edit
         self._path = path
 
-    def __getattr__(self, name: str) -> YamlValue | FieldView:
-        """Read one field/key; missing fields raise AttributeError, without I/O."""
+    def __getattr__(self, name: str) -> YamlValue | complex | FieldView:
+        """Read a field/key with complex tags decoded, without I/O.
+
+        Missing/unset fields raise AttributeError; malformed tags raise the
+        core codec ValueError or OverflowError.
+        """
         try:
             return self[name]
         except KeyError as cause:
             raise AttributeError(f"{self._path}.{name}: field is not set") from cause
 
-    def __getitem__(self, name: str) -> YamlValue | FieldView:
-        """Read one literal key, returning a live child view for dict/model values.
+    def __getitem__(self, name: str) -> YamlValue | complex | FieldView:
+        """Read a literal key, decoding a complex tag to a native scalar.
 
-        Scalars and lists are independent YAML values. Missing mapping keys raise
-        KeyError; unset null-default model fields raise AttributeError. Empty or
-        dotted keys cannot be addressed by set/meta.
+        Other dict/model values return live child views. Scalars and lists are
+        independent YAML values; lists retain their YAML elements. Malformed
+        tagged mappings raise the core codec ValueError or OverflowError.
+        Missing keys raise KeyError; unset null-default model fields raise
+        AttributeError. Empty or dotted keys cannot be addressed by set/meta.
         """
         value = _read_field(self._model(), name, self._path)
         if isinstance(value, (BaseModel, dict)):
@@ -665,14 +671,19 @@ class FieldView:
             yield child
 
     def __setattr__(self, name: str, value: object) -> None:
-        """Write one field/key through the complete owning model's validation."""
+        """Encode a native complex scalar, then validate the complete owning model."""
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
             self[name] = value
 
     def __setitem__(self, name: str, value: object) -> None:
-        """Copy into an atomic candidate; validation/body failures reject the write."""
+        """Encode a native complex scalar and copy into an atomic candidate.
+
+        The core codec supplies the persisted tag. Original owning-model and
+        source validation still apply; failures reject values and sources.
+        Container assignments retain the existing YAML/model contract.
+        """
         with self._edit(name) as draft:
             _write_field(draft, name, value)
 
@@ -728,9 +739,10 @@ class ComponentView:
 
         model supplies the latest snapshot. edit(relative_path) yields a detached
         candidate, validates it on normal exit, and accepts its value and source.
-        path is the component name. Dict/model reads return live child views
-        using the same callback; scalar/list reads are independent YAML values.
-        No read performs I/O.
+        path is the component name. Tagged mappings decode to native complex;
+        other dict/model reads return live child views using the same callback.
+        Scalars/lists are independent YAML values. No read performs I/O.
+        Malformed tags propagate the core codec error.
         """
         self._model = model
         self._fields = FieldView(model, edit, path)
@@ -740,8 +752,11 @@ class ComponentView:
         """Return the component's declared kind."""
         return self._model().kind
 
-    def __getattr__(self, name: str) -> YamlValue | FieldView:
-        """Read a field; missing/unset fields raise AttributeError."""
+    def __getattr__(self, name: str) -> YamlValue | complex | FieldView:
+        """Read a field with complex tags decoded; missing/unset raises AttributeError.
+
+        Malformed tags propagate the core codec ValueError or OverflowError.
+        """
         return self._fields.__getattr__(name)
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -764,7 +779,7 @@ def _accepted_source(provenance: Provenance, ledger: Path, entry_id: str) -> Yam
 def _set_document_value(
     draft: SetupDocument | PointDocument,
     path: str,
-    value: YamlValue,
+    value: YamlValue | complex,
     *,
     metadata: YamlMap | None,
 ) -> None:
@@ -830,9 +845,16 @@ class EditView:
             yield candidate
 
     def set(
-        self, path: str, value: YamlValue, *, provenance: Provenance | None = None
+        self,
+        path: str,
+        value: YamlValue | complex,
+        *,
+        provenance: Provenance | None = None,
     ) -> None:
         """Accept a logical dotted path and working-unit value into this draft.
+
+        Native complex scalars encode through the core codec before the original
+        schema/source validation; the stored value remains a YAML tag.
 
         Omitted provenance records manual acceptance. An explicit source keeps
         its five fixed fields and clears clone origin; non-manual event ids must
