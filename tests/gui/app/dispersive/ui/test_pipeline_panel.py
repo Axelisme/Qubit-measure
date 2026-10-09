@@ -292,7 +292,9 @@ def test_rf_slider_refreshes_sample_dots_after_debounce(qapp, monkeypatch):
 
     monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", echo_rf)
     panel._on_add_sample()
-    s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
+    artists = panel._tune_artists
+    assert artists is not None
+    s = artists.samples[0]
 
     panel._rf_slider.setValue(165)  # → 5.55 GHz; the debounce timer is (re)started
     assert panel._dot_debounce.isActive()  # recompute is pending, not done yet
@@ -310,7 +312,9 @@ def test_g_change_refreshes_sample_dots_after_debounce(qapp, monkeypatch):
 
     monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", echo_g)
     panel._on_add_sample()
-    s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
+    artists = panel._tune_artists
+    assert artists is not None
+    s = artists.samples[0]
 
     panel._g_slider.setValue(90)  # 90 MHz → g = 0.09 GHz; debounce started
     assert panel._dot_debounce.isActive()
@@ -332,8 +336,11 @@ def test_drag_moves_line_without_recompute_until_drop(qapp, monkeypatch):
 
     monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", echo_flux)
     panel._on_add_sample()
-    s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
-    before = float(np.asarray(s.dot_ground.get_ydata())[0])  # type: ignore[union-attr]
+    artists = panel._tune_artists
+    assert artists is not None
+    s = artists.samples[0]
+    assert s.dot_ground is not None
+    before = float(np.asarray(s.dot_ground.get_ydata())[0])
 
     panel._on_sample_drag(s, 0.3)  # motion: line moves, dot unchanged
     assert s.flux == pytest.approx(0.3)
@@ -349,7 +356,9 @@ def test_drag_moves_line_without_recompute_until_drop(qapp, monkeypatch):
 def test_drag_clamps_flux_to_axis_range(qapp, monkeypatch):
     panel = _tune_panel(qapp, monkeypatch)
     panel._on_add_sample()
-    s = panel._tune_artists.samples[0]  # type: ignore[union-attr]
+    artists = panel._tune_artists
+    assert artists is not None
+    s = artists.samples[0]
     panel._on_sample_drag(s, 5.0)  # way past the 0..1 flux axis
     assert s.flux == pytest.approx(1.0)  # clamped to the axis max
 
@@ -358,18 +367,26 @@ def test_clear_samples_removes_all(qapp, monkeypatch):
     panel = _tune_panel(qapp, monkeypatch)
     panel._on_add_sample()
     panel._on_add_sample()
-    assert len(panel._tune_artists.samples) == 2  # type: ignore[union-attr]
+    artists = panel._tune_artists
+    assert artists is not None
+    assert len(artists.samples) == 2
     panel._on_clear_samples()
-    assert panel._tune_artists.samples == []  # type: ignore[union-attr]
+    artists = panel._tune_artists
+    assert artists is not None
+    assert artists.samples == []
 
 
 def test_fresh_preprocess_drops_sample_lines(qapp, monkeypatch):
     panel = _tune_panel(qapp, monkeypatch)
     panel._on_add_sample()
-    assert len(panel._tune_artists.samples) == 1  # type: ignore[union-attr]
+    artists = panel._tune_artists
+    assert artists is not None
+    assert len(artists.samples) == 1
     # re-initialising the tune view (a new preprocess) starts with no sample lines
     panel._init_tune_view(_preprocess())
-    assert panel._tune_artists.samples == []  # type: ignore[union-attr]
+    artists = panel._tune_artists
+    assert artists is not None
+    assert artists.samples == []
 
 
 # --- auto tune --------------------------------------------------------------
