@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, TypedDict
 from pydantic import JsonValue
 from zcu_tools.experiment.workflows import InvalidRunState, RunMismatch, RunStatus
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
     RemoteControlServiceBase,
@@ -177,7 +178,28 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
         _adapter: RemoteControlServiceBase,
         params: StartParams,
     ) -> WorkflowReply:
-        raise NotImplementedError("JSON batch Start binding")
+        plan_batch = _parse_start_batch(params["plan"])
+        tunables_batch = _parse_start_batch(params["tunables"])
+        try:
+            result = self.ctrl.start(
+                params["run_id"],
+                plan_batch=plan_batch,
+                tunables_batch=tunables_batch,
+            )
+        except InvalidRunState as exc:
+            raise _project_control_error(exc) from exc
+        if isinstance(result, FormErrors):
+            messages: list[FormErrorReply] = [
+                {"path": list(path), "message": message}
+                for path, message in result.messages.items()
+            ]
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "Invalid Start form input",
+                reason="form_errors",
+                data={"messages": messages},
+            )
+        return self._status(_adapter, {})
 
     def _status(
         self,
@@ -242,6 +264,38 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             "operation_id": None if controller is None else controller.operation_id,
             "status": _project_status(status),
         }
+
+
+def _parse_start_batch(
+    batch: JsonValue | list[FormWrite],
+) -> dict[FormWritePath, JsonValue]:
+    """Convert the JSON batch shape only; FormState owns values and field paths."""
+    if not isinstance(batch, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "Start batch must be an array")
+    writes: dict[FormWritePath, JsonValue] = {}
+    for edit in batch:
+        if not isinstance(edit, dict) or set(edit) != {"path", "value"}:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "Start edits require path and value"
+            )
+        path = edit["path"]
+        if not isinstance(path, list) or not path:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, "Start paths must be nonempty arrays"
+            )
+        segments: list[str] = []
+        for segment in path:
+            if not isinstance(segment, str) or not segment:
+                raise RemoteError(
+                    ErrorCode.INVALID_PARAMS,
+                    "Start path segments must be nonempty strings",
+                )
+            segments.append(segment)
+        field_path = tuple(segments)
+        if field_path in writes:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, "Duplicate Start path")
+        writes[field_path] = edit["value"]
+    return writes
 
 
 def _project_status(status: RunStatus | None) -> NativeStatusReply | None:
