@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget
 
 
 class InteractiveFrontendEnv(Protocol):

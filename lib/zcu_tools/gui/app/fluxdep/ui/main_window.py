@@ -28,9 +28,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .analyze_panel import AnalyzePanelWidget, AnalyzeTab
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QCloseEvent
+from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -460,7 +460,7 @@ class MainWindow(QMainWindow):
 
     def _on_reload_clicked(self) -> None:
         """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
-        from qtpy.QtWidgets import QFileDialog  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QFileDialog
 
         from .paths import processed_spectrum_dir
 
@@ -553,7 +553,7 @@ class MainWindow(QMainWindow):
     # --- dialogs ---------------------------------------------------------
 
     def _show_error(self, title: str, message: str) -> None:
-        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QMessageBox
 
         QMessageBox.critical(self, title, message)
 
@@ -564,7 +564,7 @@ class MainWindow(QMainWindow):
         self._show_error(f"{action} failed", friendly_io_message(action, filepath, exc))
 
     def _show_info(self, title: str, message: str) -> None:
-        from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QMessageBox
 
         QMessageBox.information(self, title, message)
 
