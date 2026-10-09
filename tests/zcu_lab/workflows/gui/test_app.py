@@ -487,8 +487,8 @@ def test_failed_window_close_keeps_terminal_admission_closed_and_can_retry(
         assert type(caught).__name__ == "BackgroundAdmissionClosedError"
         assert app.services.device.get_active_device_operations() == ()
     assert app.window.close()
-    with pytest.raises(RuntimeError, match="background") as caught:
+    with pytest.raises(RuntimeError, match="background") as rejected:
         app.services.device.start_connect_device(
             ConnectDeviceRequest("FakeDevice", "after", "none")
         )
-    assert type(caught.value).__name__ == "BackgroundAdmissionClosedError"
+    assert type(rejected.value).__name__ == "BackgroundAdmissionClosedError"

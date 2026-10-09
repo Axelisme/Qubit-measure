@@ -317,15 +317,16 @@ def test_direct_poll_skips_terminal_admission_without_reading_driver(qapp) -> No
         bg,
         runner,
         handles,
-        driver_factory=lambda _type, _address: driver,
+        driver_factory=lambda type_name, address: driver,
         device_registry=FakeDeviceRegistry(),
     )
     try:
         svc.start_connect_device(ConnectDeviceRequest("FakeDevice", "test_dev", "none"))
         deadline = time.monotonic() + 2
-        while not svc.get_connected_devices():
+        while not svc.get_connected_devices() or svc.get_active_device_operations():
             assert time.monotonic() < deadline
             scheduler.pump_once(block=True, timeout=0.02)
+        assert svc.get_connected_devices()
         assert bg.quiesce()
         before = svc.get_device_snapshot("test_dev")
         error: Exception | None = None

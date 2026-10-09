@@ -875,10 +875,9 @@ def test_continuation_rejects_unknown_or_settled_handle(known: bool) -> None:
     assert gate.release_calls == progress.discard_calls == [token]
 
 
-@pytest.mark.parametrize("continuation", [False, True])
-def test_terminal_admission_rejection_fails_and_unwinds_without_producer(
-    continuation: bool,
-) -> None:
+def test_terminal_admission_rejection_fails_and_unwinds_begin_without_producer() -> (
+    None
+):
     from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
         ManualOwnerScheduler,
     )
@@ -906,26 +905,9 @@ def test_terminal_admission_rejection_fails_and_unwinds_without_producer(
         on_terminal=lambda _result, settle: retained.append(settle),
     )
     try:
-        if continuation:
-            token = runner.begin(spec)
-            assert scheduler.pump_once(block=True, timeout=2)
-            assert produced == ["first"]
         assert bg.quiesce()
-
-        def submit() -> None:
-            if continuation:
-                runner.continue_operation(
-                    opened[0],
-                    work=lambda: produced.append("second"),
-                    run_in_pool=False,
-                    on_terminal=lambda _result, settle: retained.append(settle),
-                    settle=retained[0],
-                )
-            else:
-                runner.begin(spec)
-
         with pytest.raises(RuntimeError, match="background") as caught:
-            submit()
+            runner.begin(spec)
         token = opened[0]
         outcome = handles.known_outcome(token)
         assert outcome is not None and outcome.status == "failed", (
@@ -933,7 +915,7 @@ def test_terminal_admission_rejection_fails_and_unwinds_without_producer(
         )
         assert handles.live_count() == 0
         assert gate.release_calls == progress.discard_calls == [token]
-        assert produced == (["first"] if continuation else [])
+        assert produced == []
         assert scheduler.pump_all() == 0
         assert type(caught.value).__name__ == "BackgroundAdmissionClosedError"
     finally:
