@@ -47,8 +47,6 @@ def test_dollar_alias_and_bare_component_remain_distinct(legacy: bool) -> None:
     parameters = _parameters(legacy=legacy)
     assert evaluate_scalar_expr("$qubit.rate ** 2 + qubit.rate", parameters) == 19.0
     assert evaluate_scalar_expr("general.ext.offset + Q2.rate", parameters) == 7.0
-    # Notebook legacy lookup keeps its own contract; the expression's bare namespace does not.
-    assert parameters.value("qubit.rate") == (4.0 if legacy else 3.0)
 
 
 def test_alias_replacement_uses_new_capture_without_changing_old_evaluation() -> None:

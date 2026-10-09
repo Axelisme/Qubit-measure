@@ -23,6 +23,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.jpa_shared import lower_jpa_rf_output_dev
 from zcu_lab.v2._support.measure.schema_builder import (
@@ -65,16 +66,16 @@ class JpaCheckAdapter(
             "are bring-up defaults, not certified safety limits."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' — resonator "
-            "frequency, centring the readout frequency sweep; 'rf_w' — "
-            "linewidth, setting the span as r_f ± 1.5*rf_w; 'res_ch' / "
-            "'ro_ch' — drive / ADC channels; 'timeFly' — cable time-of-flight "
-            "for the trigger offset."
+            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
+            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
+            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
+            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
+            "Missing aliases or calibration leave cfg Invalid; no static fallback."
         ),
         expects_ml=(
-            "Needs a pulse-readout module (e.g. 'readout_rf'); references a "
-            "ModuleLibrary waveform named 'ro_waveform' when present. "
-            "Optionally references a reset module."
+            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
+            "optional $qubit.module.reset. Inline readout uses resonator scalar "
+            "and wiring calibration; module waveforms follow their module source."
         ),
         typical_writeback=(
             "No writeback — the check is a visual diagnostic: compare the two "
@@ -83,11 +84,19 @@ class JpaCheckAdapter(
         recommended=(
             "No analysis options — the Analyze tab shows the pump off/on "
             "comparison figure only. Typical sweep: readout frequency ~101 "
-            "points spanning 1.5 linewidths around 'r_f'. Before every run, "
+            "points spanning 1.5 linewidths around $resonator.freq. Before every run, "
             "confirm the current JPA pump state and review the selected RF "
             "device: the run toggles its output off then on and leaves it ON."
         ),
     )
+
+    def parameter_roles(self) -> dict[str, RoleSpec]:
+        """Declare consumer kinds; bindings come only from the global alias table."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator"),
+            "jpa": RoleSpec("amplifier/jpa"),
+        }
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

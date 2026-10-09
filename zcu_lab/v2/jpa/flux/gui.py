@@ -28,8 +28,8 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.resources.entry import RoleSpec
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_has_key
 from zcu_lab.v2._support.measure.jpa_shared import lower_jpa_flux_dev
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
@@ -51,22 +51,15 @@ _JPA_FLUX_SEED_SPAN = 5.0e-3
 def jpa_flux_sweep_seed(
     ctx: SessionEnv, *, expts: int = _JPA_FLUX_SWEEP_EXPTS
 ) -> SweepValue:
-    """JPA flux sweep seed: centred on ``best_jpa_flux`` when known, else the
-    notebook-derived literal survey around zero.
+    """Store ±5e-3 around $jpa.flux without reading ctx calibration.
 
-    The sweep uses the neutral 'JPA flux device value' quantity of the selected
-    device — the adapter never claims a physical-unit migration.
+    Values use the selected device's working unit, not a unit conversion.
+    Missing aliases/calibration become Invalid during cfg resolution.
     """
-
-    if md_has_key(ctx, "best_jpa_flux"):
-        return SweepValue(
-            start=EvalValue(expr=f"best_jpa_flux - {_JPA_FLUX_SEED_SPAN}"),
-            stop=EvalValue(expr=f"best_jpa_flux + {_JPA_FLUX_SEED_SPAN}"),
-            expts=expts,
-        )
+    del ctx  # Defaults retain expressions; the resource owns source reads.
     return SweepValue(
-        start=-_JPA_FLUX_SEED_SPAN,
-        stop=_JPA_FLUX_SEED_SPAN,
+        start=EvalValue(expr=f"$jpa.flux - {_JPA_FLUX_SEED_SPAN}"),
+        stop=EvalValue(expr=f"$jpa.flux + {_JPA_FLUX_SEED_SPAN}"),
         expts=expts,
     )
 
@@ -113,17 +106,16 @@ class JpaFluxAdapter(
             "safety limits, and the run commands the selected device."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'best_jpa_flux' — a "
-            "previously accepted JPA flux device value, preferred as the sweep "
-            "centre; 'res_ch' / 'ro_ch' — drive / ADC channels; 'timeFly' — "
-            "cable time-of-flight for the trigger offset; 'q_f' / 'qub_ch' — "
-            "qubit frequency / drive channel for the g↔e pi pulse."
+            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
+            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
+            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
+            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
+            "Missing aliases or calibration leave cfg Invalid; no static fallback."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module (typically a calibrated pi "
-            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
-            "'readout_rf'); references a ModuleLibrary waveform named "
-            "'ro_waveform' when present. Optionally references a reset module."
+            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
+            "optional $qubit.module.reset. Inline readout uses resonator scalar "
+            "and wiring calibration; module waveforms follow their module source."
         ),
         typical_writeback=(
             "Proposes the signal-maximizing JPA flux device value into "
@@ -138,6 +130,14 @@ class JpaFluxAdapter(
             "difference."
         ),
     )
+
+    def parameter_roles(self) -> dict[str, RoleSpec]:
+        """Declare consumer kinds; bindings come only from the global alias table."""
+        return {
+            "qubit": RoleSpec("qubit/*"),
+            "resonator": RoleSpec("resonator"),
+            "jpa": RoleSpec("amplifier/jpa"),
+        }
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

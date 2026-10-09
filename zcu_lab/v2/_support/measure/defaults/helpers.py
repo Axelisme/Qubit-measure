@@ -16,7 +16,6 @@ from zcu_tools.gui.cfg import (
     ScalarValue,
 )
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_has_key
 from zcu_lab.v2._support.measure.defaults.module_defaults import (
     NamedModuleValue,
     select_named_module_value,
@@ -47,7 +46,7 @@ def patch_pulse_fields(
     """Patch a pulse CfgSectionValue (flat fields) in-place with sensible values.
 
     Every field accepts a raw scalar (wrapped in DirectValue) or an already-built
-    DirectValue/EvalValue — so a field may be a live md expression (e.g. a
+    DirectValue/EvalValue — so a field may be a canonical calibration expression (e.g. a
     best_ro_* readout seed) as readily as a literal constant.
     """
     waveform_ref = value.fields.get("waveform")
@@ -105,11 +104,9 @@ def make_trig_offset(
     trig_expr: str,
     trig_fallback: float,
 ) -> ScalarValue:
-    """Build a trig_offset ScalarValue: EvalValue if timeFly exists, else DirectValue.
+    """Store trig_expr without a source read; missing calibration becomes Invalid.
 
-    When ``timeFly`` is present the EvalValue carries only ``trig_expr``; lowering
-    resolves it against md at render time.
+    ctx is not consulted. trig_fallback stays accepted but is not substituted.
     """
-    if md_has_key(ctx, "timeFly"):
-        return EvalValue(expr=trig_expr)
-    return DirectValue(trig_fallback)
+    del ctx, trig_fallback  # Preserve callers; resolution owns missing calibration.
+    return EvalValue(expr=trig_expr)

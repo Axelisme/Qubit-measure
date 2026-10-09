@@ -8,7 +8,9 @@ Indexing and arbitrary calls are not part of this language.
 from __future__ import annotations
 
 import ast
+import io
 import math
+import tokenize
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -100,7 +102,7 @@ def evaluate_numeric_expr(expr: str, parameters: ParameterContext | None) -> flo
 
 
 def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scalar:
-    """Evaluate finite arithmetic using captured role/component/general paths.
+    """Evaluate finite arithmetic using $alias.path or concrete/general paths.
 
     None permits pure calculation only; parameter/library references raise
     ExpressionError. Resolve paths through ParameterContext, never the live
@@ -112,15 +114,7 @@ def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scal
     """
     tree = _parse_expression(expr)
     paths: dict[str, Scalar] = {}
-
-    def resolve_path(path: str) -> Scalar:
-        if parameters is None:
-            raise ExpressionError(f"Parameter path {path!r} requires a context")
-        try:
-            value = parameters.value(path)
-        except (AttributeError, ValueError, InvalidInputError) as exc:
-            raise ExpressionError(f"Invalid parameter path {path!r}: {exc}") from exc
-        return _parameter_number(value, path)
+    resolve_path = _parameter_reader(parameters)
 
     # Replace complete dotted paths before simpleeval can perform attribute access.
     class CapturePaths(ast.NodeTransformer):
@@ -191,9 +185,13 @@ def _parse_expression(expr: str) -> ast.Expression:
     if len(expr) > _MAX_TEXT:
         raise ExpressionError("Expression exceeds the text length limit")
     try:
-        tree = ast.parse(expr, mode="eval")
+        python_expr, aliases = _alias_syntax(expr)
+        tree = ast.parse(python_expr, mode="eval")
     except (SyntaxError, RecursionError) as exc:
         raise ExpressionError(f"Invalid expression syntax: {expr!r}") from exc
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and (node.lineno, node.col_offset) in aliases:
+            node.id = aliases[node.lineno, node.col_offset]
     pending: list[tuple[ast.AST, int]] = [(tree, 0)]
     count = 0
     while pending:
@@ -215,6 +213,68 @@ def _parse_expression(expr: str) -> ast.Expression:
             raise ExpressionError("Unsupported expression syntax: function call")
         pending.extend((child, depth + 1) for child in ast.iter_child_nodes(node))
     return tree
+
+
+def _alias_syntax(expr: str) -> tuple[str, dict[tuple[int, int], str]]:
+    """Translate only lexical $alias.path roots; AST handles arithmetic."""
+    lines = expr.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(expr).readline))
+    except (tokenize.TokenError, IndentationError) as exc:
+        raise ExpressionError(f"Invalid expression syntax: {expr!r}") from exc
+    aliases: dict[tuple[int, int], str] = {}
+    characters = list(expr)
+    for index, token in enumerate(tokens):
+        if token.string != "$" or token.type not in (tokenize.OP, tokenize.ERRORTOKEN):
+            continue
+        following = tokens[index + 1 : index + 4]
+        if (
+            len(following) != 3
+            or following[0].type != tokenize.NAME
+            or following[0].start != token.end
+            or following[1].string != "."
+            or following[1].start != following[0].end
+            or following[2].type != tokenize.NAME
+            or following[2].start != following[1].end
+        ):
+            raise ExpressionError("Alias references require adjacent $alias.path")
+        line, column = token.start
+        byte_column = len(lines[line - 1][:column].encode("utf-8"))
+        aliases[line, byte_column] = "$" + following[0].string
+        characters[offsets[line - 1] + column] = "_"
+    return "".join(characters), aliases
+
+
+def _parameter_reader(
+    parameters: ParameterContext | None,
+) -> Callable[[str], Scalar]:
+    """Read aliases from parameters and bare paths from one concrete-only view.
+
+    Construct the bare view lazily once per evaluation. Missing/invalid paths
+    become ExpressionError; source/provider faults retain their classification.
+    """
+    concrete_parameters: ParameterContext | None = None
+
+    def read(path: str) -> Scalar:
+        nonlocal concrete_parameters
+        if parameters is None:
+            raise ExpressionError(f"Parameter path {path!r} requires a context")
+        try:
+            # Bare namespaces must not inherit notebook's legacy role shorthand.
+            if path.startswith("$"):
+                value = parameters.value(path)
+            else:
+                if concrete_parameters is None:
+                    concrete_parameters = parameters.bind_aliases((), {})
+                value = concrete_parameters.value(path)
+        except (AttributeError, ValueError, InvalidInputError) as exc:
+            raise ExpressionError(f"Invalid parameter path {path!r}: {exc}") from exc
+        return _parameter_number(value, path)
+
+    return read
 
 
 def _parameter_number(value: object, path: str) -> Scalar:
