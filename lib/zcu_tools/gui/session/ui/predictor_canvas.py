@@ -21,7 +21,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
-from qtpy.QtWidgets import QVBoxLayout, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QVBoxLayout, QWidget
 
 # How close (in axes-width fraction) a click must be to the marker line to grab it.
 _PICK_TOL_FRAC = 0.02
@@ -340,7 +340,7 @@ class PredictorCurveCanvas(QWidget):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _get_ax(self):  # type: ignore[return]
+    def _get_ax(self):
         """Return the primary axes if the figure has one, else None."""
         axes = self.figure.get_axes()
         return axes[0] if axes else None

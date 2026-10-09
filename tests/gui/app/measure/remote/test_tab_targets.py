@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
+from qtpy.QtWidgets import QApplication, QTabWidget
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
@@ -28,6 +29,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.handlers.tab import (
+    h_tab_get_cfg,
     h_tab_new,
     h_tab_parameter_read,
 )
@@ -384,18 +386,18 @@ def test_role_rebind_clear_publishes_invalid_but_unused_alias_can_run(
     assert observation.status is CfgStatus.INVALID
     assert any("driver" in item.message for item in observation.diagnostics)
     with pytest.raises(CfgPreconditionError):
-        GuardService(application.state).acquire_run_permit(
+        GuardService(application.state).capture_run_inputs(
             tab_id, expected_revision=observation.ref.revision
         )
     unused = control.new_tab("unused_alias")
     control.set_role(unused, "driver", None)
     cfg = application.state.get_tab(unused).cfg
-    permit = GuardService(application.state).acquire_run_permit(
+    inputs = GuardService(application.state).capture_run_inputs(
         unused, expected_revision=cfg.observe().ref.revision
     )
-    assert permit.parameters is not None and permit.parameters.roles is not None
-    assert permit.parameters.roles.names == {}
-    assert permit.accepted_cfg.values == {"rate": 1.0}
+    assert inputs.parameters is not None and inputs.parameters.roles is not None
+    assert inputs.parameters.roles.names == {}
+    assert inputs.accepted_cfg.values == {"rate": 1.0}
 
 
 @pytest.mark.parametrize(
@@ -423,7 +425,7 @@ def test_role_rebind_invalid_choice_has_no_partial_commit(
     assert events == []
 
 
-@pytest.mark.parametrize("busy", ["running", "analyzing", "saving"])
+@pytest.mark.parametrize("busy", ["running", "analyzing"])
 def test_role_rebind_busy_tab_rejects_but_other_idle_tab_can_change(
     application: TargetApplication,
     busy: str,
@@ -435,10 +437,8 @@ def test_role_rebind_busy_tab_rejects_but_other_idle_tab_can_change(
     capture, observation = tab.parameters, tab.cfg.observe()
     if busy == "running":
         state.set_tab_running(tab_id, running=True)
-    elif busy == "analyzing":
-        state.set_tab_analyzing(tab_id, analyzing=True)
     else:
-        state.set_tab_saving_data(tab_id, saving_data=True)
+        state.set_tab_analyzing(tab_id, analyzing=True)
     try:
         with pytest.raises(FailedPreconditionError):
             control.set_role(tab_id, "driver", "Q2")
@@ -452,7 +452,6 @@ def test_role_rebind_busy_tab_rejects_but_other_idle_tab_can_change(
     finally:
         state.set_tab_running(tab_id, running=False)
         state.set_tab_analyzing(tab_id, analyzing=False)
-        state.set_tab_saving_data(tab_id, saving_data=False)
 
 
 def test_role_rebind_reentrant_command_rejects_before_capture_install(
@@ -518,13 +517,13 @@ def test_role_rebind_keeps_historical_panes_and_next_run_snapshot(
     assert tab.run.parameters is birth and tab.run.result is historical_result
     assert tab.analysis.result is historical_analysis
     assert tab.save_context is birth
-    permit = GuardService(application.state).acquire_run_permit(
+    inputs = GuardService(application.state).capture_run_inputs(
         tab_id, expected_revision=tab.cfg.observe().ref.revision
     )
-    assert permit.parameters is tab.parameters and permit.snapshot is not None
-    assert permit.snapshot.roles == {"driver": "Q2", "sense": "R2"}
-    assert permit.snapshot.entry_id == birth.storage.entry_id
-    assert permit.snapshot.point == birth.storage.point
+    assert inputs.parameters is tab.parameters and inputs.snapshot is not None
+    assert inputs.snapshot.roles == {"driver": "Q2", "sense": "R2"}
+    assert inputs.snapshot.entry_id == birth.storage.entry_id
+    assert inputs.snapshot.point == birth.storage.point
     token = application.controller.start_run(tab_id, tab.cfg.observe().ref)
     loop, poll, deadline = QEventLoop(), QTimer(), QTimer()
     poll.timeout.connect(
@@ -540,7 +539,7 @@ def test_role_rebind_keeps_historical_panes_and_next_run_snapshot(
     assert not application.state.is_tab_running(tab_id)
     metadata = tab.run.metadata
     assert metadata is not None and tab.run.source_operation_id == token
-    assert metadata.snapshot == permit.snapshot
+    assert metadata.snapshot == inputs.snapshot
     assert tab.run.parameters is not None and tab.run.parameters.roles is not None
     assert tab.run.parameters.roles.names == metadata.snapshot.roles
 
@@ -581,7 +580,7 @@ def test_inherited_defaults_open_unbound_tab_and_recover_without_focus_rebinding
     assert observation.status is CfgStatus.INVALID
     assert any("driver.module.pi" in item.message for item in observation.diagnostics)
     with pytest.raises(CfgPreconditionError):
-        GuardService(application.state).acquire_run_permit(
+        GuardService(application.state).capture_run_inputs(
             tab_id, expected_revision=observation.ref.revision
         )
     context.set_component_focus("Q2")
@@ -616,11 +615,65 @@ def test_inherited_defaults_open_unbound_tab_and_recover_without_focus_rebinding
     modules = cfg.snapshot_inputs().value.fields["modules"]
     assert isinstance(modules, CfgSectionValue)
     assert isinstance(modules.fields["reset"], ReferenceValue)
-    permit = GuardService(application.state).acquire_run_permit(
+    permit = GuardService(application.state).capture_run_inputs(
         tab_id, expected_revision=cfg.observe().ref.revision
     )
     assert permit.parameters is not None and permit.parameters.roles is not None
     assert permit.parameters.roles.names == {"driver": "QL"}
+
+
+def test_real_window_context_focus_preserves_captured_titles_and_role_facts(
+    application: TargetApplication,
+    qapp: QApplication,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Project committed tab roles in Qt while session focus changes separately."""
+    import logging
+
+    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+
+    caplog.set_level(logging.ERROR)
+    controller = application.controller
+    context = controller.context_control
+    context.new_point(PointCreateRequest("saved", "", CommandOrigin("gui")))
+    for name, sense in (("Q1", "R1"), ("Q2", "R2")):
+        context.add_component(name, "fake/drive/a", {"rate": 10.0, "sense": sense})
+    for name in ("R1", "R2"):
+        context.add_component(name, "fake/sensor", {"rate": 30.0})
+    context.set_component_focus("Q1")
+    window = MainWindow(controller)
+    try:
+        first = controller.tab_control.new_tab("rebind")
+        context.set_component_focus("Q2")
+        second = controller.tab_control.new_tab("rebind")
+        tabs = window.findChild(QTabWidget)
+        assert tabs is not None and tabs.count() == 2
+        assert "driver=Q1" in tabs.tabText(0)
+        assert "sense=R1" in tabs.tabToolTip(0)
+        assert "driver=Q2" in tabs.tabText(1)
+        assert "sense=R2" in tabs.tabToolTip(1)
+        first_capture = application.state.get_tab(first).parameters
+        second_capture = application.state.get_tab(second).parameters
+        for focus in ("Q1", "Q2", None):
+            context.set_component_focus(focus)
+            window.refresh_run_lock(first)
+            assert "driver=Q1" in tabs.tabText(0)
+            assert "sense=R1" in tabs.tabToolTip(0)
+            assert "driver=Q2" in tabs.tabText(1)
+            window.refresh_run_lock(None)
+            assert "driver=Q1" in tabs.tabText(0)
+            assert application.state.get_tab(first).parameters is first_capture
+            assert application.state.get_tab(second).parameters is second_capture
+        controller.tab_control.set_role(first, "driver", "Q2")
+        assert "driver=Q2" in tabs.tabText(0)
+        assert "sense=R2" in tabs.tabToolTip(0)
+        assert "driver=Q2" in tabs.tabText(1)
+        assert not caplog.records, (
+            "Context/focus/role facts must not fail Qt subscribers"
+        )
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
 
 
 def test_auto_partial_alias_creates_invalid_tab_without_focus_fallback(
@@ -646,7 +699,7 @@ def test_auto_partial_alias_creates_invalid_tab_without_focus_fallback(
     assert tab.cfg.observe().status is CfgStatus.INVALID
 
 
-def test_auto_partial_unused_alias_can_acquire_run_permit(
+def test_auto_partial_unused_alias_can_capture_run_inputs(
     application: TargetApplication,
 ) -> None:
     context = application.controller.context_control
@@ -662,12 +715,12 @@ def test_auto_partial_unused_alias_can_acquire_run_permit(
     assert tab.parameters.roles.names == {}
     observation = tab.cfg.observe()
     assert observation.status is CfgStatus.VALID
-    permit = GuardService(application.state).acquire_run_permit(
+    inputs = GuardService(application.state).capture_run_inputs(
         tab_id, expected_revision=observation.ref.revision
     )
-    assert permit.parameters is tab.parameters
-    assert permit.accepted_cfg.values == {"rate": 1.0}
-    assert permit.request.soc is None
+    assert inputs.parameters is tab.parameters
+    assert inputs.accepted_cfg.values == {"rate": 1.0}
+    assert inputs.request.soc is None
 
 
 def test_explicit_target_uses_other_component_without_changing_focus(
@@ -718,12 +771,10 @@ def test_explicit_target_allows_unbound_same_kind_peer_reference(
     assert application.controller.context_control.get_component_focus().name == "Q1"
 
 
-def test_parameter_read_uses_fixed_tab_roles_and_distinguishes_missing_null(
+def test_parameter_read_uses_current_sources_and_temporary_aliases(
     application: TargetApplication,
 ) -> None:
-    tab_id = h_tab_new(
-        application.remote, {"adapter_name": "targeted", "target": "Q2"}
-    )["tab_id"]
+    tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
     assert isinstance(tab_id, str)
     context = application.controller.context_control
     context.set_parameter(context.read_context().target, "Q2.rate", 25.0)
@@ -732,23 +783,22 @@ def test_parameter_read_uses_fixed_tab_roles_and_distinguishes_missing_null(
         application.remote,
         {
             "tab_id": tab_id,
-            "paths": ["driver.rate", "driver.energy_a", "driver.not_supplied"],
+            "target": "Q2",
+            "paths": ["$driver.rate", "$driver.energy_a", "$driver.not_supplied"],
             "module_refs": [],
         },
     )
     assert sources == {
-        "values": {"driver.rate": 20.0, "driver.energy_a": None},
+        "values": {"$driver.rate": 25.0, "$driver.energy_a": None},
         "modules": {},
     }
     assert context.get_component_focus().name == "Q1"
 
 
-def test_parameter_read_resolves_library_role_slots_in_original_capture(
+def test_parameter_read_resolves_library_slots_in_current_temporary_source(
     application: TargetApplication,
 ) -> None:
-    tab_id = h_tab_new(
-        application.remote, {"adapter_name": "targeted", "target": "QL"}
-    )["tab_id"]
+    tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
     context = application.controller.context_control
     context.set_parameter(
         context.read_context().target, "QL.module.pi", "QL.pulses.missing"
@@ -769,11 +819,12 @@ def test_parameter_read_resolves_library_role_slots_in_original_capture(
         {
             "tab_id": tab_id,
             "paths": [],
+            "target": "QL",
             "module_refs": [
-                "driver.module.pi",
-                "driver.pulses.pi",
+                "$driver.module.pi",
+                "$driver.pulses.pi",
                 "QL.pulses.pi",
-                "driver.pulses.later",
+                "$driver.pulses.later",
                 "<Custom:pulse>",
             ],
         },
@@ -781,10 +832,10 @@ def test_parameter_read_resolves_library_role_slots_in_original_capture(
     assert sources == {
         "values": {},
         "modules": {
-            "driver.module.pi": "QL.pulses.pi",
-            "driver.pulses.pi": "QL.pulses.pi",
+            "$driver.module.pi": None,
+            "$driver.pulses.pi": "QL.pulses.pi",
             "QL.pulses.pi": "QL.pulses.pi",
-            "driver.pulses.later": None,
+            "$driver.pulses.later": "QL.pulses.later",
             "<Custom:pulse>": None,
         },
     }
@@ -799,27 +850,63 @@ def test_parameter_read_rejects_unbound_role_instead_of_live_focus_fallback(
     with pytest.raises(RoleResolutionError):
         h_tab_parameter_read(
             application.remote,
-            {"tab_id": tab_id, "paths": ["qubit.freq"], "module_refs": []},
+            {"tab_id": tab_id, "paths": ["$qubit.freq"], "module_refs": []},
         )
 
 
-def test_parameter_read_source_free_tab_accepts_only_empty_queries(
+def test_parameter_read_roleless_tab_can_read_current_concrete_paths(
     application: TargetApplication,
 ) -> None:
     tab_id = h_tab_new(application.remote, {"adapter_name": "roleless"})["tab_id"]
     assert h_tab_parameter_read(
-        application.remote, {"tab_id": tab_id, "paths": [], "module_refs": []}
-    ) == {"values": {}, "modules": {}}
-    for requested in (
-        {"paths": ["driver.rate"]},
-        {"module_refs": ["driver.pulses.pi"]},
+        application.remote,
+        {"tab_id": tab_id, "paths": ["Q2.rate"], "module_refs": ["QL.pulses.pi"]},
+    ) == {"values": {"Q2.rate": 20.0}, "modules": {"QL.pulses.pi": "QL.pulses.pi"}}
+
+
+def test_target_cfg_preview_keeps_publication_and_rejects_stale_ref(
+    application: TargetApplication,
+) -> None:
+    tab_id = application.controller.tab_control.new_tab("targeted")
+    cfg = application.state.get_tab(tab_id).cfg
+    observed = cfg.edit(cfg.observe().ref.revision, (CfgEdit(("rate",), 17.0),))
+    expected = {
+        "cfg_id": str(observed.ref.cfg_id),
+        "revision": str(observed.ref.revision),
+    }
+    preview = h_tab_get_cfg(
+        application.remote, {"tab_id": tab_id, "target": "Q2", "expected": expected}
+    )
+    assert preview["status"] == "Valid"
+    assert preview["cfg_ref"] == expected
+    assert cfg.observe() == observed
+    cfg.edit(observed.ref.revision, (CfgEdit(("rate",), 18.0),))
+    with pytest.raises(RemoteError) as caught:
+        h_tab_get_cfg(
+            application.remote, {"tab_id": tab_id, "target": "Q2", "expected": expected}
+        )
+    assert caught.value.reason == "stale_revision"
+
+
+@pytest.mark.parametrize("target", ["", " ", 2, False])
+def test_target_source_reads_reject_malformed_target(
+    application: TargetApplication, target: object
+) -> None:
+    tab_id = application.controller.tab_control.new_tab("targeted")
+    for handler, query in (
+        (h_tab_parameter_read, {"paths": [], "module_refs": []}),
+        (h_tab_get_cfg, {}),
     ):
         with pytest.raises(RemoteError) as caught:
-            h_tab_parameter_read(
-                application.remote,
-                {"tab_id": tab_id, "paths": [], "module_refs": [], **requested},
-            )
-        assert caught.value.code is ErrorCode.PRECONDITION_FAILED
+            handler(application.remote, {"tab_id": tab_id, "target": target, **query})
+        assert caught.value.reason == "invalid_target"
+
+
+def test_target_preview_requires_expected_ref(application: TargetApplication) -> None:
+    tab_id = application.controller.tab_control.new_tab("targeted")
+    with pytest.raises(RemoteError) as caught:
+        h_tab_get_cfg(application.remote, {"tab_id": tab_id, "target": "Q2"})
+    assert caught.value.code is ErrorCode.INVALID_PARAMS
 
 
 @pytest.mark.parametrize("field", ["paths", "module_refs"])

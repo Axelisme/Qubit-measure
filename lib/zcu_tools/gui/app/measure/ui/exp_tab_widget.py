@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from fnmatch import fnmatchcase
-from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
@@ -31,8 +29,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
@@ -95,9 +93,9 @@ class TabActions(Protocol):
 
     def apply_post_writeback(self, tab_id: str) -> None: ...
 
-    def save_data(self, tab_id: str) -> None: ...
-
-    def save_image(self, tab_id: str, key: ArtifactKey) -> None: ...
+    def save_artifact(self, tab_id: str, ref: ArtifactRef) -> None:
+        """Save every member of one declared artifact."""
+        ...
 
     def save_all(self, tab_id: str) -> None: ...
 
@@ -274,14 +272,6 @@ class ExpTabWidget(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
         root_layout.setSpacing(2)
-
-        self._roles_widget = QWidget(self)
-        self._roles_widget.setObjectName("tab-roles")
-        self._roles_layout = QVBoxLayout(self._roles_widget)
-        self._roles_layout.setContentsMargins(0, 0, 0, 0)
-        self._role_controls: dict[str, tuple[QComboBox, QLabel, QPushButton]] = {}
-        self._roles_widget.hide()
-        root_layout.addWidget(self._roles_widget)
 
         # --- main content area: [splitter] ---
         self._content_widget = QWidget()
@@ -480,7 +470,7 @@ class ExpTabWidget(QWidget):
 
     def _build_data_panel(self) -> None:
         # ── Tab: Data (always) — save center ──────────────────────
-        self._save_center = ArtifactSaveCenter(self.tab_id, self._capabilities)
+        self._save_center = ArtifactSaveCenter(self._capabilities)
         self._save_center.bind_comment_changed(self._on_comment_changed)
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
@@ -708,7 +698,6 @@ class ExpTabWidget(QWidget):
                 f"widget {self._capabilities!r} vs snapshot {snapshot.capabilities!r}"
             )
         self.cfg_form.attach(self._cfg)
-        self.refresh_roles(snapshot)
         if (
             self._has_analysis
             and snapshot.analysis is not None
@@ -731,8 +720,6 @@ class ExpTabWidget(QWidget):
                 raise RuntimeError(
                     f"tab {self.tab_id!r} received post params but does not support post-analysis"
                 )
-        assert snapshot.paths is not None
-        self.set_data_path(snapshot.paths.data.path or "")
         self.update_interaction_state(snapshot)
         self._bind_to_controller(actions)
 
@@ -795,18 +782,6 @@ class ExpTabWidget(QWidget):
         )
         self.post_writeback_widget.populate(items, values)
         self.post_writeback_section.setVisible(len(items) > 0)
-
-    def set_data_path(self, data_path: str) -> None:
-        self._save_center.set_data_path(data_path)
-
-    def set_image_path(self, key: ArtifactKey, path: str) -> None:
-        self._save_center.set_image_path(key, path)
-
-    def get_data_path(self) -> str:
-        return self._save_center.get_data_path()
-
-    def get_image_path(self, key: ArtifactKey) -> str:
-        return self._save_center.path_for(key)
 
     def get_comment(self) -> str:
         return self._save_center.get_comment()
@@ -1091,90 +1066,6 @@ class ExpTabWidget(QWidget):
         # Guide
         self._right_stack.setCurrentWidget(self._right_placeholder)
 
-    def refresh_roles(self, snapshot: TabSnapshot) -> None:
-        """Render ordered declarations from this fixed capture without commands.
-
-        Role selectors use object names role-<alias>, itemData component/None
-        and kind-matched captured components. Manual labels use
-        role-manual-<alias>; reset buttons role-reset-<alias> name birth focus
-        (or explicitly no birth focus). Roleless tabs hide the row. Busy state
-        comes only from snapshot.interaction. User activation invokes tab_control.
-        """
-        parameters = snapshot.parameters
-        roles = parameters.roles if parameters is not None else None
-        if parameters is None or roles is None or not roles.declarations:
-            self._roles_widget.hide()
-            return
-        if snapshot.interaction is None:
-            raise RuntimeError(
-                f"render snapshot for tab {self.tab_id!r} has no interaction"
-            )
-        components = parameters.document().components
-        for alias, spec in roles.declarations.items():
-            if alias not in self._role_controls:
-                self._build_role_row(alias)
-            selector, manual, reset = self._role_controls[alias]
-            selector.clear()
-            selector.addItem("（空）", None)
-            for name, component in components.items():
-                if fnmatchcase(component.kind, spec.kind):
-                    selector.addItem(name, name)
-            selector.setCurrentIndex(selector.findData(roles.names.get(alias)))
-            manual.setVisible(alias in roles.explicit)
-            reset.setText(
-                f"回到開啟時焦點 {roles.focus}"
-                if roles.focus is not None
-                else "回到開啟時設定（沒有開啟時焦點）"
-            )
-        interaction = snapshot.interaction
-        self._roles_widget.setEnabled(
-            not (
-                interaction.is_running
-                or interaction.is_analyzing
-                or interaction.is_saving_data
-            )
-        )
-        self._roles_widget.show()
-
-    def _build_role_row(self, alias: str) -> None:
-        row = QHBoxLayout()
-        row.addWidget(QLabel(alias))
-        selector = QComboBox()
-        selector.setObjectName(f"role-{alias}")
-        row.addWidget(selector, stretch=1)
-        manual = QLabel("手動指定")
-        manual.setObjectName(f"role-manual-{alias}")
-        row.addWidget(manual)
-        reset = QPushButton()
-        reset.setObjectName(f"role-reset-{alias}")
-        row.addWidget(reset)
-        self._roles_layout.addLayout(row)
-        self._role_controls[alias] = selector, manual, reset
-        selector.activated.connect(partial(self._on_role_activated, alias, selector))
-        reset.clicked.connect(lambda _checked=False: self._on_role_reset(alias))
-
-    def _on_role_activated(self, role: str, selector: QComboBox, index: int) -> None:
-        component = selector.itemData(index)
-        if component is not None and not isinstance(component, str):
-            raise TypeError("Role selector data must be a component name or None")
-        self._on_role_selected(role, component)
-
-    def _on_role_selected(self, role: str, component: str | None) -> None:
-        try:
-            self._ctrl.tab_control.set_role(self.tab_id, role, component)
-        except Exception as exc:
-            logger.exception("Role selection failed: tab=%s role=%s", self.tab_id, role)
-            self.refresh_roles(self._ctrl.tab_control.get_tab_snapshot(self.tab_id))
-            self._dialog_presenter.critical(self, "Role selection failed", str(exc))
-
-    def _on_role_reset(self, role: str) -> None:
-        try:
-            self._ctrl.tab_control.reset_role(self.tab_id, role)
-        except Exception as exc:
-            logger.exception("Role reset failed: tab=%s role=%s", self.tab_id, role)
-            self.refresh_roles(self._ctrl.tab_control.get_tab_snapshot(self.tab_id))
-            self._dialog_presenter.critical(self, "Role reset failed", str(exc))
-
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
         assert snapshot.interaction is not None
         if snapshot.capabilities is None:
@@ -1188,7 +1079,7 @@ class ExpTabWidget(QWidget):
             )
         state = snapshot.interaction
         capabilities = snapshot.capabilities
-        local_busy = state.is_running or state.is_analyzing or state.is_saving_data
+        local_busy = state.is_running or state.is_analyzing
         # Status-free action row (A5): no readiness text, only button enablement + tooltip.
         if state.is_running:
             self.reset_btn.setVisible(False)
@@ -1241,7 +1132,6 @@ class ExpTabWidget(QWidget):
         idle = not local_busy
         self.cfg_form.set_editing_enabled(idle)
         self.reset_btn.setEnabled(idle)
-        self._roles_widget.setEnabled(idle)
 
         # Capability is already enforced by conditional construction; no tab visibility toggling.
         # Branch inner controls only for present panes.
@@ -1278,24 +1168,8 @@ class ExpTabWidget(QWidget):
         def validity_cb(_valid: bool) -> None:
             actions.refresh_interaction(tab_id)
 
-        def data_path_cb(_text: str) -> None:
-            with self._save_center.retain_local_path_edit(
-                ArtifactKey(ArtifactKind.DATA)
-            ):
-                data_path = self.get_data_path()
-                self._ctrl.update_tab_data_path(
-                    tab_id, data_path if data_path else None
-                )
-                self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
-
-        def image_path_cb(key: ArtifactKey, text: str) -> None:
-            with self._save_center.retain_local_path_edit(key):
-                self._ctrl.update_tab_image_path(tab_id, key, text if text else None)
-                self.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
-
         self.cfg_form.validity_changed.connect(validity_cb)
 
-        self._save_center.bind_data_path_changed(data_path_cb)
         if self._has_analysis:
             self.analyze_form.params_changed.connect(
                 lambda instance: self._ctrl.update_tab_analyze_param_instance(
@@ -1308,7 +1182,6 @@ class ExpTabWidget(QWidget):
                     tab_id, instance
                 )
             )
-        self._save_center.bind_image_path_changed(image_path_cb)
         self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
         self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
         if self._capabilities.load_data:
@@ -1319,18 +1192,16 @@ class ExpTabWidget(QWidget):
             self.writeback_widget.apply_requested.connect(
                 lambda: actions.apply_writeback(tab_id)
             )
-            self._save_center.bind_image_save(
-                lambda key: actions.save_image(tab_id, key)
-            )
         if self._has_post:
             self.post_analyze_btn.clicked.connect(lambda: actions.post_analyze(tab_id))
             self.post_writeback_widget.apply_requested.connect(
                 lambda: actions.apply_post_writeback(tab_id)
             )
-        self._save_center.bind_save_data(lambda: actions.save_data(tab_id))
+        self._save_center.bind_artifact_save(
+            lambda ref: actions.save_artifact(tab_id, ref)
+        )
 
         self._validity_cb = validity_cb
-        self._data_path_cb = data_path_cb
 
     def _on_progress_changed(self) -> None:
         models = tuple(m for _, m in self._progress_control.progress_bars(self.tab_id))
@@ -1341,8 +1212,6 @@ class ExpTabWidget(QWidget):
         if self._actions is None:
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
         self.cfg_form.validity_changed.disconnect(self._validity_cb)
-        self._save_center.unbind_data_path_changed(self._data_path_cb)
-        self._save_center.unbind_image_path_changed()
         self._progress_unsub()
         self.cfg_form.detach()
         self._actions = None

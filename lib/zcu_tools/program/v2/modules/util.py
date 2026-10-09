@@ -14,10 +14,9 @@ def get_fclk(prog: QickProgramV2, gen_ch: int | None = None, ro_ch: int | None =
         raise RuntimeError("can't specify both gen_ch and ro_ch!")
     if gen_ch is not None:
         return prog.soccfg["gens"][gen_ch]["f_fabric"]
-    elif ro_ch is not None:
+    if ro_ch is not None:
         return prog.soccfg["readouts"][ro_ch]["f_output"]
-    else:
-        return prog.soccfg["tprocs"][0]["f_time"]
+    return prog.soccfg["tprocs"][0]["f_time"]
 
 
 def round_timestamp(
@@ -47,7 +46,7 @@ def calc_max_length(
 ) -> float | QickParam:
     if length1 > length2:
         return length1
-    elif length1 < length2:
+    if length1 < length2:
         return length2
 
     # Equal lengths. For two plain floats this is genuinely unambiguous -- both
@@ -91,15 +90,14 @@ def merge_max_length(*args: float | QickParam) -> float | QickParam:
     ) -> float | QickParam | None:
         if length1 > length2:
             return length1
-        elif length1 < length2:
+        if length1 < length2:
             return length2
         # Equal: collapse two equal plain floats unambiguously (see
         # calc_max_length); keep both only when a QickParam makes the
         # cross-iteration relationship ambiguous.
-        elif not isinstance(length1, QickParam) and not isinstance(length2, QickParam):
+        if not isinstance(length1, QickParam) and not isinstance(length2, QickParam):
             return length1
-        else:
-            return None
+        return None
 
     while True:
         prev_num = len(merge_list)

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 from zcu_tools.gui.app.measure.services.arb_waveform import resolve_arb_waveform_root
 from zcu_tools.gui.expected_error import (
@@ -12,7 +10,7 @@ from zcu_tools.gui.session.types import SessionEnv
 
 
 def test_resolve_arb_waveform_root_without_project_is_failed_precondition() -> None:
-    ctx = SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
+    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
 
     with pytest.raises(
         FailedPreconditionError,

@@ -12,8 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QComboBox,
-    QFileDialog,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -23,15 +22,15 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
-from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
-from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 from zcu_tools.resources.entry import RoleResolutionError
 
@@ -41,12 +40,7 @@ from .main_window_activity import activity_marker_presentation
 from .main_window_events import MainWindowEventCoordinator
 from .main_window_tab_list import configure_tab_bar
 from .main_window_toolbar import MainWindowToolbar
-
-_SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
-    ArtifactKind.DATA: "Save data failed",
-    ArtifactKind.ANALYSIS: "Save image failed",
-    ArtifactKind.POST_ANALYSIS: "Save post-analysis image failed",
-}
+from .run_load_dialog import RunLoadDialog
 
 logger = logging.getLogger(__name__)
 
@@ -91,24 +85,18 @@ class _MainWindowTabActions:
     def apply_post_writeback(self, tab_id: str) -> None:
         self._window.apply_tab_writeback(tab_id, pane="post_analysis")
 
-    def save_data(self, tab_id: str) -> None:
-        self._window.save_tab_data(tab_id)
-
-    def save_image(self, tab_id: str, key: ArtifactKey) -> None:
-        self._window.save_tab_image(tab_id, key)
+    def save_artifact(self, tab_id: str, ref: ArtifactRef) -> None:
+        if ref == ArtifactRef("run", "measurement_data"):
+            self._window.save_tab_data(tab_id)
+        else:
+            self._window.save_tab_artifact(tab_id, ref)
 
     def save_all(self, tab_id: str) -> None:
         self._window.save_tab_artifacts(tab_id)
 
 
 class MainWindow(QMainWindow):
-    """Present session focus and each tab's immutable role capture.
-
-    The always-visible component_focus combo projects context_control focus.
-    Selection calls the owner; it affects only newly created tabs. Tab titles
-    and tooltips use their own TabSnapshot.parameters.roles, never live focus.
-    Expected role failures during create_tab are shown without creating a tab.
-    """
+    """Present current session sources and pane-owned historical results."""
 
     def __init__(
         self,
@@ -174,7 +162,7 @@ class MainWindow(QMainWindow):
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
     def _build_context_bar(self) -> QHBoxLayout:
-        """Assemble the persistent entry/point/focus/predictor controls."""
+        """Assemble the persistent entry/point/predictor controls."""
         ctx_bar = QHBoxLayout()
         ctx_bar.addWidget(QLabel("Entry:"))
         self._entry_label = QLabel("No entry open")
@@ -184,59 +172,12 @@ class MainWindow(QMainWindow):
         self._point_label = QLabel("No point selected")
         self._point_label.setObjectName("current_point")
         ctx_bar.addWidget(self._point_label)
-        ctx_bar.addWidget(QLabel("Focus:"))
-        self._focus_combo = QComboBox(self)
-        self._focus_combo.setObjectName("component_focus")
-        self._focus_combo.currentIndexChanged.connect(self._on_focus_selected)
-        ctx_bar.addWidget(self._focus_combo)
         ctx_bar.addSpacing(24)
         ctx_bar.addWidget(QLabel("Predictor:"))
         self._predictor_label = QLabel("none")
         ctx_bar.addWidget(self._predictor_label)
         ctx_bar.addStretch()
-        self._render_component_focus()
         return ctx_bar
-
-    def _on_focus_selected(self, index: int) -> None:
-        """Translate a combo selection into the session owner's focus command."""
-        if index < 0:
-            return
-        name = self._focus_combo.itemData(index)
-        if name is not None and not isinstance(name, str):
-            raise TypeError("Component focus item data must be a name or None")
-        self._ctrl.context_control.set_component_focus(name)
-
-    def _render_component_focus(self) -> None:
-        """Project all owner options in kind groups without sending commands."""
-        focus = self._ctrl.context_control.get_component_focus()
-        signals_blocked = self._focus_combo.blockSignals(True)
-        try:
-            self._focus_combo.clear()
-            self._focus_combo.addItem("(none)", None)
-            previous_kind: str | None = None
-            for option in sorted(
-                focus.components, key=lambda option: (option.kind, option.name)
-            ):
-                if previous_kind != option.kind:
-                    self._focus_combo.insertSeparator(self._focus_combo.count())
-                self._focus_combo.addItem(f"{option.name} ({option.kind})", option.name)
-                previous_kind = option.kind
-            self._focus_combo.setCurrentIndex(self._focus_combo.findData(focus.name))
-        finally:
-            self._focus_combo.blockSignals(signals_blocked)
-
-    @staticmethod
-    def _captured_tab_label(adapter_name: str, snapshot: TabSnapshot) -> str:
-        """Format only this tab's fixed role names, never the current focus."""
-        roles = snapshot.parameters.roles if snapshot.parameters is not None else None
-        if roles is None:
-            return adapter_name
-        return " · ".join(
-            [
-                adapter_name,
-                *(f"{role}={roles.names.get(role, '')}" for role in roles.declarations),
-            ]
-        )
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         self._events.close()
@@ -249,7 +190,7 @@ class MainWindow(QMainWindow):
         # Construct the tab from the same immutable capabilities snapshot used
         # for its initial attach, so optional panes never need dynamic rebuilds.
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
-        tab_label = self._captured_tab_label(adapter_name, snapshot)
+        tab_label = adapter_name
         caps = snapshot.capabilities
         if caps is None:
             raise RuntimeError(
@@ -366,25 +307,6 @@ class MainWindow(QMainWindow):
                 list(current.post_analysis.writeback_items)
             )
 
-    def refresh_tab_save_paths(
-        self, tab_id: str, snapshot: TabSnapshot | None = None
-    ) -> None:
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        assert current.paths is not None
-        assert current.capabilities is not None
-        tab_w.set_data_path(current.paths.data.path or "")
-        for name, path in current.paths.analysis_images.items():
-            tab_w.set_image_path(
-                ArtifactKey(ArtifactKind.ANALYSIS, name), path.path or ""
-            )
-        for name, path in current.paths.post_analysis_images.items():
-            tab_w.set_image_path(
-                ArtifactKey(ArtifactKind.POST_ANALYSIS, name), path.path or ""
-            )
-
     def refresh_tab_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
@@ -451,24 +373,6 @@ class MainWindow(QMainWindow):
         # the run's terminal path drops the container and notifies the tab's
         # listener, which re-renders to empty.
 
-    def refresh_tab_roles(self, tab_id: str, snapshot: TabSnapshot) -> None:
-        """Render committed roles/title from one snapshot, retaining the Run marker.
-
-        Does not refresh results, drafts, figures or selected panes.
-        """
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        tab_w.refresh_roles(snapshot)
-        index = self._tabs.indexOf(tab_w)
-        if index >= 0:
-            self._tabs.setTabText(
-                index, self._captured_tab_label(snapshot.adapter_name, snapshot)
-            )
-            self._set_tab_activity_marker(
-                tab_id, active=self._ctrl.get_running_tab_id() == tab_id
-            )
-
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
@@ -478,16 +382,11 @@ class MainWindow(QMainWindow):
         tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_context_panel(self) -> None:
-        """Project entry, published point and focus without changing captures.
+        """Project current entry and point without submitting source commands.
 
-        Entry shows the owner's entry name or "No entry open". Point shows the
-        published SavedPoint name, "Draft (in-memory)" for memory parameters, or
-        "No point selected" when parameters are absent, never a focus-derived
-        qubit name. Focus options include all components grouped by kind.
-        Empty/ambiguous focus remains unselected; rendering must not submit a
-        focus command or change tab titles. Refresh tab interaction state too.
+        Show the SavedPoint name, "Draft (in-memory)", or "No point selected".
+        Refresh tab interaction state without changing titles or result panes.
         """
-        self._render_component_focus()
         entry = self._ctrl.context_control.get_entry_info()
         parameters = self._ctrl.get_session_env().parameters
         target = parameters.target if parameters is not None else None
@@ -641,13 +540,10 @@ class MainWindow(QMainWindow):
         return self._ctrl.get_adapter_names()
 
     def create_tab(self, adapter_name: str) -> None:
-        """Create from focus, allowing unresolved automatic aliases.
+        """Create a registered adapter tab using current global aliases.
 
-        adapter_name is a registered measure adapter key. Automatic ambiguity
-        leaves roles unbound and still creates the tab. Invalid explicit choices
-        or dangling/wrong-kind references appear through the dialog presenter
-        and leave the tab list unchanged.
-        Other failures propagate to the existing UI error boundary.
+        Unbound aliases permit creation with Invalid cfg. Role resolution
+        failures are shown through the presenter; other failures propagate.
         """
         try:
             self._ctrl.new_tab(adapter_name)
@@ -847,14 +743,26 @@ class MainWindow(QMainWindow):
         logger.info("load_tab_data_dialog: tab_id=%r", tab_id)
         if self._resolve_tab_widget(tab_id, "load_tab_data_dialog") is None:
             return
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Load data file",
-            self._load_data_dialog_start_dir(),
-            "HDF5 files (*.hdf5 *.h5);;All files (*)",
-        )
-        if not path:
+        try:
+            runs = self._ctrl.save_control.list_saved_runs()
+        except Exception as exc:
+            logger.exception("Ledger run listing failed: tab_id=%r", tab_id)
+            self.show_error_dialog("Load data failed", str(exc))
             return
+        dialog = RunLoadDialog(
+            runs,
+            initial_point=self._ctrl.get_session_env().active_label,
+            start_directory=self._load_data_dialog_start_dir(),
+            parent=self,
+        )
+        try:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            path = dialog.selected_path()
+        finally:
+            dialog.deleteLater()
+        if path is None:
+            raise RuntimeError("Accepted Load Data dialog did not select a path")
         try:
             outcome = self._ctrl.load_tab_result(tab_id, path)
         except LoadDataError as exc:
@@ -902,47 +810,47 @@ class MainWindow(QMainWindow):
 
     # -- centralized save dispatch (S2) --------------------------
 
-    def _present_save_error(self, kind: ArtifactKind, exc: Exception) -> None:
-        title = _SAVE_ERROR_TITLES.get(kind)
-        if title is None:
-            raise RuntimeError(f"unknown artifact {kind!r}")
-        self.show_error_dialog(title, str(exc))
-
     def _dispatch_artifact_save(
-        self, tab_w: ExpTabWidget, kind: ArtifactKind, save_call: Callable[[], object]
-    ) -> bool:
-        """Present operational errors; render the State-owned terminal outcome."""
+        self, tab_w: ExpTabWidget, save_call: Callable[[], object]
+    ) -> None:
+        """Present synchronous Save errors and refresh the committed output state."""
         try:
             save_call()
-        except (ExpectedError, OSError, ValueError) as exc:
+        except Exception as exc:
+            logger.exception("Synchronous Save failed for tab %r", tab_w.tab_id)
             self.refresh_tab_interaction(tab_w.tab_id)
-            self._present_save_error(kind, exc)
-            return False
+            self.show_error_dialog("Save failed", str(exc))
+            return
         self.refresh_tab_interaction(tab_w.tab_id)
-        return True
 
     def save_tab_data(self, tab_id: str) -> None:
+        """Execute synchronous native data Save using the displayed annotation and GUI origin.
+
+        Unknown tab IDs leave the UI unchanged. Guard/submission failures use
+        the existing save feedback path; the Save report is complete on return.
+        """
         logger.info("save_tab_data: tab_id=%r", tab_id)
         tab_w = self._resolve_tab_widget(tab_id, "save_tab_data")
         if tab_w is None:
             return
-        # Path/comment read is invariant; let exception propagate (Fast Fail)
-        path = tab_w.get_data_path() or None
         comment = tab_w.get_comment()
         self._dispatch_artifact_save(
             tab_w,
-            ArtifactKind.DATA,
-            lambda: self._ctrl.save_data(tab_id, path, comment=comment),
+            lambda: self._ctrl.save_control.save_data(
+                tab_id, comment=comment, origin=CommandOrigin("gui")
+            ),
         )
 
-    def save_tab_image(self, tab_id: str, key: ArtifactKey) -> None:
-        logger.info("save_tab_image: tab_id=%r key=%r", tab_id, key)
-        tab_w = self._resolve_tab_widget(tab_id, "save_tab_image")
+    def save_tab_artifact(self, tab_id: str, ref: ArtifactRef) -> None:
+        """Submit every member of a declared artifact with GUI attribution."""
+        tab_w = self._resolve_tab_widget(tab_id, "save_tab_artifact")
         if tab_w is None:
             return
-        path = tab_w.get_image_path(key) or None
         self._dispatch_artifact_save(
-            tab_w, key.kind, lambda: self._ctrl.save_image(tab_id, key, path)
+            tab_w,
+            lambda: self._ctrl.save_control.save_artifacts(
+                tab_id, artifacts=(ref,), origin=CommandOrigin("gui")
+            ),
         )
 
     def save_tab_artifacts(self, tab_id: str) -> None:
@@ -950,11 +858,12 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "save_tab_artifacts")
         if tab_w is None:
             return
-        try:
-            self._ctrl.save_artifacts(tab_id)
-        except (ExpectedError, OSError, ValueError) as exc:
-            self.show_error_dialog("Save failed", str(exc))
-        self.refresh_tab_interaction(tab_id)
+        self._dispatch_artifact_save(
+            tab_w,
+            lambda: self._ctrl.save_control.save_artifacts(
+                tab_id, comment=tab_w.get_comment(), origin=CommandOrigin("gui")
+            ),
+        )
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         tab_id = payload.tab_id

@@ -75,12 +75,12 @@ class AdditionalMacroMixin(AsmV2):
     ):
         if self._delay_disabled:
             raise RuntimeError("Delay macros are currently disabled.")
-        return super().delay_auto(t, gens, ros, tag)  # type: ignore
+        return super().delay_auto(t, gens, ros, tag)  # pyright: ignore[reportArgumentType]
 
     def delay(self, t: float | QickParam, tag: str | None = None):
         if self._delay_disabled:
             raise RuntimeError("Delay macros are currently disabled.")
-        return super().delay(t, tag)  # type: ignore
+        return super().delay(t, tag)
 
     def delay_reg_auto(self, time_reg: str, gens=True, ros=True) -> None:
         """Auto-align to timeline, then increment by runtime cycles from a register."""
@@ -234,7 +234,7 @@ class AdditionalMacroMixin(AsmV2):
 
         while len(self._temp_regs) < total:
             reg_name = f"temp_reg_{len(self._temp_regs)}"
-            self.add_reg(reg_name)  # type: ignore
+            self.add_reg(reg_name)  # pyright: ignore[reportAttributeAccessIssue]
             self._temp_regs.append(reg_name)
 
         self._reg_num_stack.append(total)
@@ -247,7 +247,7 @@ class AdditionalMacroMixin(AsmV2):
 
     def wait(self, t: float | QickParam, tag: str | None = None) -> None:
         self.meta_macro("DISABLE_OPT_START", "")
-        super().wait(t=t, tag=tag)  # type: ignore
+        super().wait(t=t, tag=tag)
         self.meta_macro("DISABLE_OPT_END", "")
 
     def wait_auto(
@@ -259,12 +259,12 @@ class AdditionalMacroMixin(AsmV2):
         no_warn: bool = False,
     ) -> None:
         self.meta_macro("DISABLE_OPT_START", "")
-        super().wait_auto(t=t, gens=gens, ros=ros, tag=tag, no_warn=no_warn)  # type: ignore
+        super().wait_auto(t=t, gens=gens, ros=ros, tag=tag, no_warn=no_warn)  # pyright: ignore[reportArgumentType]
         self.meta_macro("DISABLE_OPT_END", "")
 
     def end(self) -> None:
         self.meta_macro("DISABLE_OPT_START", "")
-        super().end()  # type: ignore
+        super().end()
         self.meta_macro("DISABLE_OPT_END", "")
 
 

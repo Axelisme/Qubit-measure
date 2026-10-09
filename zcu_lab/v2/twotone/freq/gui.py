@@ -57,7 +57,7 @@ FreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 def _blank_probe(ctx: SessionEnv) -> ReferenceValue:
     value = make_default_value(make_pulse_module_spec().allowed[0])
     value.with_field("freq", 0.0)
-    value.with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
     value.with_field("nqz", 2)
     value.with_field("gain", 0.1)
     value.with_field("waveform.length", 5.0)
@@ -66,17 +66,17 @@ def _blank_probe(ctx: SessionEnv) -> ReferenceValue:
 
 def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     value = make_default_value(make_pulse_readout_module_spec().allowed[0])
-    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
     value.with_field("pulse_cfg.freq", frequency)
     value.with_field(
-        "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
     )
     value.with_field("pulse_cfg.nqz", 2)
     value.with_field("pulse_cfg.gain", 0.1)
     value.with_field("pulse_cfg.waveform.length", 1.0)
     value.with_field("ro_cfg.ro_freq", frequency)
     value.with_field(
-        "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
     )
     value.with_field("ro_cfg.ro_length", 0.9)
     value.with_field("ro_cfg.trig_offset", 0.55)
@@ -161,10 +161,10 @@ class FreqAdapter(
         return RunRecord(cfg=cfg, result=result)
 
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Capture the qubit and its referenced resonator when opening a tab."""
+        """Declare the global aliases used by this adapter."""
         return {
             "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+            "resonator": RoleSpec("resonator"),
         }
 
     @classmethod
@@ -174,7 +174,7 @@ class FreqAdapter(
             .field(
                 "modules.reset",
                 spec=make_reset_module_spec(optional=True),
-                default=module_seed("qubit.module.reset", fallback=None),
+                default=module_seed("$qubit.module.reset", fallback=None),
             )
             .field(
                 "modules.qub_pulse",
@@ -187,7 +187,7 @@ class FreqAdapter(
                 "modules.readout",
                 spec=make_readout_module_spec(),
                 default=module_seed(
-                    "qubit.module.readout",
+                    "$qubit.module.readout",
                     fallback=custom(_blank_readout, description="inline readout"),
                 ),
             )

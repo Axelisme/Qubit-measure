@@ -2,7 +2,8 @@
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.services.context import ContextService
@@ -26,10 +27,41 @@ def test_empty_owner_reads_and_value_sources(control: ContextControlFacet) -> No
     assert control.get_entry_info() is None
     assert control.list_points() == ()
     assert control.get_source_binding() is None
-    assert control.get_component_focus().name is None
     assert control.list_value_sources() == ()
     with pytest.raises(MissingValue):
         control.read_value_source("device.flux.value", "float")
+
+
+def test_alias_table_can_be_edited_before_opening_an_entry(
+    control: ContextControlFacet,
+) -> None:
+    assert control.get_alias_rows() == ()
+    rows = (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator"))
+    control.set_alias_rows(rows)
+    assert control.get_alias_rows() == rows
+    assert control.get_entry_info() is None
+    assert control.get_source_binding() is None
+    control.set_alias_rows(())
+    assert control.get_alias_rows() == ()
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        (AliasRow("qubit", "$qubit.resonator"),),
+        (AliasRow("resonator", "$qubit.resonator"), AliasRow("qubit", "Q2")),
+        (AliasRow("qubit", "Q1"), AliasRow("qubit", "Q2")),
+    ],
+)
+def test_rejected_alias_submission_preserves_the_authored_table(
+    control: ContextControlFacet, rows: tuple[AliasRow, ...]
+) -> None:
+    original = (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
+    control.set_alias_rows(original)
+    with pytest.raises(InvalidInputError) as caught:
+        control.set_alias_rows(rows)
+    assert caught.value.reason_code == "alias_invalid"
+    assert control.get_alias_rows() == original
 
 
 def test_empty_owner_capture_and_write_fail_explicitly(

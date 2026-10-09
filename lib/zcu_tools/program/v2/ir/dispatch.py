@@ -55,7 +55,7 @@ def build_dispatch_table_island(
         raise ValueError("build_dispatch_table_island: at least one entry is required")
 
     blocks: list[BasicBlockNode] = []
-    for table_label, target_label in zip(table_labels, target_labels):
+    for table_label, target_label in zip(table_labels, target_labels, strict=True):
         if needs_big_jump(pmem_size):
             blocks.append(
                 BasicBlockNode(

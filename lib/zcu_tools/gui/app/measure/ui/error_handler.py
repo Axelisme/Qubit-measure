@@ -6,7 +6,7 @@ import logging
 import traceback
 from types import TracebackType
 
-from qtpy.QtWidgets import QMessageBox  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QMessageBox
 
 logger = logging.getLogger(__name__)
 

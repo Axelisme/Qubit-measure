@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, cast
 from matplotlib.backend_bases import Event, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QVBoxLayout, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.dispersive.services.viz import SampleArtists, TuneArtists

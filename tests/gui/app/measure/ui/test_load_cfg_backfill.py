@@ -4,6 +4,7 @@ from typing import ClassVar
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QFileDialog, QLineEdit, QPushButton, QTabWidget
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -23,12 +24,12 @@ from zcu_tools.gui.cfg import DirectValue
 from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import (
     call,
@@ -51,9 +52,11 @@ class LoadAdapter(OldAdapter):
         load_data=True, analysis=AnalysisMode.NONE
     )
 
-    def load(self, req: LoadDataRequest) -> RunRecord[RuntimeCfg, Result]:
+    def load(
+        self, req: LoadDataRequest
+    ) -> tuple[RunRecord[RuntimeCfg, Result], RunMetadata]:
         cfg = None if req.data_path == "missing.hdf5" else RuntimeCfg()
-        return RunRecord(cfg=cfg, result=Result(req.data_path))
+        return RunRecord(cfg=cfg, result=Result(req.data_path)), historical_metadata()
 
 
 @pytest.fixture
@@ -61,9 +64,7 @@ def app(qapp):
     state = State(replace(_make_empty_ctx(), readiness=ContextReadiness.DRAFT))
     registry = Registry()
     registry.register("demo", LoadAdapter)
-    ctrl = Controller(
-        state, registry, IOManager(), None, BaseEventBus(), catalog_loader=Loader()
-    )
+    ctrl = Controller(state, registry, None, BaseEventBus(), catalog_loader=Loader())
     window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
     ctrl.add_view(window)
     window.show()

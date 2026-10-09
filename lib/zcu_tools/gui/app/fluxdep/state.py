@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # (project / selection / spectrum:<name> / spectrums:__set__ / fit) is
 # documented beside the *_VERSION_KEY constants below.
 from zcu_tools.gui.version_table import (
-    VersionTable as VersionTable,  # noqa: E402  (re-export)
+    VersionTable as VersionTable,  # (re-export)
 )
 
 SpecType = Literal["OneTone", "TwoTone"]

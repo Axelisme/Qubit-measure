@@ -13,6 +13,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 from .staged_analyze import _StagedAnalyzeService
+from .writeback import WritebackDraft
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 class _PostAnalyzeCapture:
     run_result: object | None
     analyze_result: object
+    run_id: str | None
     context: SessionEnv
     adapter: ExpAdapterProtocol
     params: object
@@ -73,11 +75,17 @@ class PostAnalyzeService(_StagedAnalyzeService):
         *,
         plots: Plots,
     ) -> int:
-        """Begin a post-analysis for ``tab_id``. Returns the operation token.
+        """Begin Post analysis of the selected Primary result; return its token.
 
-        Gates on: the tab is not busy, and a primary analyze result exists (post-
-        analysis depends on it). The worker reads run_result + analyze_result +
-        params off the tab and calls ``adapter.post_analyze``.
+        tab_id selects an idle tab with a Primary result. Adapter-specific
+        post_analyze_params_instance and the owned plots supply operation inputs.
+        Capture Run/Load parameters and the Primary WritebackDraft.run_id at
+        start. The new Post draft retains that identity, including None when the
+        Primary draft has none or no draft exists; never infer it from live Run
+        metadata or Save state. Later tab/session edits do not replace inputs.
+        Busy/missing Primary raises FailedPreconditionError. A present Primary
+        draft must be WritebackDraft, otherwise raise TypeError before submission.
+        Submission failures propagate after unpublished plot cleanup.
         """
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
@@ -88,6 +96,11 @@ class PostAnalyzeService(_StagedAnalyzeService):
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no primary analyze result to post-analyze"
             )
+
+        primary_draft = tab.analysis.writeback_draft
+        if primary_draft is not None and not isinstance(primary_draft, WritebackDraft):
+            raise TypeError("Primary writeback draft must be WritebackDraft")
+        run_id = primary_draft.run_id if primary_draft is not None else None
 
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         req = PostAnalyzeRequest(
@@ -106,6 +119,7 @@ class PostAnalyzeService(_StagedAnalyzeService):
         captured_inputs = _PostAnalyzeCapture(
             run_result=req.run_result,
             analyze_result=req.analyze_result,
+            run_id=run_id,
             context=ctx,
             adapter=adapter,
             params=post_analyze_params_instance,
@@ -171,7 +185,11 @@ class PostAnalyzeService(_StagedAnalyzeService):
                     )
                 )
             )
-            draft = writeback.create_draft(proposal_items, parameters=ctx.parameters)
+            draft = writeback.create_draft(
+                proposal_items,
+                parameters=ctx.parameters,
+                run_id=captured_inputs.run_id,
+            )
             plots.finish()
             retired = self._state.update_tab_post_analyze(
                 tab_id,

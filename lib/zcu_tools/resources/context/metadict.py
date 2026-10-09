@@ -42,15 +42,14 @@ def _restore_complex(obj: Any) -> Any:
         try:
             restored = complex(obj)
         except ValueError:
-            pass  # Ordinary strings containing j remain strings.
-        else:
-            warnings.warn(
-                "Loading legacy MetaDict complex strings is deprecated; rewrite the "
-                f"file so complex values use the {_COMPLEX_TAG!r} marker.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            return restored
+            return obj
+        warnings.warn(
+            "Loading legacy MetaDict complex strings is deprecated; rewrite the "
+            f"file so complex values use the {_COMPLEX_TAG!r} marker.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return restored
     return obj
 
 

@@ -38,20 +38,29 @@ def compile_transitions(
     M = energies.shape[1] — needed to know which `transitions{n}` / `mirror{n}`
     keys to consume.
     """
-    if any(
-        transitions.get(name, [])
-        for name in ("blue side", "red side", "mirror blue", "mirror red")
+    if (
+        any(
+            transitions.get(name, [])
+            for name in ("blue side", "red side", "mirror blue", "mirror red")
+        )
+        and "r_f" not in transitions
     ):
-        if "r_f" not in transitions:
-            raise ValueError(
-                "r_f is required for blue side, red side, mirror blue, and mirror red transitions"
-            )
-    if any("mirror" in name for name in transitions.keys()):
-        if "r_f" not in transitions and "sample_f" not in transitions:
-            raise ValueError("sample_f is required for mirror transitions")
+        raise ValueError(
+            "r_f is required for blue side, red side, mirror blue, and mirror red transitions"
+        )
+    if (
+        any("mirror" in name for name in transitions)
+        and "r_f" not in transitions
+        and "sample_f" not in transitions
+    ):
+        raise ValueError("sample_f is required for mirror transitions")
 
-    r_f = float(transitions.get("r_f", 0.0))  # type: ignore[arg-type]
-    sample_f = float(transitions.get("sample_f", 0.0))  # type: ignore[arg-type]
+    r_f = 0.0
+    if "r_f" in transitions:
+        r_f = float(transitions["r_f"])
+    sample_f = 0.0
+    if "sample_f" in transitions:
+        sample_f = float(transitions["sample_f"])
 
     pairs: list[tuple[int, int]] = []
     coeffs: list[float] = []

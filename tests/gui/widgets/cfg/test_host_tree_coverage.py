@@ -25,11 +25,9 @@ def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         RunPaneSnapshot,
         SavePaneSnapshot,
-        TabPathsSnapshot,
     )
     from zcu_tools.gui.app.measure.state import TabInteractionState
     from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
@@ -71,7 +69,6 @@ def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
-            is_saving_data=False,
             has_context=True,
             has_active_context=True,
             has_soc=True,
@@ -87,7 +84,6 @@ def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
             result=object(),
             figures=figures,
             writeback_items=(),
-            image_paths={"fit": PathResourceSnapshot(override=None, path="/tmp/a")},
             has_writeback_draft=False,
         ),
         post_analysis=PostAnalysisPaneSnapshot(
@@ -95,17 +91,9 @@ def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
             result=None,
             figures=None,
             writeback_items=(),
-            image_paths={},
             has_writeback_draft=False,
         ),
-        save=SavePaneSnapshot(
-            data_path=PathResourceSnapshot(override=None, path="/tmp/c")
-        ),
-        paths=TabPathsSnapshot(
-            data=PathResourceSnapshot(override=None, path="/tmp/c"),
-            analysis_images={"fit": PathResourceSnapshot(override=None, path="/tmp/a")},
-            post_analysis_images={},
-        ),
+        save=SavePaneSnapshot(),
     )
 
     from qtpy.QtWidgets import QTreeWidget

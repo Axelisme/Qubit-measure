@@ -96,7 +96,7 @@ def test_auto_tune_respects_bounds(monkeypatch):
         return (np.full(len(fluxs), bare_rf), np.full(len(fluxs), bare_rf))
 
     monkeypatch.setattr(autotune_mod, "predict_dispersive_at", stub)
-    g, bare_rf = auto_tune(
+    _g, bare_rf = auto_tune(
         (4.0, 1.0, 0.5),
         sp_fluxs,
         sp_freqs,
@@ -124,7 +124,7 @@ def test_auto_tune_grid_scan_escapes_a_decoy(monkeypatch):
         return (np.full(len(fluxs), bare_rf), np.full(len(fluxs), bare_rf))
 
     monkeypatch.setattr(autotune_mod, "predict_dispersive_at", stub)
-    g, bare_rf = auto_tune(
+    _g, bare_rf = auto_tune(
         (4.0, 1.0, 0.5),
         sp_fluxs,
         sp_freqs,
@@ -151,7 +151,7 @@ def test_auto_tune_keeps_a_good_current_seed(monkeypatch):
         return (np.full(len(fluxs), bare_rf), np.full(len(fluxs), bare_rf))
 
     monkeypatch.setattr(autotune_mod, "predict_dispersive_at", stub)
-    g, bare_rf = auto_tune(
+    _g, bare_rf = auto_tune(
         (4.0, 1.0, 0.5),
         sp_fluxs,
         sp_freqs,

@@ -34,7 +34,7 @@ def freq2omega(
     freqs: float | NDArray[np.float64],
 ) -> float | NDArray[np.float64]:
     """GHz -> rad/ns"""
-    return 2 * np.pi * freqs  # type: ignore
+    return 2 * np.pi * freqs
 
 
 @overload
@@ -65,4 +65,4 @@ def calc_therm_ratio(
     T: float,
 ) -> float | NDArray[np.float64]:
     """omega: rad/ns, T: K"""
-    return (sp.hbar * omega * 1e9) / (sp.k * T)  # type: ignore
+    return (sp.hbar * omega * 1e9) / (sp.k * T)

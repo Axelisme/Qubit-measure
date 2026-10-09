@@ -260,14 +260,3 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
             app.dialogs.assert_no_unexpected_messages()
     finally:
         remote.stop()
-
-
-def test_busy_save_is_rejected_before_confirmation(window_app: WindowApp) -> None:
-    app = window_app
-    previous = app.ctrl.new_tab("demo")
-    app.state.get_tab(previous).is_saving_data = True
-    app.window.reload_experiments()
-    app.dialogs.consume_message_containing("critical", "Finish all operations")
-    assert app.ctrl.list_tab_ids() == [previous]
-    assert app.loader.loads == 0
-    app.dialogs.assert_no_unexpected_messages()

@@ -114,7 +114,6 @@ def hist(
 
 def fidelity_func(tp: float, tn: float, fp: float, fn: float) -> float:
     # this method calculates fidelity as (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N
-    # return (tp + fn) / (tp + tn + fp + fn)
     if (tp + fn) > (tn + fp):
         return (tp + fn) / (tp + tn + fp + fn)
     else:

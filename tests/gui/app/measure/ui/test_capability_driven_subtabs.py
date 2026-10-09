@@ -8,9 +8,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from qtpy.QtWidgets import QLineEdit, QPushButton
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
+from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 
 from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, make_cfg
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
@@ -35,10 +38,6 @@ def make_ctrl():
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.update_tab_data_path = MagicMock()
-    ctrl.update_tab_analysis_image_path = MagicMock()
-    ctrl.update_tab_post_analysis_image_path = MagicMock()
-    ctrl.update_tab_save_paths = MagicMock()
     ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
     ctrl.get_cfg_editor_draft.return_value = MagicMock()
     ctrl.active_operation_count.return_value = 0
@@ -63,11 +62,9 @@ def make_snapshot(
 ):
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         RunPaneSnapshot,
         SavePaneSnapshot,
-        TabPathsSnapshot,
     )
 
     # Allow explicit pane figure override or create based on flags
@@ -85,18 +82,6 @@ def make_snapshot(
     else:
         post_figure_obj = post_analysis_figure
 
-    # Determine actual figure for has_figure flag: keep consistency
-    # Paths
-    data_path_snap = PathResourceSnapshot(
-        override=None, path="/tmp/data.hdf5" if has_run_result else None
-    )
-    analysis_image_snap = PathResourceSnapshot(
-        override=None,
-        path="/tmp/image.png" if has_figure and has_analyze_result else None,
-    )
-    post_image_snap = PathResourceSnapshot(
-        override=None, path="/tmp/post.png" if has_post_result else None
-    )
     run_snap = RunPaneSnapshot(
         result=object() if has_run_result else None, source_path=None
     )
@@ -105,21 +90,14 @@ def make_snapshot(
         result=object() if has_analyze_result else None,
         figures=ready_figures(figure_obj),
         writeback_items=tuple(analysis_writeback_items),
-        image_paths={"fit": analysis_image_snap} if figure_obj is not None else {},
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=DummyPostParams() if has_post_result else None,
         result=object() if has_post_result else None,
         figures=ready_figures(post_figure_obj),
         writeback_items=tuple(post_writeback_items),
-        image_paths={"fit": post_image_snap} if post_figure_obj is not None else {},
     )
-    save_snap = SavePaneSnapshot(data_path=data_path_snap)
-    paths_snap = TabPathsSnapshot(
-        data=data_path_snap,
-        analysis_images=analysis_snap.image_paths,
-        post_analysis_images=post_snap.image_paths,
-    )
+    save_snap = SavePaneSnapshot()
     snapshot = TabSnapshot(
         adapter_name="fake",
         cfg_schema=MagicMock(),
@@ -128,7 +106,6 @@ def make_snapshot(
             global_run_active=False,
             is_running=False,
             is_analyzing=is_analyzing,
-            is_saving_data=False,
             has_context=True,
             has_active_context=True,
             has_soc=True,
@@ -144,7 +121,6 @@ def make_snapshot(
         analysis=analysis_snap,
         post_analysis=post_snap,
         save=save_snap,
-        paths=paths_snap,
     )
     return with_artifacts(snapshot)
 
@@ -228,8 +204,6 @@ def test_main_window_follow_selects_subpane_on_already_selected_tab(
 
 
 def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget):
-    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-
     ctrl = make_ctrl()
     snap_none = make_snapshot(
         "tab-1", analysis=AnalysisMode.NONE, post=False, load=False
@@ -245,16 +219,22 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     # Prove absent Analysis/Post pages and controls/containers were never constructed, not only hidden
     assert not hasattr(tab_none, "analyze_form")
     assert not hasattr(tab_none, "writeback_widget")
-    assert not tab_none._save_center.has_artifact(
-        ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    center_none = tab_none.findChild(ArtifactSaveCenter)
+    assert center_none is not None
+    assert (
+        len(
+            [
+                button
+                for button in center_none.findChildren(QPushButton)
+                if button.text() == "Save"
+            ]
+        )
+        == 1
     )
     assert not hasattr(tab_none, "_analysis_panel")
     assert not hasattr(tab_none, "_analysis_container")
     assert not hasattr(tab_none, "post_analyze_form")
     assert not hasattr(tab_none, "post_writeback_widget")
-    assert not tab_none._save_center.has_artifact(
-        ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
-    )
     assert not hasattr(tab_none, "_post_panel")
     assert not hasattr(tab_none, "_post_container")
     with pytest.raises(RuntimeError, match="does not support analysis"):
@@ -278,8 +258,17 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     ]
     assert visible_analysis == ["Run", "Analysis", "Data", "Guide"]
     assert hasattr(tab_analysis, "analyze_form")
-    assert tab_analysis._save_center.has_artifact(
-        ArtifactKey(ArtifactKind.ANALYSIS, "fit")
+    center_analysis = tab_analysis.findChild(ArtifactSaveCenter)
+    assert center_analysis is not None
+    assert (
+        len(
+            [
+                button
+                for button in center_analysis.findChildren(QPushButton)
+                if button.text() == "Save"
+            ]
+        )
+        == 2
     )
     assert not hasattr(tab_analysis, "post_analyze_form")
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
@@ -296,8 +285,8 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     assert hasattr(tab_both, "analyze_form")
     assert hasattr(tab_both, "post_analyze_form")
 
-    assert not tab_none._save_center.is_load_visible()
-    assert tab_analysis._save_center.is_load_visible()
+    assert center_none.load_button.isHidden()
+    assert not center_analysis.load_button.isHidden()
 
     tab_none.detach()
     tab_analysis.detach()
@@ -506,29 +495,32 @@ def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
     )
     assert snap.capabilities is not None
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
-    tab.attach(snap, MagicMock())
-
-    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-
-    analysis_key = ArtifactKey(ArtifactKind.ANALYSIS, "fit")
-    post_key = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
-    assert all(
-        tab._save_center.has_artifact(key)
-        for key in (ArtifactKey(ArtifactKind.DATA), analysis_key, post_key)
-    )
-    tab.set_data_path("/tmp/data.hdf5")
-    tab.set_image_path(analysis_key, "/tmp/a.png")
-    tab.set_image_path(post_key, "/tmp/p.png")
-    assert tab.get_data_path() == "/tmp/data.hdf5"
-    assert tab.get_image_path(analysis_key) == "/tmp/a.png"
-    assert tab.get_image_path(post_key) == "/tmp/p.png"
-
-    tab.set_data_path("")
-    tab.set_image_path(analysis_key, "")
-    tab.set_image_path(post_key, "")
-    assert tab.get_data_path() == ""
-    assert tab.get_image_path(analysis_key) == ""
-    assert tab.get_image_path(post_key) == ""
+    actions = MagicMock()
+    tab.attach(snap, actions)
+    center = tab.findChild(ArtifactSaveCenter)
+    assert center is not None
+    edits = center.findChildren(QLineEdit)
+    assert all(edit.isReadOnly() for edit in edits)
+    assert [edit.text() for edit in edits] == [
+        str(output.path)
+        for section in snap.artifacts
+        for artifact in section.artifacts
+        for member in artifact.members
+        for output in member.outputs
+    ]
+    buttons = [
+        button for button in center.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(buttons) == 3
+    for button in buttons:
+        button.click()
+    assert [call.args for call in actions.save_artifact.call_args_list] == [
+        ("tab-1", ArtifactRef("run", "measurement_data")),
+        ("tab-1", ArtifactRef("analysis", "results")),
+        ("tab-1", ArtifactRef("post_analysis", "results")),
+    ]
+    center.save_all_button.click()
+    assert [call.args for call in actions.save_all.call_args_list] == [("tab-1",)]
     tab._left_tabs.setCurrentWidget(tab._save_panel)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
     assert tab._right_stack.currentWidget() is tab._data_gallery

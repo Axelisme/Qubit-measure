@@ -137,7 +137,9 @@ def calculate_thermal_chain(
         - total_attenuation_db / 10.0,
     ]
 
-    for stage, downstream_db in zip(normalized_stages, downstream_attenuation_db):
+    for stage, downstream_db in zip(
+        normalized_stages, downstream_attenuation_db, strict=False
+    ):
         emissivity = 1.0 - 10.0 ** (-stage.attenuation_db / 10.0)
         stage_log_psd = thermal_psd_log10_v2_per_hz(
             stage.Temp_K,
@@ -218,7 +220,7 @@ def plot_thermal_chain_psd(
         result.input_temperature_K,
         *(stage.Temp_K for stage in result.stages),
     ]
-    for label, Temp_K in zip(raw_source_labels, raw_source_temperatures):
+    for label, Temp_K in zip(raw_source_labels, raw_source_temperatures, strict=False):
         raw_psd = thermal_psd_log10_v2_per_hz(
             Temp_K,
             result.frequencies_hz,

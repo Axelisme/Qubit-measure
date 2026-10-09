@@ -181,7 +181,7 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
 
 
 @pytest.mark.parametrize(
-    ("before", "after", "line", "reason"),
+    ("before", "after", "line", "reason", "unchanged_reason"),
     [
         (
             "if flag:\n    import missing  # type: ignore\n"
@@ -190,6 +190,7 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
             "if flag:\n    import missing  # {directive}\n",
             5,
             "unproven-position",
+            None,
         ),
         (
             "try:\n    import missing  # type: ignore\n"
@@ -200,6 +201,7 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
             "except ImportError:\n    pass\n",
             6,
             "unproven-position",
+            None,
         ),
         (
             "try:\n    run()\nexcept ValueError:\n"
@@ -208,11 +210,13 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
             "except ValueError:\n    import missing  # {directive}\n",
             6,
             "unproven-position",
+            None,
         ),
         (
             "if flag:\n    import missing  # type: ignore\nif flag:\n    pass\n",
             "if flag:\n    import missing  # {directive}\n",
             2,
+            "new-position",
             "new-position",
         ),
         (
@@ -220,6 +224,7 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
             "if flag:\n    pass\nif flag:\n    import missing  # {directive}\n",
             4,
             "unproven-position",
+            None,
         ),
         (
             "if flag:\n    if nested:\n        import missing  # type: ignore\n"
@@ -228,6 +233,7 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
             "        import missing  # {directive}\n",
             5,
             "unproven-position",
+            None,
         ),
     ],
     ids=["if-owners", "try-owners", "handlers", "before-only", "after-only", "deep"],
@@ -235,14 +241,112 @@ def test_repeated_statements_in_the_same_owner_are_not_guessed_as_migrations() -
 @pytest.mark.parametrize(
     "directive", ["pyright: ignore[reportMissingImports]", "type: ignore"]
 )
-def test_ambiguous_ancestry_cannot_authorize_an_escape_site(
-    before: str, after: str, line: int, reason: str, directive: str
+def test_ambiguous_ancestry_preserves_only_unchanged_debt(
+    before: str,
+    after: str,
+    line: int,
+    reason: str,
+    unchanged_reason: str | None,
+    directive: str,
 ) -> None:
     found = compare_ignores(before, after.format(directive=directive))
 
-    assert len(found) == 1
-    assert found[0].line == line
-    assert found[0].reason == reason
+    expected = unchanged_reason if directive == "type: ignore" else reason
+    expected_sites = [] if expected is None else [(line, expected)]
+    assert [(site.line, site.reason) for site in found] == expected_sites
+
+
+@pytest.mark.parametrize(
+    "before",
+    [
+        "class Input:\n"
+        "    def eventFilter(self, event):  # noqa: N802\n"
+        "        self.popup.hide()  # type: ignore[attr-defined]\n"
+        "        self.popup.hide()\n",
+        "def unrelated(qapp):  # noqa: ARG001\n"
+        "    pass\n"
+        "def device_test():\n"
+        "    device.ping()  # type: ignore[attr-defined]\n"
+        "    device.ping()\n",
+    ],
+    ids=["value-source-header", "device-test-other-header"],
+)
+def test_unchanged_ignore_lines_survive_unrelated_pragma_cleanup(before: str) -> None:
+    after = before.replace("  # noqa: N802", "").replace("  # noqa: ARG001", "")
+
+    assert compare_ignores(before, after) == ()
+
+
+@pytest.mark.parametrize(
+    "directive", ["type: ignoreNotADirective", "pyright: ignore[notAReport]"]
+)
+def test_unchanged_invalid_ignore_survives_comment_edit_elsewhere(
+    directive: str,
+) -> None:
+    before = f"import missing  # {directive}\n# Old note.\n"
+    after = before.replace("# Old note.", "# New note.")
+
+    assert compare_ignores(before, after) == ()
+
+
+@pytest.mark.parametrize(
+    "directive", ["type: ignore", "pyright: ignore[reportMissingImports]"]
+)
+def test_duplicating_an_identical_ignore_line_is_not_existing_debt(
+    directive: str,
+) -> None:
+    ignored = f"import missing  # {directive}\n"
+    before = ignored + "import missing\n"
+    after = ignored * 2
+
+    found = compare_ignores(before, after)
+
+    assert [(site.line, site.reason) for site in found] == [
+        (1, "unproven-position"),
+        (2, "unproven-position"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "reason"),
+    [
+        (
+            "import missing  # type: ignore\n",
+            "import different  # type: ignore\n",
+            "new-position",
+        ),
+        (
+            "import missing  # type: ignore\nimport missing\n",
+            "import different  # type: ignore\nimport different\n",
+            "unproven-position",
+        ),
+    ],
+    ids=["unique-statement", "ambiguous-statements"],
+)
+def test_editing_the_ignored_code_line_keeps_the_original_position_rules(
+    before: str, after: str, reason: str
+) -> None:
+    found = compare_ignores(before, after)
+
+    assert [(site.line, site.reason) for site in found] == [(1, reason)]
+
+
+def test_string_text_cannot_fund_an_unproven_ignore_line() -> None:
+    before = 'text = """\nimport missing  # type: ignore\n"""\nimport missing\n'
+    after = 'text = ""\nimport missing  # type: ignore\nimport missing\n'
+
+    found = compare_ignores(before, after)
+
+    assert [(site.line, site.reason) for site in found] == [(2, "unproven-position")]
+
+
+def test_unchanged_line_does_not_override_before_only_new_position() -> None:
+    before = "if flag:\n    import missing  # type: ignore\nif flag:\n    pass\n"
+    after = "if flag:\n    import missing  # type: ignore\n"
+
+    found = compare_ignores(before, after)
+
+    assert [(site.line, site.reason) for site in found] == [(2, "new-position")]
 
 
 def test_exact_unchanged_input_preserves_ambiguous_existing_debt() -> None:

@@ -119,7 +119,7 @@ def ray_intersects_box(
     """
     t_min = 0.0
     t_max = np.inf
-    for d, rng in zip(direction, (x_range, y_range, z_range)):
+    for d, rng in zip(direction, (x_range, y_range, z_range), strict=False):
         t1 = rng[0] / d
         t2 = rng[1] / d
         t_min = max(t_min, t1)

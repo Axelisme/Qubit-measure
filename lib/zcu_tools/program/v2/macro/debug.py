@@ -22,7 +22,7 @@ class PrintTimeStamp(Macro):
     ) -> None:
         super().__init__(name=name, t=t, prefix=prefix, gen_chs=gen_chs, ro_chs=ro_chs)
 
-    def expand(self, prog) -> list[AsmInst]:  # type: ignore
+    def expand(self, prog) -> list[AsmInst]:  # pyright: ignore[reportIncompatibleMethodOverride]
         return []
 
     def preprocess(self, prog) -> None:

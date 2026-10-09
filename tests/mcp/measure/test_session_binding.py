@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from dataclasses import asdict
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from zcu_tools.mcp.measure import tools_operation
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError
 
+from ._save_report_support import analysis_report
 from ._support import MeasureClient, WireTransport, full_execution_reply, make_client
 
 
@@ -307,7 +309,7 @@ def test_received_operation_reply_survives_eof(
 
 
 @pytest.mark.parametrize("change", ["eof", "reconnect"])
-@pytest.mark.parametrize("cut_after", ["tab.get_analyze_result", "tab.save_image"])
+@pytest.mark.parametrize("cut_after", ["tab.get_analyze_result", "tab.save_artifacts"])
 def test_background_analysis_retains_received_facts_without_cross_generation_replay(
     tmp_path, monkeypatch, change, cut_after
 ):
@@ -329,7 +331,7 @@ def test_background_analysis_retains_received_facts_without_cross_generation_rep
                 "analysis_state": {"figure_names": ["fit", "residual"]}
             },
         },
-        "tab.save_image": {"image_path": "/actual/fit.png"},
+        "tab.save_artifacts": asdict(analysis_report("analysis", ["fit", "residual"])),
     }
     client.transport.replies.update(
         {key: {"ok": True, "result": value} for key, value in replies.items()}
@@ -354,15 +356,11 @@ def test_background_analysis_retains_received_facts_without_cross_generation_rep
         assert result["error"]["reason"] == "connection_lost"
         assert result["op"] == 1
         assert result["result"]["summary"] == {"peak": 5}
-        assert result["saved_images"] == (
-            [{"figure_name": "fit", "image_path": "/actual/fit.png"}]
-            if cut_after == "tab.save_image"
-            else []
+        assert result["save_report"] == (
+            asdict(analysis_report("analysis", ["fit", "residual"]))
+            if cut_after == "tab.save_artifacts"
+            else None
         )
-        assert result["remaining_images"] == (
-            ["residual"] if cut_after == "tab.save_image" else ["fit", "residual"]
-        )
-        assert result["unconfirmed_image"] is None
         assert (
             client.call("status", {"execution": result["execution"], "detail": "full"})
             == result
@@ -384,7 +382,7 @@ def test_background_analysis_retains_received_facts_without_cross_generation_rep
         assert not any(
             method
             in {
-                "tab.save_image",
+                "tab.save_artifacts",
                 "tab.get_analyze_result",
                 "tab.get_figure",
                 "operation.cancel",

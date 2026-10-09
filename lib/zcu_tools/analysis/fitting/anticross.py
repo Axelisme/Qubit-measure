@@ -77,9 +77,7 @@ def fit_hyperbolic(
         res_upper[np.isnan(res_upper)] = np.inf
         res_lower[np.isnan(res_lower)] = np.inf
 
-        residuals = np.concatenate([res_upper, res_lower])
-
-        return residuals
+        return np.concatenate([res_upper, res_lower])
 
     # ---------------------------------------------------------------------
     # 3. Run optimisation.  Bounds are left unconstrained because the initial

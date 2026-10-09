@@ -6,9 +6,9 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import numpy as np  # noqa: E402
-from matplotlib.figure import Figure  # noqa: E402
-from zcu_tools.gui.app.dispersive.services.viz import (  # noqa: E402
+import numpy as np
+from matplotlib.figure import Figure
+from zcu_tools.gui.app.dispersive.services.viz import (
     add_sample_line,
     move_sample_line,
     remove_sample_line,

@@ -2,7 +2,7 @@
 
 import base64
 from copy import deepcopy
-from pathlib import Path
+from dataclasses import asdict
 from threading import Event, Thread, current_thread
 from time import sleep
 from typing import Any
@@ -10,10 +10,32 @@ from typing import Any
 import pytest
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
+from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 
 from ._recipe_support import PNG, LookbackGui, recipe_client
 from ._support import full_execution_reply, make_client
+
+RAW_REPORT = SaveReport(
+    run_id="run-a",
+    artifacts={
+        "raw": {
+            "data": SaveArtifact(
+                status="Saved",
+                members={
+                    "data": [
+                        SaveOutput(
+                            format="data_h5", path="/runs/run-a/data.h5", status="saved"
+                        ),
+                        SaveOutput(
+                            format="labber", path="/labber/raw.hdf5", status="saved"
+                        ),
+                    ]
+                },
+            )
+        }
+    },
+)
 
 
 def test_recipe_observes_run_save_and_analysis_on_one_worker(tmp_path):
@@ -34,14 +56,14 @@ def test_recipe_observes_run_save_and_analysis_on_one_worker(tmp_path):
         assert reply.data["status"] == "awaiting_answer", reply.data
         assert reply.data["question_items"] == ("trigger_offset",)
         assert reply.data["written"] == ()
-        assert reply.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert reply.data["raw_save"] == asdict(RAW_REPORT)
         assert reply.data["analysis"]["result"]["summary"] == {"offset": 0.24}
         finished = client.call(
             "answer", {"recipe": reply.data["execution"], "decision": "skipped"}
         )
         assert finished.data["status"] == "finished"
         assert not finished.data["writeback"]["receipts"]
-        assert awaited_operations == {71, 82, 93}
+        assert awaited_operations == {71, 93}
         assert len(waiting_workers) == 1
 
 
@@ -96,7 +118,7 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
         )
         assert completed.data["status"] == "awaiting_answer", completed.data
         assert completed.data["run_op"] == initial["run_op"]
-        assert completed.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert completed.data["raw_save"] == asdict(RAW_REPORT)
         assert completed.images[0].data == PNG
         finished = client.call("answer", {"recipe": execution, "decision": "skipped"})
         assert finished.data["status"] == "finished"
@@ -183,34 +205,25 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     initial = client.call("lookback", {"frequency_mhz": 6020.0})
     handoff = full_execution_reply(client, initial)
     assert handoff.data["status"] == "interactive"
-    assert handoff.data["raw_save"]["path"] == "/actual/raw.h5"
+    assert handoff.data["raw_save"] == asdict(RAW_REPORT)
     assert handoff.data["analysis"]["op"] == handoff.data["op"]
     assert initial.data["status"] == "interactive"
     assert initial.data["steps"]["run"]["status"] == "finished"
     assert initial.data["steps"]["raw_save"]["status"] == "saved"
     assert initial.data["steps"]["analysis"]["primary"]["status"] == "interactive"
-    assert initial.data["artifacts"]["raw"]["data"]["members"]["data"] == [
-        {"path": "/actual/raw.h5", "status": "saved"}
-    ]
+    assert initial.data["artifacts"]["raw"] == asdict(RAW_REPORT)["artifacts"]["raw"]
     interaction = handoff.data["analysis"]["interaction"]
     assert interaction is not None
     if handoff_failure:
         assert handoff.is_error
         assert interaction["delivery_error"]
-        assert interaction["figure"] is None
         assert not handoff.images
     else:
         assert not handoff.is_error
         assert handoff.images[0].data == PNG
-        assert Path(interaction["figure"]).read_bytes() == PNG
     if handoff_failure not in ("query", "replaced"):
         assert interaction["state"] == {"offset": 0.24}
         assert interaction["commands"] == [{"name": "done"}]
-    assert initial.data["previews"] == {
-        "run": [],
-        "primary": [] if handoff_failure else [interaction["figure"]],
-        "post": [],
-    }
     analysis_execution = handoff.data["analysis"]["execution"]
     execution = handoff.data["execution"]
     read = client.call("tab_interact", {"tab": "t"})
@@ -249,7 +262,11 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
     disconnected = Event()
 
     def respond(method, params):
-        if method == "operation.await" and params["operation_id"] == held_op:
+        if (held_op == 82 and method == "tab.save_data") or (
+            held_op != 82
+            and method == "operation.await"
+            and params["operation_id"] == held_op
+        ):
             pending.set()
             assert disconnected.wait(2), "Session must disconnect before joining"
         return gui(method, params)
@@ -275,9 +292,7 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
         assert result["phase"] == "terminal"
         assert result["error"] is None
         if held_op == 82:
-            assert result["raw_save"]["status"] == "unknown"
-            assert result["raw_save"]["reserved_path"] == "/actual/raw.h5"
-            assert result["raw_save"]["path"] is None
+            assert result["raw_save"] is None
         with pytest.raises(GuiRpcError, match="closed"):
             client.call("lookback", {"frequency_mhz": 6020.0})
         client.context.session.close()
@@ -401,11 +416,14 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
             client.call("status", {"execution": execution, "detail": "full"}) == frozen
         )
         if expected == "finished":
-            assert result.data["raw_save"]["path"] == "/actual/raw.h5"
+            assert result.data["raw_save"]["run_id"] == "run-a"
+            assert (
+                result.data["raw_save"]["artifacts"]["raw"]["data"]["status"] == "Saved"
+            )
             assert result.data["analysis"]["status"] == "finished"
         elif expected == "failed":
             assert result.data["error"]["reason"] == "run_result_unavailable"
-            assert result.data["raw_save"]["status"] == "not_started"
+            assert result.data["raw_save"] is None
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("operation.cancel") == 1
         assert methods.count("tab.run_start") == 1
@@ -421,17 +439,26 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
     tmp_path, monkeypatch, save_succeeds
 ):
     gui = LookbackGui()
+    expected_report = asdict(RAW_REPORT)
+    if not save_succeeds:
+        artifact = expected_report["artifacts"]["raw"]["data"]
+        artifact["status"] = "Not saved"
+        for output in artifact["members"]["data"]:
+            output["status"] = "failed"
+            output["error"] = "disk full"
     saving = Event()
     release_save = Event()
 
     def respond(method, params):
-        if method == "operation.await" and params["operation_id"] == 82:
+        if method == "tab.save_data":
             saving.set()
-            if not release_save.is_set():
-                return {"reason": "timeout"}
-            if not save_succeeds:
-                return {"reason": "completed", "status": "failed", "error": "disk full"}
-        return gui(method, params)
+            assert release_save.wait(2)
+        reply = gui(method, params)
+        return (
+            expected_report
+            if method == "tab.save_data" and not save_succeeds
+            else reply
+        )
 
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
@@ -448,41 +475,25 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
         assert cancelled.data["gui_cancel"]["status"] == "not_needed"
         assert cancelled.data["cancel_requested"]
         during_save = client.call("status", {"execution": execution, "detail": "full"})
-        assert during_save["raw_save"]["status"] == "saving"
-        assert during_save["raw_save"]["path"] is None
+        assert during_save["raw_save"] is None
         saving_summary = client.call("status", {"execution": execution})
-        assert saving_summary["steps"]["raw_save"]["status"] == "saving"
-        assert saving_summary["artifacts"]["raw"]["data"] == {
-            "status": "saving",
-            "lifetime": "persistent",
-            "members": {"data": [{"path": "/actual/raw.h5", "status": "reserved"}]},
-        }
+        assert saving_summary["steps"]["raw_save"] is None
+        assert saving_summary["artifacts"] == {}
         release_save.set()
         final = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 2})
         )
         assert not final.is_error  # Successful query, even when execution failed.
-        assert final.data["status"] == ("cancelled" if save_succeeds else "failed")
-        assert final.data["raw_save"]["status"] == (
-            "saved" if save_succeeds else "failed"
-        )
-        assert final.data["raw_save"]["path"] == (
-            "/actual/raw.h5" if save_succeeds else None
-        )
-        if not save_succeeds:
-            assert final.data["error"]["reason"] == "raw_save_failed"
+        assert final.data["status"] == "cancelled"
+        assert final.data["raw_save"] == expected_report
+        assert final.data["error"] is None
         summary = client.call("status", {"execution": execution})
         assert summary["status"] == final.data["status"]
-        assert summary["cancel_requested"] is (not save_succeeds)
+        assert not summary["cancel_requested"]
         assert summary["steps"]["raw_save"]["status"] == (
-            "saved" if save_succeeds else "failed"
+            "saved" if save_succeeds else "incomplete"
         )
-        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
-            {
-                "path": "/actual/raw.h5",
-                "status": "saved" if save_succeeds else "reserved",
-            }
-        ]
+        assert summary["artifacts"]["raw"] == expected_report["artifacts"]["raw"]
         assert summary["error"] == final.data["error"]
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.save_data") == 1
@@ -555,7 +566,7 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
         assert terminal.data["analysis"]["status"] == outcome
         assert terminal.data["analysis"]["cancel_requested"]
         assert terminal.data["analysis"]["operation_outcome"]["status"] == outcome
-        assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert terminal.data["raw_save"] == asdict(RAW_REPORT)
         if outcome == "failed":
             assert terminal.data["error"]["reason"] == "analysis_failed"
         methods = [method for method, _ in client.transport.sent]
@@ -566,7 +577,7 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
         assert not {
             "tab.interact",
             "tab.get_analyze_result",
-            "tab.save_image",
+            "tab.save_artifacts",
             "tab.get_figure",
             "tab.writeback_preview",
         }.intersection(methods)
@@ -623,7 +634,7 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
         assert terminal.data["status"] == "cancelled"
         assert terminal.data["analysis"]["status"] == "cancelled"
         assert terminal.data["analysis"]["cancel_requested"]
-        assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert terminal.data["raw_save"] == asdict(RAW_REPORT)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("operation.cancel") == 1
         assert methods.count("tab.analyze") == 1
@@ -637,7 +648,7 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
     ("pending_method", "forbidden_method"),
     [
         ("tab.snapshot", "tab.analyze"),
-        ("operation.await", "tab.analyze"),
+        ("tab.save_data", "tab.analyze"),
         ("tab.get_figure", "tab.writeback_preview"),
     ],
 )
@@ -652,7 +663,7 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
     def respond(method, params):
         at_boundary = method == pending_method and (
             (method == "tab.snapshot" and gui.ran)
-            or (method == "operation.await" and params["operation_id"] == 82)
+            or method == "tab.save_data"
             or method == "tab.get_figure"
         )
         if at_boundary:
@@ -699,7 +710,7 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
         methods = [method for method, _ in client.transport.sent]
         assert forbidden_method not in methods
         assert methods.count("tab.run_start") == 1
-        assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert terminal.data["raw_save"] == asdict(RAW_REPORT)
     finally:
         release.set()
         if controller is not None:
@@ -770,12 +781,12 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
         assert methods.count("operation.cancel") == 1
         if method_pending == "tab.analyze":
             assert terminal.data["analysis"]["cancel_requested"]
-            assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+            assert terminal.data["raw_save"] == asdict(RAW_REPORT)
             assert "tab.get_analyze_result" not in methods
         elif control == "cancel":
             assert "tab.save_data" not in methods
         else:
-            assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+            assert terminal.data["raw_save"] == asdict(RAW_REPORT)
     finally:
         release.set()
         stopped.set()
@@ -889,7 +900,7 @@ def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
         assert terminal.data["status"] == "cancelled"
         assert not terminal.data["cancel_requested"]
         assert terminal.data["writeback"]["items"][0]["proposed"] == 0.24
-        assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert terminal.data["raw_save"] == asdict(RAW_REPORT)
         assert terminal.data["analysis"]["operation_outcome"]["status"] == "finished"
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.writeback_preview") == 1
@@ -931,7 +942,7 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
             "revision": 99,
             "source_operation_id": replacement_source,
         }
-        assert reply.data["raw_save"]["status"] == "not_started"
+        assert reply.data["raw_save"] is None
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert "tab.save_data" not in methods
@@ -973,11 +984,30 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert data["tab"] == "t"
         assert data["run_op"] != 71
         assert data["run_outcome"]["status"] == "finished"
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["result"]["summary"] == {"offset": 0.24}
-        assert data["analysis"]["saved_images"] == [
-            {"figure_name": "trace", "image_path": "/actual/trace.png"}
-        ]
+        assert data["analysis"]["save_report"]["run_id"] == "run-a"
+        assert data["analysis"]["save_report"]["artifacts"]["analysis"]["results"] == {
+            "status": "Saved",
+            "members": {
+                "analysis:primary": [
+                    {
+                        "format": "json",
+                        "path": "/runs/run-a/analysis/results.json",
+                        "status": "saved",
+                        "error": None,
+                    }
+                ],
+                "figure:trace": [
+                    {
+                        "format": "png",
+                        "path": "/runs/run-a/analysis/trace.png",
+                        "status": "saved",
+                        "error": None,
+                    }
+                ],
+            },
+        }
         assert data["writeback"]["items"] == [
             {
                 "id": "md-1",
@@ -1011,7 +1041,9 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert methods.index("device.snapshot") < methods.index("tab.run_start")
         assert methods.index("soc.info") < methods.index("tab.run_start")
         assert methods.index("tab.save_data") < methods.index("tab.analyze")
-        assert methods.index("tab.save_image") < methods.index("tab.writeback_preview")
+        assert methods.index("tab.save_artifacts") < methods.index(
+            "tab.writeback_preview"
+        )
         edits = [
             edit
             for method, params in client.transport.sent
@@ -1170,7 +1202,7 @@ def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
         assert not reply.data["cancel_requested"]
         assert not reply.data["finish_early_requested"]
         assert reply.data["run_outcome"]["status"] == "cancelled"
-        assert reply.data["raw_save"]["status"] == "not_started"
+        assert reply.data["raw_save"] is None
         methods = [method for method, _ in client.transport.sent]
         assert "tab.save_data" not in methods
         assert "tab.analyze" not in methods

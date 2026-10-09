@@ -44,8 +44,8 @@ class ComponentTreeWidget(QWidget):
         """Bind the owner-thread control and render its current document.
 
         EMPTY displays no editable rows. Creation chooses a registered kind and
-        collects required fields before Add. The current point view permits
-        selecting a component as focus; setup mode does not change focus.
+        collects required fields before Add. Field edits go through the source
+        owner; setup mode edits only the entry template.
         """
         super().__init__(parent)
         self._control = control
@@ -74,7 +74,6 @@ class ComponentTreeWidget(QWidget):
         """Render the cached selected document; never implicitly refresh files."""
         self._tree.clear()
         self._row_values.clear()
-        self._focus_btn.setEnabled(False)
         self._apply_btn.setEnabled(False)
         try:
             document = self._control.inspect_document(setup=self._is_setup())
@@ -134,11 +133,6 @@ class ComponentTreeWidget(QWidget):
         self._error.clear()
         self.refresh()
         return True
-
-    def set_focus(self, name: str) -> None:
-        """Select a current component through the owner; errors propagate."""
-        if not self._is_setup():
-            self._control.set_component_focus(name)
 
     def _is_setup(self) -> bool:
         return self._destination.currentIndex() == 1
@@ -236,9 +230,7 @@ class ComponentTreeWidget(QWidget):
         self._value.setPlaceholderText("Working-unit value")
         self._apply_btn = QPushButton("Set field")
         self._apply_btn.clicked.connect(self._on_edit)
-        self._focus_btn = QPushButton("Set focus")
-        self._focus_btn.clicked.connect(self._on_focus)
-        for widget in (self._path, self._value, self._apply_btn, self._focus_btn):
+        for widget in (self._path, self._value, self._apply_btn):
             row.addWidget(widget)
         layout.addLayout(row)
 
@@ -261,7 +253,6 @@ class ComponentTreeWidget(QWidget):
             )
         else:
             self._value.clear()
-        self._focus_btn.setEnabled(current is not None and not self._is_setup())
 
     def _on_edit(self) -> None:
         path = self._path.text()
@@ -280,17 +271,3 @@ class ComponentTreeWidget(QWidget):
             self._error.setText(str(exc))
             return
         self.edit_parameter(path, value, setup=self._is_setup())
-
-    def _on_focus(self) -> None:
-        item = self._tree.currentItem()
-        if item is None:
-            return
-        while item.parent() is not None:
-            parent = item.parent()
-            if parent is None:
-                break
-            item = parent
-        try:
-            self.set_focus(item.text(0))
-        except Exception as exc:  # noqa: BLE001 — UI isolates and displays focus failures
-            self._error.setText(str(exc))

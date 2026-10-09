@@ -112,7 +112,7 @@ def _pulse_raw() -> dict[str, object]:
     }
 
 
-def test_create_module_from_role_uses_md_value(qapp):  # noqa: ARG001
+def test_create_module_from_role_uses_md_value(qapp):
     ctrl = _make_ctrl({"r_f": 6123.0, "res_ch": 1, "ro_ch": 2})
     ctrl.create_from_template("module", "res_probe", "my_ro")
 
@@ -126,7 +126,7 @@ def test_create_module_from_role_uses_md_value(qapp):  # noqa: ARG001
 
 def test_create_from_template_uses_value_then_fresh_shape_exactly_once(
     qapp, monkeypatch: pytest.MonkeyPatch
-) -> None:  # noqa: ARG001
+) -> None:
     events: list[str] = []
     entry, made_specs, made_values = _instrumented_entry(events)
     catalog = TemplateCatalog()
@@ -152,7 +152,7 @@ def test_create_from_template_uses_value_then_fresh_shape_exactly_once(
 
 def test_create_from_template_value_failure_does_not_call_shape(
     qapp, monkeypatch: pytest.MonkeyPatch
-) -> None:  # noqa: ARG001
+) -> None:
     events: list[str] = []
     entry, _, _ = _instrumented_entry(events, fail_value=True)
     catalog = TemplateCatalog()
@@ -175,7 +175,7 @@ def test_create_from_template_value_failure_does_not_call_shape(
 
 def test_create_from_template_shape_failure_occurs_after_value(
     qapp, monkeypatch: pytest.MonkeyPatch
-) -> None:  # noqa: ARG001
+) -> None:
     events: list[str] = []
     entry, _, _ = _instrumented_entry(events, fail_shape_on_create=True)
     catalog = TemplateCatalog()
@@ -198,7 +198,7 @@ def test_create_from_template_shape_failure_occurs_after_value(
 
 def test_create_from_template_context_failure_calls_no_factory_or_write(
     qapp, monkeypatch: pytest.MonkeyPatch
-) -> None:  # noqa: ARG001
+) -> None:
     events: list[str] = []
     entry, _, _ = _instrumented_entry(events)
     catalog = TemplateCatalog()
@@ -219,7 +219,7 @@ def test_create_from_template_context_failure_calls_no_factory_or_write(
 
 
 def test_create_from_template_downstream_failure_preserves_factory_counts_and_identity(
-    qapp,  # noqa: ARG001
+    qapp,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
@@ -253,7 +253,7 @@ def test_create_from_template_downstream_failure_preserves_factory_counts_and_id
     ],
 )
 def test_create_from_template_guards_do_not_call_value_or_shape(
-    qapp,  # noqa: ARG001
+    qapp,
     monkeypatch: pytest.MonkeyPatch,
     item_kind: str,
     name: str,
@@ -280,7 +280,7 @@ def test_create_from_template_guards_do_not_call_value_or_shape(
 
 def test_create_from_template_name_clash_guard_does_not_call_value_or_shape(
     qapp, monkeypatch: pytest.MonkeyPatch
-) -> None:  # noqa: ARG001
+) -> None:
     events: list[str] = []
     entry, _, _ = _instrumented_entry(events)
     catalog = TemplateCatalog()
@@ -301,7 +301,7 @@ def test_create_from_template_name_clash_guard_does_not_call_value_or_shape(
     write.assert_not_called()
 
 
-def test_create_module_from_role_empty_md_falls_back(qapp):  # noqa: ARG001
+def test_create_module_from_role_empty_md_falls_back(qapp):
     ctrl = _make_ctrl({})
     ctrl.create_from_template("module", "res_probe", "ro_blank")
 
@@ -310,7 +310,7 @@ def test_create_module_from_role_empty_md_falls_back(qapp):  # noqa: ARG001
     assert raw["freq"] == 6000.0
 
 
-def test_create_from_template_name_clash_fails(qapp):  # noqa: ARG001
+def test_create_from_template_name_clash_fails(qapp):
     """Create is new-entry semantics: a name clash must fail fast, not silently
     overwrite an existing ml entry."""
     ctrl = _make_ctrl({"r_f": 6000.0})
@@ -321,13 +321,13 @@ def test_create_from_template_name_clash_fails(qapp):  # noqa: ARG001
     assert ctrl.get_current_ml().modules["dup"].to_dict()["type"] == "pulse"
 
 
-def test_create_waveform_from_role(qapp):  # noqa: ARG001
+def test_create_waveform_from_role(qapp):
     ctrl = _make_ctrl({})
     ctrl.create_from_template("waveform", "res_waveform", "ro_wav")
     assert "ro_wav" in ctrl.get_current_ml().waveforms
 
 
-def test_create_from_blank_module_role(qapp):  # noqa: ARG001
+def test_create_from_blank_module_role(qapp):
     """A ':blank' role creates a structural-zero entry of that exact shape."""
     ctrl = _make_ctrl({"r_f": 6000.0})
     ctrl.create_from_template("module", "reset/bath:blank", "rb")
@@ -335,7 +335,7 @@ def test_create_from_blank_module_role(qapp):  # noqa: ARG001
     assert raw["type"] == "reset/bath"
 
 
-def test_create_from_blank_waveform_role_uncovered_style(qapp):  # noqa: ARG001
+def test_create_from_blank_waveform_role_uncovered_style(qapp):
     """A waveform style with no md-aware role (drag) is reachable via :blank."""
     ctrl = _make_ctrl({})
     ctrl.create_from_template("waveform", "drag:blank", "dwav")
@@ -343,13 +343,13 @@ def test_create_from_blank_waveform_role_uncovered_style(qapp):  # noqa: ARG001
     assert raw["style"] == "drag"
 
 
-def test_item_kind_mismatch_raises(qapp):  # noqa: ARG001
+def test_item_kind_mismatch_raises(qapp):
     ctrl = _make_ctrl({})
     with pytest.raises(RuntimeError, match="not a waveform"):
         ctrl.create_from_template("waveform", "res_probe", "x")
 
 
-def test_unknown_role_raises(qapp, monkeypatch: pytest.MonkeyPatch):  # noqa: ARG001
+def test_unknown_role_raises(qapp, monkeypatch: pytest.MonkeyPatch):
     ctrl = _make_ctrl({})
     get_context = MagicMock(wraps=ctrl.get_session_env)
     monkeypatch.setattr(ctrl, "get_session_env", get_context)
@@ -358,13 +358,13 @@ def test_unknown_role_raises(qapp, monkeypatch: pytest.MonkeyPatch):  # noqa: AR
     get_context.assert_not_called()
 
 
-def test_empty_name_raises(qapp):  # noqa: ARG001
+def test_empty_name_raises(qapp):
     ctrl = _make_ctrl({})
     with pytest.raises(RuntimeError, match="name must not be empty"):
         ctrl.create_from_template("module", "res_probe", "")
 
 
-def test_no_catalog_wired_raises(qapp):  # noqa: ARG001
+def test_no_catalog_wired_raises(qapp):
     ctx = SessionEnv(
         md=MetaDict(),
         ml=ModuleLibrary(),

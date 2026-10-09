@@ -121,7 +121,7 @@ class WritebackControlFacet:
     def get_writeback_item_draft_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
     ) -> CfgDraft:
-        self._guard.acquire_writeback_permit(tab_id)
+        self._guard.check_writeback(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
         return self._writeback.get_item_draft(draft, session_id)  # type: ignore[arg-type]
@@ -129,7 +129,7 @@ class WritebackControlFacet:
     def set_writeback_item_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
     ) -> dict[str, object]:
-        self._guard.acquire_writeback_permit(tab_id)
+        self._guard.check_writeback(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
         result = self._writeback.edit_draft(draft, session_id, **changes)  # type: ignore[arg-type]
@@ -143,7 +143,7 @@ class WritebackControlFacet:
         *,
         item_ids: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
-        self._guard.acquire_writeback_permit(tab_id)
+        self._guard.check_writeback(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
         result = self._writeback.apply_draft(draft, item_ids=item_ids)  # type: ignore[arg-type]
@@ -153,7 +153,7 @@ class WritebackControlFacet:
     def write_writeback_for_pane(
         self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]
     ) -> list[WritebackWritten]:
-        self._guard.acquire_writeback_permit(tab_id)
+        self._guard.check_writeback(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
         if not isinstance(draft, WritebackDraft):

@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgRevision, SourceRevision
-from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
     ContextSwitchedPayload,
     DeviceChangedPayload,
     MdChangedPayload,
@@ -127,7 +127,6 @@ def build_app_services(
     registry: Registry,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
-    notify_info: Callable[[str], None],
     resource_versions: Callable[[], Mapping[str, int]],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
     owner_scheduler: OwnerScheduler,
@@ -160,6 +159,7 @@ def build_app_services(
         runner=runner,
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
+        alias_rows=(AliasRow("qubit", ""), AliasRow("resonator", "$qubit.resonator")),
     )
     context = session.context
     device = session.device
@@ -171,20 +171,7 @@ def build_app_services(
         declarations: Mapping[str, RoleSpec],
         target: str | None,
     ) -> ParameterContext | None:
-        if not declarations:
-            if target is not None:
-                raise InvalidInputError(
-                    "target requires an adapter with declared roles"
-                )
-            return None
-        if target is None:
-            focus = context.get_component_focus().name
-            explicit = {}
-        else:
-            focus = target
-            explicit = {next(iter(declarations)): target}
-        roles = context.capture_roles(declarations, focus=focus, explicit=explicit)
-        return context.read_context(roles=roles)
+        return context.read_alias_context(declarations, target)
 
     def cfg_resolution(parameters: ParameterContext | None) -> CfgResolution:
         captured = session.value_sources.snapshot()
@@ -207,6 +194,7 @@ def build_app_services(
         tab_cfg.refresh_all()
 
     for event_type in (
+        AliasesChangedPayload,
         ContextSwitchedPayload,
         DeviceChangedPayload,
         MdChangedPayload,
@@ -233,8 +221,16 @@ def build_app_services(
         state, registry, writeback, tab_cfg, cfg_resolution, captured_parameters
     )
     workspace = WorkspaceService(state, tab, bus)
-    guard = GuardService(state)
-    load = LoadService(state, writeback, provide_options=bindings.provide_options)
+    guard = GuardService(
+        state, captured_parameters=captured_parameters, cfg_resolution=cfg_resolution
+    )
+    load = LoadService(
+        state,
+        writeback,
+        provide_options=bindings.provide_options,
+        context=ContextControlFacet(context=context),
+        captured_parameters=captured_parameters,
+    )
     run = RunService(
         state,
         runner,
@@ -246,9 +242,7 @@ def build_app_services(
     )
     analyze = AnalyzeService(state, runner, bus, writeback, handles)
     post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
-    save = SaveService(
-        state, runner, bus, owner_scheduler=QtOwnerScheduler(), access=access
-    )
+    save = SaveService(state, bus, access=access)
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,
@@ -274,19 +268,13 @@ def build_app_services(
         access=access,
     )
     operation_control = OperationControlFacet(
-        save=save,
         handles=handles,
         progress=progress,
         run_analyze=run_analyze_control,
         device=session.device_control,
     )
     save_control = SaveControlFacet(
-        state=state,
-        bus=bus,
-        guard=guard,
-        tab=tab,
-        save=save,
-        notify_info=notify_info,
+        state=state, guard=guard, save=save, context=context
     )
     writeback_control = WritebackControlFacet(
         state=state,

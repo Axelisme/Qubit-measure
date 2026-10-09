@@ -107,7 +107,9 @@ class IRCompileMixin(QickProgramV2):
                 offset,
                 len(entry_addrs),
             )
-            for i, (lbl, addr) in enumerate(zip(table_labels, entry_addrs)):
+            for i, (lbl, addr) in enumerate(
+                zip(table_labels, entry_addrs, strict=False)
+            ):
                 logger.debug(
                     "  dmem[%d] %s -> P_ADDR %d: %s",
                     offset + i,

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-09，Result entry／Working points 與同 token continuation
+**Last updated:** 2026-10-09，全域 alias、固定參數投影、entry/point Setup、同 token continuation 與 Inspect 元件樹
 
 # gui/session/ — 量測 session core
 
@@ -14,7 +14,8 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 ## Context、session environment 與 Run snapshot
 
 - **Entry 與 point** 的持久資源由 [`resources.entry`](../../resources/entry/README.md) 管理，module library 由 [`resources.context`](../../resources/context/README.md) 管理。Session 不重建文件版面，也不在清除選取時刪除資源。
-- **ParameterContext** 是隔離的 point/library 讀取投影。`EntryDraft` 與 `SavedPoint` 明確標識來源 entry 與目的地，捕捉的 roles 不因焦點或 point 切換重解析。固定 capture 可以保留未綁的宣告角色；實際讀取才指名失敗，不改讀同名 concrete 元件。已綁名稱仍須存在且符合 kind。資料 getter 不 refresh 或讀 YAML。`RoleBinding.explicit` 保存同次手動選擇，None 明確不綁，未列出的角色交唯一 resolver 推論；改綁回傳新 capture。Storage 只投影解析後的 names，不保存手動集合。
+- **ParameterContext** 是隔離的 point/library/storage 投影，`EntryDraft` 與 `SavedPoint` 標識來源。`bind_aliases` 固定當次有序 rows 與 consumer kind declarations。`$alias.path` 只沿這份表解析，bare concrete paths 使用獨立 namespace。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，包括 adapter 未宣告的自訂 alias；空列略過，consumer declarations 只限制其列的 kind。
+- **全域 alias 表** 由 `ContextService` 持有，只留在 session memory。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列，讀取才解析元件和 kind。App composition 宣告初值，第一份非空元件 snapshot 以 registry 的唯一候選填 primary row。此初值只初始化一次；明確提交表後不再覆蓋。`set_alias_rows` 安裝後才發布變更 fact。`read_alias_context` 每次固定目前資料，單次 target 只替換回傳 capture 的表，不改全域 rows 或版本。Notebook 的 role resolver 與 via 保留原契約。
 - **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，DRAFT／ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC、predictor 與 cached value sources 保持各自 owner。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。
 
@@ -26,6 +27,7 @@ schema/version/trigger policy，shared 層不依賴 Pydantic、Qt、cfg 或 app 
 ```
 session/
 ├── types.py            — SocProtocol/SocCfgProtocol/SocHandle/SocCfgHandle/ContextReadiness/SessionEnv（P-a 值型別）
+├── aliases.py          — session-only 有序表；原子替換、lazy component links 與單次 override
 ├── events.py           — SessionEvent enum + SessionPayload base + 11 payload（Md/Ml/ContextSwitched/Soc/Predictor/Device{Changed,SetupStarted,SetupFinished} + GateChanged/ConnectionFinished/DeviceOperationFinished）
 ├── state.py            — SessionState（session_env+devices/DeviceState+preferences/SessionPreferences+shared VersionTable+device mutators）；DeviceStatus
 ├── ports.py            — session service 依賴的 driven-adapter/seam ports：ExclusionGate(+OperationKind/OperationConflictError)、OwnerScheduler（owner-loop post/call/probe）、BackgroundExecutor（純 off-main 執行器，`submit(work,*,run_in_pool,on_done,on_error)` 無 scopes 參數）、ProgressHub、ProgressEvent/Kind/Transport、DriverFactoryPort、RememberedDevicePort、DeviceRegistryPort（production 使用 session-owned DeviceManager，測試注入 in-memory fake，ADR-0066）、ProjectIOPort、ContextReadPort、ProjectContextPort
@@ -37,7 +39,7 @@ session/
 ├── device_control.py   — DeviceControlPort + DeviceControlFacet：device lifecycle/query/progress/event-subscription 的窄 control facet（DeviceService + ProgressService + BaseEventBus），供 shared DeviceDialog、PredictorDialog 與 main remote device handler 使用；cached numeric device-value query 只讀 State，不做 live hardware read；`poll_device_info()` 是可能更新 cache 的 live refresh，`try_poll_device_info() -> bool` 讓 guarded app / UI 明確取得 refresh 是否送出；不含 context `get_current_md`
 ├── predictor_control.py — PredictorControlPort + PredictorControlFacet：predictor load/set_model_params/clear/query/compute/event-subscription 的窄 control facet（PredictorService + BaseEventBus），供 shared PredictorDialog、main predictor panel 與 remote predictor handler 使用
 ├── progress_control.py — ProgressControlPort + ProgressControlFacet：owner-keyed progress subscribe/query 的窄 control facet（ProgressService），供 app-local run UI 使用；operation-id progress 查詢仍留在 app controller/remote operation handler
-├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、focus 與 value-source 的窄 facade，轉送 ContextService
+├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀写、focus 與 value-source 的窄 facade，轉送 ContextService。Alias 表可在未開 entry 時編輯，提交不寫檔。
 ├── setup_control.py    — SetupControlPort + SetupControlFacet：entry open/new、point use/new、cached setup preferences 與獨立 SoC commands；直接公開既有 devices facet 供 cached label 建議，不依賴 app Controller
 ├── controller_mixin.py — SessionControllerMixin：measure 的 session forwards；shared dialog 使用窄 control facet，entry open/new 直接交 SetupControlPort，不經 project identity 或 app Controller
 ├── expression.py       — simpleeval 共用數值求值引擎，封裝函式／算子白名單、AST／數值大小限制及 MetaDict 名稱查詢。`evaluate_scalar_expr` 保留 int/float/complex，`evaluate_numeric_expr` 在 real-only 邊界拒絕 complex；`**` 為冪次，`^` 沿用原生 XOR。函式為 sin/cos/tan/sqrt/exp/log/log10/abs，常數 pi/e；math 函式不自動轉 cmath。引用到的保留名稱若與來源衝突則拒絕。EvalRef 是 apply-time resolve marker，不持久化。

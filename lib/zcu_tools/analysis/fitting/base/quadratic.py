@@ -152,8 +152,8 @@ def retrieve_params(
 
     # Recover f from the width definition. In encode_params:
     #     A = c (which we set to 1)
-    #     B = d + e * cx
-    #     C = a * cx**2 + b * cx + f
+    #     B is the linear coefficient d + e * cx.
+    #     C is the constant term a * cx**2 + b * cx + f.
     #     width = 0.5 * sqrt(B**2 - 4 * A * C) / |A|
     # →  (d + e * cx)^2 - 4 (a * cx**2 + b * cx + f) = (2 * width)^2
     B = d + e * cx

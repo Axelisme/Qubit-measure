@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import ClassVar, Literal
 
+from zcu_tools.experiment.run_saving import SaveReport
 from zcu_tools.gui.event_bus import BasePayload
 
 
@@ -25,17 +26,36 @@ class AnalyzeFailedPayload(BasePayload):
 
 @dataclass(frozen=True)
 class SaveDataFinishedPayload(BasePayload):
+    """Native data completion fact, delivered after the synchronous State commit.
+
+    tab_id identifies the owning tab; data_path is the attempted canonical path.
+    error joins failed output paths and diagnostics, or is None on full success.
+    report contains every attempted output from this call. The existing None
+    default carries no output evidence. Preparation/ledger errors propagate
+    without publishing a completion fact.
+    """
+
     EVENT: ClassVar[CompletionEvent] = CompletionEvent.SAVE_DATA_FINISHED
     tab_id: str
     data_path: str
     error: str | None = None
+    report: SaveReport | None = None
 
 
 @dataclass(frozen=True)
 class SaveArtifactsFinishedPayload(BasePayload):
+    """Multi-artifact completion fact, after the synchronous State commit.
+
+    tab_id identifies the owner. error joins failed output paths and diagnostics,
+    or is None on complete success. report lists every attempted output from
+    this call. The existing None default carries no output evidence.
+    Preparation/ledger errors propagate without publishing a completion fact.
+    """
+
     EVENT: ClassVar[CompletionEvent] = CompletionEvent.SAVE_ARTIFACTS_FINISHED
     tab_id: str
     error: str | None = None
+    report: SaveReport | None = None
 
 
 __all__ = [

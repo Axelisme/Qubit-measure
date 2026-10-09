@@ -8,9 +8,12 @@ from dataclasses import asdict, dataclass, field, replace
 from threading import Condition, Event, Lock, Thread
 from typing import Any, Literal, TypedDict
 
+from pydantic import TypeAdapter, ValidationError
+
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.operation_wait import await_operation
+from zcu_tools.mcp.measure.raw_save import SaveReport
 from zcu_tools.mcp.measure.session import GuiConnection, GuiRpcError, MeasureMcpSession
 
 AnalysisStage = Literal["primary", "post"]
@@ -39,12 +42,6 @@ class AnalysisResult:
     params: dict[str, Any]
     operation_state: dict[str, Any]
     invalid: list[InvalidAnalysisValue]
-
-
-@dataclass(frozen=True)
-class SavedImage:
-    figure_name: str
-    image_path: str
 
 
 @dataclass(frozen=True)
@@ -94,10 +91,9 @@ class ExecutionSnapshot:
     result: Captured native analysis result, or None before result_read.
     interaction: Latest interaction handoff, or None if none was delivered.
     save_status: not_started, not_available, saving, saved, incomplete or unknown.
-    saved_images: Confirmed persistent image paths; failures retain this prefix.
-    remaining_images: Unsaved owner image names, or None before result_read.
-    unconfirmed_image: Admitted save with unknown outcome, or None.
-    figure: Session preview path, or None if unavailable/not delivered.
+    save_report: Latest complete synchronous native Save report, or None before
+        a reply; it contains all outputs, including reserved/failed paths.
+        There is no image-by-image successful prefix or session PNG path.
     writeback: Completed operation's preview, or None before writeback_read.
         Interactive handoff does not capture; done joins this completion.
         A failed read retains result/save/preview facts and reports error.
@@ -118,10 +114,7 @@ class ExecutionSnapshot:
     result: AnalysisResult | None = None
     interaction: dict[str, Any] | None = None
     save_status: SaveStatus = "not_started"
-    saved_images: list[SavedImage] = field(default_factory=list)
-    remaining_images: list[str] | None = None
-    unconfirmed_image: str | None = None
-    figure: str | None = None
+    save_report: SaveReport | None = None
     writeback: AnalysisWriteback | None = None
     error: ExecutionError | None = None
 
@@ -341,7 +334,6 @@ class AnalysisExecution:
             self._snapshot = replace(
                 self._snapshot,
                 interaction=deepcopy(reply.data),
-                figure=reply.data.get("figure"),
                 status="running" if done else self._snapshot.status,
             )
             self._condition.notify_all()
@@ -423,7 +415,7 @@ class AnalysisExecution:
         known operation receipt. This performs the same bounded operation.await,
         result/image/writeback capture and failure isolation as background start.
         Return a detached terminal snapshot, including failures and cancellation.
-        The caller owns this worker's join before session PNG cleanup. Raise
+        The caller owns this worker's join before session close returns. Raise
         ValueError if completion already started or no operation receipt exists.
         Recipe drivers use this to avoid a second waiting worker; standalone
         analyses keep their ordinary background start.
@@ -454,7 +446,7 @@ class AnalysisExecution:
             self._snapshot = replace(self._snapshot, **changes)
             self._condition.notify_all()
 
-    def _admit(self, phase: ExecutionPhase, image: str | None = None) -> None:
+    def _admit(self, phase: ExecutionPhase) -> None:
         with self._condition:
             if self._closed.is_set() or self._session_closed.is_set():
                 raise GuiRpcError("MCP session is closed", reason="session_closed")
@@ -463,9 +455,11 @@ class AnalysisExecution:
             self._snapshot = replace(
                 self._snapshot,
                 phase=phase,
-                unconfirmed_image=image,
+                save_report=None
+                if phase == "image_save"
+                else self._snapshot.save_report,
                 save_status="saving"
-                if image is not None
+                if phase == "image_save"
                 else self._snapshot.save_status,
             )
 
@@ -475,7 +469,6 @@ class AnalysisExecution:
         method: str,
         params: dict[str, Any],
         *,
-        image: str | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
         try:
@@ -484,7 +477,7 @@ class AnalysisExecution:
                 params,
                 timeout_seconds=timeout,
                 operation_handle=self._snapshot.op,
-                before_send=lambda: self._admit(phase, image),
+                before_send=lambda: self._admit(phase),
             )
         except _ContinuationCancelled:
             raise
@@ -498,24 +491,18 @@ class AnalysisExecution:
             reason = exc.reason if isinstance(exc, GuiRpcError) else None
             code = exc.code if isinstance(exc, GuiRpcError) else None
             save_status = snapshot.save_status
-            unconfirmed = snapshot.unconfirmed_image
-            if phase == "image_save" and save_status != "saved":
-                save_status = "incomplete"
-            if unconfirmed is not None:
-                # Timeouts and failed reply encoding do not settle the admitted save.
+            if phase == "image_save" and save_status == "saving":
+                # A missing reply cannot confirm whether the admitted save wrote.
                 known_rejection = (
                     code not in (None, "timeout")
                     and reason != "response_encoding_failed"
                 )
                 save_status = "incomplete" if known_rejection else "unknown"
-                if known_rejection:
-                    unconfirmed = None
             self._snapshot = replace(
                 snapshot,
                 status="failed",
                 phase="terminal",
                 save_status=save_status,
-                unconfirmed_image=unconfirmed,
                 error=ExecutionError(
                     phase, reason or "execution_failed", str(exc), code
                 ),
@@ -540,14 +527,10 @@ class AnalysisExecution:
     def _finish(self, **changes: Any) -> None:
         with self._condition:
             snapshot = replace(self._snapshot, **changes)
-            save_status = snapshot.save_status
-            if save_status == "saving" and snapshot.unconfirmed_image is None:
-                save_status = "incomplete" if snapshot.remaining_images else "saved"
             self._snapshot = replace(
                 snapshot,
                 status="cancelled" if snapshot.cancel_requested else "finished",
                 phase="terminal",
-                save_status=save_status,
             )
             self._condition.notify_all()
 
@@ -587,34 +570,32 @@ class AnalysisExecution:
         )
         reply = self._rpc("result_read", method, {"tab_id": snapshot.tab})
         result, names = _analysis_result(reply, snapshot.stage)
-        self._publish(
-            result=result, params=deepcopy(result.params), remaining_images=names
+        self._publish(result=result, params=deepcopy(result.params))
+        reply = self._rpc(
+            "image_save",
+            "tab.save_artifacts",
+            {
+                "tab_id": snapshot.tab,
+                "artifacts": [{"section": pane, "name": "results"}],
+            },
         )
-        saved: list[SavedImage] = []
-        for index, name in enumerate(names):
-            reply = self._rpc(
-                "image_save",
-                "tab.save_image",
-                {
-                    "tab_id": snapshot.tab,
-                    "subtab_id": pane,
-                    "figure_name": name,
-                    "image_path": None,
-                },
-                image=name,
-            )
-            path = reply.get("image_path")
-            if not isinstance(path, str) or not path:
-                raise GuiRpcError(
-                    "invalid saved image path", reason="incompatible_wire"
-                )
-            saved.append(SavedImage(name, path))
-            self._publish(
-                saved_images=list(saved),
-                remaining_images=names[index + 1 :],
-                unconfirmed_image=None,
-            )
-        self._publish(save_status="saved" if names else "not_available")
+        try:
+            report = TypeAdapter(SaveReport).validate_python(reply)
+        except ValidationError as error:
+            raise GuiRpcError(
+                "Invalid native Save report", reason="incompatible_wire"
+            ) from error
+        artifacts = [
+            artifact
+            for section in report.artifacts.values()
+            for artifact in section.values()
+        ]
+        self._publish(
+            save_report=report,
+            save_status="saved"
+            if artifacts and all(artifact.status == "Saved" for artifact in artifacts)
+            else "incomplete",
+        )
         if names:
             reply = self._rpc(
                 "figure_read",
@@ -627,10 +608,8 @@ class AnalysisExecution:
                     "invalid analysis preview reply", reason="incompatible_wire"
                 )
             image = validated_png(base64.b64decode(encoded, validate=True))
-            path = self._session.write_png(image.data)
             with self._condition:
                 self._images = (image,)
-                self._publish(figure=str(path))
         reply = self._rpc(
             "writeback_read",
             "tab.writeback_preview",

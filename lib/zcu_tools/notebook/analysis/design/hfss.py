@@ -64,10 +64,9 @@ def analyze_xy_sweep(
     if Xs[0] != Xs[1]:
         if Ys[0] != Ys[1]:
             raise ValueError("Unrecognized data order")
-        else:
-            print("force order: (x, y)")
-            freqs1 = freqs1.reshape(len_y, len_x).T.flatten()
-            freqs2 = freqs2.reshape(len_y, len_x).T.flatten()
+        print("force order: (x, y)")
+        freqs1 = freqs1.reshape(len_y, len_x).T.flatten()
+        freqs2 = freqs2.reshape(len_y, len_x).T.flatten()
     freqs1 = freqs1.reshape(len_x, len_y)
     freqs2 = freqs2.reshape(len_x, len_y)
 

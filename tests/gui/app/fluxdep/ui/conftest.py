@@ -10,7 +10,7 @@ import pytest
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["QT_QPA_PLATFORMTHEME"] = "generic"
 
-from qtpy.QtWidgets import QApplication  # noqa: E402
+from qtpy.QtWidgets import QApplication
 
 
 @pytest.fixture(scope="session")

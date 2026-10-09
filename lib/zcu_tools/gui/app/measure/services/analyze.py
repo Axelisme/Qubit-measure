@@ -15,7 +15,6 @@ from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import OperationRunner
 
-from .guard import AnalyzePermit
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 from .staged_analyze import _StagedAnalyzeService
 
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class _AnalyzeCapture:
     run_result: object | None
+    run_id: str | None
     context: SessionEnv
     adapter: ExpAdapterProtocol
     params: object | None
@@ -86,15 +86,19 @@ class AnalyzeService(_StagedAnalyzeService):
 
     def start_analyze(
         self,
-        permit: AnalyzePermit,
+        tab_id: str,
         analyze_params_instance: object,
         *,
         plots: Plots,
     ) -> int:
-        # Context + run-result preconditions are proven by the AnalyzePermit;
-        # tab-busy is the dynamic check that stays at the operation boundary.
-        # Returns the operation token (handle) so the caller can await it.
-        tab_id = permit.tab_id
+        """Start Primary analysis and return its asynchronous operation token.
+
+        tab_id identifies an existing tab; analyze_params_instance is the
+        adapter's parameter instance and plots is the operation-owned host.
+        Call after GuardService.check_analyze in the same owner-thread command.
+        Capture the historical Run source, not current tab bindings. Busy or
+        submission failures raise; worker failures settle the returned token.
+        """
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
@@ -114,6 +118,7 @@ class AnalyzeService(_StagedAnalyzeService):
         adapter = tab.adapter
         captured_inputs = _AnalyzeCapture(
             run_result=req.run_result,
+            run_id=tab.run.metadata.run_id if tab.run.metadata is not None else None,
             context=ctx,
             adapter=adapter,
             params=analyze_params_instance,
@@ -147,21 +152,29 @@ class AnalyzeService(_StagedAnalyzeService):
 
     def start_plugin(
         self,
-        permit: AnalyzePermit,
+        tab_id: str,
         plugin: PluginDefinition[Any, Any],
         owner: OwnerScheduler,
         *,
         analyze_params_instance: object,
         plots: Plots,
     ) -> int:
-        """Capture operation inputs and register one service-owned session."""
-        tab_id = permit.tab_id
+        """Open plugin and return its service-owned interactive operation token.
+
+        tab_id identifies an existing tab checked by GuardService.check_analyze
+        in the same owner-thread command. plugin is its adapter's definition;
+        owner schedules commits, analyze_params_instance supplies parameters and
+        plots is its owned host. Capture the historical Run source once. Busy,
+        plugin opening or handle admission failures raise without a live session.
+        The owning service disposes the session on terminal paths.
+        """
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
         tab = self._state.get_tab(tab_id)
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         captured = _AnalyzeCapture(
             run_result=tab.run.result,
+            run_id=tab.run.metadata.run_id if tab.run.metadata is not None else None,
             context=ctx,
             adapter=tab.adapter,
             params=analyze_params_instance,
@@ -393,7 +406,9 @@ class AnalyzeService(_StagedAnalyzeService):
         draft: Any | None = None
         try:
             draft = self._writeback.create_draft(
-                proposal_items, parameters=ctx.parameters
+                proposal_items,
+                parameters=ctx.parameters,
+                run_id=captured_inputs.run_id,
             )
             plots.finish()
             retired = self._state.update_tab_analyze(

@@ -22,7 +22,7 @@ from zcu_tools.gui.cfg import (
 
 def test_waveform_cfg_to_value():
     cfg = {"style": "gauss", "length": 2.0, "sigma": 0.5}
-    spec, val = waveform_cfg_to_value(cfg)
+    _spec, val = waveform_cfg_to_value(cfg)
 
     assert cast(DirectValue, val.fields["style"]).value == "gauss"
     assert cast(DirectValue, val.fields["length"]).value == 2.0
@@ -33,7 +33,7 @@ def test_waveform_cfg_to_value():
 
 def test_waveform_cfg_to_value_missing_fields():
     cfg = {"style": "gauss"}
-    spec, val = waveform_cfg_to_value(cfg)
+    _spec, val = waveform_cfg_to_value(cfg)
 
     # A missing key is unset (value is None, ADR-0010) — no hard-coded default.
     assert cast(DirectValue, val.fields["length"]).value is None
@@ -45,7 +45,7 @@ def test_waveform_cfg_flat_top():
         "length": 3.0,
         "raise_waveform": {"style": "cosine", "length": 0.5},
     }
-    spec, val = waveform_cfg_to_value(cfg)
+    _spec, val = waveform_cfg_to_value(cfg)
     assert cast(DirectValue, val.fields["style"]).value == "flat_top"
 
     raise_wav = val.fields["raise_waveform"]
@@ -65,7 +65,7 @@ def test_waveform_cfg_to_value_arb_has_no_length_field():
 
 def test_module_cfg_to_value_direct_readout():
     cfg = {"type": "readout/direct", "ro_freq": 7000.0}
-    spec, val = module_cfg_to_value(cfg)
+    _spec, val = module_cfg_to_value(cfg)
 
     assert cast(DirectValue, val.fields["type"]).value == "readout/direct"
     assert cast(DirectValue, val.fields["ro_freq"]).value == 7000.0
@@ -108,7 +108,7 @@ def test_module_cfg_to_value_direct_readout_missing_gen_ch_lowers_omitted():
 
 def test_module_cfg_to_value_pulse_reset():
     cfg = {"type": "reset/pulse", "pulse_cfg": {"freq": 5000.0}}
-    spec, val = module_cfg_to_value(cfg)
+    _spec, val = module_cfg_to_value(cfg)
 
     assert cast(DirectValue, val.fields["type"]).value == "reset/pulse"
     pulse_val = cast(CfgSectionValue, val.fields["pulse_cfg"])
@@ -186,7 +186,7 @@ def test_module_cfg_to_value_pulse_basic():
         "post_delay": 0.0,
         "waveform": {"style": "const", "length": 2.0},
     }
-    spec, val = module_cfg_to_value(cfg)
+    _spec, val = module_cfg_to_value(cfg)
 
     assert cast(DirectValue, val.fields["type"]).value == "pulse"
     assert cast(DirectValue, val.fields["freq"]).value == 5500.0
@@ -196,7 +196,7 @@ def test_module_cfg_to_value_pulse_basic():
 
 def test_module_cfg_to_value_pulse_missing_fields():
     cfg = {"type": "pulse"}
-    spec, val = module_cfg_to_value(cfg)
+    _spec, val = module_cfg_to_value(cfg)
 
     # missing keys → unset (value is None, ADR-0010)
     assert cast(DirectValue, val.fields["freq"]).value is None

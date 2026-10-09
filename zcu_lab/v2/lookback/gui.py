@@ -55,7 +55,7 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     on the capture; unbound roles and source faults do not become fallback.
     """
     spec = make_pulse_readout_module_spec().allowed[0]
-    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
     return (
         ReferenceValue(
             make_custom_reference_key(spec.label or "Readout"),
@@ -67,19 +67,19 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
         .with_field("pulse_cfg.waveform.length", 1.0)
         .with_field(
             "pulse_cfg.ch",
-            path_seed("resonator.wiring.ch", fallback=0).resolve(ctx),
+            path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx),
         )
         .with_field("ro_cfg.ro_freq", frequency)
         .with_field(
             "ro_cfg.ro_ch",
-            path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx),
+            path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx),
         )
         .with_field("ro_cfg.ro_length", 1.5)
         .with_field(
             "ro_cfg.trig_offset",
             path_seed(
-                "resonator.ext.time_of_fly",
-                expr="resonator.ext.time_of_fly - 0.1",
+                "$resonator.ext.time_of_fly",
+                expr="$resonator.ext.time_of_fly - 0.1",
                 fallback=0.4,
             ).resolve(ctx),
         )
@@ -150,10 +150,10 @@ class LookbackAdapter(
     )
 
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Capture the chosen qubit and its resonator for one lookback tab."""
+        """Declare the global aliases used by this adapter."""
         return {
             "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+            "resonator": RoleSpec("resonator"),
         }
 
     @classmethod
@@ -226,7 +226,7 @@ class LookbackAdapter(
         """
         return [
             MetaDictWriteback(
-                target_name="resonator.ext.time_of_fly",
+                target_name="$resonator.ext.time_of_fly",
                 description="Readout trigger offset prediction (us)",
                 proposed_value=req.analyze_result.predict_offset,
             )

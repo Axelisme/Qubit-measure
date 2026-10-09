@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-10-09 — native arb paths, hardware-clock quantization and worker GIL yielding
+**Last updated:** 2026-10-09，native arb path、worker GIL yield 與 hardware-clock time quantization
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,

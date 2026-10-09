@@ -86,6 +86,10 @@ class MainDialogRegistry:
             return InspectDialog(
                 self._ctrl, bus=self._ctrl.get_bus(), parent=self._parent
             )
+        if name is DialogName.ALIASES:
+            from .alias_dialog import AliasDialog
+
+            return AliasDialog(self._ctrl.context_control, parent=self._parent)
         if name is DialogName.ARB_WAVEFORM:
             from .arb_waveform_dialog import ArbWaveformDialog
 

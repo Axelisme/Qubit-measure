@@ -15,7 +15,7 @@ owns only the transition lists. ``get_transitions`` parses the fields back to a
 
 from __future__ import annotations
 
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QFormLayout,
     QLineEdit,
     QWidget,
