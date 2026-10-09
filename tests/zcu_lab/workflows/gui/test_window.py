@@ -50,7 +50,7 @@ from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
-from ._plan_inputs import inline_input
+from ._plan_inputs import inline_input, library_env
 
 
 @pytest.fixture(scope="session")
@@ -722,9 +722,16 @@ RpcRequest = Callable[[str, dict[str, object]], dict[str, object]]
 @pytest.fixture
 def rpc(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
 ) -> Iterator[RpcRequest]:
     """Use public route and encoded replies; pump the real owner queue explicitly."""
     window, harness, _entry = attachment
+    context = harness.services.context
+    library = library_env(inputs).library
+    assert library is not None
+    target = context.read_context().target
+    for key in ("Q1.pulses.pi", "Q1.readout.ro"):
+        context.set_module(target, key, library.module_spec(key))
     service = window.create_remote_service(ControlOptions(port=0), harness.bus)
     link = ClientLink("workflow-contract", token_required=False)
     service.on_client_open(link)
@@ -984,24 +991,23 @@ def test_rpc_old_target_does_not_change_current_run(
     assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
 
 
-def _start_plan_batch(inputs: Inputs) -> list[FormWrite]:
-    """Encode this nested-model fixture as leaf writes, retaining scalar Expr."""
-    data = inline_input(inputs).data
-    del data["points"]  # RPC uses defaults, not the old GUI input.
-    data["pi_length_us"] = {"expr": "0.06 * 2"}
-    batch: list[FormWrite] = []
+def _start_plan_batch(_inputs: Inputs) -> list[FormWrite]:
+    """Select the fixture's native modules through captured public library roots.
 
-    def append_leaves(tree: dict[str, JsonValue], prefix: tuple[str, ...]) -> None:
-        # This fixture contains nested models, not typed-mapping object leaves.
-        for name, value in tree.items():
-            path = (*prefix, name)
-            if isinstance(value, dict) and "expr" not in value:
-                append_leaves(value, path)
-            else:
-                batch.append({"path": list(path), "value": value})
-
-    append_leaves(data, ())
-    return batch
+    Waveform's reference/inline union has no writable discriminator child path;
+    reference selections use existing supported leaves without a tree encoder.
+    Omit points so Start must use defaults rather than the old GUI draft.
+    """
+    return [
+        {"path": ["flux_dev"], "value": "flux"},
+        {"path": ["fluxes", "kind"], "value": "list"},
+        {"path": ["fluxes", "values"], "value": [1.0, 1.1]},
+        {"path": ["pi_length_us"], "value": {"expr": "0.06 * 2"}},
+        {"path": ["qub_pulse", "kind"], "value": "ref"},
+        {"path": ["qub_pulse", "name"], "value": "Q1.pulses.pi"},
+        {"path": ["readout", "kind"], "value": "ref"},
+        {"path": ["readout", "name"], "value": "Q1.readout.ro"},
+    ]
 
 
 def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
