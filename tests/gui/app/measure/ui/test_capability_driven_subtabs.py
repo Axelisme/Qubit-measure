@@ -63,11 +63,9 @@ def make_snapshot(
 ):
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         RunPaneSnapshot,
         SavePaneSnapshot,
-        TabPathsSnapshot,
     )
 
     # Allow explicit pane figure override or create based on flags
@@ -85,18 +83,6 @@ def make_snapshot(
     else:
         post_figure_obj = post_analysis_figure
 
-    # Determine actual figure for has_figure flag: keep consistency
-    # Paths
-    data_path_snap = PathResourceSnapshot(
-        override=None, path="/tmp/data.hdf5" if has_run_result else None
-    )
-    analysis_image_snap = PathResourceSnapshot(
-        override=None,
-        path="/tmp/image.png" if has_figure and has_analyze_result else None,
-    )
-    post_image_snap = PathResourceSnapshot(
-        override=None, path="/tmp/post.png" if has_post_result else None
-    )
     run_snap = RunPaneSnapshot(
         result=object() if has_run_result else None, source_path=None
     )
@@ -105,21 +91,14 @@ def make_snapshot(
         result=object() if has_analyze_result else None,
         figures=ready_figures(figure_obj),
         writeback_items=tuple(analysis_writeback_items),
-        image_paths={"fit": analysis_image_snap} if figure_obj is not None else {},
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=DummyPostParams() if has_post_result else None,
         result=object() if has_post_result else None,
         figures=ready_figures(post_figure_obj),
         writeback_items=tuple(post_writeback_items),
-        image_paths={"fit": post_image_snap} if post_figure_obj is not None else {},
     )
-    save_snap = SavePaneSnapshot(data_path=data_path_snap)
-    paths_snap = TabPathsSnapshot(
-        data=data_path_snap,
-        analysis_images=analysis_snap.image_paths,
-        post_analysis_images=post_snap.image_paths,
-    )
+    save_snap = SavePaneSnapshot()
     snapshot = TabSnapshot(
         adapter_name="fake",
         cfg_schema=MagicMock(),
@@ -128,7 +107,6 @@ def make_snapshot(
             global_run_active=False,
             is_running=False,
             is_analyzing=is_analyzing,
-            is_saving_data=False,
             has_context=True,
             has_active_context=True,
             has_soc=True,
@@ -144,7 +122,6 @@ def make_snapshot(
         analysis=analysis_snap,
         post_analysis=post_snap,
         save=save_snap,
-        paths=paths_snap,
     )
     return with_artifacts(snapshot)
 

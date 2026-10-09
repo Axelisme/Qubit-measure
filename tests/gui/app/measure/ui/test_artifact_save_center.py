@@ -6,6 +6,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+from matplotlib.figure import Figure
 from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
@@ -15,11 +17,18 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactDeclaration,
     ArtifactTracker,
 )
-from zcu_tools.gui.app.measure.services.ports import TabSnapshot
+from zcu_tools.gui.app.measure.services.ports import (
+    AnalysisPaneSnapshot,
+    PostAnalysisPaneSnapshot,
+    RunPaneSnapshot,
+    TabSnapshot,
+)
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.resources.entry import ArtifactKey, Output, SaveLayout
+
+from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 _CAPABILITIES = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
 _REFS = (
@@ -27,6 +36,62 @@ _REFS = (
     ArtifactRef("analysis", "results"),
     ArtifactRef("post_analysis", "results"),
 )
+
+
+@pytest.mark.parametrize("has_figures, output_count", [(False, 4), (True, 8)])
+def test_pane_specimens_render_data_json_and_named_figure_outputs(
+    qapp: QApplication, tmp_path: Path, has_figures: bool, output_count: int
+) -> None:
+    """Project view fixtures through the shipped Qt seam, including JSON-only panes."""
+    _, current = snapshot(tmp_path)
+    current = with_artifacts(
+        replace(
+            current,
+            run=RunPaneSnapshot(result=object(), source_path=None),
+            analysis=AnalysisPaneSnapshot(
+                params=None,
+                result=object(),
+                figures=ready_figures(Figure() if has_figures else None),
+                writeback_items=(),
+            ),
+            post_analysis=PostAnalysisPaneSnapshot(
+                params=None,
+                result=object(),
+                figures=ready_figures(Figure() if has_figures else None),
+                writeback_items=(),
+            ),
+        )
+    )
+    selected: list[ArtifactRef] = []
+    center = ArtifactSaveCenter(_CAPABILITIES)
+    center.bind_artifact_save(selected.append)
+    try:
+        center.update_interaction(current)
+        paths = [edit for edit in center.findChildren(QLineEdit) if edit.isReadOnly()]
+        assert len(paths) == output_count
+        assert all(Path(edit.text()).is_absolute() for edit in paths)
+        labels = [label.text() for label in center.findChildren(QLabel)]
+        assert "data · data_h5" in labels
+        assert "data · labber" in labels
+        assert "analysis · json" in labels
+        assert "post_analysis · json" in labels
+        if has_figures:
+            assert labels.count("fit · png") == 4
+        assert sum("NOT SAVED" in label for label in labels) == 3
+        assert center.has_unsaved_data()
+        assert center.save_all_button.isEnabled()
+        buttons = [
+            button
+            for button in center.findChildren(QPushButton)
+            if button.text() == "Save"
+        ]
+        assert len(buttons) == 3
+        for button in buttons:
+            button.click()
+        assert selected == list(_REFS)
+    finally:
+        center.deleteLater()
+        qapp.processEvents()
 
 
 def snapshot(tmp_path: Path) -> tuple[ArtifactTracker, TabSnapshot]:
