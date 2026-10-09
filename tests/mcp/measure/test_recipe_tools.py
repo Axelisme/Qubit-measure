@@ -173,8 +173,21 @@ def test_primary_and_post_done_return_recipe_continuation_then_question(tmp_path
         assert question.data["execution"] == key
         assert question.data["status"] == "awaiting_answer"
         assert question.data["question_items"] == ("frequency", "linewidth")
-        assert len(question.data["previews"]["primary"]) == 1
-        assert len(question.data["previews"]["post"]) == 1
+        primary_artifact = question.data["artifacts"]["analysis"]["results"]
+        post_artifact = question.data["artifacts"]["post_analysis"]["results"]
+        assert primary_artifact["status"] == post_artifact["status"] == "Saved"
+        assert set(primary_artifact["members"]) == {
+            "analysis:primary",
+            "figure:fit",
+            "figure:residual",
+        }
+        assert set(post_artifact["members"]) == {"analysis:post", "figure:post-fit"}
+        for artifact in (primary_artifact, post_artifact):
+            assert all(
+                output["status"] == "saved"
+                for outputs in artifact["members"].values()
+                for output in outputs
+            )
         result = client.call("answer", {"recipe": key, "decision": "skipped"})
         assert result.data["status"] == "finished"
         assert gui.writes == []
@@ -287,7 +300,7 @@ def test_op_control_resolves_original_run_and_preserves_native_outcome(
         )
         assert not result.is_error
         if control == "finish_early":
-            assert result.data["artifacts"]["raw"]["data"]["status"] == "saved"
+            assert result.data["artifacts"]["raw"]["data"]["status"] == "Saved"
             client.call("answer", {"recipe": key, "decision": "skipped"})
         else:
             assert not gui.raw_saved
