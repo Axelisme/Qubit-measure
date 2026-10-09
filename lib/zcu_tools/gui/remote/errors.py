@@ -87,7 +87,7 @@ class ErrorEnvelope:
         )
 
     def to_wire(self) -> dict:
-        wire: dict = {"code": self.code, "message": self.message}
+        wire: dict[str, object] = {"code": self.code, "message": self.message}
         if self.reason:
             wire["reason"] = self.reason
         if self.data:
