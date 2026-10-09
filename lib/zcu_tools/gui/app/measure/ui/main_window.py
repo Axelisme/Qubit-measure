@@ -174,11 +174,16 @@ class MainWindow(QMainWindow):
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
     def _build_context_bar(self) -> QHBoxLayout:
-        """Assemble the persistent context/focus/predictor controls."""
+        """Assemble the persistent entry/point/focus/predictor controls."""
         ctx_bar = QHBoxLayout()
-        ctx_bar.addWidget(QLabel("Context:"))
-        self._ctx_label = QLabel("(none)")
-        ctx_bar.addWidget(self._ctx_label)
+        ctx_bar.addWidget(QLabel("Entry:"))
+        self._entry_label = QLabel("No entry open")
+        self._entry_label.setObjectName("current_entry")
+        ctx_bar.addWidget(self._entry_label)
+        ctx_bar.addWidget(QLabel("Point:"))
+        self._point_label = QLabel("No point selected")
+        self._point_label.setObjectName("current_point")
+        ctx_bar.addWidget(self._point_label)
         ctx_bar.addWidget(QLabel("Focus:"))
         self._focus_combo = QComboBox(self)
         self._focus_combo.setObjectName("component_focus")
@@ -473,29 +478,36 @@ class MainWindow(QMainWindow):
         tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_context_panel(self) -> None:
-        """Project committed context and component focus without changing captures.
+        """Project entry, published point and focus without changing captures.
 
-        The status label uses cached entry identity and the published parameter
-        target, never a focus-derived qubit name. Focus options include all
-        components grouped by kind. Empty/ambiguous focus remains unselected;
-        rendering must not submit a focus command or change tab titles.
+        Entry shows the owner's entry name or "No entry open". Point shows the
+        published SavedPoint name, "Draft (in-memory)" for memory parameters, or
+        "No point selected" when parameters are absent, never a focus-derived
+        qubit name. Focus options include all components grouped by kind.
+        Empty/ambiguous focus remains unselected; rendering must not submit a
+        focus command or change tab titles. Refresh tab interaction state too.
         """
         self._render_component_focus()
         entry = self._ctrl.context_control.get_entry_info()
         parameters = self._ctrl.get_session_env().parameters
         target = parameters.target if parameters is not None else None
         if entry is None:
-            self._ctx_label.setText("No entry open — use Setup… to configure")
-            self._ctx_label.setStyleSheet("color: gray;")
-        elif isinstance(target, SavedPoint):
-            self._ctx_label.setText(f"{entry.name} / {target.point}")
-            self._ctx_label.setStyleSheet("")
-        elif parameters is not None:
-            self._ctx_label.setText(f"{entry.name} / Draft (in-memory)")
-            self._ctx_label.setStyleSheet("color: blue;")
+            self._entry_label.setText("No entry open")
+            self._entry_label.setStyleSheet("color: gray;")
         else:
-            self._ctx_label.setText(f"{entry.name} / No point selected")
-            self._ctx_label.setStyleSheet("color: orange;")
+            self._entry_label.setText(entry.name)
+            self._entry_label.setStyleSheet("")
+        if isinstance(target, SavedPoint):
+            self._point_label.setText(target.point)
+            self._point_label.setStyleSheet("")
+        elif parameters is not None:
+            self._point_label.setText("Draft (in-memory)")
+            self._point_label.setStyleSheet("color: blue;")
+        else:
+            self._point_label.setText("No point selected")
+            self._point_label.setStyleSheet(
+                "color: orange;" if entry else "color: gray;"
+            )
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
@@ -973,8 +985,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def get_view_snapshot(self) -> ViewSnapshot:
-        """Capture the visible window state as a JSON-friendly dict.
+        """Read visible labels, status and dialogs as a JSON-friendly ViewSnapshot.
 
+        Entry and Point text comes directly from the persistent visible labels.
         tab_ids and active_tab_id are sourced from State (via ctrl.list_tab_ids)
         rather than _tab_widgets, so ghost widget entries that have diverged from
         State never leak into the projection (ADR-0068 view = second SSOT reader).
@@ -996,7 +1009,8 @@ class MainWindow(QMainWindow):
         return {
             "active_tab_id": active_id,
             "tab_ids": state_tab_ids,
-            "context_label": self._ctx_label.text() if self._ctx_label else "",
+            "entry_label": self._entry_label.text(),
+            "point_label": self._point_label.text(),
             "predictor_label": (
                 self._predictor_label.text() if self._predictor_label else ""
             ),
