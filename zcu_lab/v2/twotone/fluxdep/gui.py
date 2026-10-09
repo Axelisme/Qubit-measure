@@ -215,17 +215,17 @@ class FluxDepAdapter(
         result = req.analyze_result
         return [
             MetaDictWriteback(
-                target_name="flx_half",
+                target_name="$qubit.flux_half",
                 description="Half-flux (Φ₀/2) sweet-spot device value",
                 proposed_value=result.flx_half,
             ),
             MetaDictWriteback(
-                target_name="flx_int",
+                target_name="$qubit.flux_int",
                 description="Integer-flux sweet-spot device value",
                 proposed_value=result.flx_int,
             ),
             MetaDictWriteback(
-                target_name="flx_period",
+                target_name="$qubit.flux_period",
                 description="Flux period (device units) = 2·|flx_int − flx_half|",
                 proposed_value=result.flx_period,
             ),
