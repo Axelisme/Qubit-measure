@@ -17,6 +17,7 @@ from zcu_tools.experiment.workflows import (
     EnginePorts,
     InvalidRunState,
     RunIdentity,
+    RunMismatch,
     RunPaths,
     RunStatus,
 )
@@ -162,6 +163,7 @@ class WorkflowController[C]:
                 "start", "running" if status is None else status.lifecycle
             )
         self._started = True
+        self._run_id = identity.run_id
 
         def opened(token: int) -> None:
             self._operation_id = token
@@ -209,6 +211,7 @@ class WorkflowController[C]:
             finally:
                 self._admitting = False
         except Exception:
+            self._run_id = None
             try:
                 self._discard_progress()
             finally:
@@ -255,6 +258,11 @@ class WorkflowController[C]:
         engine = self.engine
         return None if engine is None else engine.status()
 
+    def _require_run_id(self, run_id: str) -> None:
+        """Reject a control target that is not this Start's native identity."""
+        if run_id != self._run_id:
+            raise RunMismatch(expected=run_id, actual=self._run_id)
+
     def pause(self, run_id: str) -> RunStatus:
         """Request cooperative Pause of the explicitly targeted active run.
 
@@ -266,6 +274,7 @@ class WorkflowController[C]:
         delivery; Pause does not discard progress, plots or submitted inputs.
         """
         with self._lock:
+            self._require_run_id(run_id)
             engine = self._engine
             status = None if engine is None else engine.status()
             if engine is None or status is None:
@@ -299,6 +308,7 @@ class WorkflowController[C]:
         Stop while this segment is pending prevents its step from restarting.
         """
         with self._lock:
+            self._require_run_id(run_id)
             engine = self._engine
             status = None if engine is None else engine.status()
             if engine is None or status is None:
@@ -379,6 +389,7 @@ class WorkflowController[C]:
         rollback or cleanup occurs.
         """
         with self._lock:
+            self._require_run_id(run_id)
             self._stop_signal.set()
             if self._engine is None:
                 return None
