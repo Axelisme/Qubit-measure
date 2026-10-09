@@ -1,4 +1,4 @@
-"""Narrow fixed-read, entry/point and focus surface for shared consumers."""
+"""Narrow fixed-read, entry/point, alias and focus control for shared consumers."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
     from zcu_tools.format_version import YamlMap, YamlValue
     from zcu_tools.gui.cfg import CfgSchema
+    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_types import (
         ComponentFocus,
         ContextSourceBinding,
@@ -169,6 +170,26 @@ class ContextControlPort(Protocol):
         """Read detached source facts without I/O."""
         ...
 
+    def get_alias_rows(self) -> tuple[AliasRow, ...]:
+        """Read immutable authored global rows on the owner thread without I/O.
+
+        Links remain authored strings, not resolved component names. No entry
+        is required; an uninitialized table may be empty.
+        """
+        ...
+
+    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Atomically submit the complete ordered session-only alias table.
+
+        Run on the owner thread; no entry or currently resolvable component is
+        required. Invalid syntax, duplicate names and links to self/later rows
+        raise InvalidInputError(alias_invalid) and preserve rows and versions.
+        Changed rows publish AliasesChangedPayload after installation; identical
+        submissions publish nothing. Either submission disables later default
+        initialization. No files, preferences or ledger records are written.
+        """
+        ...
+
     def get_component_focus(self) -> ComponentFocus:
         """Read cached target/selection/options without I/O."""
         ...
@@ -282,6 +303,14 @@ class ContextControlFacet(ContextControlPort):
 
     def get_source_binding(self) -> ContextSourceBinding | None:
         return self._context.get_source_binding()
+
+    def get_alias_rows(self) -> tuple[AliasRow, ...]:
+        """Read authored rows using ContextControlPort's session-memory contract."""
+        return self._context.get_alias_rows()
+
+    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Commit the dialog's ordered rows through the owning service."""
+        self._context.set_alias_rows(rows)
 
     def get_component_focus(self) -> ComponentFocus:
         return self._context.get_component_focus()
