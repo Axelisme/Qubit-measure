@@ -41,6 +41,18 @@ def collect_referenced_labels(chunks: ChunkList) -> set[Label]:
     return refs
 
 
+def _block_scheduled_ticks(block: BasicBlockNode) -> int:
+    """Count only guaranteed literal TIME inc_ref delays in one physical block."""
+    total = 0
+    for inst in block.insts:
+        if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
+            if inst.r1 is not None:
+                continue
+            if isinstance(inst.lit, Immediate):
+                total += inst.lit.value
+    return total
+
+
 def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
     """Lower-bound on inc_ref delay ticks in a body sequence.
 
@@ -52,12 +64,7 @@ def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
     total = 0
     for node in body:
         if isinstance(node, BasicBlockNode):
-            for inst in node.insts:
-                if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
-                    if inst.r1 is not None:
-                        continue
-                    if isinstance(inst.lit, Immediate):
-                        total += inst.lit.value
+            total += _block_scheduled_ticks(node)
         elif isinstance(node, BlockNode):
             total += estimate_body_scheduled_ticks(node.insts)
         elif isinstance(node, IRLoop):
@@ -77,6 +84,40 @@ def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
     return total
 
 
+def _block_word_count(block: BasicBlockNode) -> int:
+    """Count physical words, retaining the BaseInst check for runtime inputs."""
+    size = sum(inst.addr_inc for inst in block.insts if isinstance(inst, BaseInst))
+    if block.branch is not None:
+        size += block.branch.addr_inc
+    return size
+
+
+def _max_loop_iterations(node: IRLoop) -> int:
+    """Use the upper bound, or one physical body copy for an unknown loop."""
+    if isinstance(node.n, int):
+        return node.n
+    if node.range_hint is not None:
+        return node.range_hint[1]
+    return 1
+
+
+def _block_cycle_cost(block: BasicBlockNode, config: PipeLineConfig) -> int:
+    """Count execution cycles using the configured memory/default costs."""
+    cost = 0
+    for inst in block.insts:
+        if isinstance(inst, (PortWriteInst, WmemWriteInst)):
+            cost += config.cost_wmem
+        elif isinstance(inst, (DmemReadInst, DmemWriteInst)):
+            cost += config.cost_dmem
+        elif isinstance(inst, (MetaInst, LabelInst)):
+            pass
+        else:
+            cost += config.cost_default
+    if block.branch is not None:
+        cost += config.cost_default
+    return cost
+
+
 def estimate_flat_size(nodes: list[IRNode]) -> int:
     """Estimate the number of pmem words emitted by a node sequence.
 
@@ -86,23 +127,12 @@ def estimate_flat_size(nodes: list[IRNode]) -> int:
     size = 0
     for node in nodes:
         if isinstance(node, BasicBlockNode):
-            for inst in node.insts:
-                if isinstance(inst, BaseInst):
-                    size += inst.addr_inc
-            if node.branch is not None:
-                size += node.branch.addr_inc
+            size += _block_word_count(node)
         elif isinstance(node, BlockNode):
             size += estimate_flat_size(node.insts)
         elif isinstance(node, IRLoop):
             inner = estimate_flat_size(node.body.insts)
-            if isinstance(node.n, int):
-                n = node.n
-            elif node.range_hint is not None:
-                n = node.range_hint[1]
-            else:
-                # Unknown dynamic loops stay rolled, so one physical body copy is the
-                # best flat-size approximation.
-                n = 1
+            n = _max_loop_iterations(node)
             # IRLoop.body is treated as one full logical iteration, including
             # the counter update even if later optimizers move or merge it.
             # Shape: [guard? 1] + init 1 + n * inner + cond-back 1.
@@ -125,17 +155,7 @@ def estimate_body_cost(body: list[IRNode], config: PipeLineConfig) -> int:
     cost = 0
     for node in body:
         if isinstance(node, BasicBlockNode):
-            for inst in node.insts:
-                if isinstance(inst, (PortWriteInst, WmemWriteInst)):
-                    cost += config.cost_wmem
-                elif isinstance(inst, (DmemReadInst, DmemWriteInst)):
-                    cost += config.cost_dmem
-                elif isinstance(inst, (MetaInst, LabelInst)):
-                    pass
-                else:
-                    cost += config.cost_default
-            if node.branch is not None:
-                cost += config.cost_default
+            cost += _block_cycle_cost(node, config)
         elif isinstance(node, BlockNode):
             cost += estimate_body_cost(node.insts, config)
         elif isinstance(node, IRLoop):
@@ -145,12 +165,7 @@ def estimate_body_cost(body: list[IRNode], config: PipeLineConfig) -> int:
             loop_overhead = config.cost_default + config.cost_jump_flush
             inner_cost = estimate_body_cost(node.body.insts, config)
 
-            if isinstance(node.n, int):
-                cost += node.n * (inner_cost + loop_overhead)
-            elif node.range_hint is not None:
-                cost += node.range_hint[1] * (inner_cost + loop_overhead)
-            else:
-                cost += inner_cost + loop_overhead
+            cost += _max_loop_iterations(node) * (inner_cost + loop_overhead)
         elif isinstance(node, IRBranch):
             # Constant-depth dispatch-table runtime cost:
             # setup (REG_WR/ALU ops) + indirect jump + stub jump.

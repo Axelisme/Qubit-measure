@@ -22,7 +22,7 @@ class PatchWmemFromRegs(Macro):
         if self.freq_reg is None and self.gain_reg is None:
             raise ValueError("PatchWmemFromRegs requires at least one runtime register")
 
-    def expand(self, prog) -> list[AsmInst]:  # type: ignore[no-untyped-def]
+    def expand(self, prog) -> list[AsmInst]:  # pyright: ignore[reportIncompatibleMethodOverride]
         addr = _single_wave_addr(prog, self.name)
         insts = [_read_wmem(addr)]
         if self.freq_reg is not None:
@@ -43,7 +43,7 @@ class PatchWmemFromDmem(Macro):
     val_reg: str
     dmem_offset: int
 
-    def expand(self, prog) -> list[AsmInst]:  # type: ignore[no-untyped-def]
+    def expand(self, prog) -> list[AsmInst]:  # pyright: ignore[reportIncompatibleMethodOverride]
         idx_reg = prog._get_reg(self.idx_reg)
         addr_reg = prog._get_reg(self.addr_reg)
         val_reg = prog._get_reg(self.val_reg)
@@ -74,18 +74,21 @@ class PatchWmemFromDmem(Macro):
 
 
 class _WaveFromRegs:
+    t_regs: dict[str, int | str | None]
     name: str
     freq_reg: str | None = None
     gain_reg: str | None = None
 
-    def _expand_wave_from_regs(self, prog, port: int) -> list[AsmInst]:  # type: ignore[no-untyped-def]
+    def _expand_wave_from_regs(
+        self, prog, port: int, timed_macro: TimedMacro
+    ) -> list[Macro]:
         if self.freq_reg is None and self.gain_reg is None:
             raise ValueError("runtime wave playback requires at least one register")
         addr = _single_wave_addr(prog, self.name)
-        time_reg = self.t_regs["t"]  # type: ignore[attr-defined]
-        insts: list[AsmInst] = []
+        time_reg = self.t_regs["t"]
+        insts: list[Macro] = []
         if not isinstance(time_reg, Integral):
-            insts.append(self.set_timereg(prog, "t"))  # type: ignore[attr-defined]
+            insts.append(timed_macro.set_timereg(prog, "t"))
         insts.append(_read_wmem(addr))
 
         if self.freq_reg is not None:
@@ -121,9 +124,9 @@ class PulseFromRegs(_WaveFromRegs, Pulse):
         self.freq_reg = freq_reg
         self.gain_reg = gain_reg
 
-    def expand(self, prog) -> list[AsmInst]:  # type: ignore[no-untyped-def]
+    def expand(self, prog) -> list[Macro]:
         port = int(prog.soccfg["gens"][self.ch]["tproc_ch"])
-        return self._expand_wave_from_regs(prog, port)
+        return self._expand_wave_from_regs(prog, port, self)
 
 
 class PulseFromLengthReg(TimedMacro):
@@ -151,7 +154,7 @@ class PulseFromLengthReg(TimedMacro):
         self.flat_top = flat_top
         self.t = t
 
-    def preprocess(self, prog) -> None:  # type: ignore[no-untyped-def]
+    def preprocess(self, prog) -> None:
         if self.name not in prog.pulses:
             raise RuntimeError(
                 f"trying to play pulse {self.name}, but it has not been defined"
@@ -166,7 +169,7 @@ class PulseFromLengthReg(TimedMacro):
         # register. Do not advance QICK's compile-time generator timestamp here.
         self.convert_time(prog, self.t, "t")
 
-    def expand(self, prog) -> list[Macro]:  # type: ignore[no-untyped-def]
+    def expand(self, prog) -> list[Macro]:  # pyright: ignore[reportIncompatibleMethodOverride]
         addrs = _pulse_wave_addrs(prog, self.name, flat_top=self.flat_top)
         port = int(prog.soccfg["gens"][self.ch]["tproc_ch"])
         time_reg = self.t_regs["t"]
@@ -215,12 +218,12 @@ class ConfigReadoutFromRegs(_WaveFromRegs, ConfigReadout):
         self.freq_reg = freq_reg
         self.gain_reg = None
 
-    def expand(self, prog) -> list[AsmInst]:  # type: ignore[no-untyped-def]
+    def expand(self, prog) -> list[Macro]:
         port = int(prog.soccfg["readouts"][self.ch]["tproc_ctrl"])
-        return self._expand_wave_from_regs(prog, port)
+        return self._expand_wave_from_regs(prog, port, self)
 
 
-def _single_wave_addr(prog, name: str) -> int:  # type: ignore[no-untyped-def]
+def _single_wave_addr(prog, name: str) -> int:
     if name not in prog.pulses:
         raise RuntimeError(f"pulse/readout config {name!r} is not registered")
     wave_names = prog.pulses[name].get_wavenames(exclude_special=True)
@@ -232,7 +235,7 @@ def _single_wave_addr(prog, name: str) -> int:  # type: ignore[no-untyped-def]
     return int(prog.wave2idx[wave_names[0]])
 
 
-def _pulse_wave_addrs(prog, name: str, *, flat_top: bool) -> list[int]:  # type: ignore[no-untyped-def]
+def _pulse_wave_addrs(prog, name: str, *, flat_top: bool) -> list[int]:
     if name not in prog.pulses:
         raise RuntimeError(f"pulse config {name!r} is not registered")
     wave_names = prog.pulses[name].get_wavenames(exclude_special=not flat_top)
@@ -258,7 +261,7 @@ def _read_wmem(addr: int) -> AsmInst:
     )
 
 
-def _copy_reg_to_wave_field(prog, reg: str, wave_reg: str) -> AsmInst:  # type: ignore[no-untyped-def]
+def _copy_reg_to_wave_field(prog, reg: str, wave_reg: str) -> AsmInst:
     resolved = prog._get_reg(reg)
     return AsmInst(
         inst={

@@ -1,5 +1,6 @@
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
+    Instruction,
     LabelInst,
     MetaInst,
     NopInst,
@@ -12,7 +13,7 @@ from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 
 def test_linker_link_tracks_meta_and_label_without_advancing_address():
     linker = IRLinker()
-    insts = [
+    insts: list[Instruction] = [
         MetaInst(type="LOOP_START", name="loop", info={"n": 2}),
         LabelInst(name=Label("entry"), can_remove=True),
         RegWriteInst(dst=Register("r0"), src=SrcKeyword.IMM, lit=Immediate(1)),
@@ -49,7 +50,7 @@ def test_linker_link_tracks_meta_and_label_without_advancing_address():
 
 def test_linker_link_rejects_duplicate_label_names():
     linker = IRLinker()
-    insts = [
+    insts: list[Instruction] = [
         LabelInst(name=Label("dup")),
         NopInst(),
         LabelInst(name=Label("dup")),

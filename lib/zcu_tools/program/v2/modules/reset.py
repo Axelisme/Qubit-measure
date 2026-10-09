@@ -188,5 +188,4 @@ class BathReset(AbsReset):
     ) -> float | QickParam:
         res_t = self.res_pulse.run(prog, t)
         self.qub_pulse.run(prog, t)
-        end_t = self.pi2_pulse.run(prog, res_t)
-        return end_t
+        return self.pi2_pulse.run(prog, res_t)

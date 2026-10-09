@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
-from zcu_tools.program.v2.ir.instructions import MetaInst, RegWriteInst
+from zcu_tools.program.v2.ir.instructions import Instruction, MetaInst, RegWriteInst
 from zcu_tools.program.v2.ir.node import BlockNode, IRLoop
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 
@@ -21,7 +21,7 @@ def test_loop_range_hint_preservation():
 
 def test_parse_loop_restores_range_hint():
     """Verify that the parser restores range_hint from MetaInst ARGS."""
-    insts = [
+    insts: list[Instruction] = [
         MetaInst(
             type="LOOP_START",
             name="loop",
