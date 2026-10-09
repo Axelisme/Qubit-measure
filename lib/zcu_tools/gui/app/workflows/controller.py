@@ -54,6 +54,7 @@ class _Run[F: FormModel, C]:
     token: int | None = None
     engine: Engine[C] | None = None
     settle: SettleFn | None = None
+    native_error: Exception | None = None
 
 
 class WorkflowController[F: FormModel, C]:
@@ -214,14 +215,31 @@ class WorkflowController[F: FormModel, C]:
         except Exception:
             logger.exception("Workflow view notification failed")
 
-    def _finish(self, run: _Run[F, C], error: Exception | None) -> None:
+    def _record_native_failure(self, run: _Run[F, C], error: Exception) -> None:
         status = None if run.engine is None else run.engine.status()
-        if error is not None:
+        # Active native failures first request stopping; delivery still owns cleanup.
+        if (
+            status is not None
+            and status.lifecycle in {"stopping", "failed"}
+            and status.reason is not None
+        ):
+            if run.native_error is None:
+                run.native_error = error
+            if run.phase == "paused" and status.lifecycle == "failed":
+                self._finish(run, error)
+
+    def _finish(self, run: _Run[F, C], error: Exception | None) -> None:
+        if run.phase in {"finishing", "terminal"}:
+            return
+        status = None if run.engine is None else run.engine.status()
+        if run.native_error is not None:
+            error = run.native_error
+        if status is not None and status.lifecycle == "failed":
+            outcome = OperationOutcome("failed", status.reason)
+        elif error is not None:
             outcome = OperationOutcome("failed", str(error))
         elif status is None or status.lifecycle == "stopped":
             outcome = OperationOutcome("cancelled")
-        elif status.lifecycle == "failed":
-            outcome = OperationOutcome("failed", status.reason)
         else:
             outcome = OperationOutcome("finished")
         if run.settle is None:
@@ -271,7 +289,11 @@ class WorkflowController[F: FormModel, C]:
                 raise InvalidRunState(
                     "pause", "running" if status is None else status.lifecycle
                 )
-            return run.engine.pause(run_id)
+            try:
+                return run.engine.pause(run_id)
+            except Exception as error:
+                self._record_native_failure(run, error)
+                raise
 
     def resume(self, run_id: str, *, devices: Callable[[], DeviceSnapshot]) -> int:
         """Read devices on owner and continue a delivered paused run's token.
@@ -322,7 +344,8 @@ class WorkflowController[F: FormModel, C]:
             else:
                 run.phase = "paused"
             raise
-        run.phase = "producing"
+        if run.phase == "resuming":
+            run.phase = "producing"
         return token
 
     def stop(self, run_id: str) -> RunStatus | None:
@@ -341,10 +364,14 @@ class WorkflowController[F: FormModel, C]:
             run.stop.set()
             if run.engine is None:
                 return None
-            stopped = run.engine.stop(run_id)
-        if run.phase == "paused":
-            self._finish(run, None)
-        return stopped
+            try:
+                stopped = run.engine.stop(run_id)
+            except Exception as error:
+                self._record_native_failure(run, error)
+                raise
+            if run.phase == "paused":
+                self._finish(run, None)
+            return stopped
 
     def apply_tunables(
         self,
@@ -363,4 +390,15 @@ class WorkflowController[F: FormModel, C]:
         ends idle ownership immediately, or waits for active producer delivery.
         Success accepts expression input/base; no revision guard or retry.
         """
-        raise NotImplementedError("Controller-owned tunables submission seed")
+        with self._lock:
+            self.require_run_id(run_id)
+            run = self._run
+            if run is None:
+                raise RuntimeError("Apply requires a current workflow run")
+            try:
+                if batch is None:
+                    return run.binding.apply(actor=actor, local_errors=local_errors)
+                return run.binding.apply_external(batch, actor=actor)
+            except Exception as error:
+                self._record_native_failure(run, error)
+                raise
