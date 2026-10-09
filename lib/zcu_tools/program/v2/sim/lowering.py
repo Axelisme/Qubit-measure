@@ -293,13 +293,7 @@ def _drive_amp_segments(
     if isinstance(wav, ConstWaveformCfg):
         return [length], [1.0]
 
-    if isinstance(wav, GaussWaveformCfg):
-        ratio = wav.sigma / wav.length
-        amps = _gauss_amplitudes(length, ratio * length, n)
-        durs = [length / n] * n
-        return durs, list(amps)
-
-    if isinstance(wav, DragWaveformCfg):
+    if isinstance(wav, (GaussWaveformCfg, DragWaveformCfg)):
         # Only the in-phase Gaussian envelope drives the (two-level) Rabi rate;
         # the DRAG derivative term is a leakage correction with no TLS analogue.
         ratio = wav.sigma / wav.length
@@ -337,33 +331,28 @@ def _drive_amp_segments(
         ratio = ramp_cfg.sigma / ramp_cfg.length
         sigma = ratio * ramp_len
         rise = _gauss_amplitudes(ramp_len, sigma, n)[: n // 2 or 1]
-        durs = [half / len(rise)] * len(rise)
-        durs += [flat_len]
-        durs += list(reversed(durs[: len(rise)]))
-        amps = list(rise) + [1.0] + list(reversed(rise))
-        return durs, amps
-    if isinstance(ramp_cfg, CosineWaveformCfg):
+    elif isinstance(ramp_cfg, CosineWaveformCfg):
         rise = _cosine_amplitudes(ramp_len, n)[: n // 2 or 1]
-        durs = [half / len(rise)] * len(rise)
-        durs += [flat_len]
-        durs += list(reversed(durs[: len(rise)]))
-        amps = list(rise) + [1.0] + list(reversed(rise))
-        return durs, amps
-    if isinstance(ramp_cfg, ArbWaveformCfg):
+    elif isinstance(ramp_cfg, ArbWaveformCfg):
         rise = _arb_amplitudes(ramp_cfg, ramp_len, n)[: n // 2 or 1]
-        durs = [half / len(rise)] * len(rise)
-        durs += [flat_len]
-        durs += list(reversed(durs[: len(rise)]))
+    else:
+        # Const ramp: approximate the ramp as full amplitude (its area is small
+        # relative to the flat top); fall back to a single flat segment of the
+        # full length.
+        return [length], [1.0]
+
+    durs = [half / len(rise)] * len(rise)
+    durs += [flat_len]
+    durs += list(reversed(durs[: len(rise)]))
+    if isinstance(ramp_cfg, ArbWaveformCfg):
         amps = (
             [float(amp) for amp in rise]
             + [1.0]
             + [float(amp) for amp in reversed(rise)]
         )
-        return durs, amps
-    # Const ramp: approximate the ramp as full amplitude (its area is small
-    # relative to the flat top); fall back to a single flat segment of the
-    # full length.
-    return [length], [1.0]
+    else:
+        amps = list(rise) + [1.0] + list(reversed(rise))
+    return durs, amps
 
 
 def _pulse_segments(
@@ -414,7 +403,7 @@ def _pulse_segments(
     segments: list[Segment] = []
     if pre_delay > 0.0:
         segments.append(_idle_segment(sim, equilibrium_pop, pre_delay, idle_detuning))
-    for dur, amp in zip(durs, amps):
+    for dur, amp in zip(durs, amps, strict=False):
         segments.append(
             Segment(
                 omega=omega_scale * amp,
@@ -671,7 +660,7 @@ def _readout_plan(
             ro_length_us=ro_length_us,
             trig_offset_us=trig_offset_us,
         )
-    elif isinstance(module, (PulseReadout, TablePulseReadout)):
+    if isinstance(module, (PulseReadout, TablePulseReadout)):
         ro_freq = module.cfg.ro_cfg.ro_freq
         ro_length = module.cfg.ro_cfg.ro_length
         trig_offset = module.cfg.ro_cfg.trig_offset
@@ -762,10 +751,9 @@ def _readout_plan(
             pulse_length_us=pulse_length_us,
             pulse_pre_delay_us=pulse_pre_delay_us,
         )
-    else:
-        raise UnsupportedModuleError(
-            f"unsupported readout module {type(module).__name__} for lowering"
-        )
+    raise UnsupportedModuleError(
+        f"unsupported readout module {type(module).__name__} for lowering"
+    )
 
 
 def _require_frequency_decoder_surface(
