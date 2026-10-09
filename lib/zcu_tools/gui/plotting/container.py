@@ -15,7 +15,7 @@ from __future__ import annotations
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QStackedWidget, QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QStackedWidget, QWidget
 
 from . import host as _host
 

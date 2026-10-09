@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from qtpy.QtWidgets import QDoubleSpinBox  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QDoubleSpinBox
 
 
 class TrimDoubleSpinBox(QDoubleSpinBox):
