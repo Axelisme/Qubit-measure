@@ -28,7 +28,13 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.session.context_types import EntryInfo, EntryRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryInfo,
+    EntryRequest,
+    PointCreateRequest,
+    PointUseRequest,
+)
 from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
 from zcu_tools.program import describe_soc
 
@@ -106,9 +112,10 @@ class SetupDialog(QDialog):
         left_layout.addWidget(entry_group)
 
         # context list
-        ctx_group = QGroupBox("Contexts (requires file-backed project)")
+        ctx_group = QGroupBox("Working points")
         ctx_layout = QVBoxLayout(ctx_group)
         self._ctx_list = QListWidget()
+        self._ctx_list.setObjectName("working_points")
         self._ctx_list.setMaximumHeight(120)
         ctx_layout.addWidget(self._ctx_list)
 
@@ -120,11 +127,12 @@ class SetupDialog(QDialog):
         left_layout.addWidget(ctx_group)
 
         # new context
-        new_group = QGroupBox("New context (requires file-backed project)")
+        new_group = QGroupBox("New working point")
         new_form = QFormLayout(new_group)
 
         device_row = QHBoxLayout()
         self._device_combo = QComboBox()
+        self._device_combo.setObjectName("track_device")
         self._device_combo.setMinimumWidth(160)
         self._device_combo.currentTextChanged.connect(self._on_device_changed)
         device_row.addWidget(self._device_combo)
@@ -135,20 +143,27 @@ class SetupDialog(QDialog):
         device_row.addWidget(refresh_dev_btn)
         new_form.addRow("Track device:", device_row)
 
-        self._unit_label = QLabel("—")
-        new_form.addRow("Unit:", self._unit_label)
+        self._label_edit = QLineEdit()
+        self._label_edit.setObjectName("point_label")
+        new_form.addRow("Label:", self._label_edit)
 
         self._clone_combo = QComboBox()
+        self._clone_combo.setObjectName("clone_from")
         self._clone_combo.setMinimumWidth(160)
         new_form.addRow("Clone from:", self._clone_combo)
 
-        self._new_ctx_btn = QPushButton("Create new context")
+        self._description_edit = QLineEdit()
+        self._description_edit.setObjectName("point_description")
+        new_form.addRow("Description:", self._description_edit)
+
+        self._new_ctx_btn = QPushButton("Create")
         self._new_ctx_btn.clicked.connect(self._on_new_ctx_clicked)
         new_form.addRow("", self._new_ctx_btn)
         left_layout.addWidget(new_group)
 
         # project status label
         self._project_status = QLabel("")
+        self._project_status.setObjectName("setup_status")
         left_layout.addWidget(self._project_status)
 
         left_layout.addStretch()
@@ -336,7 +351,7 @@ class SetupDialog(QDialog):
         )
 
     def _refresh_device_list(self) -> None:
-        entries = self._ctrl.list_devices()
+        entries = self._ctrl.devices.list_devices()
 
         current = self._device_combo.currentText()
         self._device_combo.blockSignals(True)
@@ -357,11 +372,8 @@ class SetupDialog(QDialog):
         self._on_device_changed(self._device_combo.currentText())
 
     def _on_device_changed(self, _text: str) -> None:
-        device_name = self._device_combo.currentData()
-        if device_name:
-            self._unit_label.setText(self._ctrl.get_device_unit(device_name))
-        else:
-            self._unit_label.setText("—")
+        # Internal writer supplies the cached value/unit suggestion.
+        pass
 
     def _on_new_entry_clicked(self) -> None:
         name, accepted = QInputDialog.getText(self, "New entry", "Entry name:")
@@ -403,26 +415,37 @@ class SetupDialog(QDialog):
             self._set_project_status("Select a context first", error=True)
             return
         label = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
-        self._ctrl.use_context(label)
+        try:
+            self._ctrl.use_point(PointUseRequest(label))
+        except Exception as exc:
+            # Keep owner rejection visible without escaping the Qt callback.
+            logger.exception("Failed to switch working point")
+            self._set_project_status(
+                f"Failed to switch working point: {exc}", error=True
+            )
+            return
         self._refresh_context_list()
-        self._set_project_status(f"Switched to context: {label}")
-        logger.info("SetupDialog: switched to context=%r", label)
+        self._set_project_status(f"Switched to working point: {label}")
 
     def _on_new_ctx_clicked(self) -> None:
-        device_name: str | None = self._device_combo.currentData()
-        # Clone source picked from the dropdown ("(none)" -> None). The
-        # Controller resolves unit/value from bind_device internally.
-        clone_from: str | None = self._clone_combo.currentData()
-        self._ctrl.new_context(bind_device=device_name, clone_from=clone_from)
+        request = PointCreateRequest(
+            label=self._label_edit.text(),
+            description=self._description_edit.text(),
+            origin=CommandOrigin("gui"),
+            clone_from=self._clone_combo.currentData(),
+        )
+        try:
+            self._ctrl.new_point(request)
+        except Exception as exc:
+            # PointBindingError may retain a created resource; do not retry New.
+            logger.exception("Failed to create working point")
+            self._refresh_context_list()
+            self._set_project_status(
+                f"Failed to create working point: {exc}", error=True
+            )
+            return
         self._refresh_context_list()
-        self._set_project_status(
-            f"Created new context (device={device_name or 'none'})"
-        )
-        logger.info(
-            "SetupDialog: new_context bind_device=%r clone_from=%r",
-            device_name,
-            clone_from,
-        )
+        self._set_project_status(f"Created working point: {request.label}")
 
     def _refresh_context_list(self) -> None:
         self._ctx_list.clear()
