@@ -12,8 +12,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -280,7 +280,7 @@ class SsAcStarkAdapter(
     ) -> Sequence[WritebackItem]:
         # Key ``ac_stark_coeff`` per single_qubit.md:3329.
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="ac_stark_coeff",
                 description="AC-Stark coefficient (photon number per gain²)",
                 proposed_value=req.analyze_result.ac_stark_coeff,

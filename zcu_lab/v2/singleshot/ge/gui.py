@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
@@ -309,22 +309,22 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         result.validate_calibration()
         # AcceptedWrite owns native complex conversion; producers keep numbers.
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.fidelity",
                 description="Single-shot assignment fidelity",
                 proposed_value=result.fidelity,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.sigma",
                 description="Single-shot IQ cluster width (s)",
                 proposed_value=result.ge_s,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.g_center",
                 description="Single-shot |g> IQ cluster centre (complex)",
                 proposed_value=result.g_center,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.e_center",
                 description="Single-shot |e> IQ cluster centre (complex)",
                 proposed_value=result.e_center,
@@ -337,12 +337,12 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
     ) -> Sequence[WritebackItem]:
         result = cast(GEPostAnalyzeResult, req.post_analyze_result)
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.radius",
                 description="Single-shot classification radius",
                 proposed_value=result.ge_radius,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.confusion_matrix",
                 description="Single-shot 3x3 confusion matrix (prepared->measured)",
                 proposed_value=result.confusion,

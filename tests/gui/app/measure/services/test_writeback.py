@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     WaveformWriteback,
 )
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
@@ -176,31 +176,35 @@ def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape(se
         control.read_context().target, "general.ext.confusion_matrix", matrix
     )
     draft = service.create_draft(
-        [MetaDictWriteback("general.ext.confusion_matrix", "d", proposed_value=matrix)],
+        [
+            ParameterWriteback(
+                "general.ext.confusion_matrix", "d", proposed_value=matrix
+            )
+        ],
         parameters=control.read_context(),
     )
-    assert service.get_summaries(draft, "md-1") == ("3 × 3 matrix", "3 × 3 matrix")
+    assert service.get_summaries(draft, "param-1") == ("3 × 3 matrix", "3 × 3 matrix")
 
 
 def test_applied_state_follows_successful_writes_and_content_edits(session):
     _entry, control, _editor, service = session
     draft = service.create_draft(
         [
-            MetaDictWriteback("general.ext.r_f", "d", proposed_value=1.0),
-            MetaDictWriteback("general.ext.skip", "d", proposed_value=2.0),
+            ParameterWriteback("general.ext.r_f", "d", proposed_value=1.0),
+            ParameterWriteback("general.ext.skip", "d", proposed_value=2.0),
         ],
         parameters=control.read_context(),
     )
-    assert service.get_all_applied(draft) == {"md-1": False, "md-2": False}
-    draft.edit("md-2", selected=False)
+    assert service.get_all_applied(draft) == {"param-1": False, "param-2": False}
+    draft.edit("param-2", selected=False)
     draft.apply()
-    assert service.get_all_applied(draft) == {"md-1": True, "md-2": False}
-    draft.edit("md-1", selected=False)
-    assert service.get_all_applied(draft)["md-1"] is True
-    draft.edit("md-1", target_name="general.ext.r_f", proposed_value=1.0)
-    assert service.get_all_applied(draft)["md-1"] is True
-    draft.edit("md-1", proposed_value=3.0)
-    assert service.get_all_applied(draft)["md-1"] is False
+    assert service.get_all_applied(draft) == {"param-1": True, "param-2": False}
+    draft.edit("param-1", selected=False)
+    assert service.get_all_applied(draft)["param-1"] is True
+    draft.edit("param-1", target_name="general.ext.r_f", proposed_value=1.0)
+    assert service.get_all_applied(draft)["param-1"] is True
+    draft.edit("param-1", proposed_value=3.0)
+    assert service.get_all_applied(draft)["param-1"] is False
 
 
 def test_direct_cfg_draft_change_marks_applied_item_unapplied(session):
@@ -219,8 +223,8 @@ def test_duplicate_selected_destination_is_rejected_before_write(session):
     entry, control, _editor, service = session
     draft = service.create_draft(
         [
-            MetaDictWriteback("general.ext.same", "first", proposed_value=1.0),
-            MetaDictWriteback("general.ext.same", "second", proposed_value=2.0),
+            ParameterWriteback("general.ext.same", "first", proposed_value=1.0),
+            ParameterWriteback("general.ext.same", "second", proposed_value=2.0),
         ],
         parameters=control.read_context(),
     )
@@ -229,7 +233,7 @@ def test_duplicate_selected_destination_is_rejected_before_write(session):
         draft.apply()
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.same").present
-    assert service.get_all_applied(draft) == {"md-1": False, "md-2": False}
+    assert service.get_all_applied(draft) == {"param-1": False, "param-2": False}
 
 
 def test_failed_and_empty_apply_do_not_mark_items_applied(session, monkeypatch):
@@ -238,41 +242,41 @@ def test_failed_and_empty_apply_do_not_mark_items_applied(session, monkeypatch):
         control, "set_parameter", MagicMock(side_effect=RuntimeError("write failed"))
     )
     draft = service.create_draft(
-        [MetaDictWriteback("general.ext.r_f", "d", proposed_value=1.0)],
+        [ParameterWriteback("general.ext.r_f", "d", proposed_value=1.0)],
         parameters=control.read_context(),
     )
     with pytest.raises(RuntimeError, match="write failed"):
         draft.apply()
-    assert service.get_all_applied(draft) == {"md-1": False}
-    draft.edit("md-1", selected=False)
+    assert service.get_all_applied(draft) == {"param-1": False}
+    draft.edit("param-1", selected=False)
     assert draft.apply()["applied_ids"] == []
-    assert service.get_all_applied(draft) == {"md-1": False}
+    assert service.get_all_applied(draft) == {"param-1": False}
 
 
 def test_explicit_apply_ignores_selection_without_changing_checkboxes(session):
     _entry, control, _editor, service = session
     draft = service.create_draft(
         [
-            MetaDictWriteback("general.ext.a", "d", proposed_value=1.0),
-            MetaDictWriteback("general.ext.b", "d", proposed_value=2.0),
+            ParameterWriteback("general.ext.a", "d", proposed_value=1.0),
+            ParameterWriteback("general.ext.b", "d", proposed_value=2.0),
         ],
         parameters=control.read_context(),
     )
-    draft.edit("md-1", selected=False)
+    draft.edit("param-1", selected=False)
     selection = [item.selected for item in draft.items]
-    assert draft.apply(item_ids=("md-1",))["applied_ids"] == ["md-1"]
+    assert draft.apply(item_ids=("param-1",))["applied_ids"] == ["param-1"]
     current = control.read_context()
     assert current.value("general.ext.a") == 1.0
     assert not current.lookup("general.ext.b").present
     assert [item.selected for item in draft.items] == selection
-    assert service.get_all_applied(draft) == {"md-1": True, "md-2": False}
+    assert service.get_all_applied(draft) == {"param-1": True, "param-2": False}
 
 
-@pytest.mark.parametrize("item_ids", [("md-1", "missing"), ("md-1", "md-1")])
+@pytest.mark.parametrize("item_ids", [("param-1", "missing"), ("param-1", "param-1")])
 def test_explicit_apply_rejects_invalid_ids_before_any_write(session, item_ids):
     entry, control, _editor, service = session
     draft = service.create_draft(
-        [MetaDictWriteback("general.ext.a", "d", proposed_value=1.0)],
+        [ParameterWriteback("general.ext.a", "d", proposed_value=1.0)],
         parameters=control.read_context(),
     )
     count = len(entry.ledger.events())
@@ -280,20 +284,20 @@ def test_explicit_apply_rejects_invalid_ids_before_any_write(session, item_ids):
         draft.apply(item_ids=item_ids)
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.a").present
-    assert service.get_all_applied(draft) == {"md-1": False}
+    assert service.get_all_applied(draft) == {"param-1": False}
 
 
 def test_explicit_empty_apply_does_not_fall_back_to_selected_items(session):
     entry, control, _editor, service = session
     draft = service.create_draft(
-        [MetaDictWriteback("general.ext.a", "d", proposed_value=1.0)],
+        [ParameterWriteback("general.ext.a", "d", proposed_value=1.0)],
         parameters=control.read_context(),
     )
     count = len(entry.ledger.events())
     assert draft.apply(item_ids=())["applied_ids"] == []
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.a").present
-    assert service.get_all_applied(draft) == {"md-1": False}
+    assert service.get_all_applied(draft) == {"param-1": False}
 
 
 def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session):
@@ -301,30 +305,36 @@ def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session)
     control.set_parameter(control.read_context().target, "general.ext.dest", [1])
     draft = service.create_draft(
         [
-            MetaDictWriteback("general.ext.a", "d", proposed_value=2),
-            MetaDictWriteback("general.ext.b", "d", proposed_value=3),
+            ParameterWriteback("general.ext.a", "d", proposed_value=2),
+            ParameterWriteback("general.ext.b", "d", proposed_value=3),
         ],
         parameters=control.read_context(),
     )
-    draft.edit("md-1", selected=False)
+    draft.edit("param-1", selected=False)
     result = service.write_draft(
         draft,
-        (WritebackEdit("md-1", target_name="general.ext.dest", proposed_value=None),),
+        (
+            WritebackEdit(
+                "param-1", target_name="general.ext.dest", proposed_value=None
+            ),
+        ),
     )
-    assert result == [WritebackWritten("md-1", "md", "general.ext.dest", [1], None)]
+    assert result == [
+        WritebackWritten("param-1", "parameter", "general.ext.dest", [1], None)
+    ]
     current = control.read_context()
     assert current.value("general.ext.dest") is None
     assert not current.lookup("general.ext.b").present
     assert [item.selected for item in draft.items] == [False, True]
-    assert service.get_all_applied(draft) == {"md-1": True, "md-2": False}
+    assert service.get_all_applied(draft) == {"param-1": True, "param-2": False}
 
 
 def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session):
     entry, control, _editor, service = session
     draft = service.create_draft(
         [
-            MetaDictWriteback("general.ext.a", "d", proposed_value=1),
-            MetaDictWriteback("general.ext.b", "d", proposed_value=2),
+            ParameterWriteback("general.ext.a", "d", proposed_value=1),
+            ParameterWriteback("general.ext.b", "d", proposed_value=2),
         ],
         parameters=control.read_context(),
     )
@@ -333,19 +343,19 @@ def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session)
         service.write_draft(
             draft,
             (
-                WritebackEdit("md-1", proposed_value=11),
+                WritebackEdit("param-1", proposed_value=11),
                 WritebackEdit("missing"),
-                WritebackEdit("md-2", proposed_value=22),
+                WritebackEdit("param-2", proposed_value=22),
             ),
         )
     values = []
     for item in draft.items:
-        assert isinstance(item, MetaDictWriteback)
+        assert isinstance(item, ParameterWriteback)
         values.append(item.proposed_value)
     assert values == [11, 2]
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.a").present
-    assert service.get_all_applied(draft) == {"md-1": False, "md-2": False}
+    assert service.get_all_applied(draft) == {"param-1": False, "param-2": False}
 
 
 def test_ordered_write_rejects_invalid_cfg_before_context_apply(session):
@@ -372,12 +382,12 @@ def test_apply_draft_records_accepted_before_selected_setter(session, monkeypatc
     entry, control, _editor, service = session
     draft = service.create_draft(
         [
-            MetaDictWriteback("general.ext.r_f", "d", proposed_value=1.0),
-            MetaDictWriteback("general.ext.skip", "d", proposed_value=2.0),
+            ParameterWriteback("general.ext.r_f", "d", proposed_value=1.0),
+            ParameterWriteback("general.ext.skip", "d", proposed_value=2.0),
         ],
         parameters=control.read_context(),
     )
-    draft.edit("md-2", selected=False)
+    draft.edit("param-2", selected=False)
     original = control.set_parameter
     setter = MagicMock(wraps=original)
 
@@ -388,8 +398,12 @@ def test_apply_draft_records_accepted_before_selected_setter(session, monkeypatc
     monkeypatch.setattr(control, "set_parameter", after_accepted)
     result = draft.apply()
     assert result == {
-        "applied_ids": ["md-1"],
-        "written": {"md": ["general.ext.r_f"], "ml_modules": [], "ml_waveforms": []},
+        "applied_ids": ["param-1"],
+        "written": {
+            "parameter": ["general.ext.r_f"],
+            "ml_modules": [],
+            "ml_waveforms": [],
+        },
     }
     assert setter.call_count == 1
     current = control.read_context()

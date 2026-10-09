@@ -11,8 +11,8 @@ from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     WritebackItem,
 )
 from zcu_tools.gui.app.measure.services import TabSnapshot
@@ -309,15 +309,15 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
     ctrl = make_ctrl()
     # Mock service-owned summaries (S2) — not on public WritebackItem
     ctrl.get_writeback_summaries_for_pane.return_value = {
-        "md-1": ("6000.0", "6100.0"),
+        "param-1": ("6000.0", "6100.0"),
         "ml-1": ("— not present", "create readout_rf"),
         "wf-1": ("— not present", "create → ro_waveform"),
     }
     # Create MetaDict items (adapter proposal shape unchanged)
-    md_item = MetaDictWriteback(
+    md_item = ParameterWriteback(
         target_name="r_f", description="Resonator freq", proposed_value=6100.0
     )
-    md_item.session_id = "md-1"
+    md_item.session_id = "param-1"
     ml_item = ModuleWriteback(
         target_name="readout_rf", description="Readout module", edit_schema=MagicMock()
     )
@@ -331,11 +331,11 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
     widget.populate([md_item, ml_item, ml_item2])
     # Selection
     assert len(widget._checks) == 3
-    for sid in ["md-1", "ml-1", "wf-1"]:
+    for sid in ["param-1", "ml-1", "wf-1"]:
         assert sid in widget._checks
         assert isinstance(widget._checks[sid], QCheckBox)
     # Target/description via checkbox label (contains target)
-    assert "r_f" in widget._checks["md-1"].text()
+    assert "r_f" in widget._checks["param-1"].text()
     assert "readout_rf" in widget._checks["ml-1"].text()
     # Current / proposed labels exist and show summaries
     cur = widget.findChildren(QLabel, "writebackCurrent")
@@ -354,15 +354,15 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
     assert widget._apply_btn.text() == "Apply Selected"
     assert widget._apply_btn.isEnabled() is True
     # Toggling selection disables Apply when none selected
-    widget._checks["md-1"].setChecked(False)
+    widget._checks["param-1"].setChecked(False)
     widget._checks["ml-1"].setChecked(False)
     widget._checks["wf-1"].setChecked(False)
     assert widget._apply_btn.isEnabled() is False
     # Restore
-    widget._checks["md-1"].setChecked(True)
+    widget._checks["param-1"].setChecked(True)
     assert widget._apply_btn.isEnabled() is True
     # Save/Cancel in MD edit dialog: check that Edit opens dialog with current readonly
-    widget._edit_md_item(md_item, widget._checks["md-1"])
+    widget._edit_md_item(md_item, widget._checks["param-1"])
     from qtpy.QtWidgets import QApplication, QDialog
 
     dialogs = [
@@ -402,10 +402,10 @@ def test_writeback_baseline_captured_via_service(qapp):
     cfg_editor = MagicMock()
     cfg_editor.open_seeded.return_value = ("ed-1", ())
     svc = WritebackService(cfg_editor, ctrl)
-    md_item = MetaDictWriteback(
+    md_item = ParameterWriteback(
         target_name="r_f", description="freq", proposed_value=6100.0
     )
-    md_item2 = MetaDictWriteback(
+    md_item2 = ParameterWriteback(
         target_name="missing_key", description="missing", proposed_value=1
     )
     module_item = ModuleWriteback(
@@ -433,8 +433,8 @@ def test_writeback_baseline_captured_via_service(qapp):
     assert prop_mod is not None and "create" in prop_mod
     # Adapter proposal shape unchanged (no summary fields)
     assert (
-        not hasattr(MetaDictWriteback, "current_summary")
-        or "current_summary" not in MetaDictWriteback.__dataclass_fields__
+        not hasattr(ParameterWriteback, "current_summary")
+        or "current_summary" not in ParameterWriteback.__dataclass_fields__
     )
     assert (
         "current_summary" not in WritebackItem.__dataclass_fields__

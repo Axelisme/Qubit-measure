@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from qtpy.QtWidgets import QCheckBox, QDialog, QLineEdit, QPushButton
-from zcu_tools.gui.app.measure.adapter import MetaDictWriteback, ModuleWriteback
+from zcu_tools.gui.app.measure.adapter import ModuleWriteback, ParameterWriteback
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
@@ -26,11 +26,11 @@ def _find_open_dialog(title_prefix: str) -> QDialog:
 
 
 def test_edit_md_item_can_change_target_name(qapp):
-    """The metadict Edit dialog exposes an editable apply-as (target_name)."""
-    item = MetaDictWriteback(
+    """The parameter Edit dialog exposes an editable apply-as (target_name)."""
+    item = ParameterWriteback(
         target_name="r_f", description="freq", proposed_value=6000.0
     )
-    item.session_id = "md-1"
+    item.session_id = "param-1"
 
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([item])
@@ -54,16 +54,16 @@ def test_edit_md_item_can_change_target_name(qapp):
         assert item.target_name == "r_f_tuned"
         assert item.proposed_value == 6100.0
         # session_id (the stable id) is untouched by a retarget.
-        assert item.session_id == "md-1"
+        assert item.session_id == "param-1"
     finally:
         dialog.close()
 
 
 def test_edit_md_item_rejects_blank_target_name(qapp):
-    item = MetaDictWriteback(
+    item = ParameterWriteback(
         target_name="r_f", description="freq", proposed_value=6000.0
     )
-    item.session_id = "md-1"
+    item.session_id = "param-1"
 
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([item])
@@ -92,10 +92,10 @@ def test_edit_md_item_rejects_blank_target_name(qapp):
 
 def test_edit_md_item_parses_complex_value(qapp):
     """A complex md value coerces the user's "re+imj" input to complex (not str)."""
-    item = MetaDictWriteback(
+    item = ParameterWriteback(
         target_name="g_center", description="|g> centre", proposed_value=complex(1, 2)
     )
-    item.session_id = "md-1"
+    item.session_id = "param-1"
 
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([item])
@@ -119,10 +119,10 @@ def test_edit_md_item_parses_complex_value(qapp):
 
 def test_edit_md_item_rejects_unparseable_complex(qapp):
     """An unparseable complex input fast-fails and leaves the original value."""
-    item = MetaDictWriteback(
+    item = ParameterWriteback(
         target_name="g_center", description="|g> centre", proposed_value=complex(1, 2)
     )
-    item.session_id = "md-1"
+    item.session_id = "param-1"
 
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([item])

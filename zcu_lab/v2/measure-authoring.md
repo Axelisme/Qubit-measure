@@ -150,7 +150,7 @@ opaque draft，adapter不接觸Writeback implementation。
 上方呈現measured populations與joint-fit curves，左下呈現第一點integrated-bin histogram fit，右下
 呈現derived confusion matrix。完整typed numeric fit留在adapter result內。只有backend valid且
 `g_center`、`e_center`、`ge_radius`、`confusion_matrix`四項全部finite時，adapter才同時提出四個
-獨立`MetaDictWriteback` items；任一項無效就全數略過。Adapter只投影同一次domain analysis結果，
+獨立`ParameterWriteback` items；任一項無效就全數略過。Adapter只投影同一次domain analysis結果，
 不重跑fit、不重算stability，也不直接apply proposal。
 
 `singleshot/amp_rabi` 與 `singleshot/reset_check` 的 `g_center`、`e_center`、`radius` 是正式 experiment cfg
@@ -191,7 +191,7 @@ readout role 的 proposal；`readout_rf` 是 target name，不是新的 role id�
 `readout_rf` 以該 snapshot readout 作為 template，只用 fitted `r_f` 覆寫
 `pulse_cfg.freq` / `ro_cfg.ro_freq`，gain、waveform length/style、channels、ADC
 readout length、trigger timing 等欄位都沿用 snapshot。`source.cfg is None` 或
-readout 不是 pulse readout 時，module writeback graceful skip，只保留 MetaDict items。
+readout 不是 pulse readout 時，module writeback graceful skip，只保留 parameter items。
 
 `onetone/freq` 的 `fit_bg_amp_slope` 預設開啟，`fit_bg_phase_curvature` 預設關閉；
 兩者是獨立選項。fake one-tone 的兩個選項預設都關閉。只有啟用的項才進入
@@ -204,7 +204,7 @@ raw-complex refinement；未啟用項固定為零。若 Hanger fit 的 `Qi=None`
 要求相符 prior，`manual` 要求 finite seed。prior/manual 都只固定 branch，後續仍作 local
 refinement。只有實際參與 fitting（移除首尾點後）的 nonuniform grid 能自行辨識 absolute
 branch；uniform grid 若沒有可信 seed，不會把 local alias 提案寫成 calibration。可持久化
-的結果以單一 compound MetaDict writeback item
+的結果以單一 compound parameter writeback item
 `res_edelay_calibration = {edelay, res_ch, ro_ch}` 保存，讓 delay 與 route identity 的選取
 all-or-none。只有可辨識 pulse route 的 run snapshot，且有可信 seed 或 fitting grid 為 nonuniform，
 才提出此 writeback。沒有 cfg snapshot 的舊資料仍可分析，不提出無 route 的 calibration。
@@ -266,7 +266,7 @@ hints，不是 Cartesian sample count，總 measurement budget 仍由 `num_point
 JPA flux 在六個 adapter 一律以中性 device value／`a.u.` 語彙呈現（sweep label、
 liveplot 與 canonical persistence 一致，無 `1e3` 縮放或 physical-unit 宣稱）。
 capabilities 一致：四個校準 adapter 是 `analysis=FIT` 並提出
-`MetaDictWriteback`，survey/diagnostic 兩個 adapter 不提供 writeback。每個 adapter
+`ParameterWriteback`，survey/diagnostic 兩個 adapter 不提供 writeback。每個 adapter
 的 operator guide 都以現在式說明 seeded bounds 是 bring-up defaults 而非 certified
 safety limits，operator 必須先 review device 與 sweep 再 run；`jpa/check` 特別警告
 run 結束時 pump output 保持 ON。真實硬體 acceptance 由 operator 在 device/sweep
@@ -306,13 +306,13 @@ IQ centers與confusion matrix。Amp固定無衰減／零相位，提供Initial S
 
 ### cfg → writeback 的兩種產出
 
-- **校準純量**：校準掃描的純量結果經 `MetaDictWriteback` 寫回 md（如 `reset_f`、
+- **校準純量**：校準掃描的純量結果經 `ParameterWriteback` 寫回 md（如 `reset_f`、
   `reset_f1/2`、`reset_gain1/2`、`bathreset_freq/gain`、`bathreset_max/min_phase`）。
 - **reset module**：除了既有 md writeback，每個校準實驗在校準 md 齊時額外 emit
   `ModuleWriteback`，把校準好的 reset module 註冊回 ModuleLibrary（撞名覆寫，沿用
   `register_module` 語意）。
 
-> 領域層只產 `MetaDictWriteback` / `ModuleWriteback` 兩種 item，**不產**
+> 領域層只產 `ParameterWriteback` / `ModuleWriteback` 兩種 item，**不產**
 > `WaveformWriteback`（GUI attachments 零使用，備查）。波形寫回沒有校準 adapter 需要。
 
 ### reset module 組裝流程（gated per-experiment）

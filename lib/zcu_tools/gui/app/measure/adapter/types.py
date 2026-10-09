@@ -303,7 +303,7 @@ class WritebackItem(ABC):
     # may retarget the writeback before applying.
     target_name: str
     description: str
-    # ``session_id`` (``<kind>-<n>``, e.g. ``md-1``) is the stable identifier for
+    # ``session_id`` (``<kind>-<n>``, e.g. ``param-1``) is the stable identifier for
     # UI/wire/dedup. Stamped once by WritebackService when items are computed at
     # analyze time (never by the adapter), and decoupled from target_name so
     # retargeting does not change the id.
@@ -312,7 +312,9 @@ class WritebackItem(ABC):
 
 
 @dataclass
-class MetaDictWriteback(WritebackItem):
+class ParameterWriteback(WritebackItem):
+    """Propose a point parameter value at target_name, resolved against the Run capture."""
+
     proposed_value: Any
 
 

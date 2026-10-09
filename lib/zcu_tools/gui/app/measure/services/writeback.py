@@ -15,8 +15,8 @@ from zcu_tools.cfg_model import (
     waveform_spec_from_raw,
 )
 from zcu_tools.gui.app.measure.adapter import (
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     WaveformWriteback,
     WritebackItem,
 )
@@ -44,9 +44,9 @@ if TYPE_CHECKING:
     from zcu_tools.gui.cfg.binding import CfgDraft
 
 # Kind prefixes are deliberately draft-local. Two independent drafts can both
-# expose ``md-1`` without sharing any editor session or mutable item state.
+# expose ``param-1`` without sharing any editor session or mutable item state.
 _KIND_PREFIX = {
-    MetaDictWriteback: "md",
+    ParameterWriteback: "param",
     ModuleWriteback: "ml",
     WaveformWriteback: "wf",
 }
@@ -70,14 +70,14 @@ class WritebackWritten:
     """Actual destination values around a successful context write."""
 
     id: str
-    kind: Literal["md", "module", "waveform"]
+    kind: Literal["parameter", "module", "waveform"]
     target: str
     before: object
     after: object
 
 
 def _destination_path(item: WritebackItem, parameters: ParameterContext) -> str:
-    if isinstance(item, MetaDictWriteback):
+    if isinstance(item, ParameterWriteback):
         return parameters.resolve_path(item.target_name)
     return parameters.library_key(item.target_name)
 
@@ -85,7 +85,7 @@ def _destination_path(item: WritebackItem, parameters: ParameterContext) -> str:
 def _destination_value(
     item: WritebackItem, parameters: ParameterContext, path: str
 ) -> object:
-    if isinstance(item, MetaDictWriteback):
+    if isinstance(item, ParameterWriteback):
         result = parameters.lookup(path)
         return result.value if result.present else None
     kind = "module" if isinstance(item, ModuleWriteback) else "waveform"
@@ -360,7 +360,7 @@ class WritebackService:
                 AcceptedWrite.model_validate(
                     {"path": path, "value": item.proposed_value}
                 ).value
-                if isinstance(item, MetaDictWriteback)
+                if isinstance(item, ParameterWriteback)
                 else schema_to_raw_dict(
                     self._entry_schema(self._find_draft_entry(draft, item.session_id)),
                     parameters,
@@ -372,7 +372,7 @@ class WritebackService:
                 proposed=proposed,
                 unit=(
                     document_unit(current.document(), path)
-                    if isinstance(item, MetaDictWriteback)
+                    if isinstance(item, ParameterWriteback)
                     else None
                 ),
             )
@@ -417,9 +417,9 @@ class WritebackService:
                 else:
                     entry.proposed_summary = f"{action} → {item.target_name}"
         if proposed_value is not _UNSET:
-            if not isinstance(item, MetaDictWriteback):
+            if not isinstance(item, ParameterWriteback):
                 raise InvalidInputError(
-                    f"{session_id!r} is not a metadict item; proposed_value invalid"
+                    f"{session_id!r} is not a parameter item; proposed_value invalid"
                 )
             if not self._values_equal(proposed_value, item.proposed_value):
                 item.proposed_value = proposed_value
@@ -481,7 +481,11 @@ class WritebackService:
         """
         self._require_draft(draft)
         selected_entries = _entries_to_apply(draft._entries, item_ids)
-        written: dict[str, list[str]] = {"md": [], "ml_modules": [], "ml_waveforms": []}
+        written: dict[str, list[str]] = {
+            "parameter": [],
+            "ml_modules": [],
+            "ml_waveforms": [],
+        }
         if not selected_entries:
             return {"applied_ids": [], "written": written}
         parameters = self._require_parameters(draft)
@@ -492,12 +496,12 @@ class WritebackService:
         waveforms: dict[str, WaveformSpec] = {}
         for entry in selected_entries:
             item = entry.item
-            if isinstance(item, MetaDictWriteback):
+            if isinstance(item, ParameterWriteback):
                 path = parameters.resolve_path(item.target_name)
                 write = AcceptedWrite.model_validate(
                     {"path": path, "value": item.proposed_value}
                 )
-                written["md"].append(path)
+                written["parameter"].append(path)
             else:
                 path = parameters.library_key(item.target_name)
                 raw = schema_to_raw_dict(self._entry_schema(entry), parameters)
@@ -538,7 +542,7 @@ class WritebackService:
                 at=event.at,
                 stderr=item.stderr,
             )
-            if isinstance(item, MetaDictWriteback):
+            if isinstance(item, ParameterWriteback):
                 self._write.set_parameter(
                     parameters.target, write.path, write.value, source=source
                 )
@@ -604,8 +608,8 @@ class WritebackService:
             WritebackWritten(
                 id=item.session_id,
                 kind=(
-                    "md"
-                    if isinstance(item, MetaDictWriteback)
+                    "parameter"
+                    if isinstance(item, ParameterWriteback)
                     else "module"
                     if isinstance(item, ModuleWriteback)
                     else "waveform"
@@ -734,7 +738,7 @@ class WritebackService:
     ) -> None:
         """Capture display-only summaries from the creation context."""
         item = entry.item
-        if isinstance(item, MetaDictWriteback):
+        if isinstance(item, ParameterWriteback):
             current = (
                 None if parameters is None else parameters.lookup(item.target_name)
             )

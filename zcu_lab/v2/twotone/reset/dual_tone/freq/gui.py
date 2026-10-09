@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -189,12 +189,12 @@ class DualToneFreqAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="reset_f1",
                 description="Dual-tone reset frequency 1 (MHz)",
                 proposed_value=result.freq1,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="reset_f2",
                 description="Dual-tone reset frequency 2 (MHz)",
                 proposed_value=result.freq2,

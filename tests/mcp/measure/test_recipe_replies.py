@@ -415,8 +415,8 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         if method == "tab.writeback_preview":
             response["items"] = [
                 {
-                    "id": "md-1",
-                    "kind": "metadict",
+                    "id": "param-1",
+                    "kind": "parameter",
                     "target_name": "trigger_offset",
                     "selected": False,
                     "proposed": 0.24,
@@ -504,7 +504,7 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         )
         candidate = summary["writeback"]["stages"]["primary"][0]
         assert candidate == {
-            "id": "md-1",
+            "id": "param-1",
             "kind": "parameter",
             "target": "trigger_offset",
             "resolved_target": None,

@@ -160,7 +160,7 @@ def test_failed_writeback_view_selection_leaves_draft_untouched():
             {
                 "tab_id": "t",
                 "subtab_id": "analysis",
-                "write": [{"id": "md-1"}],
+                "write": [{"id": "param-1"}],
             },
         )
     adapter.writeback_control.write_writeback_for_pane.assert_not_called()

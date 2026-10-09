@@ -296,7 +296,7 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
 def test_main_window_refresh_projects_post_writeback_into_post_widget(
     qapp, exp_tab_widget
 ):
-    from zcu_tools.gui.app.measure.adapter import MetaDictWriteback
+    from zcu_tools.gui.app.measure.adapter import ParameterWriteback
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = make_ctrl()
@@ -308,8 +308,10 @@ def test_main_window_refresh_projects_post_writeback_into_post_widget(
     tab.attach(empty, MagicMock())
     assert tab.post_writeback_widget._items == []
 
-    item = MetaDictWriteback(target_name="radius", description="post", proposed_value=1)
-    item.session_id = "md-1"
+    item = ParameterWriteback(
+        target_name="radius", description="post", proposed_value=1
+    )
+    item.session_id = "param-1"
     item.selected = True
     committed = make_snapshot(
         "tab-1",
@@ -589,10 +591,10 @@ def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget):
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
     # Populate post writeback with a dummy item
-    from zcu_tools.gui.app.measure.adapter import MetaDictWriteback
+    from zcu_tools.gui.app.measure.adapter import ParameterWriteback
 
-    item = MetaDictWriteback(target_name="x", description="d", proposed_value=1)
-    item.session_id = "md-1"
+    item = ParameterWriteback(target_name="x", description="d", proposed_value=1)
+    item.session_id = "param-1"
     item.selected = True
     tab.post_writeback_widget.populate([item])
     # Toggle should route to post_analysis pane, not analysis
@@ -602,20 +604,20 @@ def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget):
     # Directly call handler via widget
     tab.post_writeback_widget._on_check_toggled(item)
     ctrl.set_writeback_item_for_pane.assert_called_with(
-        "tab-1", "post_analysis", "md-1", selected=item.selected
+        "tab-1", "post_analysis", "param-1", selected=item.selected
     )
     # Edit should also route pane-qualified
     ctrl.set_writeback_item_for_pane.reset_mock()
     # Simulate edit via widget's edit path not needed; verify that primary widget still uses analysis pane
-    primary_item = MetaDictWriteback(
+    primary_item = ParameterWriteback(
         target_name="y", description="d2", proposed_value=2
     )
-    primary_item.session_id = "md-1"
+    primary_item.session_id = "param-1"
     primary_item.selected = True
     tab.writeback_widget.populate([primary_item])
     tab.writeback_widget._on_check_toggled(primary_item)
     ctrl.set_writeback_item_for_pane.assert_called_with(
-        "tab-1", "analysis", "md-1", selected=primary_item.selected
+        "tab-1", "analysis", "param-1", selected=primary_item.selected
     )
     tab.detach()
 

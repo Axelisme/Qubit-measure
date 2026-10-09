@@ -19,8 +19,8 @@ from zcu_tools.gui.cfg import (
 
 from .adapter import (
     ExpAdapterProtocol,
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     ParamMeta,
     PostWritebackRequest,
     SavePaths,
@@ -61,7 +61,7 @@ __all__ = [
     "RetiredRunResource",
     "RetiredAnalysisResource",
     "RetiredPaneResources",
-    "MetaDictWriteback",
+    "ParameterWriteback",
     "ModuleWriteback",
     "ParamMeta",
     "PostWritebackRequest",

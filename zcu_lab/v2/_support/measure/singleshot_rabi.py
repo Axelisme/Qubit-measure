@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
-from zcu_tools.gui.app.measure.adapter import MetaDictWriteback, WritebackItem
+from zcu_tools.gui.app.measure.adapter import ParameterWriteback, WritebackItem
 
 from zcu_lab.v2._support.singleshot.rabi_fit import RabiJointFitResult
 
@@ -20,22 +20,22 @@ def rabi_calibration_writeback(fit: RabiJointFitResult) -> Sequence[WritebackIte
         return []
 
     return [
-        MetaDictWriteback(
+        ParameterWriteback(
             target_name="g_center",
             description="Rabi fitted |g> IQ cluster centre (complex)",
             proposed_value=fit.g_center,
         ),
-        MetaDictWriteback(
+        ParameterWriteback(
             target_name="e_center",
             description="Rabi fitted |e> IQ cluster centre (complex)",
             proposed_value=fit.e_center,
         ),
-        MetaDictWriteback(
+        ParameterWriteback(
             target_name="ge_radius",
             description="Rabi fitted single-shot classification radius",
             proposed_value=fit.radius,
         ),
-        MetaDictWriteback(
+        ParameterWriteback(
             target_name="confusion_matrix",
             description="Rabi fitted 3x3 confusion matrix",
             proposed_value=fit.confusion_matrix.tolist(),

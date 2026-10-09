@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -288,7 +288,7 @@ class T2RamseyAdapter(
         """
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.t2r",
                 description="T2 Ramsey time (us)",
                 proposed_value=result.t2r,
@@ -311,7 +311,7 @@ class T2RamseyAdapter(
                 source_freq + req.run_result.result.true_activate_detune - result.detune
             )
             items.append(
-                MetaDictWriteback(
+                ParameterWriteback(
                     target_name="$qubit.freq",
                     description="Qubit frequency (MHz)",
                     proposed_value=q_f,

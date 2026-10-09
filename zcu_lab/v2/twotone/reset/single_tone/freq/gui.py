@@ -11,8 +11,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -164,12 +164,12 @@ class SingleToneFreqAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="reset_f",
                 description="Sideband reset frequency (MHz)",
                 proposed_value=result.freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="resetf_w",
                 description="Reset sideband linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,

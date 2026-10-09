@@ -11,8 +11,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -149,12 +149,12 @@ class BathPhaseAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="bathreset_max_phase",
                 description="Bath-reset pi/2 phase for ground reset (deg)",
                 proposed_value=result.max_phase,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="bathreset_min_phase",
                 description="Bath-reset pi/2 phase for excited reset (deg)",
                 proposed_value=result.min_phase,

@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -225,7 +225,7 @@ class LookbackAdapter(
         occurs here.
         """
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$resonator.ext.time_of_fly",
                 description="Readout trigger offset prediction (us)",
                 proposed_value=req.analyze_result.predict_offset,

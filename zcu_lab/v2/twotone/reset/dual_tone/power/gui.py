@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -166,12 +166,12 @@ class DualTonePowerAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="reset_gain1",
                 description="Dual-tone reset gain 1 (a.u.)",
                 proposed_value=result.gain1,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="reset_gain2",
                 description="Dual-tone reset gain 2 (a.u.)",
                 proposed_value=result.gain2,
