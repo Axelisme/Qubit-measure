@@ -1,17 +1,18 @@
-"""Owner-thread admission and worker lifecycle for native workflow runs."""
+"""One run owner for native workflow admission, continuation and terminal delivery."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from dataclasses import replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 from threading import RLock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
+    Actor,
     DeviceSnapshot,
     Engine,
     EnginePorts,
@@ -20,8 +21,10 @@ from zcu_tools.experiment.workflows import (
     RunMismatch,
     RunPaths,
     RunStatus,
+    TunablesSnapshot,
 )
 from zcu_tools.experiment.workflows.declaration import WorkflowStep
+from zcu_tools.gui.form import FormErrors, FormModel, FormWritePath
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
@@ -29,113 +32,102 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
-from zcu_tools.gui.session.services.progress import (
-    BoundProgressFactory,
-    ProgressService,
-)
+from zcu_tools.gui.session.services.progress import BoundProgressFactory
+
+from .tunables import TunablesHost
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_runner import OperationRunner
 
-
 logger = logging.getLogger(__name__)
 
 
-class WorkflowController[C]:
-    """Submit Start/Resume segments and cooperative Pause/Stop through the runner.
+@dataclass
+class _Run[F: FormModel, C]:
+    """Keep binding, producer ownership and cleanup together for one native run."""
 
-    All methods except Engine queries are called on the runner's owner thread.
-    The controller owns admission and the pending operation token, not native
-    lifecycle or a second device registry. ``engine`` is None until the worker
-    accepts startup; its status and artifacts remain authoritative thereafter.
-    An operation token is not proof of native acceptance. Each segment holds its
-    own lease until owner delivery. Paused runs retain progress and plots; only
-    whole-run completion, Stop or failure discards the Start-token progress.
+    binding: TunablesHost[F, C]
+    phase: Literal[
+        "starting", "producing", "paused", "resuming", "finishing", "terminal"
+    ] = "starting"
+    stop: StopSignal = field(default_factory=StopSignal)
+    token: int | None = None
+    engine: Engine[C] | None = None
+    settle: SettleFn | None = None
+
+
+class WorkflowController[F: FormModel, C]:
+    """Own one current run from Start admission through final owner delivery.
+
+    A fixed controller accepts a replacement only after terminal cleanup. The
+    current binding owns the unique form draft and fixed Start capture. Native
+    Engine status remains authoritative; a token or binding is not acceptance.
+    Pause retains the operation, local RUN lease and progress. Resume submits a
+    producer through the same Runner handle, never another begin. This does not
+    arbitrate other processes or restore hardware. Commands run on the owner
+    thread; startup publication and cooperative controls share a binding lock.
     """
 
     def __init__(
         self,
         runner: OperationRunner,
-        ports: EnginePorts[C],
         owner_id: str,
-        progress: ProgressService,
         *,
         on_finished: Callable[[RunStatus | None, Exception | None], None],
     ) -> None:
-        """Borrow runner/ports and report worker completion on the owner thread.
+        """Borrow runner and report paused/terminal native delivery to the view.
 
-        owner_id labels the run lease and progress. progress must be the runner's
-        owning ProgressService. Start creates one bound factory using its token;
-        Resume reuses it, without consulting ambient progress or ports.progress.
-        on_finished receives
-        the authoritative status (None if startup was never accepted) and the
-        original startup/worker error when present. Terminal owner delivery fixes
-        the handle's native outcome and releases admission and the run lease
-        before notifying the view. View exceptions are logged and never change
-        the native outcome or write the run binding. A paused notification retains
-        the handle, lease and progress; it is not terminal cleanup. Synchronous
-        Resume admission failure has no producer: begin has already unwound any
-        segment resources.
-        If Stop terminated the native run during admission, on_finished then
-        receives that stopped status with error=None, retained progress is
-        discarded, and the original admission error is reraised to the caller.
-        The callback also reports each paused segment; the caller keeps plan,
-        plots and run inputs alive and locked in that case. Terminal run callbacks
-        may finish plots; release belongs to the caller. No rollback is promised.
+        owner_id labels the run lease and progress. runner owns that progress
+        service. on_finished receives authoritative native status (None before
+        acceptance) and the original producer error, if any. Terminal cleanup
+        fixes the native handle outcome and releases admission/lease/progress
+        before notification. View errors are logged and do not alter outcome or
+        binding. Paused notification retains ownership. Callback reentry may
+        Stop, or Start a replacement after terminal cleanup; no old binding is
+        written after notification. No instrument call occurs here.
         """
         self._runner = runner
-        self._ports = ports
         self._owner_id = owner_id
-        self._progress = progress
         self._on_finished = on_finished
         self._lock = RLock()
-        self._stop_signal = StopSignal()
-        self._started = False
-        self._run_id: str | None = None
-        self._admitting = False
-        self._operation_id: int | None = None
-        self._progress_token: int | None = None
-        self._factory: BoundProgressFactory | None = None
-        self._engine: Engine[C] | None = None
+        self._run: _Run[F, C] | None = None
+
+    @property
+    def binding(self) -> TunablesHost[F, C] | None:
+        """Return current pending/accepted form owner, or None before Start."""
+        return None if self._run is None else self._run.binding
 
     @property
     def engine(self) -> Engine[C] | None:
-        """Return the accepted native engine, or None before accepted startup."""
+        """Return current native Engine, or None before startup acceptance."""
         with self._lock:
-            return self._engine
+            return None if self._run is None else self._run.engine
 
     @property
     def run_id(self) -> str | None:
-        """Read Start's native target, including pending and terminal runs.
+        """Return current native target, including pending/terminal, or None.
 
-        None before Start or after synchronous admission/factory/submit failure.
-        Published before Runner admission notifications; successful submission
-        retains this identity through Pause, Resume and terminal delivery.
-        This is not an operation token or proof of native acceptance.
+        Start publishes it before admission notifications. Synchronous Start
+        rejection clears the pending binding. It is not an operation token.
         """
-        return self._run_id
+        binding = self.binding
+        return None if binding is None else binding.run_id
 
     @property
     def operation_id(self) -> int | None:
-        """Return the pending runner token, or None before opening/after delivery.
-
-        Registration can notify before its token is available. During that gap,
-        has_pending_segment is True even though this property is None.
-        """
-        return self._operation_id
+        """Return the one live run token, retained while paused; None at terminal."""
+        run = self._run
+        return None if run is None or run.phase == "terminal" else run.token
 
     @property
     def has_pending_segment(self) -> bool:
-        """Read whether synchronous Start/Resume segment admission is in flight.
+        """Read whether admission, producer or terminal cleanup is still pending.
 
-        True from immediately before Runner.begin until it returns or raises,
-        including lease registration notifications before on_opened supplies a
-        token. False afterward; operation_id separately identifies an opened
-        segment until owner terminal delivery. Stop/Start/close must treat either
-        this property or a non-None operation_id as pending segment work.
-        This is observed state, not a configurable policy or an operation ID.
+        False after paused owner delivery, even though operation_id is retained.
+        Stop/close must wait for pending work; paused Stop cleans up synchronously.
         """
-        return self._admitting
+        run = self._run
+        return run is not None and run.phase not in {"paused", "terminal"}
 
     def start[P: BaseModel, T: BaseModel, S, R](
         self,
@@ -145,49 +137,49 @@ class WorkflowController[C]:
         tunables: T,
         paths: RunPaths,
         identity: RunIdentity,
+        ports: EnginePorts[C],
+        binding: TunablesHost[F, C],
     ) -> int:
-        """Admit and submit captured, validated startup, returning a runner token.
+        """Publish prepared binding and submit native startup once via Runner.
 
-        One controller accepts exactly one Start; duplicate/pending Start raises
-        InvalidRunState. Native declaration validation belongs to Engine and is
-        performed on the worker while holding the run lease. Runner admission,
-        registration/factory/submit failures propagate synchronously and leave
-        no native run directories. Worker startup failures settle failed with
-        their original error passed to on_finished; partial files are retained.
-        identity.run_id is published before Runner notifications; synchronous
-        rejection clears it. Successful submission retains it through terminal.
-        Stop before worker startup creates no native run. Stop arriving during
-        startup is delivered before execute calls init/step. Terminal is not
-        reported until the worker has returned. No retry or hardware cleanup.
+        ports contains this run's live resources and initial context; Runner's
+        progress factory replaces ports.progress. binding must be pending, with
+        run_id equal to identity.run_id and input matching tunables. Mismatched
+        identity raises RunMismatch, accepted bindings raise RuntimeError.
+        Pending/paused/active/finishing replacement raises InvalidRunState before
+        mutation. Engine validates declaration/values on the worker. Admission,
+        factory and submit errors propagate, clear pending ownership and create
+        no native files. Stop before worker startup does not create a native run.
+        Startup errors retain partial files and deliver the original error.
+        The returned token is a receipt, not native acceptance or completion.
         """
-        if self._started:
-            status = self.status()
-            raise InvalidRunState(
-                "start", "running" if status is None else status.lifecycle
-            )
-        self._started = True
-        self._run_id = identity.run_id
+        with self._lock:
+            if self._run is not None and self._run.phase != "terminal":
+                status = self.status()
+                raise InvalidRunState(
+                    "start", "running" if status is None else status.lifecycle
+                )
+            if binding.run_id != identity.run_id:
+                raise RunMismatch(identity.run_id, binding.run_id)
+            if binding.engine is not None:
+                raise RuntimeError("Start requires a pending tunables binding")
+            run = _Run(binding)
+            self._run = run
 
         def opened(token: int) -> None:
-            self._operation_id = token
-            # Retain the existing Start token, not a new run tracking identity.
-            self._progress_token = token
-            self._factory = self._progress.make_factory(token, self._owner_id)
+            run.token = token
 
-        def work(_factory: None) -> RunStatus | None:
-            if self._stop_signal.is_set():
+        def work(factory: BoundProgressFactory) -> RunStatus | None:
+            if run.stop.is_set():
                 return None
-            factory = self._factory
-            if factory is None:
-                raise RuntimeError("Start requires its bound progress factory")
-            engine = Engine(replace(self._ports, progress=factory))
+            engine = Engine(replace(ports, progress=factory))
             status = engine.start(
                 step, plan=plan, tunables=tunables, paths=paths, identity=identity
             )
-            # Startup stays unpublished so Stop never waits for startup I/O.
             with self._lock:
-                self._engine = engine
-                if self._stop_signal.is_set():
+                binding.accept(engine)
+                run.engine = engine
+                if run.stop.is_set():
                     engine.stop(status.run_id)
             return engine.execute(status.run_id)
 
@@ -195,236 +187,178 @@ class WorkflowController[C]:
             self.stop(identity.run_id)
 
         try:
-            self._admitting = True
-            try:
-                return self._runner.begin(
-                    OperationSpec(
-                        exclusion=ExclusionRequest(
-                            "run", self._owner_id, "workflow run"
-                        ),
-                        owner_id=self._owner_id,
-                        wants_progress=False,
-                        cancel_hook=cancel,
-                        work=work,
-                        run_in_pool=False,
-                        on_terminal=self._segment_finished,
-                        on_opened=opened,
-                    )
+            token = self._runner.begin(
+                OperationSpec(
+                    exclusion=ExclusionRequest("run", self._owner_id, "workflow run"),
+                    owner_id=self._owner_id,
+                    wants_progress=True,
+                    cancel_hook=cancel,
+                    work=work,
+                    run_in_pool=False,
+                    on_terminal=lambda bg, settle: self._delivered(run, bg, settle),
+                    on_opened=opened,
                 )
-            finally:
-                self._admitting = False
+            )
         except Exception:
-            self._run_id = None
-            try:
-                self._discard_progress()
-            finally:
-                self._operation_id = None
-                self._started = False
+            self._run = None
             raise
+        if run.phase == "starting":
+            run.phase = "producing"
+        return token
 
-    def _discard_progress(self) -> None:
-        """Discard the retained Start-token container once, including on unwind."""
-        token = self._progress_token
-        self._progress_token = None
-        self._factory = None
-        if token is not None:
-            try:
-                self._progress.discard_operation(token)
-            except Exception:
-                logger.exception("Failed to discard workflow run progress")
-
-    def _segment_finished(self, bg: BgResult, settle: SettleFn) -> None:
-        """Report a returned producer before releasing its segment resources."""
-        status = self.status()
+    def _notify(self, status: RunStatus | None, error: Exception | None) -> None:
         try:
-            try:
-                self._on_finished(status, bg.error)
-            finally:
-                # The callback may synchronously Stop a newly paused run.
-                status = self.status()
-                if not bg.ok or status is None or status.lifecycle != "paused":
-                    self._discard_progress()
-            if not bg.ok:
-                outcome = OperationOutcome("failed", str(bg.error))
-            elif status is None or status.lifecycle == "stopped":
-                outcome = OperationOutcome("cancelled")
-            elif status.lifecycle == "failed":
-                outcome = OperationOutcome("failed", status.reason)
-            else:
-                outcome = OperationOutcome("finished")
-            settle(outcome)
-        finally:
-            self._operation_id = None
+            self._on_finished(status, error)
+        except Exception:
+            logger.exception("Workflow view notification failed")
+
+    def _finish(self, run: _Run[F, C], error: Exception | None) -> None:
+        status = None if run.engine is None else run.engine.status()
+        if error is not None:
+            outcome = OperationOutcome("failed", str(error))
+        elif status is None or status.lifecycle == "stopped":
+            outcome = OperationOutcome("cancelled")
+        elif status.lifecycle == "failed":
+            outcome = OperationOutcome("failed", status.reason)
+        else:
+            outcome = OperationOutcome("finished")
+        if run.settle is None:
+            raise RuntimeError("Terminal delivery requires Runner ownership")
+        run.phase = "finishing"
+        run.settle(outcome)
+        run.phase = "terminal"
+        self._notify(status, error)
+
+    def _delivered(self, run: _Run[F, C], bg: BgResult, settle: SettleFn) -> None:
+        run.settle = settle
+        status = None if run.engine is None else run.engine.status()
+        if bg.ok and status is not None and status.lifecycle == "paused":
+            run.phase = "paused"
+            self._notify(status, None)
+        else:
+            self._finish(run, bg.error)
 
     def status(self) -> RunStatus | None:
-        """Read accepted native status; None distinguishes pending startup."""
+        """Return current accepted native status; None means no acceptance."""
         engine = self.engine
         return None if engine is None else engine.status()
 
     def require_run_id(self, run_id: str) -> None:
-        """Check this Start's native identity without changing run or admission.
-
-        run_id must equal the identity supplied to Start, including pending
-        startup. A wrong or absent target raises RunMismatch with requested and
-        attached identities before side effects. Matching does not imply native
-        acceptance or permit a lifecycle operation. Call on the owner thread.
-        """
-        if run_id != self._run_id:
-            raise RunMismatch(expected=run_id, actual=self._run_id)
+        """Reject absent/stale target with RunMismatch before any side effect."""
+        if run_id != self.run_id:
+            raise RunMismatch(run_id, self.run_id)
 
     def pause(self, run_id: str) -> RunStatus:
-        """Request cooperative Pause of the explicitly targeted active run.
+        """Request cooperative Pause, retaining the run's operation and lease.
 
-        run_id must equal this controller's Start identity. A wrong or absent
-        target raises RunMismatch before any side effect. A matching pending
-        target without native acceptance raises RuntimeError. Terminal runs and
-        segments awaiting owner delivery raise InvalidRunState. Repeated pausing
-        requests follow Engine.pause. The lease stays held until producer return and owner
-        delivery; Pause does not discard progress, plots or submitted inputs.
+        Stale/absent targets raise RunMismatch. Pending acceptance raises
+        RuntimeError. Only a producing running/pausing Engine accepts Pause;
+        other phases raise InvalidRunState. Worker return alone is not delivery.
         """
         with self._lock:
             self.require_run_id(run_id)
-            engine = self._engine
-            status = None if engine is None else engine.status()
-            if engine is None or status is None:
+            run = self._run
+            if run is None or run.engine is None:
                 raise RuntimeError("Pause requires an accepted workflow run")
-            if self._operation_id is None or status.lifecycle not in {
-                "running",
-                "pausing",
-            }:
-                raise InvalidRunState("pause", status.lifecycle)
-            return engine.pause(run_id)
+            status = run.engine.status()
+            if (
+                run.phase != "producing"
+                or status is None
+                or status.lifecycle not in {"running", "pausing"}
+            ):
+                raise InvalidRunState(
+                    "pause", "running" if status is None else status.lifecycle
+                )
+            return run.engine.pause(run_id)
 
     def resume(self, run_id: str, *, devices: Callable[[], DeviceSnapshot]) -> int:
-        """Submit the explicitly targeted paused run, returning its segment token.
+        """Read devices on owner and continue a delivered paused run's token.
 
-        run_id must equal this controller's Start identity. A wrong or absent
-        target raises RunMismatch before lease admission or device capture.
-        A matching target without native acceptance raises RuntimeError. Only
-        paused with previous owner delivery complete is admitted; other states
-        raise InvalidRunState.
-        After obtaining the RUN lease, invoke devices once
-        on the owner thread to capture current cached native device provenance.
-        Engine.resume and execute run on the worker with the original progress
-        factory, state and inputs. No init or Start is repeated. Capture, lease or
-        submission failure propagates. Without synchronous Stop it leaves the run
-        paused and retains progress. If Stop already terminated the native run
-        and no producer was submitted, synchronous unwind reports that terminal
-        once and discards progress, then reraises the original failure. It does
-        not invent a RunStatus or restore stopped to paused.
-        Native failed status retains Engine's reason; exceptions escaping the
-        worker reach on_finished unchanged. Either failure discards progress.
-        Stop while this segment is pending prevents its step from restarting.
+        Target/state checks precede devices. devices synchronously reads all
+        connected drivers and raises a named failure; no cached fallback. Read
+        or submit failure preserves a healthy paused run and original ownership.
+        Stop during admission with no producer finishes synchronously, then
+        reraises any original error. Native resume/execute run off-main with
+        unchanged context, cursor, progress and records; no repeated init.
         """
         with self._lock:
             self.require_run_id(run_id)
-            engine = self._engine
-            status = None if engine is None else engine.status()
-            if engine is None or status is None:
+            run = self._run
+            if run is None or run.engine is None:
                 raise RuntimeError("Resume requires an accepted paused workflow run")
-            if (
-                status.lifecycle != "paused"
-                or self._admitting
-                or self._operation_id is not None
-            ):
-                raise InvalidRunState("resume", status.lifecycle)
-
-        captured: DeviceSnapshot | None = None
-
-        def opened(token: int) -> None:
-            nonlocal captured
-            self._operation_id = token
+            status = run.engine.status()
+            if run.phase != "paused" or status is None or status.lifecycle != "paused":
+                raise InvalidRunState(
+                    "resume", "running" if status is None else status.lifecycle
+                )
+            if run.token is None or run.settle is None:
+                raise RuntimeError("Resume requires retained Runner ownership")
+            engine = run.engine
+            run.phase = "resuming"
+        try:
             captured = devices()
 
-        def work(_factory: None) -> RunStatus:
-            with self._lock:
-                if self._stop_signal.is_set():
-                    stopped = engine.status()
-                    if stopped is None:
-                        raise RuntimeError("accepted engine has no run status")
-                    return stopped
-                if captured is None:
-                    raise RuntimeError("Resume requires captured devices")
-                engine.resume(status.run_id, devices=captured)
-            return engine.execute(status.run_id)
+            def work() -> RunStatus:
+                with self._lock:
+                    if not run.stop.is_set():
+                        engine.resume(run_id, devices=captured)
+                return engine.execute(run_id)
 
-        def cancel() -> None:
-            self.stop(run_id)
-
-        try:
-            self._admitting = True
-            try:
-                return self._runner.begin(
-                    OperationSpec(
-                        exclusion=ExclusionRequest(
-                            "run", self._owner_id, "workflow run"
-                        ),
-                        owner_id=self._owner_id,
-                        wants_progress=False,
-                        cancel_hook=cancel,
-                        work=work,
-                        run_in_pool=False,
-                        on_terminal=self._segment_finished,
-                        on_opened=opened,
-                    )
-                )
-            finally:
-                self._admitting = False
+            token = self._runner.continue_operation(
+                run.token,
+                work=work,
+                run_in_pool=False,
+                on_terminal=lambda bg, settle: self._delivered(run, bg, settle),
+                settle=run.settle,
+            )
         except Exception:
-            self._operation_id = None
-            stopped = engine.status()
-            if stopped is not None and stopped.lifecycle == "stopped":
-                # begin unwound the lease; no producer can deliver this terminal.
-                try:
-                    self._on_finished(stopped, None)
-                except Exception:
-                    logger.exception("Workflow admission terminal callback failed")
-                finally:
-                    self._discard_progress()
+            status = engine.status()
+            if run.stop.is_set() or (
+                status is not None and status.lifecycle == "failed"
+            ):
+                self._finish(run, None)
+            else:
+                run.phase = "paused"
             raise
+        run.phase = "producing"
+        return token
 
     def stop(self, run_id: str) -> RunStatus | None:
-        """Request Stop of the explicit target without waiting for its worker.
+        """Request explicit-target Stop; finish idle paused/failed runs once.
 
-        run_id must equal this controller's Start identity. A wrong or absent
-        target raises RunMismatch before StopSignal or any other side effect.
-        A matching target before acceptance cancels startup and returns None. After
-        acceptance it delegates to Engine.stop and returns its native status.
-        An active segment, including registration before its token is available,
-        keeps its lease until worker terminal delivery or synchronous admission
-        unwind when no producer exists. An already-delivered paused run with no
-        admission in flight stops synchronously, reports on_finished and
-        discards its retained progress. Native failures propagate; no hardware
-        rollback or cleanup occurs. An idle native failed run can retain progress
-        after a synchronous tunables error. Stop reports that actual failed status
-        once and discards retained progress; it does not turn failed into stopped.
-        Later Stop calls do not repeat owner terminal delivery.
+        Stale/absent targets raise RunMismatch. Before acceptance, set Stop and
+        return None. Pending work retains ownership until delivery/unwind. An
+        idle paused run stops and cleans up synchronously. Terminal calls do not
+        repeat notification. Native failures propagate; no hardware rollback.
         """
         with self._lock:
             self.require_run_id(run_id)
-            self._stop_signal.set()
-            if self._engine is None:
+            run = self._run
+            if run is None:
+                raise RuntimeError("Stop requires a current run")
+            run.stop.set()
+            if run.engine is None:
                 return None
-            status = self._engine.status()
-            if status is None:
-                raise RuntimeError("accepted engine has no run status")
-            stopped = self._engine.stop(run_id)
-        if (
-            status.lifecycle == "paused"
-            and not self._admitting
-            and self._operation_id is None
-        ):
-            try:
-                self._on_finished(stopped, None)
-            finally:
-                self._discard_progress()
-        elif (
-            status.lifecycle == "failed"
-            and not self._admitting
-            and self._operation_id is None
-            and self._progress_token is not None
-        ):
-            # Consume retained ownership before callbacks can reenter Stop.
-            self._discard_progress()
-            self._on_finished(stopped, None)
+            stopped = run.engine.stop(run_id)
+        if run.phase == "paused":
+            self._finish(run, None)
         return stopped
+
+    def apply_tunables(
+        self,
+        run_id: str,
+        batch: Mapping[FormWritePath, JsonValue] | None = None,
+        *,
+        actor: Actor,
+        local_errors: FormErrors | None = None,
+    ) -> TunablesSnapshot | FormErrors:
+        """Submit GUI draft or external batch through the current unique Host.
+
+        Target checks precede draft writes. None submits GUI input, with optional
+        local_errors; a mapping writes external edits then submits complete input.
+        Pending acceptance raises RuntimeError without writes. FormErrors retains
+        invalid draft; native exceptions propagate unchanged. A native failure
+        ends idle ownership immediately, or waits for active producer delivery.
+        Success accepts expression input/base; no revision guard or retry.
+        """
+        raise NotImplementedError("Controller-owned tunables submission seed")

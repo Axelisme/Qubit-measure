@@ -15,6 +15,7 @@ from zcu_tools.experiment.workflows import (
     InvalidRunState,
     RunIdentity,
     RunMismatch,
+    RunPaths,
     RunStatus,
     Step,
     TunableChange,
@@ -22,6 +23,8 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 from zcu_tools.gui.app.workflows.controller import WorkflowController
+from zcu_tools.gui.app.workflows.tunables import TunablesHost
+from zcu_tools.gui.form import FormEnv, FormModel, FormState
 from zcu_tools.gui.session.adapters.thread_pool_background import (
     ThreadPoolBackgroundExecutor,
 )
@@ -45,9 +48,9 @@ from tests.experiment.workflows._engine_fakes import (
 from ._start_fakes import StartHarness
 
 
-def identity() -> RunIdentity:
+def identity(run_id: str = "run") -> RunIdentity:
     return RunIdentity(
-        "run",
+        run_id,
         DeviceSnapshot({}),
         SoftwareProvenance(
             software_versions={},
@@ -60,16 +63,25 @@ def identity() -> RunIdentity:
     )
 
 
+class ValueForm(FormModel):
+    """Ordinary input corresponding to the example workflow tunable."""
+
+    value: int = 1
+
+
+def create_binding(run_id: str = "run") -> TunablesHost[ValueForm, int]:
+    env = FormEnv()
+    return TunablesHost(FormState(ValueForm.default_input(env)), env, run_id)
+
+
 def create_controller(
     harness: StartHarness,
     rig: Rig,
     finished: Callable[[RunStatus | None, Exception | None], None],
-) -> WorkflowController[int]:
+) -> WorkflowController[ValueForm, int]:
     return WorkflowController(
         harness.runner,
-        EnginePorts(rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices),
         "example",
-        harness.progress,
         on_finished=finished,
     )
 
@@ -111,6 +123,10 @@ def test_target_check_is_available_before_acceptance_without_changing_admission(
         declare(rig),
         plan=Plan(),
         tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
         paths=rig.paths,
         identity=identity(),
     )
@@ -139,6 +155,10 @@ def test_submit_is_pending_until_worker_accepts_and_owner_releases_lease(
         declare(rig),
         plan=Plan(),
         tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
         paths=rig.paths,
         identity=identity(),
     )
@@ -153,6 +173,10 @@ def test_submit_is_pending_until_worker_accepts_and_owner_releases_lease(
             declare(rig),
             plan=Plan(),
             tunables=Tunables(),
+            ports=EnginePorts(
+                rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+            ),
+            binding=create_binding(),
             paths=rig.paths,
             identity=identity(),
         )
@@ -209,6 +233,10 @@ def test_submit_failure_has_no_native_artifacts_or_lease(
             declare(rig),
             plan=Plan(),
             tunables=Tunables(),
+            ports=EnginePorts(
+                rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+            ),
+            binding=create_binding(),
             paths=rig.paths,
             identity=identity(),
         )
@@ -233,6 +261,10 @@ def test_stop_before_worker_acceptance_does_not_start_run(tmp_path: Path) -> Non
         declare(rig),
         plan=Plan(),
         tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
         paths=rig.paths,
         identity=identity(),
     )
@@ -263,6 +295,10 @@ def test_native_startup_failure_reports_original_error_and_releases(
         declare(rig),
         plan=Plan(),
         tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
         paths=rig.paths,
         identity=identity(),
     )
@@ -295,15 +331,15 @@ def test_stop_during_start_is_settled_before_init_and_step(tmp_path: Path) -> No
     ports = EnginePorts(rig.plots, rig.progress, StoppingClock(), context=7)
     controller = WorkflowController(
         harness.runner,
-        ports,
         "example",
-        harness.progress,
         on_finished=lambda _status, _error: None,
     )
     token = controller.start(
         declare(rig),
         plan=Plan(),
         tunables=Tunables(),
+        ports=ports,
+        binding=create_binding(),
         paths=rig.paths,
         identity=identity(),
     )
@@ -334,7 +370,15 @@ def test_native_step_failure_is_not_reported_as_finished(tmp_path: Path) -> None
 
     controller = create_controller(harness, rig, lambda _status, _error: None)
     token = controller.start(
-        fail, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+        fail,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
     )
     harness.background.execute()
     harness.background.deliver()
@@ -370,6 +414,10 @@ def test_owner_view_failure_preserves_native_outcome_after_terminal_cleanup(
         declare(rig),
         plan=Plan(),
         tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
         paths=rig.paths,
         identity=identity(),
     )
@@ -405,14 +453,20 @@ def test_native_execution_is_off_owner_and_terminal_delivery_returns_to_owner(
 
     controller = WorkflowController(
         runner,
-        EnginePorts(rig.plots, rig.progress, rig.clock, context=7),
         "worker-seam",
-        harness.progress,
         on_finished=lambda _status, _error: delivered.append(get_ident()),
     )
     try:
         token = controller.start(
-            step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+            step,
+            plan=Plan(),
+            tunables=Tunables(),
+            ports=EnginePorts(
+                rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+            ),
+            binding=create_binding(),
+            paths=rig.paths,
+            identity=identity(),
         )
         deadline = monotonic() + 5.0
         while not delivered and monotonic() < deadline:
@@ -473,7 +527,15 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
         return Done()
 
     token = controller.start(
-        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
     )
     harness.background.execute()
     harness.owner.pump_all()
@@ -486,7 +548,8 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
     with pytest.raises(InvalidRunState):
         controller.resume("run", devices=lambda: DeviceSnapshot({}))
     harness.background.deliver()
-    assert not harness.gate.snapshot()
+    assert harness.gate.snapshot() and controller.operation_id == token
+    assert harness.handles.known_outcome(token) is None
     assert harness.progress.bars_for_owner("example") == bars
     engine = controller.engine
     assert engine is not None
@@ -503,7 +566,7 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
         return DeviceSnapshot({})
 
     second = controller.resume("run", devices=capture)
-    assert second != token
+    assert second == token
     harness.background.execute()
     harness.owner.pump_all()
     assert model.n == 2
@@ -518,8 +581,9 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
     assert attempts == [1, 2, 2]
     assert len(rig.initialized) == 1
     assert progress_calls == ([token], [token])
-    assert harness.progress.bars_for_owner("example") == ()
-    assert harness.handles.known_outcome(third) == OperationOutcome("finished")
+    assert not harness.progress.bars_for_owner(
+        "example"
+    ) and harness.handles.known_outcome(third) == OperationOutcome("finished")
 
 
 @pytest.mark.parametrize("ending", ["stop", "failure"])
@@ -549,7 +613,15 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
         raise ValueError("resumed workflow failed")
 
     token = controller.start(
-        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
     )
     harness.background.execute()
     harness.owner.pump_all()
@@ -580,7 +652,7 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
     assert controller.operation_id is None
 
 
-def test_stop_reports_idle_native_failure_once_and_discards_retained_progress(
+def test_idle_tunables_failure_finishes_once_and_discards_retained_progress(
     tmp_path: Path,
     progress_calls: tuple[list[int], list[int]],
 ) -> None:
@@ -605,11 +677,19 @@ def test_stop_reports_idle_native_failure_once_and_discards_retained_progress(
         return Done()
 
     token = controller.start(
-        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
     )
     harness.complete_segment()
     engine = controller.engine
-    assert engine is not None and controller.operation_id is None
+    assert engine is not None and controller.operation_id == token
     assert finished[0][0] is not None and finished[0][0].lifecycle == "paused"
     journal = rig.paths.metadata_root / "journal.jsonl"
     original = journal.read_bytes()
@@ -617,21 +697,23 @@ def test_stop_reports_idle_native_failure_once_and_discards_retained_progress(
     journal.mkdir()
     try:
         with pytest.raises(IsADirectoryError):
-            engine.update_tunables(
-                "run",
-                (TunableChange("value", 2),),
-                expected_revision=0,
-                actor=Actor("agent", "test"),
+            controller.apply_tunables(
+                "run", {("value",): 2}, actor=Actor("agent", "test")
             )
     finally:
         journal.rmdir()
         journal.write_bytes(original)
     failed = controller.status()
     assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
-    assert len(finished) == 1 and harness.progress.bars_for_owner("example")
+    assert len(finished) == 2
+    assert finished[0][0] is not None and finished[0][0].lifecycle == "paused"
+    assert finished[-1][0] == failed
+    assert isinstance(finished[-1][1], IsADirectoryError)
     assert not harness.gate.snapshot()
+    assert harness.handles.known_outcome(token) == OperationOutcome(
+        "failed", failed.reason
+    )
     assert controller.stop("run") == failed
-    assert finished == [(finished[0][0], None), (failed, None)]
     assert progress_calls == ([token], [token])
     assert not harness.progress.bars_for_owner("example")
     assert controller.stop("run") == failed and len(finished) == 2
@@ -639,7 +721,7 @@ def test_stop_reports_idle_native_failure_once_and_discards_retained_progress(
     assert harness.background.work is None and not harness.gate.snapshot()
 
 
-@pytest.mark.parametrize("failure", ["lease", "capture", "submit"])
+@pytest.mark.parametrize("failure", ["capture", "submit"])
 def test_resume_admission_failure_keeps_paused_run_and_progress(
     tmp_path: Path,
     progress_calls: tuple[list[int], list[int]],
@@ -663,7 +745,15 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
         return Done()
 
     token = controller.start(
-        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
     )
     harness.background.execute()
     harness.owner.pump_all()
@@ -679,17 +769,7 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
             raise ValueError("cached snapshot unavailable")
         return DeviceSnapshot({})
 
-    if failure == "lease":
-        harness.gate.register(
-            999,
-            "device_setup",
-            owner_id="flux",
-            origin_kind=harness.bus.current_origin.kind,
-            note="device setup owns hardware",
-            resource_id="flux",
-        )
-        expected = OperationConflictError
-    elif failure == "submit":
+    if failure == "submit":
         harness.background.fail_submit = True
         expected = OSError
     else:
@@ -698,14 +778,14 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
         with pytest.raises(expected):
             controller.resume("run", devices=capture)
         assert controller.status() == before
-        assert controller.operation_id is None
-        assert harness.handles.live_count() == 0
+        assert controller.operation_id == token
+        assert harness.handles.live_count() == 1
+        assert harness.handles.known_outcome(token) is None
+        assert harness.gate.snapshot()
         assert harness.progress.bars_for_owner("example") == bars
         assert progress_calls == ([token], [])
-        assert captured == ([] if failure == "lease" else [failure])
+        assert captured == [failure]
     finally:
-        if failure == "lease":
-            harness.gate.release(999)
         harness.background.fail_submit = False
     resumed = controller.resume("run", devices=lambda: DeviceSnapshot({}))
     harness.background.execute()
@@ -734,7 +814,15 @@ def test_stop_during_resume_capture_does_not_restart_paused_step(
         return Done()
 
     token = controller.start(
-        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
     )
     harness.background.execute()
     harness.owner.pump_all()
@@ -756,7 +844,7 @@ def test_stop_during_resume_capture_does_not_restart_paused_step(
     assert not harness.gate.snapshot()
 
 
-def test_resume_register_stop_waits_for_owner_terminal_delivery(
+def test_resume_capture_stop_waits_for_owner_terminal_delivery(
     tmp_path: Path,
     progress_calls: tuple[list[int], list[int]],
 ) -> None:
@@ -779,31 +867,36 @@ def test_resume_register_stop_waits_for_owner_terminal_delivery(
         return Done()
 
     token = controller.start(
-        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
     )
     harness.complete_segment()
     paused = controller.status()
     assert paused is not None and paused.lifecycle == "paused"
     notifications: list[tuple[int, bool, bool]] = []
 
-    def stop_on_register(payload: GateChangedPayload) -> None:
-        if payload.active:
-            controller.stop("run")
-            notifications.append(
-                (
-                    len(finished),
-                    bool(harness.progress.bars_for_owner("example")),
-                    controller.has_pending_segment,
-                )
+    def capture() -> DeviceSnapshot:
+        controller.stop("run")
+        notifications.append(
+            (
+                len(finished),
+                bool(harness.progress.bars_for_owner("example")),
+                controller.has_pending_segment,
             )
+        )
+        return DeviceSnapshot({})
 
-    subscription = harness.bus.subscribe(GateChangedPayload, stop_on_register)
-    try:
-        resumed = controller.resume("run", devices=lambda: DeviceSnapshot({}))
-    finally:
-        subscription.unsubscribe()
+    resumed = controller.resume("run", devices=capture)
+    assert resumed == token
     assert notifications == [(1, True, True)]
-    assert not controller.has_pending_segment
+    assert controller.has_pending_segment
     assert len(finished) == 1 and harness.gate.snapshot()
     harness.background.execute()
     assert len(finished) == 1 and harness.gate.snapshot()
@@ -844,7 +937,15 @@ def test_resume_stop_rejection_finishes_without_a_producer(
         return Done()
 
     token = controller.start(
-        step, plan=Plan(), tunables=Tunables(), paths=rig.paths, identity=identity()
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
     )
     harness.complete_segment()
     capture_error = ValueError("cached snapshot failed after Stop")
@@ -884,6 +985,10 @@ def test_pause_resume_reject_pending_start_without_accepting_native_run(
         declare(rig),
         plan=Plan(),
         tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
         paths=rig.paths,
         identity=identity(),
     )
@@ -930,6 +1035,10 @@ def test_control_without_attached_target_rejects_before_side_effects(
         declare(rig),
         plan=Plan(),
         tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
         paths=rig.paths,
         identity=identity(),
     )
@@ -983,6 +1092,10 @@ def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
             declare(rig),
             plan=Plan(),
             tunables=Tunables(),
+            ports=EnginePorts(
+                rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+            ),
+            binding=create_binding(),
             paths=rig.paths,
             identity=identity(),
         )
@@ -1000,6 +1113,80 @@ def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
     assert harness.handles.known_outcome(token) == OperationOutcome("finished")
     assert controller.run_id == "run"
     assert progress_calls == ([token], [token])
+
+
+@pytest.mark.parametrize("notification", ["gate", "progress"])
+def test_replacement_notifications_observe_new_pending_host_without_editing_old_draft(
+    tmp_path: Path, notification: str
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    controller = create_controller(harness, rig, lambda _status, _error: None)
+    ports = EnginePorts(rig.plots, rig.progress, rig.clock, context=7)
+    old = create_binding()
+    controller.start(
+        declare(rig),
+        plan=Plan(),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=identity(),
+        ports=ports,
+        binding=old,
+    )
+    harness.complete_segment()
+    old.state.write({("value",): 9}, old.env)
+    old_input = old.state.input.data
+    pending = create_binding("next")
+    observed: list[tuple[bool, int | None, bool]] = []
+    errors: list[str] = []
+
+    def observe() -> None:
+        if controller.run_id != "next":
+            return
+        observed.append(
+            (
+                controller.binding is pending,
+                controller.operation_id,
+                controller.has_pending_segment,
+            )
+        )
+        try:
+            controller.apply_tunables(
+                "next", {("value",): 3}, actor=Actor("agent", "rpc")
+            )
+        except RuntimeError as error:
+            errors.append(str(error))
+        controller.stop("next")
+
+    def registered(payload: GateChangedPayload) -> None:
+        if payload.active:
+            observe()
+
+    detach = (
+        harness.bus.subscribe(GateChangedPayload, registered).unsubscribe
+        if notification == "gate"
+        else harness.progress.attach_by_owner("example", observe)
+    )
+    try:
+        paths = RunPaths(tmp_path / "next-metadata", tmp_path / "next-data")
+        token = controller.start(
+            declare(rig),
+            plan=Plan(),
+            tunables=Tunables(),
+            paths=paths,
+            identity=identity("next"),
+            ports=ports,
+            binding=pending,
+        )
+    finally:
+        detach()
+    harness.complete_segment()
+    assert observed == [(True, token, True)]
+    assert len(errors) == 1 and "acceptance" in errors[0]
+    assert old.state.input.data == old_input
+    assert pending.state.input.data == {"value": 1}
+    assert pending.engine is None
+    assert not paths.metadata_root.exists()
+    assert harness.handles.known_outcome(token) == OperationOutcome("cancelled")
 
 
 @pytest.mark.parametrize("phase", ["running", "pausing", "paused"])
@@ -1066,6 +1253,10 @@ def test_accepted_old_controls_preserve_native_state_progress_and_capture(
         step,
         plan=Plan(),
         tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
         paths=rig.paths,
         identity=identity(),
     )

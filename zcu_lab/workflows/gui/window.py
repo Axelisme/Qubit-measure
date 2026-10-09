@@ -22,7 +22,6 @@ from zcu_tools.experiment.workflows import (
     EnginePorts,
     InvalidRunState,
     RunIdentity,
-    RunMismatch,
     RunPaths,
     RunStatus,
     TunablesSnapshot,
@@ -30,6 +29,7 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
+from zcu_tools.gui.app.workflows.tunables import TunablesHost
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import (
     FormEnv,
@@ -114,8 +114,8 @@ class T1WorkflowWindow(QWidget):
     """Compose captured T1 run controls and accepted-run tuning on the Qt owner.
 
     plan_panel and tunables_panel expose the existing editable form state.
-    controller is None before the first submitted Start; its native engine is
-    None until startup acceptance. tuning_panel attaches only after acceptance.
+    controller is fixed for this Window's lifetime; its native engine is None
+    until startup acceptance. tuning_panel presents its unique run binding.
     The supplied session/runner own shared hardware, exclusion and workers.
     This window does not create a second registry, launch a GUI process or
     refresh YAML. Its RPC adapter calls the same controls. Start and each Resume
@@ -150,11 +150,11 @@ class T1WorkflowWindow(QWidget):
         self._runner = runner
         self._owner = owner
         self._progress = progress
-        self.controller: WorkflowController[Calibrated] | None = None
+        self.controller: WorkflowController[T1TunablesForm, Calibrated] = (
+            WorkflowController(runner, "t1-workflow", on_finished=self._finished)
+        )
         self.tuning_panel: T1TuningPanel | None = None
         self._plots: Plots | None = None
-        self._run_env: FormEnv | None = None
-        self._accepted_input: FormInput[T1TunablesForm] | None = None
 
         env = self._capture_env(
             DeviceSnapshot(self._services.device.capture_native_device_info())
@@ -214,8 +214,6 @@ class T1WorkflowWindow(QWidget):
 
     def _ensure_can_start(self) -> None:
         """Reject replacement until the native run and owner delivery both end."""
-        if self.controller is None:
-            return
         status = self.controller.status()
         if (
             self.controller.has_pending_segment
@@ -312,23 +310,25 @@ class T1WorkflowWindow(QWidget):
             soccfg=session.soccfg,
             devices=SessionDevices(self._services.device),
         )
-        candidate = WorkflowController(
-            self._runner,
-            ports,
-            "t1-workflow",
-            self._progress,
-            on_finished=self._finished,
+        binding: TunablesHost[T1TunablesForm, Calibrated] = TunablesHost(
+            FormState(accepted_input), env, run_id
         )
         if self._plots is not None:
             self._plots.release()
-        # Runner progress listeners can synchronously request Stop or close.
-        self.controller = candidate
+        # Install presentation before synchronous admission listeners can reenter.
+        if self.tuning_panel is not None:
+            self.tuning_panel.close()
+            self.tuning_panel.deleteLater()
+            self.tuning_panel = None
+        self._plots = plots
         try:
-            token = candidate.start(
+            token = self.controller.start(
                 t1_fluxdep,
                 plan=plan,
                 tunables=tunables_form.to_cfg(),
                 paths=RunPaths(metadata_root=roots.result, data_root=roots.database),
+                ports=ports,
+                binding=binding,
                 identity=RunIdentity(
                     run_id,
                     DeviceSnapshot(env.devices),
@@ -338,20 +338,14 @@ class T1WorkflowWindow(QWidget):
                 ),
             )
         except Exception:
-            self.controller = None
+            plots.release()
+            self._plots = None
             raise
         self.plan_panel.state.reset(submitted_plan)
         self.tunables_panel.state.reset(accepted_input)
         for editor in (self.plan_panel.editor, self.tunables_panel.editor):
             editor.refresh(env)
             editor.discard_local_text()
-        if self.tuning_panel is not None:
-            self.tuning_panel.close()
-            self.tuning_panel.deleteLater()
-            self.tuning_panel = None
-        self._plots = plots
-        self._run_env = env
-        self._accepted_input = accepted_input
         self.plan_panel.setEnabled(False)
         self.tunables_panel.setEnabled(False)
         self._start_button.setEnabled(False)
@@ -398,8 +392,6 @@ class T1WorkflowWindow(QWidget):
         reraised unchanged, even if owner cleanup fails; no batch is retried.
         """
         controller = self.controller
-        if controller is None:
-            raise RunMismatch(expected=run_id, actual=None)
         controller.require_run_id(run_id)
         self._refresh_run()
         panel = self.tuning_panel
@@ -426,8 +418,6 @@ class T1WorkflowWindow(QWidget):
         target raises RuntimeError; illegal native states raise InvalidRunState.
         The lease remains held until worker return and owner delivery.
         """
-        if self.controller is None:
-            raise RunMismatch(run_id, None)
         return self.controller.pause(run_id)
 
     def resume(self, run_id: str) -> int:
@@ -443,8 +433,6 @@ class T1WorkflowWindow(QWidget):
         submission failure retains the paused run, its progress and local lease.
         No retry, ramp-interleaving guard or hardware rollback is provided.
         """
-        if self.controller is None:
-            raise RunMismatch(run_id, None)
         return self.controller.resume(
             run_id,
             devices=lambda: DeviceSnapshot(
@@ -458,14 +446,10 @@ class T1WorkflowWindow(QWidget):
         Controller rejects a wrong or absent target with RunMismatch before side
         effects. Return native status, or None for a matching pending startup.
         """
-        if self.controller is None:
-            raise RunMismatch(run_id, None)
         return self.controller.stop(run_id)
 
     def _refresh_run(self) -> None:
         controller = self.controller
-        if controller is None:
-            return
         status = controller.status()
         if status is None:
             return
@@ -474,18 +458,15 @@ class T1WorkflowWindow(QWidget):
             controller.operation_id is not None and status.lifecycle == "running"
         )
         self._resume_button.setEnabled(
-            controller.operation_id is None and status.lifecycle == "paused"
+            not controller.has_pending_segment and status.lifecycle == "paused"
         )
-        engine = controller.engine
+        binding = controller.binding
         if (
             self.tuning_panel is None
-            and engine is not None
-            and self._run_env is not None
-            and self._accepted_input is not None
+            and binding is not None
+            and binding.engine is not None
         ):
-            self.tuning_panel = T1TuningPanel(
-                engine, status.run_id, self._run_env, self._accepted_input, self
-            )
+            self.tuning_panel = T1TuningPanel(controller, self)
             self._layout.addWidget(self.tuning_panel)
         if self.tuning_panel is not None:
             self.tuning_panel.setEnabled(
@@ -519,7 +500,7 @@ class T1WorkflowWindow(QWidget):
             self._plots.finish()
 
     def _pause_clicked(self) -> None:
-        run_id = None if self.controller is None else self.controller.run_id
+        run_id = self.controller.run_id
         if run_id is None:
             return
         try:
@@ -529,7 +510,7 @@ class T1WorkflowWindow(QWidget):
             self._message.setText(str(error))
 
     def _resume_clicked(self) -> None:
-        run_id = None if self.controller is None else self.controller.run_id
+        run_id = self.controller.run_id
         if run_id is None:
             return
         try:
@@ -540,7 +521,7 @@ class T1WorkflowWindow(QWidget):
 
     def _stop_clicked(self) -> None:
         # Qt clicked(bool) is not a run target; use the Controller's native ID.
-        run_id = None if self.controller is None else self.controller.run_id
+        run_id = self.controller.run_id
         if run_id is None:
             return
         try:
@@ -561,24 +542,16 @@ class T1WorkflowWindow(QWidget):
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         """Keep producer/canvas alive during Stop; release only after terminal."""
-        run_id = None if self.controller is None else self.controller.run_id
-        if self.controller is not None and (
-            self.controller.has_pending_segment
-            or self.controller.operation_id is not None
-        ):
+        run_id = self.controller.run_id
+        if self.controller.has_pending_segment:
             if run_id is not None:
                 self.stop(run_id)
             if a0 is not None:
                 a0.ignore()
             return
-        if self.controller is not None:
-            status = self.controller.status()
-            if (
-                status is not None
-                and status.lifecycle == "paused"
-                and run_id is not None
-            ):
-                self.stop(run_id)
+        status = self.controller.status()
+        if status is not None and status.lifecycle == "paused" and run_id is not None:
+            self.stop(run_id)
         self._poll.stop()
         if self._plots is not None:
             self._plots.release()

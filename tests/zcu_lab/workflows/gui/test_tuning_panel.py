@@ -9,11 +9,17 @@ from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
     DeviceSnapshot,
+    Done,
     Engine,
     EnginePorts,
     RunIdentity,
     RunPaths,
+    Step,
+    WorkflowEnv,
+    workflow,
 )
+from zcu_tools.gui.app.workflows.controller import WorkflowController
+from zcu_tools.gui.app.workflows.tunables import TunablesHost
 from zcu_tools.gui.form import FormEnv, FormErrors, FormState
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -22,11 +28,12 @@ from tests.experiment.workflows._engine_fakes import (
     RecordingBar,
     RecordingDevices,
 )
+from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan, seed_from_inputs
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.gui.tuning_panel import T1TuningPanel
-from zcu_lab.workflows.t1 import t1_fluxdep
+from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 
 @pytest.fixture(scope="session")
@@ -49,8 +56,27 @@ def tuning(
     accepted = T1TunablesForm.default_input(env)
     result = FormState(accepted).result(env)
     assert isinstance(result, T1TunablesForm)
-    engine = Engine(
-        EnginePorts(
+    harness = StartHarness()
+    controller: WorkflowController[T1TunablesForm, Calibrated] = WorkflowController(
+        harness.runner, "tuning", on_finished=lambda _status, _error: None
+    )
+    binding: TunablesHost[T1TunablesForm, Calibrated] = TunablesHost(
+        FormState(accepted), env, "tuning"
+    )
+
+    @workflow("tuning", plan=T1Plan, tunables=T1Tunables, init=lambda _env, _plan: None)
+    def step(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del plan, tun, state
+        controller.pause("tuning")
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    controller.start(
+        step,
+        binding=binding,
+        ports=EnginePorts(
             Plots(NonPresentingHost()),
             RecordingBar,
             ManualClock(),
@@ -58,10 +84,7 @@ def tuning(
             soc=inputs.soc,
             soccfg=inputs.soccfg,
             devices=RecordingDevices(),
-        )
-    )
-    engine.start(
-        t1_fluxdep,
+        ),
         plan=make_plan(inputs),
         tunables=result.to_cfg(),
         paths=RunPaths(tmp_path / "metadata", tmp_path / "data"),
@@ -78,8 +101,14 @@ def tuning(
             ),
         ),
     )
-    widget = T1TuningPanel(engine, "tuning", env, accepted)
+    harness.complete_segment()
+    engine = controller.engine
+    assert engine is not None
+    widget = T1TuningPanel(controller)
+    assert widget.host is binding
+    assert widget.panel.state is binding.state
     yield widget, engine
+    controller.stop("tuning")
     widget.close()
     widget.deleteLater()
     qapp.processEvents()
@@ -170,10 +199,15 @@ def test_journal_failure_propagates_without_accepting_input_or_clearing_local_te
     assert isinstance(control, QLineEdit)
     control.setText("-")
     journal = tmp_path / "metadata/journal.jsonl"
+    original = journal.read_bytes()
     journal.unlink()
     journal.mkdir()
-    with pytest.raises(IsADirectoryError) as caught:
-        widget.apply_external({("guess_us",): 45.0}, actor=Actor("agent", "rpc"))
+    try:
+        with pytest.raises(IsADirectoryError) as caught:
+            widget.apply_external({("guess_us",): 45.0}, actor=Actor("agent", "rpc"))
+    finally:
+        journal.rmdir()
+        journal.write_bytes(original)
     assert caught.value.filename == str(journal)
     assert engine.tunables("tuning") == before
     status = engine.status()
