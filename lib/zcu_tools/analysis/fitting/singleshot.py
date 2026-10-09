@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import cast
+from typing import overload
 
 import numpy as np
 import scipy.stats as stats
@@ -291,7 +291,15 @@ def _fit_population_simplex(
     return coordinates.physical_result(values, covariance)
 
 
-def _swap_ge_parameters(values: Sequence[float | None]) -> list[float | None]:
+@overload
+def _swap_ge_parameters(values: Sequence[float]) -> list[float]: ...
+
+
+@overload
+def _swap_ge_parameters(values: Sequence[float | None]) -> Sequence[float | None]: ...
+
+
+def _swap_ge_parameters(values: Sequence[float | None]) -> Sequence[float | None]:
     swapped = list(values)
     swapped[0], swapped[1] = swapped[1], swapped[0]
     if swapped[5] is not None:
@@ -469,9 +477,15 @@ def fit_singleshot(
         )
         transform = np.eye(7)[[1, 0, 2, 3, 4, 5, 6]]
         transform[5, 5] = -1.0
-        return cast(
-            tuple[float, float, float, float, float, float, float],
-            tuple(_swap_ge_parameters(fitted)),
+        swapped = _swap_ge_parameters(fitted)
+        return (
+            swapped[0],
+            swapped[1],
+            swapped[2],
+            swapped[3],
+            swapped[4],
+            swapped[5],
+            swapped[6],
         ), transform @ covariance @ transform.T
 
     initial = _initial_ge_parameters(xs, g_pdfs, e_pdfs, fitparams, fixedparams)
@@ -502,8 +516,14 @@ def fit_singleshot(
 
     fixed = list(fixedparams) if fixedparams is not None else [None] * 7
     fitted, covariance = _fit_ge_multistart(xs, g_pdfs, e_pdfs, initial, bounds, fixed)
-    return cast(
-        tuple[float, float, float, float, float, float, float], tuple(fitted)
+    return (
+        fitted[0],
+        fitted[1],
+        fitted[2],
+        fitted[3],
+        fitted[4],
+        fitted[5],
+        fitted[6],
     ), covariance
 
 
@@ -517,9 +537,15 @@ def fit_singleshot_p0(
 ) -> tuple[tuple[float, float, float], NDArray[np.float64]]:
     sg, se, s, _, _, p_avg, length_ratio = ge_params
     if sg > se:
-        swapped = cast(
-            tuple[float, float, float, float, float, float, float],
-            tuple(_swap_ge_parameters(ge_params)),
+        swapped_values = _swap_ge_parameters(ge_params)
+        swapped = (
+            swapped_values[0],
+            swapped_values[1],
+            swapped_values[2],
+            swapped_values[3],
+            swapped_values[4],
+            swapped_values[5],
+            swapped_values[6],
         )
         fitted, covariance = fit_singleshot_p0(
             xs, pdfs, init_p0_e, init_p0_g, swapped, fit_length_ratio=fit_length_ratio
