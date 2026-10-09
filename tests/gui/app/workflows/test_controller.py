@@ -871,6 +871,99 @@ def test_active_tunables_failure_waits_for_producer_and_preserves_native_outcome
 
 
 @pytest.mark.parametrize("failure", ["capture", "submit"])
+@pytest.mark.parametrize("view_error", [False, True])
+def test_resume_failed_tunables_unwind_finishes_once_without_a_producer(
+    tmp_path: Path,
+    progress_calls: tuple[list[int], list[int]],
+    caplog: pytest.LogCaptureFixture,
+    failure: str,
+    view_error: bool,
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    finished: list[tuple[RunStatus | None, Exception | None]] = []
+    native_errors: list[IsADirectoryError] = []
+    observed: list[tuple[bool, bool, int]] = []
+
+    def completed(status: RunStatus | None, error: Exception | None) -> None:
+        finished.append((status, error))
+        if view_error and status is not None and status.lifecycle == "failed":
+            raise ValueError("failed view notification")
+
+    controller = create_controller(harness, rig, completed)
+
+    @workflow("failed-resume-admission", plan=Plan, tunables=Tunables, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        del plan, tun, state
+        env.pbar("retained", 1).refresh()
+        controller.pause("run")
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    token = controller.start(
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(rig.plots, rig.progress, rig.clock, context=7),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
+    )
+    harness.complete_segment()
+    capture_error = ValueError("flux live snapshot failed during Resume")
+    journal = rig.paths.metadata_root / "journal.jsonl"
+    original = journal.read_bytes()
+    journal.unlink()
+    journal.mkdir()
+
+    def capture() -> DeviceSnapshot:
+        try:
+            controller.apply_tunables(
+                "run", {("value",): 2}, actor=Actor("agent", "rpc")
+            )
+        except IsADirectoryError as error:
+            native_errors.append(error)
+        controller.stop("run")
+        observed.append(
+            (
+                bool(harness.gate.snapshot()),
+                controller.has_pending_segment,
+                len(finished),
+            )
+        )
+        if failure == "capture":
+            raise capture_error
+        return DeviceSnapshot({})
+
+    harness.background.fail_submit = failure == "submit"
+    try:
+        with pytest.raises(ValueError if failure == "capture" else OSError) as raised:
+            controller.resume("run", devices=capture)
+    finally:
+        journal.rmdir()
+        journal.write_bytes(original)
+    assert len(native_errors) == 1 and observed == [(True, True, 1)]
+    assert (
+        raised.value is capture_error
+        if failure == "capture"
+        else str(raised.value) == "submit failed"
+    )
+    failed = controller.status()
+    assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
+    assert finished[-1] == (failed, native_errors[0]) and len(finished) == 2
+    assert harness.handles.known_outcome(token) == OperationOutcome(
+        "failed", failed.reason
+    )
+    assert harness.background.work is None and controller.operation_id is None
+    assert not harness.gate.snapshot() and harness.handles.live_count() == 0
+    assert not harness.progress.bars_for_owner("example")
+    assert controller.stop("run") == failed and len(finished) == 2
+    assert progress_calls == ([token], [token])
+    assert ("failed view notification" in caplog.text) == view_error
+
+
+@pytest.mark.parametrize("failure", ["capture", "submit"])
 def test_resume_admission_failure_keeps_paused_run_and_progress(
     tmp_path: Path,
     progress_calls: tuple[list[int], list[int]],

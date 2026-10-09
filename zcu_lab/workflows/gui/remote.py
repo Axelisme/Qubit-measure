@@ -257,8 +257,6 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
         _params: Mapping[str, object],
     ) -> WorkflowReply:
         controller = self.ctrl.controller
-        if controller is None:
-            return {"run_id": None, "operation_id": None, "status": None}
         return {
             "run_id": controller.run_id,
             "operation_id": controller.operation_id,
@@ -276,8 +274,8 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             raise _project_control_error(exc) from exc
         controller = self.ctrl.controller
         return {
-            "run_id": None if controller is None else controller.run_id,
-            "operation_id": None if controller is None else controller.operation_id,
+            "run_id": controller.run_id,
+            "operation_id": controller.operation_id,
             "status": _project_status(status),
         }
 
@@ -292,11 +290,9 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             raise _project_control_error(exc) from exc
         controller = self.ctrl.controller
         return {
-            "run_id": None if controller is None else controller.run_id,
+            "run_id": controller.run_id,
             "operation_id": operation_id,
-            "status": _project_status(
-                None if controller is None else controller.status()
-            ),
+            "status": _project_status(controller.status()),
         }
 
     def _stop(
@@ -310,8 +306,8 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             raise _project_control_error(exc) from exc
         controller = self.ctrl.controller
         return {
-            "run_id": None if controller is None else controller.run_id,
-            "operation_id": None if controller is None else controller.operation_id,
+            "run_id": controller.run_id,
+            "operation_id": controller.operation_id,
             "status": _project_status(status),
         }
 
