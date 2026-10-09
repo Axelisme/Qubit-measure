@@ -14,7 +14,6 @@ from qick import QickConfig
 from qtpy.QtCore import QTimer
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
-    QComboBox,
     QLabel,
     QPushButton,
     QStackedWidget,
@@ -55,6 +54,7 @@ from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.remote.control_service import ControlOptions
+from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
@@ -64,7 +64,7 @@ from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
-from zcu_tools.resources.entry import RoleSpec
+from zcu_tools.resources.entry import RoleResolutionError, RoleSpec
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from ..calibration import Calibrated
@@ -237,12 +237,11 @@ class T1WorkflowWindow(QWidget):
         self.tuning_panel: T1TuningPanel | None = None
         self._plots: Plots | None = None
 
-        focus = services.context_control.get_component_focus()
         env = (
             self._capture_env(
                 DeviceSnapshot(self._services.device.capture_native_device_info())
             )
-            if focus.target is not None and focus.name is not None
+            if state.session_env.parameters is not None
             else FormEnv()
         )
         self.plan_panel = T1PlanPanel(env, self)
@@ -294,7 +293,7 @@ class T1WorkflowWindow(QWidget):
 
         Reopening refreshes the dialog's cached inputs, not form captures. No
         entry is opened or hardware connected by showing. Closing Setup updates
-        qubit choices from ContextControlPort without replacing form drafts.
+        the global qubit alias availability without replacing form drafts.
         """
         self.setup_dialog.show()
         self.setup_dialog.raise_()
@@ -302,44 +301,35 @@ class T1WorkflowWindow(QWidget):
 
     def _init_source_controls(self) -> None:
         self.setup_dialog = SetupDialog(self._services.setup_control, self)
-        self.setup_dialog.finished.connect(self._sync_source_choices)
+        self.setup_dialog.finished.connect(self._sync_source_status)
         setup_button = QPushButton("Setup", self)
         setup_button.setObjectName("workflow.source.setup")
         setup_button.clicked.connect(self.open_setup)
-        self._qubit_choice = QComboBox(self)
-        self._qubit_choice.setObjectName("workflow.source.qubit")
-        self._qubit_choice.currentIndexChanged.connect(self._source_selected)
-        use_button = QPushButton("Use source", self)
+        self._source_status = QLabel(self)
+        self._source_status.setObjectName("workflow.source.status")
+        use_button = QPushButton("Prepare forms", self)
         use_button.setObjectName("workflow.source.use")
         use_button.clicked.connect(self._use_source_clicked)
-        for widget in (setup_button, self._qubit_choice, use_button):
+        for widget in (setup_button, self._source_status, use_button):
             self._layout.addWidget(widget)
-        self._sync_source_choices()
+        self._sync_source_status()
 
-    def _sync_source_choices(self, *_args: object) -> None:
-        focus = self._services.context_control.get_component_focus()
-        was_blocked = self._qubit_choice.blockSignals(True)
+    def _sync_source_status(self, *_args: object) -> None:
         try:
-            self._qubit_choice.clear()
-            self._qubit_choice.addItem("None")
-            for component in focus.components:
-                if component.kind.startswith("qubit/"):
-                    self._qubit_choice.addItem(component.name)
-            index = (
-                self._qubit_choice.findText(focus.name) if focus.name is not None else 0
+            parameters = self._services.context.read_alias_context(
+                {"qubit": RoleSpec("qubit/*")}
             )
-            self._qubit_choice.setCurrentIndex(max(0, index))
-        finally:
-            self._qubit_choice.blockSignals(was_blocked)
-
-    def _source_selected(self, index: int) -> None:
-        name = self._qubit_choice.currentText() if index > 0 else None
-        try:
-            self._services.context_control.set_component_focus(name)
-        except Exception as error:
-            logger.exception("T1 workflow source selection failed")
-            self._message.setText(str(error))
-            self._sync_source_choices()
+            source = (
+                parameters.resolve_path("$qubit.kind")
+                if parameters is not None
+                else None
+            )
+        except (RoleResolutionError, ContextSourceUnavailableError) as error:
+            self._source_status.setText(f"Qubit unavailable: {error}")
+        else:
+            self._source_status.setText(
+                f"Qubit: {source}" if source is not None else "Qubit: no context"
+            )
 
     def _use_source_clicked(self) -> None:
         try:
@@ -351,7 +341,7 @@ class T1WorkflowWindow(QWidget):
     def prepare_forms(self) -> None:
         """Replace both Start drafts and bases with current captured defaults.
 
-        Call on the GUI owner after selecting a qubit through Context focus.
+        Call on the GUI owner with a readable global qubit alias.
         Capture parameters/library and cached device values once, then replace
         this Window's form attachments. Previous edits and local parse text are
         discarded on success; subsequent source changes do not update the forms.
@@ -360,14 +350,17 @@ class T1WorkflowWindow(QWidget):
         Pending, running or paused operations raise InvalidRunState before capture.
         """
         self._ensure_can_start()
-        focus = self._services.context_control.get_component_focus()
-        if focus.target is None or focus.name is None:
-            raise FailedPreconditionError(
-                "Select a qubit source before preparing forms"
-            )
         env = self._capture_env(
             DeviceSnapshot(self._services.device.capture_native_device_info())
         )
+        if env.parameters is None:
+            raise FailedPreconditionError("No parameter context is installed")
+        try:
+            env.parameters.resolve_path("$qubit.kind")
+        except RoleResolutionError as error:
+            raise FailedPreconditionError(
+                "Bind a readable global qubit alias before preparing forms"
+            ) from error
         plan_panel = T1PlanPanel(env, self)
         try:
             tunables_panel = T1TunablesPanel(

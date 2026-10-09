@@ -9,6 +9,7 @@ from zcu_tools.gui.runtime import GuiAssembly, GuiRuntimeBehavior, GuiRuntimeSpe
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -82,6 +83,7 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
             bind_assets=ArbWaveformDatabase.info_at,
             project_root=self._project_root,
             device_registry=self._devices,
+            alias_rows=(AliasRow("qubit", ""),),
         )
         self.window = T1WorkflowWindow(
             self.state,
