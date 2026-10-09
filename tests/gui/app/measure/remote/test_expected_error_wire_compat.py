@@ -157,133 +157,19 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     arb_adapter = SimpleNamespace(ctrl=arb_ctrl)
 
     render_view = MagicMock()
-    # New pane-qualified figure handler reads via tab_control snapshot for analysis/post and via render_view for run
-    # Mock tab_control for analysis pane
-    from unittest.mock import MagicMock as Mock2
-
-    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.measure.services.ports import (
-        AnalysisPaneSnapshot,
-        PostAnalysisPaneSnapshot,
-        TabSnapshot,
-    )
-    from zcu_tools.gui.cfg import CfgSchema
-
-    tab_control = Mock2()
-    # Make analysis pane have no figure to trigger precondition
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT,
-        post_analysis=True,
-        load_data=False,
-        requires_soc=False,
-    )
-    ana = AnalysisPaneSnapshot(
-        params=None,
-        result=object(),
-        figures=None,
-        writeback_items=tuple(),
-        image_paths={},
-    )
-    post = PostAnalysisPaneSnapshot(
-        params=None,
-        result=None,
-        figures=None,
-        writeback_items=tuple(),
-        image_paths={},
-    )
-    snap = TabSnapshot(
-        adapter_name="fake",
-        cfg_schema=Mock2(spec=CfgSchema),
-        tab_id="t1",
-        interaction=Mock2(),
-        capabilities=caps,
-        run=None,
-        analysis=ana,
-        post_analysis=post,
-        save=None,
-        paths=None,
-    )
-    tab_control.get_tab_snapshot.return_value = snap
-    tab_control.has_tab.return_value = True
     render_view.take_figure_screenshot_for_subtab.side_effect = FailedPreconditionError(
         "tab 't1' analysis has no figure yet"
     )
+    tab_control = MagicMock()
+    tab_control.has_tab.return_value = True
     view_adapter = SimpleNamespace(render_view=render_view, tab_control=tab_control)
-    view_adapter.ctrl = Mock2()
-    view_adapter.ctrl.get_session_env.return_value = Mock2(
-        active_label="ctx",
-        chip_name="c",
-        qub_name="q",
-        res_name="r",
-        database_path="/tmp",
-        result_dir="/tmp",
-        is_active=lambda: True,
-    )
 
     writeback_control = MagicMock()
     writeback_control.has_tab.return_value = True
     writeback_control.set_writeback_item_for_pane.side_effect = InvalidInputError(
         "bad facet"
     )
-    tab_control_wb = MagicMock()
-    tab_control_wb.has_tab.return_value = True
-    # Mock snapshot for writeback pane
-    from unittest.mock import MagicMock as Mock3
-
-    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities as Caps2
-    from zcu_tools.gui.app.measure.adapter import AnalysisMode as AM2
-    from zcu_tools.gui.app.measure.services.ports import AnalysisPaneSnapshot as APS2
-    from zcu_tools.gui.app.measure.services.ports import (
-        PostAnalysisPaneSnapshot as PAPS2,
-    )
-    from zcu_tools.gui.app.measure.services.ports import TabSnapshot as TS2
-    from zcu_tools.gui.cfg import CfgSchema as CS2
-
-    caps2 = Caps2(
-        analysis=AM2.FIT, post_analysis=True, load_data=False, requires_soc=False
-    )
-    ana2 = APS2(
-        params=None,
-        result=object(),
-        figures=None,
-        writeback_items=tuple(),
-        image_paths={},
-    )
-    post2 = PAPS2(
-        params=None,
-        result=None,
-        figures=None,
-        writeback_items=tuple(),
-        image_paths={},
-    )
-    snap2 = TS2(
-        adapter_name="fake",
-        cfg_schema=Mock3(spec=CS2),
-        tab_id="t1",
-        interaction=Mock3(),
-        capabilities=caps2,
-        run=None,
-        analysis=ana2,
-        post_analysis=post2,
-        save=None,
-        paths=None,
-    )
-    tab_control_wb = MagicMock()
-    tab_control_wb.get_tab_snapshot.return_value = snap2
-    tab_control_wb.has_tab.return_value = True
-    writeback_adapter = SimpleNamespace(
-        writeback_control=writeback_control, tab_control=tab_control_wb
-    )
-    writeback_adapter.ctrl = Mock3()
-    writeback_adapter.ctrl.get_session_env.return_value = Mock3(
-        active_label="ctx",
-        chip_name="c",
-        qub_name="q",
-        res_name="r",
-        database_path="/tmp",
-        result_dir="/tmp",
-        is_active=lambda: True,
-    )
+    writeback_adapter = SimpleNamespace(writeback_control=writeback_control)
 
     cases: list[tuple[Callable[[], object], WireTuple]] = [
         (
