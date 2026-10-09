@@ -464,7 +464,7 @@ def test_working_point_create_without_entry_shows_owner_failure(
         qapp.processEvents()
 
 
-@pytest.mark.parametrize("cached", [None, 0.35])
+@pytest.mark.parametrize("cached", [None, 0.0035])
 def test_working_point_device_suggestion_is_cached_and_preserves_manual_text(
     entry_dialog: tuple[SetupDialog, Controller, State],
     monkeypatch: pytest.MonkeyPatch,
@@ -498,7 +498,7 @@ def test_working_point_device_suggestion_is_cached_and_preserves_manual_text(
     label.insert("my-bias")
     assert label.isModified()
     state.set_device_info(
-        "flux", YOKOGS200Info(address="offline", mode="current", value=0.4)
+        "flux", YOKOGS200Info(address="offline", mode="current", value=0.004)
     )
     controller.get_bus().emit(DeviceChangedPayload(name="flux"))
     assert label.text() == "my-bias"
