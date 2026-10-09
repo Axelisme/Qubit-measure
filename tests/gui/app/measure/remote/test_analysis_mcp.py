@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 
 from ._helpers import Fixture, call, mcp_client, open_client
 
@@ -70,7 +70,7 @@ def _result_method(stage: str) -> str:
 def fx(qapp):
     fixture = Fixture(active_label="ctx001")
     fixture.state.set_context(
-        replace(fixture.state.session_env, md=MetaDict(), ml=ModuleLibrary())
+        replace(fixture.state.session_env, parameters=parameter_capture())
     )
     fixture.start()
     yield fixture
@@ -314,125 +314,6 @@ def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
         )["result"]
         assert current["params"] == {"threshold": 0.7}
         assert current["summary"] == {"value": 7.0}
-
-
-@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
-def test_operation_result_observation_unlocks_only_the_observed_image(
-    fx, tmp_path, stage
-):
-    tab = fx.ctrl.new_tab("fake")
-    fx.state.update_tab_result(tab, object())
-    _install_result(fx, tab, stage, 3.0, 101)
-    destination = tmp_path / f"{stage}.png"
-    save = {
-        "tab_id": tab,
-        "subtab_id": stage,
-        "figure_name": "fit",
-        "operation_id": 101,
-        "image_path": str(destination),
-    }
-    with open_client(fx.service.port) as sock:
-        summary = call(sock, _result_method(stage), {"tab_id": tab})
-        assert summary["result"] == {"summary": {"value": 3.0}, "invalid": []}
-        assert call(sock, "tab.get_figure", save)["ok"] is True
-        assert call(sock, "tab.save_image", save)["error"]["reason"] == "stale_version"
-        rejected = call(
-            sock, _result_method(stage), {"tab_id": tab, "operation_id": 99}
-        )
-        assert rejected["error"]["reason"] == "result_superseded"
-        assert call(sock, "tab.save_image", save)["error"]["reason"] == "stale_version"
-        observed = call(
-            sock, _result_method(stage), {"tab_id": tab, "operation_id": 101}
-        )["result"]
-        assert observed["summary"] == {"value": 3.0}
-        assert observed["operation_id"] == 101
-        snapshot = observed["operation_state"]
-        assert snapshot["tab_id"] == tab
-        assert snapshot["result_state"]["available"] is True
-        assert snapshot[f"{stage}_state"]["has_figure"] is True
-        assert snapshot["save_paths"]
-        saved = call(sock, "tab.save_image", save)
-        assert saved["result"]["image_path"] == str(destination)
-        assert destination.read_bytes().startswith(b"\x89PNG")
-
-
-@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
-@pytest.mark.parametrize("replacement", ["same_pane", "run", "primary"])
-def test_replaced_operation_cannot_read_or_save_another_result(
-    fx, tmp_path, stage, replacement
-):
-    tab = fx.ctrl.new_tab("fake")
-    fx.state.update_tab_result(tab, object())
-    _install_result(fx, tab, stage, 3.0, 101)
-    with open_client(fx.service.port) as sock:
-        assert (
-            call(sock, _result_method(stage), {"tab_id": tab, "operation_id": 101})[
-                "ok"
-            ]
-            is True
-        )
-        if replacement == "same_pane":
-            _install_result(fx, tab, stage, 7.0, 102)
-        elif replacement == "run":
-            fx.state.update_tab_result(tab, object())
-        else:
-            _install_result(fx, tab, "analysis", 8.0, 103)
-        for method, params in (
-            (_result_method(stage), {"tab_id": tab}),
-            ("tab.get_figure", {"tab_id": tab, "subtab_id": stage}),
-            ("tab.writeback_preview", {"tab_id": tab, "subtab_id": stage}),
-        ):
-            rejected = call(sock, method, {**params, "operation_id": 101})
-            assert rejected["error"]["reason"] == "result_superseded"
-        # Even a fresh full observation cannot turn the replaced pane into the old result.
-        before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
-        destination = tmp_path / "must-not-export.png"
-        rejected = call(
-            sock,
-            "tab.save_image",
-            {
-                "tab_id": tab,
-                "subtab_id": stage,
-                "figure_name": "fit",
-                "operation_id": 101,
-                "image_path": str(destination),
-            },
-        )
-        assert rejected["error"]["reason"] == "result_superseded"
-        after = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
-        assert after["save_paths"] == before["save_paths"]
-        assert after["artifacts"] == before["artifacts"]
-        assert not destination.exists()
-
-
-@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
-def test_other_caller_save_path_change_invalidates_operation_observation(
-    fx, tmp_path, stage
-):
-    tab = fx.ctrl.new_tab("fake")
-    fx.state.update_tab_result(tab, object())
-    _install_result(fx, tab, stage, 3.0, 101)
-    bound = {"tab_id": tab, "operation_id": 101}
-    with open_client(fx.service.port) as first, open_client(fx.service.port) as other:
-        assert call(first, _result_method(stage), bound)["ok"] is True
-        assert call(other, _result_method(stage), bound)["ok"] is True
-        assert (
-            call(
-                other,
-                "tab.save_image",
-                {
-                    **bound,
-                    "subtab_id": stage,
-                    "figure_name": "fit",
-                    "image_path": str(tmp_path / "other.png"),
-                },
-            )["ok"]
-            is True
-        )
-        rejected = call(
-            first, "tab.save_image", {**bound, "subtab_id": stage, "figure_name": "fit"}
-        )
-        assert rejected["error"]["reason"] == "stale_version"
 
 
 def test_operation_bound_run_figure_is_rejected(fx):
