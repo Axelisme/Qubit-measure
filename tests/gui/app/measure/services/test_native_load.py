@@ -1,6 +1,6 @@
 """Native Load retains history and rejects unsafe saves through public services."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -19,14 +19,24 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
+from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
+from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
+from zcu_tools.gui.app.measure.services.run import RunService
+from zcu_tools.gui.app.measure.services.run_analyze_control import (
+    RunAnalyzeControlFacet,
+)
+from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.services.writeback import (
     WritebackDraft,
     WritebackEdit,
     WritebackService,
     WritebackWritten,
 )
+from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
+from zcu_tools.gui.cfg.resource import CfgResolution
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
@@ -46,6 +56,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     PaneParams,
@@ -54,6 +65,79 @@ from tests.gui.app.measure._native_save_support import (
     declare_panes,
     native_save_session,
 )
+
+
+def _native_controls(
+    session: NativeSaveSession,
+    writeback: WritebackService,
+    control: ContextControlFacet,
+) -> tuple[RunAnalyzeControlFacet, WritebackControlFacet]:
+    """Compose real admission/load/analysis/WB owners; no Run is executed."""
+
+    def capture(
+        declarations: Mapping[str, RoleSpec], target: str | None
+    ) -> ParameterContext | None:
+        return session.context.read_alias_context(declarations, target=target)
+
+    def resolve(parameters: ParameterContext | None) -> CfgResolution:
+        return cfg_resolution(session.state, parameters)
+
+    guard = GuardService(
+        session.state, captured_parameters=capture, cfg_resolution=resolve
+    )
+    runner = OperationRunner(
+        None, session.handles, None, session.background, session.bus
+    )
+    tab = TabService(
+        session.state,
+        MagicMock(),
+        writeback,
+        cfg_resources(session.state),
+        resolve,
+        capture,
+    )
+    load = LoadService(
+        session.state,
+        writeback,
+        provide_options=lambda _: (),
+        context=control,
+        captured_parameters=capture,
+    )
+    run = RunService(
+        session.state,
+        runner,
+        session.bus,
+        session.handles,
+        writeback,
+        gate=MagicMock(),
+        devices=lambda: {},
+    )
+    analyze = AnalyzeService(
+        session.state, runner, session.bus, writeback, session.handles
+    )
+    post = PostAnalyzeService(
+        session.state, runner, session.bus, session.handles, writeback
+    )
+    commands = RunAnalyzeControlFacet(
+        state=session.state,
+        bus=session.bus,
+        guard=guard,
+        tab=tab,
+        load=load,
+        run=run,
+        analyze=analyze,
+        post_analyze=post,
+        render_host=lambda: None,
+        owner_scheduler=QtOwnerScheduler(),
+    )
+    wb = WritebackControlFacet(
+        state=session.state,
+        guard=guard,
+        writeback=writeback,
+        resource_versions=session.state.version.snapshot,
+        bus=session.bus,
+    )
+    return commands, wb
 
 
 @pytest.fixture
@@ -280,31 +364,89 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     writeback = WritebackService(
         editor, write_port=control, entry_ledger=session.context.entry_ledger
     )
-    service = LoadService(
-        session.state,
-        writeback,
-        provide_options=lambda _: (),
-        context=control,
-        captured_parameters=session.context.read_alias_context,
-    )
-
-    service.load_result("tab", str(path))
-
+    commands, wb = _native_controls(session, writeback, control)
+    loaded = commands.load_tab_result("tab", str(path))
+    assert loaded.has_analyze_params
+    assert tab.run.metadata is not None
+    assert tab.run.metadata.run_id == session.metadata.run_id
     assert tab.run.parameters is None
-    runner = OperationRunner(
-        None, session.handles, None, session.background, session.bus
-    )
-    analysis = AnalyzeService(
-        session.state, runner, session.bus, writeback, session.handles
-    )
-    analysis.start_analyze("tab", PaneParams(), plots=Plots(NonPresentingHost()))
+    if source == "empty":
+        assert tab.run.storage is None
+    commands.analyze("tab", PaneParams())
     assert session.background.quiesce()
     assert isinstance(tab.analysis.result, PaneSummary)
     draft = tab.analysis.writeback_draft
     assert isinstance(draft, WritebackDraft)
     assert draft.parameters is None and draft.run_id == session.metadata.run_id
     assert draft.items == ()
+    events = session.entry.ledger.events()
+    assert wb.apply_writeback_for_pane("tab", "analysis")["applied_ids"] == []
+    assert session.entry.ledger.events() == events
     writeback.teardown_draft(draft)
+    rejected = writeback.create_draft(
+        [MetaDictWriteback("Q1.rate", "rate", 99.0)],
+        parameters=None,
+        run_id=session.metadata.run_id,
+    )
+    tab.analysis.writeback_draft = rejected
+    selection = control.get_source_binding()
+    try:
+        with pytest.raises(FailedPreconditionError, match="captured context"):
+            wb.apply_writeback_for_pane("tab", "analysis")
+        assert session.entry.ledger.events() == events
+        assert control.get_source_binding() == selection
+        assert rejected.is_active
+        assert not any(wb.get_writeback_applied_for_pane("tab", "analysis").values())
+    finally:
+        writeback.teardown_draft(rejected)
+
+
+def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
+    role_load_session: NativeSaveSession, tmp_path: Path
+) -> None:
+    session = role_load_session
+    control = ContextControlFacet(context=session.context)
+    tab = session.state.get_tab("tab")
+    parameters = tab.run.parameters
+    assert parameters is not None and isinstance(parameters.target, SavedPoint)
+    editor = CfgEditorService(
+        MagicMock(), control, MagicMock(), MagicMock(), session.bus
+    )
+    writeback = WritebackService(
+        editor, write_port=control, entry_ledger=session.context.entry_ledger
+    )
+    _, wb = _native_controls(session, writeback, control)
+    draft = writeback.create_draft(
+        [MetaDictWriteback("$source_qubit.rate", "rate", 99.0)],
+        parameters=parameters,
+        run_id=session.metadata.run_id,
+    )
+    session.state.update_tab_analyze("tab", PaneSummary(), None, writeback_draft=draft)
+    other = ResultEntry.create(
+        "foreign",
+        result_root=tmp_path / "Foreign",
+        database_root=tmp_path / "ForeignDB",
+    )
+    other.new_point("other")
+    session.context.install_entry(other)
+    control.use_point(PointUseRequest("other"))
+    original_events = session.entry.ledger.events()
+    foreign_events = other.ledger.events()
+    selection = control.get_source_binding()
+    try:
+        with pytest.raises(FailedPreconditionError) as caught:
+            wb.apply_writeback_for_pane("tab", "analysis")
+        assert caught.value.reason_code == "entry_not_open"
+        assert session.entry.ledger.events() == original_events
+        assert other.ledger.events() == foreign_events
+        assert control.get_source_binding() == selection
+        assert draft.is_active
+        assert not any(wb.get_writeback_applied_for_pane("tab", "analysis").values())
+        session.context.install_entry(session.entry)
+        control.use_point(PointUseRequest(parameters.target.point))
+        assert control.read_context().lookup("Q1.rate").value == 7.0
+    finally:
+        writeback.teardown_draft(draft)
 
 
 @pytest.mark.parametrize("completion", ["complete", "partial", "stopped"])

@@ -197,10 +197,8 @@ def test_analysis_draft_uses_start_run_identity(
             native.state, runner, native.bus, writeback, native.handles
         )
         plots = Plots(NonPresentingHost())
-        tab.parameters = control.read_context() if captured is None else None
-        native.state.set_context(
-            replace(native.state.session_env, parameters=tab.parameters)
-        )
+        current = control.read_context() if captured is None else None
+        native.state.set_context(replace(native.state.session_env, parameters=current))
         if interactive:
             plugin = PluginDefinition(
                 "pick", 2, (), lambda _state: None, lambda _state: PaneSummary()
@@ -319,13 +317,13 @@ def test_post_analysis_draft_retains_primary_identity(
         tab.run.metadata = replace(native.metadata, run_id="not-primary-source")
         native.entry.new_point("later-point")
         control.use_point(PointUseRequest("later-point"))
-        tab.parameters = control.read_context()
-        assert tab.parameters is not captured
+        current = control.read_context()
+        assert current is not captured
         service.start_post_analyze("tab", object(), plots=Plots(NonPresentingHost()))
         # Terminal delivery must use the operation-start identity and context.
         tab.analysis.writeback_draft = None
         tab.run.metadata = replace(native.metadata, run_id="terminal-live-run")
-        tab.run.parameters = tab.parameters
+        tab.run.parameters = current
         assert native.background.quiesce()
         draft = tab.post_analysis.writeback_draft
         assert isinstance(draft, WritebackDraft)
@@ -498,7 +496,6 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     session.entry.new_point("b")
     second = session.control.use_point(PointUseRequest("b"))
     session.control.add_component("Q2", "fake/drive/a", {})
-    session.control.set_component_focus("Q2")
     selected = session.control.read_context().document()
     preview = session.service.preview_values(draft)
     assert preview["md-1"].current == {"__complex__": [0.6, 0.1]}
@@ -521,7 +518,6 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     }
     assert session.control.read_context().target == second
     assert session.control.read_context().document() == selected
-    assert session.control.get_component_focus().name == "Q2"
     event = session.entry.ledger.events()[-1]
     assert event.origin == "mcp"
     assert isinstance(event.payload, AcceptedPayload)
@@ -543,7 +539,7 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     assert [document_value(document, path) for path in paths] == tags
 
 
-def test_receipt_reads_actual_role_target_after_point_and_focus_change(
+def test_receipt_reads_actual_role_target_after_point_change(
     session: WritebackSession,
 ) -> None:
     session.entry.new_point("a")
@@ -561,7 +557,6 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     session.entry.new_point("b")
     second = session.control.use_point(PointUseRequest("b"))
     session.control.add_component("Q2", "fake/drive/a", {"rate": 0.8})
-    session.control.set_component_focus("Q2")
     selected = session.control.read_context().document()
     assert session.service.preview_values(draft)["md-1"].current == 0.6
     draft.edit("md-1", selected=False)
@@ -572,7 +567,6 @@ def test_receipt_reads_actual_role_target_after_point_and_focus_change(
     assert captured.value("driver.rate") == 0.1
     assert session.control.read_context().target == second
     assert session.control.read_context().document() == selected
-    assert session.control.get_component_focus().name == "Q2"
     assert not draft.items[0].selected
     assert session.service.get_all_applied(draft) == {"md-1": True}
     event = session.entry.ledger.events()[-1]

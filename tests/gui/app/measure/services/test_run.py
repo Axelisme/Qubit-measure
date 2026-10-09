@@ -105,7 +105,6 @@ def _make_state(
             adapter_name="any",
             adapter=adapter,
             cfg=make_cfg(_empty_schema(), state=state),
-            parameters=state.session_env.parameters,
         ),
     )
     return state, tab_id, adapter
