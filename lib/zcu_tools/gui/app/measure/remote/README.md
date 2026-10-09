@@ -156,9 +156,14 @@ Run uses the explicit cfg ref and observed device snapshots, not live md/ml.
 Cfg admission uses only the resource identity and revision. A ref observed by
 another connection is valid, but tab, SoC and device seen guards still belong to
 the requesting connection. Run and existing-tab native Load do not require exporting
-active context. Load reads the tab capture and preserves the file's original metadata;
-it guards tab/result/analysis revisions, not session focus. Editor commit and writeback
-retain their existing context guards.
+active context. Load 在 adapter 呼叫前固定 Load-time selection，並獨立捕捉 Save storage。
+它不讀 tab birth 或後來的 selection。同 opened entry 且可定位歷史 point 時，
+context owner 按 native 檔案的 point 與 resolved alias names 一次讀取持久 point／library。
+這份固定 ParameterContext 供 Analyze／Post／Writeback 使用，是 Load 時的持久值，
+不是原始量測的參數版本。跨 entry、EMPTY 或無歷史 point 時，analysis source 為 None；
+context-free analysis 仍可用，不回退目前 alias。同 entry 的來源讀取失敗在替換結果前傳遞，
+舊結果不變。Load preserves the file's original metadata; it guards tab/result/analysis revisions,
+not session focus. Editor commit and writeback retain their existing context guards.
 
 GUI owns observation and write tracking:
 
