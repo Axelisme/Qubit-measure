@@ -298,9 +298,12 @@ class WritebackWidget(QWidget):
         values maps every item session_id to its current preview. Missing keys
         raise KeyError; the view never resolves a target or substitutes active
         context. Rows show the logical target, actual path, current/proposed
-        values and optional stderr in working units, without a unit label.
-        Empty items clear the view. Items remain the persistent draft objects
-        so checkbox and Edit commands use the same stable identities.
+        values and optional stderr in working units, without conversion. A
+        service fact's display-only static unit follows a present current value
+        and follows proposed stderr once. Missing current has no unit label;
+        unit=None adds no whitespace. Empty items clear the view. Items remain
+        the persistent draft objects so checkbox and Edit commands use the same
+        stable identities.
         Local cfg editing may retain invalid input. Its row shows proposed as
         "Invalid configuration" and current/path as "Unavailable (invalid
         configuration)", while preserving selection and updating unapplied

@@ -274,10 +274,12 @@ def document_unit(document: SetupDocument | PointDocument, path: str) -> str | N
     """Read a fixed field's static schema unit at an actual dotted path.
 
     Return the nonempty json_schema_extra.unit label without converting values.
-    Roles are not expanded. Ext namespaces, mapping/list data, missing ancestors
-    or fields, and fields without static unit metadata return None. A declared
-    optional leaf retains its label even when unset; existing nested BaseModel
-    fields can supply labels. No schema callback, model hook or I/O runs.
+    Roles are not expanded. The final declared BaseModel field supplies its
+    label regardless of whether its value is a list, mapping or unset optional.
+    Ext namespaces, child paths inside mapping/list data, missing ancestors or
+    fields, and fields without static unit metadata return None. Existing nested
+    BaseModel fields can supply labels. No leaf value is read, and no schema
+    callback, model hook or I/O runs.
     Invalid/unaddressable dotted syntax or malformed unit metadata raises
     ValueError. Labels are not inferred from field names or other values.
     """

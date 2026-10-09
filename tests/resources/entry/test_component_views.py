@@ -48,6 +48,13 @@ def test_static_units_follow_declared_fields_without_reading_values(
         absent: Nested | None = None
         plain: float = 3.0
         values: list[float] = Field(default_factory=lambda: [1.0])
+        labeled_values: list[float] = Field(
+            default_factory=lambda: [1.0], json_schema_extra={"unit": "list-label"}
+        )
+        labeled_mapping: dict[str, float] = Field(
+            default_factory=lambda: {"sample": 2.0},
+            json_schema_extra={"unit": "mapping-label"},
+        )
         dynamic: float = Field(default=4.0, json_schema_extra=reject_schema_callback)
         flux: float = 0.0
         ext: YamlMap = Field(default_factory=dict)
@@ -60,6 +67,8 @@ def test_static_units_follow_declared_fields_without_reading_values(
         assert document_unit(document, "N1.frequency") == "MHz"
         assert document_unit(document, "N1.unset") == "us"
         assert document_unit(document, "N1.nested.arbitrary") == "quux"
+        assert document_unit(document, "N1.labeled_values") == "list-label"
+        assert document_unit(document, "N1.labeled_mapping") == "mapping-label"
         for path in (
             "N1.absent.arbitrary",
             "N1.plain",
@@ -68,6 +77,8 @@ def test_static_units_follow_declared_fields_without_reading_values(
             "N1.ext.frequency",
             "N1.values",
             "N1.values.0",
+            "N1.labeled_values.0",
+            "N1.labeled_mapping.sample",
             "N1.missing",
             "missing.frequency",
             "general.ext.frequency",
