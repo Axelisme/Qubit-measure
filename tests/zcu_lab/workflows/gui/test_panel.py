@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 import pytest
 from qtpy.QtWidgets import QApplication, QLineEdit
-from zcu_tools.gui.form import FormEnv, FormErrors
+from zcu_tools.gui.form import FormEnv, FormErrors, FormState
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -62,16 +62,19 @@ def environment(guess_us: float) -> FormEnv:
     )
 
 
-def test_t1_panel_builds_a_draft_with_the_host_captured_expression(
+def test_t1_panel_presents_host_state_without_replacing_draft(
     panels: list[T1TunablesPanel],
 ) -> None:
     env = environment(30.0)
-    panel = T1TunablesPanel(env)
+    state = FormState(T1TunablesForm.default_input(env))
+    state.write({("guess_us",): {"expr": "general.ext.guess_us + 2"}}, env)
+    panel = T1TunablesPanel(state, env)
     panels.append(panel)
-    assert panel.state.input.data["guess_us"] == {"expr": "general.ext.guess_us"}
+    assert panel.state is state
+    assert state.input.data["guess_us"] == {"expr": "general.ext.guess_us + 2"}
     result = panel.state.result(env)
     assert isinstance(result, T1TunablesForm)
-    assert result.guess_us == 30.0
+    assert result.guess_us == 32.0
     assert panel.editor.local_parse_errors() is None
     assert panel.editor.errors() is None
 
@@ -80,7 +83,8 @@ def test_t1_panel_exposes_generic_local_parse_errors_and_host_reset(
     panels: list[T1TunablesPanel],
 ) -> None:
     env = environment(30.0)
-    panel = T1TunablesPanel(env)
+    state = FormState(T1TunablesForm.default_input(env))
+    panel = T1TunablesPanel(state, env)
     panels.append(panel)
     field = panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
     assert isinstance(field, QLineEdit)
@@ -95,6 +99,9 @@ def test_t1_panel_exposes_generic_local_parse_errors_and_host_reset(
     result = panel.state.result(env)
     assert isinstance(result, T1TunablesForm)
     assert result.sweep_factor == 8.0
+    host_result = state.result(env)
+    assert isinstance(host_result, T1TunablesForm)
+    assert host_result.sweep_factor == 8.0
     assert panel.editor.local_parse_errors() is None
     updated_env = environment(40.0)
     panel.state.reset(T1TunablesForm.default_input(updated_env))

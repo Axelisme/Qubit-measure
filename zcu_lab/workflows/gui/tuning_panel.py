@@ -7,7 +7,7 @@ from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 from zcu_tools.experiment.workflows import Actor, Engine, TunablesSnapshot
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormWritePath
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState, FormWritePath
 
 from zcu_lab.workflows.calibration import Calibrated
 
@@ -43,9 +43,8 @@ class T1TuningPanel(QWidget):
         source/editor errors propagate. parent controls Qt lifetime.
         """
         super().__init__(parent)
-        self.panel = T1TunablesPanel(env, self)
-        self.panel.state.reset(accepted_input)
-        self.host = TunablesHost(self.panel.state, env, engine, run_id)
+        self.host = TunablesHost(FormState(accepted_input), env, engine, run_id)
+        self.panel = T1TunablesPanel(self.host.state, env, self)
         self._message = QLabel(self)
         self._message.setObjectName("workflow.tuning.message")
         apply_button = QPushButton("Apply", self)

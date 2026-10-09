@@ -13,27 +13,33 @@ from .tunables import T1TunablesForm
 
 
 class T1TunablesPanel(QWidget):
-    """Create a T1 draft and its editor from host-captured env on the GUI thread.
+    """Present a host-owned T1 draft on the GUI thread.
 
-    state is the panel-owned FormState[T1TunablesForm] with input defaults from
-    env. editor is its FormEditor. Hosts use these public handles for validation,
-    changes and reset, and check editor.local_parse_errors before submission.
-    The panel neither submits nor captures sources, and has no native preview,
-    Start, Apply or Discard action. F5 embeds this panel directly.
+    state is the supplied FormState[T1TunablesForm], not a copy or fresh draft.
+    editor is its FormEditor evaluated in the supplied fixed env. Hosts use
+    these public handles for validation, changes and reset, and check
+    editor.local_parse_errors before submission. This panel does not create
+    defaults, submit, capture sources or own native lifecycle.
     """
 
     state: FormState[T1TunablesForm]
     editor: FormEditor[T1TunablesForm]
 
-    def __init__(self, env: FormEnv, parent: QWidget | None = None) -> None:
-        """Create state with T1 defaults and embed its editor in this QWidget.
+    def __init__(
+        self,
+        state: FormState[T1TunablesForm],
+        env: FormEnv,
+        parent: QWidget | None = None,
+    ) -> None:
+        """Embed an editor for state without resetting its input or base.
 
-        env is supplied by the host; it is not refreshed or copied from live
-        sources. Default/source/editor construction failures propagate. parent
-        controls the Qt lifetime. Requires GUI-thread use and a QApplication.
+        state is the host's T1 draft. env is its fixed evaluation capture,
+        not live sources. Editor construction failures propagate. parent
+        controls Qt lifetime; closing detaches the editor but preserves state.
+        Requires GUI-thread use and a QApplication.
         """
         super().__init__(parent)
-        self.state = FormState(T1TunablesForm.default_input(env))
+        self.state = state
         self.editor = FormEditor(self.state, env, self)
         layout = QVBoxLayout(self)
         layout.addWidget(self.editor)

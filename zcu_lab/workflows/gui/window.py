@@ -160,7 +160,9 @@ class T1WorkflowWindow(QWidget):
             DeviceSnapshot(self._services.device.capture_native_device_info())
         )
         self.plan_panel = T1PlanPanel(env, self)
-        self.tunables_panel = T1TunablesPanel(env, self)
+        self.tunables_panel = T1TunablesPanel(
+            FormState(T1TunablesForm.default_input(env)), env, self
+        )
         self._message = QLabel(self)
         self._message.setObjectName("workflow.run.message")
         self._start_button = QPushButton("Start", self)
