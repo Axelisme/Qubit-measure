@@ -21,6 +21,10 @@ from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.tab import TabService
+from zcu_tools.gui.app.measure.services.writeback import (
+    WritebackDraft,
+    WritebackService,
+)
 from zcu_tools.gui.app.measure.state import (
     Session,
     State,
@@ -128,7 +132,7 @@ def _state() -> tuple[State, str, MagicMock, SessionEnv]:
 
 
 def _analyze_service(
-    state: State, writeback: _Writeback, bus: EventBus | None = None
+    state: State, writeback: _Writeback | WritebackService, bus: EventBus | None = None
 ) -> tuple[AnalyzeService, _Bg]:
     bus = bus or EventBus()
     handles = OperationHandles()
@@ -423,9 +427,12 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
         metadata=replace(
             native_session.metadata, experiment=GE_Exp().persistence_spec().tag
         ),
-        parameters=state.get_tab(tab_id).parameters,
+        parameters=None,
     )
-    bus, writeback = EventBus(), _Writeback()
+    bus = EventBus()
+    writeback = WritebackService(
+        MagicMock(), MagicMock(), entry_ledger=native_session.context.entry_ledger
+    )
     primary_service, primary_bg = _analyze_service(state, writeback, bus)
     params = GEAnalyzeParams(initial_state="excited", length_ratio=0.01)
     fit_plots = Plots(NonPresentingHost())
@@ -438,7 +445,9 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     assert primary.initial_state == "excited"
     assert tab.analysis.plots is fit_plots
     assert tuple(fit_plots) == ("fit",)
-    assert {item.target_name for item in writeback.created[-1].items} == {
+    primary_draft = tab.analysis.writeback_draft
+    assert isinstance(primary_draft, WritebackDraft)
+    assert {item.target_name for item in writeback.preview_draft(primary_draft)} == {
         "fid",
         "ge_s",
         "g_center",
@@ -456,9 +465,7 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
         post_bg,
         bus,
     )
-    post_service = PostAnalyzeService(
-        state, post_runner, bus, post_handles, cast(Any, writeback)
-    )
+    post_service = PostAnalyzeService(state, post_runner, bus, post_handles, writeback)
     post_plots = Plots(NonPresentingHost())
     post_service.start_post_analyze(tab_id, post_params, plots=post_plots)
     post_bg.on_done(post_bg.work())
@@ -468,7 +475,9 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     np.testing.assert_allclose(post.confusion, np.eye(3), atol=0.06)
     assert tab.post_analysis.plots is post_plots
     assert tuple(post_plots) == ("post",)
-    assert {item.target_name for item in writeback.created[-1].items} == {
+    post_draft = tab.post_analysis.writeback_draft
+    assert isinstance(post_draft, WritebackDraft)
+    assert {item.target_name for item in writeback.preview_draft(post_draft)} == {
         "ge_radius",
         "confusion_matrix",
     }
@@ -507,6 +516,13 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     post_plots["post"].savefig(old_post, format="png")
     assert old_fit.getvalue().startswith(b"\x89PNG")
     assert old_post.getvalue().startswith(b"\x89PNG")
+
+    fit_plots.release()
+    post_plots.release()
+    new_fit.release()
+    current_draft = tab.analysis.writeback_draft
+    assert isinstance(current_draft, WritebackDraft)
+    writeback.teardown_draft(current_draft)
 
 
 def test_failed_draft_build_preserves_previous_primary_and_post() -> None:
