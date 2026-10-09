@@ -525,7 +525,9 @@ renders each publication after submitting an input change:
 - Value tree: authored inputs, including expressions and reference identities.
 
 Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
-remains valid. Run uses the tab's fixed `ParameterContext`, not live point or focus.
+remains valid. Run admission captures the current global `ParameterContext`, not tab birth sources.
+A single-use target resolves the same inputs against its temporary capture without
+changing the tab publication or global aliases.
 `schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
 fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves
@@ -543,8 +545,10 @@ measure-owned pulse/waveform spec factory顯式設定`kind="module"`或`kind="wa
 資源，lookup 直接回傳 resource-bound editing，不轉送命令。建立失敗不留下關聯，retire
 先撤銷舊 handle，再移除關聯。Widget detach 只停止觀察，不改資源 lifetime。
 
-`MeasureCfgBindings.snapshot_from_state` 使用呼叫者提供的固定 `ParameterContext`，
-擷取 options 與已發布的 values，並記錄 context、device set 及每個 device 的 source basis。
+Tab 的每次 cfg refresh／reset 從目前全域 alias 表與 point／library 建立固定
+`ParameterContext`。它不讀 tab birth capture。`MeasureCfgBindings.snapshot_from_state`
+使用這份投影，擷取 options 與已發布的 values，並記錄 context、device set
+及每個 device 的 source basis。
 Bare capture 從同一 `ParameterContext` 解析。
 Dotted capture 只讀 `ValueSourceBinder` 已發布的 detached cache，不查 live provider 或硬體。
 Source 更新先準備及安裝所有 tab 的新 publication，再通知任何 subscriber。

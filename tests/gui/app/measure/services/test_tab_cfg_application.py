@@ -1,11 +1,22 @@
 """Production cfg owner wiring without tab widgets or live hardware."""
 
+from collections.abc import Generator, Mapping
+from pathlib import Path
 from time import monotonic, sleep
+from typing import ClassVar, NoReturn
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtWidgets import QApplication
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services.app_services import (
+    AppServices,
+    build_app_services,
+)
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg.model import (
     CfgSchema,
     CfgSectionSpec,
@@ -22,13 +33,21 @@ from zcu_tools.gui.cfg.resource import (
     CfgStaleError,
     CfgStatus,
 )
+from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     GateChangedPayload,
-    MdChangedPayload,
 )
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
+from zcu_tools.resources.entry import ComponentSchema, RoleSpec, component_registry
 
 from tests.gui.app.measure.remote._helpers import Fixture
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
@@ -173,7 +192,10 @@ def test_production_capture_uses_published_cache_without_live_provider(
 
 
 def test_source_event_publishes_every_tab_before_callback(application: Fixture) -> None:
-    application.state.session_env.md.update(x=1.0)
+    parameters = application.ctrl.context_control.read_context()
+    application.ctrl.context_control.set_parameter(
+        parameters.target, "general.ext.x", 1.0
+    )
     first = application.ctrl.new_tab("cfg-contract")
     second = application.ctrl.new_tab("cfg-contract")
     editors = [
@@ -181,7 +203,8 @@ def test_source_event_publishes_every_tab_before_callback(application: Fixture) 
     ]
     for editor in editors:
         editor.edit(
-            editor.observe().ref.revision, (CfgEdit(("gain",), EvalValue("x")),)
+            editor.observe().ref.revision,
+            (CfgEdit(("gain",), EvalValue("general.ext.x")),),
         )
     before = editors[0].observe().ref
     observed = []
@@ -191,10 +214,8 @@ def test_source_event_publishes_every_tab_before_callback(application: Fixture) 
             observed.append(tuple(editor.observe() for editor in editors))
 
     unsubscribe = editors[0].watch(callback)
-    application.state.session_env.md.update(x=9.0)
-    application.state.version.bump("context")
-    application.bus.emit(
-        MdChangedPayload(binding_id=1, content_changed=True, fault=None)
+    application.ctrl.context_control.set_parameter(
+        parameters.target, "general.ext.x", 9.0
     )
     unsubscribe()
     assert len(observed) == 1
@@ -281,6 +302,138 @@ def test_run_registration_notification_blocks_tab_mutation(
     assert outcomes == ["blocked"]
     assert cfg.observe().ref == expected
     assert cfg.snapshot_inputs() == original
+
+
+class SourceDrive(ComponentSchema):
+    gain: float
+
+
+class GlobalSourceAdapter(FakeAdapter):
+    experiment_tag: ClassVar[str | None] = "fake.stub"
+
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, object],
+        *,
+        context: RunContext,
+    ) -> NoReturn:
+        """Reject execution: these source-contract tests end at admission."""
+        raise AssertionError("Admission-only adapter must not execute")
+
+    def parameter_roles(self) -> Mapping[str, RoleSpec]:
+        return {"qubit": RoleSpec("cfg/drive")}
+
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+        schema = super().make_default_cfg(ctx)
+        schema.value.fields["gain"] = EvalValue("Q1.gain")
+        return schema
+
+
+@pytest.fixture
+def global_sources(
+    qapp: QApplication, tmp_path: Path
+) -> Generator[tuple[AppServices, State], None, None]:
+    before = component_registry.kinds()
+    component_registry.register("cfg/drive", SourceDrive)
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    registry = Registry()
+    registry.register("global-source", GlobalSourceAdapter)
+    try:
+        services = build_app_services(
+            state=state,
+            bus=EventBus(),
+            registry=registry,
+            cfg_editor_ctrl=MagicMock(),
+            progress_transport=MagicMock(),
+            resource_versions=state.version.snapshot,
+            render_host=lambda: None,
+            owner_scheduler=QtOwnerScheduler(),
+            project_root=str(tmp_path),
+        )
+        try:
+            services.setup_control.new_entry(EntryRequest("sources"))
+            services.context.add_component(
+                "Q1", "cfg/drive", {"gain": 10.0}, setup=True
+            )
+            services.context.add_component(
+                "Q2", "cfg/drive", {"gain": 20.0}, setup=True
+            )
+            services.context.new_point(
+                PointCreateRequest("first", "", CommandOrigin("gui"))
+            )
+            services.context.set_alias_rows(
+                (AliasRow("qubit", "Q1"), AliasRow("custom", "Q2"))
+            )
+            yield services, state
+        finally:
+            for tab_id in tuple(state.tabs):
+                services.tab.close_tab(tab_id)
+            services.background.quiesce()
+            services.background.deleteLater()
+            qapp.processEvents()
+    finally:
+        component_registry.unregister("cfg/drive")
+        assert component_registry.kinds() == before
+
+
+def test_existing_tab_and_run_admission_use_current_point(
+    global_sources: tuple[AppServices, State],
+) -> None:
+    services, state = global_sources
+    tab_id = services.tab.new_tab("global-source")
+    cfg = state.get_tab(tab_id).cfg
+    first = services.guard.capture_run_inputs(
+        tab_id, expected_revision=cfg.observe().ref.revision
+    )
+    assert first.accepted_cfg.values["gain"] == 10.0
+    assert first.snapshot is not None
+    assert first.snapshot.point == "first"
+    assert first.snapshot.roles == {"qubit": "Q1", "custom": "Q2"}
+
+    services.context.new_point(PointCreateRequest("second", "", CommandOrigin("gui")))
+    parameters = services.context.read_context()
+    services.context.set_parameter(parameters.target, "Q1.gain", 30.0)
+    second = services.guard.capture_run_inputs(
+        tab_id, expected_revision=cfg.observe().ref.revision
+    )
+    assert second.accepted_cfg.values["gain"] == 30.0
+    assert second.snapshot is not None
+    assert second.snapshot.point == "second"
+    assert second.parameters is not None
+    assert second.parameters.value("Q1.gain") == 30.0
+    assert second.storage is not None
+    assert second.storage.point == "second"
+    assert first.parameters is not None
+    assert first.parameters.value("Q1.gain") == 10.0
+    assert first.snapshot.point == "first"
+    assert first.storage is not None
+    assert first.storage.point == "first"
+
+
+def test_run_target_capture_does_not_mutate_global_rows_or_cfg(
+    global_sources: tuple[AppServices, State],
+) -> None:
+    services, state = global_sources
+    tab_id = services.tab.new_tab("global-source")
+    cfg = state.get_tab(tab_id).cfg
+    observed = cfg.observe()
+    rows = services.context.get_alias_rows()
+    admitted = services.guard.capture_run_inputs(
+        tab_id, expected_revision=observed.ref.revision, target="Q2"
+    )
+    assert admitted.snapshot is not None
+    assert admitted.snapshot.roles == {"qubit": "Q2", "custom": "Q2"}
+    assert admitted.parameters is not None
+    assert admitted.parameters.value("$qubit.gain") == 20.0
+    assert admitted.accepted_cfg.values["gain"] == 10.0
+    assert services.context.get_alias_rows() == rows
+    assert cfg.observe() == observed
+    cfg.edit(observed.ref.revision, (CfgEdit(("gain",), 15.0),))
+    with pytest.raises(CfgStaleError):
+        services.guard.capture_run_inputs(
+            tab_id, expected_revision=observed.ref.revision, target="Q2"
+        )
 
 
 @pytest.mark.parametrize("fail_submit", [False, True])

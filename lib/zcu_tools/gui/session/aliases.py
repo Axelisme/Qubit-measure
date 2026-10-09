@@ -127,21 +127,22 @@ class AliasTable:
     def names(
         self, point: PointDocument, declarations: Mapping[str, RoleSpec]
     ) -> dict[str, str]:
-        """Capture declared aliases as concrete names, omitting unbound rows.
+        """Capture all bound rows as concrete names for Run/storage records.
 
-        Missing rows and empty dependency chains are unbound. Nonempty invalid
-        links and wrong consumer kinds raise RoleResolutionError, not omissions.
-        Returned names are independent data suitable for Run/storage records;
-        no declaration.via inference or concrete-name fallback is performed.
+        Empty dependency chains are omitted. Consumer declarations constrain
+        their rows' kinds; other authored rows still contribute resolved names.
+        Nonempty invalid links and wrong kinds raise RoleResolutionError.
+        Returned names are independent data; no declaration.via inference or
+        concrete-name fallback is performed.
         """
         names: dict[str, str] = {}
-        authored = {row.alias for row in self._rows}
-        for alias, spec in declarations.items():
-            if alias not in authored:
-                continue
-            name = self._resolve_name(alias, point, kind=spec.kind)
+        for row in self._rows:
+            spec = declarations.get(row.alias)
+            name = self._resolve_name(
+                row.alias, point, kind=None if spec is None else spec.kind
+            )
             if name is not None:
-                names[alias] = name
+                names[row.alias] = name
         return names
 
     def _resolve_name(

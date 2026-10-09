@@ -153,8 +153,9 @@ class ParameterContext:
     def roles(self) -> RoleBinding | None:
         """Return consumer declarations and names from this fixed capture.
 
-        With authored aliases, resolve only the declared rows now, omitting
-        unbound rows. Invalid links/kinds and unavailable sources raise. No
+        With authored aliases, resolve every bound row now, including custom
+        rows outside consumer declarations. Unbound rows are omitted. Invalid
+        links/kinds and unavailable sources raise. No
         current global table is read. The returned binding has resolved names,
         not authored rows, so historical target reads never re-expand links.
         None means no consumer declarations.

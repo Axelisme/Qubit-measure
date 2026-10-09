@@ -155,14 +155,25 @@ def test_invalid_override_is_rejected_without_changing_the_table(target: str) ->
     assert table.rows == (AliasRow("qubit", "Q1"),)
 
 
-def test_capture_uses_only_declared_rows_and_does_not_infer_from_via(
+def test_capture_includes_custom_rows_without_inference_from_via(
     point: PointDocument,
 ) -> None:
-    table = AliasTable((AliasRow("qubit", "Q1"), AliasRow("resonator", "R2")))
+    table = AliasTable(
+        (
+            AliasRow("qubit", "Q1"),
+            AliasRow("resonator", "R2"),
+            AliasRow("custom_sensor", "$qubit.partner"),
+            AliasRow("unused", ""),
+        )
+    )
     declarations = {
         "qubit": RoleSpec("qubit/*"),
         "resonator": RoleSpec("resonator", "qubit.partner"),
         "absent": RoleSpec("resonator"),
     }
-    assert table.names(point, declarations) == {"qubit": "Q1", "resonator": "R2"}
+    assert table.names(point, declarations) == {
+        "qubit": "Q1",
+        "resonator": "R2",
+        "custom_sensor": "R1",
+    }
     assert table.with_override("absent", "R1").resolve("absent", point) == "R1"

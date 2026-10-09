@@ -76,12 +76,13 @@ class TabService:
             [Mapping[str, RoleSpec], str | None], ParameterContext | None
         ],
     ) -> None:
-        """Inject fixed cfg sources and the current role capture operation.
+        """Inject owner-sequence captures and fixed cfg resolution construction.
 
-        captured_parameters receives ordered role declarations and an optional
-        explicit target for the first role. It resolves through the context owner;
-        empty declarations return None only when target is omitted. Missing context/roles propagate before
-        tab registration. cfg_resolution retains the supplied capture on refresh.
+        captured_parameters freezes current global sources for the declared
+        aliases. An optional target overrides only that capture's first alias;
+        EMPTY returns None unless a target was requested. Source/target errors
+        propagate before registration. Every cfg refresh/reset captures current
+        sources anew; cfg_resolution retains only its supplied fixed capture.
         """
         self._state = state
         self._registry = registry
@@ -209,15 +210,13 @@ class TabService:
         *,
         target: str | None = None,
     ) -> str:
-        """Create a tab with roles and cfg sources captured once.
+        """Create a tab cfg whose refresh/reset reads current global sources.
 
-        target=None uses current GUI focus. A non-empty component name explicitly
-        binds the adapter's first declared role; dependent roles still use their
-        declared inference. It never changes GUI focus. Automatic inference with
-        zero/multiple choices leaves aliases unbound and still creates the tab.
-        Cfgs that use them publish Invalid. Explicit invalid choices and actual
-        dangling/wrong-kind references raise before tab registration. An empty target or a
-        target on a roleless adapter raises InvalidInputError.
+        Defaults use current global aliases, not focus or via inference. Unbound
+        aliases still permit tab creation; cfgs that consume them are Invalid.
+        target optionally validates and initializes the pane's parameter capture,
+        but does not override cfg refresh/reset. An empty, missing or wrong-kind
+        target, or a target on a roleless adapter, raises before registration.
 
         ``from_dict is None`` → a fresh tab with the adapter's default cfg.
         ``from_dict`` given (restore) → rebuild the tab from the snapshot's
@@ -240,10 +239,7 @@ class TabService:
         )
 
         def current_parameters() -> ParameterContext | None:
-            # Creation precedes registration; later refresh/reset uses the tab capture.
-            if self._state.has_tab(tab_id):
-                return self._state.get_tab(tab_id).parameters
-            return parameters
+            return self._captured_parameters(adapter.parameter_roles(), None)
 
         cfg = self._cfg_resources.create(
             tab_id,

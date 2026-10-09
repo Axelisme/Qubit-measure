@@ -452,10 +452,11 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # -- shared implementation (provided once) -----------------------------
 
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare ordered required roles; empty means pure calculation.
+        """Declare ordered used aliases and their required component kinds.
 
-        The tab owner resolves and captures these once at creation. Changing
-        session focus later does not rebind an existing tab.
+        Empty means no declared aliases. Global authored rows determine names;
+        RoleSpec.via is notebook-only and ignored by GUI. Cfg refresh and Run
+        admission each capture the current table, never a tab birth binding.
         """
         return {}
 

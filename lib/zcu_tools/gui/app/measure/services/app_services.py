@@ -221,7 +221,9 @@ def build_app_services(
         state, registry, writeback, tab_cfg, cfg_resolution, captured_parameters
     )
     workspace = WorkspaceService(state, tab, bus)
-    guard = GuardService(state)
+    guard = GuardService(
+        state, captured_parameters=captured_parameters, cfg_resolution=cfg_resolution
+    )
     load = LoadService(state, writeback, provide_options=bindings.provide_options)
     run = RunService(
         state,
