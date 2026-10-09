@@ -21,7 +21,6 @@ from zcu_lab.v2._support.measure.defaults.role_factories import (
 )
 from zcu_lab.v2._support.measure.defaults.role_table import (
     ROLE_TABLE,
-    Md,
     RoleDef,
     Source,
     role_blank,
@@ -34,7 +33,6 @@ __all__ = [
     "ROLE_FACTORIES",
     "RoleFactorySpec",
     "RoleDef",
-    "Md",
     "Source",
     "role_blank",
     "role_ref",

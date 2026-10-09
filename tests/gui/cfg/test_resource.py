@@ -95,6 +95,45 @@ def make_resource(sources: Sources | None = None) -> CfgResource:
     return CfgResource(defaults, resolution=source.read)
 
 
+@pytest.mark.parametrize("edge", ["start", "stop"])
+@pytest.mark.parametrize("mode", ["direct", "expression"])
+def test_invalid_sweep_endpoint_error_is_published_in_diagnostics(
+    edge: str, mode: str
+) -> None:
+    value = (
+        DirectValue(None, raw="invalid", error=f"Invalid {edge} endpoint")
+        if mode == "direct"
+        else EvalValue("$qubit.freq")
+    )
+    sweep = SweepValue(
+        start=value if edge == "start" else 0.0,
+        stop=value if edge == "stop" else 1.0,
+        expts=3,
+    )
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"range": SweepSpec()}),
+        CfgSectionValue(fields={"range": sweep}),
+    )
+    resolution = CfgResolution(
+        (),
+        lambda expression: evaluate_scalar_expr(expression, None),
+        lambda source_id: (),
+        EmptyReferences(),
+        lambda key: 0.0,
+        validate_scalar_expr,
+    )
+    resource = CfgResource(lambda: schema, resolution=lambda: resolution)
+    try:
+        observation = resource.observe()
+        assert observation.status is CfgStatus.INVALID
+        expected = f"Invalid {edge} endpoint" if mode == "direct" else "$qubit.freq"
+        assert any(expected in item.message for item in observation.diagnostics)
+        with pytest.raises(CfgPreconditionError):
+            resource.accept(observation.ref.revision)
+    finally:
+        resource.revoke()
+
+
 def test_restore_skips_defaults_until_reset_and_detaches_input_snapshot() -> None:
     calls: list[str] = []
 

@@ -11,13 +11,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.cfg import (
-    DirectValue,
     EvalValue,
     ScalarValue,
     SweepValue,
 )
-
-from zcu_lab.v2._support.measure.ctx_helpers import md_has_key
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
@@ -74,39 +71,24 @@ def read_chi_kappa(md: MetaDict) -> tuple[float, float]:
 
 
 def readout_probe_freq(ctx: SessionEnv) -> ScalarValue:
-    """Default a probe tone to the readout/resonator frequency calibration."""
-    if md_has_key(ctx, "readout_f"):
-        return EvalValue(expr="readout_f")
-    if md_has_key(ctx, "r_f"):
-        return EvalValue(expr="r_f")
-    return DirectValue(6000.0)
+    """Store $resonator.freq without reading ctx; missing calibration is Invalid."""
+    del ctx  # Defaults do not read the source before resource resolution.
+    return EvalValue(expr="$resonator.freq")
 
 
 def readout_probe_freq_range(
     ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
-    """Default a probe frequency sweep around readout_f, falling back to r_f."""
-    center_key = "readout_f" if md_has_key(ctx, "readout_f") else "r_f"
-    center_raw = ctx.md.get(center_key)
-    center = float(center_raw) if isinstance(center_raw, (int, float)) else 6000.0
-    width_raw = ctx.md.get("rf_w")
-    width = float(width_raw) if isinstance(width_raw, (int, float)) else 500.0
-    half_span = span_factor * width if width > 0 else 30.0
+    """Store a live $resonator.freq ± span_factor*$resonator.kappa sweep.
 
-    width_term = "rf_w" if span_factor == 1.0 else f"{span_factor} * rf_w"
-    if md_has_key(ctx, center_key) and md_has_key(ctx, "rf_w"):
-        return SweepValue(
-            start=EvalValue(expr=f"{center_key} - {width_term}"),
-            stop=EvalValue(expr=f"{center_key} + {width_term}"),
-            expts=expts,
-        )
-    if md_has_key(ctx, center_key):
-        return SweepValue(
-            start=EvalValue(expr=f"{center_key} - {half_span}"),
-            stop=EvalValue(expr=f"{center_key} + {half_span}"),
-            expts=expts,
-        )
-    return SweepValue(start=center - half_span, stop=center + half_span, expts=expts)
+    ctx is not read; missing aliases/calibration become Invalid at resolution.
+    """
+    del ctx  # Defaults do not read the source before resource resolution.
+    return SweepValue(
+        start=EvalValue(f"$resonator.freq - {span_factor} * $resonator.kappa"),
+        stop=EvalValue(f"$resonator.freq + {span_factor} * $resonator.kappa"),
+        expts=expts,
+    )
 
 
 def _require_complex(md: MetaDict, key: str) -> complex:

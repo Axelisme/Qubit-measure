@@ -8,7 +8,6 @@ from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.app.measure.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -17,6 +16,7 @@ from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter

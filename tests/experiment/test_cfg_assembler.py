@@ -7,7 +7,16 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseCfg, PulseSpec
+from zcu_tools.cfg_model import (
+    ConfigBase,
+    ConstWaveformCfg,
+    DirectReadoutCfg,
+    FlatTopWaveformSpec,
+    PulseCfg,
+    PulseReadoutSpec,
+    PulseSpec,
+    waveform_spec_from_raw,
+)
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.cfg_assembler import (
     CfgEnv,
@@ -20,7 +29,13 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.program.v2.modules import ModuleCfg as NativeModuleCfg
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules.pulse import PulseCfg as NativePulseCfg
+from zcu_tools.program.v2.modules.readout import (
+    PulseReadoutCfg as NativePulseReadoutCfg,
+)
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg as NativeArbWaveformCfg
+from zcu_tools.program.v2.modules.waveform import (
+    FlatTopWaveformCfg as NativeFlatTopWaveformCfg,
+)
 from zcu_tools.resources.context import MetaDict
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -135,6 +150,85 @@ def test_assembly_converts_nested_arb_with_capture_bound_paths(
         "length": 3.0,
         "raise_waveform": {"style": "arb", "data": "shape"},
     }
+
+
+@pytest.mark.parametrize("readout", [False, True])
+@pytest.mark.parametrize("flat_top", [False, True])
+def test_library_arb_assembly_json_roundtrip_needs_no_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, readout: bool, flat_top: bool
+) -> None:
+    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
+    ArbWaveformDatabase.init(tmp_path / "first")
+    ArbWaveformDatabase.save(
+        "shape",
+        time=np.array([0.0, 1.0]),
+        idata=np.array([0.0, 0.5]),
+    )
+    ramp = waveform_spec_from_raw({"style": "arb", "data": "shape"})
+    waveform = (
+        FlatTopWaveformSpec(length=3.0, raise_waveform="Q1.waveforms.ramp")
+        if flat_top
+        else ramp
+    )
+    pulse = PulseSpec(
+        ch=0, nqz=1, freq=1000.0, gain=0.1, waveform="Q1.waveforms.envelope"
+    )
+    component = ComponentLibrary(
+        waveforms={"ramp": ramp, "envelope": waveform},
+        pulses={"drive": pulse},
+        readout={
+            "measure": PulseReadoutSpec(
+                pulse_cfg="Q1.pulses.drive",
+                ro_cfg=DirectReadoutCfg(
+                    ro_ch=0, ro_freq=1000.0, ro_length=3.0, trig_offset=0.0
+                ),
+            )
+        },
+    )
+    captured = LibrarySnapshot(
+        ModuleLibraryDocument(
+            format="zcu.module-library",
+            format_version="1.0",
+            components={"Q1": component},
+        ),
+        assets=ArbWaveformDatabase.bound_info(),
+    )
+    ArbWaveformDatabase.init(tmp_path / "second")
+    ArbWaveformDatabase.save(
+        "shape",
+        time=np.array([0.0, 9.0]),
+        idata=np.array([0.9, 0.9]),
+    )
+    cfg = assemble_experiment_cfg(
+        ExperimentCfgInput(
+            {
+                "modules": {
+                    "drive": "Q1.readout.measure" if readout else "Q1.pulses.drive"
+                }
+            }
+        ),
+        _NativeExperimentCfg,
+        context=captured.validation_context(),
+        device_snapshot={},
+    )
+    restored = _NativeExperimentCfg.model_validate_json(cfg.model_dump_json())
+    module = restored.modules.drive
+    if isinstance(module, NativePulseReadoutCfg):
+        module = module.pulse_cfg
+    assert isinstance(module, NativePulseCfg)
+    envelope = module.waveform
+    if isinstance(envelope, NativeFlatTopWaveformCfg):
+        assert envelope.length == 3.0
+        envelope = envelope.raise_waveform
+    assert isinstance(envelope, NativeArbWaveformCfg)
+    assert envelope.model_dump() == {
+        "style": "arb",
+        "data": "shape",
+        "path": (tmp_path / "first" / "shape.npz").resolve().as_posix(),
+    }
+    assert envelope.length == 1.0
+    np.savez(envelope.path, time=[0, 2], idata=[0, 0.7], qdata=[0, 0])
+    assert envelope.length == 2.0
 
 
 def test_assembly_rejects_arb_without_assets() -> None:

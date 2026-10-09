@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -214,6 +215,66 @@ def test_arb_path_controls_length_samples_and_flat_top_after_global_db_switch(
     _asset(tmp_path, idata=[0.0, 0.2, 0.0])
     data, _ = restored.build("updated").make_iqdata(0, prog)
     np.testing.assert_allclose(data, [0.0, 0.2])
+
+
+@pytest.mark.parametrize("flat_top", [False, True])
+def test_converted_arb_copy_reads_current_capture_duration_and_iq(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flat_top: bool
+) -> None:
+    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
+    first = tmp_path / "first"
+    ArbWaveformDatabase.init(first)
+    ArbWaveformDatabase.save(
+        "demo",
+        time=np.array([0.0, 1.0, 2.0]),
+        idata=np.array([0.0, 0.3, 0.0]),
+        qdata=np.array([0.0, 0.4, 0.0]),
+    )
+    context = CfgValidationContext(assets=ArbWaveformDatabase.bound_info())
+    core = CoreArbWaveformCfg(data="demo")
+    source = (
+        CoreFlatTopWaveformCfg(length=6.0, raise_waveform=core) if flat_top else core
+    )
+    copied = deepcopy(WaveformCfgFactory.from_core(source, context=context))
+    native = copied.raise_waveform if isinstance(copied, FlatTopWaveformCfg) else copied
+    assert isinstance(native, ArbWaveformCfg)
+    ArbWaveformDatabase.init(tmp_path / "second")
+    ArbWaveformDatabase.save(
+        "demo",
+        time=np.array([0.0, 9.0]),
+        idata=np.array([0.9, 0.9]),
+    )
+    prog = MagicMock()
+    prog.soccfg.get_maxv.return_value = 1.0
+    prog.soccfg.__getitem__.return_value = [{"samps_per_clk": 1}]
+    prog.us2cycles.side_effect = lambda *, gen_ch, us: round(us)
+    waveform = native.build("captured")
+    assert waveform.length == 2.0
+    idata, qdata = waveform.make_iqdata(0, prog)
+    np.testing.assert_allclose(idata, [0.0, 0.3])
+    assert qdata is not None
+    np.testing.assert_allclose(qdata, [0.0, 0.4])
+
+    path = first / "demo.npz"
+    np.savez(path, time=[0, 2, 4], idata=[0, 0.6, 0], qdata=[0, 0.8, 0])
+    assert waveform.length == 4.0
+    idata, qdata = waveform.make_iqdata(0, prog, even_length=flat_top)
+    np.testing.assert_allclose(idata, [0.0, 0.3, 0.6, 0.3])
+    assert qdata is not None
+    np.testing.assert_allclose(qdata, [0.0, 0.4, 0.8, 0.4])
+    if isinstance(copied, FlatTopWaveformCfg):
+        assert copied.build("flat").to_wav_kwargs().get("length") == 2.0
+
+    path.unlink()
+    with pytest.raises(FileNotFoundError):
+        _ = waveform.length
+    with pytest.raises(FileNotFoundError):
+        waveform.make_iqdata(0, prog)
+    np.savez(path, time=[0, 1], idata=[0, 2], qdata=[0, 0])
+    with pytest.raises(WaveformFormatError):
+        _ = waveform.length
+    with pytest.raises(WaveformFormatError):
+        waveform.make_iqdata(0, prog)
 
 
 @pytest.mark.parametrize(
