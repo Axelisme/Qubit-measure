@@ -116,14 +116,14 @@ def plot_with_classified(
         g_center.imag,
         markerfacecolor="b",
         label="Ground",
-        **plt_params,  # type: ignore
+        **plt_params,  # pyright: ignore[reportArgumentType]
     )
     ax.plot(
         e_center.real,
         e_center.imag,
         markerfacecolor="r",
         label="Excited",
-        **plt_params,  # type: ignore
+        **plt_params,  # pyright: ignore[reportArgumentType]
     )
     separation = abs(e_center - g_center)
     axis = (e_center - g_center) / separation
