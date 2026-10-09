@@ -144,7 +144,9 @@ class WorkflowController[F: FormModel, C]:
 
         ports contains this run's live resources and initial context; Runner's
         progress factory replaces ports.progress. binding must be pending, with
-        run_id equal to identity.run_id and input matching tunables. Mismatched
+        run_id equal to identity.run_id. The caller converts binding input to
+        native tunables through its adapter and is responsible for their match;
+        this generic Controller does not validate that conversion. Mismatched
         identity raises RunMismatch, accepted bindings raise RuntimeError.
         Pending/paused/active/finishing replacement raises InvalidRunState before
         mutation. Engine validates declaration/values on the worker. Admission,
