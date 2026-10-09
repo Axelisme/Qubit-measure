@@ -16,6 +16,7 @@ from qtpy.QtWidgets import (
     QListWidget,
     QPushButton,
     QTableWidget,
+    QTableWidgetItem,
     QWidget,
 )
 from zcu_tools.device.manager import DeviceManager
@@ -200,6 +201,25 @@ def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
     )
 
 
+def edit_alias_entry(
+    window: T1WorkflowWindow, value_text: str
+) -> tuple[AliasDialog, QDialogButtonBox, QTableWidgetItem]:
+    entry = window.findChild(QPushButton, "workflow.source.aliases")
+    assert entry is not None, "Window must expose the shared alias editor entry"
+    entry.click()
+    dialog = next(
+        (d for d in window.findChildren(AliasDialog) if d.isVisible()), None
+    )
+    assert dialog is not None, "Alias entry must show the shared AliasDialog"
+    table = dialog.findChild(QTableWidget)
+    buttons = dialog.findChild(QDialogButtonBox)
+    assert table is not None and buttons is not None
+    value = table.item(0, 1)
+    assert value is not None and value.text() == "Q1"
+    value.setText(value_text)
+    return dialog, buttons, value
+
+
 @pytest.mark.parametrize("outcome", ["apply", "cancel", "invalid"])
 def test_alias_entry_edits_same_session_without_replacing_captured_forms(
     app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication, outcome: str
@@ -223,19 +243,9 @@ def test_alias_entry_edits_same_session_without_replacing_captured_forms(
     before_plan, before_knobs = plan.state.input.data, knobs.state.input.data
     base_plan, base_knobs = plan.state.base.data, knobs.state.base.data
 
-    entry = window.findChild(QPushButton, "workflow.source.aliases")
-    assert entry is not None, "Window must expose the shared alias editor entry"
-    entry.click()
-    dialog = next(
-        (d for d in window.findChildren(AliasDialog) if d.isVisible()), None
+    dialog, buttons, value = edit_alias_entry(
+        window, "$qubit" if outcome == "invalid" else "Q2"
     )
-    assert dialog is not None, "Alias entry must show the shared AliasDialog"
-    table = dialog.findChild(QTableWidget)
-    buttons = dialog.findChild(QDialogButtonBox)
-    assert table is not None and buttons is not None
-    value = table.item(0, 1)
-    assert value is not None and value.text() == "Q1"
-    value.setText("$qubit" if outcome == "invalid" else "Q2")
     if outcome != "cancel":
         apply = buttons.button(QDialogButtonBox.StandardButton.Apply)
         assert apply is not None
