@@ -1020,11 +1020,11 @@ def test_window_without_run_rejects_explicit_target(
 
 @pytest.mark.parametrize("phase", ["pending", "paused"])
 def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
     phase: str,
 ) -> None:
-    window, harness, entry = attachment
+    window, harness, entry = run_attachment
     attempts: list[str] = []
 
     def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
@@ -1062,13 +1062,15 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
     bars = harness.progress.bars_for_owner("t1-workflow")
     tuning = window.tuning_panel
     captures: list[str] = []
-    original_capture = harness.services.device.capture_native_device_info
+    original_capture = harness.services.device.capture_live_native_device_info
 
     def capture() -> dict[str, DeviceInfo]:
         captures.append("devices")
         return original_capture()
 
-    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
+    monkeypatch.setattr(
+        harness.services.device, "capture_live_native_device_info", capture
+    )
     for invoke in (
         lambda: window.pause("run-A"),
         lambda: window.resume("run-A"),
@@ -1108,11 +1110,11 @@ RpcRequest = Callable[[str, dict[str, object]], dict[str, object]]
 
 @pytest.fixture
 def rpc(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     inputs: Inputs,
 ) -> Iterator[RpcRequest]:
     """Use public route and encoded replies; pump the real owner queue explicitly."""
-    window, harness, _entry = attachment
+    window, harness, _entry = run_attachment
     context = harness.services.context
     library = library_env(inputs).library
     assert library is not None
@@ -1219,7 +1221,7 @@ def test_rpc_without_attached_run_reports_native_target(
     )
 
 
-def test_rpc_pause_resume_uses_same_native_run_and_cached_capture(
+def test_rpc_pause_resume_retains_token_lease_and_reads_live_devices(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
     monkeypatch: pytest.MonkeyPatch,
@@ -1260,31 +1262,42 @@ def test_rpc_pause_resume_uses_same_native_run_and_cached_capture(
     )
     paused = rpc("workflow.status", {})["result"]
     assert isinstance(paused, dict) and isinstance(paused["status"], dict)
-    assert paused["run_id"] == "rpc-run" and paused["operation_id"] is None
+    assert paused["run_id"] == "rpc-run" and paused["operation_id"] == token
     assert paused["status"]["lifecycle"] == "paused"
     assert window.controller is not None
     native = window.controller.status()
     assert native is not None
     assert paused["status"] == json.loads(json.dumps(asdict(native)))
     assert paused["status"]["progress"][0]["name"] == "rpc-work"
-    assert not harness.gate.snapshot()
+    lease = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
+    bars = harness.progress.bars_for_operation(token)
+    assert lease and bars and harness.handles.live_count() == 1
+    assert harness.handles.known_outcome(token) is None
 
     entry.new_point("later-rpc")
     harness.services.context.use_point(PointUseRequest("later-rpc"))
     harness.services.context.set_component_focus(None)
     captures: list[bool] = []
-    original = harness.services.device.capture_native_device_info
 
     def capture() -> dict[str, DeviceInfo]:
         captures.append(bool(harness.gate.snapshot()))
-        return original()
+        return {"flux": FakeDeviceInfo(address="none", value=0.34)}
 
-    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
-    resumed = rpc("workflow.resume", {"run_id": "rpc-run"})["result"]
+    monkeypatch.setattr(
+        harness.services.device, "capture_live_native_device_info", capture
+    )
+    resume_reply = rpc("workflow.resume", {"run_id": "rpc-run"})
+    assert resume_reply["ok"] is True
+    resumed = resume_reply["result"]
     assert isinstance(resumed, dict)
     assert resumed["run_id"] == "rpc-run"
-    assert isinstance(resumed["operation_id"], int) and resumed["operation_id"] != token
+    assert resumed["operation_id"] == token
     assert captures == [True] and not window.plan_panel.isEnabled()
+    assert (
+        tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot()) == lease
+    )
+    assert harness.progress.bars_for_operation(token) == bars
+    assert harness.handles.live_count() == 1
     harness.complete_segment()
     terminal = rpc("workflow.status", {})["result"]
     assert isinstance(terminal, dict) and isinstance(terminal["status"], dict)
@@ -1294,7 +1307,12 @@ def test_rpc_pause_resume_uses_same_native_run_and_cached_capture(
         and terminal["status"]["run_id"] == "rpc-run"
     )
     assert len(attempts) == 2 and attempts[0] == attempts[1]
+    journal = entry.result_path / "workflows/rpc-run/journal.jsonl"
+    events = [json.loads(line) for line in journal.read_text().splitlines()]
+    resumed_event = next(event for event in events if event["kind"] == "resumed")
+    assert resumed_event["devices"]["items"]["flux"]["value"] == 0.34
     assert harness.background.error is None
+    assert harness.handles.known_outcome(token) is not None
     assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
 
 
@@ -1334,13 +1352,15 @@ def test_rpc_old_target_does_not_change_current_run(
     before = rpc("workflow.status", {})["result"]
     gate = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
     captures: list[str] = []
-    original = harness.services.device.capture_native_device_info
+    original = harness.services.device.capture_live_native_device_info
 
     def capture() -> dict[str, DeviceInfo]:
         captures.append("devices")
         return original()
 
-    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
+    monkeypatch.setattr(
+        harness.services.device, "capture_live_native_device_info", capture
+    )
     for method in ("workflow.pause", "workflow.resume", "workflow.stop"):
         reply = rpc(method, {"run_id": "old"})
         error = reply["error"]
@@ -1380,11 +1400,11 @@ def test_rpc_old_target_does_not_change_current_run(
 
 @pytest.fixture
 def paused_tuning(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[tuple[int, float, int]]:
     """One committed step, followed by an owner-delivered paused step."""
-    window, harness, _entry = attachment
+    window, harness, _entry = run_attachment
     attempts: list[tuple[int, float, int]] = []
 
     def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
@@ -1404,13 +1424,16 @@ def paused_tuning(
         return Next(tun.guess_us, state + 1)
 
     monkeypatch.setattr(window_module, "t1_fluxdep", step)
-    assert isinstance(window.start("tuning"), int)
+    token = window.start("tuning")
+    assert isinstance(token, int)
     harness.complete_segment()
-    assert window.controller is not None
     status = window.controller.status()
     assert status is not None and status.lifecycle == "paused"
     assert window.tuning_panel is not None
-    assert not harness.gate.snapshot()
+    assert window.controller.operation_id == token
+    assert not window.controller.has_pending_segment
+    assert harness.gate.snapshot() and harness.handles.live_count() == 1
+    assert harness.handles.known_outcome(token) is None
     return attempts
 
 
@@ -1498,6 +1521,10 @@ def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
         panel is not None and controller is not None and controller.engine is not None
     )
     engine = controller.engine
+    token = controller.operation_id
+    assert token is not None
+    lease = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
+    assert lease and harness.handles.known_outcome(token) is None
     prior = engine.records("tuning")
     assert len(prior) == 1 and prior[0].revision == 0
     panel.panel.state.write(
@@ -1524,15 +1551,22 @@ def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
     entry.new_point("later-tuning")
     context.use_point(PointUseRequest("later-tuning"))
     captures: list[bool] = []
-    original = harness.services.device.capture_native_device_info
 
     def capture() -> dict[str, DeviceInfo]:
         captures.append(bool(harness.gate.snapshot()))
-        return original()
+        return {"flux": FakeDeviceInfo(address="none", value=0.56)}
 
-    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
+    monkeypatch.setattr(
+        harness.services.device, "capture_live_native_device_info", capture
+    )
     reply = rpc("workflow.resume", {"run_id": "tuning"})
     assert reply["ok"] is True and captures == [True]
+    result = reply["result"]
+    assert isinstance(result, dict) and result["operation_id"] == token
+    assert controller.operation_id == token and harness.handles.live_count() == 1
+    assert (
+        tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot()) == lease
+    )
     harness.complete_segment()
     assert harness.background.error is None
     assert paused_tuning[0][0] == 0
@@ -1544,6 +1578,11 @@ def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
     assert records[1].encoded_record.value == 40.0
     status = controller.status()
     assert status is not None and status.lifecycle == "done"
+    journal = entry.result_path / "workflows/tuning/journal.jsonl"
+    events = [json.loads(line) for line in journal.read_text().splitlines()]
+    resumed_event = next(event for event in events if event["kind"] == "resumed")
+    assert resumed_event["devices"]["items"]["flux"]["value"] == 0.56
+    assert harness.handles.known_outcome(token) is not None
     assert not harness.gate.snapshot()
 
 
@@ -1620,6 +1659,10 @@ def test_rpc_tunables_rejects_wire_and_structural_batches_before_draft_write(
         panel.host.accepted_input.data,
         controller.engine.tunables("tuning"),
     )
+    token = controller.operation_id
+    assert token is not None
+    lease = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
+    assert lease and harness.handles.known_outcome(token) is None
     reply = rpc("workflow.tunables", {"run_id": "tuning", "batch": batch})
     error = reply["error"]
     assert reply["ok"] is False and isinstance(error, dict)
@@ -1630,7 +1673,11 @@ def test_rpc_tunables_rejects_wire_and_structural_batches_before_draft_write(
         panel.host.accepted_input.data,
         controller.engine.tunables("tuning"),
     ) == before
-    assert not harness.gate.snapshot()
+    assert controller.operation_id == token and harness.handles.live_count() == 1
+    assert (
+        tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot()) == lease
+    )
+    assert harness.handles.known_outcome(token) is None
 
 
 @pytest.mark.parametrize(
@@ -1700,6 +1747,10 @@ def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
     assert (
         panel is not None and controller is not None and controller.engine is not None
     )
+    token = controller.operation_id
+    assert token is not None
+    lease = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
+    assert lease and harness.handles.known_outcome(token) is None
     panel.panel.state.write({("guess_us",): 35.0}, FormEnv())
     before = (
         panel.panel.state.input.data,
@@ -1710,13 +1761,15 @@ def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
         controller.operation_id,
     )
     captures: list[str] = []
-    original = harness.services.device.capture_native_device_info
+    original = harness.services.device.capture_live_native_device_info
 
     def capture() -> dict[str, DeviceInfo]:
         captures.append("devices")
         return original()
 
-    monkeypatch.setattr(harness.services.device, "capture_native_device_info", capture)
+    monkeypatch.setattr(
+        harness.services.device, "capture_live_native_device_info", capture
+    )
     with pytest.raises(RunMismatch):
         window.apply_tunables("old", {("reps",): 200}, actor=Actor("agent", "rpc"))
     reply = rpc(
@@ -1734,7 +1787,12 @@ def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
         controller.status(),
         controller.operation_id,
     ) == before
-    assert captures == [] and not harness.gate.snapshot()
+    assert captures == [] and controller.operation_id == token
+    assert (
+        tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot()) == lease
+    )
+    assert harness.handles.live_count() == 1
+    assert harness.handles.known_outcome(token) is None
 
 
 @pytest.mark.parametrize("failure", ["terminal", "journal"])
