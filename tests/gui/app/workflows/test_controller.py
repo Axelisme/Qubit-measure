@@ -430,6 +430,75 @@ def test_owner_view_failure_preserves_native_outcome_after_terminal_cleanup(
     assert "view failed" in caplog.text
 
 
+def test_terminal_view_can_start_replacement_without_old_cleanup_touching_it(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    progress_calls: tuple[list[int], list[int]],
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    ports = EnginePorts(rig.plots, rig.progress, rig.clock, context=7)
+    pending = create_binding("next")
+    receipts: list[int] = []
+    observed: list[
+        tuple[RunStatus | None, Exception | None, OperationOutcome | None, bool, bool]
+    ] = []
+
+    def completed(status: RunStatus | None, error: Exception | None) -> None:
+        if status is None or status.run_id != "run":
+            return
+        observed.append(
+            (
+                status,
+                error,
+                harness.handles.known_outcome(token),
+                not harness.gate.snapshot(),
+                controller.operation_id is None,
+            )
+        )
+        receipts.append(
+            controller.start(
+                declare(rig),
+                plan=Plan(),
+                tunables=Tunables(),
+                paths=RunPaths(tmp_path / "next-metadata", tmp_path / "next-data"),
+                identity=identity("next"),
+                ports=ports,
+                binding=pending,
+            )
+        )
+        raise ValueError("old view failed after replacement")
+
+    controller = create_controller(harness, rig, completed)
+    token = controller.start(
+        declare(rig),
+        plan=Plan(),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=identity(),
+        ports=ports,
+        binding=create_binding(),
+    )
+    harness.complete_segment()
+    assert len(observed) == len(receipts) == 1
+    status, error, outcome, released, detached = observed[0]
+    assert status is not None and status.lifecycle == "done"
+    assert error is None and outcome == OperationOutcome("finished")
+    assert released and detached
+    replacement = receipts[0]
+    assert replacement != token and controller.operation_id == replacement
+    assert controller.binding is pending and pending.engine is None
+    assert controller.run_id == "next" and controller.has_pending_segment
+    assert harness.gate.snapshot() and harness.handles.live_count() == 1
+    assert progress_calls == ([token, replacement], [token])
+    assert "old view failed after replacement" in caplog.text
+    harness.complete_segment()
+    assert controller.status() is not None
+    assert harness.handles.known_outcome(token) == OperationOutcome("finished")
+    assert harness.handles.known_outcome(replacement) == OperationOutcome("finished")
+    assert progress_calls == ([token, replacement], [token, replacement])
+    assert not harness.gate.snapshot() and harness.handles.live_count() == 0
+
+
 def test_native_execution_is_off_owner_and_terminal_delivery_returns_to_owner(
     tmp_path: Path,
 ) -> None:
@@ -658,11 +727,12 @@ def test_idle_tunables_failure_finishes_once_and_discards_retained_progress(
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
+    repeated: list[RunStatus | None] = []
 
     def completed(status: RunStatus | None, error: Exception | None) -> None:
         finished.append((status, error))
         if status is not None and status.lifecycle == "failed":
-            assert controller.stop("run") == status
+            repeated.append(controller.stop("run"))
 
     controller = create_controller(harness, rig, completed)
 
@@ -707,7 +777,7 @@ def test_idle_tunables_failure_finishes_once_and_discards_retained_progress(
     assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
     assert len(finished) == 2
     assert finished[0][0] is not None and finished[0][0].lifecycle == "paused"
-    assert finished[-1][0] == failed
+    assert finished[-1][0] == failed and repeated == [failed]
     assert isinstance(finished[-1][1], IsADirectoryError)
     assert not harness.gate.snapshot()
     assert harness.handles.known_outcome(token) == OperationOutcome(
@@ -719,6 +789,85 @@ def test_idle_tunables_failure_finishes_once_and_discards_retained_progress(
     assert controller.stop("run") == failed and len(finished) == 2
     assert progress_calls == ([token], [token])
     assert harness.background.work is None and not harness.gate.snapshot()
+
+
+def test_active_tunables_failure_waits_for_producer_and_preserves_native_outcome(
+    tmp_path: Path,
+    progress_calls: tuple[list[int], list[int]],
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    finished: list[tuple[RunStatus | None, Exception | None]] = []
+    errors: list[IsADirectoryError] = []
+    observed: list[tuple[bool, bool, int | None, int]] = []
+    binding = create_binding()
+    controller = create_controller(
+        harness, rig, lambda status, error: finished.append((status, error))
+    )
+    journal = rig.paths.metadata_root / "journal.jsonl"
+
+    @workflow("active-failure", plan=Plan, tunables=Tunables, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        del plan, tun, state
+        env.pbar("retained", 1).refresh()
+        original = journal.read_bytes()
+        journal.unlink()
+        journal.mkdir()
+        try:
+            try:
+                controller.apply_tunables(
+                    "run", {("value",): 2}, actor=Actor("agent", "test")
+                )
+            except IsADirectoryError as error:
+                errors.append(error)
+        finally:
+            journal.rmdir()
+            journal.write_bytes(original)
+        controller.stop("run")
+        observed.append(
+            (
+                bool(harness.gate.snapshot()),
+                harness.handles.known_outcome(token) is None,
+                controller.operation_id,
+                len(finished),
+            )
+        )
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    token = controller.start(
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=binding,
+        paths=rig.paths,
+        identity=identity(),
+    )
+    harness.background.execute()
+    harness.owner.pump_all()
+    failed = controller.status()
+    assert len(errors) == 1
+    assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
+    assert observed == [(True, True, token, 0)]
+    assert controller.operation_id == token and harness.gate.snapshot()
+    assert finished == [] and progress_calls == ([token], [])
+    assert harness.progress.bars_for_operation(token)
+    assert binding.accepted_input.data == binding.state.base.data == {"value": 1}
+    assert binding.state.input.data == {"value": 2}
+    harness.background.deliver()
+    assert finished == [(failed, errors[0])]
+    assert harness.handles.known_outcome(token) == OperationOutcome(
+        "failed", failed.reason
+    )
+    assert controller.operation_id is None and not harness.gate.snapshot()
+    assert progress_calls == ([token], [token])
+    assert not harness.progress.bars_for_owner("example")
+    assert controller.stop("run") == failed and len(finished) == 1
+    assert progress_calls == ([token], [token])
 
 
 @pytest.mark.parametrize("failure", ["capture", "submit"])
