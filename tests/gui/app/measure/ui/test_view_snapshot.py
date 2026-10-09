@@ -17,6 +17,7 @@ import types
 from typing import Any
 from unittest.mock import MagicMock
 
+from zcu_tools.gui.app.measure.controller import ViewSnapshot
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
@@ -62,8 +63,8 @@ def _make_snapshot_shell(
         _ctrl=ctrl,
         _tab_widgets=tab_widgets,
         _tabs=tabs_stub,
-        # Optional UI labels — snapshot guards with "if X" so None is safe.
-        _ctx_label=None,
+        _entry_label=types.SimpleNamespace(text=lambda: "No entry open"),
+        _point_label=types.SimpleNamespace(text=lambda: "No point selected"),
         _predictor_label=None,
         _status_bar=None,
         list_open_dialogs=lambda: list(open_dialogs or []),
@@ -71,7 +72,7 @@ def _make_snapshot_shell(
     return shell
 
 
-def _snapshot(shell: Any) -> dict[str, object]:
+def _snapshot(shell: Any) -> ViewSnapshot:
     """Invoke the real get_view_snapshot on the duck-typed shell."""
     return MainWindow.get_view_snapshot(shell)  # type: ignore[arg-type]
 
@@ -201,7 +202,8 @@ def test_snapshot_contains_required_keys() -> None:
     expected_keys = {
         "active_tab_id",
         "tab_ids",
-        "context_label",
+        "entry_label",
+        "point_label",
         "predictor_label",
         "status",
         "open_dialogs",

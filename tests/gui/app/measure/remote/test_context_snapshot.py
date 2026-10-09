@@ -27,19 +27,35 @@ def test_active_point_label_and_real_window_follow_published_target_not_focus(
     caplog.set_level(logging.ERROR)
     controller = application.controller
     window = MainWindow(controller)
+    previous_view = application.remote.render_view
+    application.remote.render_view = window
+
+    def assert_visible_snapshot(entry: str, point: str) -> None:
+        snapshot = window.get_view_snapshot()
+        assert snapshot["entry_label"] == entry
+        assert snapshot["point_label"] == point
+        labels = window.findChildren(QLabel)
+        assert any(
+            label.objectName() == "current_entry" and label.text() == entry
+            for label in labels
+        )
+        assert any(
+            label.objectName() == "current_point" and label.text() == point
+            for label in labels
+        )
+        assert application.result("view.snapshot", {}) == snapshot
+        assert (
+            application.result("tab.list_all", {})["active_tab_id"]
+            == snapshot["active_tab_id"]
+        )
+
     try:
         window.refresh_context_panel()
-        assert any(
-            label.text() == "No entry open — use Setup… to configure"
-            for label in window.findChildren(QLabel)
-        )
+        assert_visible_snapshot("No entry open", "No point selected")
         assert application.result("context.active", {}) == {"label": None}
         assert application.result("context.labels", {}) == {"labels": []}
         info = application.open_entry()
-        assert any(
-            label.text() == "entry / Draft (in-memory)"
-            for label in window.findChildren(QLabel)
-        )
+        assert_visible_snapshot(info.name, "Draft (in-memory)")
         context = controller.context_control
         context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
         context.add_component("Q2", "fake/drive/a", {"rate": 20.0}, setup=True)
@@ -47,23 +63,23 @@ def test_active_point_label_and_real_window_follow_published_target_not_focus(
         for point in ("base", "next"):
             application.result("point.new", {"label": point, "description": point})
             assert application.result("context.active", {}) == {"label": point}
-            assert any(
-                label.text() == f"entry / {point}"
-                for label in window.findChildren(QLabel)
-            )
+            assert_visible_snapshot(info.name, point)
             for focus in ("Q1", "Q2", None):
                 context.set_component_focus(focus)
                 assert application.result("context.active", {}) == {"label": point}
-                assert any(
-                    label.text() == f"entry / {point}"
-                    for label in window.findChildren(QLabel)
-                )
+                assert_visible_snapshot(info.name, point)
         assert application.result("context.labels", {}) == {"labels": ["base", "next"]}
         assert context.get_entry_info() == info
+        application.state.set_context(
+            replace(controller.get_session_env(), parameters=None)
+        )
+        window.refresh_context_panel()
+        assert_visible_snapshot(info.name, "No point selected")
         assert not caplog.records, (
             "Entry/point/focus facts must not raise in GUI subscribers"
         )
     finally:
+        application.remote.render_view = previous_view
         window.deleteLater()
         qapp.processEvents()
 

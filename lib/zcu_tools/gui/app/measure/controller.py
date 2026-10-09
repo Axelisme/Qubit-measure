@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.services.experiment_reload import (
@@ -163,6 +163,27 @@ class RenderHost(Protocol):
     def current_left_panel_width(self) -> int: ...
 
 
+class ViewSnapshot(TypedDict):
+    """Visible measure-window facts exposed to remote readers.
+
+    active_tab_id is the focused State-owned tab ID, or None.
+    tab_ids lists State-owned IDs in State order, excluding ghost widgets.
+    entry_label is the visible entry name, or "No entry open".
+    point_label is the visible SavedPoint label, "Draft (in-memory)", or
+    "No point selected". It never derives from component focus.
+    predictor_label and status are the visible predictor and status-bar text.
+    open_dialogs lists the named dialogs currently open, using wire names.
+    """
+
+    active_tab_id: str | None
+    tab_ids: list[str]
+    entry_label: str
+    point_label: str
+    predictor_label: str
+    status: str
+    open_dialogs: list[str]
+
+
 class RenderView(Protocol):
     """View reads and explicit presentation commands for RemoteControlAdapter.
 
@@ -174,7 +195,10 @@ class RenderView(Protocol):
         self, tab_id: str, pane: Literal["run", "analysis", "post_analysis", "data"]
     ) -> None: ...
 
-    def get_view_snapshot(self) -> dict[str, object]: ...
+    def get_view_snapshot(self) -> ViewSnapshot:
+        """Read visible entry/point and State-owned tab facts without mutation."""
+        ...
+
     def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None:
         """Read an active frontend's figure and preview flag, if mounted."""
         ...

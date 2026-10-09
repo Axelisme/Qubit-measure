@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.gui.app.measure.controller import Controller
+    from zcu_tools.gui.app.measure.controller import Controller, ViewSnapshot
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
 
@@ -972,7 +972,7 @@ class MainWindow(QMainWindow):
     # Remote view query helpers
     # ------------------------------------------------------------------
 
-    def get_view_snapshot(self) -> dict[str, object]:
+    def get_view_snapshot(self) -> ViewSnapshot:
         """Capture the visible window state as a JSON-friendly dict.
 
         tab_ids and active_tab_id are sourced from State (via ctrl.list_tab_ids)
