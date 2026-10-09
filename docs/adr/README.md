@@ -40,9 +40,9 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。SaveLayout 計算 run 輸出位置，獨立 writers 處理格式，上層編排 batch 與 ledger；參數容器使用工作單位與顯式定義注入。
 
-## Experiment runtime／Autofluxdep workflow
+## Experiment runtime／Workflows
 
-- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：runtime、executor、GUI Node、run snapshot、feedback 與 RunSession 的責任分界。
+- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：新 workflows 的單一 run owner、一 run 一 operation、Pause／Resume 與所有 connected devices 的同步讀回。
 
 
 ## Analysis / Simulation / Waveform

@@ -134,6 +134,28 @@ def attachment(
             restore_registry(before)
 
 
+def test_start_live_read_failure_names_device_before_admission(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, harness, entry = attachment
+    driver = harness.services.device.get_connected_devices()["flux"]
+    before = window.plan_panel.state.input
+
+    def reject_read() -> DeviceInfo:
+        raise OSError("instrument read failed")
+
+    monkeypatch.setattr(driver, "get_info", reject_read)
+    with pytest.raises(RuntimeError, match="flux"):
+        window.start("live-read-failure")
+
+    assert window.plan_panel.state.input == before
+    assert harness.background.work is None and harness.handles.live_count() == 0
+    assert not harness.gate.snapshot()
+    assert not (entry.result_path / "workflows/live-read-failure").exists()
+    assert not (entry.database_path / "workflows/live-read-failure").exists()
+
+
 def test_invalid_pi_does_not_submit_or_create_workflow_directories(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
 ) -> None:

@@ -118,9 +118,10 @@ class T1WorkflowWindow(QWidget):
     None until startup acceptance. tuning_panel attaches only after acceptance.
     The supplied session/runner own shared hardware, exclusion and workers.
     This window does not create a second registry, launch a GUI process or
-    refresh YAML. Its RPC adapter calls the same controls. Pause retains plan, plots and input capture; Resume only
-    captures current cached devices after reacquiring the lease. Each Start captures current
-    published parameters and cached device data in one owner sequence.
+    refresh YAML. Its RPC adapter calls the same controls. Start and each Resume
+    synchronously read all connected devices for native provenance; any read
+    failure names the device and rejects that request without cached fallback.
+    Pause retains plan, plots and input capture for the same run.
     """
 
     def __init__(
@@ -155,7 +156,9 @@ class T1WorkflowWindow(QWidget):
         self._run_env: FormEnv | None = None
         self._accepted_input: FormInput[T1TunablesForm] | None = None
 
-        env = self._capture_env()
+        env = self._capture_env(
+            DeviceSnapshot(self._services.device.capture_native_device_info())
+        )
         self.plan_panel = T1PlanPanel(env, self)
         self.tunables_panel = T1TunablesPanel(env, self)
         self._message = QLabel(self)
@@ -195,7 +198,7 @@ class T1WorkflowWindow(QWidget):
         self._poll.setInterval(50)
         self._poll.timeout.connect(self._refresh_run)
 
-    def _capture_env(self) -> FormEnv:
+    def _capture_env(self, devices: DeviceSnapshot) -> FormEnv:
         context = self._services.context
         roles = context.capture_roles(
             {"qubit": RoleSpec("qubit/*")},
@@ -203,9 +206,8 @@ class T1WorkflowWindow(QWidget):
             explicit={},
         )
         parameters = context.read_context(roles=roles)
-        devices = self._services.device.capture_native_device_info()
         return FormEnv(
-            parameters=parameters, library=parameters.library, devices=devices
+            parameters=parameters, library=parameters.library, devices=devices.items
         )
 
     def _ensure_can_start(self) -> None:
@@ -246,13 +248,17 @@ class T1WorkflowWindow(QWidget):
         Both editors display ordinary values in this same fixed Start capture,
         not their old constructor capture; they do not poll later source changes.
         Draft/unbound storage, missing hardware, source/provenance and native
-        failures raise without fallback/retry. The returned operation token is
+        failures raise without fallback/retry. Every connected device is read
+        synchronously before submission, and read failure names that device.
+        The returned operation token is
         pending, not proof of accepted startup. Calibrated uses the validated
         form's required pi_length_us and selected native module scalars.
         Expressions remain in the accepted FormInput used for later tuning.
         """
         self._ensure_can_start()
-        env = self._capture_env()
+        env = self._capture_env(
+            DeviceSnapshot(self._services.device.capture_live_native_device_info())
+        )
         if env.parameters is None:
             raise ValueError("T1 Start requires captured parameters")
         storage = self._services.context.capture_storage(env.parameters)
@@ -423,21 +429,24 @@ class T1WorkflowWindow(QWidget):
         return self.controller.pause(run_id)
 
     def resume(self, run_id: str) -> int:
-        """Reacquire the RUN lease and submit the explicitly targeted paused run.
+        """Submit the targeted paused run after reading all connected devices.
 
-        run_id is the identity passed to Start. Controller rejects a wrong or
-        absent target with RunMismatch before lease admission or cached device
-        capture. A matching pending target raises RuntimeError; illegal native
-        states raise InvalidRunState. Plan, context, roles, expressions and plots
-        stay fixed. Return the pending segment token, not native acceptance.
-        Capture/submission errors propagate without retry or live hardware reads.
+        run_id is the Start identity. Controller rejects wrong or absent targets
+        before device reads. Pending or illegal native states reject Resume.
+        Read every connected driver synchronously through DeviceService. Any
+        read failure names the device and rejects this Resume without falling
+        back to cache. Record read-back values as native device provenance.
+        Plan, context, roles, expressions and plots stay fixed. Return the same
+        pending run token, not proof of worker acceptance. Healthy read or
+        submission failure retains the paused run, its progress and local lease.
+        No retry, ramp-interleaving guard or hardware rollback is provided.
         """
         if self.controller is None:
             raise RunMismatch(run_id, None)
         return self.controller.resume(
             run_id,
             devices=lambda: DeviceSnapshot(
-                self._services.device.capture_native_device_info()
+                self._services.device.capture_live_native_device_info()
             ),
         )
 

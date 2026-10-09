@@ -654,6 +654,20 @@ class DeviceService:
         """Borrow the registered drivers without transferring lifecycle ownership."""
         return dict(self._registry.get_all_devices())
 
+    def capture_live_native_device_info(self) -> dict[str, DeviceInfo]:
+        """Synchronously read every registered connected driver for provenance.
+
+        Call on the session owner thread. Read each device once through
+        get_device_info, which owns mutation checks and State cache refresh.
+        Return detached native DeviceInfo models in registry order; no connected
+        devices returns an empty mapping. Missing reads, unsupported native info
+        and read exceptions raise RuntimeError naming the failing device. Never
+        substitute cached info or retry. Earlier successful reads may already
+        have refreshed State when a later read fails; there is no rollback.
+        Driver I/O can block, and a ramp can expose an intermediate value.
+        """
+        raise NotImplementedError("live native device capture seed")
+
     def capture_native_device_info(self) -> dict[str, DeviceInfo]:
         """Capture ordered native info for live registered devices without I/O.
 
