@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，全域 alias、Run admission 與 native Load 來源
+**Last updated:** 2026-10-10，全域 alias、ParameterWriteback 與參數容器寫入
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -60,7 +60,7 @@ Tab cfg edit batch 在完整候選準備成功後一次發布，拒絕不改舊 
 Run、Qt 與 remote 的資源契約現況見 Cfg ADR；library conversion、selected Apply
 與其他 app 的剩餘目標見 [cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)。
 
-`State` 保存可觀察的 app 資料，`ContextService` 寫入 md／ml；services
+`State` 保存可觀察的 app 資料，`ContextService` 寫入參數容器／library；services
 依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
 版本由資源 owner 發布，不以每次 emit 必然 bump 推導：
 `SessionState.refresh_device_info_cache()` 在 driver info 與快取相同時不 bump，
@@ -137,7 +137,7 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
   centered Current → Proposed columns on a shared-background continuous-boundary
   panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions。
-  Scalar MetaDict與editable module/waveform items使用Edit；non-scalar MetaDict的
+  Scalar parameter 與 editable module/waveform items 使用 Edit；non-scalar parameter 的
   current/proposed headings使用一致的bounded summary（例如`3 × 3 matrix`）。small
   proposed matrix另外顯示read-only matrix view，current value維持summary-only；Copy會把
   complete proposed JSON放入clipboard。其它arbitrary long values只顯示bounded summary，
@@ -230,8 +230,7 @@ Shared layers:
 - `zcu_tools.gui.session`：context、SoC、device、project settings、predictor、operation
   handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
-- `zcu_tools.gui.plotting`：explicit figure host、container、export
-  substrate。
+- `zcu_tools.gui.plotting`：explicit figure host、container 與 export。
 - `zcu_tools.mcp.measure`：agent-facing MCP policy layer and tool surface。
 
 ## Composition Root
@@ -259,7 +258,7 @@ for setup/context/device/predictor/progress domains.
 Measure composition 在一處宣告 session-memory alias 初值：qubit 留空，resonator
 保存 `$qubit.resonator`。ContextService 在第一份非空元件 snapshot 以 registry
 的唯一候選填 qubit，不硬編 component kind。之後切 point 不重設表。參數捕捉
-經 `read_alias_context`，不再從 GUI focus 或 adapter 的 via 推論 alias。
+經 `read_alias_context`，adapter 只宣告 used aliases 與 kind。Shared `session.ui.alias_dialog.AliasDialog` 編輯全域表，tab 不顯示角色列。
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
@@ -311,10 +310,10 @@ Key ownership rules:
   request coercion與structured/domain-special wire policy，不擁有分類registry。
   ordinary/provider/persistence/invariant failures保持unexpected並保留controller traceback
   （ADR-0068）。
-- `ContextService` is the only writer for live `MetaDict` / `ModuleLibrary`
-  contents. Its ModuleLibrary schema-replacement interface validates names and
-  lowers before mutation, then emits one `ML_CHANGED` fact and bumps `context`
-  once; failures leave the live entry untouched.
+- `ContextService` 擁有參數容器與 point-local library 的提交。SavedPoint 經
+  resources owner 單檔交易，成功後才發布目前 binding 的投影、版本與 fact。
+  DRAFT 只改記憶體，同 entry 的非選取 point 寫入不改目前 selection。
+  Library structure change 以固定 ParameterContext lower，不讀後來的 alias 表。
 - `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
   happen on the owner thread and return retired resources for post-commit cleanup.
 - `GuardService` owns the implemented domain checks. Qt and remote controls
@@ -398,7 +397,7 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    cfg-editor machinery before commit. `WritebackService.create_draft` captures
    the destination ParameterContext and its fixed role names. Preview facts
    expose the actual destination, latest stored current value and complete proposal.
-   Scalar MetaDict rows show values and stderr with static schema unit labels
+   ParameterWriteback rows show values and stderr with static schema unit labels
    from resources; ext and fields without static units show no label. Labels never
    convert values. Draft-local retarget refreshes the destination facts and unit.
    Module/waveform items show bounded change summaries without units and keep
@@ -500,11 +499,9 @@ canvas, or changes ADR-0067 reactions. No competing state owner is introduced.
 
 ## Tab Lifecycle And Ordering
 
-Tab 角色列只呈現該 tab 的固定 capture；改綁不讀目前 session 的焦點或工作點。
-手動指定（包含清空）保留在 capture，其他角色依開啟時焦點與手動選擇重新推論。
-逐角色重設只移除該角色的手動選擇。改綁限本 tab idle，保留 cfg resource、輸入
-與既有 Run/Analyze/WB/artifact；cfg 與下一次 Run 使用新的角色，歷史結果仍使用
-當次來源。角色列、標題與完整 tooltip 由同一 committed fact 更新，不重畫結果。
+Tab 保存實驗類型與 cfg 輸入，不保存建立時的 point、library、storage 或角色綁定。
+全域 alias dialog 是編輯對應的入口，tab 不顯示角色列。Cfg refresh 與下一次
+Run 使用目前來源；已發布的 Run、Analyze、WB 和 artifact 保留各自的固定來源。
 
 New tabs are pure GUI configuration surfaces: creating one builds the adapter's
 default cfg from the current context but does not start hardware work. The toolbar
@@ -549,7 +546,7 @@ changing the tab publication or global aliases. Recipe source queries also captu
 current globals through TabService. Targeted preview requires the original full
 CfgRef and returns a temporary observation without replacing it or publishing.
 `schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
-fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
+fixed ParameterContext, not the currently selected point or global aliases. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
 
@@ -569,8 +566,9 @@ Tab 的每次 cfg refresh／reset 從目前全域 alias 表與 point／library �
 `ParameterContext`。它不讀 tab birth capture。`MeasureCfgBindings.snapshot_from_state`
 使用這份投影，擷取 options 與已發布的 values，並記錄 context、device set
 及每個 device 的 source basis。
-Bare capture 從同一 `ParameterContext` 解析。
-Dotted capture 只讀 `ValueSourceBinder` 已發布的 detached cache，不查 live provider 或硬體。
+`@{key}` 先讀 `ValueSourceBinder` 已發布的 detached cache；未命中時，
+再沿同一固定 `ParameterContext` 查參數路徑。不查 live provider 或硬體。
+`$alias.path` 保持動態 alias 引用，不使用這條 resolve-once capture 路徑。
 Source 更新先準備及安裝所有 tab 的新 publication，再通知任何 subscriber。
 來源故障發布 Unavailable，不保留舊 Valid。通知期間拒絕 cfg mutation、acceptance 和 tab lifetime mutation。
 
@@ -723,7 +721,7 @@ guard, editor lifecycle, and diagnostics.
 It projects internal tab interaction/content facts to the coarse
 `{tab_id, requery:["tab.snapshot"]}` event envelope; GUI refresh masks and
 pane figure details stay internal to `MainWindowEventCoordinator`. The wire event
-name and payload are not the internal fact enum. Context/value/md/ml RPC handlers use
+name and payload are not the internal fact enum. Context/value/parameter/library RPC handlers use
 the controller-exposed `ContextControlPort` facet; device RPC handlers use
 `DeviceControlPort` for device lifecycle/query/progress; predictor RPC handlers
 use `PredictorControlPort` for predictor load/query/compute. SoC handlers remain
@@ -752,7 +750,7 @@ remote named-dialog surface delegate reference retention and `finished` /
 `InspectDialog` adapts the measure controller into the shared
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
 controller only for measure-only CfgEditor and template-catalog actions. Measure owns
-the dense two-column Parameters property grid and a separate Modules composition:
+the Parameters component tree and a separate Modules composition:
 the Modules tree exposes only New/Delete collection actions, while the right pane
 embeds the service-owned `CfgFormWidget` with Name, Saved/Unsaved, Revert, and
 Apply on one row (there is no Raw pane or Modify/Rename action). Selecting an entry
@@ -760,10 +758,9 @@ opens one `gc=False` editor session; field and Name edits stay in that draft.
 Apply calls the replacement write interface, which validates and lowers before the
 single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
 the resulting selection. Collision, invalid, or lowering failures leave the live
-entry and draft intact. Each existing-entry editor retains its source
-ModuleLibrary identity and fast-fails replacement after a context switch, leaving
-that draft for explicit Revert/Discard. A pending refresh is consumed after a
-dirty selection transaction so the tree reflects the resulting names. Revert
+entry and draft intact. Editor 固定開啟時的 ParameterContext。同 entry 切換 point
+不改目的地；跨 entry 或失效 DRAFT 拒絕提交，保留 draft 供 Revert／Discard。
+Dirty selection transaction 後套用 pending refresh，讓 tree 顯示提交後的名稱。 Revert
 reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
 New remains a retained non-blocking template catalog dialog; the Modules tree Delete
 key is direct only at the tree focus boundary, while the button confirms.
@@ -827,15 +824,14 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
 
 ## Adapter-Facing Rules
 
-- `ContextService` 擁有 md／ml 內容提交、`context` version bump 與變更事件。
-  Measure 的 `ContextWritePort` 從 cfg schema 產生 app-side lowering callbacks，
-  交給共用 service 在寫入時呼叫；`CfgEditorService` 只交未 lower 的 schema。
-  Writeback 選出的 md／ml entries 交給一次 `apply_ml_writes()`，每批至多
-  bump 一次、每種變更事件至多送一次。整批 lower／register 先在隔離候選
-  完成，後項可讀前項候選，但不能改 live md／ml。準備失敗保留舊內容與版本。
-  成功後一次套用內容、更新版本並通知，最後保存。保存失敗明確回報已套用
-  但未保存，不 rollback 或自動重試。寫入與 crash durability 是不同責任，
-  磁碟保存見 ADR-0063。
+- `ContextService` 擁有 parameter／library 提交、版本與變更 fact。
+  Library editor 交未 lower 的 schema 與固定 ParameterContext，app 注入的 callbacks
+  準備 Spec，ContextService 再提交單筆 structure change。
+  `WritebackService` 先沿結果來源的 capture 解析與 lower 全部選定 proposals，
+  追加 accepted 後依序呼叫 target setters。首錯停止，保留成功前綴及 ledger 證據。
+  `ParameterWriteback` 的 wire kind 是 `parameter`，draft-local ID 使用 `param-<n>`，
+  receipt 的 parameter paths 位於 `written.parameter`。這不是跨檔交易，不 rollback
+  或自動重試；磁碟保存見 ADR-0063。
 - `ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。`AdapterCapabilities`
   宣告 SoC 需求、analysis、post-analysis、load 的支援範圍；`requires_soc` 不代表
   SoC 已連線。Run guard 檢查 context、cfg、SoC 與 preflight；operation owner 另
@@ -862,8 +858,8 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
 - `WritebackService.create_draft()` accepts those candidates and returns an opaque,
   service-owned draft. Item-local cfg-editor sessions and their identities stay
   inside the service; draft creation cleans every session on failure, teardown is
-  idempotent, and `apply_draft()` sends selected entries through one
-  `ContextWritePort` batch. `WritebackWidget` is pane-bound and the Qt-only
+  idempotent. `apply_draft()` 先準備全部選定 entries，再追加 accepted 並依序
+  呼叫 target setters；失敗保留成功前綴。`WritebackWidget` is pane-bound and the Qt-only
   `Controller`/`WritebackControl` pane-qualified forwarding (`*_for_pane` with
   `pane` in `analysis|post_analysis`) resolves the pane's opaque draft before
   calling the stage-agnostic service. Remote/MCP writeback operations use the same

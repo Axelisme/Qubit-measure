@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-07，Notebook stop 保留可存的部分數據
+**Last updated:** 2026-10-10，bound-point 保存與固定角色來源
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -24,7 +24,7 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 `NotebookAdapter()(core)` 可離線 load／analyze。同步 analyze 的 options 仍必傳，只有 source 可以省略。`analyze(options, *, source=None)` 與 `save(destination, *, source=None, ...)` 預設最近成功 run／load 的 last_run，沒有 record 就拒絕。處理歷史資料時顯式傳 source；分析歷史來源不改 last_run，也不改下一次 save 的預設來源。Save 只處理本機路徑，unique=True 才選新檔名並回傳實際 Path；cfg 要求與禁止覆寫由核心 saver 守住。
 
-`save_run(ctx, source=record, ...)` 是綁定 PointView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口捕捉 cached context 與 acquisition evidence，保存 native、Labber、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
+`save_run(ctx, source=record, ...)` 是綁定 PointView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口從 bound point 捕捉 cached context 與 storage capability，量測身分、時間與 provenance 沿 adapter 的 acquisition evidence。可選的 RoleView 必須來自同一 point，省略代表沒有角色對應。入口保存正規 `data.h5`、Labber 衍生輸出、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
 
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
 

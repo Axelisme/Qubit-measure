@@ -10,9 +10,13 @@ GUI 與 remote 是 application 的 driving adapters。它們讀同一個 owner �
 
 ## Session、狀態與協作
 
-`gui.session` 供 measure 和 autofluxdep 共用 context、SoC、device、操作機制與 dialog 所需的窄 control facets。兩個 app 各自組裝 `SessionServices`，注入背景執行與 operation gate；app 決定自己的 RUN policy、workflow 和呈現。Session 不反向 import 具體 app。Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（套用 project、讀取記住的 Session Preference、連線），不知道 app 正在啟動、還原或關閉；control port 也不提供啟動專用的版本。Session Preference 只回答下次輸入預填什麼，不證明 project 已套用或儀器已連線。Fluxdep、dispersive 並未因此取得完整的 measurement session。
+`gui.session` 供 measure 和 autofluxdep 共用 context、SoC、device、操作機制與 dialog 所需的窄 control facets。兩個 app 各自組裝 `SessionServices`，注入背景執行與 operation gate；app 決定自己的 RUN policy、workflow 和呈現。Session 不反向 import 具體 app。Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（開啟 entry、選取 point、讀取記住的 Session Preference、連線），不知道 app 正在啟動、還原或關閉；control port 也不提供啟動專用的版本。Session Preference 只回答下次輸入預填什麼，不證明 entry 已開啟或儀器已連線。Fluxdep、dispersive 並未因此取得完整的 measurement session。
 
-可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影；寫入交給對應 owner。成功提交後，owner 依操作發布版本或變更通知。`ContextService` 是 md／ml 內容的寫入權威，measure 的 cfg lowering policy 經注入的 callback 配合這條寫入路徑，Writeback 不直接改 md／ml。`apply_ml_writes()` 先在 memory-only md／ml 候選完成全部 lowering 與 register；後項使用前項候選結果，準備失敗不修改 live content。成功後保留 stores 的物件身份與路徑，一次安裝完整內容、bump `context` version 並 emit 變更事件，再執行既有同步／dump。儲存失敗明確回報設定已套用但儲存失敗，不回滾已提交內容，也不新增重試、未保存狀態管理或跨檔交易。Selected Apply 的版本接受與其他尚待整合義務見 [Cfg 編輯 draft](draft/cfg-editing-boundaries.md#observationrun-與-apply)。
+可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影。ContextService 私下持有 ResultEntry、point 與 library handles，是 GUI 參數與 library 的寫入權威。EMPTY 沒有參數；開啟 entry 後建立記憶體 DRAFT，選取 point 後使用 ACTIVE 的持久文件。SavedPoint 寫入經 resources owner 的 DocumentStore 單檔交易，成功後才發布目前 binding 的固定投影、版本與 fact。DRAFT 只提交記憶體候選。同 entry 的非選取 point 可寫入但不改目前 selection；跨 entry 和失效 DRAFT 拒絕。Schema、來源、衝突或 I/O 失敗不發布候選。
+
+Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。WritebackService 則先以分析來源的固定 capture 解析全部選定的 `$alias.path` proposals，再追加 accepted，依序呼叫 ContextService 的 parameter／module／waveform setters。首個 setter 失敗停止，保留已成功寫入與 accepted 證據，不宣稱跨檔原子性或 rollback。
+
+全域 alias 表由 ContextService 擁有，只存在 session memory，不寫 preference、文件或 ledger。每列保存元件名稱或引用前列的 `$` 軟連結，整表提交原子驗證語法與重名，使用時才驗元件和 consumer kind。Shared `gui.session.ui.alias_dialog` 是編輯入口，Measure 直接 import，不設 app-local wrapper。Tab 不顯示角色列，也不在建立時固定環境。Cfg refresh 使用目前 point／library 和 alias 表；Run admission 才固定 ParameterContext、解析名稱與 storage capability。FIT、interactive、Post、Writeback 和 Save 使用結果的固定來源，不因後來選取而換目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
 
 Device 的可觀察狀態在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作；remembered device 的磁碟保存由 Persistence owner 從已提交狀態選擇性投影。State 是否供多方觀察與資料是否重啟後保存是兩個問題。Live SoC handle 可屬 session environment 而不落盤，worker、lease 和 driver 的控制權也不因有人需要觀察其狀態而交給 State。
 
@@ -22,7 +26,7 @@ State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由
 
 ## Adapter capability 與事件
 
-Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 明示 SoC 需求、analysis、post-analysis 與 load 的支援範圍。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 依 `requires_soc` 檢查連線；load permit 與 LoadService 依 `load_data` 拒絕不支援的 load。這些局部檢查不代表所有 application 操作入口都已用同一份宣告拒絕不支援的操作。Analyze permit 目前只查 context／run result，非 interactive 的 analyze 會進 FIT 路徑，post-analyze 入口也未查 post-analysis capability。補齊這些入口的核准目標與轉正條件見 [GUI capability draft](draft/gui-adapter-capability-guards.md)。
+Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 明示 SoC 需求、analysis、post-analysis 與 load 的支援範圍。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 依 `requires_soc` 檢查連線；`GuardService.check_load` 與 LoadService 依 `load_data` 拒絕不支援的 load，不要求目前 context。這些局部檢查不代表所有 application 操作入口都已用同一份宣告拒絕不支援的操作。`check_analyze` 只要求 Run result，不要求目前 context，也不檢查 analysis capability。非 interactive 的 analyze 會進 FIT 路徑，post-analyze 入口也未查 post-analysis capability。補齊這些入口的核准目標與轉正條件見 [GUI capability draft](draft/gui-adapter-capability-guards.md)。
 
 Capability 不等於當次 readiness、檔案相容、權限或 hardware lease。Framework 在既有 guard 和 operation 邊界分別判斷部分 context／cfg 與動態 busy 狀態，run guard 呼叫 adapter 的 preflight；preflight 不代替 execution guard 或硬體操作。精確 flags、conditional hooks 和 import-time 驗證見 [measure adapter contract](../../lib/zcu_tools/gui/app/measure/README.md) 及 [experiment adapter owner](../../zcu_lab/v2/gui-contracts.md)。
 

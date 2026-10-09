@@ -1,132 +1,119 @@
-# Qubit Measurement Context
+# Qubit measurement context
 
-This context defines the domain language for measurement workflows, persisted
-measurement data, and analysis handoffs in ZCU-Tools.
+本詞彙表定義 ZCU-Tools 的量測流程、參數容器、保存資料與分析交接用語。
 
-## Language
+## 參數與環境
 
-**Experiment Run**:
-A single execution of an experiment against a specific configuration and hardware
-state. An experiment run produces one experiment result.
-_Avoid_: job, task run, measurement job
+**Result Entry**:
+一次降溫加一片 chip 的資料單位，包含工作點、參數與量測成果。名稱由使用者決定，不帶可解析的物理意義。
+_Avoid_: project identity, chip/qubit scope
 
-**Experiment Result**:
-The complete measurement outcome of one experiment run, including all measured
-data needed to analyze that run as a whole.
-_Avoid_: output blob, save payload
+**Working Point（工作點）**:
+由實驗語意決定的一段穩定環境，擁有獨立參數與 module library。它不綁定特定裝置或物理量。
+_Avoid_: device value, bias folder
 
-**Complete Experiment Result**:
-An experiment result whose required data variables are all present. Normal
-analysis and loading operate on complete experiment results.
-_Avoid_: partial result, best-effort result
+**Parameter Container（參數容器）**:
+保存參數與來源的文件模型，包含 general、components 與 provenance。Setup 元件範本與工作點使用同一種模型，各自保存獨立的值與來源。
+_Avoid_: global parameter dict
 
-**Experiment Result Identity**:
-The shared identity that ties persisted measurement data back to one experiment
-result. It belongs to the experiment result, not to any individual dataset.
-_Avoid_: primary file identity, sidecar identity
+**Component（元件）**:
+參數容器中的具名條目，例如 Q1 或 R1，具有 kind 和該 kind 的欄位。
+_Avoid_: role, device
 
-**Labber Dataset**:
-A single persisted measurement dataset with axes and measured values in the
-Labber-style data model used by the project.
-_Avoid_: HDF5 blob, data file
+**Role（角色）**:
+實驗 adapter 所需的位置，例如 qubit 或 resonator，並帶有要求的 kind。角色不是元件本身。
+_Avoid_: component name, module name
 
-**Experiment Data File**:
-The canonical persisted file for one experiment result. If the experiment result
-has multiple data variables, they belong in the same experiment data file.
-_Avoid_: sidecar file, companion file, workaround file
+**Alias**:
+GUI session 中可編輯的名稱對應，值是元件名稱或引用前列的軟連結。它可供多個實驗角色使用。
+_Avoid_: focus component, tab-local binding
 
-**Legacy Measurement Artifact**:
-A persisted measurement artifact written before the current experiment data file
-language. Legacy artifacts may be migrated, but they are not a normal loading
-format.
-_Avoid_: supported old format, compatibility path
-
-**Data Variable**:
-A named measured variable within an experiment result, corresponding to a member
-of xarray's `data_vars`. Each data variable may have its own axes and shape;
-shared experiment result identity, not shared shape, makes the variables a group.
-_Avoid_: file suffix, member name
-
-**Grouped Experiment Dataset**:
-A set of Labber datasets that together represent one experiment result. The
-group, not any individual member, is the canonical persisted measurement result;
-all member datasets are peers under the same experiment result identity and each
-member represents a data variable.
-_Avoid_: grouped persistence, multi-file workaround, sidecar artifact
-
-**Flux-Dependence Analysis**:
-The analysis workflow that uses flux-dependent spectra, selected spectral
-features, and flux alignment to produce a fluxonium fit handoff for later
-measurement and dispersive analysis.
-_Avoid_: fluxdep widget, spectrum editor, point-picking UI
-
-**Fluxonium Prediction**:
-The simulation-backed calculation that maps fitted fluxonium parameters and
-value-to-flux alignment into predicted transition frequencies, matrix elements,
-or dispersive resonator frequencies. GUI services and notebook helpers may adapt
-it, but they are not the prediction model itself.
-_Avoid_: GUI predictor service, dispersive tuning widget, plot overlay
-
-**Arbitrary Waveform Asset**:
-A qubit-scoped stored waveform sample asset file that can be referenced by an
-arbitrary waveform configuration. It always has playback data, and it may also
-embed an editable formula recipe.
-_Avoid_: waveform cfg, formula file, arbitrary pulse, asset folder
-
-**Arbitrary Waveform Data Key**:
-The path-safe identity of an arbitrary waveform asset, used as the asset filename
-stem and as the reference string in arbitrary waveform configurations.
-_Avoid_: filename, module name, waveform name
-
-**Formula Recipe**:
-An optional editable source definition for an arbitrary waveform asset. User and
-agent-created formula waveforms store a formula recipe, while imported waveform
-assets may exist as playback data only. A formula recipe is stored inside the
-asset file and may contain one or more formula segments.
-_Avoid_: source of truth, cache metadata, formula cfg
-
-**Formula Segment**:
-An ordered part of a formula recipe with its own duration and formula
-expression. Formula segments concatenate to form one arbitrary waveform asset;
-their formulas are written against segment-local time. Segment rendering uses
-half-open time intervals, with the final segment including the waveform endpoint.
-Total waveform duration is the sum of segment durations.
-_Avoid_: piece, section, pulse part
-
-**Permit**:
-呼叫受保護 GUI 操作前，對該次請求已檢查的前置條件憑證。
-它不表示操作期間的硬體資源仍然可用，也不需釋放。
-_Avoid_: lease, operation handle
-
-**Exclusion Lease**:
-操作啟動時取得、在終局釋放的動態互斥佔用。
-它與操作追蹤用的 handle 不同，也不代替請求前置條件檢查。
-_Avoid_: permit, operation handle
+**Ledger**:
+一個 Result Entry 的事件記錄，包含量測、保存與接受結果等事實。參數來源可引用同條目的事件。
+_Avoid_: run directory, parameter snapshot
 
 **ModuleLibrary Template**:
-A named starting shape and defaults for creating a new module or waveform entry.
-Choosing a template creates an independent entry that can then be edited.
+建立 module 或 waveform entry 時使用的具名起始 shape 與 defaults。依 template 建立的 entry 彼此獨立。
 _Avoid_: experiment role, module role catalog
 
 **SessionEnv**:
-GUI session 目前生效的實驗 context 與 live 連線資源。
-它與預填 Setup 的 Session Preference 不同。
+GUI session 目前生效的實驗 context 與 live 連線資源。它與預填 Setup 的 Session Preference 不同。
 _Avoid_: persisted session preference, complete app state
 
 **Session Preference**:
-GUI 記住、用來預填 Setup 的 project 名稱、result scope 與連線位址。
-它不表示 project 已套用或儀器已連線，也與目前生效的 SessionEnv 分開。
-_Avoid_: startup preference
+GUI 記住、用來預填 Setup 的條目名稱與連線位址。它不表示 entry 已開啟或儀器已連線。
+_Avoid_: active environment
 
-## Example Dialogue
+## 量測與保存
 
-Developer: "This experiment result has multiple measured views. Is that several
-experiment runs?"
+**Experiment Run**:
+使用特定 cfg 和硬體狀態執行一次實驗。一次 Run 產生一個 Experiment Result。
+_Avoid_: job, task run, measurement job
 
-Domain expert: "No. It is one experiment run. Persist it as a grouped experiment
-dataset so the datasets stay tied to the same result."
+**Experiment Result**:
+一次 Experiment Run 的量測成果，包含分析該次量測所需的資料。
+_Avoid_: output blob, save payload
 
-Developer: "Can one member be a sidecar artifact in another storage format?"
+**Complete Experiment Result**:
+所需 Data Variables 都齊全的 Experiment Result。完整性不保證全部預定測點都已完成。
+_Avoid_: successful operation, fully scanned result
 
-Domain expert: "No. If it is part of the canonical experiment result, model it as
-a Labber dataset inside the grouped experiment dataset."
+**Experiment Result Identity**:
+將保存資料連回同一個 Experiment Result 的共同身分。它不屬於任何單一 dataset。
+_Avoid_: primary file identity, sidecar identity
+
+**Experiment Data File**:
+一個 Experiment Result 的正規資料檔，稱為 data.h5。多個 Data Variables 屬於同一份正規資料。
+_Avoid_: sidecar file, companion file, Labber export
+
+**Labber Dataset**:
+以 Labber 資料模型表示 axes 和 measured values 的衍生輸出，供 Log Browser 檢視。它不是 Experiment Result 的正規保存權威。
+_Avoid_: canonical data file, HDF5 blob
+
+**Legacy Measurement Artifact**:
+在目前 Experiment Data File 格式前保存的量測成果。它屬於明確遷移的來源，不是正常載入格式。
+_Avoid_: supported old format, compatibility path
+
+**Data Variable**:
+Experiment Result 中具名的量測變數。各變數可以有不同 axes 和 shape，仍共用同一結果身分。
+_Avoid_: file suffix, member name
+
+**Grouped Experiment Dataset**:
+同一個 Experiment Result 的多個 Data Variables 所形成的資料群。Labber 的 grouped 表示是此資料群的衍生輸出。
+_Avoid_: multi-file workaround, sidecar artifact
+
+## 分析與 waveform
+
+**Flux-Dependence Analysis**:
+利用隨 flux 變化的 spectra、選定 spectral features 與 flux alignment，產生供後續量測和 dispersive analysis 使用的 fluxonium fit handoff。
+_Avoid_: fluxdep widget, spectrum editor, point-picking UI
+
+**Fluxonium Prediction**:
+根據擬合後的 fluxonium parameters 與 value-to-flux alignment，計算 transition frequencies、matrix elements 或 dispersive resonator frequencies 的模擬模型。
+_Avoid_: GUI predictor service, dispersive tuning widget, plot overlay
+
+**Arbitrary Waveform Asset**:
+可被 arbitrary waveform cfg 引用的 qubit-scoped samples 資產。它一定有播放資料，也可以內嵌可編輯的 Formula Recipe。
+_Avoid_: waveform cfg, formula file, arbitrary pulse
+
+**Arbitrary Waveform Data Key**:
+Arbitrary Waveform Asset 的安全路徑身分，也是 asset filename stem 與 cfg 引用字串。
+_Avoid_: filename, module name, waveform name
+
+**Formula Recipe**:
+Arbitrary Waveform Asset 內選用的可編輯來源定義，可包含多個 Formula Segments。匯入的 asset 可以只有播放資料。
+_Avoid_: cache metadata, formula cfg
+
+**Formula Segment**:
+Formula Recipe 中具有獨立 duration 和 expression 的有序片段。片段使用各自的局部時間，串接後形成完整 waveform。
+_Avoid_: piece, section, pulse part
+
+## 操作憑證
+
+**Permit**:
+呼叫受保護 GUI 操作前，對該次請求已檢查的前置條件憑證。它不表示操作期間的硬體資源仍然可用，也不需釋放。
+_Avoid_: lease, operation handle
+
+**Exclusion Lease**:
+操作啟動時取得、在終局釋放的動態互斥佔用。它與操作追蹤用的 handle 不同，也不代替請求前置條件檢查。
+_Avoid_: permit, operation handle

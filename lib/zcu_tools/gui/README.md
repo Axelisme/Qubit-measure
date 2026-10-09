@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-08，cfg 即時送出與參數容器切換
+**Last updated:** 2026-10-10，entry Setup 與 shared AliasDialog owner
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -104,7 +104,7 @@ Complex 使用一般 direct/eval 路徑。Cfg codec 與 editor 的 complex 值�
 
 `CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
 Fast Fail duplicate/parent conflict與錯誤default carrier、建立choice binding、對齊locked literal，
-並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、MetaDict、
+並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、參數容器、
 ModuleLibrary、logical key或generation policy；measure保有domain builder，重用這層
 tree mechanics（ADR-0065；局部 authoring 見 ADR-0012）。
 
@@ -180,15 +180,22 @@ it does not select a process-wide Matplotlib backend.
 
 ## Project / Result Scope
 
-`ResultScopeManager` scans `result/**/params.json` under the project root and
-treats each hit as a selectable result scope. Measurement-session setup dialogs
-(measure) use that scope to apply a project; analysis dialogs
-(fluxdep/dispersive) use the same discovery in `widgets.ProjectDialog` as a
-dropdown picker only, leaving typed paths and Browse flows available.
-Measurement-session discovery is snapshot-cached: ordinary dialog reopen/apply
-paths reuse the last scan, while an explicit refresh requests a new scan. Applying
-a previously selected scope validates against the snapshot first and only rescans
-when the selected scope is absent.
+Measure 的 shared SetupDialog 使用 `ProjectSettingsService` 開啟或建立 Result Entry，
+再透過 ContextService 選取或建立 Working Point。Entry discovery 由 resources owner
+列出含 setup.yaml 的條目，普通查詢重用 cache，明確 refresh 才重讀。開啟 entry
+不自選 point，不連硬體，也不從 chip／qubit／resonator 名稱推導路徑。
+
+`ResultScopeManager` 仍供 `widgets.ProjectDialog` 的 analysis path picker 使用。
+它掃描 project root 下的 `result/**/params.json`，提供 result scope 候選；
+fluxdep／dispersive 保留 typed path 和 Browse。這不是 Measure 的 entry binding。
+
+## Shared session dialogs (`session/ui/`)
+
+`SetupDialog`、`AliasDialog`、`InspectDialogBase`、`DeviceDialog` 與
+`PredictorDialog` 由 shared session UI 擁有，依賴各 domain 的窄 control facet。
+`session/ui/alias_dialog.py` 的 AliasDialog 編輯 session-memory 的有序 alias 表。
+Measure 與 workflows 直接 import 同一 owner，不留 app-local re-export 或 wrapper。
+App 保留 dialog lifecycle 與呈現政策，shared dialog 不反向 import app。
 
 ## Dialogs — always non-blocking
 
