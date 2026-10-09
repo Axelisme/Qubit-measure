@@ -47,7 +47,7 @@ class FakeAnalyzeParams:
     threshold: Annotated[float, ParamMeta(label="Threshold", decimals=2)] = 0.5
 
 
-def _require_int(raw_cfg: dict[str, object], key: str) -> int:
+def _require_int(raw_cfg: Mapping[str, ExperimentCfgValue], key: str) -> int:
     value = raw_cfg.get(key)
     if not isinstance(value, int):
         raise RuntimeError(
@@ -56,7 +56,7 @@ def _require_int(raw_cfg: dict[str, object], key: str) -> int:
     return value
 
 
-def _require_float(raw_cfg: dict[str, object], key: str) -> float:
+def _require_float(raw_cfg: Mapping[str, ExperimentCfgValue], key: str) -> float:
     value = raw_cfg.get(key)
     if not isinstance(value, (int, float)):
         raise RuntimeError(
