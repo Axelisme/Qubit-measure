@@ -24,6 +24,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
+from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2._support.measure.flux_pick_frontend import make_flux_pick_frontend
 from zcu_lab.v2._support.measure.flux_pick_plugin import (
     FluxPickPlugin,
@@ -172,9 +173,18 @@ class FluxDepAdapter(
         """
         result = req.run_result.result
         inputs = FluxPickInputs(result.signals, result.values, result.freqs)
-        half, integer = fold_initial_lines(
-            inputs.dev_values, req.md.get("flx_half"), req.md.get("flx_int")
+        parameters = req.parameters
+        flux_half = (
+            None
+            if parameters is None
+            else optional_parameter_float(parameters, "qubit.flux_half")
         )
+        flux_int = (
+            None
+            if parameters is None
+            else optional_parameter_float(parameters, "qubit.flux_int")
+        )
+        half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
         # Two-tone spectra may carry useful phase information.
         return FluxPickPlugin(
             inputs,

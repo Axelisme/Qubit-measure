@@ -16,6 +16,7 @@ from zcu_tools.gui.interactive.flux_pick import SharedFluxPickPlugin
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.plots import Plots
 
+from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickResult
 
 
@@ -76,9 +77,18 @@ def make_flux_pick_plugin(
     """
     result = req.run_result
     inputs = FluxPickInputs(result.signals, result.values, result.freqs)
-    half, integer = fold_initial_lines(
-        inputs.dev_values, req.md.get("flx_half", None), req.md.get("flx_int", None)
+    parameters = req.parameters
+    flux_half = (
+        None
+        if parameters is None
+        else optional_parameter_float(parameters, "qubit.flux_half")
     )
+    flux_int = (
+        None
+        if parameters is None
+        else optional_parameter_float(parameters, "qubit.flux_int")
+    )
+    half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
     return FluxPickPlugin(
         inputs,
         FluxPickState(flux_half=half, flux_int=integer, magnitude_only=force_magnitude),
