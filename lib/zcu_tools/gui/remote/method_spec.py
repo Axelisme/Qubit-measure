@@ -67,16 +67,20 @@ class McpMethodPolicy:
             not isinstance(name, str) or not name for name in self.override_tool_names
         ):
             raise ValueError("override MCP tool names must be non-empty strings")
-        if self.exposure in {McpExposure.GENERATED, McpExposure.INTERNAL}:
-            if self.override_tool_names:
-                raise ValueError(
-                    f"{self.exposure.value} MCP policy cannot declare override tools"
-                )
+        if (
+            self.exposure in {McpExposure.GENERATED, McpExposure.INTERNAL}
+            and self.override_tool_names
+        ):
+            raise ValueError(
+                f"{self.exposure.value} MCP policy cannot declare override tools"
+            )
         if self.exposure is McpExposure.OVERRIDE and not self.override_tool_names:
             raise ValueError("override MCP policy requires at least one tool name")
-        if self.exposure in {McpExposure.INTERNAL, McpExposure.OVERRIDE}:
-            if not self.reason:
-                raise ValueError(f"{self.exposure.value} MCP policy requires a reason")
+        if (
+            self.exposure in {McpExposure.INTERNAL, McpExposure.OVERRIDE}
+            and not self.reason
+        ):
+            raise ValueError(f"{self.exposure.value} MCP policy requires a reason")
 
 
 @dataclass(frozen=True)

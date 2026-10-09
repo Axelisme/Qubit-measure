@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
     SavedPoint,
@@ -45,6 +46,9 @@ class RoleBinding:
     explicit preserves manual choices: a component name binds that role, None
     explicitly leaves it unbound, and an absent key allows inference. It is
     process-local capture state, not storage or ledger metadata.
+    aliases optionally retains immutable authored alias rows. When present,
+    ParameterContext resolves names from these rows rather than focus or via;
+    None denotes an already resolved binding without authored alias rows.
     Construction detaches mappings. ParameterContext also detaches returned
     bindings, so consumer edits do not change another capture.
     """
@@ -53,6 +57,7 @@ class RoleBinding:
     declarations: Mapping[str, RoleSpec]
     names: Mapping[str, str]
     explicit: Mapping[str, str | None] = field(default_factory=dict)
+    aliases: tuple[AliasRow, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "declarations", deepcopy(dict(self.declarations)))
@@ -68,8 +73,12 @@ class ParameterContext:
     Binding declarations may omit names for unbound roles. Their data reads
     raise RoleResolutionError naming the role; concrete paths remain readable.
     source_faults contains only point/module_cfg diagnostics, not setup faults.
-    The target, roles, and diagnostics remain readable on an unavailable
-    capture; all data reads then raise ContextSourceUnavailableError.
+    The target, authored alias rows, diagnostics and already resolved bindings
+    remain readable on an unavailable capture. Data reads and alias-derived
+    names then raise ContextSourceUnavailableError.
+    Optional aliases retain authored ordered rows from one environment capture.
+    $alias.path reads expand those rows lazily against this fixed point. Consumer
+    declarations constrain kinds but do not infer bindings from via or focus.
     Reads do not refresh, read YAML, or consult current selection. Library
     materialization may use its captured waveform asset capability.
     """
@@ -92,6 +101,10 @@ class ParameterContext:
         ValueError. storage optionally retains a resource-owned saved-point
         capability with matching target identity; omit it for drafts or synthetic
         captures. Mismatched storage origins also raise ValueError.
+        roles.aliases optionally supplies fixed authored rows. When supplied,
+        roles contributes consumer declarations; names are resolved lazily for $
+        reads and role/storage projections. Invalid alias syntax/order raises
+        InvalidInputError. Empty aliases do not prevent constructing a capture.
         No session selection generation is accepted or compared.
         """
         if any(fault.document == "setup" for fault in source_faults):
@@ -108,7 +121,16 @@ class ParameterContext:
         self._roles = deepcopy(roles)
         self._source_faults = deepcopy(source_faults)
         self._storage = storage
-        if self._roles is not None and not self._source_faults:
+        self._aliases = (
+            AliasTable(self._roles.aliases)
+            if self._roles is not None and self._roles.aliases is not None
+            else None
+        )
+        if (
+            self._aliases is None
+            and self._roles is not None
+            and not self._source_faults
+        ):
             for role, spec in self._roles.declarations.items():
                 if role not in self._roles.names:
                     continue
@@ -129,8 +151,25 @@ class ParameterContext:
 
     @property
     def roles(self) -> RoleBinding | None:
-        """Return a detached fixed binding; None means direct paths only."""
+        """Return consumer declarations and names from this fixed capture.
+
+        With authored aliases, resolve every bound row now, including custom
+        rows outside consumer declarations. Unbound rows are omitted. Invalid
+        links/kinds and unavailable sources raise. No
+        current global table is read. The returned binding has resolved names,
+        not authored rows, so historical target reads never re-expand links.
+        None means no consumer declarations.
+        """
+        if self._aliases is not None and self._roles is not None:
+            self._ensure_readable()
+            names = self._aliases.names(self._point, self._roles.declarations)
+            return RoleBinding(None, self._roles.declarations, names)
         return deepcopy(self._roles)
+
+    @property
+    def aliases(self) -> tuple[AliasRow, ...]:
+        """Return fixed authored alias rows; empty means none were captured."""
+        return () if self._aliases is None else self._aliases.rows
 
     @property
     def storage(self) -> PointStorageBinding | None:
@@ -138,11 +177,13 @@ class ParameterContext:
 
         Its roots, ledger and description belong to capture time. This projection
         adds this consumer's fixed role names without consulting session focus.
+        Alias-derived names can raise source or role resolution errors.
         No file I/O, refresh or ledger append occurs.
         """
         if self._storage is None:
             return None
-        names = {} if self._roles is None else dict(self._roles.names)
+        roles = self.roles
+        names = {} if roles is None else dict(roles.names)
         return replace(self._storage, roles=MappingProxyType(names))
 
     def capture_storage(self) -> PointStorageBinding:
@@ -180,6 +221,28 @@ class ParameterContext:
         self._ensure_readable()
         return self._point.model_copy(deep=True)
 
+    def bind_aliases(
+        self,
+        rows: tuple[AliasRow, ...],
+        declarations: Mapping[str, RoleSpec],
+    ) -> ParameterContext:
+        """Return a fixed capture of authored aliases and consumer kind rules.
+
+        Validate syntax/order, not bindings. Empty or missing rows are legal
+        until used; reads report RoleResolutionError naming the alias. Use $
+        for aliases and bare paths for concrete components. Declaration.via and
+        focus never infer aliases. Point/library/target/storage stay at this
+        capture's origin. Unavailable sources and invalid rows propagate.
+        """
+        self._ensure_readable()
+        return ParameterContext(
+            point=self._point,
+            library=self._library,
+            target=self._target,
+            roles=RoleBinding(None, declarations, {}, aliases=rows),
+            storage=self._storage,
+        )
+
     def bind_roles(
         self,
         declarations: Mapping[str, RoleSpec],
@@ -209,15 +272,41 @@ class ParameterContext:
         )
 
     def resolve_path(self, path: str) -> str:
-        """Expand only the captured role prefix, preserving the remaining path.
+        """Expand a fixed $ alias or captured role, preserving the path suffix.
 
+        $alias.path uses authored rows or fixed resolved names, never concrete-
+        prefix inference. Missing,
+        unbound and wrong-kind aliases raise RoleResolutionError. Bare concrete
+        paths remain independent of $ alias names, including name collisions.
         Accepts direct components, captured roles, and general.* paths.
-        Reading a declared unbound role raises RoleResolutionError even if a
-        concrete component shares its name. Other entry syntax/collision/unknown
+        Without authored aliases, reading a declared unbound role raises
+        RoleResolutionError even if a concrete component shares its name.
+        Other entry syntax/collision/unknown
         namespace errors propagate.
         """
         self._ensure_readable()
-        if self._roles is not None:
+        if path.startswith("$"):
+            alias, separator, suffix = path[1:].partition(".")
+            if not alias or not separator or not suffix:
+                raise ValueError(f"Expected $alias.path: {path!r}")
+            spec = (
+                self._roles.declarations.get(alias) if self._roles is not None else None
+            )
+            if self._aliases is not None:
+                name = self._aliases.resolve(
+                    alias, self._point, kind=spec.kind if spec is not None else None
+                )
+            else:
+                if self._roles is None or alias not in self._roles.names:
+                    raise RoleResolutionError(
+                        alias,
+                        None,
+                        spec.kind if spec is not None else None,
+                        "Alias is not bound",
+                    )
+                name = self._roles.names[alias]
+            return resolve_path(self._point, f"{name}.{suffix}", roles={})
+        if self._aliases is None and self._roles is not None:
             prefix = path.split(".", 1)[0]
             if prefix in self._roles.declarations and prefix not in self._roles.names:
                 raise RoleResolutionError(
@@ -226,7 +315,11 @@ class ParameterContext:
                     self._roles.declarations[prefix].kind,
                     "Role is not bound",
                 )
-        names = self._roles.names if self._roles is not None else {}
+        names = (
+            self._roles.names
+            if self._aliases is None and self._roles is not None
+            else {}
+        )
         return resolve_path(self._point, path, roles=names)
 
     def library_key(self, path: str) -> str:

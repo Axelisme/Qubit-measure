@@ -113,9 +113,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:analyze",
                 "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:path:data",
-                "tab:{tab_id}:path:analysis_image",
-                "tab:{tab_id}:path:post_analysis_image",
+                "tab:{tab_id}:save",
             ),
             reveals_when_nonempty=("tab_id",),
         ),
@@ -125,8 +123,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_parameter_read",
         MethodSpec(
             5.0,
-            "Read only requested paths and module_refs from this tab's fixed "
-            "parameter capture. Returns {values, modules}: absent values are "
+            "Read only requested paths and module_refs from current point/library/aliases "
+            "for this tab. Optional target overrides only this read's first alias. "
+            "Returns {values, modules}: absent values are "
             "omitted, null is retained; each module ref maps to an existing "
             "canonical library root or null for missing/custom. Invalid paths, "
             "unknown roles and source failures propagate. Does not observe "
@@ -135,6 +134,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("tab_id"),
                 ParamSpec("paths", JsonType.ARRAY, required=True),
                 ParamSpec("module_refs", JsonType.ARRAY, required=True),
+                optional_string("target"),
             ),
         ),
         agent=AgentMethodPolicy(),
@@ -145,11 +145,18 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Return a complete cached resource publication: cfg_ref, status, tree, "
-            "source_basis and diagnostics. Reads never refresh or query sources. "
+            "source_basis and diagnostics. Ordinary reads do not query sources. "
+            "Optional target requires expected cfg_ref and resolves current inputs "
+            "against a temporary first-alias override without publication. Stale "
+            "refs reject; the returned ref never refreshes to a newer revision. "
             "Use cfg_ref as expected for tab.edit_cfg or tab.reset_cfg. Paths are arrays of field "
             "segments; writes use the closed __expr/__text/__complex/__ref codec. "
             "Library editor observations use their own independent interface.",
-            (required_string("tab_id"),),
+            (
+                required_string("tab_id"),
+                optional_string("target"),
+                ParamSpec("expected", JsonType.OBJECT),
+            ),
         ),
         agent=AgentMethodPolicy(),
     ),

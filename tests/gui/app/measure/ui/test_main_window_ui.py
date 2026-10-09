@@ -12,7 +12,6 @@ from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
-    QComboBox,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -20,18 +19,20 @@ from qtpy.QtWidgets import (
     QTabWidget,
     QWidget,
 )
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     MetaDictWriteback,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import (
-    ArtifactKey,
-    ArtifactKind,
+    ArtifactSectionSnapshot,
+    ArtifactSnapshot,
     SaveStatus,
 )
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import TabSnapshot
+from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -54,27 +55,15 @@ from zcu_tools.gui.cfg.resource import (
     CfgResource,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.context_types import (
-    ComponentFocus,
-    ComponentOption,
-    EntryDraft,
-)
-from zcu_tools.gui.session.events import ComponentFocusChangedPayload, SocChangedPayload
-from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
+from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import (
-    ComponentSchema,
     RoleResolutionError,
-    RoleSpec,
-    component_registry,
 )
-from zcu_tools.resources.entry.schema import PointDocument
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._cfg_fakes import PublishedHost, configure_cfg_lookup
@@ -85,322 +74,10 @@ def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
     configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
+        "": WritebackValues("r_f", None, 6100.0, None)
+    }
     return ctrl
-
-
-@pytest.fixture
-def focus_captures() -> Iterator[tuple[ParameterContext, ParameterContext]]:
-    before = component_registry.kinds()
-    component_registry.register("ui-focus/driver", ComponentSchema)
-    component_registry.register("ui-focus/sensor", ComponentSchema)
-    try:
-        point = PointDocument.model_validate(
-            {
-                "format": "zcu.parameter-container",
-                "format_version": "1.0",
-                "general": {"created_at": "2026-10-08T00:00:00Z"},
-                "components": {
-                    "Q1": {"kind": "ui-focus/driver"},
-                    "Q2": {"kind": "ui-focus/driver"},
-                    "R1": {"kind": "ui-focus/sensor"},
-                    "R2": {"kind": "ui-focus/sensor"},
-                },
-            }
-        )
-        library = LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
-        )
-        declarations = {
-            "qubit": RoleSpec("ui-focus/driver"),
-            "resonator": RoleSpec("ui-focus/sensor"),
-        }
-        captures = tuple(
-            ParameterContext(
-                point=point,
-                library=library,
-                target=EntryDraft(entry_id="entry"),
-                roles=RoleBinding(
-                    qubit, declarations, {"qubit": qubit, "resonator": resonator}
-                ),
-            )
-            for qubit, resonator in (("Q1", "R1"), ("Q2", "R2"))
-        )
-        yield captures[0], captures[1]
-    finally:
-        component_registry.unregister("ui-focus/driver")
-        component_registry.unregister("ui-focus/sensor")
-        assert component_registry.kinds() == before
-
-
-def test_role_rebind_ui_renders_capture_choices_and_emits_only_user_intent(
-    qapp,
-    focus_captures: tuple[ParameterContext, ParameterContext],
-) -> None:
-    ctrl = _mock_ctrl()
-    q1, _q2 = focus_captures
-    snapshot = replace(
-        _snapshot("a", supports_analysis=False, analyze_params=None), parameters=q1
-    )
-    assert snapshot.capabilities is not None
-    widget = ExpTabWidget("a", ctrl, snapshot.capabilities)
-    widget.attach(snapshot, _RecordingTabActions())
-    driver = widget.findChild(QComboBox, "role-qubit")
-    sensor = widget.findChild(QComboBox, "role-resonator")
-    reset = widget.findChild(QPushButton, "role-reset-qubit")
-    assert driver is not None and sensor is not None and reset is not None
-    assert {driver.itemData(index) for index in range(driver.count())} == {
-        None,
-        "Q1",
-        "Q2",
-    }
-    assert {sensor.itemData(index) for index in range(sensor.count())} == {
-        None,
-        "R1",
-        "R2",
-    }
-    assert driver.currentData() == "Q1" and sensor.currentData() == "R1"
-    assert "Q1" in reset.text()
-    ctrl.tab_control.set_role.assert_not_called()
-    ctrl.tab_control.reset_role.assert_not_called()
-    index = driver.findData("Q2")
-    driver.setCurrentIndex(index)
-    ctrl.tab_control.set_role.assert_not_called()
-    driver.activated.emit(index)
-    ctrl.tab_control.set_role.assert_called_once_with("a", "qubit", "Q2")
-    ctrl.tab_control.set_role.reset_mock()
-    clear = driver.findData(None)
-    driver.setCurrentIndex(clear)
-    driver.activated.emit(clear)
-    ctrl.tab_control.set_role.assert_called_once_with("a", "qubit", None)
-    reset.click()
-    ctrl.tab_control.reset_role.assert_called_once_with("a", "qubit")
-    widget.detach()
-
-
-@pytest.mark.parametrize("busy", ["running", "analyzing", "saving"])
-def test_role_rebind_ui_manual_clear_and_local_busy_are_projected_without_commands(
-    qapp,
-    focus_captures: tuple[ParameterContext, ParameterContext],
-    busy: str,
-) -> None:
-    ctrl = _mock_ctrl()
-    q1, _q2 = focus_captures
-    assert q1.roles is not None
-    rebound = ParameterContext(
-        point=q1.document(),
-        library=q1.library,
-        target=q1.target,
-        roles=RoleBinding(
-            "Q1",
-            q1.roles.declarations,
-            {"qubit": "Q2"},
-            {"qubit": "Q2", "resonator": None},
-        ),
-    )
-    snapshot = replace(
-        _snapshot("a", supports_analysis=False, analyze_params=None), parameters=rebound
-    )
-    assert snapshot.capabilities is not None and snapshot.interaction is not None
-    widget = ExpTabWidget("a", ctrl, snapshot.capabilities)
-    widget.attach(snapshot, _RecordingTabActions())
-    widget.refresh_roles(snapshot)
-    driver = widget.findChild(QComboBox, "role-qubit")
-    sensor = widget.findChild(QComboBox, "role-resonator")
-    manual = widget.findChild(QLabel, "role-manual-resonator")
-    reset = widget.findChild(QPushButton, "role-reset-qubit")
-    assert (
-        driver is not None
-        and sensor is not None
-        and manual is not None
-        and reset is not None
-    )
-    assert driver.currentData() == "Q2" and sensor.currentData() is None
-    assert not manual.isHidden()
-    interaction = replace(
-        snapshot.interaction,
-        is_running=busy == "running",
-        is_analyzing=busy == "analyzing",
-        is_saving_data=busy == "saving",
-    )
-    widget.update_interaction_state(replace(snapshot, interaction=interaction))
-    assert not driver.isEnabled() and not sensor.isEnabled() and not reset.isEnabled()
-    widget.update_interaction_state(
-        replace(
-            snapshot, interaction=replace(snapshot.interaction, global_run_active=True)
-        )
-    )
-    assert driver.isEnabled() and sensor.isEnabled() and reset.isEnabled()
-    ctrl.tab_control.set_role.assert_not_called()
-    ctrl.tab_control.reset_role.assert_not_called()
-    widget.detach()
-
-
-def test_role_rebind_ui_roleless_capture_hides_row(qapp) -> None:
-    ctrl = _mock_ctrl()
-    snapshot = _snapshot("a", supports_analysis=False, analyze_params=None)
-    assert snapshot.capabilities is not None
-    widget = ExpTabWidget("a", ctrl, snapshot.capabilities)
-    widget.attach(snapshot, _RecordingTabActions())
-    row = widget.findChild(QWidget, "tab-roles")
-    assert row is not None and row.isHidden()
-    widget.detach()
-
-
-def test_role_rebind_ui_owner_fact_updates_complete_title_and_keeps_run_marker(
-    qapp,
-    focus_captures: tuple[ParameterContext, ParameterContext],
-) -> None:
-    ctrl = _apply_window_defaults(_mock_ctrl())
-    bus = EventBus()
-    ctrl.get_bus.return_value = bus
-    ctrl.get_running_tab_id.return_value = "a"
-    q1, _q2 = focus_captures
-    assert q1.roles is not None
-    snapshot = replace(
-        _snapshot("a", supports_analysis=False, analyze_params=None), parameters=q1
-    )
-    ctrl.get_tab_snapshot.return_value = snapshot
-    window = MainWindow(ctrl)
-    window.add_tab_widget("a", "fake")
-    tabs = window.findChild(QTabWidget)
-    assert tabs is not None
-    assert "●" in tabs.tabText(0)
-    rebound = ParameterContext(
-        point=q1.document(),
-        library=q1.library,
-        target=q1.target,
-        roles=RoleBinding(
-            "Q1",
-            q1.roles.declarations,
-            {"qubit": "Q2"},
-            {"qubit": "Q2", "resonator": None},
-        ),
-    )
-    ctrl.get_tab_snapshot.return_value = replace(snapshot, parameters=rebound)
-    ctrl.get_tab_snapshot.reset_mock()
-    from zcu_tools.gui.app.measure.events.tab import (
-        TabContentChangedPayload,
-        TabContentFact,
-    )
-
-    bus.emit(TabContentChangedPayload(tab_id="a", fact=TabContentFact.ROLES_COMMITTED))
-    ctrl.get_tab_snapshot.assert_called_once_with("a")
-    assert "●" in tabs.tabText(0)
-    assert "qubit=Q2" in tabs.tabText(0)
-    assert "resonator=" in tabs.tabText(0)
-    assert "resonator=" in tabs.tabToolTip(0)
-    widget = window.findChild(ExpTabWidget)
-    assert widget is not None
-    combo = widget.findChild(QComboBox, "role-qubit")
-    assert combo is not None and combo.currentData() == "Q2"
-    ctrl.tab_control.set_role.assert_not_called()
-    ctrl.tab_control.reset_role.assert_not_called()
-
-
-def test_role_rebind_ui_rejection_restores_committed_capture_without_retry(
-    qapp,
-    focus_captures: tuple[ParameterContext, ParameterContext],
-) -> None:
-    ctrl = _mock_ctrl()
-    q1, _q2 = focus_captures
-    snapshot = replace(
-        _snapshot("a", supports_analysis=False, analyze_params=None), parameters=q1
-    )
-    ctrl.tab_control.get_tab_snapshot.return_value = snapshot
-    failure = FailedPreconditionError("Tab is busy")
-    ctrl.tab_control.set_role.side_effect = failure
-    dialogs = RecordingDialogPresenter()
-    assert snapshot.capabilities is not None
-    widget = ExpTabWidget("a", ctrl, snapshot.capabilities, dialog_presenter=dialogs)
-    widget.attach(snapshot, _RecordingTabActions())
-    selector = widget.findChild(QComboBox, "role-qubit")
-    assert selector is not None and selector.currentData() == "Q1"
-    index = selector.findData("Q2")
-    selector.setCurrentIndex(index)
-    selector.activated.emit(index)
-    assert selector.currentData() == "Q1"
-    ctrl.tab_control.set_role.assert_called_once_with("a", "qubit", "Q2")
-    assert len(dialogs.calls) == 1 and dialogs.calls[0].message == str(failure)
-    widget.detach()
-
-
-def test_main_window_focus_selection_projects_owner_without_rebinding_tabs(qapp):
-    ctrl = _apply_window_defaults(_mock_ctrl())
-    bus = EventBus()
-    ctrl.get_bus.return_value = bus
-    target = EntryDraft(entry_id="entry")
-    options = (
-        ComponentOption("Q1", "qubit/a"),
-        ComponentOption("Q2", "qubit/a"),
-        ComponentOption("R1", "resonator"),
-    )
-    focus = ComponentFocus(target, "Q1", options)
-    facet = ctrl.context_control
-    facet.get_component_focus.return_value = focus
-    window = MainWindow(ctrl)
-    combo = window.findChild(QComboBox, "component_focus")
-    assert combo is not None
-    window.refresh_context_panel()
-    assert combo.currentData() == "Q1"
-    assert {
-        combo.itemData(index)
-        for index in range(combo.count())
-        if combo.itemData(index) is not None
-    } == {"Q1", "Q2", "R1"}
-    facet.set_component_focus.assert_not_called()
-
-    def select(name: str | None) -> ComponentFocus:
-        selected = replace(focus, name=name)
-        facet.get_component_focus.return_value = selected
-        bus.emit(ComponentFocusChangedPayload(focus=selected))
-        return selected
-
-    facet.set_component_focus.side_effect = select
-    combo.setCurrentIndex(combo.findData("Q2"))
-    assert facet.get_component_focus().name == "Q2"
-    facet.set_component_focus.assert_called_once_with("Q2")
-    ctrl.new_tab.assert_not_called()
-    externally_selected = replace(focus, name="R1")
-    facet.get_component_focus.return_value = externally_selected
-    bus.emit(ComponentFocusChangedPayload(focus=externally_selected))
-    assert combo.currentData() == "R1"
-    facet.set_component_focus.assert_called_once_with("Q2")
-
-
-def test_main_window_titles_keep_captured_roles_after_focus_and_activity(
-    qapp, focus_captures
-):
-    ctrl = _apply_window_defaults(_mock_ctrl())
-    bus = EventBus()
-    ctrl.get_bus.return_value = bus
-    ctrl.get_running_tab_id.return_value = None
-    captures = dict(zip(("a", "b"), focus_captures, strict=True))
-    snapshots = {
-        tab_id: replace(
-            _snapshot(tab_id, supports_analysis=False, analyze_params=None),
-            parameters=capture,
-        )
-        for tab_id, capture in captures.items()
-    }
-    ctrl.get_tab_snapshot.side_effect = snapshots.__getitem__
-    window = MainWindow(ctrl)
-    window.add_tab_widget("a", "fake")
-    window.add_tab_widget("b", "fake")
-    tabs = window.findChild(QTabWidget)
-    assert tabs is not None and tabs.count() == 2
-    for index, qubit, resonator in ((0, "Q1", "R1"), (1, "Q2", "R2")):
-        assert f"qubit={qubit}" in tabs.tabText(index)
-        assert f"resonator={resonator}" in tabs.tabToolTip(index)
-    selected = ComponentFocus(EntryDraft(entry_id="entry"), "Q2", ())
-    ctrl.context_control.get_component_focus.return_value = selected
-    bus.emit(ComponentFocusChangedPayload(focus=selected))
-    window.refresh_run_lock("a")
-    assert "qubit=Q1" in tabs.tabText(0)
-    assert "resonator=R1" in tabs.tabToolTip(0)
-    window.refresh_run_lock(None)
-    assert "qubit=Q1" in tabs.tabText(0)
-    assert "resonator=R1" in tabs.tabToolTip(0)
-    assert snapshots["a"].parameters is focus_captures[0]
 
 
 def test_main_window_role_failure_is_presented_without_registering_tab(qapp):
@@ -428,9 +105,6 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     ctrl.get_active_context_label.return_value = None
     ctrl.has_draft_context.return_value = False
     ctrl.has_project.return_value = False
-    ctrl.context_control.get_component_focus.return_value = ComponentFocus(
-        None, None, ()
-    )
     ctrl.get_session_env.return_value = SessionEnv(
         parameters=None, soc=None, soccfg=None
     )
@@ -444,7 +118,7 @@ _DEFAULT_PARAMS = object()
 
 class _RecordingTabActions:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str] | tuple[str, str, ArtifactKey]] = []
+        self.calls: list[tuple[str, str] | tuple[str, str, ArtifactRef]] = []
 
     def refresh_interaction(self, tab_id: str) -> None:
         self.calls.append(("refresh_interaction", tab_id))
@@ -467,11 +141,8 @@ class _RecordingTabActions:
     def apply_post_writeback(self, tab_id: str) -> None:
         self.calls.append(("apply_post_writeback", tab_id))
 
-    def save_data(self, tab_id: str) -> None:
-        self.calls.append(("save_data", tab_id))
-
-    def save_image(self, tab_id: str, key: ArtifactKey) -> None:
-        self.calls.append(("save_image", tab_id, key))
+    def save_artifact(self, tab_id: str, ref: ArtifactRef) -> None:
+        self.calls.append(("save_artifact", tab_id, ref))
 
     def save_all(self, tab_id: str) -> None:
         self.calls.append(("save_all", tab_id))
@@ -483,7 +154,6 @@ def _snapshot(
     global_run_active: bool = False,
     is_running: bool = False,
     is_analyzing: bool = False,
-    is_saving_data: bool = False,
     has_context: bool = True,
     has_active_context: bool = True,
     has_soc: bool = True,
@@ -503,11 +173,9 @@ def _snapshot(
 ) -> TabSnapshot:
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         RunPaneSnapshot,
         SavePaneSnapshot,
-        TabPathsSnapshot,
     )
 
     # Resolve analysis params
@@ -537,19 +205,6 @@ def _snapshot(
         load_data=supports_load_data,
     )
 
-    # Path resources per pane
-    data_path_snap = PathResourceSnapshot(
-        override=None, path="/tmp/data.hdf5" if has_run_result else None
-    )
-    analysis_image_snap = PathResourceSnapshot(
-        override=None,
-        path="/tmp/image.png" if has_figure and has_analyze_result else None,
-    )
-    post_image_snap = PathResourceSnapshot(
-        override=None,
-        path="/tmp/post.png" if has_post_analyze_result else None,
-    )
-
     # Pane snapshots
     run_snap = RunPaneSnapshot(
         result=object() if has_run_result else None,
@@ -560,22 +215,13 @@ def _snapshot(
         result=object() if has_analyze_result else None,
         figures=ready_figures(figure_obj),
         writeback_items=tuple(writeback_items),
-        image_paths={"fit": analysis_image_snap} if figure_obj is not None else {},
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=post_analyze_params,
         result=object() if has_post_analyze_result else None,
         figures=ready_figures(post_figure_obj),
         writeback_items=(),
-        image_paths={"fit": post_image_snap} if post_figure_obj is not None else {},
     )
-    save_snap = SavePaneSnapshot(data_path=data_path_snap)
-    paths_snap = TabPathsSnapshot(
-        data=data_path_snap,
-        analysis_images=analysis_snap.image_paths,
-        post_analysis_images=post_snap.image_paths,
-    )
-
     snapshot = TabSnapshot(
         adapter_name="fake",
         tab_id=tab_id,
@@ -583,7 +229,6 @@ def _snapshot(
             global_run_active=global_run_active,
             is_running=is_running,
             is_analyzing=is_analyzing,
-            is_saving_data=is_saving_data,
             has_context=has_context,
             has_active_context=has_active_context,
             has_soc=has_soc,
@@ -597,11 +242,31 @@ def _snapshot(
         run=run_snap,
         analysis=analysis_snap,
         post_analysis=post_snap,
-        save=save_snap,
-        paths=paths_snap,
+        save=SavePaneSnapshot(),
     )
-    statuses = {ArtifactKind.DATA: data_status} if data_status is not None else None
-    return with_artifacts(snapshot, statuses)
+    snapshot = with_artifacts(snapshot)
+    if data_status is None or data_status is SaveStatus.NOT_SAVED:
+        return snapshot
+    # Close-guard specimens retain planned paths and project the Run save facts.
+    sections: list[ArtifactSectionSnapshot] = []
+    for section in snapshot.artifacts:
+        if section.section != "run":
+            sections.append(section)
+            continue
+        artifacts: list[ArtifactSnapshot] = []
+        for artifact in section.artifacts:
+            members = tuple(
+                replace(
+                    member,
+                    outputs=tuple(
+                        replace(output, status="saved") for output in member.outputs
+                    ),
+                )
+                for member in artifact.members
+            )
+            artifacts.append(replace(artifact, status=data_status, members=members))
+        sections.append(replace(section, artifacts=tuple(artifacts)))
+    return replace(snapshot, artifacts=tuple(sections))
 
 
 def test_left_panel_toggle_is_attached_to_tab_bar(qapp):
@@ -701,7 +366,6 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
             global_run_active=False,
             is_running=False,
             is_analyzing=True,
-            is_saving_data=False,
             has_context=True,
             has_active_context=True,
             has_soc=True,
@@ -713,13 +377,19 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     )
 
     assert tab.analyze_btn.isEnabled() is False
-    assert tab._save_center.is_load_visible()
-    assert tab._save_center.is_load_enabled() is False
+    load = next(
+        button
+        for button in tab.findChildren(QPushButton)
+        if button.text() == "Load Data"
+    )
+    assert load.isHidden() is False
+    assert load.isEnabled() is False
     assert tab.writeback_widget.isEnabled() is False
-    assert (
-        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.ANALYSIS, "fit"))
-        is False
-    )  # disabled because is_analyzing
+    saves = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(saves) == 2
+    assert all(not button.isEnabled() for button in saves)
 
 
 def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
@@ -736,7 +406,6 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
             global_run_active=True,
             is_running=False,
             is_analyzing=False,
-            is_saving_data=False,
             has_context=True,
             has_active_context=True,
             has_soc=True,
@@ -748,40 +417,11 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
 
     assert tab.run_btn.isEnabled() is False
     assert tab.analyze_btn.isEnabled() is True
-    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is True
-
-
-def test_exp_tab_disables_save_buttons_while_saving_data(qapp):
-    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
-
-    tab = ExpTabWidget(
-        "tab-1",
-        _mock_ctrl(),
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
-    )
-    tab.update_interaction_state(
-        _snapshot(
-            "tab-1",
-            global_run_active=False,
-            is_running=False,
-            is_analyzing=False,
-            is_saving_data=True,
-            has_context=True,
-            has_active_context=True,
-            has_soc=True,
-            has_run_result=True,
-            has_analyze_result=True,
-            has_figure=True,
-        )
-    )
-
-    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is False
-    assert (
-        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.ANALYSIS, "fit"))
-        is False
-    )
-    assert tab.run_btn.text() == "Run"
-    assert tab.run_btn.toolTip() == "Tab is busy"
+    saves = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(saves) == 2
+    assert all(button.isEnabled() for button in saves)
 
 
 def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
@@ -798,7 +438,6 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
-            is_saving_data=False,
             has_context=True,
             has_active_context=True,
             has_soc=False,
@@ -830,7 +469,6 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
-            is_saving_data=False,
             has_context=True,
             has_active_context=True,
             has_soc=True,
@@ -853,7 +491,6 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
         global_run_active=False,
         is_running=False,
         is_analyzing=False,
-        is_saving_data=False,
         has_context=True,
         has_active_context=False,
         has_soc=True,
@@ -870,15 +507,20 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
 
     assert tab.run_btn.isEnabled() is False
     assert tab.run_btn.toolTip() == "Select or create a file-backed context"
-    assert tab._save_center.is_load_visible()
-    assert tab._save_center.is_load_enabled() is True
+    load = next(
+        button
+        for button in tab.findChildren(QPushButton)
+        if button.text() == "Load Data"
+    )
+    assert load.isHidden() is False
+    assert load.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.writeback_widget.isEnabled() is True
-    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is False
-    assert (
-        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.ANALYSIS, "fit"))
-        is False
-    )
+    saves = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(saves) == 2
+    assert all(not button.isEnabled() for button in saves)
 
 
 def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
@@ -910,10 +552,15 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
     assert not hasattr(tab, "analyze_form")
     assert not hasattr(tab, "_analyze_section")
     # No Load Data capability means no control is constructed.
-    assert not tab._save_center.is_load_visible()
+    assert not any(
+        button.text() == "Load Data" for button in tab.findChildren(QPushButton)
+    )
     # ... but Save stays reachable and usable (run result + active context).
-    assert tab._save_center.has_artifact(ArtifactKey(ArtifactKind.DATA))
-    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is True
+    saves = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(saves) == 1
+    assert all(button.isEnabled() for button in saves)
 
 
 def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
@@ -933,7 +580,10 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
     assert tab._left_tabs.tabText(1) == "Analysis"
     assert tab._analyze_section.isHidden() is False
     assert tab.analyze_btn.isHidden() is False
-    assert tab._save_center.has_artifact(ArtifactKey(ArtifactKind.DATA))
+    saves = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(saves) == 2
 
 
 def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
@@ -952,8 +602,13 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
     assert snap1.capabilities is not None
     tab = ExpTabWidget("tab-1", _mock_ctrl(), snap1.capabilities)
     tab.update_interaction_state(snap1)
-    assert tab._save_center.is_load_visible()
-    assert tab._save_center.is_load_enabled() is True
+    load = next(
+        button
+        for button in tab.findChildren(QPushButton)
+        if button.text() == "Load Data"
+    )
+    assert load.isHidden() is False
+    assert load.isEnabled() is True
 
     tab.update_interaction_state(
         _snapshot(
@@ -967,7 +622,7 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
             supports_load_data=True,
         )
     )
-    assert tab._save_center.is_load_enabled() is False
+    assert load.isEnabled() is False
 
 
 @pytest.mark.parametrize("analysis_error", [None, "analysis defaults unavailable"])
@@ -977,15 +632,16 @@ def test_main_window_load_data_dialog_calls_controller(
     from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
     ctrl = _apply_window_defaults(MagicMock())
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     database_root = tmp_path / "Database" / "Q3_2D" / "Q1"
     database_root.mkdir(parents=True)
+    ctrl.save_control.list_saved_runs.return_value = ()
     ctrl.get_session_env.return_value = SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
+        parameters=None,
         soc=None,
         soccfg=None,
         database_path=str(database_root / "2026" / "06" / "Data_0625"),
@@ -1015,6 +671,13 @@ def test_main_window_load_data_dialog_calls_controller(
         fake_get_open_file_name,
     )
 
+    def choose_file(dialog: RunLoadDialog) -> int:
+        button = dialog.findChild(QPushButton, "load_file")
+        assert button is not None
+        button.click()
+        return dialog.result()
+
+    monkeypatch.setattr(RunLoadDialog, "exec", choose_file)
     window.load_tab_data_dialog("tab-1")
 
     ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")
@@ -1141,18 +804,23 @@ def test_open_notify_prompt_retains_until_close(qapp):
 
 
 def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
-    from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
     ctrl = _apply_window_defaults(MagicMock())
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
+    ctrl.save_control.list_saved_runs.return_value = ()
     window = MainWindow(ctrl)
     window._tab_widgets["tab-1"] = MagicMock()
-    monkeypatch.setattr(
-        QFileDialog, "getOpenFileName", lambda *args, **kwargs: ("", "")
-    )
 
+    def cancel(dialog: RunLoadDialog) -> int:
+        button = dialog.findChild(QPushButton, "load_cancel")
+        assert button is not None
+        button.click()
+        return dialog.result()
+
+    monkeypatch.setattr(RunLoadDialog, "exec", cancel)
     window.load_tab_data_dialog("tab-1")
 
     ctrl.load_tab_result.assert_not_called()
@@ -1162,10 +830,12 @@ def test_main_window_load_data_dialog_shows_user_facing_error(qapp, monkeypatch)
     from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.measure.services.load import LoadDataError
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
     ctrl = _apply_window_defaults(MagicMock())
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
+    ctrl.save_control.list_saved_runs.return_value = ()
     ctrl.load_tab_result.side_effect = LoadDataError(
         "Cannot load this data file into the current tab.\n\nDetails: bad axes",
         reason_code="invalid_data_file",
@@ -1179,6 +849,13 @@ def test_main_window_load_data_dialog_shows_user_facing_error(qapp, monkeypatch)
         lambda *args, **kwargs: ("/tmp/bad.hdf5", ""),
     )
 
+    def choose_file(dialog: RunLoadDialog) -> int:
+        button = dialog.findChild(QPushButton, "load_file")
+        assert button is not None
+        button.click()
+        return dialog.result()
+
+    monkeypatch.setattr(RunLoadDialog, "exec", choose_file)
     window.load_tab_data_dialog("tab-1")
 
     window.show_error_dialog.assert_called_once()
@@ -1693,11 +1370,11 @@ def test_exp_tab_detach_preserves_resource_for_later_views(qapp):
     assert other.cfg_form.is_valid() == (after.status.value == "Valid")
 
 
-def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
-    from dataclasses import replace
-    from typing import Any, cast
-
+def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
+    qapp, request: pytest.FixtureRequest
+):
     from qtpy.QtWidgets import QComboBox, QWidget
+    from zcu_tools.cfg_model import module_spec_from_raw
     from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
     from zcu_tools.gui.app.measure.specs import make_pulse_spec
     from zcu_tools.gui.cfg import (
@@ -1707,15 +1384,15 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
         ReferenceSpec,
         ReferenceValue,
     )
-    from zcu_tools.gui.session.events import MlChangedPayload
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
+    from zcu_tools.resources.entry import ComponentSchema, component_registry
 
     from tests.gui.app.measure.remote._helpers import Fixture
     from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
+    component_registry.register("test/ui-linked", ComponentSchema)
+    request.addfinalizer(lambda: component_registry.unregister("test/ui-linked"))
     fx = Fixture(headless=True)
-    ml = ModuleLibrary(None)
-    fx.state.set_context(replace(fx.state.session_env, md=MetaDict(None), ml=ml))
+    fx.ctrl.context_control.add_component("Q1", "test/ui-linked", {})
     raw = {
         "type": "pulse",
         "waveform": {"style": "const", "length": 1.0},
@@ -1734,11 +1411,18 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
         CfgSectionSpec(
             fields={"drive": ReferenceSpec("module", [spec], label="Drive")}
         ),
-        CfgSectionValue({"drive": ReferenceValue("drive-pulse", value)}),
+        CfgSectionValue({"drive": ReferenceValue("Q1.pulses.drive", value)}),
     )
-    cfg = fx.prepare_tab("tab-1", FakeAdapter(), schema)
-    tab = ExpTabWidget("tab-1", fx.ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
-    snapshot = _snapshot("tab-1", has_run_result=False)
+
+    class LinkedAdapter(FakeAdapter):
+        def make_default_cfg(self, ctx):
+            return schema
+
+    fx.registry.register("linked", LinkedAdapter)
+    tab_id = fx.ctrl.new_tab("linked")
+    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
+    tab = ExpTabWidget(tab_id, fx.ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
+    snapshot = _snapshot(tab_id, has_run_result=False)
 
     class GateActions(_RecordingTabActions):
         def refresh_interaction(self, tab_id):
@@ -1748,12 +1432,16 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
     tab.attach(snapshot, GateActions())
     assert not tab.cfg_form.is_valid()
     assert not tab.run_btn.isEnabled()
-    ml.modules["drive-pulse"] = cast(Any, raw)
-    fx.bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
+    context = fx.ctrl.context_control
+    context.set_module(
+        context.read_context().target,
+        "Q1.pulses.drive",
+        module_spec_from_raw(raw),
+    )
     widget = tab.cfg_form.findChild(QWidget, "cfgInput:drive")
     assert widget is not None
     combo = widget.findChild(QComboBox)
-    assert combo is not None and combo.currentText() == "Lib: drive-pulse"
+    assert combo is not None and combo.currentText() == "Lib: Q1.pulses.drive"
     assert tab.cfg_form.is_valid()
     assert tab.run_btn.isEnabled()
     assert cfg.observe().status.value == "Valid"
@@ -1788,30 +1476,37 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     tab.attach(snapshot, actions)
 
     assert tab.run_btn.isEnabled() is True
-    assert tab._save_center.is_load_visible()
-    assert tab._save_center.is_load_enabled() is True
+    load = next(
+        button
+        for button in tab.findChildren(QPushButton)
+        if button.text() == "Load Data"
+    )
+    assert load.isHidden() is False
+    assert load.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True
     assert tab.post_analyze_btn.isEnabled() is True
-    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is True
-    assert (
-        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.ANALYSIS, "fit"))
-        is True
-    )
-    assert (
-        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit"))
-        is True
-    )
+    saves = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(saves) == 3
+    assert all(button.isEnabled() for button in saves)
 
     actions.calls.clear()
     tab.run_btn.click()
-    tab._save_center.load_button.click()
+    load.click()
     tab.analyze_btn.click()
     tab.post_analyze_btn.click()
     tab.writeback_widget.apply_requested.emit()
     tab.post_writeback_widget.apply_requested.emit()
-    tab._save_center.save_button(ArtifactKey(ArtifactKind.DATA)).click()
-    tab._save_center.save_button(ArtifactKey(ArtifactKind.ANALYSIS, "fit")).click()
-    tab._save_center.save_button(ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")).click()
+    for button in saves:
+        button.click()
+    save_all = next(
+        button
+        for button in tab.findChildren(QPushButton)
+        if button.text() == "Save All"
+    )
+    assert save_all.isEnabled()
+    save_all.click()
 
     assert actions.calls == [
         ("run_or_stop", "tab-1"),
@@ -1820,9 +1515,10 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
         ("post_analyze", "tab-1"),
         ("apply_writeback", "tab-1"),
         ("apply_post_writeback", "tab-1"),
-        ("save_data", "tab-1"),
-        ("save_image", "tab-1", ArtifactKey(ArtifactKind.ANALYSIS, "fit")),
-        ("save_image", "tab-1", ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")),
+        ("save_artifact", "tab-1", ArtifactRef("run", "measurement_data")),
+        ("save_artifact", "tab-1", ArtifactRef("analysis", "results")),
+        ("save_artifact", "tab-1", ArtifactRef("post_analysis", "results")),
+        ("save_all", "tab-1"),
     ]
 
 

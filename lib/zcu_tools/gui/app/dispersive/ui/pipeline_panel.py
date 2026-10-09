@@ -619,7 +619,7 @@ class PipelinePanelWidget(QWidget):
         fluxs = np.array([s.flux for s in samples], dtype=np.float64)
         try:
             rf_0, rf_1 = self._ctrl.predict_sample_points(fluxs, g, bare_rf)
-        except Exception:  # noqa: BLE001 — a sample dot must not break tuning
+        except Exception:  # a sample dot must not break tuning
             logger.exception("sample-point prediction failed")
             return
         for sample, r0, r1 in zip(samples, rf_0, rf_1):

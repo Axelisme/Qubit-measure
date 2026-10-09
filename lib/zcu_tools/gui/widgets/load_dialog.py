@@ -163,7 +163,7 @@ class LoadDataDialog(QDialog):
             y = ld.axes[1].values if len(ld.axes) > 1 else None
             signals = ld.z.T if y is not None else ld.z
             return signals, x, y
-        except Exception:  # noqa: BLE001 — preview is best-effort; never crash the dialog
+        except Exception:  # preview is best-effort; never crash the dialog
             logger.exception("preview read failed for %r", filepath)
             return None
 

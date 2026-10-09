@@ -352,7 +352,6 @@ def plot_dispersive_with_onetone(
 
     for i, rf in enumerate(plot_rfs):
         rf = rf.copy()
-        # rf[np.abs(np.diff(rf, prepend=rf[0])) > 0.5 * np.ptp(sp_freqs)] = np.nan
         diff_rf = np.diff(rf, prepend=rf[0])
         for j in range(1, len(diff_rf) - 1):
             sign_j = np.sign(diff_rf[j])

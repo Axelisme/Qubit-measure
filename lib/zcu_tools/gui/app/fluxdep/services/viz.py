@@ -226,7 +226,7 @@ def render_fit_figure(
     handles, labels = ax.get_legend_handles_labels()
     keep = [
         (handle, label)
-        for handle, label in zip(handles, labels)
+        for handle, label in zip(handles, labels, strict=False)
         if not label.startswith("_")
     ]
     if keep:

@@ -36,6 +36,7 @@ from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request, parse_request
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import GateChangedPayload
 from zcu_tools.gui.session.operation_handles import OperationOutcome
@@ -100,7 +101,7 @@ def attachment(
         context = harness.services.context
         context.install_entry(entry)
         context.use_point(PointUseRequest("source"))
-        context.set_component_focus("Q1")
+        context.set_alias_rows((AliasRow("qubit", "Q1"),))
         context.set_parameter(
             context.read_context().target, "general.ext.guess_us", 20.0
         )
@@ -681,10 +682,10 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     paused = controller.status()
     assert paused is not None and paused.lifecycle == "paused"
 
-    # Resume must not capture this later point/focus as new run inputs.
+    # Resume must not capture this later point/alias as new run inputs.
     entry.new_point("later")
     harness.services.context.use_point(PointUseRequest("later"))
-    harness.services.context.set_component_focus(None)
+    harness.services.context.set_alias_rows((AliasRow("qubit", ""),))
     assert captured == [0.12]
     assert controller.operation_id == token and harness.gate.snapshot()
     assert harness.handles.known_outcome(token) is None
@@ -1718,7 +1719,7 @@ def test_mcp_native_controls_keep_capture_lease_and_record_revisions(
     context.set_parameter(context.read_context().target, "general.ext.guess_us", 99.0)
     entry.new_point("later-mcp")
     context.use_point(PointUseRequest("later-mcp"))
-    context.set_component_focus(None)
+    context.set_alias_rows((AliasRow("qubit", ""),))
     inspected = mcp_tools["workflows_workflow_form"]["handler"](
         {"form": "tunables", "run_id": "mcp-controls"}
     )
@@ -2280,7 +2281,7 @@ def test_rpc_pause_resume_retains_token_lease_and_reads_live_devices(
 
     entry.new_point("later-rpc")
     harness.services.context.use_point(PointUseRequest("later-rpc"))
-    harness.services.context.set_component_focus(None)
+    harness.services.context.set_alias_rows((AliasRow("qubit", ""),))
     captures: list[bool] = []
 
     def capture() -> dict[str, DeviceInfo]:

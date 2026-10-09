@@ -10,8 +10,9 @@ from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryDraft
-from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -56,7 +57,10 @@ def captured_pi_env(inputs: Inputs) -> Iterator[FormEnv]:
             ),
             library=library,
             target=EntryDraft(entry_id="entry"),
-            roles=RoleBinding("Q1", {"qubit": RoleSpec(kind)}, {"qubit": "Q1"}),
+            roles=None,
+        )
+        parameters = parameters.bind_aliases(
+            (AliasRow("qubit", "Q1"),), {"qubit": RoleSpec(kind)}
         )
         yield FormEnv(parameters=parameters, library=library)
     finally:
@@ -69,7 +73,7 @@ def test_pi_default_uses_captured_x180_and_remains_user_editable(
 ) -> None:
     env = captured_pi_env
     default = T1PlanForm.default_input(env)
-    assert default.data["pi_length_us"] == {"expr": "qubit.module.x180.waveform.length"}
+    assert default.data["pi_length_us"] == {"expr": "Q1.module.x180.waveform.length"}
     data = inline_input(inputs).data
     data["pi_length_us"] = default.data["pi_length_us"]
     state = FormState(FormInput(T1PlanForm, data))

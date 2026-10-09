@@ -9,8 +9,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
-from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer
+from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QDialog,

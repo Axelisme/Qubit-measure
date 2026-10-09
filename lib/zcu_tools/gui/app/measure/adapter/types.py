@@ -10,6 +10,7 @@ from typing import (
     Any,
     Generic,
     Protocol,
+    runtime_checkable,
 )
 
 from typing_extensions import TypeVar
@@ -128,6 +129,7 @@ class AnalyzeResultBase:
         return result
 
 
+@runtime_checkable
 class AnalyzeResult(Protocol):
     """Numeric analysis payload; figures belong to the operation's plots."""
 
@@ -173,10 +175,11 @@ class RunRequest:
 
 @dataclass(frozen=True)
 class LoadDataRequest:
-    """Canonical result file path and the destination tab's fixed parameter capture.
+    """Canonical result file path and current-source capture fixed for this Load.
 
-    data_path identifies the file consumed by the adapter. parameters is the
-    tab-opening capture, or None for an adapter without parameter roles.
+    data_path identifies the file consumed by the adapter. parameters contains
+    the point/library/storage and aliases observed when Load starts, or None
+    when no parameter context is installed. It never replaces native history.
     """
 
     data_path: str

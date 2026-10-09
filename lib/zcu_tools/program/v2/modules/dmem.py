@@ -120,7 +120,7 @@ class LoadValue(Module):
                 word_reg = ""  # not use
 
             if not self._is_compressed:
-                # addr = idx [+ offset]
+                # Use the index register plus the optional offset as the address.
                 if self.offset == 0:
                     prog.write_reg(addr_reg, self.idx_reg)
                 else:

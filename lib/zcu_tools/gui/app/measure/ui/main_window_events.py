@@ -19,7 +19,6 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
-    ComponentFocusChangedPayload,
     ContextSwitchedPayload,
     PredictorChangedPayload,
     SocChangedPayload,
@@ -49,9 +48,6 @@ class MainWindowEventHost(Protocol):
     def refresh_tab_writeback(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
-    def refresh_tab_save_paths(
-        self, tab_id: str, snapshot: TabSnapshot | None = None
-    ) -> None: ...
     def refresh_tab_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
@@ -59,9 +55,6 @@ class MainWindowEventHost(Protocol):
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None: ...
     def clear_tab_plot(self, tab_id: str) -> None: ...
-    def refresh_tab_roles(self, tab_id: str, snapshot: TabSnapshot) -> None:
-        """Project committed roles to rolebar/title, preserving activity and panes."""
-        ...
 
     def refresh_tab_interaction(
         self, tab_id: str, snapshot: TabSnapshot | None = None
@@ -74,7 +67,6 @@ class MainWindowEventHost(Protocol):
 
 
 class _TabReaction(Enum):
-    ROLES = auto()
     ANALYZE_FORM = auto()
     POST_ANALYZE_FORM = auto()
     WRITEBACK = auto()
@@ -82,7 +74,6 @@ class _TabReaction(Enum):
     POST_FIGURE = auto()
     INTERACTION = auto()
     CLEAR_PLOT = auto()
-    SAVE_PATHS = auto()
 
 
 _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
@@ -127,15 +118,11 @@ _INTERACTION_REACTIONS: dict[TabInteractionFact, tuple[_TabReaction, ...]] = {
     TabInteractionFact.ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.POST_ANALYZE_PARAMS_CHANGED: (),
     TabInteractionFact.SAVE_PATHS_CHANGED: (),
-    TabInteractionFact.SAVE_DRAFT_COMMITTED: (
-        _TabReaction.SAVE_PATHS,
-        _TabReaction.INTERACTION,
-    ),
+    TabInteractionFact.SAVE_DRAFT_COMMITTED: (_TabReaction.INTERACTION,),
     TabInteractionFact.WRITEBACK_DRAFT_CHANGED: (_TabReaction.WRITEBACK,),
 }
 
 _CONTENT_REACTIONS: dict[TabContentFact, tuple[_TabReaction, ...]] = {
-    TabContentFact.ROLES_COMMITTED: (_TabReaction.ROLES, _TabReaction.INTERACTION),
     TabContentFact.RUN_RESULT_COMMITTED: (
         _TabReaction.ANALYZE_FORM,
         _TabReaction.POST_ANALYZE_FORM,
@@ -221,9 +208,6 @@ class MainWindowEventCoordinator:
         self._subs.subscribe(bus, RunStartedPayload, self._on_run_started)
         self._subs.subscribe(bus, RunFinishedPayload, self._on_run_finished)
         self._subs.subscribe(bus, ContextSwitchedPayload, self._on_context_switched)
-        self._subs.subscribe(
-            bus, ComponentFocusChangedPayload, self._on_component_focus_changed
-        )
         self._subs.subscribe(bus, TabAddedPayload, self._on_tab_added)
         self._subs.subscribe(bus, TabClosedPayload, self._on_tab_closed)
         self._subs.subscribe(bus, TabActivatedPayload, self._on_tab_activated)
@@ -260,18 +244,11 @@ class MainWindowEventCoordinator:
         self._react_to_tab(payload.tab_id, (_TabReaction.INTERACTION,))
         self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
 
-    def _on_component_focus_changed(
-        self, payload: ComponentFocusChangedPayload
-    ) -> None:
-        del payload
-        self._host.refresh_context_panel()
-
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
         self._host.refresh_context_panel()
         for tab_id in self._host.view_tab_ids():
             snapshot = self._ctrl.get_tab_snapshot(tab_id)
-            self._host.refresh_tab_save_paths(tab_id, snapshot)
             self._host.refresh_tab_interaction(tab_id, snapshot)
 
     def _on_tab_added(self, payload: TabAddedPayload) -> None:
@@ -293,7 +270,6 @@ class MainWindowEventCoordinator:
             return
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
         actions = {
-            _TabReaction.ROLES: lambda: self._host.refresh_tab_roles(tab_id, snapshot),
             _TabReaction.ANALYZE_FORM: lambda: self._host.refresh_tab_analyze_form(
                 tab_id, snapshot
             ),
@@ -313,9 +289,6 @@ class MainWindowEventCoordinator:
                 tab_id, snapshot
             ),
             _TabReaction.CLEAR_PLOT: lambda: self._host.clear_tab_plot(tab_id),
-            _TabReaction.SAVE_PATHS: lambda: self._host.refresh_tab_save_paths(
-                tab_id, snapshot
-            ),
         }
         for reaction in reactions:
             actions[reaction]()

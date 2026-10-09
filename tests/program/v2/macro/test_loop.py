@@ -13,7 +13,7 @@ from zcu_tools.program.v2.macro.meta import MetaMacro
 from zcu_tools.program.v2.macro.write_reg import WriteRegOp
 
 # ---------------------------------------------------------------------------
-# needs_big_jump (centralised in ir.dispatch)
+# Check big-jump requirements through the shared ir.dispatch helper.
 # ---------------------------------------------------------------------------
 
 
@@ -104,7 +104,8 @@ def test_open_inner_loop_runtime_n_has_guard(mock_prog):
     macro = OpenInnerLoop("lp", counter_reg="r0", n="n_reg")
     result = macro.expand(mock_prog)
 
-    # MetaMacro(LOOP_START), guard_jump(s), WriteReg, Label, MetaMacro(LOOP_BODY_START)
+    # Start with LOOP_START metadata, then guard jumps, WriteReg, the start label,
+    # and LOOP_BODY_START metadata.
     assert isinstance(result[0], MetaMacro)
     assert result[0].type == "LOOP_START"
 
@@ -136,7 +137,8 @@ def _expand_close(prog, name="lp", counter_reg="r0", n=10):
 def test_close_inner_loop_structure(mock_prog):
     result = _expand_close(mock_prog)
 
-    # WriteRegOp, MetaMacro(LOOP_BODY_END), cond_jump(s), Label(end), MetaMacro(LOOP_END)
+    # Emit WriteRegOp, then LOOP_BODY_END metadata, conditional jumps, the end
+    # label, and LOOP_END metadata.
     assert isinstance(result[0], WriteRegOp)
     assert result[0].op == "+"
     assert result[0].rhs == 1

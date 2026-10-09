@@ -11,9 +11,8 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import (
-    ComponentFocus,
-    ComponentOption,
     ContextSource,
     ContextSourceBinding,
     EntryDraft,
@@ -24,7 +23,7 @@ from zcu_tools.gui.session.context_types import (
     WorkingPointInfo,
 )
 from zcu_tools.gui.session.events import (
-    ComponentFocusChangedPayload,
+    AliasesChangedPayload,
     ContextSwitchedPayload,
     MdChangedPayload,
     MlChangedPayload,
@@ -46,7 +45,7 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 from zcu_tools.resources.entry import snapshot, source_path
-from zcu_tools.resources.entry.roles import resolve_names, role_registry
+from zcu_tools.resources.entry.roles import role_registry
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -68,13 +67,19 @@ if TYPE_CHECKING:
     )
     from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import SessionEnv
-    from zcu_tools.resources.entry import PointView, ResultEntry, RoleSpec, SetupView
+    from zcu_tools.resources.entry import (
+        ComponentSchema,
+        PointView,
+        ResultEntry,
+        RoleSpec,
+        SetupView,
+    )
     from zcu_tools.resources.entry.ledger import RecordsLedger
     from zcu_tools.resources.entry.provenance import Provenance
 
 
 class ContextService:
-    """Own entry/point installation, fixed parameter captures, and session focus.
+    """Own entry/point installation, fixed parameter captures, and global aliases.
 
     Commands and captures run on the creating owner thread. Resource preparation
     precedes publication, so failure never replaces a valid binding. The service
@@ -90,6 +95,7 @@ class ContextService:
         values: ValueLookup | None = None,
         *,
         bind_assets: Callable[[Path], WaveformAssetInfo],
+        alias_rows: tuple[AliasRow, ...] = (),
     ) -> None:
         """Use owner State/bus, optional value facade, and explicit asset binding.
 
@@ -97,6 +103,11 @@ class ContextService:
         installation. Its capability stays with the library capture, not a
         global Database selection. Binding errors abort publication. values
         defaults to State's facade and does not change parameter content/version.
+        alias_rows supplies the app's session-only default table. On the first
+        nonempty cached component snapshot, its empty primary shorthand row gets
+        the registry's sole default-focus candidate, or remains empty. Defaults
+        never reset on later point changes. An explicit set_alias_rows command,
+        even before any point, disables this one-time default initialization.
         """
         self._owner = OwnerThreadGuard()
         self._state = state
@@ -111,7 +122,11 @@ class ContextService:
         self._points: tuple[WorkingPointInfo, ...] = ()
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
-        self._focus = ComponentFocus(None, None, ())
+        self._aliases = AliasTable(alias_rows)
+        self._aliases_initialized = False
+        parameters = state.session_env.parameters
+        if parameters is not None and not parameters.source_faults:
+            self._initialize_aliases(parameters.document().components)
         if state.session_env.values is not self._values:
             state.set_context(replace(state.session_env, values=self._values))
 
@@ -121,7 +136,7 @@ class ContextService:
         Prepare setup, the complete point-description cache, and entry-scoped
         assets before replacing any binding. Failure retains the old binding,
         not deleting an entry already created by resources. Success bumps the
-        context once and publishes switch/focus facts after installation.
+        context once and publishes a switch fact after installation.
         """
         self._owner.assert_owner()
         setup = entry.setup
@@ -233,9 +248,9 @@ class ContextService:
         return SavedPoint(entry_id=entry.entry_id, point=request.label)
 
     def clear_context(self) -> None:
-        """Publish EMPTY, clear entry/point/focus, retaining non-parameter handles.
+        """Publish EMPTY, clear entry/point, retaining non-parameter handles.
 
-        Publish switch/focus facts after installation; do not delete resources.
+        Publish a switch fact after installation; do not delete resources.
         """
         self._owner.assert_owner()
         self._entry = None
@@ -270,10 +285,8 @@ class ContextService:
         setup=True edits only the opened entry template. Otherwise edit the
         current DRAFT in memory or ACTIVE point in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
-        Success on the current point publishes one parameter change and updates
-        focus options. If no focus is selected, the registry's sole candidate is
-        selected; existing focus is retained. Setup edits never change existing
-        points or their captures.
+        Success on the current point installs its source before publishing one
+        parameter change. Setup edits never change existing points or captures.
         No entry/context, schema, conflict and I/O errors propagate.
         """
         self._owner.assert_owner()
@@ -298,16 +311,6 @@ class ContextService:
                 )
             self._point.add_component(name, kind=kind, **fields)
             document = snapshot(self._point)
-        self._focus = replace(
-            self._focus,
-            name=self._focus.name
-            if self._focus.name is not None
-            else role_registry.default_focus(document.components),
-            components=tuple(
-                ComponentOption(component_name, component.kind)
-                for component_name, component in document.components.items()
-            ),
-        )
         self._publish_write(
             ParameterContext(
                 point=document,
@@ -318,7 +321,6 @@ class ContextService:
             ),
             parameter=True,
         )
-        self._bus.emit(ComponentFocusChangedPayload(focus=self.get_component_focus()))
 
     def set_setup_parameter(self, path: str, value: YamlValue) -> None:
         """Edit an existing concrete setup field in working units.
@@ -355,10 +357,69 @@ class ContextService:
             storage=parameters.storage,
         )
 
+    def get_alias_rows(self) -> tuple[AliasRow, ...]:
+        """Read immutable authored global rows without expanding links or I/O."""
+        self._owner.assert_owner()
+        return self._aliases.rows
+
+    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Commit the dialog's complete ordered table on the owner sequence.
+
+        Invalid syntax, duplicate names and non-backward $ links raise
+        InvalidInputError(alias_invalid) without changing rows or versions.
+        Bindings are checked only when read, not against the current point here.
+        A changed table bumps context once and publishes AliasesChangedPayload
+        after installation. An identical explicit submission publishes nothing
+        but still prevents later default initialization. No file or ledger write.
+        """
+        self._owner.assert_owner()
+        previous = self._aliases.rows
+        self._aliases.replace(rows)
+        self._aliases_initialized = True
+        if self._aliases.rows != previous:
+            self._state.version.bump("context")
+            self._bus.emit(AliasesChangedPayload(rows=self._aliases.rows))
+
+    def read_alias_context(
+        self,
+        declarations: Mapping[str, RoleSpec],
+        target: str | None = None,
+    ) -> ParameterContext | None:
+        """Capture current point/library/storage and authored global aliases.
+
+        Consumer declarations constrain kinds, never focus/via inference. No
+        target means lazy bindings: unbound aliases fail only when read. EMPTY
+        returns None for deferred cfg construction. Unavailable sources raise.
+        A target temporarily binds the first declared alias; its component and
+        kind must resolve now. Empty declarations/target raise InvalidInputError;
+        target with EMPTY raises FailedPreconditionError(no_context). Neither
+        global rows, source versions nor publications are changed by a target.
+        Returned captures retain no live callback and never follow later edits.
+        """
+        self._owner.assert_owner()
+        parameters = self._state.session_env.parameters
+        if parameters is None:
+            if target is not None:
+                raise FailedPreconditionError(
+                    "No parameter context is installed", reason_code="no_context"
+                )
+            return None
+        table = self._aliases
+        if target is not None:
+            if not declarations:
+                raise InvalidInputError("target requires a declared alias")
+            alias = next(iter(declarations))
+            table = table.with_override(alias, target)
+        captured = parameters.bind_aliases(table.rows, declarations)
+        if target is not None:
+            # Validate the one-use destination without copying or reading its fields.
+            captured.resolve_path(f"${next(iter(declarations))}.kind")
+        return captured
+
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.
 
-        Current entry, point and focus are not read. Source faults propagate;
+        Current entry and point are not read. Source faults propagate;
         draft/unbound captures raise FailedPreconditionError(storage_unavailable).
         No refresh, file write, output reservation or ledger append occurs.
         """
@@ -390,29 +451,6 @@ class ContextService:
             roles=roles,
             storage=capture_point_storage(point),
         )
-
-    def capture_roles(
-        self,
-        declarations: Mapping[str, RoleSpec],
-        *,
-        focus: str | None,
-        explicit: Mapping[str, str | None],
-    ) -> RoleBinding:
-        """Resolve declared roles once against the published point snapshot.
-
-        Explicit choices precede focus/via inference; None explicitly leaves
-        that role unbound. Omitted explicit keys allow inference. Return a
-        RoleBinding preserving the supplied focus and explicit manual choices.
-        Empty declarations remain empty. Automatic zero/multiple candidates leave roles unbound; actual
-        use fails later. Invalid explicit choices and dangling/wrong-kind
-        references raise RoleResolutionError here. EMPTY/source faults follow
-        read_context policy; no YAML/hardware read occurs.
-        """
-        parameters = self.read_context()
-        names = resolve_names(
-            parameters.document().components, declarations, focus, explicit
-        )
-        return RoleBinding(focus, declarations, names, explicit)
 
     def set_parameter(
         self,
@@ -562,7 +600,7 @@ class ContextService:
         """Apply one structure command to the captured target, lowering before writes.
 
         parameters supplies fixed expression/reference data and the destination.
-        change uses concrete library roots; it never resolves current focus.
+        change uses concrete library roots; it never resolves global aliases.
         App callbacks lower only put/replace schemas, without writing resources.
         Rename moves Spec and sources; delete does not cascade references.
         Replace checks source/destination and commits relocation plus value in
@@ -641,33 +679,11 @@ class ContextService:
         """Return only the currently opened entry's ledger; never append an event.
 
         No entry raises no_entry; a different UUID raises entry_not_open.
-        Use capture_storage(parameters).ledger for a tab's historical origin.
+        Use capture_storage(parameters).ledger for a result's historical origin.
         Ledger capabilities are not serialized into wire data.
         """
         self._owner.assert_owner()
         return self._require_entry(entry_id).ledger
-
-    def get_component_focus(self) -> ComponentFocus:
-        """Return cached target/name/component options without I/O or refresh."""
-        return deepcopy(self._focus)
-
-    def set_component_focus(self, name: str | None) -> ComponentFocus:
-        """Select an existing component or clear focus; reject unknown names.
-
-        Never change consumer roles or context/cfg revision. Publish a focus
-        fact only for a changed selection. None does not trigger auto-selection.
-        """
-        self._owner.assert_owner()
-        if name is not None and not any(
-            component.name == name for component in self._focus.components
-        ):
-            raise InvalidInputError(f"Unknown component {name!r}")
-        if name != self._focus.name:
-            self._focus = replace(self._focus, name=name)
-            self._bus.emit(
-                ComponentFocusChangedPayload(focus=self.get_component_focus())
-            )
-        return self.get_component_focus()
 
     def _require_open_entry(self) -> ResultEntry:
         if self._entry is None:
@@ -707,8 +723,26 @@ class ContextService:
             return self._library
         return entry.module_library(target.point)
 
+    def _initialize_aliases(self, components: Mapping[str, ComponentSchema]) -> None:
+        if self._aliases_initialized or not components:
+            return
+        self._aliases_initialized = True
+        if not role_registry.shorthand:
+            return
+        primary = role_registry.shorthand[0]
+        self._aliases.replace(
+            tuple(
+                AliasRow(row.alias, role_registry.default_focus(components) or "")
+                if row.alias == primary and not row.value
+                else row
+                for row in self._aliases.rows
+            )
+        )
+
     def _publish_write(self, parameters: ParameterContext, *, parameter: bool) -> None:
         """Install a committed projection/version before its single content fact."""
+        if not self._aliases_initialized and not parameters.source_faults:
+            self._initialize_aliases(parameters.document().components)
         self._state.set_context(replace(self._state.session_env, parameters=parameters))
         self._state.version.bump("context")
         payload = MdChangedPayload if parameter else MlChangedPayload
@@ -775,14 +809,7 @@ class ContextService:
         active_label: str,
     ) -> None:
         components = parameters.document().components if parameters is not None else {}
-        self._focus = ComponentFocus(
-            target=parameters.target if parameters is not None else None,
-            name=role_registry.default_focus(components),
-            components=tuple(
-                ComponentOption(name, component.kind)
-                for name, component in components.items()
-            ),
-        )
+        self._initialize_aliases(components)
         if parameters is None:
             self._source_binding = None
         else:
@@ -808,7 +835,6 @@ class ContextService:
                 sources=self.get_source_binding(),
             )
         )
-        self._bus.emit(ComponentFocusChangedPayload(focus=self.get_component_focus()))
 
     def get_session_env(self) -> SessionEnv:
         """Return the currently published environment; not a frozen Run snapshot."""

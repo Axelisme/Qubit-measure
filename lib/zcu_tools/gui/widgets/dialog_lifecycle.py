@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QDialog  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QDialog
 
 
 class DialogRefStore:

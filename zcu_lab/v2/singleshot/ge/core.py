@@ -314,11 +314,16 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
 
         # Validate and setup configuration
         if cfg.rounds != 1:
-            warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
+            warnings.warn(
+                "rounds will be overwritten to 1 for singleshot measurement",
+                stacklevel=1,
+            )
             cfg.rounds = 1
 
         if cfg.reps != 1:
-            warnings.warn("reps will be overwritten by singleshot measurement shots")
+            warnings.warn(
+                "reps will be overwritten by singleshot measurement shots", stacklevel=1
+            )
         cfg.reps = cfg.shots
 
         signals_buffer = SignalBuffer((2, cfg.shots))

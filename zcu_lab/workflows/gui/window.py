@@ -212,12 +212,12 @@ class T1WorkflowWindow(QWidget):
         state/services/runner/progress must be the same owning session. The
         progress service is borrowed directly from its composition root, not
         obtained through a wider control facet. owner marshals
-        plot commands to this thread. EMPTY or unselected focus builds partial
-        source-free drafts. A selected focus captures defaults; source errors
-        propagate without fallback. Start requires a saved point, native
-        QickConfig and connected SoC. setup_dialog is the retained shared Setup
-        instance over this session's setup_control. Selecting a qubit changes
-        Context focus only; Use source calls prepare_forms explicitly.
+        plot commands to this thread. EMPTY builds partial source-free drafts.
+        prepare_forms explicitly replaces drafts using the readable context
+        and its fixed global qubit alias capture. Source errors propagate without
+        fallback. Start requires a saved point, native QickConfig and connected
+        SoC. setup_dialog is the retained shared Setup instance over this
+        session's setup_control. Qubit changes use the existing alias dialog.
         parent controls Qt lifetime; closing during work requests Stop and keeps
         the window alive until terminal delivery. Once native work ends, on_close
         releases composition-owned resources. If it raises, close is rejected
@@ -390,12 +390,11 @@ class T1WorkflowWindow(QWidget):
 
     def _capture_env(self, devices: DeviceSnapshot) -> FormEnv:
         context = self._services.context
-        roles = context.capture_roles(
-            {"qubit": RoleSpec("qubit/*")},
-            focus=context.get_component_focus().name,
-            explicit={},
-        )
-        parameters = context.read_context(roles=roles)
+        parameters = context.read_alias_context({"qubit": RoleSpec("qubit/*")})
+        if parameters is None:
+            raise FailedPreconditionError(
+                "No parameter context is installed", reason_code="no_context"
+            )
         return FormEnv(
             parameters=parameters, library=parameters.library, devices=devices.items
         )

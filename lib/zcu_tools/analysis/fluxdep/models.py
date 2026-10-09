@@ -49,21 +49,26 @@ def energy2linearform(
     Bs = np.empty((N, K))
     Cs = np.empty((N, K))
 
-    if any(
-        map(
-            lambda name: transitions.get(name, []),
-            ["blue side", "red side", "mirror blue", "mirror red"],
-        )
-    ):
-        if "r_f" not in transitions:
-            raise ValueError(
-                "r_f is required for blue side, red side, mirror blue, and mirror red transitions"
+    if (
+        any(
+            map(
+                lambda name: transitions.get(name, []),
+                ["blue side", "red side", "mirror blue", "mirror red"],
             )
+        )
+        and "r_f" not in transitions
+    ):
+        raise ValueError(
+            "r_f is required for blue side, red side, mirror blue, and mirror red transitions"
+        )
     r_f = transitions.get("r_f", 0.0)
 
-    if any("mirror" in name for name in transitions.keys()):
-        if "r_f" not in transitions and "sample_f" not in transitions:
-            raise ValueError("sample_f is required for mirror transitions")
+    if (
+        any("mirror" in name for name in transitions)
+        and "r_f" not in transitions
+        and "sample_f" not in transitions
+    ):
+        raise ValueError("sample_f is required for mirror transitions")
     sample_f = transitions.get("sample_f", 0.0)
 
     idx = 0

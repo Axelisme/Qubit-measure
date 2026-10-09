@@ -34,7 +34,9 @@ from zcu_tools.gui.app.measure.remote.events import (
 )
 from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.event_bus import EventMeta
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
     ContextSwitchedPayload,
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
@@ -87,6 +89,7 @@ _EXPECTED_WIRE_NAMES = frozenset(
         "device_setup_started",
         "device_setup_finished",
         "context_switched",
+        "aliases_changed",
         "md_changed",
         "ml_changed",
         "soc_changed",
@@ -95,7 +98,7 @@ _EXPECTED_WIRE_NAMES = frozenset(
 
 
 def test_event_serializers_wire_names_locked():
-    """All 14 measure-gui EVENT_SERIALIZERS wire names are byte-identical to the
+    """All measure-gui EVENT_SERIALIZERS wire names are byte-identical to the
     documented set.  Any payload rename or accidental removal fails here first,
     before a connected agent notices silent breakage."""
     from zcu_tools.gui.app.measure.remote.events import (
@@ -114,7 +117,6 @@ def test_event_serializers_wire_names_locked():
 def test_all_event_serializer_payload_shapes_are_locked() -> None:
     from zcu_tools.gui.app.measure.remote.events import EVENT_SERIALIZERS
 
-    opaque = MagicMock()
     cases = [
         (
             TabAddedPayload(tab_id="tab-x", adapter_name="fake"),
@@ -156,7 +158,7 @@ def test_all_event_serializer_payload_shapes_are_locked() -> None:
             {"name": "flux", "outcome": "failed", "error_message": "boom"},
         ),
         (
-            ContextSwitchedPayload(md=opaque, ml=opaque),
+            ContextSwitchedPayload(binding_id=1, sources=None),
             {"requery": ["context.active"]},
         ),
         (
@@ -168,9 +170,13 @@ def test_all_event_serializer_payload_shapes_are_locked() -> None:
             {"requery": ["context.ml_get"]},
         ),
         (SocChangedPayload(soc=None, soccfg=None), {"connected": False}),
+        (
+            AliasesChangedPayload(rows=(AliasRow("qubit", "Q1"),)),
+            {"requery": ["tab.get_cfg"]},
+        ),
     ]
 
-    assert len(cases) == len(EVENT_SERIALIZERS) == 14
+    assert len(cases) == len(EVENT_SERIALIZERS) == 15
     for payload, expected in cases:
         assert EVENT_SERIALIZERS[type(payload)](payload) == expected
 
@@ -423,6 +429,24 @@ def test_unsubscribe_stops_push(fx):
         # RPC and verifying its reply comes back without a push in between.
         resp = call(sock, "state.has_context", rid="probe")
         assert resp["ok"] is True
+    finally:
+        sock.close()
+
+
+def test_aliases_changed_pushes_cfg_requery_without_live_source_objects(fx):
+    sock = open_client(fx.service.port)
+    try:
+        call(sock, "events.subscribe", {"events": ["aliases_changed"]})
+        fx.bus.emit(
+            AliasesChangedPayload(
+                rows=(
+                    AliasRow("qubit", "Q2"),
+                    AliasRow("resonator", "$qubit.resonator"),
+                )
+            )
+        )
+        msg = recv_push(sock, "aliases_changed")
+        assert msg["payload"] == {"requery": ["tab.get_cfg"]}
     finally:
         sock.close()
 

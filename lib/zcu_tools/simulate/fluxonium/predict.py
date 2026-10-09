@@ -145,8 +145,8 @@ class FluxoniumPredictor:
         phi0 = (cur_value + bias0 - self.flux_half) / self.flux_period + 0.5
 
         # Step 3: Enumerate equivalent flux candidates (periodic + mirror symmetry)
-        # Periodic: phi0 + n
-        # Mirror:   1 - phi0 + n
+        # Periodic equivalents shift phi0 by an integer n, giving phi0 + n.
+        # Mirror equivalents reflect phi0 and shift by n, giving 1 - phi0 + n.
         N = 2  # number of periods to consider in each direction
         candidate_fluxes = []
         for n in range(-N, N + 1):
@@ -162,9 +162,7 @@ class FluxoniumPredictor:
         ]
 
         # Step 5: Pick the candidate with minimum |bias|
-        best_bias = min(candidate_biases, key=lambda b: abs(b))
-
-        return best_bias
+        return min(candidate_biases, key=lambda b: abs(b))
 
     def update_bias(self, flux_bias: float) -> None:
         self._engine = FluxoniumPrediction(

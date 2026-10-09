@@ -11,13 +11,12 @@ paths via bg.last_on_done / on_error (same pattern as test_analyze.py).
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, PostAnalyzeRequest
+from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -32,7 +31,6 @@ from zcu_tools.gui.expected_error import (
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
-from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui._completion_helpers import on_post_analyze_failed
@@ -117,47 +115,6 @@ def _make_two_tab_state() -> State:
     state.update_tab_result("tab2", object())
     state.update_tab_analyze("tab2", object(), None)
     return state
-
-
-@pytest.mark.parametrize("context_free", [False, True])
-def test_post_uses_run_source_for_request_and_writeback_after_rebinding(
-    qapp,
-    result_sources: tuple[ParameterContext, ParameterContext],
-    context_free: bool,
-) -> None:
-    state = _make_state()
-    q1, q2 = result_sources
-    captured = None if context_free else q1
-    tab = state.get_tab("tab1")
-    run_result, primary_result = object(), object()
-    state.update_tab_result("tab1", run_result, parameters=captured)
-    state.update_tab_analyze("tab1", primary_result, None)
-    tab.parameters = q2
-    state.set_context(replace(state.session_env, parameters=q2))
-    writeback = MagicMock()
-    service, background = _make_service(state, EventBus(), writeback=writeback)
-    service.start_post_analyze("tab1", object(), plots=_plots())
-    state.set_context(replace(state.session_env, parameters=None))
-
-    assert background.last_work is not None
-    result = background.last_work()
-    assert isinstance(tab.adapter, MagicMock)
-    request = tab.adapter.post_analyze.call_args.args[0]
-    assert isinstance(request, PostAnalyzeRequest)
-    assert request.run_result is run_result
-    assert request.analyze_result is primary_result
-    assert request.parameters is captured
-    if request.parameters is not None:
-        assert request.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
-        assert request.parameters.value("source_qubit.rate") == 1.0
-    assert background.last_on_done is not None
-    background.last_on_done(result)
-    proposal = tab.adapter.get_post_writeback_items.call_args.args[0]
-    assert proposal.ctx.parameters is captured
-    assert writeback.create_draft.call_args.kwargs["parameters"] is captured
-    if proposal.ctx.parameters is not None:
-        assert proposal.ctx.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
-    assert tab.post_analysis.result is result
 
 
 def test_start_post_analyze_submits_to_bg(qapp):

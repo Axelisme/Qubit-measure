@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QHBoxLayout,
     QPushButton,
     QVBoxLayout,

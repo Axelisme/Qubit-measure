@@ -224,7 +224,7 @@ def test_device_mutation_is_globally_exclusive_and_blocks_same_device_read(qapp)
     gate.release(1)
 
 
-def test_cancel_missing_device_operation_is_failed_precondition(qapp):  # noqa: ARG001
+def test_cancel_missing_device_operation_is_failed_precondition(qapp):
     svc, _device = _make_svc()
 
     with pytest.raises(FailedPreconditionError, match="No operation") as exc_info:

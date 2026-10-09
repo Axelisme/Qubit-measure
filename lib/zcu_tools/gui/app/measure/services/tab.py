@@ -4,38 +4,27 @@ import logging
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-from zcu_tools.gui.app.measure.state import (
-    AnalysisPaneState,
-    PostAnalysisPaneState,
-    Session,
-    TabInteractionState,
-)
+from zcu_tools.gui.app.measure.state import Session, TabInteractionState
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.resource import (
     CfgObservation,
-    CfgPreconditionError,
-    CfgPreconditionReason,
+    CfgRef,
     CfgResolution,
-    CfgResource,
+    CfgStaleError,
 )
-from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import RoleResolutionError, RoleSpec
+from zcu_tools.resources.entry import RoleSpec
 
 from ..adapter import AnalysisMode, WritebackItem
 from .plot_lifecycle import release_retired_plots
 from .ports import (
     AnalysisPaneSnapshot,
-    PathResourceSnapshot,
     PostAnalysisPaneSnapshot,
     RunPaneSnapshot,
     SavePaneSnapshot,
-    TabPathsSnapshot,
     TabSnapshot,
 )
 
@@ -85,12 +74,13 @@ class TabService:
             [Mapping[str, RoleSpec], str | None], ParameterContext | None
         ],
     ) -> None:
-        """Inject fixed cfg sources and the current role capture operation.
+        """Inject owner-sequence captures and fixed cfg resolution construction.
 
-        captured_parameters receives ordered role declarations and an optional
-        explicit target for the first role. It resolves through the context owner;
-        empty declarations return None only when target is omitted. Missing context/roles propagate before
-        tab registration. cfg_resolution retains the supplied capture on refresh.
+        captured_parameters freezes current global sources for the declared
+        aliases. An optional target overrides only that capture's first alias;
+        EMPTY returns None unless a target was requested. Source/target errors
+        propagate before registration. Every cfg refresh/reset captures current
+        sources anew; cfg_resolution retains only its supplied fixed capture.
         """
         self._state = state
         self._registry = registry
@@ -101,12 +91,43 @@ class TabService:
         self._cfg_resolution = cfg_resolution
         self._captured_parameters = captured_parameters
 
+    def capture_parameters(
+        self, tab_id: str, *, target: str | None = None
+    ) -> ParameterContext | None:
+        """Freeze current point/library/aliases for an existing tab's consumer.
+
+        target overrides this capture's first declared alias, not session rows
+        or tab state. EMPTY yields None without a target. Unknown tab and source,
+        alias or target failures propagate; no observation guard is refreshed.
+        """
+        tab = self._state.get_tab(tab_id)
+        return self._captured_parameters(tab.adapter.parameter_roles(), target)
+
+    def preview_cfg(
+        self, tab_id: str, expected: CfgRef, *, target: str
+    ) -> CfgObservation:
+        """Preview one target's cfg without publishing or accepting a Run.
+
+        Require an existing tab and its exact observed identity/revision.
+        Resolve current inputs from the same capture owner as Run admission.
+        Stale refs, source/target failures and cfg notification guards propagate.
+        Return Valid or Invalid; do not change aliases, inputs or revision.
+        """
+        tab = self._state.get_tab(tab_id)
+        actual = tab.cfg.observe().ref
+        if expected != actual:
+            raise CfgStaleError(expected, actual)
+        parameters = self.capture_parameters(tab_id, target=target)
+        return tab.cfg.preview(
+            expected.revision, resolution=self._cfg_resolution(parameters)
+        )
+
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
         populated). The persist/restore form of ``TabSnapshot`` is produced
         elsewhere (codec / restore) with the live fields left empty."""
         tab = self._state.get_tab(tab_id)
-        ctx = replace(self._state.session_env, parameters=tab.parameters)
+        ctx = self._state.session_env
         is_running = self._state.is_tab_running(tab_id)
         interaction = TabInteractionState(
             global_run_active=self._state.is_run_active() and not is_running,
@@ -115,35 +136,11 @@ class TabService:
             has_soc=ctx.has_soc(),
             is_running=is_running,
             is_analyzing=tab.is_analyzing,
-            is_saving_data=tab.is_saving_data,
             has_run_result=tab.has_run_result(),
             has_analyze_result=tab.has_analyze_result(),
             has_figure=tab.has_figure(),
             has_post_analyze_result=tab.has_post_analyze_result(),
         )
-        data_path = PathResourceSnapshot(
-            override=tab.save.data_path_override,
-            path=tab.effective_data_path(ctx),
-        )
-
-        def image_paths(
-            kind: ArtifactKind,
-            pane: AnalysisPaneState[Any, Any] | PostAnalysisPaneState[Any, Any],
-        ) -> Mapping[str, PathResourceSnapshot]:
-            if pane.plots is None or pane.result is None:
-                return MappingProxyType({})
-            return MappingProxyType(
-                {
-                    name: PathResourceSnapshot(
-                        override=pane.image_path_overrides.get(name),
-                        path=tab.effective_image_path(ctx, ArtifactKey(kind, name)),
-                    )
-                    for name in pane.plots
-                }
-            )
-
-        analysis_image_paths = image_paths(ArtifactKind.ANALYSIS, tab.analysis)
-        post_image_paths = image_paths(ArtifactKind.POST_ANALYSIS, tab.post_analysis)
 
         # Pane-owned writeback items via opaque drafts.
         def _items_for_pane(pane) -> tuple[WritebackItem, ...]:
@@ -164,13 +161,13 @@ class TabService:
                 result=tab.run.result,
                 source_path=tab.run.source_path,
                 source_operation_id=tab.run.source_operation_id,
+                run_id=tab.run.confirmed_run_id,
             ),
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,
                 result=tab.analysis.result,
                 figures=tab.analysis.plots,
                 writeback_items=analysis_items,
-                image_paths=analysis_image_paths,
                 has_writeback_draft=tab.analysis.writeback_draft is not None,
                 source_operation_id=tab.analysis.source_operation_id,
                 result_params=tab.analysis.result_params,
@@ -180,91 +177,30 @@ class TabService:
                 result=tab.post_analysis.result,
                 figures=tab.post_analysis.plots,
                 writeback_items=post_items,
-                image_paths=post_image_paths,
                 has_writeback_draft=tab.post_analysis.writeback_draft is not None,
                 source_operation_id=tab.post_analysis.source_operation_id,
                 result_params=tab.post_analysis.result_params,
             ),
-            save=SavePaneSnapshot(data_path=data_path, comment=tab.save.comment),
-            paths=TabPathsSnapshot(
-                data=data_path,
-                analysis_images=analysis_image_paths,
-                post_analysis_images=post_image_paths,
-            ),
+            save=SavePaneSnapshot(comment=tab.save.comment),
             artifacts=self._state.get_artifact_snapshots(tab_id),
-            parameters=tab.parameters,
         )
-
-    def set_role(self, tab_id: str, role: str, component: str | None) -> None:
-        """Commit a manual choice/None clear and refresh this idle tab's cfg.
-
-        Re-infer all non-manual roles from this capture's declarations/focus.
-        RoleResolutionError rejects invalid names/kinds/roles before mutation.
-        FailedPreconditionError rejects busy/roleless tabs. CfgPreconditionError
-        rejects any tab cfg notification reentrancy. Preserve resource identity,
-        cfg inputs and historical pane/save captures. Facet publishes the fact.
-        """
-        self._commit_role_change(tab_id, role, {role: component})
-
-    def reset_role(self, tab_id: str, role: str) -> None:
-        """Remove one manual choice, re-infer and refresh; set_role errors apply."""
-        self._commit_role_change(tab_id, role, {})
-
-    def _commit_role_change(
-        self, tab_id: str, role: str, manual_choice: Mapping[str, str | None]
-    ) -> None:
-        # An empty choice removes the manual key; None is a deliberate clear.
-        resources = tuple(
-            self._state.get_tab(key).cfg for key in self._state.list_tab_ids()
-        )
-        if CfgResource.notifications_active(resources):
-            raise CfgPreconditionError(
-                CfgPreconditionReason.REENTRANT_MUTATION,
-                "Role mutation is forbidden during cfg notification",
-            )
-        tab = self._state.get_tab(tab_id)
-        if self._state.is_tab_busy(tab_id):
-            raise FailedPreconditionError(f"Cannot rebind roles on busy tab {tab_id!r}")
-        parameters = tab.parameters
-        roles = parameters.roles if parameters is not None else None
-        if parameters is None or roles is None or not roles.declarations:
-            raise FailedPreconditionError("Tab has no declared roles")
-        if role not in roles.declarations:
-            raise RoleResolutionError(role, roles.focus, None, "Role is not declared")
-        explicit = dict(roles.explicit)
-        explicit.pop(role, None)
-        explicit.update(manual_choice)
-        candidate = parameters.bind_roles(
-            roles.declarations, focus=roles.focus, explicit=explicit
-        )
-        revision = tab.cfg.observe().ref.revision
-        self._state.update_tab_parameters(tab_id, candidate)
-        tab.cfg.refresh(revision)
 
     def new_tab(
         self,
         adapter_name: str,
         from_dict: TabSnapshot | None = None,
-        *,
-        target: str | None = None,
     ) -> str:
-        """Create a tab with roles and cfg sources captured once.
+        """Create a tab cfg whose refresh/reset reads current global sources.
 
-        target=None uses current GUI focus. A non-empty component name explicitly
-        binds the adapter's first declared role; dependent roles still use their
-        declared inference. It never changes GUI focus. Automatic inference with
-        zero/multiple choices leaves aliases unbound and still creates the tab.
-        Cfgs that use them publish Invalid. Explicit invalid choices and actual
-        dangling/wrong-kind references raise before tab registration. An empty target or a
-        target on a roleless adapter raises InvalidInputError.
+        Defaults use current global aliases, not focus or via inference. Unbound
+        aliases still permit tab creation; cfgs that consume them are Invalid.
+        The tab retains no source capture; Run admission captures its own inputs.
 
         ``from_dict is None`` → a fresh tab with the adapter's default cfg.
         ``from_dict`` given (restore) → rebuild the tab from the snapshot's
         detached ``cfg_schema`` input memento. Path overrides are process-local and not
         persisted, so restore creates fresh panes.
         """
-        if target is not None and not target.strip():
-            raise InvalidInputError("target must be a non-empty component name")
         adapter = self._registry.create(adapter_name)
         tab_id = f"{_slug(adapter_name)}-{uuid.uuid4().hex[:8]}"
         logger.info(
@@ -273,16 +209,9 @@ class TabService:
             tab_id,
             from_dict is not None,
         )
-        parameters = self._captured_parameters(adapter.parameter_roles(), target)
-        save_context = (
-            parameters if parameters is not None else self._state.session_env.parameters
-        )
 
         def current_parameters() -> ParameterContext | None:
-            # Creation precedes registration; later refresh/reset uses the tab capture.
-            if self._state.has_tab(tab_id):
-                return self._state.get_tab(tab_id).parameters
-            return parameters
+            return self._captured_parameters(adapter.parameter_roles(), None)
 
         cfg = self._cfg_resources.create(
             tab_id,
@@ -298,8 +227,6 @@ class TabService:
                 adapter_name=adapter_name,
                 adapter=adapter,
                 cfg=cfg,
-                parameters=parameters,
-                save_context=save_context,
             ),
         )
 
@@ -411,23 +338,3 @@ class TabService:
 
     def get_tab_post_analyze_result(self, tab_id: str) -> object | None:
         return self._state.get_tab(tab_id).post_analysis.result
-
-    def get_tab_data_path(self, tab_id: str) -> str | None:
-        tab = self._state.get_tab(tab_id)
-        return tab.effective_data_path(
-            replace(self._state.session_env, parameters=tab.parameters)
-        )
-
-    def get_tab_image_path(self, tab_id: str, key: ArtifactKey) -> str | None:
-        tab = self._state.get_tab(tab_id)
-        return tab.effective_image_path(
-            replace(self._state.session_env, parameters=tab.parameters), key
-        )
-
-    def update_tab_data_path_override(self, tab_id: str, data_path: str | None) -> None:
-        self._state.update_tab_data_path_override(tab_id, data_path)
-
-    def update_tab_image_path_override(
-        self, tab_id: str, key: ArtifactKey, image_path: str | None
-    ) -> None:
-        self._state.update_tab_image_path_override(tab_id, key, image_path)

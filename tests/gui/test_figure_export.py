@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 
+import pytest
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from PIL import Image
@@ -13,6 +14,7 @@ from zcu_tools.gui.app.measure.figure_export import (
     SAVE_DPI,
     SAVE_FIGSIZE,
     render_figure_preview_png,
+    render_save_figure_png,
     save_figure_to_path,
 )
 
@@ -44,6 +46,37 @@ def test_data_preview_uses_save_logical_geometry_at_small_raster_size():
         assert tuple(fig.get_size_inches()) == (5.0, 4.0)
     finally:
         fig.clear()
+
+
+def test_native_png_encoder_preserves_owner_geometry_and_canvas():
+    figure = Figure(figsize=(5, 4), dpi=80)
+    canvas = FigureCanvasAgg(figure)
+    try:
+        png = render_save_figure_png(figure)
+        assert Image.open(io.BytesIO(png)).size == (1800, 1350)
+        assert tuple(figure.get_size_inches()) == (5, 4)
+        assert figure.dpi == 80
+        assert figure.canvas is canvas
+    finally:
+        figure.clear()
+
+
+def test_native_png_render_failure_restores_display(monkeypatch: pytest.MonkeyPatch):
+    figure = Figure(figsize=(5, 4), dpi=80)
+    canvas = FigureCanvasAgg(figure)
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(figure, "savefig", fail)
+    try:
+        with pytest.raises(RuntimeError, match="render failed"):
+            render_save_figure_png(figure)
+        assert tuple(figure.get_size_inches()) == (5, 4)
+        assert figure.dpi == 80
+        assert figure.canvas is canvas
+    finally:
+        figure.clear()
 
 
 def test_save_to_path_keeps_full_save_size(tmp_path):

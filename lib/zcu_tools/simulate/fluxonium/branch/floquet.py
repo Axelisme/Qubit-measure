@@ -116,7 +116,7 @@ class _BaseFloquetBranchAnalysis:
         return {
             b: [
                 calc_pop(fstates_t, i)
-                for fstates_t, i in zip(fstates_t_n, branch_infos[b])
+                for fstates_t, i in zip(fstates_t_n, branch_infos[b], strict=False)
             ]
             for b in branch_infos.keys()
         }

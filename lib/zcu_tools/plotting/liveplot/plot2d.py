@@ -153,7 +153,7 @@ class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
 
         if segment1d_line_kwargs is not None:
             assert len(segment1d_line_kwargs) == num_lines
-            for lk, sk in zip(line_kwargs, segment1d_line_kwargs):
+            for lk, sk in zip(line_kwargs, segment1d_line_kwargs, strict=False):
                 lk.update(sk)
 
         segment1d = Plot1DSegment(

@@ -207,7 +207,7 @@ def _initialize_rendering(app: GuiApplication) -> None:
 
 
 def _get_or_create_qapplication() -> GuiApplication:
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+    from qtpy.QtWidgets import QApplication
 
     app = QApplication.instance()
     if app is None:

@@ -88,7 +88,7 @@ class NotifyUserDialog(QDialog):
         # singleShot → fires once; timeout is in milliseconds.
         self._timer: QTimer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self._on_timer)  # type: ignore[attr-defined]
+        self._timer.timeout.connect(self._on_timer)
         if timeout > 0:
             self._timer.start(int(timeout * 1000))
 

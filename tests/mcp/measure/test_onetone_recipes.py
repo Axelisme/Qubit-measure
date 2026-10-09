@@ -3,7 +3,6 @@
 import base64
 from contextlib import contextmanager
 from copy import deepcopy
-from pathlib import Path
 from threading import Event
 from typing import Any
 
@@ -437,10 +436,8 @@ def test_power_rejects_invalid_gain_inputs_before_preparation(tmp_path, argument
         )
 
 
-@pytest.mark.parametrize("failure", ["source", "base64", "png", "delivery"])
-def test_power_preview_failure_retains_the_saved_raw_and_true_run(
-    tmp_path, monkeypatch, failure
-):
+@pytest.mark.parametrize("failure", ["source", "base64", "png"])
+def test_power_preview_failure_retains_the_saved_raw_and_true_run(tmp_path, failure):
     gui = PowerGui()
     with recipe_client(tmp_path, gui) as client:
         if failure == "source":
@@ -461,25 +458,58 @@ def test_power_preview_failure_retains_the_saved_raw_and_true_run(
                     else base64.b64encode(b"not-png").decode()
                 },
             }
-        else:
-
-            def fail_write(png):
-                raise OSError("Image destination failed")
-
-            monkeypatch.setattr(client.context.session, "write_png", fail_write)
         reply = full_execution_reply(
-            client, client.call("onetone_spectrum_over_power", {})
+            client,
+            client.call(
+                "onetone_spectrum_over_power", {"center_mhz": 6100.0, "span_mhz": 20.0}
+            ),
         )
         assert isinstance(reply, ToolReply)
         assert reply.is_error
         assert reply.data["status"] == "failed"
-        assert reply.data["error"]["phase"] == "preview"
-        assert reply.data["raw_save"]["path"] == "/actual/raw.h5"
+        error = reply.data["error"]
+        assert error["reason"] == (
+            "result_superseded" if failure == "source" else "recipe_failed"
+        )
+        if failure == "source":
+            assert error["code"] == "precondition_failed"
+            assert "The source was replaced" in error["message"]
+        else:
+            assert ("base64" if failure == "base64" else "PNG") in error["message"]
+        assert reply.data["raw_save"] == {
+            "run_id": "run-a",
+            "artifacts": {
+                "raw": {
+                    "data": {
+                        "status": "Saved",
+                        "members": {
+                            "data": [
+                                {
+                                    "format": "data_h5",
+                                    "path": "/runs/run-a/data.h5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                                {
+                                    "format": "labber",
+                                    "path": "/labber/raw.hdf5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                            ]
+                        },
+                    }
+                }
+            },
+        }
         assert reply.data["run_outcome"]["status"] == "finished"
-        assert reply.data["preview"] is None
         assert reply.data["analysis"] is None
         assert reply.data["writeback"] is None
         assert not reply.images
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == methods.count("tab.save_data") == 1
+        assert methods.count("tab.get_figure") == 1
+        assert methods.index("tab.save_data") < methods.index("tab.get_figure")
 
 
 @pytest.mark.parametrize(
@@ -493,11 +523,9 @@ def test_power_cancel_does_not_suppress_fast_save_or_preview_after_completed_run
     gui = PowerGui()
 
     def respond(method, params):
-        should_block = (
-            phase == "raw_save"
-            and method == "operation.await"
-            and params["operation_id"] == 82
-        ) or (phase == "preview" and method == "tab.get_figure")
+        should_block = (phase == "raw_save" and method == "tab.save_data") or (
+            phase == "preview" and method == "tab.get_figure"
+        )
         if should_block:
             entered.set()
             assert release.wait(3)
@@ -508,7 +536,11 @@ def test_power_cancel_does_not_suppress_fast_save_or_preview_after_completed_run
     with recipe_client(tmp_path, respond) as client:
         try:
             initial = full_execution_reply(
-                client, client.call("onetone_spectrum_over_power", {})
+                client,
+                client.call(
+                    "onetone_spectrum_over_power",
+                    {"center_mhz": 6100.0, "span_mhz": 20.0},
+                ),
             )
             assert entered.wait(2)
             execution = initial.data["execution"]
@@ -520,10 +552,36 @@ def test_power_cancel_does_not_suppress_fast_save_or_preview_after_completed_run
             data = terminal.data
             assert data["status"] == ("failed" if fail else "finished")
             assert data["cancel_requested"]
-            assert data["raw_save"]["path"] == "/actual/raw.h5"
-            assert (data["preview"] is not None) is (not fail)
+            assert data["raw_save"] == {
+                "run_id": "run-a",
+                "artifacts": {
+                    "raw": {
+                        "data": {
+                            "status": "Saved",
+                            "members": {
+                                "data": [
+                                    {
+                                        "format": "data_h5",
+                                        "path": "/runs/run-a/data.h5",
+                                        "status": "saved",
+                                        "error": None,
+                                    },
+                                    {
+                                        "format": "labber",
+                                        "path": "/labber/raw.hdf5",
+                                        "status": "saved",
+                                        "error": None,
+                                    },
+                                ]
+                            },
+                        }
+                    }
+                },
+            }
+            assert [img.data for img in terminal.images] == ([] if fail else [PNG])
             if fail:
-                assert data["error"]["phase"] == "preview"
+                assert data["error"]["reason"] == "recipe_failed"
+                assert "base64" in data["error"]["message"]
             methods = [method for method, _ in client.transport.sent]
             assert "tab.get_figure" in methods
             assert "tab.analyze" not in methods
@@ -641,6 +699,21 @@ def test_onetone_power_number_ranges_publish_float_endpoints_and_integer_counts(
             },
             {"start": 0.1, "stop": 0.7, "expts": 7},
         ),
+        (
+            {"center_mhz": 6100.0, "span_mhz": 20.0},
+            {"start": 0.03, "stop": 0.27, "expts": 13},
+        ),
+        (
+            {
+                "reuse_tab_id": "t",
+                "center_mhz": 6100.0,
+                "span_mhz": 20.0,
+                "gain_range": [0.1, 0.7],
+                "gain_points": 7,
+                "freq_points": 23,
+            },
+            {"start": 0.1, "stop": 0.7, "expts": 7},
+        ),
     ],
 )
 def test_power_saves_raw_and_delivers_only_a_run_preview(
@@ -660,20 +733,41 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
         scalar_gain = data["actual"]["fields"]["modules.readout.pulse_cfg.gain"]
         assert scalar_gain["value"] == 0.21
         assert scalar_gain["source"] == "gui_default"
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
-        assert data["preview"]["kind"] == "run_preview"
-        assert Path(data["preview"]["path"]).read_bytes() == PNG
+        assert data["raw_save"] == {
+            "run_id": "run-a",
+            "artifacts": {
+                "raw": {
+                    "data": {
+                        "status": "Saved",
+                        "members": {
+                            "data": [
+                                {
+                                    "format": "data_h5",
+                                    "path": "/runs/run-a/data.h5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                                {
+                                    "format": "labber",
+                                    "path": "/labber/raw.hdf5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                            ]
+                        },
+                    }
+                }
+            },
+        }
         assert reply.images[0].data == PNG
         before = len(client.transport.sent)
         summary = client.call("status", {"execution": data["execution"]})
         waited = client.call("wait", {"execution": data["execution"], "timeout": 0})
-        assert summary["previews"] == {
-            "run": [data["preview"]["path"]],
-            "primary": [],
-            "post": [],
-        }
+        assert summary["artifacts"] == data["raw_save"]["artifacts"]
         assert (
-            initial.data["previews"] == waited.data["previews"] == summary["previews"]
+            initial.data["artifacts"]
+            == waited.data["artifacts"]
+            == summary["artifacts"]
         )
         assert summary["actual"]["parameters"]["gain"] == {
             "value": 0.21,
@@ -683,9 +777,7 @@ def test_power_saves_raw_and_delivers_only_a_run_preview(
             waited.data["actual"]["parameters"]["gain"]
             == summary["actual"]["parameters"]["gain"]
         )
-        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
-            {"path": "/actual/raw.h5", "status": "saved"}
-        ]
+        assert summary["run_id"] == waited.data["run_id"] == data["raw_save"]["run_id"]
         assert len(client.transport.sent) == before
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
@@ -792,7 +884,32 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
         assert fields["modules.readout.pulse_cfg.gain"]["value"] == 0.13
         assert fields["reps"]["value"] == 23
         assert fields["rounds"]["value"] == 7
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == {
+            "run_id": "run-a",
+            "artifacts": {
+                "raw": {
+                    "data": {
+                        "status": "Saved",
+                        "members": {
+                            "data": [
+                                {
+                                    "format": "data_h5",
+                                    "path": "/runs/run-a/data.h5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                                {
+                                    "format": "labber",
+                                    "path": "/labber/raw.hdf5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                            ]
+                        },
+                    }
+                }
+            },
+        }
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"]
         methods = [method for method, _ in client.transport.sent]
@@ -811,6 +928,94 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
             assert type(flux_edits[0]["start"]) is float
             assert type(flux_edits[0]["stop"]) is float
             assert type(flux_edits[0]["expts"]) is int
+
+
+def test_explicit_flux_saves_report_images_and_actual_conditions(tmp_path):
+    gui = FluxGui()
+    with recipe_client(tmp_path, gui) as client:
+        question = client.call(
+            "onetone_spectrum_over_flux",
+            {
+                "flux_device": "alternate",
+                "flux_unit": "V",
+                "flux_range": [0.01, 0.04],
+                "flux_points": 7,
+                "center_mhz": 6100.0,
+                "span_mhz": 20.0,
+            },
+        )
+        reply = full_execution_reply(client, skip_writeback(client, question))
+        data = reply.data
+        assert data["status"] == "finished", data
+        assert data["actual"]["fields"]["dev.flux_dev"] == {
+            "value": "alternate",
+            "unit": "V",
+            "source": "explicit",
+        }
+        assert data["actual"]["fields"]["sweep.flux"]["value"] == {
+            "start": 0.01,
+            "stop": 0.04,
+            "expts": 7,
+        }
+        assert data["raw_save"] == {
+            "run_id": "run-a",
+            "artifacts": {
+                "raw": {
+                    "data": {
+                        "status": "Saved",
+                        "members": {
+                            "data": [
+                                {
+                                    "format": "data_h5",
+                                    "path": "/runs/run-a/data.h5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                                {
+                                    "format": "labber",
+                                    "path": "/labber/raw.hdf5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                            ]
+                        },
+                    }
+                }
+            },
+        }
+        analysis_report = data["analysis"]["save_report"]
+        assert analysis_report["run_id"] == data["raw_save"]["run_id"]
+        assert analysis_report["artifacts"]["analysis"]["results"]["members"] == {
+            "analysis:primary": [
+                {
+                    "format": "json",
+                    "path": "/runs/run-a/analysis/results.json",
+                    "status": "saved",
+                    "error": None,
+                }
+            ],
+            "figure:trace": [
+                {
+                    "format": "png",
+                    "path": "/runs/run-a/analysis/trace.png",
+                    "status": "saved",
+                    "error": None,
+                }
+            ],
+        }
+        assert [img.data for img in reply.images] == [PNG]
+        before = len(client.transport.sent)
+        summary = client.call("status", {"execution": data["execution"]})
+        assert summary["artifacts"] == {
+            **data["raw_save"]["artifacts"],
+            **analysis_report["artifacts"],
+        }
+        assert summary["run_id"] == analysis_report["run_id"]
+        assert len(client.transport.sent) == before
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == methods.count("tab.save_data") == 1
+        assert methods.count("tab.save_artifacts") == 1
+        assert methods.index("tab.save_data") < methods.index("tab.analyze")
 
 
 def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path):
@@ -847,7 +1052,32 @@ def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path
             "stop": 1.5,
             "expts": 7,
         }
-        assert reply.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert reply.data["raw_save"] == {
+            "run_id": "run-a",
+            "artifacts": {
+                "raw": {
+                    "data": {
+                        "status": "Saved",
+                        "members": {
+                            "data": [
+                                {
+                                    "format": "data_h5",
+                                    "path": "/runs/run-a/data.h5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                                {
+                                    "format": "labber",
+                                    "path": "/labber/raw.hdf5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                            ]
+                        },
+                    }
+                }
+            },
+        }
         assert reply.data["analysis"]["status"] == "finished"
         assert gui.ran
 
@@ -1013,7 +1243,32 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
         assert fields["span_mhz"]["source"] == span_source
         assert fields["reps"]["value"] == 17
         assert fields["rounds"]["value"] == 3
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == {
+            "run_id": "run-a",
+            "artifacts": {
+                "raw": {
+                    "data": {
+                        "status": "Saved",
+                        "members": {
+                            "data": [
+                                {
+                                    "format": "data_h5",
+                                    "path": "/runs/run-a/data.h5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                                {
+                                    "format": "labber",
+                                    "path": "/labber/raw.hdf5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                            ]
+                        },
+                    }
+                }
+            },
+        }
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"][0]["proposed"] == 0.24
         assert reply.images

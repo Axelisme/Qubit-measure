@@ -77,10 +77,9 @@ def minus_background(
 
     if method == "median":
         return minus_median(signals, axis)
-    elif method == "mean":
+    if method == "mean":
         return minus_mean(signals, axis)
-    else:
-        raise ValueError(f"Invalid method: {method}")
+    raise ValueError(f"Invalid method: {method}")
 
 
 def minus_median(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
@@ -389,7 +388,7 @@ def smooth_signal1d(
     """Smooth traces along one axis with a shared method knob."""
     if method == "gaussian":
         return cast(NDArray[Any], gaussian_filter1d(signals, sigma=sigma, axis=axis))
-    elif method == "wavelet":
+    if method == "wavelet":
         return wavelet_denoise1d(
             signals,
             axis=axis,
@@ -398,8 +397,7 @@ def smooth_signal1d(
             threshold_scale=sigma if wavelet_threshold is None else wavelet_threshold,
             threshold_mode=threshold_mode,
         )
-    else:
-        raise ValueError(f"Invalid smoothing method: {method}")
+    raise ValueError(f"Invalid smoothing method: {method}")
 
 
 def smooth_signal_nd(

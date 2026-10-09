@@ -202,7 +202,9 @@ def _load_grouped_v2(
             [Axis(name, unit, values) for name, unit, values in axes],
             timestamps=timestamps,
         )
-        for variable, channel in zip(declared_variables, declared_channels)
+        for variable, channel in zip(
+            declared_variables, declared_channels, strict=False
+        )
     }
     _validate_v2_payloads(payloads)
     if required_variables is not None:

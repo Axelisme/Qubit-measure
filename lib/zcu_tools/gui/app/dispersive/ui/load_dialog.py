@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QWidget,

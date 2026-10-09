@@ -60,7 +60,8 @@ def _select_by_mpl_name() -> LivePlotBackend:
     if not any(name in backend for name in ["inline", "agg", "qtagg", "module://"]):
         warnings.warn(
             f"Auto-selected backend for matplotlib is '{backend}', "
-            "which may not be fully supported."
+            "which may not be fully supported.",
+            stacklevel=1,
         )
     return FallbackBackend()
 

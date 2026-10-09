@@ -4,16 +4,22 @@ from unittest.mock import MagicMock
 
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.state import SessionEnv, State
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    PointCreateRequest,
+    PointUseRequest,
+)
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.value_lookup import (
-    EmptyValueLookup,
     ValueKey,
     ValueRegistry,
 )
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 
 def _state() -> State:
-    return State(SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None))
+    return State(SessionEnv(parameters=None, soc=None, soccfg=None))
 
 
 def test_context_service_injects_value_lookup_without_context_bump() -> None:
@@ -21,69 +27,12 @@ def test_context_service_injects_value_lookup_without_context_bump() -> None:
     registry = ValueRegistry()
     before = state.version.get("context")
 
-    ContextService(state, MagicMock(), MagicMock(), values=registry)
+    ContextService(
+        state, MagicMock(), values=registry, bind_assets=ArbWaveformDatabase.info_at
+    )
 
     assert state.session_env.values is registry
     assert state.version.get("context") == before
-
-
-def test_project_context_preserves_injected_value_lookup() -> None:
-    state = _state()
-    registry = ValueRegistry()
-    svc = ContextService(state, MagicMock(), MagicMock(), values=registry)
-
-    svc.set_project_context(MagicMock(), MagicMock(), "C", "Q", "R", "/res", "/db")
-
-    assert state.session_env.values is registry
-    assert state.session_env.readiness is ContextReadiness.DRAFT
-
-
-def test_use_context_preserves_lookup_when_io_returns_fresh_context() -> None:
-    state = _state()
-    registry = ValueRegistry()
-    io = MagicMock()
-    io.use_context.return_value = SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
-        soc=None,
-        soccfg=None,
-        values=EmptyValueLookup(),
-    )
-    svc = ContextService(state, io, MagicMock(), values=registry)
-
-    old_ctx = state.session_env
-    svc.use_context("flux_0.0_A")
-
-    io.use_context.assert_called_once_with("flux_0.0_A", old_ctx)
-    assert state.session_env.values is registry
-    assert state.session_env.active_label == "flux_0.0_A"
-    assert state.session_env.readiness is ContextReadiness.ACTIVE
-
-
-def test_new_context_preserves_lookup_when_io_returns_fresh_context() -> None:
-    state = _state()
-    registry = ValueRegistry()
-    io = MagicMock()
-    io.new_context.return_value = SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
-        soc=None,
-        soccfg=None,
-        values=EmptyValueLookup(),
-    )
-    io.get_active_label.return_value = "flux_1.0_V"
-    io.list_contexts.return_value = ["base"]
-    svc = ContextService(state, io, MagicMock(), values=registry)
-
-    old_ctx = state.session_env
-    svc.new_context(value=1.0, unit="V", clone_from="base")
-
-    io.new_context.assert_called_once_with(
-        old_ctx, value=1.0, unit="V", clone_from="base", label=None
-    )
-    assert state.session_env.values is registry
-    assert state.session_env.active_label == "flux_1.0_V"
-    assert state.session_env.readiness is ContextReadiness.ACTIVE
 
 
 def test_context_service_lists_and_reads_value_sources() -> None:
@@ -95,7 +44,9 @@ def test_context_service_lists_and_reads_value_sources() -> None:
         owner="device:flux",
         description="Named device cached value.",
     )
-    svc = ContextService(state, MagicMock(), MagicMock(), values=registry)
+    svc = ContextService(
+        state, MagicMock(), values=registry, bind_assets=ArbWaveformDatabase.info_at
+    )
 
     assert [info.key for info in svc.list_value_sources()] == ["device.flux.value"]
     info, value = svc.read_value_source("device.flux.value", "float")
@@ -103,3 +54,23 @@ def test_context_service_lists_and_reads_value_sources() -> None:
     assert info.type_name == "float"
     assert info.owner == "device:flux"
     assert value == 0.125
+
+
+def test_entry_and_point_commands_preserve_injected_value_lookup(tmp_path) -> None:
+    state = _state()
+    registry = ValueRegistry()
+    svc = ContextService(
+        state, MagicMock(), values=registry, bind_assets=ArbWaveformDatabase.info_at
+    )
+    entry = ResultEntry.create(
+        "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
+    svc.install_entry(entry)
+    assert state.session_env.values is registry
+    assert state.session_env.readiness is ContextReadiness.DRAFT
+    svc.new_point(PointCreateRequest("first", "", CommandOrigin("gui")))
+    assert state.session_env.values is registry
+    svc.use_point(PointUseRequest("first"))
+    assert state.session_env.values is registry
+    assert state.session_env.active_label == "first"
+    assert state.session_env.readiness is ContextReadiness.ACTIVE

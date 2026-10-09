@@ -24,11 +24,11 @@ def test_t1_curve_fit_module_exports_public_api() -> None:
 
 
 def _fake_t1_model(
-    params: tuple[float, float, float],  # noqa: ARG001
+    params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     noise_channels: Sequence[tuple[str, dict[str, float]]],
     Temp: float,
-    **kwargs: Any,  # noqa: ARG001
+    **kwargs: Any,
 ) -> NDArray[np.float64]:
     opts = {name: values for name, values in noise_channels}
     fluxs = np.asarray(fluxs, dtype=np.float64)
@@ -207,11 +207,11 @@ def test_fit_t1_noise_params_adds_extra_relaxation_rate_from_callable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def intrinsic_model(
-        params: tuple[float, float, float],  # noqa: ARG001
+        params: tuple[float, float, float],
         fluxs: NDArray[np.float64],
-        noise_channels: Sequence[tuple[str, dict[str, float]]],  # noqa: ARG001
-        Temp: float,  # noqa: ARG001
-        **kwargs: Any,  # noqa: ARG001
+        noise_channels: Sequence[tuple[str, dict[str, float]]],
+        Temp: float,
+        **kwargs: Any,
     ) -> NDArray[np.float64]:
         return np.full_like(fluxs, 20.0, dtype=np.float64)
 
@@ -244,11 +244,11 @@ def test_fit_t1_noise_params_equalizes_flux_bins_with_fixed_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def shifted_model(
-        params: tuple[float, float, float],  # noqa: ARG001
+        params: tuple[float, float, float],
         fluxs: NDArray[np.float64],
-        noise_channels: Sequence[tuple[str, dict[str, float]]],  # noqa: ARG001
-        Temp: float,  # noqa: ARG001
-        **kwargs: Any,  # noqa: ARG001
+        noise_channels: Sequence[tuple[str, dict[str, float]]],
+        Temp: float,
+        **kwargs: Any,
     ) -> NDArray[np.float64]:
         return np.full_like(fluxs, 20.0, dtype=np.float64)
 
@@ -286,11 +286,11 @@ def test_fit_t1_noise_params_default_keeps_nan_error_unweighted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def shifted_model(
-        params: tuple[float, float, float],  # noqa: ARG001
+        params: tuple[float, float, float],
         fluxs: NDArray[np.float64],
-        noise_channels: Sequence[tuple[str, dict[str, float]]],  # noqa: ARG001
-        Temp: float,  # noqa: ARG001
-        **kwargs: Any,  # noqa: ARG001
+        noise_channels: Sequence[tuple[str, dict[str, float]]],
+        Temp: float,
+        **kwargs: Any,
     ) -> NDArray[np.float64]:
         return np.full_like(fluxs, 20.0, dtype=np.float64)
 
@@ -505,7 +505,7 @@ def _noise_channels(
 
 
 class _RecordingProgressBar:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.total = kwargs.get("total")
         self.n: int | float = 0
         self.closed = False

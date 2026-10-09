@@ -23,6 +23,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgEdit,
     CfgInput,
     CfgInputError,
+    CfgObservation,
     CfgPreconditionError,
     CfgResolution,
     CfgResource,
@@ -80,6 +81,27 @@ def reference_resource() -> tuple[CfgResource, Catalog]:
         resolution=catalog.snapshot,
     )
     return resource, catalog
+
+
+def test_one_off_acceptance_resolves_linked_reference_without_rebinding(
+    reference_resource: tuple[CfgResource, Catalog],
+) -> None:
+    resource, catalog = reference_resource
+    before = resource.observe()
+    inputs = resource.snapshot_inputs()
+    seen: list[CfgObservation] = []
+    resource.watch(seen.append)
+    temporary = Catalog({"first": entry(8.0)}).snapshot()
+    catalog.lookups.clear()
+
+    accepted = resource.accept(before.ref.revision, resolution=temporary)
+
+    assert accepted.values["ref"] == {"x": 8.0}
+    assert resource.accept(before.ref.revision).values["ref"] == {"x": 1.0}
+    assert resource.observe() == before
+    assert resource.snapshot_inputs() == inputs
+    assert seen == [before]
+    assert catalog.lookups == []
 
 
 @pytest.mark.parametrize("reversed_keys", [False, True])

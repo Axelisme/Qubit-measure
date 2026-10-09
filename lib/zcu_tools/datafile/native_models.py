@@ -2,11 +2,11 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 import numpy as np
-from pydantic import JsonValue
+from pydantic import JsonValue, PlainSerializer
 
 from .models import DataVariable, LabberMetadata, LabberPayload
 
@@ -91,7 +91,10 @@ class RunSnapshot:
     entry_name: str
     point: str | None
     description: str | None
-    roles: Mapping[str, str]
+    roles: Annotated[
+        Mapping[str, str],
+        PlainSerializer(dict, return_type=dict[str, str], when_used="json"),
+    ]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -107,7 +110,10 @@ class SoftwareProvenance:
     None, and git_dirty uses true/false/unknown, never bool(string).
     """
 
-    software_versions: Mapping[str, str]
+    software_versions: Annotated[
+        Mapping[str, str],
+        PlainSerializer(dict, return_type=dict[str, str], when_used="json"),
+    ]
     git_commit: str | None
     git_dirty: bool | None
     qick_version: str | None
@@ -125,7 +131,10 @@ class RunMetadata:
     completion is complete, partial or stopped measurement progress, not a
     transaction status. labber_path is the last successful Labber path or None.
     snapshot is caller-captured entry state; provenance is historical environment
-    evidence. Native I/O rejects malformed values with a located ValueError.
+    evidence. device_snapshot maps device names to detached finite JSON settings
+    captured for this Run. Empty means no devices; None means not recorded.
+    Native stores it at /device, separate from /context, and never reads hardware.
+    Native I/O rejects malformed values with a located ValueError.
     """
 
     run_id: str
@@ -136,6 +145,13 @@ class RunMetadata:
     labber_path: str | None
     snapshot: RunSnapshot
     provenance: SoftwareProvenance
+    device_snapshot: (
+        Annotated[
+            Mapping[str, JsonObject],
+            PlainSerializer(dict, return_type=dict[str, JsonObject], when_used="json"),
+        ]
+        | None
+    ) = None
 
 
 @dataclass(frozen=True, kw_only=True)

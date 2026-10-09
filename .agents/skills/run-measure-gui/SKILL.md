@@ -36,7 +36,7 @@ Recipe 首次呼叫最多等待 300 秒。Client deadline 必須超過 300 秒�
 
 Recipe、`tab_analyze` 與 `wait(execution)` 回傳同一摘要。先核對 `actual` 的量測條件、`analysis.primary/post` 的 estimates、details、warnings，以及全部 writeback candidates 與 destination。需要原始 expressions、完整 cfg publication、proposal 或分析診斷時，用 `status(execution, detail="full")` 讀當次已捕捉的內容。這個查詢不補讀目前 GUI，也不刷新 guard。全域 `status` 只列非終態 executions 與終態數量，保存已知 execution ID 以便後續查詢。
 
-保存結果看 `artifacts` 的 section、artifact name、member 路徑清單與各路徑 status。`reserved` 是預留目的地，只有 `saved` 證明已保存。後續分析失敗時，先前確認的 raw 或 image 路徑仍有效。`previews.run/primary/post` 是完整 session 暫存路徑清單，不是持久保存產物；`status` 不附 image content。Run 或分析 step 為 `unknown` 時，沒有 handle 也不能推斷未啟動，先核對現況，不自動重送。
+保存結果看 `artifacts` 的 section、artifact name、完整 members 與各路徑 status/error。`reserved` 是預留目的地，只有 `saved` 證明該次已保存。`run_id` 取 Save report 的 confirmed 身分，未確認持久輸出時為 null。後續分析失敗不抹掉已確認的 raw 保存結果。當次回覆可附記憶體中的 image content，之後用 `tab.get_figure` 取 GUI 當下圖像，不保證是原圖。`status` 只讀 capture，不附 image content。Run 或分析 step 為 `unknown` 時，沒有 handle 也不能推斷未啟動，先核對現況，不自動重送。
 
 `finish_early` 對 recipe 停止採集，有可用結果就保存 raw 並繼續分析。`cancel` 放棄後續分析與保存，優先於 finish_early；已啟動且不可取消的保存仍回報真實結果。控制回覆只確認請求及 GUI 回應，用 `wait` 或 `status` 核對終態、錯誤與實際保存路徑，不只看 GUI 是否停止。
 

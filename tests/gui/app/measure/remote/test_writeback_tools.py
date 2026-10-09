@@ -62,7 +62,6 @@ def _snapshot(
         result=object(),
         figures=None,
         writeback_items=tuple(items),
-        image_paths={},
         has_writeback_draft=has_writeback_draft,
     )
     post = PostAnalysisPaneSnapshot(
@@ -70,7 +69,6 @@ def _snapshot(
         result=None,
         figures=None,
         writeback_items=tuple(),
-        image_paths={},
     )
     return TabSnapshot(
         adapter_name="fake",
@@ -82,7 +80,6 @@ def _snapshot(
         analysis=ana,
         post_analysis=post,
         save=None,
-        paths=None,
     )
 
 

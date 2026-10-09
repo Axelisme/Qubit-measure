@@ -14,13 +14,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from matplotlib.figure import Figure
-from qtpy.QtCore import (  # type: ignore[attr-defined]
+from qtpy.QtCore import (
     QCoreApplication,
     QObject,
     QThread,
     Signal,  # type: ignore[reportPrivateImportUsage]
 )
-from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QWidget
 
 if TYPE_CHECKING:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -99,7 +99,7 @@ def get_figure_container(fig: Figure) -> FigureContainer | None:
 
 
 def _purge_stale_registry_entries() -> None:
-    from qtpy import sip  # type: ignore[attr-defined]
+    from qtpy import sip
 
     # GC-driven weakref eviction can mutate the registry mid-iteration, so snapshot
     # to a plain list first (a live WeakKeyDictionary iterator would raise
@@ -122,7 +122,7 @@ def _purge_stale_registry_entries() -> None:
             if figure is fig:
                 fig_canvas = widget
                 break
-        if fig_canvas is None or sip.isdeleted(fig_canvas):  # type: ignore[attr-defined]
+        if fig_canvas is None or sip.isdeleted(fig_canvas):
             stale_figs.append(fig)
     for fig in stale_figs:
         _fig_container_registry.pop(fig, None)
@@ -165,7 +165,7 @@ def _attach_figure_canvas(
     fig: Figure,
 ) -> FigureCanvasQTAgg:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-    from qtpy import sip  # type: ignore[attr-defined]
+    from qtpy import sip
 
     canvas = fig.canvas
     # ``fig.canvas`` can be a dead Qt wrapper if a previous render path deleted

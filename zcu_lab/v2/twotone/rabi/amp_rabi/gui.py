@@ -86,14 +86,14 @@ def _blank_rabi_pulse(ctx: SessionEnv) -> ReferenceValue:
     value = make_default_value(spec)
     return (
         ReferenceValue(make_custom_reference_key(spec.label), value)
-        .with_field("freq", path_seed("qubit.freq", fallback=4000.0).resolve(ctx))
-        .with_field("ch", path_seed("qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+        .with_field("freq", path_seed("$qubit.freq", fallback=4000.0).resolve(ctx))
+        .with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
         .with_field("nqz", 2)
         .with_field("gain", 0.0)
         .with_field(
             "waveform.length",
             scaled_path_seed(
-                "qubit.module.x180.waveform.length", factor=1.01, fallback_value=1.1
+                "$qubit.module.x180.waveform.length", factor=1.01, fallback_value=1.1
             ).resolve(ctx),
         )
     )
@@ -110,27 +110,28 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
     """
     spec = make_pulse_readout_module_spec().allowed[0]
     value = make_default_value(spec)
-    frequency = path_seed("resonator.freq", fallback=6000.0).resolve(ctx)
+    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
     return (
         ReferenceValue(make_custom_reference_key(spec.label), value)
         .with_field("pulse_cfg.freq", frequency)
         .with_field(
-            "pulse_cfg.ch", path_seed("resonator.wiring.ch", fallback=0).resolve(ctx)
+            "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
         )
         .with_field("pulse_cfg.nqz", 2)
         .with_field("pulse_cfg.gain", 0.1)
         .with_field("pulse_cfg.waveform.length", 1.0)
         .with_field("ro_cfg.ro_freq", frequency)
         .with_field(
-            "ro_cfg.ro_ch", path_seed("resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+            "ro_cfg.ro_ch",
+            path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx),
         )
         .with_field("ro_cfg.ro_length", 0.9)
         .with_field(
             "ro_cfg.trig_offset",
             path_seed(
-                "resonator.ext.time_of_fly",
+                "$resonator.ext.time_of_fly",
                 fallback=0.55,
-                expr="resonator.ext.time_of_fly + 0.05",
+                expr="$resonator.ext.time_of_fly + 0.05",
             ).resolve(ctx),
         )
     )
@@ -191,10 +192,10 @@ class AmpRabiAdapter(
     )
 
     def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Capture the qubit and its referenced resonator when opening a tab."""
+        """Declare the global aliases used by this adapter."""
         return {
             "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator", via="qubit.resonator"),
+            "resonator": RoleSpec("resonator"),
         }
 
     def run(
@@ -227,7 +228,7 @@ class AmpRabiAdapter(
             .field(
                 "modules.reset",
                 spec=make_reset_module_spec(optional=True),
-                default=module_seed("qubit.module.reset", fallback=None),
+                default=module_seed("$qubit.module.reset", fallback=None),
             )
             .field(
                 "modules.qub_pulse",
@@ -235,7 +236,7 @@ class AmpRabiAdapter(
                     "gain", 0.0
                 ),
                 default=module_seed(
-                    "qubit.module.x180",
+                    "$qubit.module.x180",
                     fallback=custom(_blank_rabi_pulse, description="inline Rabi pulse"),
                 ),
             )
@@ -243,12 +244,12 @@ class AmpRabiAdapter(
                 "modules.readout",
                 spec=make_readout_module_spec(),
                 default=module_seed(
-                    "qubit.module.readout",
+                    "$qubit.module.readout",
                     fallback=custom(_blank_readout, description="inline readout"),
                 ),
             )
             .relax_delay(
-                scaled_path_seed("qubit.t1", factor=5.0, fallback_value=30.5),
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5),
             )
             .sweep(
                 "gain",
@@ -256,7 +257,7 @@ class AmpRabiAdapter(
                 default=SweepDefault(
                     start=-0.3,
                     stop=scaled_path_seed(
-                        "qubit.module.x180.gain", factor=1.2, fallback_value=0.6
+                        "$qubit.module.x180.gain", factor=1.2, fallback_value=0.6
                     ),
                     expts=51,
                 ),
@@ -315,8 +316,13 @@ class AmpRabiAdapter(
         result = req.analyze_result
         items: list[WritebackItem] = []
         for target, slot, gain, description in (
-            ("qubit.pulses.pi_amp", "qubit.module.x180", result.pi_gain, "Pi pulse"),
-            ("qubit.pulses.pi2_amp", "qubit.module.x90", result.pi2_gain, "Pi/2 pulse"),
+            ("$qubit.pulses.pi_amp", "$qubit.module.x180", result.pi_gain, "Pi pulse"),
+            (
+                "$qubit.pulses.pi2_amp",
+                "$qubit.module.x90",
+                result.pi2_gain,
+                "Pi/2 pulse",
+            ),
         ):
             key = parameters.library_key(target)
             spec, value = module_cfg_to_value(pulse)
@@ -337,7 +343,7 @@ class AmpRabiAdapter(
             )
         items.append(
             MetaDictWriteback(
-                target_name="qubit.ext.pi_product",
+                target_name="$qubit.ext.pi_product",
                 description="Pi pulse gain times length (a.u. * us)",
                 proposed_value=result.pi_gain * length,
             )

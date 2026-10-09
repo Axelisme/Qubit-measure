@@ -4,7 +4,7 @@ import logging
 import time
 from collections.abc import Callable
 
-from qtpy.QtCore import QObject, QTimer  # type: ignore[attr-defined]
+from qtpy.QtCore import QObject, QTimer
 
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.services.shutdown import (

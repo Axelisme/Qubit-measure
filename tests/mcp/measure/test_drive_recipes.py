@@ -3,15 +3,34 @@
 import base64
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import asdict
 from threading import Event
 from typing import Any
 
 import pytest
 from simpleeval import simple_eval
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 
 from ._recipe_support import PNG, LookbackGui, scalar, section
 from ._support import MeasureClient, full_execution_reply, make_client
+
+RAW_REPORT = SaveReport(
+    "run-a",
+    {
+        "raw": {
+            "data": SaveArtifact(
+                "Saved",
+                {
+                    "data": [
+                        SaveOutput("data_h5", "/runs/run-a/data.h5", "saved"),
+                        SaveOutput("labber", "/labber/raw.hdf5", "saved"),
+                    ]
+                },
+            )
+        }
+    },
+)
 
 
 @contextmanager
@@ -364,7 +383,7 @@ def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tm
         assert fields["reps"]["value"] == 13
         assert fields["rounds"]["value"] == 9
         assert fields["modules.reset"]["source"] == "disabled"
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"]
         assert reply.images
@@ -498,7 +517,7 @@ def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
         assert fields["reps"]["value"] == 13
         assert fields["rounds"]["value"] == 9
         assert fields["modules.reset"]["source"] == "disabled"
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"]
         assert reply.images
@@ -722,7 +741,7 @@ def test_drive_primary_handoff_waits_for_question_before_actual_write(
             assert reply.data["execution"] == execution
         assert reply.data["status"] == "awaiting_answer", reply.data
         assert tuple(reply.data["question_items"]) == (target,)
-        assert reply.data["previews"]["primary"]
+        assert [image.data for image in reply.images] == [PNG]
         assert not gui.writes
         before = list(client.transport.sent)
         status = client.call("status", {"execution": execution})
@@ -793,7 +812,7 @@ def test_drive_cancelled_question_retains_preview_without_writing(
         client.call("cancel", {"execution": execution})
         reply = client.call("wait", {"execution": execution, "timeout": 5})
         assert reply.data["status"] == "cancelled", reply.data
-        assert reply.data["previews"]["primary"]
+        assert [image.data for image in reply.images] == [PNG]
         assert not reply.data["writeback"]["receipts"]
         assert client.transport.sent == before
         assert not gui.writes
@@ -888,7 +907,7 @@ def test_twotone_runs_once_with_gui_sweep_and_preserved_readout(tmp_path, readou
             expected = 5000.0 if readout_ref else 7200.0
             assert fields["modules.readout.pulse_cfg.freq"]["value"] == expected
             assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == expected
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"]
         assert reply.images
@@ -1118,7 +1137,7 @@ def test_twotone_number_inputs_preserve_mhz_us_and_source_labels(tmp_path, numbe
             assert fields[field]["value"] == value
             assert isinstance(fields[field]["value"], int)
             assert fields[field]["source"] == field
-        assert reply.data["raw_save"]["path"] == "/actual/raw.h5"
+        assert reply.data["raw_save"] == asdict(RAW_REPORT)
         assert reply.data["analysis"]["result"]["summary"] == gui.fit_summary
 
 

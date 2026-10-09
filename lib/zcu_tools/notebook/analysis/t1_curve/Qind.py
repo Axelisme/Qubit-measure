@@ -38,7 +38,7 @@ def calc_ind_dipole(
 
     params: GHz, omega: rad/ns, T: K, EL: GHz -> GHz
     """
-    EJ, EC, EL = params
+    _EJ, _EC, EL = params
 
     spectral_densities = inductive_spectral_density(
         omegas, Temp, EL
@@ -77,7 +77,7 @@ def calc_Qind_vs_omega(
     Temp: float = 20e-3,
 ) -> NDArray[np.float64] | tuple[NDArray[np.float64], NDArray[np.float64]]:
     """params: GHz, omegas: rad/ns, T1s: ns, guess_Temp: K -> 1"""
-    EJ, EC, EL = params
+    _EJ, _EC, _EL = params
 
     # calculate Qind vs omega
     dipoles = calc_ind_dipole(params, phi_elements, omegas, Temp)

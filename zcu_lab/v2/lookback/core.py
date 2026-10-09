@@ -81,7 +81,9 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
     def run(self, config: LookbackCfg, *, context: RunContext) -> LookbackResult:
         run_cfg = deepcopy(config)
         if run_cfg.reps != 1:
-            warnings.warn("reps is not 1 in config, this will be ignored.")
+            warnings.warn(
+                "reps is not 1 in config, this will be ignored.", stacklevel=1
+            )
             run_cfg.reps = 1
 
         setup_devices(

@@ -49,13 +49,13 @@ def test_linker_wait_address_calculation():
     prog_list, labels, meta_infos, cursor = _link_root(linker, ir)
 
     # Expected addresses:
-    # L1: 0
+    # Label L1 starts at address 0.
     # REG_WR (at 0): occupies 1 word -> next addr: 1
-    # L2: 1
+    # Label L2 starts at address 1.
     # WAIT (at 1): occupies 2 words -> next addr: 3
-    # L3: 3
+    # Label L3 starts at address 3.
     # REG_WR (at 3): occupies 1 word -> next addr: 4
-    # L4: 4
+    # Label L4 starts at address 4.
 
     assert labels["L1"] == "&0"
     assert labels["L2"] == "&1"
@@ -105,7 +105,7 @@ def test_linker_wait_roundtrip():
     linker = IRLinker()
     prog_list, labels, meta_infos, _cursor = _link_root(linker, ir)
 
-    # Roundtrip: unlink
+    # Unlink the linked program for the round-trip comparison.
     logical_insts = linker.unlink(prog_list, labels, meta_infos)
 
     # Compare CMD/LABEL

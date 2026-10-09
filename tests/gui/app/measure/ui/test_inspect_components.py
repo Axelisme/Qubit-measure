@@ -69,19 +69,21 @@ def test_shipped_inspect_refresh_keeps_component_frontend_and_modules_tab(
     assert [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())] == [
         "Q1"
     ]
-    editor.set_focus("Q1")
-    assert control.get_component_focus().name == "Q1"
+    captured = control.read_context()
+    assert captured.lookup("Q1.rate").value == 4300.0
+    assert editor.edit_parameter("Q1.rate", 4400.0)
+    assert control.read_context().lookup("Q1.rate").value == 4400.0
+    assert captured.lookup("Q1.rate").value == 4300.0
     tabs = dialog.findChild(QTabWidget)
     assert tabs is not None
     assert [tabs.tabText(i) for i in range(tabs.count())] == ["Parameters", "Modules"]
 
 
-def test_inspect_template_edits_do_not_change_current_point_or_focus(inspector) -> None:
+def test_inspect_template_edits_do_not_change_current_point(inspector) -> None:
     dialog, control = inspector
     editor = dialog.findChild(ComponentTreeWidget)
     assert editor is not None
     assert editor.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
-    editor.set_focus("Q1")
     before = control.inspect_document()
     destination = next(
         combo
@@ -95,4 +97,3 @@ def test_inspect_template_edits_do_not_change_current_point_or_focus(inspector) 
     dialog.refresh()
     assert "Template" in control.inspect_document(setup=True).components
     assert control.inspect_document() == before
-    assert control.get_component_focus().name == "Q1"

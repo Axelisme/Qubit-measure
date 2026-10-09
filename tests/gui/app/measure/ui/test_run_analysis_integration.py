@@ -59,15 +59,11 @@ def make_ctrl():
 def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         RunPaneSnapshot,
         SavePaneSnapshot,
-        TabPathsSnapshot,
     )
 
-    data_path = PathResourceSnapshot(override=None, path="/tmp/data.hdf5")
-    image = PathResourceSnapshot(override=None, path="/tmp/img.png")
     run_snap = RunPaneSnapshot(result=object(), source_path=None)
     plots = Plots(NonPresentingHost())
     plots.adopt("fit", Figure())
@@ -77,7 +73,6 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         result=object(),
         figures=plots,
         writeback_items=(),
-        image_paths={"fit": image},
         has_writeback_draft=False,
     )
     post_snap = PostAnalysisPaneSnapshot(
@@ -85,7 +80,6 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         result=None,
         figures=None,
         writeback_items=(),
-        image_paths={},
         has_writeback_draft=False,
     )
     # cfg schema dummy
@@ -108,7 +102,6 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
-            is_saving_data=False,
             has_context=True,
             has_active_context=True,
             has_soc=True,
@@ -121,10 +114,7 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         run=run_snap,
         analysis=analysis_snap,
         post_analysis=post_snap,
-        save=SavePaneSnapshot(data_path=data_path),
-        paths=TabPathsSnapshot(
-            data=data_path, analysis_images={"fit": image}, post_analysis_images={}
-        ),
+        save=SavePaneSnapshot(),
     )
     return with_artifacts(snapshot)
 

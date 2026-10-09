@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
-    ComponentFocus,
     ContextSourceBinding,
     EntryDraft,
     EntryInfo,
@@ -19,7 +19,7 @@ from zcu_tools.gui.session.context_types import (
     SavedPoint,
 )
 from zcu_tools.gui.session.events import (
-    ComponentFocusChangedPayload,
+    AliasesChangedPayload,
     ContextSwitchedPayload,
 )
 from zcu_tools.gui.session.services.context import ContextService
@@ -29,7 +29,6 @@ from zcu_tools.resources.entry import (
     ResultEntry,
     RoleResolutionError,
     RoleSpec,
-    source_path,
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -91,6 +90,7 @@ def context() -> ContextService:
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
         BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
     )
 
 
@@ -112,50 +112,227 @@ def _entry_command(context: ContextService, command: str, entry_id: str) -> obje
     return context.entry_ledger(entry_id)
 
 
-def test_single_candidate_point_publishes_automatic_focus(context, tmp_path):
+def test_alias_defaults_initialize_once_without_resetting_on_point_changes(
+    context: ContextService, tmp_path: Path
+) -> None:
+    entry = _entry(tmp_path)
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
+    context.install_entry(entry)
+    assert context.get_alias_rows()[0].value == ""
+    context.new_point(_new_request("first"))
+    assert context.get_alias_rows() == (
+        AliasRow("driver", "Q1"),
+        AliasRow("sense", "$driver.sense"),
+    )
+    context.set_alias_rows((AliasRow("driver", ""), AliasRow("sense", "$driver.sense")))
+    context.new_point(_new_request("second"))
+    assert context.get_alias_rows()[0].value == ""
+    capture = context.read_alias_context({"driver": RoleSpec("fake/drive/*")})
+    assert capture is not None
+    with pytest.raises(RoleResolutionError, match="driver"):
+        capture.value("$driver.rate")
+
+
+def test_alias_defaults_use_an_already_published_snapshot_without_binding_assets(
+    context: ContextService,
+    tmp_path: Path,
+) -> None:
+    entry = _entry(tmp_path)
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
+    context.install_entry(entry)
+    context.new_point(_new_request("first"))
+
+    def no_asset_binding(_path: Path) -> WaveformAssetInfo:
+        raise AssertionError("Cached initialization must not reopen assets")
+
+    installed = ContextService(
+        SessionState(context.get_session_env()),
+        BaseEventBus(),
+        bind_assets=no_asset_binding,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+    )
+    assert installed.get_alias_rows()[0] == AliasRow("driver", "Q1")
+    captured = installed.read_alias_context({"driver": RoleSpec("fake/drive/*")})
+    assert captured is not None
+    assert captured.value("$driver.rate") == 4300.0
+
+
+def test_empty_alias_submission_before_a_point_prevents_default_rebinding(
+    context: ContextService, tmp_path: Path
+) -> None:
+    assert context.read_alias_context({"driver": RoleSpec("fake/drive/*")}) is None
+    context.set_alias_rows(context.get_alias_rows())
     entry = _entry(tmp_path)
     entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0)
     context.install_entry(entry)
     context.new_point(_new_request("first"))
-    first = context.get_component_focus()
-    assert first.name == "Q1"
-    assert first.target == context.read_context().target
-    context.set_component_focus(None)
-    context.use_point(PointUseRequest("first"))
-    assert context.get_component_focus().name == "Q1"
+    assert context.get_alias_rows()[0].value == ""
 
 
-def test_multiple_candidates_do_not_guess_focus(context, rich_entry):
-    context.install_entry(rich_entry)
-    context.new_point(_new_request("first"))
-    assert context.get_component_focus().name is None
-    context.set_component_focus("Q2")
-    context.use_point(PointUseRequest("first"))
-    assert context.get_component_focus().name is None
-
-
-def test_first_component_uses_default_focus_without_overwriting_selection(
-    context, tmp_path
-):
+def test_first_component_publication_initializes_the_alias_default(
+    context: ContextService, tmp_path: Path
+) -> None:
     context.install_entry(_entry(tmp_path))
     context.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
-    assert context.get_component_focus().name == "Q1"
+    assert context.get_alias_rows()[0] == AliasRow("driver", "Q1")
     context.add_component("Q2", "fake/drive/a", {"rate": 5100.0})
-    assert context.get_component_focus().name == "Q1"
-    context.set_component_focus(None)
-    assert context.get_component_focus().name is None
+    assert context.get_alias_rows()[0] == AliasRow("driver", "Q1")
 
 
-def test_parameter_write_preserves_selected_component_focus(
+def test_global_alias_changes_install_before_the_fact_and_reject_invalid_batches() -> (
+    None
+):
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    observed: list[tuple[tuple[AliasRow, ...], int]] = []
+
+    def on_aliases(event: AliasesChangedPayload) -> None:
+        assert service.get_alias_rows() == event.rows
+        observed.append((event.rows, state.version.snapshot().get("context", 0)))
+
+    bus.subscribe(AliasesChangedPayload, on_aliases)
+    rows = (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+    service.set_alias_rows(rows)
+    assert observed == [(rows, 1)]
+    with pytest.raises(InvalidInputError):
+        service.set_alias_rows(
+            (AliasRow("driver", "Q2"), AliasRow("sense", "$sense.sense"))
+        )
+    assert service.get_alias_rows() == rows
+    assert state.version.snapshot().get("context") == 1
+    service.set_alias_rows(rows)
+    assert observed == [(rows, 1)]
+    assert state.version.snapshot().get("context") == 1
+
+
+def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fixed(
     context: ContextService,
     rich_entry: ResultEntry,
 ) -> None:
     context.install_entry(rich_entry)
-    target = context.new_point(_new_request("a"))
-    focus = context.set_component_focus("Q1")
-    context.set_parameter(target, "Q1.rate", 4500.0)
-    assert context.get_component_focus() == focus
-    assert context.read_context().value("Q1.rate") == 4500.0
+    target = context.new_point(_new_request("first"))
+    assert context.get_alias_rows()[0].value == ""
+    declarations = {
+        "driver": RoleSpec("fake/drive/*"),
+        "sense": RoleSpec("fake/sensor"),
+    }
+    context.set_alias_rows(
+        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+    )
+    first = context.read_alias_context(declarations)
+    assert first is not None
+    context.set_parameter(target, "Q1.rate", 4400.0)
+    current = context.read_alias_context(declarations)
+    assert current is not None
+    assert first.value("$driver.rate") == 4300.0
+    assert current.value("$driver.rate") == 4400.0
+    context.new_point(_new_request("second"))
+    context.set_alias_rows(
+        (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
+    )
+    second = context.read_alias_context(declarations)
+    assert second is not None
+    assert second.value("$driver.rate") == 5100.0
+    assert first.target == target
+    assert first.roles is not None
+    assert first.roles.names == {"driver": "Q1", "sense": "R1"}
+    assert second.roles is not None
+    assert second.roles.names == {"driver": "Q2", "sense": "R2"}
+    assert second.capture_storage().point == "second"
+    assert first.capture_storage().point == "first"
+
+
+def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_version(
+    rich_entry: ResultEntry,
+) -> None:
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    context = ContextService(
+        state,
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+    )
+    context.install_entry(rich_entry)
+    context.new_point(_new_request("first"))
+    before = context.get_alias_rows()
+    version = state.version.snapshot()
+    declarations = {
+        "driver": RoleSpec("fake/drive/*"),
+        "sense": RoleSpec("fake/sensor"),
+    }
+    temporary = context.read_alias_context(declarations, "Q2")
+    assert temporary is not None
+    assert temporary.value("$driver.rate") == 5100.0
+    assert temporary.roles is not None
+    assert temporary.roles.names == {"driver": "Q2", "sense": "R2"}
+    assert temporary.capture_storage().roles == temporary.roles.names
+    assert context.get_alias_rows() == before
+    assert state.version.snapshot() == version
+    current = context.read_alias_context(declarations)
+    assert current is not None
+    assert current.roles is not None
+    assert current.roles.names == {}
+    context.set_alias_rows(
+        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+    )
+    assert temporary.value("$driver.rate") == 5100.0
+
+
+@pytest.mark.parametrize("target", ["", "missing", "R1"])
+def test_bad_one_run_target_keeps_the_global_table(
+    context: ContextService,
+    rich_entry: ResultEntry,
+    target: str,
+) -> None:
+    context.install_entry(rich_entry)
+    context.new_point(_new_request("first"))
+    before = context.get_alias_rows()
+    with pytest.raises((InvalidInputError, RoleResolutionError)):
+        context.read_alias_context({"driver": RoleSpec("fake/drive/*")}, target)
+    assert context.get_alias_rows() == before
+
+
+def test_historical_target_reads_keep_resolved_alias_names_when_point_links_change(
+    context: ContextService,
+    rich_entry: ResultEntry,
+) -> None:
+    context.install_entry(rich_entry)
+    target = context.new_point(_new_request("first"))
+    context.set_alias_rows(
+        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+    )
+    declarations = {
+        "driver": RoleSpec("fake/drive/*"),
+        "sense": RoleSpec("fake/sensor"),
+    }
+    captured = context.read_alias_context(declarations)
+    assert captured is not None
+    fixed_names = captured.roles
+    assert fixed_names is not None
+    assert fixed_names.names == {"driver": "Q1", "sense": "R1"}
+    context.set_parameter(target, "Q1.sense", "R2")
+    historical = context.read_target(target, roles=fixed_names)
+    assert historical.resolve_path("$sense.rate") == "R1.rate"
+    current = context.read_alias_context(declarations)
+    assert current is not None
+    assert current.resolve_path("$sense.rate") == "R2.rate"
+    assert captured.value("$driver.sense") == "R1"
+
+
+def test_target_requires_a_point_and_a_declared_alias(
+    context: ContextService,
+    rich_entry: ResultEntry,
+) -> None:
+    with pytest.raises(FailedPreconditionError) as caught:
+        context.read_alias_context({"driver": RoleSpec("fake/drive/*")}, "Q1")
+    assert caught.value.reason_code == "no_context"
+    context.install_entry(rich_entry)
+    context.new_point(_new_request("first"))
+    with pytest.raises(InvalidInputError, match="declared alias"):
+        context.read_alias_context({}, "Q1")
 
 
 def test_empty_queries_have_no_entry_point_or_component_selection(
@@ -166,7 +343,6 @@ def test_empty_queries_have_no_entry_point_or_component_selection(
     assert not context.is_active_context()
     assert context.get_entry_info() is None
     assert context.list_points() == ()
-    assert context.get_component_focus() == ComponentFocus(None, None, ())
 
 
 def test_empty_read_rejects_instead_of_returning_default_parameters(
@@ -320,7 +496,7 @@ def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
     context.install_entry(entry)
     ledger = context.entry_ledger(entry.entry_id)
     assert ledger.events() == before
-    context.capture_roles({}, focus=None, explicit={})
+    context.read_alias_context({})
     assert entry.ledger.events() == before
 
 
@@ -359,90 +535,6 @@ def test_cross_entry_clone_rejects_before_destination_or_ledger_changes(
     assert context.read_context().target == before
 
 
-@pytest.mark.parametrize(
-    ("explicit", "expected"),
-    [
-        ({"driver": "Q2"}, {"driver": "Q2", "sense": "R2"}),
-        ({"driver": None}, {}),
-        ({"driver": None, "sense": "R2"}, {"sense": "R2"}),
-    ],
-)
-def test_manual_capture_retains_choices_without_ledger_or_live_focus(
-    context: ContextService,
-    rich_entry: ResultEntry,
-    explicit: dict[str, str | None],
-    expected: dict[str, str],
-) -> None:
-    rich_entry.new_point("first")
-    context.install_entry(rich_entry)
-    context.use_point(PointUseRequest("first"))
-    ledger_before = rich_entry.ledger.events()
-    declarations = {
-        "driver": RoleSpec("fake/drive/*"),
-        "sense": RoleSpec("fake/sensor", "driver.sense"),
-    }
-    binding = context.capture_roles(declarations, focus="Q1", explicit=explicit)
-    fixed = context.read_context(roles=binding)
-    context.set_component_focus("Q2")
-    assert context.get_component_focus().name == "Q2"
-    assert dict(binding.explicit) == explicit
-    assert dict(binding.names) == expected
-    captured = fixed.roles
-    assert captured is not None
-    assert captured.focus == "Q1"
-    assert dict(captured.explicit) == explicit
-    assert dict(captured.names) == expected
-    storage = fixed.capture_storage()
-    assert dict(storage.roles) == expected
-    assert fixed.value("Q1.rate") == 4300.0
-    if "driver" not in expected:
-        with pytest.raises(RoleResolutionError) as error:
-            fixed.value("driver.rate")
-        assert error.value.role == "driver"
-    assert rich_entry.ledger.events() == ledger_before
-
-
-@pytest.mark.parametrize("explicit", [{}, {"driver": "Q2"}])
-def test_service_roles_and_reads_preserve_fixed_nonempty_names_without_source_io(
-    context: ContextService, rich_entry: ResultEntry, explicit: dict[str, str]
-) -> None:
-    first = rich_entry.new_point("first")
-    second = rich_entry.new_point("second")
-    with second.edit() as edit:
-        edit.set("Q1.rate", 4700.0)
-    ledger_before = rich_entry.ledger.events()
-    context.install_entry(rich_entry)
-    context.use_point(PointUseRequest("first"))
-    declarations = {
-        "driver": RoleSpec("fake/drive/*"),
-        "sense": RoleSpec("fake/sensor", "driver.sense"),
-    }
-    binding = context.capture_roles(declarations, focus="Q1", explicit=explicit)
-    names = (
-        {"driver": "Q2", "sense": "R2"} if explicit else {"driver": "Q1", "sense": "R1"}
-    )
-    assert dict(binding.names) == names
-    assert binding.focus == "Q1"
-    capture = context.read_context(roles=binding)
-    assert capture.roles == binding
-    assert capture.resolve_path("driver.rate") == f"{names['driver']}.rate"
-    assert capture.value("driver.rate") == (5100.0 if explicit else 4300.0)
-
-    context.set_component_focus("Q2")
-    assert context.read_context(roles=binding).roles == binding
-    context.use_point(PointUseRequest("second"))
-    source_path(first).unlink()
-    source_path(second).unlink()
-    assert capture.target == SavedPoint(entry_id=rich_entry.entry_id, point="first")
-    assert capture.value("driver.rate") == (5100.0 if explicit else 4300.0)
-    current = context.read_context(roles=binding)
-    assert current.roles == binding
-    assert current.value("driver.rate") == (5100.0 if explicit else 4700.0)
-    fresh = context.capture_roles(declarations, focus="Q2", explicit={})
-    assert dict(fresh.names) == {"driver": "Q2", "sense": "R2"}
-    assert rich_entry.ledger.events() == ledger_before
-
-
 def test_publication_facts_observe_installed_state_and_one_context_bump(
     rich_entry: ResultEntry,
 ) -> None:
@@ -452,71 +544,33 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
     assets = Assets()
     context = ContextService(state, bus, bind_assets=assets.bind)
     observations: list[
-        tuple[
-            str,
-            int,
-            SessionEnv,
-            EntryInfo | None,
-            ComponentFocus,
-            ContextSourceBinding | None,
-        ]
+        tuple[int, SessionEnv, EntryInfo | None, ContextSourceBinding | None]
     ] = []
 
     def switched(payload: ContextSwitchedPayload) -> None:
         observations.append(
             (
-                "context",
                 state.version.get("context"),
                 state.session_env,
                 context.get_entry_info(),
-                context.get_component_focus(),
                 payload.sources,
             )
         )
 
-    def focused(payload: ComponentFocusChangedPayload) -> None:
-        observations.append(
-            (
-                "focus",
-                state.version.get("context"),
-                state.session_env,
-                context.get_entry_info(),
-                payload.focus,
-                context.get_source_binding(),
-            )
-        )
-
-    switch_subscription = bus.subscribe(ContextSwitchedPayload, switched)
-    focus_subscription = bus.subscribe(ComponentFocusChangedPayload, focused)
+    subscription = bus.subscribe(ContextSwitchedPayload, switched)
     try:
         assert state.version.get("context") == 0 and observations == []
         info = context.install_entry(rich_entry)
         context.use_point(PointUseRequest("first"))
-        context.set_component_focus("Q1")
-        context.set_component_focus("Q1")
-        assert state.version.get("context") == 2
         context.new_point(_new_request("second"))
-        assert state.version.get("context") == 3
         context.clear_context()
-        assert [(kind, version) for kind, version, *_ in observations] == [
-            ("context", 1),
-            ("focus", 1),
-            ("context", 2),
-            ("focus", 2),
-            ("focus", 2),
-            ("context", 3),
-            ("focus", 3),
-            ("context", 4),
-            ("focus", 4),
-        ]
-        for kind, version, env, entry_info, focus, sources in observations:
+        assert [version for version, *_ in observations] == [1, 2, 3, 4]
+        for version, env, entry_info, sources in observations:
             if version == 4:
                 assert env.readiness is ContextReadiness.EMPTY
                 assert env.parameters is None and entry_info is None and sources is None
-                assert focus == ComponentFocus(None, None, ())
                 continue
-            assert entry_info == info
-            assert env.parameters is not None
+            assert entry_info == info and env.parameters is not None
             expected = (
                 EntryDraft(entry_id=info.entry_id)
                 if version == 1
@@ -524,32 +578,25 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
                     entry_id=info.entry_id, point="first" if version == 2 else "second"
                 )
             )
-            assert env.parameters.target == expected and focus.target == expected
+            assert env.parameters.target == expected
             assert sources is not None and sources.sources
             assert env.result_dir == str(info.result_path)
             assert env.database_path == str(info.database_path)
             assert env.active_label == (
                 "" if version == 1 else "first" if version == 2 else "second"
             )
-            if version == 1:
-                assert (
-                    env.readiness is ContextReadiness.DRAFT and focus.components == ()
-                )
-            else:
-                assert env.readiness is ContextReadiness.ACTIVE
-                assert {option.name for option in focus.components} == {
+            assert env.readiness is (
+                ContextReadiness.DRAFT if version == 1 else ContextReadiness.ACTIVE
+            )
+            if version != 1:
+                assert set(env.parameters.document().components) == {
                     "Q1",
                     "Q2",
                     "R1",
                     "R2",
                 }
-            if kind == "focus" and focus.name is not None:
-                assert version == 2 and focus.name == "Q1"
-            else:
-                assert focus.name is None
     finally:
-        switch_subscription.unsubscribe()
-        focus_subscription.unsubscribe()
+        subscription.unsubscribe()
 
 
 def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
@@ -560,9 +607,8 @@ def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
     bus = BaseEventBus()
     assets = Assets()
     context = ContextService(state, bus, bind_assets=assets.bind)
-    events: list[ContextSwitchedPayload | ComponentFocusChangedPayload] = []
+    events: list[ContextSwitchedPayload] = []
     switched = bus.subscribe(ContextSwitchedPayload, events.append)
-    focused = bus.subscribe(ComponentFocusChangedPayload, events.append)
     try:
         context.install_entry(rich_entry)
         target = context.use_point(PointUseRequest("first"))
@@ -581,4 +627,3 @@ def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
         assert rich_entry.list_points() == ["first", "retained"]
     finally:
         switched.unsubscribe()
-        focused.unsubscribe()

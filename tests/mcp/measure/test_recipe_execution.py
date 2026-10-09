@@ -4,6 +4,7 @@ from dataclasses import replace
 from threading import Event
 
 import pytest
+from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeAnalysis,
@@ -19,6 +20,7 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 from ._recipe_analysis_support import AnalysisRecipeGui
 from ._recipe_execution_support import ControlledRunGui, definition, registry
 from ._recipe_support import LookbackGui, recipe_client
+from ._save_report_support import analysis_report
 
 
 def test_generator_run_analysis_and_snapshot_capture_do_not_query_gui(tmp_path):
@@ -61,10 +63,31 @@ def test_generator_run_analysis_and_snapshot_capture_do_not_query_gui(tmp_path):
         assert finally_ran.is_set()
         snapshot = execution.snapshot()
         assert snapshot.actual is not None
-        assert snapshot.raw_save.path == "/actual/raw.h5"
+        assert snapshot.raw_save == SaveReport(
+            "run-a",
+            {
+                "raw": {
+                    "data": SaveArtifact(
+                        "Saved",
+                        {
+                            "data": [
+                                SaveOutput("data_h5", "/runs/run-a/data.h5", "saved"),
+                                SaveOutput("labber", "/labber/raw.hdf5", "saved"),
+                            ]
+                        },
+                    )
+                }
+            },
+        )
         assert snapshot.analysis is not None and snapshot.post_analysis is not None
         assert snapshot.analysis.stage == "primary"
         assert snapshot.post_analysis.stage == "post"
+        assert snapshot.analysis.save_report == analysis_report(
+            "analysis", gui.names["primary"]
+        )
+        assert snapshot.post_analysis.save_report == analysis_report(
+            "post_analysis", gui.names["post"]
+        )
         assert snapshot.writeback is not None and snapshot.post_writeback is not None
         assert executions.get(snapshot.execution) is execution
         calls = list(client.transport.sent)

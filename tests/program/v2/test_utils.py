@@ -28,11 +28,11 @@ def test_param2str():
     # integer
     assert param2str(10) == "10.000"
 
-    # QickParam (not sweep)
+    # Format a QickParam without a sweep.
     param_no_sweep = QickParam(start=2.5, spans={})
     assert param2str(param_no_sweep) == "2.500"
 
-    # QickParam (sweep)
+    # Format a swept QickParam by its start and stop values.
     cfg = SweepCfg(start=1.0, stop=5.0, expts=5, step=1.0)
     param_sweep = sweep2param("test_sweep", cfg)
     assert param2str(param_sweep) == "sweep(1.000, 5.000)"

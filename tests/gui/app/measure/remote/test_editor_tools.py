@@ -11,10 +11,10 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorError
 from zcu_tools.gui.app.measure.services.ports import CfgEditResult
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.services.context import MlEntryValidationError
 
-from ._helpers import dispatch_handler as _dispatch  # noqa: E402
+from ._helpers import dispatch_handler as _dispatch
 
 
 @pytest.fixture
@@ -112,7 +112,7 @@ def test_get_unknown_editor_is_invalid_params():
 
 def test_commit_translates_validation_error():
     ctrl = MagicMock()
-    ctrl.commit_cfg_editor.side_effect = MlEntryValidationError("invalid module")
+    ctrl.commit_cfg_editor.side_effect = InvalidInputError("invalid module")
     with pytest.raises(RemoteError) as ei:
         _dispatch(ctrl, "editor.commit", {"editor_id": "e", "name": "x"})
     assert ei.value.code == ErrorCode.INVALID_PARAMS

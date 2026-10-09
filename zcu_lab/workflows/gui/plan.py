@@ -57,8 +57,9 @@ class T1PlanForm(FormModel):
     ) -> dict[str, JsonValue]:
         """Prefill the required pi estimate from the fixed x180 module capture.
 
-        On initial input only, retain qubit.module.x180.waveform.length as an
-        expression if readable and non-null. No capture, absent/null values or
+        On initial input only, resolve $qubit.module.x180.waveform.length in
+        the fixed alias capture and retain its concrete path as an expression
+        if readable and non-null. No capture, absent/null values or
         unreadable paths leave the field unfilled for explicit user input. Other
         modules and simulator constants are never consulted. Invalid readable
         values produce ordinary field validation errors, not a fallback.
@@ -67,8 +68,8 @@ class T1PlanForm(FormModel):
         data = super().defaults(env, previous)
         if previous or env.parameters is None:
             return data
-        path = "qubit.module.x180.waveform.length"
         try:
+            path = env.parameters.resolve_path("$qubit.module.x180.waveform.length")
             value = env.parameters.lookup(path)
         except (
             AttributeError,

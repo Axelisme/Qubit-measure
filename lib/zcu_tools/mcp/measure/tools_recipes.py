@@ -109,8 +109,9 @@ def build_recipe_tools(
             definition.name: {
                 "handler": partial(run_recipe, context, definition),
                 "description": definition.description
-                + " Execution summaries include previews.run/primary/post as full "
-                "session-only PNG path lists, separate from persistent artifacts. "
+                + " Execution summaries retain whole-artifact Save reports, "
+                "including JSON-only analysis and every output status/error. "
+                "Current replies may include in-memory MCP images, not session PNG files. "
                 "Use status(execution, detail=full) for captured native detail.",
                 "inputSchema": definition.input_schema,
             }

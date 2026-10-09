@@ -14,8 +14,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_handles import AwaitResult, OperationOutcome
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
-    from .ports import ActiveSaveOperation
-
 
 class OperationAwaitPort(Protocol):
     """Thread-safe await surface consumed by operation control."""
@@ -44,12 +42,6 @@ class TabOperationOwnerPort(Protocol):
     def cancel_analyze(self, tab_id: str) -> bool: ...
 
 
-class SaveOperationOwnerPort(Protocol):
-    """Live save handles owned by the save service; no terminal history."""
-
-    def active_save_operations(self) -> tuple[ActiveSaveOperation, ...]: ...
-
-
 class DeviceOperationRef(Protocol):
     """The fields operation control reads from one live device operation."""
 
@@ -70,7 +62,7 @@ class DeviceOperationOwnerPort(Protocol):
 class ActiveOperation:
     op: int
     tab: str | None
-    kind: Literal["run", "analyze", "device", "save"]
+    kind: Literal["run", "analyze", "device"]
 
 
 class OperationControlPort(Protocol):
@@ -111,13 +103,11 @@ class OperationControlFacet:
         progress: OperationProgressPort,
         run_analyze: TabOperationOwnerPort,
         device: DeviceOperationOwnerPort,
-        save: SaveOperationOwnerPort,
     ) -> None:
         self._handles = handles
         self._progress = progress
         self._run_analyze = run_analyze
         self._device = device
-        self._save = save
 
     def await_operation(self, operation_id: int, timeout: float) -> AwaitResult:
         return self._handles.await_known_outcome(operation_id, timeout)
@@ -172,8 +162,4 @@ class OperationControlFacet:
             ActiveOperation(op.token, None, "device")
             for op in self._device.get_active_device_operations()
         )
-        save_ops = (
-            ActiveOperation(op.operation_id, op.tab_id, "save")
-            for op in self._save.active_save_operations()
-        )
-        return tuple(sorted((*tab_ops, *device_ops, *save_ops), key=lambda op: op.op))
+        return tuple(sorted((*tab_ops, *device_ops), key=lambda op: op.op))
