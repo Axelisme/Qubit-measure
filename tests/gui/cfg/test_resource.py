@@ -116,7 +116,7 @@ def test_invalid_sweep_endpoint_error_is_published_in_diagnostics(
     )
     resolution = CfgResolution(
         (),
-        lambda expr: evaluate_scalar_expr(expr, None),
+        lambda expression: evaluate_scalar_expr(expression, None),
         lambda source_id: (),
         EmptyReferences(),
         lambda key: 0.0,
