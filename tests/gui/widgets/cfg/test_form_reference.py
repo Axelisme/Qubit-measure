@@ -342,7 +342,9 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
 def test_missing_module_reference_is_invalid_and_shows_hint(qapp, ctrl):
     from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.resources.context import ModuleLibrary
+
+    from tests.gui.app.measure._cfg_fakes import parameter_capture
+    from zcu_lab.components import QubitSchema, ResonatorSchema
 
     pulse_spec = CfgSectionSpec(
         label="Pulse",
@@ -355,15 +357,21 @@ def test_missing_module_reference_is_invalid_and_shows_hint(qapp, ctrl):
         {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[pulse_spec])},
         {
             "pulse": ReferenceValue(
-                chosen_key="missing_pulse",
+                chosen_key="Q1.pulses.missing_pulse",
                 value=CfgSectionValue(
                     fields={"type": DirectValue("pulse"), "gain": DirectValue(0.2)}
                 ),
             )
         },
     )
-    ctrl.get_current_ml.return_value = ModuleLibrary()
-    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator"),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
+    ctrl.read_context.return_value = parameters
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=parameters)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -371,10 +379,10 @@ def test_missing_module_reference_is_invalid_and_shows_hint(qapp, ctrl):
         assert not draft.is_valid()
         missing = form.read_values().fields["pulse"]
         assert isinstance(missing, ReferenceValue)
-        assert missing.chosen_key == "missing_pulse"
+        assert missing.chosen_key == "Q1.pulses.missing_pulse"
         hint = form.findChild(QLabel, "missingRefHint")
         assert hint is not None and hint.isVisible()
-        assert "missing_pulse" in hint.text()
+        assert "Q1.pulses.missing_pulse" in hint.text()
     finally:
         form.detach()
         form.close()

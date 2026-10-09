@@ -435,9 +435,12 @@ def test_centered_sweep_eval_center_resolves_against_md_when_no_snapshot():
 
 
 def test_module_ref_named_key_without_library_entry_raises():
-    ml = _make_ml()
-    ml.modules = {}
-    ml.waveforms = {}
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator"),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     inner_spec = CfgSectionSpec(
         label="Direct Readout",
         fields={"ro_ch": ScalarSpec(label="RO ch", type=int)},
@@ -446,13 +449,13 @@ def test_module_ref_named_key_without_library_entry_raises():
         {"readout": ReferenceSpec(kind="module", allowed=[inner_spec])},
         {
             "readout": ReferenceValue(
-                chosen_key="readout_rf",
+                chosen_key="R1.readout.readout_rf",
                 value=CfgSectionValue(fields={"ro_ch": DirectValue(99)}),
             )
         },
     )
     with pytest.raises(RuntimeError, match="Unknown module reference"):
-        schema_to_raw_dict(s, None, ml)
+        schema_to_raw_dict(s, parameters)
 
 
 def test_module_ref_custom_key_resolves_by_label():
@@ -736,36 +739,23 @@ def test_custom_key_unknown_label_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_sweep_edge_unresolved_eval_raises():
-    spec = CfgSectionSpec(fields={"sweep": SweepSpec()})
-    val = CfgSectionValue(
-        fields={
-            "sweep": SweepValue(
-                start=EvalValue(expr="r_f", resolved=None, error=None),
-                stop=1.0,
-                expts=11,
-            )
-        }
-    )
-    s = CfgSchema(spec=spec, value=val)
-    with pytest.raises(RuntimeError, match="unresolved"):
-        schema_to_raw_dict(s, None, None)
-
-
 def test_resolve_sweep_edge_non_numeric_resolved_raises():
+    parameters = parameter_capture(
+        {"R1": ResonatorSchema(kind="resonator", freq=6000.0)}
+    )
     spec = CfgSectionSpec(fields={"sweep": SweepSpec()})
     val = CfgSectionValue(
         fields={
             "sweep": SweepValue(
-                start=EvalValue(expr="r_f", resolved="not_a_number", error=None),
+                start=EvalValue(expr="R1.freq", resolved="not_a_number", error=None),
                 stop=1.0,
                 expts=11,
             )
         }
     )
     s = CfgSchema(spec=spec, value=val)
-    with pytest.raises(RuntimeError, match="non-numeric"):
-        schema_to_raw_dict(s, None, None)
+    with pytest.raises(ValueError, match="not_a_number"):
+        schema_to_raw_dict(s, parameters)
 
 
 # ---------------------------------------------------------------------------

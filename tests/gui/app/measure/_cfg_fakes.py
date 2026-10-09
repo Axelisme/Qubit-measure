@@ -51,7 +51,10 @@ class PublishedHost:
 
 
 def parameter_capture(
-    components: Mapping[str, ComponentSchema] | None = None, /, **values: float
+    components: Mapping[str, ComponentSchema] | None = None,
+    library: LibrarySnapshot | None = None,
+    /,
+    **values: float,
 ) -> ParameterContext:
     """Capture original component models and optional general.ext numeric values.
 
@@ -89,9 +92,10 @@ def parameter_capture(
         assert component_registry.kinds() == before, (
             "parameter_capture polluted component registry"
         )
-    library = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
-    )
+    if library is None:
+        library = LibrarySnapshot(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        )
     return ParameterContext(
         point=point, library=library, target=EntryDraft(entry_id="entry"), roles=None
     )

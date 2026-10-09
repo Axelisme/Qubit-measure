@@ -14,6 +14,7 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
 )
 from zcu_tools.gui.cfg.binding import ScalarField
+from zcu_tools.gui.session.parameters import ParameterContext
 
 
 def section_schema(
@@ -25,9 +26,11 @@ def section_schema(
     )
 
 
-def attach_draft(w, schema: CfgSchema, ctrl):
+def attach_draft(
+    w, schema: CfgSchema, ctrl, *, parameters: ParameterContext | None = None
+):
     """Build a caller-owned draft, attach the widget, and return its root field."""
-    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=parameters)
     w.attach(draft)
     return draft.root
 
