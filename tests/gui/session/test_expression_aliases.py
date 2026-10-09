@@ -73,7 +73,9 @@ def test_invalid_alias_expression_is_rejected(expression: str) -> None:
         evaluate_scalar_expr(expression, _parameters())
 
 
-def test_parameter_reader_fault_is_not_reported_as_invalid_expression(monkeypatch) -> None:
+def test_parameter_reader_fault_is_not_reported_as_invalid_expression(
+    monkeypatch,
+) -> None:
     parameters = _parameters()
 
     def broken_source(path: str) -> object:

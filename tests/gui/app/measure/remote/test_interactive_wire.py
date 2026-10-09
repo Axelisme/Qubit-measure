@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -600,6 +601,22 @@ def test_controller_interactive_mount_is_visible_from_run_or_data(
     assert window.interactive_presentation(tab_id) is None
 
 
+def _assert_mcp_interactive_discovery(
+    call: Callable[[str, dict[str, Any]], dict[str, Any]],
+    tab_id: str,
+) -> dict[str, Any]:
+    read = call("tab_interact", {"tab": tab_id})
+    # The caller keeps structured data; MCP stdio contracts own image delivery.
+    # Read the GUI PNG through its public RPC instead of a session file.
+    figure = call("rpc_call", {"method": "tab.interact", "params": {"tab_id": tab_id}})[
+        "figure"
+    ]
+    assert base64.b64decode(figure["png_b64"], validate=True).startswith(b"\x89PNG")
+    assert read["preview_active"] is False
+    assert "done" in {command["name"] for command in read["commands"]}
+    return read
+
+
 @pytest.mark.parametrize("terminal", ["done", "cancel"])
 def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
     mounted_fx, tmp_path, terminal, request
@@ -618,16 +635,8 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
     bridge, call = mcp_client(fx.service.port, tmp_path, request=request)
     try:
         call("connect", {"port": fx.service.port})
-        read = call("tab_interact", {"tab": tab_id})
+        read = _assert_mcp_interactive_discovery(call, tab_id)
         assert read["state"] == active.plugin.project_state(active.session.snapshot())
-        # The caller keeps structured data; MCP stdio contracts own image delivery.
-        # Read the GUI PNG through its public RPC instead of a session file.
-        figure = call(
-            "rpc_call", {"method": "tab.interact", "params": {"tab_id": tab_id}}
-        )["figure"]
-        assert base64.b64decode(figure["png_b64"], validate=True).startswith(b"\x89PNG")
-        assert read["preview_active"] is False
-        assert "done" in {command["name"] for command in read["commands"]}
         changed = call(
             "tab_interact",
             {
