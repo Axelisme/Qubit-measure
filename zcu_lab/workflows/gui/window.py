@@ -338,6 +338,7 @@ class T1WorkflowWindow(QWidget):
                 ),
             )
         except Exception:
+            plots.finish(present=False)
             plots.release()
             self._plots = None
             raise
