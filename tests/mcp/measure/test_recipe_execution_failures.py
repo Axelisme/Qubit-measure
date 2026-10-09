@@ -1,8 +1,11 @@
 """Failed/uncertain generator handoffs retain owner facts and run Python finally."""
 
+from dataclasses import asdict
 from threading import Event
 
 import pytest
+from zcu_tools.mcp.measure.execution_reply import project_execution
+from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeRun, RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -267,14 +270,34 @@ def test_close_question_runs_finally_once_without_delivering_answer(tmp_path):
 
 
 @pytest.mark.parametrize("uncertain", [False, True])
-def test_failed_second_save_preserves_confirmed_prefix_and_failure_phase(
-    tmp_path, uncertain
-):
+def test_second_save_replaces_report_or_retains_transport_failure(tmp_path, uncertain):
+    completed_reports: list[SaveReport] = []
+    failed_report = SaveReport(
+        "run-a",
+        {
+            "raw": {
+                "data": SaveArtifact(
+                    "Not saved",
+                    {
+                        "data": [
+                            SaveOutput(
+                                "data_h5", "/runs/run-a/data.h5", "failed", "disk full"
+                            ),
+                            SaveOutput(
+                                "labber", "/labber/second.hdf5", "failed", "disk full"
+                            ),
+                        ]
+                    },
+                )
+            }
+        },
+    )
+
     def sample(session: RecipeSession) -> RecipeGenerator:
         run, _ = yield session.open_tab("lookback").run()
         assert isinstance(run, RecipeRun)
-        run.save_raw()
-        run.save_raw()
+        completed_reports.append(run.save_raw())
+        completed_reports.append(run.save_raw())
 
     gui = LookbackGui()
     saves = 0
@@ -282,30 +305,54 @@ def test_failed_second_save_preserves_confirmed_prefix_and_failure_phase(
     def respond(method: str, params: dict[str, object]) -> dict[str, object]:
         nonlocal saves
         if method == "tab.save_data":
+            assert params == {"tab_id": "t", "run_operation_id": 71}
             saves += 1
-            if saves == 2 and uncertain:
-                raise GuiRpcError("lost receipt", reason="connection_lost")
-            return {
-                "operation_id": 82 if saves == 1 else 84,
-                "data_path": "/first.h5" if saves == 1 else "/second.h5",
-            }
-        if method == "operation.await" and params["operation_id"] == 84:
-            return {"reason": "completed", "status": "failed", "error": "disk full"}
+            if saves == 2:
+                if uncertain:
+                    raise GuiRpcError("lost receipt", reason="connection_lost")
+                return asdict(failed_report)
         return gui(method, params)
 
+    recipe_definition = definition(sample)
     with (
         recipe_client(tmp_path, respond) as client,
-        registry(client.context, definition(sample)) as executions,
+        registry(client.context, recipe_definition) as executions,
     ):
         execution = executions.start(client.context, "sample", {})
         reply = execution.wait(5)
-        assert reply.data["status"] == "failed"
-        assert reply.data["error"]["phase"] == "raw_save"
-        assert reply.data["raw_save"]["path"] == "/first.h5"
-        assert reply.data["raw_save"]["status"] == (
-            "unknown" if uncertain else "failed"
+        sent = list(client.transport.sent)
+        snapshot = execution.snapshot()
+        summary = project_execution(
+            reply.data, recipes=(recipe_definition,), definition=recipe_definition
         )
+        assert snapshot.run_outcome == {"reason": "completed", "status": "finished"}
+        assert completed_reports[0].run_id == "run-a"
+        assert completed_reports[0].artifacts["raw"]["data"].status == "Saved"
+        if uncertain:
+            assert reply.data["status"] == "failed"
+            assert reply.data["error"] == {
+                "phase": "preparing",
+                "reason": "connection_lost",
+                "message": "GUI is not connected; binding expired",
+                "code": None,
+            }
+            assert snapshot.raw_save is None
+            assert reply.data["raw_save"] is None
+            assert summary["steps"]["raw_save"] is None
+            assert summary["artifacts"] == {}
+            assert summary["run_id"] is None
+            assert len(completed_reports) == 1
+        else:
+            assert reply.data["status"] == "finished"
+            assert reply.data["error"] is None
+            assert snapshot.raw_save == failed_report
+            assert reply.data["raw_save"] == asdict(failed_report)
+            assert summary["steps"]["raw_save"] == {"status": "incomplete"}
+            assert summary["artifacts"] == asdict(failed_report)["artifacts"]
+            assert summary["run_id"] == "run-a"
+            assert completed_reports[1] == failed_report
         assert saves == 2
+        assert client.transport.sent == sent
 
 
 def test_worker_start_failure_returns_a_queryable_terminal_record(
