@@ -38,7 +38,7 @@ class AnritsuMG3692(BaseDevice[AnritsuMG3692Info]):
         super().__init__(address, rm)
 
     def get_output(self) -> Literal["on", "off"]:
-        return STATUS_MAP_INV[self.query(":OUTP?")]  # type: ignore
+        return STATUS_MAP_INV[self.query(":OUTP?")]  # pyright: ignore[reportReturnType]
 
     @device_operation
     def set_output(self, status: Literal["on", "off"]) -> None:
