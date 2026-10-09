@@ -46,11 +46,14 @@ from zcu_tools.gui.expected_error import (
 )
 from zcu_tools.gui.interactive import Action, PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ArtifactKey
+from zcu_tools.resources.entry.schema import PointDocument
 
 from tests.gui._completion_helpers import on_analyze_failed
 from tests.gui._progress_fakes import DirectProgressTransport
@@ -59,6 +62,7 @@ from tests.gui.app.measure._native_save_support import (
     native_save_session,
 )
 from tests.gui.session.ui._parameter_fakes import make_parameters
+from zcu_lab.components import QubitSchema
 from zcu_lab.v2._support.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
@@ -158,6 +162,46 @@ def _make_two_tab_state() -> State:
 # ---------------------------------------------------------------------------
 # start_analyze — normal path
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("has_run_source", [True, False])
+def test_historical_analyze_uses_run_capture_after_alias_and_parameter_edits(
+    qapp, has_run_source: bool
+) -> None:
+    original = make_parameters({})
+    point = PointDocument.model_construct(
+        format="zcu.parameter-container",
+        format_version="1.0",
+        general=original.document().general,
+        components={
+            "Q1": QubitSchema(kind="qubit/fluxonium", freq=4200.0),
+            "Q2": QubitSchema(kind="qubit/fluxonium", freq=5100.0),
+        },
+    )
+    captured = ParameterContext(
+        point=point, library=original.library, target=original.target, roles=None
+    ).bind_aliases((AliasRow("qubit", "Q1"),), {})
+    state = _make_state()
+    state.update_tab_result(
+        "tab1", object(), parameters=captured if has_run_source else None
+    )
+    point.components["Q1"] = QubitSchema(kind="qubit/fluxonium", freq=4300.0)
+    current = ParameterContext(
+        point=point, library=original.library, target=original.target, roles=None
+    ).bind_aliases((AliasRow("qubit", "Q2"),), {})
+    state.session_env = replace(state.session_env, parameters=current)
+    adapter = MagicMock()
+    state.get_tab("tab1").adapter = adapter
+    svc, bg = _make_service(state, EventBus())
+    svc.start_analyze("tab1", analyze_params_instance=object(), plots=_plots())
+    assert bg.last_work is not None
+    bg.last_work()
+    request = adapter.analyze.call_args.args[0]
+    if has_run_source:
+        assert request.parameters.value("$qubit.freq") == 4200.0
+        assert current.value("$qubit.freq") == 5100.0
+    else:
+        assert request.parameters is None
 
 
 def test_start_analyze_submits_to_bg(qapp):
