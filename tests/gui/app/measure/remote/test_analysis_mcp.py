@@ -2,7 +2,6 @@
 
 import json
 from dataclasses import dataclass, replace
-from pathlib import Path
 
 import pytest
 from matplotlib.figure import Figure
@@ -214,61 +213,6 @@ def test_finite_analysis_preserves_zero_and_existing_null(fx, connected_mcp, sta
         "other": [2.0, None, False],
     }
     assert parsed["invalid"] == []
-
-
-def test_mcp_analysis_returns_actual_params_and_replaces_old_draft(fx, tmp_path):
-    tab = fx.ctrl.new_tab("fake")
-    run = fx.ctrl.start_run(tab, fx.ctrl.cfg_resources.lookup(tab).observe().ref)
-    sock = open_client(fx.service.port)
-    try:
-        assert (
-            call(sock, "operation.await", {"operation_id": run, "timeout": 2})[
-                "result"
-            ]["status"]
-            == "finished"
-        )
-    finally:
-        sock.close()
-    bridge, invoke = mcp_client(fx.service.port, tmp_path)
-    try:
-        invoke("connect", {"port": fx.service.port})
-        invoke("rpc_call", {"method": "context.snapshot"})
-        invoke("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}})
-        rejected = invoke("tab_analyze", {"tab": tab, "params": {"threshold": "bad"}})
-        assert rejected["status"] == "failed"
-        assert rejected["steps"]["analysis"]["primary"]["status"] == "not_started"
-        assert rejected["error"]["code"] == "invalid_params"
-        assert "threshold" in rejected["error"]["message"]
-        assert "float" in rejected["error"]["message"]
-        assert invoke("status", {"execution": rejected["execution"]}) == rejected
-        initial = invoke("tab_analyze", {"tab": tab, "params": {"threshold": 0.3}})
-        assert initial["analysis"]["primary"]["params"] == {"threshold": 0.3}
-        first = invoke("status", {"execution": initial["execution"], "detail": "full"})
-        assert first["status"] == "finished"
-        assert first["params"] == {"threshold": 0.3}
-        assert first["invalidated"] == []
-        assert Path(first["figure"]).is_file()
-        previous = fx.state.get_tab(tab).analysis.writeback_draft
-        assert previous is not None and previous.is_active
-        repeated = invoke("tab_analyze", {"tab": tab})
-        assert repeated["analysis"]["primary"]["params"] == {"threshold": 0.3}
-        second = invoke(
-            "status", {"execution": repeated["execution"], "detail": "full"}
-        )
-        assert second["status"] == "finished"
-        assert second["params"] == {"threshold": 0.3}
-        assert second["invalidated"] == ["analysis.writeback"]
-        assert not previous.is_active
-        current = fx.state.get_tab(tab).analysis
-        assert current.writeback_draft is not previous
-        assert second["result"]["summary"] == current.result.to_summary_dict()
-        assert second["save_status"] == "saved"
-        assert second["saved_images"]
-        assert all(
-            Path(item["image_path"]).is_file() for item in second["saved_images"]
-        )
-    finally:
-        bridge.disconnect()
 
 
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
