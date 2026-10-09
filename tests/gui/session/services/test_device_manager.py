@@ -292,3 +292,51 @@ def test_devicemanager_get_all_info(qapp):
     flux_info = info["flux"]
     assert isinstance(flux_info, FakeDeviceInfo)
     assert flux_info.value == pytest.approx(1.0)
+
+
+def test_direct_poll_skips_terminal_admission_without_reading_driver(qapp) -> None:
+    from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
+        ManualOwnerScheduler,
+    )
+    from zcu_tools.gui.session.adapters.thread_pool_background import (
+        ThreadPoolBackgroundExecutor,
+    )
+
+    scheduler = ManualOwnerScheduler()
+    bg = ThreadPoolBackgroundExecutor(scheduler)
+    driver = FakeDevice(fast_mode=True)
+    bus = EventBus()
+    state = State(MagicMock())
+    gate = OperationGate(bus)
+    handles = OperationHandles()
+    runner = OperationRunner(gate, handles, None, bg, bus)
+    svc = DeviceService(
+        bus,
+        state,
+        gate,
+        bg,
+        runner,
+        handles,
+        driver_factory=lambda _type, _address: driver,
+        device_registry=FakeDeviceRegistry(),
+    )
+    try:
+        svc.start_connect_device(ConnectDeviceRequest("FakeDevice", "test_dev", "none"))
+        deadline = time.monotonic() + 2
+        while not svc.get_connected_devices():
+            assert time.monotonic() < deadline
+            scheduler.pump_once(block=True, timeout=0.02)
+        assert bg.quiesce()
+        before = svc.get_device_snapshot("test_dev")
+        error: Exception | None = None
+        try:
+            svc.poll_device_info("test_dev")
+        except RuntimeError as exc:
+            error = exc
+        assert error is None, "best-effort poll must skip closed admission"
+        assert svc.get_device_snapshot("test_dev") == before
+        assert handles.live_count() == 0
+    finally:
+        scheduler.pump_all()
+        assert bg.quiesce()
+        driver.close()
