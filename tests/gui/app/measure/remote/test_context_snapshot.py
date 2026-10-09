@@ -158,7 +158,9 @@ def test_context_notification_requery_reads_complete_native_capture(
     application.result("point.use", {"label": "base"})
     application.result("events.subscribe", {"events": [event]})
     application.controller.get_bus().emit(
-        MdChangedPayload() if event == "md_changed" else MlChangedPayload()
+        MdChangedPayload(binding_id=0, content_changed=True, fault=None)
+        if event == "md_changed"
+        else MlChangedPayload(binding_id=0, content_changed=True, fault=None)
     )
     notification = recv_push(application.client, event)
     # Consume the advertised query, not a hard-coded method or catalog entry.
