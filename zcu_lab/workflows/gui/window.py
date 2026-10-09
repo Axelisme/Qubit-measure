@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from uuid import uuid4
 
+from pydantic import JsonValue
 from qick import QickConfig
 from qtpy.QtCore import QTimer
 from qtpy.QtGui import QCloseEvent
@@ -26,7 +28,7 @@ from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormWritePath
 from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.remote.control_service import ControlOptions
@@ -178,11 +180,23 @@ class T1WorkflowWindow(QWidget):
         }:
             raise InvalidRunState("start", status.lifecycle)
 
-    def start(self, run_id: str) -> int | FormErrors:
+    def start(
+        self,
+        run_id: str,
+        *,
+        plan_batch: Mapping[FormWritePath, JsonValue] | None = None,
+        tunables_batch: Mapping[FormWritePath, JsonValue] | None = None,
+    ) -> int | FormErrors:
         """Capture/validate and submit T1, returning a token or directed errors.
 
         run_id is a nonempty path-safe segment for this run's exact directories.
-        Local parse/model errors return FormErrors without submission or files.
+        A None batch reads that GUI panel and its local parse errors. An explicit
+        batch, including {}, starts from that form's default_input in this Start's
+        fixed capture, then uses FormState.write once. Paths are model-field tuple
+        leaves; lists/mappings are whole leaves and branch switches use core rules.
+        Invalid batch/model input returns FormErrors without touching either panel,
+        submission or files. Structural errors without a directed path are model-wide.
+        Success resets both panel bases to the submitted input and clears local text.
         Draft/unbound storage, missing hardware, source/provenance and native
         failures raise without fallback/retry. The returned operation token is
         pending, not proof of accepted startup. Calibrated uses the validated
@@ -190,6 +204,8 @@ class T1WorkflowWindow(QWidget):
         Expressions remain in the accepted FormInput used for later tuning.
         """
         self._ensure_can_start()
+        if plan_batch is not None or tunables_batch is not None:
+            raise NotImplementedError("partial-input Start preparation")
         env = self._capture_env()
         parameters = env.parameters
         if parameters is None:

@@ -9,7 +9,8 @@ from time import monotonic
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QApplication, QPushButton
+from pydantic import JsonValue
+from qtpy.QtWidgets import QApplication, QLineEdit, QPushButton
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.workflows import (
@@ -43,6 +44,8 @@ from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.components import QubitSchema
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.gui import window as window_module
+from zcu_lab.workflows.gui.plan import T1PlanForm
+from zcu_lab.workflows.gui.remote import FormWrite
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
@@ -185,7 +188,9 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
         token = window.start("captured")
     finally:
         detach()
-    assert window.tunables_panel.state.input.data["guess_us"] == 77.0
+    assert window.tunables_panel.state.input.data["guess_us"] == {
+        "expr": "general.ext.guess_us"
+    }
     assert isinstance(token, int)
     controller = window.controller
     assert controller is not None and controller.status() is None
@@ -977,6 +982,310 @@ def test_rpc_old_target_does_not_change_current_run(
             {"action": "resume", "lifecycle": "stopped"},
         )
     assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
+
+
+def _start_plan_batch(inputs: Inputs) -> list[FormWrite]:
+    """Encode this nested-model fixture as leaf writes, retaining scalar Expr."""
+    data = inline_input(inputs).data
+    del data["points"]  # RPC uses defaults, not the old GUI input.
+    data["pi_length_us"] = {"expr": "0.06 * 2"}
+    batch: list[FormWrite] = []
+
+    def append_leaves(tree: dict[str, JsonValue], prefix: tuple[str, ...]) -> None:
+        # This fixture contains nested models, not typed-mapping object leaves.
+        for name, value in tree.items():
+            path = (*prefix, name)
+            if isinstance(value, dict) and "expr" not in value:
+                append_leaves(value, path)
+            else:
+                batch.append({"path": list(path), "value": value})
+
+    append_leaves(data, ())
+    return batch
+
+
+def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
+    rpc: RpcRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window, harness, entry = attachment
+    context = harness.services.context
+    context.set_parameter(context.read_context().target, "general.ext.guess_us", 31.0)
+    window.tunables_panel.state.write({("guess_us",): 999.0}, FormEnv())
+    observed: list[tuple[Calibrated, T1Plan, T1Tunables]] = []
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("rpc-start-observer", plan=T1Plan, tunables=T1Tunables, init=init)
+    def observe(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del state
+        observed.append((env.context, plan, tun))
+        yield from ()
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", observe)
+    reply = rpc(
+        "workflow.start",
+        {
+            "run_id": "partial-rpc",
+            "plan": _start_plan_batch(inputs),
+            "tunables": [{"path": ["reps"], "value": 9}],
+        },
+    )
+    assert reply["ok"] is True
+    controller = window.controller
+    assert controller is not None and isinstance(controller.operation_id, int)
+    assert reply["result"] == {
+        "run_id": "partial-rpc",
+        "operation_id": controller.operation_id,
+        "status": None,
+    }
+    assert controller.status() is None and not observed
+    assert not (entry.result_path / "workflows/partial-rpc").exists()
+    for panel in (window.plan_panel, window.tunables_panel):
+        assert panel.state.base.data == panel.state.input.data
+        assert not panel.isEnabled()
+    assert window.plan_panel.state.input.data["pi_length_us"] == {"expr": "0.06 * 2"}
+    assert window.tunables_panel.state.input.data["guess_us"] == {
+        "expr": "general.ext.guess_us"
+    }
+    context.set_parameter(context.read_context().target, "general.ext.guess_us", 88.0)
+    harness.background.execute()
+    assert len(observed) == 1
+    seed, plan, tun = observed[0]
+    assert seed.pi_length_us == 0.12 and tun.guess_us == 31.0 and tun.reps == 9
+    assert plan.points == T1PlanForm.default_input(FormEnv()).data["points"]
+    assert plan.fluxes == (1.0, 1.1) and plan.snapshot.point == "source"
+    assert harness.gate.snapshot()
+    harness.background.deliver()
+    assert not harness.gate.snapshot()
+    assert window.tuning_panel is not None
+    assert (
+        window.tuning_panel.host.accepted_input.data
+        == window.tunables_panel.state.base.data
+    )
+
+
+@pytest.mark.parametrize(
+    "form,bad_value",
+    [("plan", 0.0), ("tunables", 0), ("plan", {"expr": "missing_name"})],
+)
+def test_rpc_start_model_errors_leave_both_panel_drafts_and_bases_untouched(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
+    rpc: RpcRequest,
+    form: str,
+    bad_value: JsonValue,
+) -> None:
+    window, harness, entry = attachment
+    before = [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
+    plan = _start_plan_batch(inputs)
+    tunables: list[FormWrite] = []
+    path = ["pi_length_us"] if form == "plan" else ["reps"]
+    if form == "plan":
+        for edit in plan:
+            if edit["path"] == path:
+                edit["value"] = bad_value
+    else:
+        tunables = [{"path": path, "value": bad_value}]
+    reply = rpc(
+        "workflow.start", {"run_id": "invalid-rpc", "plan": plan, "tunables": tunables}
+    )
+    assert reply["ok"] is False
+    error = reply["error"]
+    assert isinstance(error, dict) and error["code"] == "invalid_params"
+    assert error["reason"] == "form_errors"
+    data = error["data"]
+    assert isinstance(data, list) and any(
+        item["path"] == path and isinstance(item["message"], str) for item in data
+    )
+    assert before == [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
+    assert window.controller is None and harness.background.work is None
+    assert not (entry.result_path / "workflows").exists()
+    assert not (entry.database_path / "workflows").exists()
+
+
+@pytest.mark.parametrize(
+    "batch",
+    [
+        {},
+        [42],
+        [{"path": ["points"]}],
+        [{"path": [], "value": 17}],
+        [{"path": ["fluxes", 0], "value": 1.0}],
+        [{"path": ["points"], "value": 17}, {"path": ["points"], "value": 19}],
+        [{"path": ["unknown"], "value": 17}],
+        [{"path": ["fluxes"], "value": {"kind": "list", "values": [0.0]}}],
+        [
+            {"path": ["fluxes", "kind"], "value": "list"},
+            {"path": ["fluxes", "values", "0"], "value": 1.0},
+        ],
+        [
+            {"path": ["fluxes"], "value": {}},
+            {"path": ["fluxes", "kind"], "value": "list"},
+        ],
+    ],
+)
+def test_rpc_start_rejects_bad_batches_without_mutating_drafts(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    rpc: RpcRequest,
+    batch: object,
+) -> None:
+    window, harness, entry = attachment
+    before = [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
+    reply = rpc(
+        "workflow.start", {"run_id": "bad-batch", "plan": batch, "tunables": []}
+    )
+    assert reply["ok"] is False
+    error = reply["error"]
+    assert isinstance(error, dict) and error["code"] == "invalid_params"
+    assert before == [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
+    assert window.controller is None and harness.background.work is None
+    assert not (entry.result_path / "workflows").exists()
+
+
+def test_rpc_start_ignores_unparseable_gui_text_then_resets_accepted_base(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
+    rpc: RpcRequest,
+) -> None:
+    window, _harness, _entry = attachment
+    widget = window.plan_panel.editor.findChild(QLineEdit, "form.input.pi_length_us")
+    assert isinstance(widget, QLineEdit)
+    widget.setText("-")
+    before = window.plan_panel.state.input.data
+    local = window.plan_panel.editor.local_parse_errors()
+    assert local is not None and ("pi_length_us",) in local.messages
+    gui = window.start("bad-gui")
+    assert isinstance(gui, FormErrors) and ("pi_length_us",) in gui.messages
+    assert window.plan_panel.state.input.data == before
+    reply = rpc(
+        "workflow.start",
+        {"run_id": "clean-rpc", "plan": _start_plan_batch(inputs), "tunables": []},
+    )
+    assert reply["ok"] is True
+    assert window.plan_panel.editor.local_parse_errors() is None
+    assert window.plan_panel.state.base.data == window.plan_panel.state.input.data
+    assert window.plan_panel.state.input.data["pi_length_us"] == {"expr": "0.06 * 2"}
+
+
+def test_window_start_explicit_empty_batch_uses_defaults_not_the_gui_draft(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+) -> None:
+    window, _harness, _entry = attachment
+    window.tunables_panel.state.write({("guess_us",): -1.0}, FormEnv())
+    gui = window.start("invalid-tunables")
+    assert isinstance(gui, FormErrors) and ("guess_us",) in gui.messages
+    original_plan = window.plan_panel.state.input.data
+    token = window.start("default-tunables", tunables_batch={})
+    assert isinstance(token, int)
+    assert window.plan_panel.state.base.data == original_plan
+    assert window.tunables_panel.state.base.data["guess_us"] == {
+        "expr": "general.ext.guess_us"
+    }
+
+
+def test_rpc_start_native_submit_failure_does_not_install_new_panel_bases(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
+    rpc: RpcRequest,
+) -> None:
+    window, harness, entry = attachment
+    before = [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
+    harness.background.fail_submit = True
+    reply = rpc(
+        "workflow.start",
+        {"run_id": "failed-rpc", "plan": _start_plan_batch(inputs), "tunables": []},
+    )
+    assert reply["ok"] is False
+    error = reply["error"]
+    assert isinstance(error, dict) and error["code"] == "controller_error"
+    assert "submit failed" in error["message"]
+    assert window.controller is None and harness.handles.live_count() == 0
+    assert not harness.gate.snapshot()
+    assert before == [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
+    assert not (entry.result_path / "workflows").exists()
+
+
+def test_rpc_start_source_failure_does_not_fall_back_to_old_gui_capture(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
+    rpc: RpcRequest,
+) -> None:
+    window, harness, entry = attachment
+    before = [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
+    harness.services.context.clear_context()
+    reply = rpc(
+        "workflow.start",
+        {"run_id": "empty-source", "plan": _start_plan_batch(inputs), "tunables": []},
+    )
+    assert reply["ok"] is False
+    error = reply["error"]
+    assert isinstance(error, dict) and error["code"] == "precondition_failed"
+    assert before == [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
+    assert window.controller is None and harness.background.work is None
+    assert not (entry.result_path / "workflows").exists()
+
+
+def test_rpc_start_cannot_replace_pending_native_run(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
+    rpc: RpcRequest,
+) -> None:
+    window, harness, _entry = attachment
+    token = window.start("attached")
+    assert isinstance(token, int)
+    controller = window.controller
+    before = [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
+    reply = rpc(
+        "workflow.start",
+        {"run_id": "replacement", "plan": _start_plan_batch(inputs), "tunables": []},
+    )
+    assert reply["ok"] is False
+    error = reply["error"]
+    assert isinstance(error, dict) and error["code"] == "precondition_failed"
+    assert error["reason"] == "invalid_run_state"
+    assert error["data"] == {"action": "start", "lifecycle": "running"}
+    assert window.controller is controller
+    assert controller is not None and controller.run_id == "attached"
+    assert controller.operation_id == token and controller.status() is None
+    assert harness.gate.snapshot()
+    assert before == [
+        (p.state.input.data, p.state.base.data)
+        for p in (window.plan_panel, window.tunables_panel)
+    ]
 
 
 def test_rpc_running_stop_retains_lease_until_owner_delivery(
