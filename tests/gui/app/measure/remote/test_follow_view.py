@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.run_saving import SaveReport
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.remote.handlers.analysis import (
     h_tab_analyze,
@@ -84,19 +85,21 @@ def test_save_selects_data_before_start_and_supports_headless(headless):
 
     def save(*args, **kwargs):
         order.append("save")
-        return SimpleNamespace(operation_id=7, destinations=())
+        return SaveReport(run_id="run-t", outputs=())
 
     adapter.save_control.save_artifacts.side_effect = save
+    adapter.tab_control.get_tab_snapshot.return_value = SimpleNamespace(artifacts=())
     result = h_tab_save_artifacts(
         adapter,
         {
             "tab_id": "t",
             "artifacts": "all",
-            "paths": {},
+            "run_operation_id": None,
+            "operation_id": None,
             "comment": None,
         },
     )
-    assert result == {"operation_id": 7, "destinations": {}}
+    assert result == {"run_id": "run-t", "artifacts": {}}
     assert order == (["save"] if headless else [("t", "data"), "save"])
 
 
@@ -109,7 +112,8 @@ def test_failed_save_view_selection_does_not_start_save():
             {
                 "tab_id": "t",
                 "artifacts": "all",
-                "paths": {},
+                "run_operation_id": None,
+                "operation_id": None,
                 "comment": None,
             },
         )
