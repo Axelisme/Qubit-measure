@@ -523,6 +523,21 @@ class WritebackWidget(QWidget):
         actual_path.setText(fact.actual_path)
         self._refresh_item_applied_presentation(item, checkbox)
 
+    def _refresh_cfg_item_preview(
+        self, item: ModuleWriteback | WaveformWriteback, *, valid: bool
+    ) -> None:
+        # Incomplete edits belong to the attached model, not finished lowering.
+        if not valid:
+            current_label, proposed_label, actual_path, checkbox = self._row_widgets[
+                item.session_id
+            ]
+            self._refresh_item_applied_presentation(item, checkbox)
+            proposed_label.setText("Invalid configuration")
+            current_label.setText("Unavailable (invalid configuration)")
+            actual_path.setText("Unavailable (invalid configuration)")
+            return
+        self._refresh_item_preview(item)
+
     def _edit_item(self, item: WritebackItem) -> None:
         if isinstance(item, MetaDictWriteback):
             self._edit_md_item(item)
@@ -633,7 +648,7 @@ class WritebackWidget(QWidget):
                 target_name=text,
             )
             item.target_name = text
-            self._refresh_item_preview(item)
+            self._refresh_cfg_item_preview(item, valid=draft.is_valid())
 
         name_edit.editingFinished.connect(_commit_name)
 
@@ -645,7 +660,7 @@ class WritebackWidget(QWidget):
         form_widget.attach(draft)
 
         def _on_draft_changed(*_: object) -> None:
-            self._refresh_item_preview(item)
+            self._refresh_cfg_item_preview(item, valid=draft.is_valid())
 
         draft.on_change.connect(_on_draft_changed)
         scroll.setWidget(form_widget)
@@ -659,7 +674,7 @@ class WritebackWidget(QWidget):
             finally:
                 draft.on_change.disconnect(_on_draft_changed)
                 form_widget.detach()
-            self._refresh_item_preview(item)
+            self._refresh_cfg_item_preview(item, valid=draft.is_valid())
 
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
         dialog.finished.connect(_on_finished)
