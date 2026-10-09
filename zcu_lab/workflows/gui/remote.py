@@ -201,8 +201,8 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
         _adapter: RemoteControlServiceBase,
         params: StartParams,
     ) -> WorkflowReply:
-        plan_batch = _parse_start_batch(params["plan"])
-        tunables_batch = _parse_start_batch(params["tunables"])
+        plan_batch = _parse_form_batch(params["plan"])
+        tunables_batch = _parse_form_batch(params["tunables"])
         try:
             result = self.ctrl.start(
                 params["run_id"],
@@ -229,15 +229,27 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
         _adapter: RemoteControlServiceBase,
         params: TunablesParams,
     ) -> WorkflowReply:
-        result = self.ctrl.apply_tunables(
-            params["run_id"],
-            _parse_start_batch(params["batch"]),
-            actor=Actor("agent", "rpc"),
-        )
-        del result
-        raise NotImplementedError(
-            "Project FormErrors and native controls without retry"
-        )
+        batch = _parse_form_batch(params["batch"])
+        try:
+            result = self.ctrl.apply_tunables(
+                params["run_id"],
+                batch,
+                actor=Actor("agent", "rpc"),
+            )
+        except (RunMismatch, InvalidRunState) as exc:
+            raise _project_control_error(exc) from exc
+        if isinstance(result, FormErrors):
+            messages: list[FormErrorReply] = [
+                {"path": list(path), "message": message}
+                for path, message in result.messages.items()
+            ]
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "Invalid tunables form input",
+                reason="form_errors",
+                data={"messages": messages},
+            )
+        return self._status(_adapter, {})
 
     def _status(
         self,
@@ -304,7 +316,7 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
         }
 
 
-def _parse_start_batch(
+def _parse_form_batch(
     batch: JsonValue | list[FormWrite],
 ) -> dict[FormWritePath, JsonValue]:
     """Convert the JSON batch shape only; FormState owns values and field paths."""

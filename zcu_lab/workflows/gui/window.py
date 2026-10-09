@@ -386,7 +386,15 @@ class T1WorkflowWindow(QWidget):
         Success updates accepted input/base and clears renderer-local text.
         Failure does neither; Engine owns revision and atomic publication.
         """
-        raise NotImplementedError("Wire the canonical target and existing tuning panel")
+        controller = self.controller
+        if controller is None:
+            raise RunMismatch(expected=run_id, actual=None)
+        controller.require_run_id(run_id)
+        self._refresh_run()
+        panel = self.tuning_panel
+        if panel is None:
+            raise RuntimeError("Applying tunables requires accepted run")
+        return panel.apply_external(batch, actor=actor)
 
     def pause(self, run_id: str) -> RunStatus:
         """Request Pause of the explicit native target, retaining plan and plots.
