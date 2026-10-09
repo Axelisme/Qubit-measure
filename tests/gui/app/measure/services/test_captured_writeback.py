@@ -511,7 +511,7 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     paths = ("Q1.ext.readout_cal.g_center", "Q1.ext.readout_cal.e_center")
     assert [current.value(path) for path in paths] == tags
     assert (
-        evaluate_scalar_expr("driver.ext.readout_cal.g_center", current) == centers[0]
+        evaluate_scalar_expr("$driver.ext.readout_cal.g_center", current) == centers[0]
     )
     assert captured.value("driver.ext.readout_cal.g_center") == {
         "__complex__": [0.2, -0.1]

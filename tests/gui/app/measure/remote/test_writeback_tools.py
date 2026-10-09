@@ -105,8 +105,15 @@ def _ctrl() -> MagicMock:
     wc.has_tab.return_value = True
     wc.get_context_version.return_value = 7
     wc.get_writeback_values_for_pane.return_value = {
-        "md-1": WritebackValues(current=6000.0, proposed=6012.3),
-        "ml-1": WritebackValues(current=None, proposed={"type": "pulse", "gain": 0.5}),
+        "md-1": WritebackValues(
+            actual_path="r_f", current=6000.0, proposed=6012.3, unit=None
+        ),
+        "ml-1": WritebackValues(
+            actual_path="readout_rf",
+            current=None,
+            proposed={"type": "pulse", "gain": 0.5},
+            unit=None,
+        ),
     }
     wc.set_writeback_item_for_pane.return_value = {
         "valid": True,
@@ -506,7 +513,12 @@ def _complex_items() -> list[WritebackItem]:
 def test_preview_serializes_complex_as_tag():
     ctrl = _ctrl()
     ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
-        "md-1": WritebackValues(current=None, proposed=complex(1.5, -2.25)),
+        "md-1": WritebackValues(
+            actual_path="g_center",
+            current=None,
+            proposed=complex(1.5, -2.25),
+            unit=None,
+        ),
     }
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
         tab_id, _complex_items(), has_writeback_draft=True
@@ -584,7 +596,9 @@ def _matrix_items() -> list[WritebackItem]:
 def test_preview_serializes_nested_list_verbatim():
     ctrl = _ctrl()
     ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
-        "md-1": WritebackValues(current=None, proposed=_CONFUSION),
+        "md-1": WritebackValues(
+            actual_path="confusion_matrix", current=None, proposed=_CONFUSION, unit=None
+        ),
     }
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
         tab_id, _matrix_items(), has_writeback_draft=True
