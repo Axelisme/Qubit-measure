@@ -4,7 +4,6 @@ import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
-from pathlib import Path
 from threading import Event
 
 import pytest
@@ -214,6 +213,27 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
     tmp_path, clients, stage, outcome
 ):
     pane = "analysis" if stage == "primary" else "post_analysis"
+    report = analysis_report(pane, ["fit", "residual"])
+    if outcome == "partial":
+        artifact = report.artifacts[pane]["results"]
+        members = dict(artifact.members)
+        members["figure:residual"] = [
+            replace(
+                members["figure:residual"][0],
+                status="failed",
+                error="Destination unavailable",
+            )
+        ]
+        report = replace(
+            report,
+            artifacts={
+                pane: {
+                    "results": replace(
+                        artifact, status="Partially saved", members=members
+                    )
+                }
+            },
+        )
 
     def respond(method, params):
         if method in {"tab.analyze", "tab.post_analyze"}:
@@ -226,28 +246,14 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
             }
         if method in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
             return _result_reply(pane, ["fit", "residual"], {"gain": 2.0})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/" + params["figure_name"] + ".png"}
+        if method == "tab.save_artifacts":
+            assert params["artifacts"] == [{"section": pane, "name": "results"}]
+            return asdict(report)
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(method)
 
     client = _client(tmp_path, clients, respond)
-    if outcome == "partial":
-
-        def save(params):
-            if params["figure_name"] == "residual":
-                return {
-                    "ok": False,
-                    "error": {
-                        "code": "precondition_failed",
-                        "reason": "save_failed",
-                        "message": "Destination unavailable",
-                    },
-                }
-            return {"ok": True, "result": respond("tab.save_image", params)}
-
-        client.transport.replies["tab.save_image"] = save
     initial = client.call("tab_analyze", {"tab": "t", "stage": stage})
     execution = initial.data["execution"]
     before = len(client.transport.sent)
@@ -258,29 +264,32 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
     assert {k: v for k, v in waited.data.items() if k != "elapsed_s"} == summary
     assert len(client.transport.sent) == before
     assert summary["recipe"] is None
-    assert summary["run_id"] is None
+    assert summary["run_id"] == (None if outcome == "failed" else "run-a")
     assert summary["run_op"] is None
     assert summary["analysis"]["stage"] == stage
     assert summary["steps"]["analysis"][stage]["status"] == (
         "failed" if outcome == "failed" else "finished"
     )
-    assert summary["status"] == ("finished" if outcome == "finished" else "failed")
+    assert summary["status"] == ("failed" if outcome == "failed" else "finished")
     if outcome != "failed":
         assert summary["analysis"][stage]["params"] == {"gain": 2.0}
-        assert summary["analysis"][stage]["details"] == {"frequency": 5.0}
-        assert summary["artifacts"][pane]["fit"]["members"]["image"] == [
-            {"path": "/actual/fit.png", "status": "saved"}
-        ]
+        assert summary["analysis"][stage]["summary"] == {"frequency": 5.0}
+        assert summary["artifacts"] == asdict(report)["artifacts"]
+        assert full["save_report"] == asdict(report)
     else:
         assert summary["error"] == full["error"]
     if outcome == "partial":
         assert summary["steps"]["analysis_save"][stage]["status"] == "incomplete"
-        assert summary["artifacts"][pane]["residual"] == {
-            "status": "incomplete",
-            "lifetime": "persistent",
-            "members": {"image": []},
-        }
-        assert summary["error"]["phase"] == "image_save"
+        assert full["save_status"] == "incomplete"
+        assert summary["artifacts"][pane]["results"]["members"]["figure:residual"] == [
+            {
+                "format": "png",
+                "path": "/actual/residual.png",
+                "status": "failed",
+                "error": "Destination unavailable",
+            }
+        ]
+        assert summary["error"] is None
 
 
 @pytest.mark.parametrize("stage", ["primary", "post"])
@@ -563,8 +572,8 @@ def test_execution_query_observes_background_completion_without_reconnect(
             return {"reason": "completed", "status": outcome, "error": None}
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"model": "fit"})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/fit.png"}
+        if method == "tab.save_artifacts":
+            return asdict(analysis_report("analysis", ["fit"]))
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(method)
@@ -678,8 +687,8 @@ def test_done_joins_original_completion_without_duplicate_saves(
             )
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"gain": 2})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/fit.png"}
+        if method == "tab.save_artifacts":
+            return asdict(analysis_report("analysis", ["fit"]))
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(method)
@@ -735,14 +744,14 @@ def test_done_joins_original_completion_without_duplicate_saves(
     assert methods.count("tab.analyze") == int(registered)
     assert methods.count("tab.interact") == 1 + int(registered)
     assert methods.count("tab.get_analyze_result") == int(outcome == "finished")
-    assert methods.count("tab.save_image") == int(outcome == "finished")
+    assert methods.count("tab.save_artifacts") == int(outcome == "finished")
     assert methods.count("tab.writeback_preview") == int(outcome == "finished")
     assert set(methods) <= {
         "tab.analyze",
         "tab.interact",
         "operation.await",
         "tab.get_analyze_result",
-        "tab.save_image",
+        "tab.save_artifacts",
         "tab.get_figure",
         "tab.writeback_preview",
     }
@@ -759,8 +768,8 @@ def test_failed_writeback_capture_keeps_saved_analysis_and_preview(
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"skip": 1})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/fit.png"}
+        if method == "tab.save_artifacts":
+            return asdict(analysis_report("analysis", ["fit"]))
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(method)
@@ -780,11 +789,8 @@ def test_failed_writeback_capture_keeps_saved_analysis_and_preview(
     assert data["writeback"] is None
     assert data["result"]["params"] == {"skip": 1}
     assert data["save_status"] == "saved"
-    assert data["saved_images"] == [
-        {"figure_name": "fit", "image_path": "/actual/fit.png"}
-    ]
-    assert Path(data["figure"]).read_bytes() == _PNG
-    assert reply["content"][1]["data"] == base64.b64encode(_PNG).decode()
+    assert data["save_report"] == asdict(analysis_report("analysis", ["fit"]))
+    _assert_figure(reply, present=True)
     assert _methods(client).count("tab.writeback_preview") == 1
     before = list(client.transport.sent)
     assert (
