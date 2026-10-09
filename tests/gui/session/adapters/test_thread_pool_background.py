@@ -189,3 +189,20 @@ def test_terminal_delivery_releases_completed_future_result() -> None:
     assert executor.quiesce()
     assert delivered == [True]
     assert result_ref() is None
+
+
+@pytest.mark.parametrize("run_in_pool", [True, False])
+def test_terminal_quiesce_uses_named_admission_rejection(run_in_pool: bool) -> None:
+    scheduler = ManualOwnerScheduler()
+    executor = ThreadPoolBackgroundExecutor(scheduler)
+    assert executor.quiesce()
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="background") as caught:
+            executor.submit(
+                lambda: None,
+                run_in_pool=run_in_pool,
+                on_done=lambda _: None,
+                on_error=lambda _: None,
+            )
+        assert type(caught.value).__name__ == "BackgroundAdmissionClosedError"
+        assert executor.quiesce()

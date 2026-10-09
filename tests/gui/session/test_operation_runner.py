@@ -873,3 +873,53 @@ def test_continuation_rejects_unknown_or_settled_handle(known: bool) -> None:
         )
     assert handles.live_count() == 0
     assert gate.release_calls == progress.discard_calls == [token]
+
+
+def test_terminal_admission_rejection_fails_and_unwinds_begin_without_producer() -> (
+    None
+):
+    from zcu_tools.gui.session.adapters.manual_owner_scheduler import (
+        ManualOwnerScheduler,
+    )
+    from zcu_tools.gui.session.adapters.thread_pool_background import (
+        ThreadPoolBackgroundExecutor,
+    )
+
+    scheduler = ManualOwnerScheduler()
+    bg = ThreadPoolBackgroundExecutor(scheduler)
+    gate = _FakeGate()
+    progress = _FakeProgress()
+    handles = OperationHandles()
+    runner = OperationRunner(gate, handles, progress, bg, BaseEventBus())
+    opened: list[int] = []
+    retained: list[SettleFn] = []
+    produced: list[str] = []
+    spec = OperationSpec(
+        exclusion=ExclusionRequest("run", "workflow", "admission test"),
+        owner_id="workflow",
+        wants_progress=True,
+        cancel_hook=None,
+        work=lambda _factory: produced.append("first"),
+        run_in_pool=False,
+        on_opened=opened.append,
+        on_terminal=lambda _result, settle: retained.append(settle),
+    )
+    try:
+        assert bg.quiesce()
+        with pytest.raises(RuntimeError, match="background") as caught:
+            runner.begin(spec)
+        token = opened[0]
+        outcome = handles.known_outcome(token)
+        assert outcome is not None and outcome.status == "failed", (
+            "rejection left a pending handle"
+        )
+        assert handles.live_count() == 0
+        assert gate.release_calls == progress.discard_calls == [token]
+        assert produced == []
+        assert scheduler.pump_all() == 0
+        assert type(caught.value).__name__ == "BackgroundAdmissionClosedError"
+    finally:
+        if handles.live_count() and retained:
+            retained[0](OperationOutcome("failed", "test cleanup"))
+        scheduler.pump_all()
+        assert bg.quiesce()

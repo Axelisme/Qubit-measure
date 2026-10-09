@@ -4,9 +4,11 @@ import json
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 from time import monotonic
 
 import pytest
+from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
@@ -19,6 +21,7 @@ from qtpy.QtWidgets import (
     QTableWidgetItem,
     QWidget,
 )
+from zcu_tools.device import FakeDevice
 from zcu_tools.device.manager import DeviceManager
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors
@@ -38,6 +41,7 @@ from zcu_tools.resources.entry import (
     role_registry,
 )
 
+from tests.gui._completion_helpers import on_device_connected
 from tests.resources.entry.fakes import registry_state, restore_registry
 from zcu_lab.components import QubitSchema
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
@@ -376,3 +380,115 @@ def test_registry_close_failure_rejects_window_close(
         message = app.window.findChild(QLabel, "workflow.run.message")
         assert message is not None and "driver close failed" in message.text()
     assert app.window.close()
+
+
+def test_window_close_rejects_queued_connect_before_driver_registration(
+    app: WorkflowsGuiBehavior, qapp: QApplication
+) -> None:
+    app.assemble(None)
+    rejections: list[Exception] = []
+    accepted: list[int] = []
+
+    def queued_connect() -> None:
+        try:
+            accepted.append(
+                app.services.device.start_connect_device(
+                    ConnectDeviceRequest("FakeDevice", "late", "none")
+                )
+            )
+        except RuntimeError as error:
+            rejections.append(error)
+
+    QTimer.singleShot(0, queued_connect)
+    assert app.window.close()
+    assert accepted == [], "queued connect escaped terminal admission"
+    assert [type(error).__name__ for error in rejections] == [
+        "BackgroundAdmissionClosedError"
+    ]
+    app.shutdown()
+    qapp.processEvents()
+    assert app.services.device.get_connected_devices() == {}
+    assert app.services.device.get_active_device_operations() == ()
+
+
+def test_window_close_drains_accepted_connect_and_delivery_before_driver_close(
+    app: WorkflowsGuiBehavior, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app.assemble(None)
+    started = Event()
+    release = Event()
+    events: list[str] = []
+    original_read = FakeDevice.get_info
+    original_close = FakeDevice.close
+    original_drain = BackgroundRunner.quiesce
+
+    def read(driver: FakeDevice):
+        events.append("worker")
+        started.set()
+        assert release.wait(2), "shutdown did not reach drain"
+        info = original_read(driver)
+        events.append("worker done")
+        return info
+
+    def close(driver: FakeDevice) -> None:
+        events.append("driver close")
+        original_close(driver)
+
+    def drain(background: BackgroundRunner, timeout_ms: int = 5000) -> bool:
+        release.set()
+        return original_drain(background, timeout_ms)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(FakeDevice, "get_info", read)
+        patch.setattr(FakeDevice, "close", close)
+        patch.setattr(BackgroundRunner, "quiesce", drain)
+        on_device_connected(
+            app.services.device, lambda _name: events.append("delivery")
+        )
+        app.services.device.start_connect_device(
+            ConnectDeviceRequest("FakeDevice", "flux", "none")
+        )
+        try:
+            assert started.wait(2)
+            assert app.window.close()
+            assert events == ["worker", "worker done", "delivery", "driver close"]
+            assert app.services.device.get_connected_devices() == {}
+        finally:
+            release.set()
+
+
+@pytest.mark.parametrize("failure", ["drain", "driver"])
+def test_failed_window_close_keeps_terminal_admission_closed_and_can_retry(
+    app: WorkflowsGuiBehavior, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    app.assemble(None)
+    original_panel = app.window.plan_panel
+    with monkeypatch.context() as patch:
+        if failure == "drain":
+            patch.setattr(BackgroundRunner, "quiesce", lambda self: False)
+        else:
+
+            def reject_close(registry: DeviceManager) -> None:
+                raise RuntimeError("driver close failed")
+
+            patch.setattr(DeviceManager, "close_all_devices", reject_close)
+        assert not app.window.close()
+        message = app.window.findChild(QLabel, "workflow.run.message")
+        assert message is not None and failure in message.text().lower()
+        assert app.window.plan_panel is original_panel
+        caught: Exception | None = None
+        try:
+            app.services.device.start_connect_device(
+                ConnectDeviceRequest("FakeDevice", "late", "none")
+            )
+        except RuntimeError as error:
+            caught = error
+        assert caught is not None, "shutdown failure must not reopen admission"
+        assert type(caught).__name__ == "BackgroundAdmissionClosedError"
+        assert app.services.device.get_active_device_operations() == ()
+    assert app.window.close()
+    with pytest.raises(RuntimeError, match="background") as rejected:
+        app.services.device.start_connect_device(
+            ConnectDeviceRequest("FakeDevice", "after", "none")
+        )
+    assert type(rejected.value).__name__ == "BackgroundAdmissionClosedError"

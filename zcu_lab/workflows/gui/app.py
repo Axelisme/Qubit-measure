@@ -115,15 +115,18 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
         self.window.open_setup()
 
     def shutdown(self) -> None:
-        """Cancel session handles, drain workers and release owned resources.
+        """Close executor admission, cancel handles, drain and release resources.
 
         Call on the owner thread after assemble and native terminal delivery.
-        Cancel every pending session operation, then quiesce the same background
-        executor before closing the registry's drivers and stopping RPC.
-        Drain timeout/driver close failures raise; Window rejects close without
-        destroying the session. Repeated successful calls are harmless. This
+        Permanently close submission admission, cancel every pending operation,
+        then drain the same executor's workers and queued terminal delivery before
+        closing this registry's drivers and stopping RPC. Drain timeout/driver
+        close failures raise; Window rejects close and displays the error.
+        Admission stays closed after failure; retry drain/close, not new work.
+        Repeated successful calls are harmless. This
         neither changes hardware output values nor reconnects anything.
         """
+        self._background.stop_accepting()
         self._handles.cancel_all()
         if not self._background.quiesce():
             raise RuntimeError("Session background drain did not complete")

@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-08，cfg 即時送出與參數容器切換
+**Last updated:** 2026-10-10，executor-owned terminal admission
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -12,8 +12,10 @@ Core state belongs to one owner thread. `OwnerScheduler` is the marshal seam：Q
 composition使用queued-signal adapter，headless/test composition使用explicitly pumped manual
 adapter。`BackgroundExecutor`與scheduler分離：Qt runtime使用QThread/QThreadPool adapter；
 headless runtime使用pure `ThreadPoolBackgroundExecutor`，並在worker完成後透過scheduler
-投遞唯一terminal callback。具體executor的`quiesce()`會停止新工作並等待worker與owner delivery
-ack，session services只依賴`submit` port。
+投遞唯一terminal callback。Headless `quiesce()` 是 terminal close，會停止新工作並等待worker與owner delivery
+ack。Qt `quiesce()` 保持可重複 drain；terminal shutdown 先呼叫 `stop_accepting()`，再取消與drain。
+關閉入口後兩個executor的`submit`都立即拋`BackgroundAdmissionClosedError`，不排worker或callback。
+Session services只依賴`submit` port，不持有另一份admission狀態。
 
 ## Remote response delivery (`remote/`)
 
