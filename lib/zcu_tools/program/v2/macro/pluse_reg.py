@@ -18,7 +18,7 @@ class PulseByReg(TimedMacro):
     def preprocess(self, prog):
         self.convert_time(prog, self.t, "t")
 
-    def expand(self, prog):  # type: ignore
+    def expand(self, prog):  # pyright: ignore[reportIncompatibleMethodOverride]
         tproc_ch = prog.soccfg["gens"][self.ch]["tproc_ch"]
         t_reg = self.t_regs["t"]
 
