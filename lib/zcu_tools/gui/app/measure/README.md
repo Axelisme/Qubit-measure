@@ -403,15 +403,16 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    convert values. Draft-local retarget refreshes the destination facts and unit.
    Module/waveform items show bounded change summaries without units and keep
    full cfg editing in `Edit`. Primary and post workflows own proposal timing;
-   the Writeback service remains stage-free. Primary FIT and interactive
-   operations capture the source `RunMetadata.run_id` at start and pass it to
-   the opaque draft. Post captures the Primary draft's identity at operation
-   start and passes it to its new draft. A missing Primary identity stays None,
-   even if live Run metadata or Save has an id. Accepted ledger events and
-   destination provenance use that identity whether or not Save occurred.
-   The identity does not imply a saved file; consult saved events for persistence.
-   Native Load retains the original identity, and analysis without native metadata
-   uses `None`.
+   the Writeback service remains stage-free.
+
+   Primary FIT and interactive operations capture the source `RunMetadata.run_id`
+   at start and pass it to the opaque draft. Post captures the Primary draft's
+   identity at operation start and passes it to its new draft. A missing Primary
+   identity stays None, even if live Run metadata or Save has an id. Accepted
+   ledger events and destination provenance use that identity whether or not Save
+   occurred. The identity does not imply a saved file; consult saved events for
+   persistence. Native Load retains the original identity, and analysis without
+   native metadata uses `None`.
 
 - `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。
   缺 cfg 時保留可用資料，不捏造設定。WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。

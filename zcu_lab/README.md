@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-09，靜態單位標籤的 owner
+**Last updated:** 2026-10-09，實驗分析 summary 與靜態單位標籤的 owner
 
 `zcu_lab` 擁有具體實驗與其前端附件。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。組合根取得定義，再顯式注入框架。
 
