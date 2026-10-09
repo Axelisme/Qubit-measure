@@ -56,7 +56,10 @@ class SetupDialog(QDialog):
 
     Showing/reopening only prefills cached preferences and queries; it does not
     open an entry or connect hardware. New/Open publish the owner binding and
-    display its paths, while failures remain visible in the status label.
+    display its paths. Working-point Switch/Create submit the exact label,
+    description and same-entry clone choice to the owner; failures remain
+    visible in the status label without retry. Track device only suggests an
+    editable label from cached value/unit, preserving manual edits and None.
     """
 
     def __init__(
@@ -420,7 +423,7 @@ class SetupDialog(QDialog):
     def _on_switch_clicked(self) -> None:
         item = self._ctx_list.currentItem()
         if item is None:
-            self._set_project_status("Select a context first", error=True)
+            self._set_project_status("Select a working point first", error=True)
             return
         label = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
         try:
