@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
-from typing import cast
 
 import pytest
 from zcu_tools.experiment.cfg_editing import (
@@ -92,10 +91,10 @@ def test_catalog_singleton_rejects_internal_collection_reassignment(
     ],
 )
 def test_catalog_unknown_discriminator_fast_fails(
-    kind: str, discriminator: str, allowed: str
+    kind: ProgramCfgKind, discriminator: str, allowed: str
 ) -> None:
     with pytest.raises(UnknownProgramShapeError) as exc_info:
-        PROGRAM_SHAPES.get(cast(ProgramCfgKind, kind), discriminator)
+        PROGRAM_SHAPES.get(kind, discriminator)
 
     assert str(exc_info.value) == (
         f"Unknown {kind} program shape {discriminator!r}; allowed: {allowed}"
@@ -213,7 +212,8 @@ def test_catalog_matches_explicit_program_v2_runtime_discriminators() -> None:
 
 def test_nested_allowed_sets_match_runtime_shape_rules() -> None:
     pulse = PROGRAM_SHAPES.module("pulse").make_spec(_AUTOFLUX_POLICY)
-    waveform = cast(ReferenceSpec, pulse.fields["waveform"])
+    waveform = pulse.fields["waveform"]
+    assert isinstance(waveform, ReferenceSpec)
     assert _literal_values(waveform, "style") == [
         "const",
         "cosine",
@@ -224,7 +224,8 @@ def test_nested_allowed_sets_match_runtime_shape_rules() -> None:
     ]
 
     flat_top = PROGRAM_SHAPES.waveform("flat_top").make_spec(_AUTOFLUX_POLICY)
-    raise_waveform = cast(ReferenceSpec, flat_top.fields["raise_waveform"])
+    raise_waveform = flat_top.fields["raise_waveform"]
+    assert isinstance(raise_waveform, ReferenceSpec)
     assert _literal_values(raise_waveform, "style") == [
         "cosine",
         "gauss",
@@ -258,8 +259,12 @@ def test_cross_app_specs_differ_only_by_two_policy_fields() -> None:
 
     main_arb = PROGRAM_SHAPES.waveform("arb").make_spec(_MAIN_POLICY)
     autoflux_arb = PROGRAM_SHAPES.waveform("arb").make_spec(_AUTOFLUX_POLICY)
-    assert cast(ScalarSpec, main_arb.fields["data"]).choices_source == "arb_waveforms"
-    assert cast(ScalarSpec, autoflux_arb.fields["data"]).choices_source == ""
+    main_data = main_arb.fields["data"]
+    assert isinstance(main_data, ScalarSpec)
+    assert main_data.choices_source == "arb_waveforms"
+    autoflux_data = autoflux_arb.fields["data"]
+    assert isinstance(autoflux_data, ScalarSpec)
+    assert autoflux_data.choices_source == ""
 
     for discriminator in ("readout/direct", "readout/pulse"):
         assert (
@@ -275,7 +280,12 @@ def test_cross_app_specs_differ_only_by_two_policy_fields() -> None:
 
 
 def _literal_values(reference: ReferenceSpec, key: str) -> list[object]:
-    return [cast(LiteralSpec, spec.fields[key]).value for spec in reference.allowed]
+    values: list[object] = []
+    for spec in reference.allowed:
+        literal = spec.fields[key]
+        assert isinstance(literal, LiteralSpec)
+        values.append(literal.value)
+    return values
 
 
 def _mutable_ids(spec: CfgSectionSpec) -> set[int]:
