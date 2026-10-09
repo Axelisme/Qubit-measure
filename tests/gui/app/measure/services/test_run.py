@@ -25,6 +25,7 @@ import pytest
 from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
 from zcu_tools.device import BaseDevice, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import ExpCfgModel
+from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -33,6 +34,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
+    ExpAdapterProtocol,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -40,7 +42,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.measure.services.guard import GuardService, RunInputs
+from zcu_tools.gui.app.measure.services.guard import RunInputs
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate,
     OperationKind,
@@ -55,7 +57,6 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
-from zcu_tools.gui.cfg.resource import CfgRevision
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
@@ -114,9 +115,9 @@ def _plots() -> Plots:
     return Plots(NonPresentingHost())
 
 
-def _make_inputs(state: State, tab_id: str, adapter: MagicMock) -> RunInputs:
+def _make_inputs(state: State, tab_id: str, adapter: ExpAdapterProtocol) -> RunInputs:
     ctx = state.session_env
-    parameters = state.get_tab(tab_id).parameters
+    parameters = ctx.parameters
     return RunInputs(
         tab_id=tab_id,
         adapter_name=state.get_tab(tab_id).adapter_name,
@@ -287,7 +288,7 @@ def test_run_started_and_terminal_events_keep_operation_origin(
 
 @pytest.mark.parametrize("context_free", [False, True])
 @pytest.mark.parametrize("cancelled", [False, True])
-def test_run_publishes_permit_source_despite_later_tab_binding(
+def test_run_publishes_admitted_source_despite_later_global_change(
     result_sources: tuple[ParameterContext, ParameterContext],
     context_free: bool,
     cancelled: bool,
@@ -298,12 +299,9 @@ def test_run_publishes_permit_source_despite_later_tab_binding(
     tab = state.get_tab(tab_id)
     state.update_tab_result(tab_id, object(), parameters=q2, source_operation_id=91)
     state.update_tab_analyze(tab_id, object(), None)
-    tab.parameters = captured
-    inputs = GuardService(state).capture_run_inputs(
-        tab_id, expected_revision=tab.cfg.observe().ref.revision
-    )
+    state.set_context(replace(state.session_env, parameters=captured))
+    inputs = _make_inputs(state, tab_id, adapter)
     assert inputs.parameters is captured
-    tab.parameters = q2
     service, gate, background, _handles = _make_run_service(state)
     result = object()
     adapter.run.return_value = result
@@ -326,9 +324,7 @@ def test_run_publishes_permit_source_despite_later_tab_binding(
     assert not state.is_tab_running(tab_id)
     assert not gate.has_active(OperationKind.RUN)
 
-    next_inputs = GuardService(state).capture_run_inputs(
-        tab_id, expected_revision=tab.cfg.observe().ref.revision
-    )
+    next_inputs = _make_inputs(state, tab_id, adapter)
     next_token = service.start_run(next_inputs, plots=_plots())
     assert tab.run.parameters is None
     assert tab.run.source_operation_id is None
@@ -348,14 +344,12 @@ def test_run_publishes_permit_source_despite_later_tab_binding(
 def test_cancelled_run_without_data_keeps_no_previous_source(
     result_sources: tuple[ParameterContext, ParameterContext],
 ) -> None:
-    state, tab_id, _adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
     q1, q2 = result_sources
     tab = state.get_tab(tab_id)
     state.update_tab_result(tab_id, object(), parameters=q1, source_operation_id=91)
-    tab.parameters = q2
-    inputs = GuardService(state).capture_run_inputs(
-        tab_id, expected_revision=tab.cfg.observe().ref.revision
-    )
+    state.set_context(replace(state.session_env, parameters=q2))
+    inputs = _make_inputs(state, tab_id, adapter)
     service, _gate, background, _handles = _make_run_service(state)
     service.start_run(inputs, plots=_plots())
     service.cancel_run()
@@ -395,9 +389,7 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     )
     cfg = make_cfg(schema, state=state)
     state.get_tab(tab_id).cfg = cfg
-    inputs = GuardService(state).capture_run_inputs(
-        tab_id, expected_revision=CfgRevision(0)
-    )
+    inputs = _make_inputs(state, tab_id, adapter)
     svc, gate, bg, _ = _make_run_service(state)
     result = object()
     adapter.run.return_value = result
@@ -447,9 +439,7 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     state.get_tab(tab_id).adapter = adapter
     state.get_tab(tab_id).cfg = cfg
     accepted_ref = cfg.observe().ref
-    inputs = GuardService(state).capture_run_inputs(
-        tab_id, expected_revision=accepted_ref.revision
-    )
+    inputs = _make_inputs(state, tab_id, adapter)
     accepted_basis = inputs.accepted_cfg.source_basis
     service, _gate, background, _handles = _make_run_service(state)
 
@@ -843,14 +833,23 @@ def test_run_publishes_record_and_historical_metadata_together(
         snapshot=snapshot,
         experiment_tag="test/native",
     )
+    settings = FakeDeviceInfo(address="offline", value=1.25)
+    inputs = replace(
+        inputs, request=replace(inputs.request, device_snapshot={"flux": settings})
+    )
+    identity = MagicMock(wraps=new_run_id)
+    monkeypatch.setattr("zcu_tools.gui.app.measure.services.run.new_run_id", identity)
     service, _gate, background, handles = _make_run_service(state)
+    before_run = datetime.now(UTC)
     token = service.start_run(inputs, plots=_plots())
+    after_admission = datetime.now(UTC)
+    assert identity.called  # Identity is already fixed before acquisition starts.
+    settings.value = 9.5
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.8))
     )
     if stopped:
         assert service.cancel_run()
-    before_acquire = datetime.now(UTC)
     background.run_work()
     after_acquire = datetime.now(UTC)
     pane = state.get_tab(tab_id).run
@@ -864,7 +863,10 @@ def test_run_publishes_record_and_historical_metadata_together(
     assert metadata.completion == ("stopped" if stopped else "complete")
     assert metadata.labber_path is None
     assert metadata.finished_at is not None
-    assert before_acquire <= datetime.fromisoformat(metadata.started_at)
+    assert metadata.device_snapshot == {
+        "flux": FakeDeviceInfo(address="offline", value=1.25).model_dump(mode="json")
+    }
+    assert before_run <= datetime.fromisoformat(metadata.started_at) <= after_admission
     assert (
         datetime.fromisoformat(metadata.started_at)
         <= datetime.fromisoformat(metadata.finished_at)
@@ -1016,9 +1018,8 @@ def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
     assert outcome is not None and outcome.status == "finished"
 
 
-@pytest.mark.parametrize("cancel_during_identity", [False, True])
 def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidence(
-    monkeypatch: pytest.MonkeyPatch, cancel_during_identity: bool
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state, tab_id, adapter = _make_state()
     adapter.run.return_value = RunRecord(
@@ -1035,21 +1036,9 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
     )
     service, _gate, background, handles = _make_run_service(state)
     token = service.start_run(inputs, plots=_plots())
-    if cancel_during_identity:
-        from zcu_tools.experiment.acquisition import new_run_id
-
-        def identity_after_cancel(started_at: datetime) -> str:
-            # The identity collaborator runs after acquisition has returned.
-            assert service.cancel_run()
-            return new_run_id(started_at)
-
-        monkeypatch.setattr(
-            "zcu_tools.gui.app.measure.services.run.new_run_id", identity_after_cancel
-        )
     assert background.last_work is not None
     acquired = background.last_work()
-    if not cancel_during_identity:
-        assert service.cancel_run()
+    assert service.cancel_run()
     assert background.last_on_done is not None
     background.last_on_done(acquired)
     metadata = state.get_tab(tab_id).run.metadata

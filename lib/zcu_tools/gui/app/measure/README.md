@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，全域 alias 初值的 composition owner
+**Last updated:** 2026-10-09，全域 alias 與 Run admission evidence
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -10,8 +10,10 @@ framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/bas
 Main 擁有 `AppPersistedState` codec/version、filename、originator、restore presentation 與
 lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleFileCaretaker`。
 
-RunInputs 固定 tab 的歷史 entry／point、admission 的角色、storage capability 與 adapter 的 persistence tag。
-`RunService` 在 adapter 呼叫邊界記錄 UTC 時間、run ID 與 software provenance。
+RunInputs 固定 admission 的 entry／point、alias、storage capability 與 adapter 的 persistence tag。
+`RunService` 在 worker submission 前固定 UTC started_at 和 run ID。
+Worker 在 acquisition 前捕捉 software provenance，完成後補 finished_at／completion。
+當次已捕捉的 device settings 投影成 JSON metadata，native Save 寫入 `/device`，不查 live hardware。
 可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
 再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
 但不建立 run 資料夾。Draft、未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
@@ -373,7 +375,11 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
    settings for a live device reject admission without querying hardware.
    `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
-4. RunService captures borrowed drivers and creates a fresh RunContext with
+4. RunService fixes started_at and run_id before worker submission. It projects
+   the admitted device settings into RunMetadata.device_snapshot; native saving
+   stores them at `/device`, not in tab preferences. A failed Run with no data
+   publishes no metadata or ledger event. Usable stopped data retains its evidence.
+   RunService captures borrowed drivers and creates a fresh RunContext with
    operation plots and one StopSignal. The adapter passes this context to the core;
    Schedule uses its StopSignal and device setup uses the same signal's event.
    Only progress remains ambient. Driver lookup does not refresh accepted cfg.

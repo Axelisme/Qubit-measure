@@ -3,12 +3,14 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from zcu_tools.datafile import RunMetadata
+from pydantic import TypeAdapter
+
+from zcu_tools.datafile import JsonObject, RunMetadata
 from zcu_tools.device.base import BaseDevice
 from zcu_tools.experiment.acquisition import capture_software_provenance, new_run_id
 from zcu_tools.experiment.context import RunContext
@@ -55,8 +57,9 @@ if TYPE_CHECKING:
 class _RunOperation:
     """One run owns its inputs and worker-produced evidence.
 
-    The worker sets metadata after acquisition returns. Terminal reads it only
-    after worker completion; the next operation never shares this object.
+    Identity and start time are fixed before worker submission. The worker
+    captures provenance before acquisition and completes metadata afterward.
+    Terminal publishes it only with usable data; failed empty Runs persist nothing.
     """
 
     tab_id: str
@@ -350,15 +353,38 @@ class RunService:
             parameters=inputs.parameters,
         )
 
+        # Fix admission identity before submission, even when the worker is delayed.
+        started_at = datetime.now(UTC)
+        snapshot, experiment_tag = inputs.snapshot, inputs.experiment_tag
+        run_id = (
+            new_run_id(started_at)
+            if snapshot is not None and experiment_tag is not None
+            else None
+        )
+        device_json = TypeAdapter(JsonObject)
+        device_snapshot = {
+            name: device_json.validate_python(info.model_dump(mode="json"), strict=True)
+            for name, info in request.device_snapshot.items()
+        }
+
         def work(factory: Any) -> object:
             # Provenance uses only software/host and the cached SoC config.
-            snapshot, experiment_tag = inputs.snapshot, inputs.experiment_tag
-            provenance = (
-                capture_software_provenance(context=context)
-                if snapshot is not None and experiment_tag is not None
-                else None
-            )
-            started_at = datetime.now(UTC)
+            if (
+                snapshot is not None
+                and experiment_tag is not None
+                and run_id is not None
+            ):
+                operation.metadata = RunMetadata(
+                    run_id=run_id,
+                    experiment=experiment_tag,
+                    started_at=started_at.isoformat(),
+                    finished_at=None,
+                    completion="partial",
+                    labber_path=None,
+                    snapshot=snapshot,
+                    provenance=capture_software_provenance(context=context),
+                    device_snapshot=device_snapshot,
+                )
             # Progress alone is ambient; execution dependencies are run-owned.
             with progress_ambient(factory):
                 result = adapter.run(request, raw_cfg, context=context)
@@ -366,22 +392,13 @@ class RunService:
             # Completion records acquisition progress, not later operation cancellation.
             completion = "stopped" if stop_event.is_set() else "complete"
             finished_at = datetime.now(UTC)
-            if (
-                snapshot is not None
-                and experiment_tag is not None
-                and provenance is not None
-            ):
+            if operation.metadata is not None:
                 if not isinstance(result, RunRecord):
                     raise TypeError("Native acquisition must return a RunRecord")
-                operation.metadata = RunMetadata(
-                    run_id=new_run_id(started_at),
-                    experiment=experiment_tag,
-                    started_at=started_at.isoformat(),
+                operation.metadata = replace(
+                    operation.metadata,
                     finished_at=finished_at.isoformat(),
                     completion=completion,
-                    labber_path=None,
-                    snapshot=snapshot,
-                    provenance=provenance,
                 )
             return result
 

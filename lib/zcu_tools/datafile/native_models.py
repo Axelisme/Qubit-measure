@@ -131,7 +131,10 @@ class RunMetadata:
     completion is complete, partial or stopped measurement progress, not a
     transaction status. labber_path is the last successful Labber path or None.
     snapshot is caller-captured entry state; provenance is historical environment
-    evidence. Native I/O rejects malformed values with a located ValueError.
+    evidence. device_snapshot maps device names to detached finite JSON settings
+    captured for this Run. Empty means no devices; None means not recorded.
+    Native stores it at /device, separate from /context, and never reads hardware.
+    Native I/O rejects malformed values with a located ValueError.
     """
 
     run_id: str
@@ -142,6 +145,13 @@ class RunMetadata:
     labber_path: str | None
     snapshot: RunSnapshot
     provenance: SoftwareProvenance
+    device_snapshot: (
+        Annotated[
+            Mapping[str, JsonObject],
+            PlainSerializer(dict, return_type=dict[str, JsonObject], when_used="json"),
+        ]
+        | None
+    ) = None
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -13,6 +13,7 @@ from .native_nodes import known_group, known_node
 
 _JSON = TypeAdapter(JsonObject)
 _METADATA = TypeAdapter(RunMetadata)
+_DEVICE = TypeAdapter(dict[str, JsonObject])
 _OPTIONAL_EVIDENCE = ("git_commit", "qick_version", "soc_fingerprint", "hostname")
 
 
@@ -135,6 +136,13 @@ def validate_cfg_snapshot(cfg: CfgSnapshot) -> None:
 def validate_metadata(metadata: RunMetadata, cfg: CfgSnapshot) -> None:
     """Validate historical metadata, UTC times and cfg JSON before creating a file."""
     validate_cfg_snapshot(cfg)
+    if metadata.device_snapshot is not None:
+        try:
+            _DEVICE.validate_json(
+                json.dumps(dict(metadata.device_snapshot), allow_nan=False), strict=True
+            )
+        except (ValidationError, ValueError) as error:
+            raise ValueError(f"/device: {error}") from error
     # JSON validation rechecks dataclass fields rather than trusting instance types.
     try:
         checked = _METADATA.validate_json(
@@ -186,6 +194,14 @@ def write_metadata(file: h5.File, metadata: RunMetadata, cfg: CfgSnapshot) -> No
         "labber_path",
     ):
         file.attrs[name] = raw[name] if raw[name] is not None else ""
+    device = raw["device_snapshot"]
+    if device is None:
+        if known_node(file, "device") is not None:
+            del file["device"]
+    elif isinstance(device, dict):
+        write_json(file, "device", device)
+    else:
+        raise ValueError("/device: expected JSON object")
     cfg_dataset = write_json(file, "cfg", cfg.values)
     cfg_dataset.attrs["cfg_type"] = cfg.cfg_type
     cfg_dataset.attrs["cfg_schema_version"] = cfg.schema_version
@@ -235,6 +251,13 @@ def read_metadata(file: h5.File, source: Path) -> tuple[RunMetadata, CfgSnapshot
         cfg_type=text_attr(cfg_node, "cfg_type"),
         schema_version=text_attr(cfg_node, "cfg_schema_version"),
     )
+    if known_node(file, "device") is not None:
+        device = read_json(file, "device")
+        try:
+            _DEVICE.validate_python(device, strict=True)
+        except ValidationError as error:
+            raise ValueError(f"/device: {error}") from error
+        raw["device_snapshot"] = device
     raw["snapshot"] = read_json(file, "context")
     group = known_node(file, "provenance")
     if not isinstance(group, h5.Group):
