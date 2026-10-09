@@ -18,6 +18,8 @@ from pydantic import (
     model_validator,
 )
 
+from zcu_tools.core.complex_codec import encode_complex
+
 
 def _json_value(value: object) -> object:
     """Reject non-JSON Python values before Pydantic can coerce them."""
@@ -115,6 +117,13 @@ class AcceptedWrite(_LedgerModel):
 
     path: _Nonempty
     value: JsonValue
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _encode_complex_value(cls, value: object) -> object:
+        if isinstance(value, complex):
+            return encode_complex(value)
+        return value
 
     @field_validator("path")
     @classmethod

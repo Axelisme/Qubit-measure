@@ -20,7 +20,7 @@ def encode_complex(value: complex) -> ComplexTag:
     values. Finite-number restrictions belong to the consuming schema.
     This function performs no I/O and does not alter value.
     """
-    raise NotImplementedError("complex scalar encoder")
+    return {"__complex__": [value.real, value.imag]}
 
 
 def decode_complex(value: object) -> complex:
@@ -32,4 +32,17 @@ def decode_complex(value: object) -> complex:
     OverflowError. Finite-number restrictions belong to the consuming schema.
     This function performs no I/O and does not alter value.
     """
-    raise NotImplementedError("complex scalar decoder")
+    if not isinstance(value, dict) or set(value) != {"__complex__"}:
+        raise ValueError("Complex tag must contain exactly the __complex__ key")
+    components = value["__complex__"]
+    if not isinstance(components, list) or len(components) != 2:
+        raise ValueError("Complex components must be a two-item list")
+    real, imaginary = components
+    if (
+        isinstance(real, bool)
+        or isinstance(imaginary, bool)
+        or not isinstance(real, (int, float))
+        or not isinstance(imaginary, (int, float))
+    ):
+        raise ValueError("Complex components must be numeric, excluding bool")
+    return complex(real, imaginary)
