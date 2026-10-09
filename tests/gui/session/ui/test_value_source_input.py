@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QLineEdit  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, Qt
+from qtpy.QtGui import QKeyEvent
+from qtpy.QtWidgets import QLineEdit
 from zcu_tools.gui.session.ui.value_source_input import (
     ValueSourceInputController,
     _active_token,
@@ -149,8 +149,8 @@ def test_tab_accepts_first_completion(qapp) -> None:
     controller = ValueSourceInputController(edit, host)
     event = QKeyEvent(
         QEvent.Type.KeyPress,
-        Qt.Key.Key_Tab,  # type: ignore[attr-defined]
-        Qt.KeyboardModifier.NoModifier,  # type: ignore[attr-defined]
+        Qt.Key.Key_Tab,
+        Qt.KeyboardModifier.NoModifier,
     )
 
     assert controller.eventFilter(edit, event)
@@ -173,8 +173,8 @@ def test_tab_accepts_first_completion_from_popup(qapp) -> None:
     assert popup is not None
     event = QKeyEvent(
         QEvent.Type.KeyPress,
-        Qt.Key.Key_Tab,  # type: ignore[attr-defined]
-        Qt.KeyboardModifier.NoModifier,  # type: ignore[attr-defined]
+        Qt.Key.Key_Tab,
+        Qt.KeyboardModifier.NoModifier,
     )
 
     assert controller.eventFilter(popup, event)
@@ -193,8 +193,8 @@ def test_tab_accepts_leaf_completion_without_drill_down(qapp) -> None:
     controller = ValueSourceInputController(edit, host)
     event = QKeyEvent(
         QEvent.Type.KeyPress,
-        Qt.Key.Key_Tab,  # type: ignore[attr-defined]
-        Qt.KeyboardModifier.NoModifier,  # type: ignore[attr-defined]
+        Qt.Key.Key_Tab,
+        Qt.KeyboardModifier.NoModifier,
     )
 
     assert controller.eventFilter(edit, event)
@@ -227,7 +227,7 @@ def test_space_after_complete_token_resolves_and_replaces_text(qapp) -> None:
     host = _Host()
     controller = ValueSourceInputController(edit, host)
     resolved: list[object] = []
-    controller.resolved.connect(resolved.append)  # type: ignore[attr-defined]
+    controller.resolved.connect(resolved.append)
 
     controller._on_text_edited(edit.text())
 
@@ -259,7 +259,7 @@ def test_failed_resolve_keeps_text_and_sets_tooltip(qapp) -> None:
     host = _Host()
     controller = ValueSourceInputController(edit, host)
     failures: list[str] = []
-    controller.resolve_failed.connect(failures.append)  # type: ignore[attr-defined]
+    controller.resolve_failed.connect(failures.append)
     popup = controller._completer.popup()
     assert popup is not None
     popup.show()
