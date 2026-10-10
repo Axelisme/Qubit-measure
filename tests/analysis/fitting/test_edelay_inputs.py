@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 from zcu_tools.analysis.fitting.resonance import find_edelay_branch
@@ -73,3 +75,54 @@ def test_find_edelay_branch_recovers_pure_phasor_for_signal_shapes(
     signals = trace if row_count == 1 else np.vstack((trace, np.exp(0.37j) * trace))
 
     assert find_edelay_branch(freqs, signals) == pytest.approx(expected_delay, abs=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("frequency_values", "signal_values", "expected_error"),
+    [
+        (
+            [0.0, 0.2, 0.55],
+            [1.0, 1.0, 1.0],
+            "electrical-delay branch search requires at least four samples",
+        ),
+        (
+            [0.0, np.nan, 0.55, 0.8],
+            [1.0, 1.0, 1.0, 1.0],
+            "electrical-delay branch search inputs must be finite",
+        ),
+        (
+            [0.0, 0.2, 0.55, 0.8],
+            [1.0, 1.0, np.inf, 1.0],
+            "electrical-delay branch search inputs must be finite",
+        ),
+        (
+            [0.0, 0.2, 0.2, 0.8],
+            [1.0, 1.0, 1.0, 1.0],
+            "electrical-delay branch search requires distinct frequencies with a "
+            "positive span",
+        ),
+        (
+            [0.2, 0.2, 0.2, 0.2],
+            [1.0, 1.0, 1.0, 1.0],
+            "electrical-delay branch search requires distinct frequencies with a "
+            "positive span",
+        ),
+    ],
+    ids=[
+        "minimum-samples",
+        "frequency-finite",
+        "signal-finite",
+        "duplicate-frequency",
+        "zero-span",
+    ],
+)
+def test_find_edelay_branch_rejects_invalid_sample_values(
+    frequency_values: list[float], signal_values: list[float], expected_error: str
+) -> None:
+    freqs = np.asarray(frequency_values, dtype=np.float64)
+    signals = np.asarray(signal_values, dtype=np.complex128)
+
+    with pytest.raises(ValueError, match=f"^{re.escape(expected_error)}$") as exc_info:
+        find_edelay_branch(freqs, signals)
+
+    assert str(exc_info.value) == expected_error
