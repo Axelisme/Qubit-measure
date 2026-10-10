@@ -844,7 +844,11 @@ def test_run_publishes_record_and_historical_metadata_together(
     )
     identity = MagicMock(wraps=new_run_id)
     monkeypatch.setattr("zcu_tools.gui.app.measure.services.run.new_run_id", identity)
-    service, _gate, background, handles = _make_run_service(state)
+    driver = FakeDevice()
+    driver.set_value(1.25)
+    service, _gate, background, handles = _make_run_service(
+        state, devices={"flux": driver}
+    )
     before_run = datetime.now(UTC)
     token = service.start_run(inputs, plots=_plots())
     after_admission = datetime.now(UTC)
@@ -869,7 +873,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     assert metadata.labber_path is None
     assert metadata.finished_at is not None
     assert metadata.device_snapshot == {
-        "flux": FakeDeviceInfo(address="offline", value=1.25).model_dump(mode="json")
+        "flux": FakeDeviceInfo(address="none", value=1.25).model_dump(mode="json")
     }
     assert before_run <= datetime.fromisoformat(metadata.started_at) <= after_admission
     assert (
