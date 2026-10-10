@@ -283,7 +283,7 @@ def auto_fit_dispersive(
                 np.interp(rf_0, sp_freqs, real_signal),
                 np.interp(rf_1, sp_freqs, real_signal),
             )
-            for rf_0, rf_1, real_signal in zip(rf_0, rf_1, real_signals)
+            for rf_0, rf_1, real_signal in zip(rf_0, rf_1, real_signals, strict=False)
         ]
         return -np.mean(vals)
 
@@ -304,17 +304,17 @@ def auto_fit_dispersive(
             res = res.x  # compatibility with scipy < 1.7
 
         return res[0].item(), res[1].item()
-    else:
-        res = minimize(
-            lambda p: loss_fn(p[0], bare_rf_GHz),
-            x0=[g_init],
-            bounds=[g_bound],
-            **fit_kwargs,
-        )
-        if not isinstance(res, np.ndarray):
-            res = res.x  # compatibility with scipy < 1.7
 
-        return res[0].item(), None
+    res = minimize(
+        lambda p: loss_fn(p[0], bare_rf_GHz),
+        x0=[g_init],
+        bounds=[g_bound],
+        **fit_kwargs,
+    )
+    if not isinstance(res, np.ndarray):
+        res = res.x  # compatibility with scipy < 1.7
+
+    return res[0].item(), None
 
 
 def plot_dispersive_with_onetone(
