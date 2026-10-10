@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from itertools import product
 from typing import Any
@@ -31,7 +31,7 @@ ParamGridInput = float | np.ndarray | tuple[float, float]
 
 
 @contextmanager
-def _t1_default_warning_disabled() -> Iterator[None]:
+def _t1_default_warning_disabled() -> Generator[None]:
     import scqubits.settings as scq
 
     old = scq.T1_DEFAULT_WARNING
@@ -70,9 +70,9 @@ def generate_params_table(
         DataFrame with columns: flux, EJ, EC, EL
     """
 
-    EJ = _param_grid_values(EJ, precision)
-    EC = _param_grid_values(EC, precision)
-    EL = _param_grid_values(EL, precision)
+    ej_values = _param_grid_values(EJ, precision)
+    ec_values = _param_grid_values(EC, precision)
+    el_values = _param_grid_values(EL, precision)
 
     return pd.DataFrame(
         [
@@ -83,7 +83,7 @@ def generate_params_table(
                 "EL": eL,
                 "valid": True,
             }
-            for eJ, eC, eL in product(EJ, EC, EL)
+            for eJ, eC, eL in product(ej_values, ec_values, el_values)
         ]
     )
 
