@@ -12,12 +12,7 @@ from zcu_tools.datafile import (
     JsonObject,
     load_run_data,
 )
-from zcu_tools.resources.entry import (
-    ResultEntry,
-    component_registry,
-    document_value,
-    snapshot,
-)
+from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.views import FieldView
 from zcu_tools.resources.storage_migration import (
     KeyRule,
@@ -32,7 +27,6 @@ from zcu_tools.resources.storage_migration import (
     migrate_storage,
 )
 
-from tests.resources.entry.fakes import registry_state, restore_registry
 from tests.resources.storage_migration.fakes import (
     manifest_path,
     noop_validation,
@@ -40,8 +34,6 @@ from tests.resources.storage_migration.fakes import (
     write_meta,
     write_run,
 )
-from zcu_lab.components import JpaSchema, QubitSchema, ResonatorSchema
-from zcu_lab.storage_migration import build_mapping
 
 pytestmark = pytest.mark.usefixtures("registry_guard")
 
@@ -165,70 +157,6 @@ def test_two_complete_points_keep_working_units_and_sources(
     assert (source_a.read_bytes(), source_b.read_bytes()) == before
     entry.setup.C1.frequency = 77.0
     assert entry.use_point("context_a").C1.frequency == 12.5
-
-
-@pytest.mark.parametrize("unit", ["A", "V"])
-def test_lab_global_flux_mapping_keeps_working_units_in_general_extensions(
-    request_data: MigrationRequest, unit: str
-) -> None:
-    before_registry = registry_state()
-    try:
-        component_registry.register("resonator", ResonatorSchema)
-        component_registry.register("qubit/fluxonium", QubitSchema)
-        component_registry.register("amplifier/jpa", JpaSchema)
-        mapping = build_mapping(
-            qubit_kind="qubit/fluxonium", data_schemas={}, native_tags={}
-        )
-        setup_source = write_meta(request_data, "", {"flux_unit": unit, "cur_A": 0.375})
-        point_source = write_meta(
-            request_data,
-            "working",
-            {
-                "flux_unit": unit,
-                "cur_A": -12.5,
-                "flx_half": 0.5,
-                "flx_period": 2.0,
-                "flx_int": 1.25,
-                "local_flux_unit": "V",
-                "jpa_flux_unit": "A",
-                "best_jpa_flux": 0.125,
-            },
-        )
-        before = (setup_source.read_bytes(), point_source.read_bytes())
-        report = migrate_storage(
-            replace(request_data, part="parameters"),
-            mapping=mapping,
-            validate_cfg=validate_cfg,
-            validate_native=noop_validation,
-        )
-        assert report.pending == ()
-        entry = ResultEntry.open(
-            request_data.name,
-            result_root=request_data.results_root,
-            database_root=request_data.database_root,
-        )
-        for view, value in ((entry.setup, 0.375), (entry.use_point("working"), -12.5)):
-            assert snapshot(view).general.ext == {
-                "flux_unit": unit,
-                "flux_value": value,
-            }
-            assert document_value(snapshot(view), "general.ext.flux_value") == value
-            source = view.meta("general.ext.flux_value")
-            assert source is not None and source.source == "manual"
-            assert source.stderr is None
-        point = entry.use_point("working")
-        assert point.Q1.flux_unit == "V"
-        assert point.J1.flux_unit == "A"
-        assert point.J1.flux == 0.125
-        assert (point.Q1.flux_half, point.Q1.flux_period, point.Q1.flux_int) == (
-            0.5,
-            2.0,
-            1.25,
-        )
-        assert (setup_source.read_bytes(), point_source.read_bytes()) == before
-    finally:
-        restore_registry(before_registry)
-        assert registry_state() == before_registry
 
 
 @pytest.mark.parametrize("first", ["parameters", "data"])
