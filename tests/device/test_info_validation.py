@@ -171,6 +171,15 @@ def test_yoko_info_requires_explicit_mode() -> None:
     )
 
 
+def test_yoko_info_rejects_invalid_mode() -> None:
+    with pytest.raises(ValidationError) as error:
+        YOKOGS200Info.model_validate({"address": "YOKO::INSTR", "mode": "bad"})
+    assert any(
+        item["loc"] == ("mode",) and item["type"] == "literal_error"
+        for item in error.value.errors()
+    )
+
+
 def test_fake_info_stores_native_unit() -> None:
     info = FakeDeviceInfo(address="none", value=0.125)
     assert info.value_unit == "native"
