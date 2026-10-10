@@ -17,7 +17,6 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -80,12 +79,6 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
     def run(self, config: TwotoneCfg, *, context: RunContext) -> TwoToneResult:
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
         modules = cfg.modules
 
         # uniform in square space

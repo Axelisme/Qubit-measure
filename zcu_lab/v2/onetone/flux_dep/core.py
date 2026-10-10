@@ -9,7 +9,6 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     AxesSpec,
@@ -19,10 +18,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils import (
-    set_flux_in_dev_cfg,
-    setup_devices,
-)
+from zcu_tools.experiment.utils import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
@@ -59,9 +55,8 @@ class FluxDepSweepCfg(ConfigBase):
 class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxDepModuleCfg
-    # Field(...) makes dev required in this subclass, overriding the Optional
-    # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
-    dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
+    # This experiment requires an explicit role-name mapping.
+    dev: Mapping[str, str] = Field(...)
     sweep: FluxDepSweepCfg
 
 
@@ -104,12 +99,12 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             },
         )
 
-        set_flux_in_dev_cfg(cfg.dev, dev_values[0])
-        setup_devices(
-            cfg,
-            context.devices,
+        set_flux(
+            context.devices[cfg.dev["flux_dev"]],
+            dev_values[0],
+            unit=cfg.flux_unit,
+            stop=context.cancel_signal,
             progress=True,
-            cancel_signal=context.cancel_signal,
         )
 
         viewer = context.plots.liveplot_2d_with_line(
@@ -131,12 +126,12 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
                 cfg = step.cfg
-                set_flux_in_dev_cfg(cfg.dev, step.value)
-                setup_devices(
-                    cfg,
-                    context.devices,
+                set_flux(
+                    context.devices[cfg.dev["flux_dev"]],
+                    step.value,
+                    unit=cfg.flux_unit,
+                    stop=context.cancel_signal,
                     progress=False,
-                    cancel_signal=context.cancel_signal,
                 )
                 modules = cfg.modules
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, TypeVar
 
@@ -11,14 +10,12 @@ T_CfgModel = TypeVar("T_CfgModel", bound="ExpCfgModel")
 
 
 class ExpCfgModel(ConfigBase):
-    """Experiment inputs with optional role-to-connected-device-name selection.
+    """Framework base for experiment-owned inputs.
 
-    dev maps experiment role keys to driver names, or is None when no roles
-    are selected. It contains neither driver settings nor acquisition metadata.
-    The experiment resolves a name through RunContext.devices when it uses it.
+    Concrete experiment cfgs declare their device role-name mappings and units
+    when needed. This base carries neither device selections nor settings.
+    Drivers are resolved by the experiment through RunContext.devices at use.
     """
-
-    dev: Mapping[str, str] | None = None
 
     @classmethod
     def validate_or_warn(

@@ -11,7 +11,6 @@ from typing import (
     Any,
     ClassVar,
     Generic,
-    Literal,
     Protocol,
     Self,
     TypeVar,
@@ -34,6 +33,13 @@ class DeviceBusyError(RuntimeError):
 
 
 class BaseDeviceInfo(ConfigBase):
+    """Descriptive driver settings, not experiment control commands.
+
+    address identifies the connection, type is the driver discriminator and
+    label is an optional descriptive tag. with_updates validates manual edits;
+    experiment operations act on the connected driver instead.
+    """
+
     address: str
     type: str
     label: str | None = None
@@ -50,32 +56,6 @@ class BaseDeviceInfo(ConfigBase):
                     f"Unknown field '{key}' for {self.__class__.__name__}."
                 )
         return super().with_updates(**kwargs)
-
-    # ----- experiment-knob setters -----
-    #
-    # The experiment layer drives device configs through these knob setters
-    # instead of reaching into device-specific fields. Each subclass overrides
-    # only the knobs it supports; unsupported knobs fail fast via the base raise.
-
-    def set_flux(self, value: float) -> None:
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support setting flux"
-        )
-
-    def set_freq(self, freq_Hz: float) -> None:
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support setting freq"
-        )
-
-    def set_power(self, power_dBm: float) -> None:
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support setting power"
-        )
-
-    def set_output(self, output: Literal["on", "off"]) -> None:
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support setting output"
-        )
 
 
 T_DeviceInfo = TypeVar("T_DeviceInfo", bound=BaseDeviceInfo)

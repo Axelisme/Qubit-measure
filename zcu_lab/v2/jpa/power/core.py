@@ -9,7 +9,6 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -20,10 +19,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import (
-    set_power_in_dev_cfg,
-    setup_devices,
-)
+from zcu_tools.experiment.utils import set_rf_power
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
@@ -65,9 +61,8 @@ class PowerSweepCfg(ConfigBase):
 
 class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerModuleCfg
-    # Field(...) makes dev required in this subclass, overriding the Optional
-    # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
-    dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
+    # This experiment requires an explicit role-name mapping.
+    dev: Mapping[str, str] = Field(...)
     sweep: PowerSweepCfg
     skew_penalty: float = Field(default=0.0, ge=0.0)
 
@@ -105,17 +100,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_power, step in sched.scan("power (dBm)", jpa_powers.tolist()):
-                set_power_in_dev_cfg(
-                    step.cfg.dev,
-                    jpa_power,
-                    label="jpa_rf_dev",
-                )
-                setup_devices(
-                    step.cfg,
-                    context.devices,
-                    progress=False,
-                    cancel_signal=context.cancel_signal,
-                )
+                set_rf_power(context.devices[step.cfg.dev["jpa_rf_dev"]], jpa_power)
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (

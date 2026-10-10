@@ -14,7 +14,6 @@ from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import LabberPayload
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     GroupedAxesSpec,
@@ -27,12 +26,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import (
-    set_flux_in_dev_cfg,
-    set_freq_in_dev_cfg,
-    set_power_in_dev_cfg,
-    setup_devices,
-)
+from zcu_tools.experiment.utils import set_flux, set_rf_frequency, set_rf_power
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
@@ -81,9 +75,8 @@ class JPAOptSweepCfg(ConfigBase):
 class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: JPAOptModuleCfg
-    # Field(...) makes dev required in this subclass, overriding the Optional
-    # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
-    dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
+    # This experiment requires an explicit role-name mapping.
+    dev: Mapping[str, str] = Field(...)
     sweep: JPAOptSweepCfg
     num_points: int = Field(ge=4, strict=True)
     skew_penalty: float = Field(default=0.0, ge=0.0)
@@ -337,15 +330,17 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
                 params[idx, :] = cur_params
                 phases[idx] = optimizer.phase
                 dev = step.cfg.dev
-                set_flux_in_dev_cfg(dev, params[idx, 0], label="jpa_flux_dev")
-                set_freq_in_dev_cfg(dev, 1e6 * params[idx, 1], label="jpa_rf_dev")
-                set_power_in_dev_cfg(dev, params[idx, 2], label="jpa_rf_dev")
-                setup_devices(
-                    step.cfg,
-                    context.devices,
-                    cancel_signal=context.cancel_signal,
+                set_flux(
+                    context.devices[dev["jpa_flux_dev"]],
+                    params[idx, 0],
+                    unit=step.cfg.flux_unit,
+                    stop=context.cancel_signal,
                     progress=False,
                 )
+                set_rf_frequency(
+                    context.devices[dev["jpa_rf_dev"]], 1e6 * params[idx, 1]
+                )
+                set_rf_power(context.devices[dev["jpa_rf_dev"]], params[idx, 2])
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (

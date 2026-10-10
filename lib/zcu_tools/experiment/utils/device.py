@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any, Literal
 
 from zcu_tools.device import (
     YOKOGS200,
     AnritsuMG3692,
     BaseDevice,
-    DeviceInfo,
     FakeDevice,
     RohdeSchwarzSGS100A,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.stop_signal import StopSignal
 
 
@@ -87,81 +84,3 @@ def set_output(device: BaseDevice[Any], output: Literal["on", "off"]) -> None:
         device.set_output(output)
     else:
         raise TypeError(f"Unsupported output device: {type(device).__name__}")
-
-
-# ==================== Helpers for device config ==================== #
-
-
-def get_labeled_device_cfg(
-    devs_cfg: Mapping[str, DeviceInfo], label: str
-) -> DeviceInfo:
-    """Get the device configuration with the given label."""
-    match_list = []
-    for name, dev_cfg in devs_cfg.items():
-        if dev_cfg.label == label:
-            match_list.append(name)
-    if len(match_list) == 0:
-        raise ValueError(f"Device with label '{label}' not found in dev configuration.")
-    if len(match_list) > 1:
-        raise ValueError(
-            f"Multiple devices with label '{label}' found in dev configuration: {match_list}"
-        )
-
-    return devs_cfg[match_list[0]]
-
-
-def set_flux_in_dev_cfg(
-    devs_cfg: Mapping[str, DeviceInfo], value: float, label: str = "flux_dev"
-) -> None:
-    """Set the flux value in the device configuration with the given label."""
-    get_labeled_device_cfg(devs_cfg, label).set_flux(value)
-
-
-def set_freq_in_dev_cfg(
-    devs_cfg: Mapping[str, DeviceInfo], freq_Hz: float, label: str = "rf_dev"
-) -> None:
-    """Set the rf frequency value in the device configuration with the given label."""
-    get_labeled_device_cfg(devs_cfg, label).set_freq(freq_Hz)
-
-
-def set_power_in_dev_cfg(
-    devs_cfg: Mapping[str, DeviceInfo], power_dBm: float, label: str = "rf_dev"
-) -> None:
-    """Set the rf power value in the device configuration with the given label."""
-    get_labeled_device_cfg(devs_cfg, label).set_power(power_dBm)
-
-
-def set_output_in_dev_cfg(
-    devs_cfg: Mapping[str, DeviceInfo],
-    output: Literal["on", "off"],
-    label: str = "rf_dev",
-) -> None:
-    """Set the output state in the device configuration with the given label."""
-    get_labeled_device_cfg(devs_cfg, label).set_output(output)
-
-
-def setup_devices(
-    cfg: ExpCfgModel,
-    devices: Mapping[str, BaseDevice[Any]],
-    *,
-    progress: bool = False,
-    cancel_signal: StopSignal | None = None,
-) -> None:
-    """Apply device setup when the experiment config contains a dev section."""
-
-    if cfg.dev is None:
-        return
-
-    # Resolve the entire batch before touching any driver.
-    missing = cfg.dev.keys() - devices.keys()
-    if missing:
-        raise ValueError(f"Devices not found: {', '.join(sorted(missing))}")
-    snapshot = [(devices[name], info) for name, info in cfg.dev.items()]
-    for device, info in snapshot:
-        if cancel_signal is not None and cancel_signal.is_set():
-            return
-        device.setup(
-            info,
-            progress=progress,
-            stop_event=cancel_signal.event if cancel_signal is not None else None,
-        )

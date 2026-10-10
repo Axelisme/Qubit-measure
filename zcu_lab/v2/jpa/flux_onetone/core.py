@@ -9,7 +9,6 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     AxesSpec,
@@ -19,10 +18,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils import (
-    set_flux_in_dev_cfg,
-    setup_devices,
-)
+from zcu_tools.experiment.utils import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
@@ -56,9 +52,8 @@ class OneToneFluxSweepCfg(ConfigBase):
 class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: OneToneFluxModuleCfg
-    # Field(...) makes dev required in this subclass, overriding the Optional
-    # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
-    dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
+    # This experiment requires an explicit role-name mapping.
+    dev: Mapping[str, str] = Field(...)
     sweep: OneToneFluxSweepCfg
 
 
@@ -104,16 +99,12 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
-                set_flux_in_dev_cfg(
-                    step.cfg.dev,
+                set_flux(
+                    context.devices[step.cfg.dev["jpa_flux_dev"]],
                     jpa_flux,
-                    label="jpa_flux_dev",
-                )
-                setup_devices(
-                    step.cfg,
-                    context.devices,
+                    unit=step.cfg.flux_unit,
+                    stop=context.cancel_signal,
                     progress=False,
-                    cancel_signal=context.cancel_signal,
                 )
                 modules = step.cfg.modules
                 modules.readout.set_param(

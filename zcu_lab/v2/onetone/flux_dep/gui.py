@@ -292,24 +292,5 @@ class OneToneFluxDepAdapter(
             ),
         ]
 
-    def build_exp_cfg(
-        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
-    ) -> FluxDepCfg:
-        cfg_raw = dict(raw_cfg)
-        dev_raw = cfg_raw.pop("dev")
-        if not isinstance(dev_raw, dict):
-            raise RuntimeError("FluxDep dev section must lower to a dict")
-        # dev_raw = {"flux_dev": "flux_yoko", ...}
-        # convert to make_cfg patch format: {"flux_yoko": {"label": "flux_dev"}}
-        dev_patch: dict[str, dict[str, str]] = {}
-        for label_key, device_name in dev_raw.items():
-            if not isinstance(device_name, str) or not device_name:
-                raise RuntimeError(
-                    f"FluxDep dev.{label_key} must be a non-empty device name"
-                )
-            dev_patch[device_name] = {"label": label_key}
-        cfg_raw["dev"] = dev_patch
-        return super().build_exp_cfg(cfg_raw, req)
-
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.res_name}_flux"

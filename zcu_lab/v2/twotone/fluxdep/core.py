@@ -8,7 +8,6 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import (
     IDENTITY,
     MHZ_TO_HZ,
@@ -19,7 +18,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
+from zcu_tools.experiment.utils import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
@@ -59,7 +58,7 @@ class FreqFluxModuleCfg(ConfigBase):
 class FreqFluxCfg(ProgramV2Cfg, ExpCfgModel):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FreqFluxModuleCfg
-    dev: Mapping[str, DeviceInfo]  # type: ignore[dict-item]
+    dev: Mapping[str, str]
     sweep: FreqFluxSweepCfg
     fail_retry: int = 0
 
@@ -111,12 +110,12 @@ class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
                 cfg = step.cfg
-                set_flux_in_dev_cfg(cfg.dev, step.value)
-                setup_devices(
-                    cfg,
-                    context.devices,
+                set_flux(
+                    context.devices[cfg.dev["flux_dev"]],
+                    step.value,
+                    unit=cfg.flux_unit,
+                    stop=context.cancel_signal,
                     progress=False,
-                    cancel_signal=context.cancel_signal,
                 )
                 modules = cfg.modules
 

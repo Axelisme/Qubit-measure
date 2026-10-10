@@ -22,7 +22,6 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import (
@@ -232,12 +231,6 @@ class T1WithToneSweepExp(
             {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
         _require_positive_lengths(lengths)
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
 
         gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(
             context.plots, sweep_name
@@ -319,12 +312,6 @@ class T1WithToneSweepExp(
             gen_ch=modules.probe_pulse.ch,
         )
         _require_positive_lengths(lengths)
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
 
         gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(
             context.plots, sweep_name

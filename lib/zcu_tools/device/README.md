@@ -8,7 +8,7 @@
 
 ## 架構一覽（一句話版）
 
-`BaseDevice` 封裝 pyvisa session；各硬體子類負責 SCPI 字串；`BaseDeviceInfo`（Pydantic model，繼承 `ConfigBase`）作為 setup/readback 的序列化結構；`DeviceInfo` 是 Union TypeAlias 匯總所有已知子類型；`DeviceManager` 以名稱為 key 管理已連線的裝置實例，方便實驗 config（YAML/JSON）直接驅動硬體。
+`BaseDevice` 封裝 pyvisa session；各硬體子類負責 SCPI 字串；`BaseDeviceInfo`（Pydantic model，繼承 `ConfigBase`）作為 setup/readback 的序列化結構；`DeviceInfo` 是 Union TypeAlias 匯總所有已知子類型；`DeviceManager` 以名稱為 key 管理已連線的裝置實例，供 caller 明確設定、讀回與釋放資源。
 
 ```text
 BaseDeviceInfo (Pydantic ConfigBase)
@@ -31,6 +31,14 @@ DeviceInfo = Union[
 ```
 
 ---
+
+## 實驗控制與 acquisition snapshot
+
+實驗 cfg 自行宣告 `dev`，只保存角色到 device 名稱的 mapping。`ExpCfgModel` 不宣告這個欄位。Core 在實際使用時從 `RunContext.devices[name]` 取得 driver，不預查名稱，也不對全部裝置自動 setup。
+
+`DeviceInfo` 描述設定與讀回結果，不提供實驗旋鈕 setters。`experiment.utils` 的 `set_flux`、`set_rf_frequency`、`set_rf_power`、`set_output` 直接操作已選取的 driver。Flux 明示 A、V 或 native，helper 不切模式、步長或 output，也不推測單位。
+
+GUI 在既有操作 lease 後、core 前，Notebook 在建立 caller-owned `RunContext` 後、core 前，各讀所有 connected drivers 一次。固定 snapshot 進入 `RunMetadata.device_snapshot`，Save 不刷新硬體。`DeviceManager.setup_devices` 與 GUI 手動設定仍是獨立的明確操作。
 
 ## `BaseDeviceInfo`（`base.py:15`）
 
