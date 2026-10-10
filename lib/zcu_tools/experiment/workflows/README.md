@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-10，必填 device unit 與原樣 effect 傳遞
+**Last updated:** 2026-10-10，單次 experiment 的固定 device snapshot
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -15,6 +15,8 @@
 `InitEnv` 只提供原始 UTC start 與 detached context。`WorkflowEnv` 的 typed helpers 使用 `yield from`，把 request 與回應的型別交接留在核心。環境共用 injected `Plots` 與 engine-owned progress bars。WorkflowEnv 的 soc／devices 與 context 存取在缺 port 時立即 raise，供定義者在步驟開頭自檢。Engine 不做 capability admission，也不記錄 requires。硬體操作應經 effect 保留 journal 與取消；框架信任定義者，不強制阻擋直接操作。
 
 `Run` 為 experiment 複製 dataclass 或 Pydantic model instance cfg，將同一個 StopSignal 與明確 env 接入既有 Schedule。型別本身與無結構輸入在入口失敗。cfg.dev 只放角色到 device 名稱，不觸發 automatic setup。`env.set_device(name, value, *, unit)` 要求明填 A、V 或 native，沿 effect 到 DevicePort 原樣傳遞值、單位與同一個 StopSignal。核心拒絕空名稱、非有限值及未知 unit；host 負責連線、實體單位檢查、driver limits 與 I/O failure，不換算或切模式。SessionDevices 的通用設值接線仍待 base device API。DeviceSnapshot 使用同一種 ordered mapping，Engine 在 start／resume 捕捉 detached provenance，不宣稱硬體之後保持不變。Schedule 的局部 cfg 不倒灌回 Run，後一個 completed outcome 不覆蓋前一個非 completed。Run 保留 live callback 的原始 failure cause，Engine 依來源區分可恢復的 Schedule Failed、宿主 Stop 與核心失敗。即使 experiment 重拋本次 signal.error，來源也不改變。
+
+每次 `env.run` 在宿主保留的 RUN lease 下、callback 前，經 DevicePort 捕捉全部 connected drivers。讀取失敗使 run failed，不執行 callback。缺少 devices 能力不是零 device；真正零 device 仍注入明確回傳 `{}` 的 port。`Run` 要求 caller 提供固定、detached 的 device JSON，直接 caller 先捕捉，確知無 device 時明填 `{}`。Native callback 與 saver 只傳遞這份資料，後續 acquisition／Save 不重新讀取。D322 device 介面與 D323 Start／Resume snapshot 退役仍待後續遷移；上一段的舊介面是目前 partial 的接線，不是完整 target。
 
 Record encoder 將摘要投影成 detached JSON。非有限數字變成 null，曲線陣列與過大 record 會警告。只有摘要序列化可降級為 repr；deepcopy、必要 journal 欄位與檔案 I/O 不能借用此降級規則。
 

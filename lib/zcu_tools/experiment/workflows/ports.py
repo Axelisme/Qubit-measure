@@ -9,6 +9,7 @@ from typing import Literal, Protocol
 
 from qick import QickConfig
 
+from ...datafile import JsonObject
 from ...device import DeviceInfo
 from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
@@ -34,6 +35,17 @@ class DevicePort(Protocol):
     Adapters forward cooperative cancellation and propagate driver failures.
     Neither the adapter nor the engine declares or checks device limits.
     """
+
+    def capture_snapshot(self) -> Mapping[str, JsonObject]:
+        """Read all connected drivers once into detached JSON, or raise.
+
+        Called in the workflow worker before each experiment callback, under
+        the host's RUN lease. Reuse capture_device_snapshot and the public
+        driver mapping; do not read GUI cache or update GUI state. An explicitly
+        empty mapping means no connected devices. Read/serialization errors
+        propagate, without retries or cached fallbacks.
+        """
+        ...
 
     def set_value(
         self,

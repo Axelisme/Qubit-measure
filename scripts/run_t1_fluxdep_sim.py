@@ -17,8 +17,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from pydantic import TypeAdapter
+from zcu_tools.datafile import JsonObject
 from zcu_tools.device import DeviceInfo, DeviceManager, FakeDevice
-from zcu_tools.experiment.acquisition import capture_software_provenance
+from zcu_tools.experiment.acquisition import (
+    capture_device_snapshot,
+    capture_software_provenance,
+)
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     DeviceSnapshot,
@@ -43,6 +47,10 @@ class _Devices:
 
     def __init__(self, manager: DeviceManager) -> None:
         self.manager = manager
+
+    def capture_snapshot(self) -> Mapping[str, JsonObject]:
+        """Capture connected drivers before each callback in the Engine worker."""
+        return capture_device_snapshot(self.manager.get_all_devices())
 
     def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
         """Set absolute native flux through the driver, observing cancellation.

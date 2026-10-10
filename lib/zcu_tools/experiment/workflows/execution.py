@@ -364,12 +364,17 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         iteration, _ = self._current_iteration()
         self._run_no += 1
         try:
+            devices = self._ports.devices
+            if devices is None:
+                raise MissingCapability("devices")
+            device_snapshot = devices.capture_snapshot()
             run = Run(
                 request.cfg,
                 signal,
                 soc=self._ports.soc,
                 soccfg=self._ports.soccfg,
-                devices=self._ports.devices,
+                devices=devices,
+                device_snapshot=device_snapshot,
             )
             if request.live is not None:
                 run.bind_live(request.live)

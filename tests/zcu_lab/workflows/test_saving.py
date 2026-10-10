@@ -50,7 +50,7 @@ def test_frequency_native_save_load_keeps_cfg_coordinates_and_history(
     cfg = inputs.freq
     before = cfg.model_dump(mode="python")
     result = run_qubit_freq(
-        Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+        Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={})
     )
     path, snapshot = tmp_path / "spectroscopy.stage", make_snapshot()
     save_frequency(Completed(cfg, result), path, snapshot=snapshot)
@@ -66,7 +66,9 @@ def test_rabi_native_save_load_keeps_cfg_coordinates_and_history(
     inputs: Inputs, tmp_path: Path
 ) -> None:
     cfg = inputs.rabi
-    result = run_len_rabi(Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg))
+    result = run_len_rabi(
+        Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={})
+    )
     path, snapshot = tmp_path / "rabi.stage", make_snapshot()
     save_rabi(Completed(cfg, result), path, snapshot=snapshot)
     record, metadata = load_run_with_metadata(
@@ -86,7 +88,7 @@ def test_readout_native_save_load_keeps_axis_order_snr_and_history(
 ) -> None:
     cfg = inputs.readout
     result = run_ro_landscape(
-        Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+        Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={})
     )
     path, snapshot = tmp_path / "readout.stage", make_snapshot()
     save_readout(Completed(cfg, result), path, snapshot=snapshot)
@@ -105,7 +107,9 @@ def test_t1_native_save_load_keeps_cfg_coordinates_and_history(
     inputs: Inputs, tmp_path: Path
 ) -> None:
     cfg = inputs.t1
-    result = run_t1(Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg))
+    result = run_t1(
+        Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={})
+    )
     path, snapshot = tmp_path / "decay.stage", make_snapshot()
     save_t1(Completed(cfg, result), path, snapshot=snapshot)
     record, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
@@ -128,7 +132,15 @@ def test_t1_saver_preserves_fixed_device_evidence_in_native_metadata(
         else ({} if kind == "empty" else None)
     )
     expected = deepcopy(captured)
-    result = run_t1(Run(inputs.t1, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg))
+    result = run_t1(
+        Run(
+            inputs.t1,
+            StopSignal(),
+            soc=inputs.soc,
+            soccfg=inputs.soccfg,
+            device_snapshot={},
+        )
+    )
     result = replace(
         result, evidence=replace(result.evidence, device_snapshot=captured)
     )
@@ -150,7 +162,15 @@ def test_t1_saver_preserves_fixed_device_evidence_in_native_metadata(
 def test_t1_saver_collision_preserves_published_native_data(
     inputs: Inputs, tmp_path: Path
 ) -> None:
-    result = run_t1(Run(inputs.t1, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg))
+    result = run_t1(
+        Run(
+            inputs.t1,
+            StopSignal(),
+            soc=inputs.soc,
+            soccfg=inputs.soccfg,
+            device_snapshot={},
+        )
+    )
     path, snapshot = tmp_path / "decay.stage", make_snapshot()
     source = Completed(inputs.t1, result)
     save_t1(source, path, snapshot=snapshot)

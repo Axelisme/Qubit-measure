@@ -41,7 +41,13 @@ def echo_cfg(inputs: Inputs) -> T2EchoCfg:
 def test_echo_uses_native_total_delay_and_acquisition_evidence(inputs: Inputs) -> None:
     cfg = echo_cfg(inputs)
     original_json = cfg.model_dump_json()
-    run = Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        cfg,
+        StopSignal(),
+        soc=inputs.soc,
+        soccfg=inputs.soccfg,
+        device_snapshot={"unused": {"value": 0.125}},
+    )
     before = datetime.now(UTC)
     result = run_t2echo(run)
     assert isinstance(result, T2EchoResult)
@@ -64,13 +70,20 @@ def test_echo_uses_native_total_delay_and_acquisition_evidence(inputs: Inputs) -
         <= result.evidence.finished_at
         <= datetime.now(UTC)
     )
+    assert result.evidence.device_snapshot == {"unused": {"value": 0.125}}
     assert result.evidence.completion == "complete"
     assert cfg.model_dump_json() == original_json
     assert run.cfg.model_dump_json() == original_json
 
 
 def test_native_echo_acquisition_has_analyzable_decay(inputs: Inputs) -> None:
-    run = Run(echo_cfg(inputs), StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        echo_cfg(inputs),
+        StopSignal(),
+        soc=inputs.soc,
+        soccfg=inputs.soccfg,
+        device_snapshot={},
+    )
     result = run_t2echo(run)
 
     fit = analyze_t2echo(result)
@@ -87,7 +100,9 @@ def test_native_echo_acquisition_has_analyzable_decay(inputs: Inputs) -> None:
 def test_echo_stop_preserves_native_partial_result(inputs: Inputs) -> None:
     stop = StopSignal()
     stop.set()
-    run = Run(echo_cfg(inputs), stop, soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        echo_cfg(inputs), stop, soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={}
+    )
     result = run_t2echo(run)
     assert run.outcome.status == "stopped"
     assert np.isnan(result.signals).all()
@@ -96,7 +111,7 @@ def test_echo_stop_preserves_native_partial_result(inputs: Inputs) -> None:
 
 def test_echo_requires_soc_capability(inputs: Inputs) -> None:
     with pytest.raises(MissingCapability, match="soc"):
-        run_t2echo(Run(echo_cfg(inputs), StopSignal()))
+        run_t2echo(Run(echo_cfg(inputs), StopSignal(), device_snapshot={}))
 
 
 @pytest.mark.parametrize("detune", [-0.1, 0.1])
@@ -105,7 +120,9 @@ def test_echo_rejects_fringe_acquisition_before_schedule(
 ) -> None:
     cfg = echo_cfg(inputs)
     cfg.detune = detune
-    run = Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={}
+    )
     with pytest.raises(ValueError, match="zero detune"):
         run_t2echo(run)
     assert not run.cancel_signal.is_set()
@@ -116,7 +133,9 @@ def test_echo_keeps_native_schedule_failure_and_partial_data(inputs: Inputs) -> 
     cfg.modules.pi2_pulse = cfg.modules.pi2_pulse.with_updates(
         waveform=ConstWaveformCfg(length=0.0)
     )
-    run = Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={}
+    )
     result = run_t2echo(run)
     assert run.outcome.status == "failed"
     assert isinstance(run.outcome.exception, RuntimeError)
