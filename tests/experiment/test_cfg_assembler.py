@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
@@ -46,7 +46,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 
 class _DeviceOnlyCfg(ExpCfgModel):
-    pass
+    dev: Mapping[str, str] | None = None
 
 
 class _PulseModules(ConfigBase):

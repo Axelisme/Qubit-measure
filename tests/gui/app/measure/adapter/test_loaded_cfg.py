@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from copy import deepcopy
 
 import pytest
@@ -29,6 +30,7 @@ from tests.gui.app.measure.adapter._cfg_fakes import (
 
 
 class Snapshot(ExpCfgModel):
+    dev: Mapping[str, str] | None = None
     reps: object = 12
     sweep: dict[str, object] = {}
     modules: dict[str, object] = {}

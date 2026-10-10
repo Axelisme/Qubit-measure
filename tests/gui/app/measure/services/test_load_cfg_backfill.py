@@ -1,5 +1,6 @@
 """Loaded result backfill publishes through the existing cfg resource."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
@@ -33,10 +34,12 @@ from tests.gui.app.measure._load_support import historical_metadata
 
 
 class RuntimeCfg(ExpCfgModel):
+    dev: Mapping[str, str] | None = None
     reps: int = 20
 
 
 class NullableRuntimeCfg(ExpCfgModel):
+    dev: Mapping[str, str] | None = None
     reps: object = None
 
 
@@ -184,7 +187,7 @@ def test_missing_device_option_without_other_fields_keeps_cfg(
 ) -> None:
     app = device_app
     app.adapter.load.return_value = make_record(
-        ExpCfgModel(dev={"jpa_rf_dev": "stale"})
+        NullableRuntimeCfg(dev={"jpa_rf_dev": "stale"})
     )
     before = app.cfg.observe()
     outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
