@@ -264,8 +264,10 @@ def _t1_curve_fit_bounds_section(
 
     Empty bounds omit the key; nonempty bounds retain the input Mapping order.
     Each name must be known, then active, before its lower and upper endpoints
-    are converted to finite floats. Invalid names or endpoints raise
-    QubitParamsError with params_value_invalid and retain conversion causes.
+    are converted to finite floats. Unknown or inactive names, invalid endpoint
+    types, and nonfinite values raise QubitParamsError with params_value_invalid.
+    Numeric conversion ValueError is retained as the QubitParamsError cause;
+    OverflowError propagates unchanged.
     """
     section: dict[str, dict[str, list[float]]] = {}
     if bounds:
