@@ -322,7 +322,10 @@ def test_fake_device_snapshot_reports_stored_native_unit(device_client) -> None:
         },
     )
     try:
-        assert invoke("wait", {"op": started["handle"], "timeout": 3})["status"] == "finished"
+        assert (
+            invoke("wait", {"op": started["handle"], "timeout": 3})["status"]
+            == "finished"
+        )
         snapshot = invoke(
             "rpc_call", {"method": "device.snapshot", "params": {"name": "bias"}}
         )["snapshot"]
@@ -332,6 +335,7 @@ def test_fake_device_snapshot_reports_stored_native_unit(device_client) -> None:
         disconnected = invoke(
             "rpc_call", {"method": "device.disconnect", "params": {"name": "bias"}}
         )
-        assert invoke(
-            "wait", {"op": disconnected["handle"], "timeout": 3}
-        )["status"] == "finished"
+        assert (
+            invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+            == "finished"
+        )

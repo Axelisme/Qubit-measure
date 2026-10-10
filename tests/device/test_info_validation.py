@@ -34,8 +34,12 @@ def test_fake_device_info_accepts_int_and_float_values() -> None:
 
 
 def test_yoko_info_accepts_int_and_float_values() -> None:
-    assert YOKOGS200Info(address="GPIB::1", mode="voltage", value=1).value == pytest.approx(1.0)
-    assert YOKOGS200Info(address="GPIB::1", mode="voltage", value=1.23).value == pytest.approx(1.23)
+    assert YOKOGS200Info(
+        address="GPIB::1", mode="voltage", value=1
+    ).value == pytest.approx(1.0)
+    assert YOKOGS200Info(
+        address="GPIB::1", mode="voltage", value=1.23
+    ).value == pytest.approx(1.23)
 
 
 @pytest.mark.parametrize("mode, expected", [("current", 1e-6), ("voltage", 1e-3)])

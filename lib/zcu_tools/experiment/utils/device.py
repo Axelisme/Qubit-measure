@@ -6,10 +6,30 @@ from zcu_tools.device import (
     YOKOGS200,
     AnritsuMG3692,
     BaseDevice,
+    BaseDeviceInfo,
     FakeDevice,
+    FakeDeviceInfo,
     RohdeSchwarzSGS100A,
+    YOKOGS200Info,
 )
 from zcu_tools.experiment.stop_signal import StopSignal
+
+
+def check_flux_unit(cfg: BaseDeviceInfo, unit: str) -> None:
+    """Check a flux coordinate against stored Info.value_unit; return None.
+
+    YOKOGS200Info validates current/A and voltage/V; FakeDeviceInfo uses native.
+    unit is required and must equal that stored unit. Mismatch or any other unit
+    raises ValueError. Other Info models raise TypeError naming the unsupported
+    device class. No conversion, I/O, cache, cancellation or cfg mutation occurs.
+    """
+    if not isinstance(cfg, (YOKOGS200Info, FakeDeviceInfo)):
+        raise TypeError(f"{type(cfg).__name__} does not support flux settings")
+    if unit != cfg.value_unit:
+        raise ValueError(
+            f"Flux unit {unit!r} does not match {type(cfg).__name__} "
+            f"value unit {cfg.value_unit!r}"
+        )
 
 
 def set_flux(
@@ -28,16 +48,18 @@ def set_flux(
     unsupported drivers raise TypeError. Driver failures propagate unchanged.
     """
     if isinstance(device, YOKOGS200):
-        mode = {"A": "current", "V": "voltage"}.get(unit)
-        if mode is None or device.get_mode() != mode:
-            raise ValueError(f"Flux unit {unit!r} does not match YOKO mode")
+        if unit not in ("A", "V"):
+            # Synthetic carrier rejects impossible units before any mode query;
+            # it is not hardware readback.
+            check_flux_unit(YOKOGS200Info(address=device.address, mode="current"), unit)
+        mode = device.get_mode()
+        check_flux_unit(YOKOGS200Info(address=device.address, mode=mode), unit)
         if unit == "A":
             device.set_current(value, progress=progress, stop_event=stop.event)
         else:
             device.set_voltage(value, progress=progress, stop_event=stop.event)
     elif isinstance(device, FakeDevice):
-        if unit != "native":
-            raise ValueError("Fake flux requires unit 'native'")
+        check_flux_unit(FakeDeviceInfo(address=device.address), unit)
         if not stop.is_set():
             device.set_value(value)
     else:

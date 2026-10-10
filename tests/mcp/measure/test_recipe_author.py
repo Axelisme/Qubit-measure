@@ -542,7 +542,11 @@ def test_author_flux_device_checks_units_without_changing_coordinates(tmp_path):
         ),
         ({"unit": "A", "type_name": "YOKOGS200", "info": {"type": "YOKOGS200"}}, "V"),
         (
-            {"unit": "native", "type_name": "FakeDevice", "info": {"type": "FakeDevice"}},
+            {
+                "unit": "native",
+                "type_name": "FakeDevice",
+                "info": {"type": "FakeDevice"},
+            },
             "A",
         ),
         (
@@ -761,9 +765,7 @@ def test_author_run_captures_asserted_flux_unit_without_conversion(tmp_path):
 @pytest.mark.parametrize("type_name", ["FakeDevice", "OtherDevice"])
 def test_author_flux_device_uses_declared_native_coordinate(tmp_path, type_name):
     gui = _SweepGui()
-    gui.device = {
-        "unit": "native", "type_name": type_name, "info": {"type": type_name}
-    }
+    gui.device = {"unit": "native", "type_name": type_name, "info": {"type": type_name}}
     before_sweep = deepcopy(gui.publication["tree"]["children"]["sweep"])
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
@@ -786,7 +788,9 @@ def test_author_flux_device_uses_declared_native_coordinate(tmp_path, type_name)
 def test_author_flux_device_rejects_unknown_coordinate_before_edit(tmp_path):
     gui = _SweepGui()
     gui.device = {
-        "unit": "none", "type_name": "FakeDevice", "info": {"type": "FakeDevice"}
+        "unit": "none",
+        "type_name": "FakeDevice",
+        "info": {"type": "FakeDevice"},
     }
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")

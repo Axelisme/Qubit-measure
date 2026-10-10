@@ -280,7 +280,9 @@ def test_yoko_readback_stores_unit_from_one_mode_observation(
     assert info.mode == mode
     assert info.value == 0.001
     assert session.queries[before_queries:] == [
-        ":OUTPut?", ":SOURce:FUNCtion?", ":SOURce:LEVel?"
+        ":OUTPut?",
+        ":SOURce:FUNCtion?",
+        ":SOURce:LEVel?",
     ]
     assert session.writes == before_writes
     assert info.output == "on"

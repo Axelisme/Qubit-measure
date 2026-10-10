@@ -573,7 +573,7 @@ def test_device_setup_spec_lists_settable_fields_with_current(fx):
 
 def test_device_setup_spec_exposes_literal_choices(fx):
     # A driver with Literal enum fields (YOKO output/mode) → choices surfaced.
-    fx.service.device_control.get_device_info = MagicMock(  # type: ignore[method-assign]
+    fx.service.device_control.get_device_info = MagicMock(
         return_value=YOKOGS200Info(address="x", type="YOKOGS200", mode="voltage")
     )
     sock = open_client(fx.service.port)
