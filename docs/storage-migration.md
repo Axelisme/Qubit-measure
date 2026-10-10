@@ -1,7 +1,5 @@
 # Agent 離線遷移說明書
 
-**Last updated:** 2026-10-10，global flux 遷移至 general.ext
-
 此文件供執行舊 `result/`、Database 遷移，以及修改 component kind 的 agent 使用。入口是永久保留的 `tools/migrate_storage.py`。它不控制硬體，也不改正常 loader。`lib/zcu_tools/resources/storage_migration/README.md` 說明框架邊界，具體對照位於 `zcu_lab/storage_migration.py`。
 
 ## 執行前
@@ -32,7 +30,7 @@ uv run --directory <worktree> --no-sync -- python tools/migrate_storage.py \
 
 Dry-run 只讀來源，將 report 印到 stdout。它會以具體 cfg model 檢查已知 pair 的可轉換性，也會驗證 point-local module／waveform 的 typed Spec 與引用。它不建立條目或 manifest，不搬移 Labber，也不執行 native validation。Library 的 `key_mappings` rows 以 `library_kind` 區分 module 與 waveform，保留 canonical `new_path`。Dry-run 未取得目的 handle，所以這些 rows 的 `new_file=None` 不代表轉換失敗。Report 有 pending 時仍可能 exit 0。逐項檢視 `key_mappings` 與 `pending`，確認新路徑與單位的證據，不能把 exit 0 當成全部資料已遷移。
 
-工具保留未知值與 expression 的原文。Expression 不會 evaluate。舊 `flux_unit` 寫入 `general.ext.flux_unit`，`cur_A` 寫入 `general.ext.flux_value`，單位與數字不換算。Local 的 `local_flux_unit` → `Q1.flux_unit`、`jpa_flux_unit` → `J1.flux_unit` 與其他對照不變。Flux 單位必須有明確證據，`cur_A` 的名稱不是單位證據。缺 cfg identity、實驗 schema、歷史 snapshot、量測時間或 completion 的 run 保留來源，列待處理。
+工具保留未知值與 expression 的原文。Expression 不會 evaluate。Flux 單位必須有明確證據，`cur_A` 的名稱不是單位證據。缺 cfg identity、實驗 schema、歷史 snapshot、量測時間或 completion 的 run 保留來源，列待處理。
 
 完成本節時，report 中每個 pending 都有後續處置或明確保留理由。對照表及真實複本結果由使用者確認，不能用自動驗證代簽。
 

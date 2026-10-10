@@ -301,9 +301,7 @@ def test_post_analysis_draft_retains_primary_identity(
                 []
                 if captured is None
                 else [
-                    ParameterWriteback(
-                        "general.ext.flux_value", "Flux", proposed_value=3.0
-                    )
+                    ParameterWriteback("general.ext.flux_value", "Flux", proposed_value=3.0)
                 ]
             )
 
@@ -424,9 +422,7 @@ def test_setter_failure_retains_accepted_and_successful_prefix(
             ParameterWriteback(
                 "general.description", "Failed", proposed_value="changed"
             ),
-            ParameterWriteback(
-                "general.ext.flux_unit", "Not started", proposed_value="mA"
-            ),
+            ParameterWriteback("general.ext.flux_unit", "Not started", proposed_value="mA"),
         ],
         parameters=captured,
         run_id="original-run",
