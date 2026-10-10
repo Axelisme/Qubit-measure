@@ -350,7 +350,8 @@ def test_prepare_accepts_other_component_kind_and_reports_consuming_field_error(
     )
     assert not isinstance(reply, FormErrors)
     error = next(e for e in reply["errors"] if e["path"] == ["pi_length_us"])
-    assert "R1" in error["message"] and "resonator" in error["message"]
+    assert "$qubit.resonator" in error["message"]
+    assert "missing parameter" in error["message"]
 
 
 def test_prepare_captures_all_alias_rows_without_live_rebinding(
