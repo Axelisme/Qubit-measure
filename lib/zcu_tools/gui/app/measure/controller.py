@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
@@ -30,7 +31,7 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.services.device import ActiveDeviceOperation
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from .adapter import SessionEnv
@@ -858,9 +859,18 @@ class Controller(SessionControllerMixin):
     # Context / IO (ContextService)
     # ------------------------------------------------------------------
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        """Capture published sources with fixed roles; EMPTY/source errors propagate."""
-        return self._context_control.read_context(roles=roles)
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix point/library/storage and aliases through the context owner.
+
+        aliases maps alias names to temporary concrete components, preserving
+        authored dependent links without changing global state. Reads perform
+        no I/O or kind checks and retain no live callback. Missing/unbound $
+        aliases fail by name on use; EMPTY/source/invalid override errors
+        propagate. See ContextControlPort.read_context for the full contract.
+        """
+        return self._context_control.read_context(aliases=aliases)
 
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange
@@ -904,8 +914,9 @@ class Controller(SessionControllerMixin):
 
         Kind must match the template; the concrete name must be nonempty and
         unused in its library family. Factory, capture, schema, conflict and I/O
-        failures propagate without a write. No current-focus role resolution
-        happens after the capture.
+        failures propagate without a write. Factory SessionEnv.parameters and
+        lowering use the same fixed alias-aware capture, with no consumer kind
+        checks or later current-source lookup.
         """
         if not name:
             raise FailedPreconditionError("Entry name must not be empty.")
@@ -926,7 +937,7 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError(
                 f"A {item_kind} named {name!r} already exists."
             )
-        ctx = self.get_session_env()
+        ctx = replace(self.get_session_env(), parameters=parameters)
         ref = entry.make_value(ctx)
         schema = CfgSchema(spec=entry.shape(), value=ref.value)
         self.apply_library_change(

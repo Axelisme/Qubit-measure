@@ -56,8 +56,10 @@ class TemplateEntry:
 
     ``shape`` returns a fresh context-free canonical Spec. Registration validates
     its root discriminator without calling ``make_value``. ``make_value`` takes
-    the live ``SessionEnv`` and returns a fresh ``ReferenceValue`` carrying
-    md-linked ``EvalValue`` defaults. Create calls both factories fresh.
+    a ``SessionEnv`` whose parameters are the create operation's fixed
+    alias-aware capture, and returns a fresh ``ReferenceValue`` carrying
+    parameter-linked ``EvalValue`` defaults. Create calls both factories fresh
+    and lowers their result with that same capture.
 
     ``default_name`` suggests a new entry name, e.g. ``"readout_rf"``. An empty
     string means no suggestion, so blank templates leave naming to the user.

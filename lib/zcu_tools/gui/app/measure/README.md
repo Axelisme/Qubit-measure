@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，全域 alias、Run admission 與 native Load 來源
+**Last updated:** 2026-10-10，全域 alias、Run admission 與 native Load 來源
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -585,7 +585,7 @@ ModuleLibrary reference enumeration只以`experiment.cfg_editing.program_shape_f
 不normalize typed cfg或建立Spec/Value。resolve才呼main materializer façade一次。Experiment
 composition把fresh canonical shape factory與eval-aware value factory一起註冊到immutable `TemplateEntry`；catalog
 registration只驗shape/kind，Controller create依序取得value與fresh shape並直接組`CfgSchema`，不從
-value sniff discriminator。既有 role_id／roles wire metadata 與 blank template 順序保持不變。
+value sniff discriminator。Create 先取得 alias-aware `read_context()`，將同一固定 capture 放進 factory 的 `SessionEnv.parameters` 並交 library write lowering；後來的來源或 selection 修改不改該次建立值與目的地。TemplateEntry 不要求 consumer roles。既有 role_id／roles wire metadata 與 blank template 順序保持不變。
 
 ModuleLibrary 新建唯一走 template catalog 的 `create_from_template`；`CfgEditorService.open`
 只以 required `from_name` 開啟既有 module/waveform 的 modify session，不提供
