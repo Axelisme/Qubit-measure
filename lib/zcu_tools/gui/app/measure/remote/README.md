@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-11, stored device flux units
+**Last updated:** 2026-10-11, native context methods and optional cfg read ref
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -126,8 +126,8 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 91`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 123`: GUI process code revision. It is displayed, not compared.
+- `WIRE_VERSION = 92`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 124`: GUI process code revision. It is displayed, not compared.
 - `MCP_VERSION = 112`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
@@ -241,8 +241,9 @@ entry, saving a loaded Run uses its captured historical point, not the tab birth
 The wire surface is grouped by ownership:
 
 - `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布空 DRAFT，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
-- `context.*`：MetaDict / ModuleLibrary / active context operations through
-  `ContextControlPort`; role-catalog create/list stays on the app controller.
+- `context.*`：published parameter capture, snapshot and point-label queries through
+  `ContextControlPort`. Library editing and template create/list use the app controller;
+  `editor.*` provides independent library-entry drafts.
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
 - `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc and installs a predictor if absent. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
@@ -281,8 +282,11 @@ changes. `cfg_observation.py` projects `CfgDraft.observe()` data, never binding
 field/editor classes. Setters retain canonical paths and reject legacy aliases.
 
 `tab.get_cfg` returns cfg_ref, status, tree, source_basis and diagnostics from the
-persistent tab resource. It has no prefix or widget prerequisite. Tree paths are
-string arrays. `tab.edit_cfg` requires expected cfg_id and canonical decimal-string
+persistent tab resource. It has no prefix or widget prerequisite. Ordinary reads
+with `aliases` omitted, null or {} need no `expected` ref and return cached cfg.
+Nonempty `aliases` previews still require `expected` with cfg_id and revision;
+missing or null refs fail with an input error naming `expected`.
+Tree paths are string arrays. `tab.edit_cfg` requires expected cfg_id and canonical decimal-string
 revision, decodes the common editing codec, then performs one atomic batch.
 Stale errors include expected/actual; input errors can include path/edit_index.
 The adapter does not retry or publish a successful prefix. Plain strings are typed

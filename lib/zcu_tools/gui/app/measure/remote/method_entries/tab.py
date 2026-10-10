@@ -160,7 +160,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     required=False,
                     description="Temporary alias-name to component-name overrides; None and {} mean no override",
                 ),
-                ParamSpec("expected", JsonType.OBJECT),
+                ParamSpec("expected", JsonType.OBJECT, required=False),
             ),
         ),
         agent=AgentMethodPolicy(),
