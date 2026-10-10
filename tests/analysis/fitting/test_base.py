@@ -20,6 +20,7 @@ from zcu_tools.analysis.fitting.base import (
     sincfunc,
 )
 from zcu_tools.analysis.fitting.base.base import fit_func
+from zcu_tools.analysis.fitting.base.gauss import guess_dual_gauss_params
 
 
 def test_fitexp_recovers_parameters():
@@ -135,6 +136,26 @@ def test_fit_gauss_recovers_parameters():
     pOpt, _ = fit_gauss(x, y)
     assert abs(pOpt[2] - true[2]) < 1e-2
     assert abs(pOpt[3] - true[3]) < 1e-2
+
+
+@pytest.mark.parametrize(
+    "ydata, expected",
+    [
+        ([3.0, 1.0, 1.0], (3.0, -2.0, 1 / 3, 1.0, 0.4, 1 / 3)),
+        ([1.0, 1.0, 3.0], (1.0, -0.4, 1 / 3, 3.0, 2.0, 1 / 3)),
+        ([1.0, 3.0, 1.0], (3.0, 0.0, 1 / 3, 3.0, 0.0, 1 / 3)),
+    ],
+    ids=["dominant-left", "dominant-right", "coincident-centers"],
+)
+def test_dual_gaussian_guess_orders_peak_centers(
+    ydata: list[float], expected: tuple[float, float, float, float, float, float]
+) -> None:
+    params = guess_dual_gauss_params(np.array([-2.0, 0.0, 2.0]), np.array(ydata))
+
+    assert isinstance(params, tuple)
+    assert len(params) == 6
+    assert params[1] <= params[4]
+    np.testing.assert_allclose(params, expected, rtol=1e-12, atol=1e-12)
 
 
 def test_fit_func_warns_when_falling_back_to_init_p(
