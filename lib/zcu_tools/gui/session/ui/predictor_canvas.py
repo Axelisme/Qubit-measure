@@ -438,7 +438,7 @@ class PredictorCurveCanvas(QWidget):
         self.set_marker(x)
         self._on_follow(x)
 
-    def _on_axes_leave(self, event: Event) -> None:  # noqa: ARG002
+    def _on_axes_leave(self, _event: Event) -> None:
         """Auto-untrack when the cursor leaves the axes (axes_leave_event / figure_leave_event).
 
         This is the canonical mpl path; _on_move's inaxes-None backstop handles
