@@ -97,22 +97,38 @@ def test_bound_resonator_creates_original_probe_from_public_template(
     original = ctrl.read_context()
     ledger = session.entry.ledger.events()
     try:
-        ctrl.create_from_template("module", "res_probe", "R1.readout.probe")
+        ctrl.create_from_template("module", "res_probe", "R1.pulses.probe")
     except InvalidInputError as error:
         raise AssertionError(
             "A bound calibrated resonator must create the original template"
         ) from error
     current = ctrl.read_context()
-    probe = current.library.module_spec("R1.readout.probe")
-    assert isinstance(probe, PulseReadoutSpec)
-    assert isinstance(probe.pulse_cfg, PulseSpec)
-    assert probe.pulse_cfg.freq == 6123.0
-    assert probe.pulse_cfg.ch == 1
-    assert probe.ro_ch == 2
+    probe = current.library.module_spec("R1.pulses.probe")
+    assert isinstance(probe, PulseSpec)
+    assert probe.freq == 6123.0
+    assert probe.ch == 1
     assert original.library.module_keys() == ()
-    source = current.library.meta("R1.readout.probe.pulse_cfg.freq")
+    source = current.library.meta("R1.pulses.probe.freq")
     assert source is not None and source.source == "manual"
     assert session.entry.ledger.events() == ledger
+
+
+def test_bound_resonator_creates_original_readout_with_adc_channel(
+    session: TemplateSession,
+) -> None:
+    ctrl = session.controller
+    try:
+        ctrl.create_from_template("module", "readout", "R1.readout.rf")
+    except InvalidInputError as error:
+        raise AssertionError(
+            "A bound resonator must create the original readout template"
+        ) from error
+    readout = ctrl.read_context().library.module_spec("R1.readout.rf")
+    assert isinstance(readout, PulseReadoutSpec)
+    assert isinstance(readout.pulse_cfg, PulseSpec)
+    assert readout.pulse_cfg.freq == 6123.0
+    assert readout.pulse_cfg.ch == 1
+    assert readout.ro_cfg.ro_ch == 2
 
 
 def test_bound_empty_resonator_reports_first_missing_leaf_without_write(
@@ -125,7 +141,8 @@ def test_bound_empty_resonator_reports_first_missing_leaf_without_write(
     ledger = session.entry.ledger.events()
     with pytest.raises(InvalidInputError) as error:
         ctrl.create_from_template("module", "res_probe", "Empty.readout.probe")
-    assert "Parameter path '$resonator.wiring.ch' is not numeric" in str(error.value)
+    assert "$resonator.wiring.ch" in str(error.value)
+    assert "missing parameter" in str(error.value)
     assert ctrl.read_context().library.document() == before.library.document()
     assert session.state.version.get("context") == version
     assert session.entry.ledger.events() == ledger
