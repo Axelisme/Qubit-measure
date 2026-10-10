@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from matplotlib.backend_bases import Event, MouseButton, MouseEvent
 from zcu_tools.gui.session.ui.predictor_canvas import (
     _compute_xlim,
     _pan_xlim_to_include,
@@ -472,3 +473,41 @@ def test_canvas_render_curves_custom_ylabel(canvas):
     ax = canvas._get_ax()
     assert ax is not None
     assert ax.get_ylabel() == "|<i|n|j>|"
+
+
+@pytest.mark.parametrize("leave_event", ["axes_leave_event", "figure_leave_event"])
+def test_canvas_leave_events_lock_last_followed_marker(canvas, leave_event):
+    """Both Matplotlib leave events lock once at the last followed device value."""
+    canvas.render_curves(**_make_render_kwargs())
+    canvas.canvas.draw()
+    ax = canvas.figure.axes[0]
+    y = sum(ax.get_ylim()) / 2
+    followed: list[float] = []
+    locked: list[float] = []
+    canvas.bind_callbacks(on_follow=followed.append, on_lock=locked.append)
+
+    x_pixel, y_pixel = ax.transData.transform((0.5, y))
+    press = MouseEvent(
+        "button_press_event", canvas.canvas, x_pixel, y_pixel, button=MouseButton.LEFT
+    )
+    canvas.canvas.callbacks.process("button_press_event", press)
+    assert followed == []
+    assert locked == []
+
+    x_pixel, y_pixel = ax.transData.transform((0.65, y))
+    move = MouseEvent("motion_notify_event", canvas.canvas, x_pixel, y_pixel)
+    canvas.canvas.callbacks.process("motion_notify_event", move)
+    assert followed == pytest.approx([0.65])
+    assert locked == []
+
+    canvas.canvas.callbacks.process(leave_event, Event(leave_event, canvas.canvas))
+    assert locked == pytest.approx([0.65])
+
+    x_pixel, y_pixel = ax.transData.transform((0.8, y))
+    move_after_leave = MouseEvent(
+        "motion_notify_event", canvas.canvas, x_pixel, y_pixel
+    )
+    canvas.canvas.callbacks.process("motion_notify_event", move_after_leave)
+    canvas.canvas.callbacks.process(leave_event, Event(leave_event, canvas.canvas))
+    assert followed == pytest.approx([0.65])
+    assert locked == pytest.approx([0.65])
