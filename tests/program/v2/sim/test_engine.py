@@ -36,7 +36,7 @@ from zcu_tools.program.v2.modules.delay import Delay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.sim import SimParams
+from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
 from zcu_tools.program.v2.sim.engine import (
     _FULL_SCALE,
     SimEngine,
@@ -1540,3 +1540,101 @@ def test_engine_deterministic_branch_smoke():
     # Branch 1 (pi pulse -> excited) reads out clearly different from branch 0
     # (empty -> ground); the engine resolved the deterministic branch selection.
     assert abs(amp[1] - amp[0]) > 0.5 * max(amp[0], amp[1])
+
+
+@pytest.mark.parametrize(
+    ("backaction", "expected_first", "expected_total"),
+    [
+        pytest.param(
+            False,
+            [
+                [976207, -1388589],
+                [986314, -1380900],
+                [969173, -1390124],
+                [966243, -1380643],
+                [980165, -1377391],
+                [985207, -1388874],
+                [989316, -1400165],
+                [973850, -1380632],
+            ],
+            -38313825784,
+            id="direct-readout",
+        ),
+        pytest.param(
+            True,
+            [
+                [46328, -72590],
+                [56435, -64901],
+                [39294, -74125],
+                [36364, -64644],
+                [50286, -61392],
+                [55328, -72875],
+                [59437, -84166],
+                [43971, -64633],
+            ],
+            -1910487593,
+            id="pulse-readout",
+        ),
+    ],
+)
+def test_engine_large_round_preserves_population_and_seed_stream(
+    backaction: bool, expected_first: list[list[int]], expected_total: int
+) -> None:
+    """Large single-node rounds keep population numerics and redraw per round."""
+
+    sim = DEFAULT_SIMPARAM.model_copy(
+        update={
+            "T1": 30.0,
+            "T2": 30.0,
+            "T2_star": 30.0,
+            "Temp": 0.06,
+            "snr": 20.0,
+            "readout_gain_noise_per_gain": 0.0,
+            "poll_latency": 0.0,
+            "seed": 1847,
+        }
+    )
+    _soc, soccfg = make_mock_soc(sim=sim)
+    drive = PulseCfg(
+        ch=0,
+        nqz=1,
+        gain=0.3,
+        freq=4000.0,
+        phase=0.0,
+        waveform=ConstWaveformCfg(length=0.08),
+    ).build("drive")
+    ro_cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=sim.bare_rf * 1000.0)
+    if backaction:
+        pulse_cfg = PulseCfg(
+            ch=0,
+            nqz=1,
+            gain=0.1,
+            freq=sim.bare_rf * 1000.0,
+            phase=0.0,
+            waveform=ConstWaveformCfg(length=1.0),
+        )
+        readout = PulseReadoutCfg(pulse_cfg=pulse_cfg, ro_cfg=ro_cfg).build("ro")
+    else:
+        readout = ro_cfg.build("ro")
+    prog = ModularProgramV2(
+        soccfg,
+        ProgramV2Cfg(reps=100_003, rounds=1, relax_delay=0.0),
+        modules=[drive, readout],
+    )
+    prog.compile()
+    assert prog.loop_dims is not None
+    loop_dims = tuple(prog.loop_dims)
+    engine = SimEngine(prog, sim)
+    first_round = engine.compute_round(0)[0]
+    second_round = engine.compute_round(1)[0]
+    replay = SimEngine(prog, sim).compute_round(0)[0]
+
+    assert first_round.shape == (100_003, 1, 2)
+    assert first_round.dtype == np.int64
+    np.testing.assert_array_equal(first_round, replay)
+    assert not np.array_equal(first_round, second_round)
+    assert tuple(prog.loop_dims) == loop_dims
+    # Original public outputs: the full-round total also checks population
+    # sampling along the rep chain, beyond the initial eight shots.
+    np.testing.assert_array_equal(first_round[:8, 0, :], expected_first)
+    assert int(first_round.sum()) == expected_total
