@@ -135,6 +135,8 @@ class WritebackSession:
     control: ContextControlFacet
     context: ContextService
     service: WritebackService
+    # Entry owning the independent points used to arrange reset scenarios.
+    entry: ResultEntry
 
 
 @pytest.fixture
@@ -178,7 +180,7 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         )
         editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
         service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
-        yield WritebackSession(control, context, service)
+        yield WritebackSession(control, context, service, entry)
         assert registry_state() == installed
     finally:
         restore_registry(before)
@@ -631,21 +633,22 @@ def _install_reset_capture(session: WritebackSession, *, existing: bool = False)
     source = _reset_capture()
     for point in ("run-point", "later-point"):
         session.control.use_point(PointUseRequest(point))
-        target = session.control.read_context().target
-        for index in (1, 2):
-            qubit = f"Q{index}"
-            session.control.set_parameter(target, f"{qubit}.ext", deepcopy(_RESET_EXT))
-            component = source.document().components[qubit]
-            if not isinstance(component, QubitSchema):
-                raise AssertionError("Expected fixture qubit")
-            slots: dict[str, YamlValue] = dict(component.module)
-            session.control.set_parameter(target, f"{qubit}.module", slots)
-        for root in source.library.module_keys():
-            session.control.set_module(target, root, source.library.module_spec(root))
-        if existing:
+        with session.entry.use_point(point).edit() as draft:
             for index in (1, 2):
-                for root, slot in (("reset_10", "sideband"), ("reset_120", "dual_tone"), ("reset_bath", "bath_g"), ("reset_bath_e", "bath_e")):
-                    session.control.set_module(target, f"Q{index}.reset.{root}", source.library.module_spec(f"Q{index}.reset.old_{slot}"))
+                qubit = f"Q{index}"
+                draft.set(f"{qubit}.ext", deepcopy(_RESET_EXT))
+                component = source.document().components[qubit]
+                if not isinstance(component, QubitSchema):
+                    raise AssertionError("Expected fixture qubit")
+                slots: dict[str, YamlValue] = dict(component.module)
+                draft.set(f"{qubit}.module", slots)
+        with session.entry.module_library(point).edit() as draft:
+            for root in source.library.module_keys():
+                draft.set_module(root, source.library.module_spec(root))
+            if existing:
+                for index in (1, 2):
+                    for root, slot in (("reset_10", "sideband"), ("reset_120", "dual_tone"), ("reset_bath", "bath_g"), ("reset_bath_e", "bath_e")):
+                        draft.set_module(f"Q{index}.reset.{root}", source.library.module_spec(f"Q{index}.reset.old_{slot}"))
     session.control.use_point(PointUseRequest("run-point"))
     session.control.set_alias_rows((AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")))
     return session.control.read_context()
