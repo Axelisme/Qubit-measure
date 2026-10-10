@@ -685,13 +685,13 @@ class Controller(SessionControllerMixin):
         return self._state.version.snapshot()
 
     def start_run(
-        self, tab_id: str, expected: CfgRef, *, target: str | None = None
+        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
     ) -> int:
         """Start observed cfg inputs with an optional single-Run alias override.
 
         See RunAnalyzeControlFacet.start_run for admission and failure semantics.
         """
-        return self._run_analyze_control.start_run(tab_id, expected, target=target)
+        return self._run_analyze_control.start_run(tab_id, expected, aliases=aliases)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         return self._run_analyze_control.load_tab_result(tab_id, data_path)

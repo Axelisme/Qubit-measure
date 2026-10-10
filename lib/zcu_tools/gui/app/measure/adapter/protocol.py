@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.context import RunContext
     from zcu_tools.experiment.native_persistence import PreparedRunData
     from zcu_tools.plotting.plots import Plots
-    from zcu_tools.resources.entry import RoleSpec
 
 from .interactive import InteractivePluginProvider
 from .types import (
@@ -94,15 +93,6 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     @classmethod
     def guide(cls) -> AdapterGuide:
         """Return the static human-facing orientation guide (no instance state)."""
-        ...
-
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare ordered used aliases and their required component kinds.
-
-        Empty means no declared aliases. Global authored rows determine names;
-        RoleSpec.via is notebook-only and ignored by GUI. Cfg refresh and Run
-        admission each capture the current table, never a tab birth binding.
-        """
         ...
 
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:

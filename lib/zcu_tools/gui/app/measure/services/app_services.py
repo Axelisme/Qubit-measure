@@ -28,7 +28,6 @@ from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from .analyze import AnalyzeService
@@ -168,10 +167,11 @@ def build_app_services(
     bindings = MeasureCfgBindings(cfg_editor_ctrl)
 
     def captured_parameters(
-        declarations: Mapping[str, RoleSpec],
-        target: str | None,
+        aliases: Mapping[str, str] | None,
     ) -> ParameterContext | None:
-        return context.read_alias_context(declarations, target)
+        if state.session_env.parameters is None and not aliases:
+            return None
+        return context.read_context(aliases=aliases)
 
     def cfg_resolution(parameters: ParameterContext | None) -> CfgResolution:
         captured = session.value_sources.snapshot()

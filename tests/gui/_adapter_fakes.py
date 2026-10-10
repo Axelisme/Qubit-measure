@@ -23,7 +23,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 
 class DummyExp:
@@ -59,11 +58,6 @@ class DummyAdapter:
 
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
     exp_cls = DummyExp
-
-    @classmethod
-    def parameter_roles(cls) -> dict[str, RoleSpec]:
-        """This structural fake performs context-free calculations."""
-        return {}
 
     @classmethod
     def guide(cls) -> AdapterGuide:

@@ -68,7 +68,6 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     ResultEntry,
-    RoleSpec,
     SavedPayload,
     SaveLayout,
 )
@@ -94,10 +93,6 @@ from tests.resources.entry.fakes import (
 
 class RoleSavingAdapter(SavingAdapter):
     """Use the existing offline saving backend with a declared driver alias."""
-
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the driver alias consumed by this offline experiment."""
-        return {"driver": RoleSpec("fake/drive/*")}
 
 
 @pytest.fixture
@@ -135,7 +130,7 @@ def _acquire_to_terminal(
     cfg = session.state.get_tab("tab").cfg
     inputs = GuardService(
         session.state,
-        captured_parameters=session.context.read_alias_context,
+        captured_parameters=session.capture_parameters,
         cfg_resolution=lambda parameters: MeasureCfgBindings(
             MagicMock()
         ).snapshot_from_state(session.state, captured_values={}, parameters=parameters),
@@ -272,7 +267,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     state, services, bus = role_application
     tab_id = services.tab.new_tab("role_saving")
     tab = state.get_tab(tab_id)
-    birth = services.context.read_alias_context(tab.adapter.parameter_roles())
+    birth = services.context.read_context()
     assert birth is not None
     birth_storage = birth.capture_storage()
     services.setup_control.new_entry(EntryRequest("acquisition"))
@@ -300,7 +295,10 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     subscription = bus.subscribe(RunFinishedPayload, terminal)
     try:
         services.run_analyze_control.start_run(
-            tab_id, tab.cfg.observe().ref, origin=origin, target=target
+            tab_id,
+            tab.cfg.observe().ref,
+            origin=origin,
+            aliases=None if target is None else {"driver": target},
         )
         timer.start(5000)
         if not finished:

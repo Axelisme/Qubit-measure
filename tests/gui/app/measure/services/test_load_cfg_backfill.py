@@ -101,7 +101,7 @@ def make_app(*, device: bool = False) -> LoadApp:
         MagicMock(),
         provide_options=options,
         context=MagicMock(),
-        captured_parameters=lambda _roles, _target: None,
+        captured_parameters=lambda _aliases: None,
     )
     return LoadApp(state, resources, cfg, service, adapter, options)
 

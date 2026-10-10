@@ -196,7 +196,6 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
     with native_save_session(tmp_path, qapp) as native:
         empty_state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
         adapter = MagicMock()
-        adapter.parameter_roles.return_value = {}
         adapter.make_default_cfg.return_value = CfgSchema(
             CfgSectionSpec(), CfgSectionValue()
         )
@@ -208,7 +207,7 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
             MagicMock(),
             cfg_resources(empty_state),
             cfg_resolution=lambda parameters: cfg_resolution(empty_state, parameters),
-            captured_parameters=lambda _roles, _target: None,
+            captured_parameters=lambda _aliases: None,
         )
         tab_id = tabs.new_tab("pure")
         empty_state.update_tab_result(

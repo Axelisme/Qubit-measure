@@ -20,7 +20,11 @@ def targeted(
     reuse_tab_id: str | None = None,
 ) -> RecipeGenerator:
     """Prepare current/temporary readout, then yield one fake acquisition."""
-    tab = session.open_tab("lookback", target=target, reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "lookback",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     tab.set_frequency(
         "modules.readout", calibration="resonator", required="readout_ref"
     )
@@ -49,7 +53,7 @@ class TargetGui(LookbackGui):
         self.created: list[dict[str, object]] = []
         self.reads: list[dict[str, object]] = []
         self.modules: dict[str, str] = {}
-        self.targets: list[str | None] = []
+        self.overrides: list[dict[str, str] | None] = []
         self.queried_paths: list[str] = []
         self.queried_modules: list[str] = []
 
@@ -59,7 +63,7 @@ class TargetGui(LookbackGui):
         if method == "tab.new":
             self.created.append(dict(params))
             return {"tab_id": "t"}
-        if method == "tab.get_cfg" and params.get("target") is not None:
+        if method == "tab.get_cfg" and params.get("aliases") is not None:
             assert params["expected"] == self.publication["cfg_ref"]
             projected = deepcopy(self.publication)
             projected["status"] = "Valid"
@@ -71,11 +75,12 @@ class TargetGui(LookbackGui):
             projected["source_basis"] = [{"source_id": "target", "revision": "1"}]
             return projected
         if method == "tab.run_start":
-            target = params.get("target")
-            assert target is None or isinstance(target, str)
-            self.targets.append(target)
+            aliases = params.get("aliases")
+            assert aliases is None or isinstance(aliases, dict)
+            self.overrides.append(aliases)
             return super().__call__(
-                method, {key: value for key, value in params.items() if key != "target"}
+                method,
+                {key: value for key, value in params.items() if key != "aliases"},
             )
         if method == "tab.parameter_read":
             assert params["tab_id"] == "t"
@@ -363,9 +368,12 @@ def test_recipe_run_uses_temporary_target_without_tab_birth_binding(
         assert reply.data["status"] == "finished"
         assert gui.created == [{"adapter_name": "lookback"}]
         assert gui.ran
-        assert gui.targets == [target]
+        assert gui.overrides == [None if target is None else {"qubit": target}]
         assert gui.reads
-        assert all(read["target"] == target for read in gui.reads)
+        assert all(
+            read.get("aliases") == (None if target is None else {"qubit": target})
+            for read in gui.reads
+        )
         full = client.call(
             "status", {"execution": reply.data["execution"], "detail": "full"}
         )
@@ -419,12 +427,16 @@ def test_recipe_stale_run_ref_is_not_refreshed_or_retried(tmp_path: Path) -> Non
             if method == "tab.run_start"
         ]
         assert starts == [
-            {"tab_id": "t", "expected": gui.publication["cfg_ref"], "target": "Q2"}
+            {
+                "tab_id": "t",
+                "expected": gui.publication["cfg_ref"],
+                "aliases": {"qubit": "Q2"},
+            }
         ]
         previews = [
             params
             for method, params in client.transport.sent
-            if method == "tab.get_cfg" and params.get("target") is not None
+            if method == "tab.get_cfg" and params.get("aliases") is not None
         ]
         assert previews[-1]["expected"] == starts[0]["expected"]
         start_index = next(
@@ -445,7 +457,7 @@ def test_recipe_target_can_be_used_with_explicit_reuse(tmp_path: Path) -> None:
         reply = client.call("sample", {"target": "Q2", "reuse_tab_id": "t"})
         assert reply.data["status"] == "finished"
         assert gui.created == []
-        assert gui.targets == ["Q2"]
+        assert gui.overrides == [{"qubit": "Q2"}]
         assert any(method == "tab.reset_cfg" for method, _ in client.transport.sent)
 
 
@@ -482,4 +494,4 @@ def test_role_resolution_rejection_is_not_replaced_by_another_target(
             for method, params in client.transport.sent
             if method == "tab.parameter_read"
         ]
-        assert reads[0]["target"] == "missing"
+        assert reads[0]["aliases"] == {"qubit": "missing"}

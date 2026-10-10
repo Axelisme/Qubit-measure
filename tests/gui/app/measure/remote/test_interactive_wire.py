@@ -110,10 +110,7 @@ def _load_native_onetone(
     fx: InteractiveFixture, tab_id: str, path: Path, result: FluxDepResult
 ) -> None:
     """Write and publicly load history captured from the current session source."""
-    parameters = fx.ctrl.context_control.read_context().bind_aliases(
-        fx.ctrl.context_control.get_alias_rows(),
-        fx.state.get_tab(tab_id).adapter.parameter_roles(),
-    )
+    parameters = fx.ctrl.context_control.read_context()
     assert parameters is not None
     storage = parameters.capture_storage()
     cfg = make_onetone_cfg()
@@ -180,11 +177,8 @@ def _start_mounted(
         if adapter == "onetone/flux_dep"
         else RunRecord(cfg=None, result=FreqFluxResult(devs, freqs, signals))
     )
-    tab = fx.state.get_tab(tab_id)
     if native_source is None:
-        parameters = fx.ctrl.context_control.read_context().bind_aliases(
-            fx.ctrl.context_control.get_alias_rows(), tab.adapter.parameter_roles()
-        )
+        parameters = fx.ctrl.context_control.read_context()
         fx.state.update_tab_result(tab_id, run_result, parameters=parameters)
     else:
         assert isinstance(run_result.result, FluxDepResult)

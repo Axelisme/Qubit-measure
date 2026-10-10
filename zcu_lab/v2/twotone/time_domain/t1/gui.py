@@ -24,7 +24,6 @@ from zcu_tools.gui.cfg import (
     make_custom_reference_key,
     make_default_value,
 )
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.schema_builder import (
@@ -157,13 +156,6 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
             "decay while keeping the configured start/stop window."
         ),
     )
-
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the global aliases used by this adapter."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-        }
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

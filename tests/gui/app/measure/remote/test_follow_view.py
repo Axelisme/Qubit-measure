@@ -173,12 +173,12 @@ def test_run_forwards_one_run_target_without_editing_sources(target):
     adapter.run_analyze_control.start_run.return_value = 19
     params = {"tab_id": "t", "expected": {"cfg_id": "cfg-t", "revision": "0"}}
     if target is not None:
-        params["target"] = target
+        params["aliases"] = {"qubit": target}
     assert h_tab_run_start(adapter, params) == {"operation_id": 19}
     adapter.run_analyze_control.start_run.assert_called_once_with(
         "t",
         CfgRef(CfgId("cfg-t"), CfgRevision(0)),
-        target=target,
+        aliases=None if target is None else {"qubit": target},
         origin=CommandOrigin("mcp"),
     )
 
@@ -192,10 +192,10 @@ def test_run_rejects_malformed_target_before_operation_or_view_changes(target):
             {
                 "tab_id": "t",
                 "expected": {"cfg_id": "cfg-t", "revision": "0"},
-                "target": target,
+                "aliases": {"qubit": target},
             },
         )
-    assert caught.value.reason == "invalid_target"
+    assert caught.value.reason == "invalid_aliases"
     adapter.run_analyze_control.start_run.assert_not_called()
     adapter.render_view.select_tab_pane.assert_not_called()
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -87,10 +87,10 @@ class RunAnalyzeControlPort(Protocol):
         tab_id: str,
         expected: CfgRef,
         *,
-        target: str | None = None,
+        aliases: Mapping[str, str] | None = None,
         origin: CommandOrigin = _GUI_ORIGIN,
     ) -> int:
-        """Start observed inputs, optionally overriding the first alias for one Run.
+        """Start observed inputs with optional named alias overrides for one Run.
 
         See RunAnalyzeControlFacet.start_run for guards and terminal semantics.
         """
@@ -201,16 +201,16 @@ class RunAnalyzeControlFacet:
         tab_id: str,
         expected: CfgRef,
         *,
-        target: str | None = None,
+        aliases: Mapping[str, str] | None = None,
         origin: CommandOrigin = _GUI_ORIGIN,
     ) -> int:
         """Start tab_id's observed inputs and return an asynchronous token.
 
         expected is the observed CfgRef; stale refs and unavailable/busy tabs
-        raise before start. target=None accepts the cached Valid publication;
-        a non-empty concrete target temporarily overrides the first declared alias
-        and resolves these inputs against that fixed capture, even if the global
-        publication is Invalid. Target/source errors propagate before admission.
+        raise before start. None and {} accept the cached Valid publication.
+        Nonempty aliases maps alias names to concrete components and resolves
+        these inputs against that fixed capture, even if the global publication
+        is Invalid. Alias/source errors propagate before admission.
         Neither global aliases nor cfg inputs/publication change. The accepted
         values and Run evidence share the same capture. origin identifies the
         initiating gui/mcp frontend for
@@ -224,7 +224,7 @@ class RunAnalyzeControlFacet:
         if expected != actual:
             raise CfgStaleError(expected, actual)
         inputs = self._guard.capture_run_inputs(
-            tab_id, expected_revision=expected.revision, target=target
+            tab_id, expected_revision=expected.revision, aliases=aliases
         )
         self._ensure_tab_idle(tab_id)
         host = self._render_host()

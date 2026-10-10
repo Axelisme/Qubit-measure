@@ -54,7 +54,6 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import (
     ComponentSchema,
     RoleResolutionError,
-    RoleSpec,
     component_registry,
 )
 
@@ -330,9 +329,6 @@ class GlobalSourceAdapter(FakeAdapter):
         """Reject execution: these source-contract tests end at admission."""
         raise AssertionError("Admission-only adapter must not execute")
 
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        return {"qubit": RoleSpec("cfg/drive")}
-
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         schema = super().make_default_cfg(ctx)
         schema.value.fields["gain"] = EvalValue("Q1.gain")
@@ -523,7 +519,7 @@ def test_run_target_capture_does_not_mutate_global_rows_or_cfg(
         observed.ref.revision, (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
     )
     admitted = services.guard.capture_run_inputs(
-        tab_id, expected_revision=observed.ref.revision, target="Q2"
+        tab_id, expected_revision=observed.ref.revision, aliases={"qubit": "Q2"}
     )
     assert admitted.snapshot is not None
     assert admitted.snapshot.roles == {"qubit": "Q2", "custom": "Q2"}
@@ -536,7 +532,7 @@ def test_run_target_capture_does_not_mutate_global_rows_or_cfg(
     cfg.edit(observed.ref.revision, (CfgEdit(("gain",), 15.0),))
     with pytest.raises(CfgStaleError):
         services.guard.capture_run_inputs(
-            tab_id, expected_revision=observed.ref.revision, target="Q2"
+            tab_id, expected_revision=observed.ref.revision, aliases={"qubit": "Q2"}
         )
 
 
@@ -565,7 +561,9 @@ def test_run_control_delivers_target_capture_to_execution_without_publication_ch
 
     monkeypatch.setattr(RunService, "start_run", receive_run)
     assert (
-        services.run_analyze_control.start_run(tab_id, observed.ref, target=target)
+        services.run_analyze_control.start_run(
+            tab_id, observed.ref, aliases=None if target is None else {"qubit": target}
+        )
         == 99
     )
     assert len(admitted) == 1
@@ -581,7 +579,9 @@ def test_run_control_delivers_target_capture_to_execution_without_publication_ch
     assert services.context.get_alias_rows() == rows
     cfg.edit(observed.ref.revision, (CfgEdit(("gain",), 15.0),))
     with pytest.raises(CfgStaleError):
-        services.run_analyze_control.start_run(tab_id, observed.ref, target=target)
+        services.run_analyze_control.start_run(
+            tab_id, observed.ref, aliases=None if target is None else {"qubit": target}
+        )
     assert len(admitted) == 1
 
 
@@ -604,7 +604,9 @@ def test_run_control_rejects_unresolvable_target_before_execution(
 
     monkeypatch.setattr(RunService, "start_run", receive_run)
     with pytest.raises(RoleResolutionError):
-        services.run_analyze_control.start_run(tab_id, observed.ref, target="missing")
+        services.run_analyze_control.start_run(
+            tab_id, observed.ref, aliases={"qubit": "missing"}
+        )
     assert executions == []
     assert cfg.observe() == observed
     assert services.context.get_alias_rows() == rows

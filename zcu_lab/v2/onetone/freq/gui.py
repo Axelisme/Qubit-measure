@@ -30,7 +30,6 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
@@ -275,13 +274,6 @@ class OneToneFreqAdapter(
             return False
         steps = np.abs(np.diff(fitting_freqs))
         return not bool(np.allclose(steps, np.median(steps), rtol=1e-8, atol=0.0))
-
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the global aliases used by this adapter."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-        }
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

@@ -16,7 +16,6 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
 )
 from zcu_tools.gui.session.context_types import EntryInfo, EntryRequest
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 
@@ -24,9 +23,6 @@ from ._helpers import recv_response, send
 
 
 class PointAdapter(T1Adapter):
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        return {"driver": RoleSpec("fake/drive/*")}
-
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         return CfgSchema(
             CfgSectionSpec(fields={"rate": ScalarSpec("Rate", float)}),

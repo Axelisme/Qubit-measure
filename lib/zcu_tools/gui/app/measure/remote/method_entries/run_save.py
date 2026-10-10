@@ -5,13 +5,7 @@ from __future__ import annotations
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-from ._params import (
-    optional_integer,
-    optional_string,
-    required_object,
-    required_string,
-    save_comment,
-)
+from ._params import optional_integer, required_object, required_string, save_comment
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
@@ -21,10 +15,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Start the observed cfg inputs without ref refresh or substitution. "
-            "Optional target overrides the first declared alias for this Run only, "
+            "Nonempty aliases maps names to concrete components for this Run only. None and {} accept cached cfg, "
             "resolving its cfg and evidence from the same current source capture; "
             "global aliases and tab publication do not change. Stale refs and "
-            "unresolvable targets reject admission. Use wait(op=handle) for terminal "
+            "unresolvable aliases reject admission. Use wait(op=handle) for terminal "
             "status, failure/cancellation and Send & Stop feedback. The GUI "
             "returns an operation_id, which MCP exposes as {handle}; starting "
             "is not completion. After completion, read result state with "
@@ -33,7 +27,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (
                 required_string("tab_id"),
                 required_object("expected", "Observed cfg_id and string revision"),
-                optional_string("target", "Single-Run concrete first-alias override"),
+                ParamSpec(
+                    "aliases",
+                    JsonType.OBJECT,
+                    required=False,
+                    description="Single-Run named overrides; None and {} mean cached acceptance",
+                ),
             ),
         ),
         agent=AgentMethodPolicy(

@@ -61,7 +61,11 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
             raise ValueError(f"{name} must be a non-empty string or null")
     if span_mhz is not None and span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
-    tab = session.open_tab("onetone/flux_dep", target=target, reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "onetone/flux_dep",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     tab.use_library("modules.readout", readout_ref)
     # Report independent missing sources together before admitting a Run.
     missing: list[MissingParameter] = []

@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-10, native context summaries, subtree reads and captured alias projections
+**Last updated:** 2026-10-10, named alias queries, cfg preview and Run acceptance
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -292,7 +292,13 @@ and saved files, adds no unsaved guard, and follows the Run pane only after succ
 `tab.run_start` requires the observed cfg_ref as `expected`. Cfg admission does
 not require a second per-connection cfg observation. Tab, SoC, device and
 authentication guards remain independent. A stale identity or revision returns expected/actual
-without starting an operation. An Invalid publication cannot run. Active Run
+without starting an operation. Optional `aliases` maps alias names to concrete
+components for parameter/library reads, cfg preview and Run acceptance. Omission,
+None and {} mean no override and use cached cfg. Nonempty preview requires the
+original expected ref and resolves current inputs without publication. Run uses
+that same mapping for its cfg and fixed metadata capture. An Invalid publication
+cannot run without a valid temporary resolution. Global rows and tab state never
+retain these overrides. Active Run
 blocks manual edits, reset, replacement and close on that tab; source publications
 and edits to other tabs remain allowed. Close becomes available after termination.
 
