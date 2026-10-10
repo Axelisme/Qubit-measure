@@ -139,9 +139,10 @@ def _materialize_node(
             return _materialize_reference(spec, raw, policy=policy, path=path)
         case CfgSectionSpec():
             if isinstance(raw, Mapping):
-                return _materialize_section(spec, raw, policy=policy, path=path)
-            value = policy.missing_section_value(path, spec, raw)
-            _validate_section_value(spec, value, path=path)
+                value = _materialize_section(spec, raw, policy=policy, path=path)
+            else:
+                value = policy.missing_section_value(path, spec, raw)
+                _validate_section_value(spec, value, path=path)
             return value
         case _:
             raise TypeError(
@@ -196,6 +197,38 @@ def _materialize_reference(
     return ReferenceValue(chosen_key=selected.chosen_key, value=value)
 
 
+def _validate_reference_value(
+    spec: ReferenceSpec,
+    value: CfgNodeValue | None,
+    *,
+    path: tuple[str, ...],
+) -> None:
+    """Validate a reference carrier and its selected section against the spec.
+
+    Invalid carriers or selection raise ValueError at path, retaining selection
+    failures as causes; optional null needs no section validation.
+    """
+    if value is None and spec.optional:
+        return
+    if not isinstance(value, ReferenceValue):
+        _raise_shape_error(
+            path,
+            "ReferenceValue",
+            "None" if value is None else type(value).__name__,
+        )
+    try:
+        selected = select_ref_value_spec(spec, value)
+    except RuntimeError as exc:
+        allowed = tuple(item.label for item in spec.allowed)
+        _raise_shape_error(
+            path,
+            f"reference matching allowed labels {allowed!r}",
+            f"chosen_key {value.chosen_key!r}",
+            cause=exc,
+        )
+    _validate_section_value(selected, value.value, path=path)
+
+
 def _validate_node_value(
     spec: CfgNodeSpec,
     value: CfgNodeValue | None,
@@ -226,25 +259,7 @@ def _validate_node_value(
                 _raise_shape_error(path, "CenteredSweepValue", type(value).__name__)
             return
         case ReferenceSpec():
-            if value is None and spec.optional:
-                return
-            if not isinstance(value, ReferenceValue):
-                _raise_shape_error(
-                    path,
-                    "ReferenceValue",
-                    "None" if value is None else type(value).__name__,
-                )
-            try:
-                selected = select_ref_value_spec(spec, value)
-            except RuntimeError as exc:
-                allowed = tuple(item.label for item in spec.allowed)
-                _raise_shape_error(
-                    path,
-                    f"reference matching allowed labels {allowed!r}",
-                    f"chosen_key {value.chosen_key!r}",
-                    cause=exc,
-                )
-            _validate_section_value(selected, value.value, path=path)
+            _validate_reference_value(spec, value, path=path)
             return
         case CfgSectionSpec():
             _validate_section_value(spec, value, path=path)

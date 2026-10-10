@@ -88,6 +88,39 @@ def _project_section(
     return adopted
 
 
+def _project_scalar(
+    spec: ScalarSpec,
+    raw: object,
+    provide_options: _OptionProvider | None,
+) -> tuple[bool, DirectValue | None]:
+    """Copy a valid scalar with live choices, or decline incompatible raw input.
+
+    Provider failures propagate; text or non-sequence options raise TypeError.
+    """
+    if (raw is None and not spec.optional) or (spec.required and raw == ""):
+        return False, None
+    value = DirectValue(deepcopy(raw))
+    schema = CfgSchema(
+        spec=CfgSectionSpec(fields={"value": spec}),
+        value=CfgSectionValue(fields={"value": value}),
+    )
+    try:
+        validate_finished_cfg(schema, resolve_reference=None)
+    except (RuntimeError, TypeError, ValueError):
+        return False, None
+    if spec.choices_source and raw is not None:
+        if provide_options is None:
+            return False, None
+        options = provide_options(spec.choices_source)
+        if isinstance(options, (str, bytes)) or not isinstance(options, Sequence):
+            raise TypeError("Dynamic choice provider must return an option sequence")
+        if raw not in options and not (
+            spec.type is str and not spec.required and raw == ""
+        ):
+            return False, None
+    return True, value
+
+
 def _project_node(
     spec: CfgNodeSpec,
     raw: object,
@@ -95,30 +128,7 @@ def _project_node(
     provide_options: _OptionProvider | None,
 ) -> tuple[bool, CfgNodeValue | None]:
     if isinstance(spec, ScalarSpec) and spec.editable:
-        if (raw is None and not spec.optional) or (spec.required and raw == ""):
-            return False, None
-        value = DirectValue(deepcopy(raw))
-        schema = CfgSchema(
-            spec=CfgSectionSpec(fields={"value": spec}),
-            value=CfgSectionValue(fields={"value": value}),
-        )
-        try:
-            validate_finished_cfg(schema, resolve_reference=None)
-        except (RuntimeError, TypeError, ValueError):
-            return False, None
-        if spec.choices_source and raw is not None:
-            if provide_options is None:
-                return False, None
-            options = provide_options(spec.choices_source)
-            if isinstance(options, (str, bytes)) or not isinstance(options, Sequence):
-                raise TypeError(
-                    "Dynamic choice provider must return an option sequence"
-                )
-            if raw not in options and not (
-                spec.type is str and not spec.required and raw == ""
-            ):
-                return False, None
-        return True, value
+        return _project_scalar(spec, raw, provide_options)
     if isinstance(spec, SweepSpec) and spec.editable and isinstance(raw, Mapping):
         try:
             # Strict types and the runtime model's own endpoint/step invariant
@@ -147,20 +157,31 @@ def _project_node(
     return False, None
 
 
+def _require_complete_reference(
+    spec: ReferenceSpec, raw: object, path: tuple[str, ...]
+) -> None:
+    """Select the raw reference shape and require all of its fields.
+
+    Optional null is complete; missing shape or discriminator raises ValueError.
+    Policy and recursive validation failures propagate without defaults.
+    """
+    if raw is None and spec.optional:
+        return
+    if not isinstance(raw, Mapping):
+        raise ValueError("Missing reference config")
+    discriminator = "type" if spec.kind == "module" else "style"
+    if discriminator not in raw:
+        raise ValueError("Missing reference discriminator")
+    selected = MAIN_PROGRAM_MATERIALIZATION_POLICY.reference_value(path, spec, raw)
+    if selected is None:
+        raise ValueError("Missing reference shape")
+    _require_complete(selected.spec, raw, path)
+
+
 def _require_complete(spec: CfgNodeSpec, raw: object, path: tuple[str, ...]) -> None:
     """Reject inputs that would make the program materializer invent defaults."""
     if isinstance(spec, ReferenceSpec):
-        if raw is None and spec.optional:
-            return
-        if not isinstance(raw, Mapping):
-            raise ValueError("Missing reference config")
-        discriminator = "type" if spec.kind == "module" else "style"
-        if discriminator not in raw:
-            raise ValueError("Missing reference discriminator")
-        selected = MAIN_PROGRAM_MATERIALIZATION_POLICY.reference_value(path, spec, raw)
-        if selected is None:
-            raise ValueError("Missing reference shape")
-        _require_complete(selected.spec, raw, path)
+        _require_complete_reference(spec, raw, path)
     elif isinstance(spec, CfgSectionSpec):
         if not isinstance(raw, Mapping):
             raise ValueError("Missing section")

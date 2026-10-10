@@ -188,78 +188,108 @@ class ParamSpec:
         if self.default is not None and self.default not in self.enum:
             raise ValueError("default must belong to enum")
 
-    def _coerce(self, present: bool, value: object) -> object:
-        if not present or value is None:
-            if self.required:
-                raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{self.name}'")
-            return self.default
-        jt = self.json_type
-        if jt is JsonType.STRING:
-            if not isinstance(value, str):
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"'{self.name}' must be a string, got {type(value).__name__}",
-                )
-            if self.required and not value:
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS, f"'{self.name}' must be non-empty"
-                )
-            return value
-        if jt is JsonType.INTEGER:
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"'{self.name}' must be an integer, got {type(value).__name__}",
-                )
-            return value
-        if jt is JsonType.NUMBER:
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"'{self.name}' must be a number, got {type(value).__name__}",
-                )
-            try:
-                return float(value)
-            except OverflowError as exc:
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"'{self.name}' must be representable as a float",
-                ) from exc
-        if jt is JsonType.BOOLEAN:
-            if not isinstance(value, bool):
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"'{self.name}' must be a boolean, got {type(value).__name__}",
-                )
-            return value
-        if jt is JsonType.OBJECT:
-            if not isinstance(value, dict):
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"'{self.name}' must be an object, got {type(value).__name__}",
-                )
-            return value
-        if jt is JsonType.ARRAY:
-            if not isinstance(value, list):
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"'{self.name}' must be a list, got {type(value).__name__}",
-                )
-            return value
-        if jt is JsonType.NUMBER_PAIRS:
-            return NumberPairs.from_wire(value)
-        if jt is JsonType.JSON:
-            try:
-                json.dumps(value)
-            except (TypeError, ValueError) as exc:
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"'{self.name}' must be JSON-serializable",
-                ) from exc
-            return value
-        raise RemoteError(  # pragma: no cover - exhaustive guard
-            ErrorCode.INTERNAL, f"unhandled json_type {jt!r}"
+
+def _coerce_numeric_param(spec: ParamSpec, value: object) -> int | float:
+    """Coerce a present INTEGER or NUMBER value, rejecting bool and wrong types.
+
+    Float overflow raises INVALID_PARAMS with the conversion failure as cause.
+    """
+    jt = spec.json_type
+    if jt is JsonType.INTEGER:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"'{spec.name}' must be an integer, got {type(value).__name__}",
+            )
+        return value
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"'{spec.name}' must be a number, got {type(value).__name__}",
         )
+    try:
+        return float(value)
+    except OverflowError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"'{spec.name}' must be representable as a float",
+        ) from exc
+
+
+def _coerce_scalar_param(spec: ParamSpec, value: object) -> str | int | float | bool:
+    """Validate a present STRING, BOOLEAN, INTEGER or NUMBER parameter.
+
+    Return its typed scalar; invalid type or required empty string raises
+    INVALID_PARAMS, and numeric conversion failures retain their cause.
+    """
+    jt = spec.json_type
+    if jt is JsonType.STRING:
+        if not isinstance(value, str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"'{spec.name}' must be a string, got {type(value).__name__}",
+            )
+        if spec.required and not value:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, f"'{spec.name}' must be non-empty"
+            )
+        return value
+    if jt is JsonType.BOOLEAN:
+        if not isinstance(value, bool):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"'{spec.name}' must be a boolean, got {type(value).__name__}",
+            )
+        return value
+    return _coerce_numeric_param(spec, value)
+
+
+def _coerce_param(spec: ParamSpec, value: object, *, present: bool) -> object:
+    """Apply omission/default rules, then coerce the supplied declared wire value.
+
+    Missing required or malformed values raise RemoteError; JSON and float
+    conversion errors retain their causes. Enum membership belongs to the caller.
+    """
+    if not present or value is None:
+        if spec.required:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{spec.name}'")
+        return spec.default
+    jt = spec.json_type
+    if (
+        jt is JsonType.STRING
+        or jt is JsonType.INTEGER
+        or jt is JsonType.NUMBER
+        or jt is JsonType.BOOLEAN
+    ):
+        return _coerce_scalar_param(spec, value)
+    if jt is JsonType.OBJECT:
+        if not isinstance(value, dict):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"'{spec.name}' must be an object, got {type(value).__name__}",
+            )
+        return value
+    if jt is JsonType.ARRAY:
+        if not isinstance(value, list):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"'{spec.name}' must be a list, got {type(value).__name__}",
+            )
+        return value
+    if jt is JsonType.NUMBER_PAIRS:
+        return NumberPairs.from_wire(value)
+    if jt is JsonType.JSON:
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError) as exc:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"'{spec.name}' must be JSON-serializable",
+            ) from exc
+        return value
+    raise RemoteError(  # pragma: no cover - exhaustive guard
+        ErrorCode.INTERNAL, f"unhandled json_type {jt!r}"
+    )
 
 
 def validate_params(
@@ -276,7 +306,7 @@ def validate_params(
     out: dict[str, object] = {}
     for spec in specs:
         present = spec.name in params
-        value = spec._coerce(present, params.get(spec.name))
+        value = _coerce_param(spec, params.get(spec.name), present=present)
         if spec.enum is not None and value is not None and value not in spec.enum:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
