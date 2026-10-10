@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import pytest
-
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
