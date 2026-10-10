@@ -122,12 +122,12 @@ def test_flux_rejects_unit_or_mode_before_writing(
 ) -> None:
     device, transport = _instrument(mode)
     before = device.get_info()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="."):
         helpers.set_flux(device, 1e-6, unit=unit, stop=StopSignal())
     assert transport.writes == []
     assert device.get_info() == before
     fake = FakeDevice()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="."):
         helpers.set_flux(fake, 1.0, unit="A", stop=StopSignal())
     assert fake.get_value() == 0.0
 
