@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 from qick.asm_v2 import QickParam
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .pulse import PulseCfg
 
 logger = logging.getLogger(__name__)
@@ -43,8 +45,8 @@ class PulseRegistry:
         return len(self._pulses)
 
     def calc_name(self, cfg: PulseCfg) -> str:
-        def sort_dict(d: dict) -> dict:
-            sorted_dict = OrderedDict()
+        def sort_dict(d: Mapping[str, object]) -> OrderedDict[str, object]:
+            sorted_dict: OrderedDict[str, object] = OrderedDict()
             for key in sorted(d.keys()):
                 value = d[key]
                 if isinstance(value, QickParam):
