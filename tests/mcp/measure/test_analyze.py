@@ -718,7 +718,7 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {})
-        if method == "project.info":
+        if method == "entry.info":
             blocker_entered.set()
             assert release_blocker.wait(10), "test did not release the RPC lock"
             return {"project": "test"}
@@ -736,7 +736,7 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
             )
             assert save_ready.wait(2)
             blocker = pool.submit(
-                client.call, "rpc_call", {"method": "project.info", "params": {}}
+                client.call, "rpc_call", {"method": "entry.info", "params": {}}
             )
             assert dispatch_save.wait(2)
             request = pool.submit(client.call, "cancel", {"op": started["op"]})

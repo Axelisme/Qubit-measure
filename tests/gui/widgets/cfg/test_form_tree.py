@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QComboBox
+from zcu_tools.cfg_model import module_spec_from_raw
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,
@@ -18,36 +19,44 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.widgets.cfg import CfgFormWidget, FieldDecorationPatch
 from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
-from zcu_tools.resources.context import ModuleLibrary
 
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.widgets.cfg._form_support import attach_draft, section_schema
 from tests.gui.widgets.cfg._tree_support import click_row as _click_row
 from tests.gui.widgets.cfg._tree_support import tree_item as _item
 from tests.gui.widgets.cfg._tree_support import tree_widget as _tree
+from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
 def _readout_shape(ctrl: MagicMock) -> tuple[CfgSectionSpec, CfgSectionValue]:
-    ml = ModuleLibrary()
-    ml.register_module(
-        lib_ro={
-            "type": "readout/direct",
-            "ro_ch": 0,
-            "ro_length": 1.0,
-            "ro_freq": 7000.0,
-        }
+    components = {
+        "R1": ResonatorSchema(kind="resonator"),
+        "Q1": QubitSchema(kind="qubit/transmon"),
+    }
+    parameters = parameter_capture(components)
+    library = parameters.library.replaced_module(
+        "R1.readout.lib_ro",
+        module_spec_from_raw(
+            {
+                "type": "readout/direct",
+                "ro_ch": 0,
+                "ro_length": 1.0,
+                "ro_freq": 7000.0,
+            }
+        ),
     )
-    ctrl.get_current_ml.return_value = ml
-    return module_cfg_to_value(ml.get_module("lib_ro"))
+    ctrl.read_context.return_value = parameter_capture(components, library)
+    return module_cfg_to_value(library.get_module("R1.readout.lib_ro"))
 
 
 def test_library_reference_starts_collapsed_custom_starts_expanded(qapp, ctrl):
     lib_spec, lib_val = _readout_shape(ctrl)
     schema_lib = section_schema(
         {"mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Mod")},
-        {"mod": ReferenceValue(chosen_key="lib_ro", value=lib_val)},
+        {"mod": ReferenceValue(chosen_key="R1.readout.lib_ro", value=lib_val)},
     )
     form_lib = CfgFormWidget()
-    attach_draft(form_lib, schema_lib, ctrl)
+    attach_draft(form_lib, schema_lib, ctrl, parameters=ctrl.read_context())
     assert _item(form_lib, "mod").isExpanded() is False
 
     schema_custom = section_schema(
@@ -60,7 +69,7 @@ def test_library_reference_starts_collapsed_custom_starts_expanded(qapp, ctrl):
         },
     )
     form_custom = CfgFormWidget()
-    attach_draft(form_custom, schema_custom, ctrl)
+    attach_draft(form_custom, schema_custom, ctrl, parameters=ctrl.read_context())
     assert _item(form_custom, "mod").isExpanded() is True
 
 
@@ -68,10 +77,10 @@ def test_reference_identity_change_reapplies_folding(qapp, ctrl):
     lib_spec, lib_val = _readout_shape(ctrl)
     schema = section_schema(
         {"mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Mod")},
-        {"mod": ReferenceValue(chosen_key="lib_ro", value=lib_val)},
+        {"mod": ReferenceValue(chosen_key="R1.readout.lib_ro", value=lib_val)},
     )
     form = CfgFormWidget()
-    attach_draft(form, schema, ctrl)
+    attach_draft(form, schema, ctrl, parameters=ctrl.read_context())
     item = _item(form, "mod")
     assert item.isExpanded() is False
     ref_widget = form.findChild(ReferenceWidget)
@@ -81,7 +90,7 @@ def test_reference_identity_change_reapplies_folding(qapp, ctrl):
     field.set_chosen_key("<Custom:Direct Readout>")
     qapp.processEvents()
     assert item.isExpanded() is True
-    field.set_chosen_key("lib_ro")
+    field.set_chosen_key("R1.readout.lib_ro")
     qapp.processEvents()
     assert item.isExpanded() is False
 

@@ -15,6 +15,7 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
 )
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
@@ -46,7 +47,10 @@ def parameters() -> Generator[ParameterContext]:
             library=library,
             target=EntryDraft(entry_id="entry"),
             roles=RoleBinding(
-                "Q1", {"qubit": RoleSpec("lowering/driver")}, {"qubit": "Q1"}
+                None,
+                {"qubit": RoleSpec("lowering/driver")},
+                {},
+                aliases=(AliasRow("qubit", "Q1"),),
             ),
         )
     finally:
@@ -55,14 +59,14 @@ def parameters() -> Generator[ParameterContext]:
 
 
 def test_role_path_expression_uses_fixed_capture(parameters: ParameterContext) -> None:
-    assert evaluate_scalar_expr("qubit.rate * 2", parameters) == 8600.0
+    assert evaluate_scalar_expr("$qubit.rate * 2", parameters) == 8600.0
     assert evaluate_scalar_expr("Q1.rate + 100", parameters) == 4400.0
 
 
 def test_no_parameters_allows_math_but_not_parameter_paths() -> None:
     assert evaluate_scalar_expr("sqrt(9) + 2", None) == 5.0
     with pytest.raises(ExpressionError):
-        evaluate_scalar_expr("qubit.rate", None)
+        evaluate_scalar_expr("$qubit.rate", None)
 
 
 def test_lowering_uses_capture_and_returns_pure_data_range(
@@ -73,7 +77,7 @@ def test_lowering_uses_capture_and_returns_pure_data_range(
             fields={"freq": ScalarSpec("Frequency", float), "sweep": SweepSpec()}
         ),
         CfgSectionValue(
-            fields={"freq": EvalValue("qubit.rate"), "sweep": SweepValue(0.0, 1.0, 3)}
+            fields={"freq": EvalValue("$qubit.rate"), "sweep": SweepValue(0.0, 1.0, 3)}
         ),
     )
     lowered = schema_to_raw_dict(schema, parameters)
@@ -110,12 +114,12 @@ def test_path_seeds_use_roles_and_explicit_fallback(
     from zcu_lab.v2._support.measure.seeds import path_seed, scaled_path_seed
 
     environment = SessionEnv(parameters=parameters, soc=None, soccfg=None)
-    value = path_seed("qubit.rate", fallback=100.0).resolve(environment)
-    assert isinstance(value, EvalValue) and value.expr == "qubit.rate"
-    scaled = scaled_path_seed("qubit.rate", factor=2.0, fallback_value=100.0).resolve(
+    value = path_seed("$qubit.rate", fallback=100.0).resolve(environment)
+    assert isinstance(value, EvalValue) and value.expr == "$qubit.rate"
+    scaled = scaled_path_seed("$qubit.rate", factor=2.0, fallback_value=100.0).resolve(
         environment
     )
     assert isinstance(scaled, EvalValue)
     assert evaluate_scalar_expr(scaled.expr, parameters) == 8600.0
     empty = SessionEnv(parameters=None, soc=None, soccfg=None)
-    assert path_seed("qubit.rate", fallback=100.0).resolve(empty) == 100.0
+    assert path_seed("$qubit.rate", fallback=100.0).resolve(empty) == value

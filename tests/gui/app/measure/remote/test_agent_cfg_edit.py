@@ -69,7 +69,7 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(
         }
     )
     tab_id = "tab-agent-cfg-read"
-    fixture.prepare_tab(
+    resource = fixture.prepare_tab(
         tab_id, FakeAdapter(), CfgSchema(spec, make_default_value(spec))
     )
     fixture.start()
@@ -80,7 +80,14 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(
         invoke("connect", {"port": fixture.service.port})
         before = call(sock, "tab.list_all")
         result = invoke(
-            "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
+            "rpc_call",
+            {
+                "method": "tab.get_cfg",
+                "params": {
+                    "tab_id": tab_id,
+                    "expected": encode_ref(resource.observe().ref),
+                },
+            },
         )
         children = result["tree"]["children"]
         assert children["axis"]["kind"] == "centered_sweep"
@@ -90,7 +97,14 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(
         assert children["nqz"]["choices"] == [1, 2]
         assert children["drive"]["kind"] == "reference"
         assert children["drive"]["choices"] == ["Pulse"]
-        assert result == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        assert (
+            result
+            == call(
+                sock,
+                "tab.get_cfg",
+                {"tab_id": tab_id, "expected": encode_ref(resource.observe().ref)},
+            )["result"]
+        )
         assert (
             call(sock, "tab.list_all")["result"]["active_tab_id"]
             == before["result"]["active_tab_id"]
@@ -522,7 +536,11 @@ def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
     fixture.start()
     sock = open_client(fixture.service.port)
     try:
-        before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        before = call(
+            sock,
+            "tab.get_cfg",
+            {"tab_id": tab_id, "expected": encode_ref(owner.observe().ref)},
+        )["result"]
         text = "x" * (4 * 1024 * 1024)
         # The read helper switches to nonblocking; a large request needs sendall
         # to wait for the server's reader thread before pumping owner events.
@@ -556,9 +574,11 @@ def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
         restored = owner.edit(
             current.revision, (CfgEdit(("text",), DirectValue("small")),)
         )
-        assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["cfg_ref"] == (
-            encode_ref(restored.ref)
-        )
+        assert call(
+            sock,
+            "tab.get_cfg",
+            {"tab_id": tab_id, "expected": encode_ref(owner.observe().ref)},
+        )["result"]["cfg_ref"] == (encode_ref(restored.ref))
     finally:
         sock.close()
         fixture.stop()

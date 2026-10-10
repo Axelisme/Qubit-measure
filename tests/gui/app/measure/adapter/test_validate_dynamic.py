@@ -7,8 +7,6 @@ resolves against md, every device ref is selected). The *static* contract
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.cfg import (
@@ -26,20 +24,13 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
 )
+from zcu_tools.gui.session.parameters import ParameterContext
+
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 
 
-def _ml() -> MagicMock:
-    ml = MagicMock()
-    ml.modules = {}
-    ml.waveforms = {}
-    return ml
-
-
-def _md(**attrs: object) -> MagicMock:
-    md = MagicMock()
-    for k, v in attrs.items():
-        setattr(md, k, v)
-    return md
+def _parameters(**values: float) -> ParameterContext:
+    return parameter_capture(**values)
 
 
 def _inner_spec() -> CfgSectionSpec:
@@ -58,7 +49,7 @@ def test_scalar_unset_raises():
         spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(None)})
     )
     with pytest.raises(RuntimeError, match="is unset"):
-        schema_to_raw_dict(schema, _md(), _ml())
+        schema_to_raw_dict(schema, _parameters())
 
 
 def test_scalar_with_value_passes():
@@ -66,7 +57,7 @@ def test_scalar_with_value_passes():
     schema = CfgSchema(
         spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(5)})
     )
-    schema_to_raw_dict(schema, _md(), _ml())
+    schema_to_raw_dict(schema, _parameters())
 
 
 # --- EvalValue resolve -------------------------------------------------------
@@ -75,28 +66,32 @@ def test_scalar_with_value_passes():
 def test_eval_resolvable_passes():
     spec = CfgSectionSpec(fields={"freq": ScalarSpec("Freq", float)})
     schema = CfgSchema(
-        spec=spec, value=CfgSectionValue(fields={"freq": EvalValue(expr="r_f")})
+        spec=spec,
+        value=CfgSectionValue(fields={"freq": EvalValue(expr="general.ext.r_f")}),
     )
-    schema_to_raw_dict(schema, _md(r_f=6.0), _ml())
+    schema_to_raw_dict(schema, _parameters(r_f=6.0))
 
 
 def test_eval_unresolvable_raises():
     spec = CfgSectionSpec(fields={"freq": ScalarSpec("Freq", float)})
     schema = CfgSchema(
         spec=spec,
-        value=CfgSectionValue(fields={"freq": EvalValue(expr="missing_key")}),
+        value=CfgSectionValue(
+            fields={"freq": EvalValue(expr="general.ext.missing_key")}
+        ),
     )
     with pytest.raises(RuntimeError, match="failed"):
-        schema_to_raw_dict(schema, _md(), _ml())
+        schema_to_raw_dict(schema, _parameters())
 
 
 def test_eval_type_mismatch_raises():
     spec = CfgSectionSpec(fields={"ch": ScalarSpec("Channel", int)})
     schema = CfgSchema(
-        spec=spec, value=CfgSectionValue(fields={"ch": EvalValue(expr="r_f")})
+        spec=spec,
+        value=CfgSectionValue(fields={"ch": EvalValue(expr="general.ext.r_f")}),
     )
     with pytest.raises(RuntimeError, match="failed"):
-        schema_to_raw_dict(schema, _md(r_f=6.5), _ml())
+        schema_to_raw_dict(schema, _parameters(r_f=6.5))
 
 
 # --- SweepValue with EvalValue edges -----------------------------------------
@@ -107,10 +102,14 @@ def test_sweep_eval_edge_passes():
     schema = CfgSchema(
         spec=spec,
         value=CfgSectionValue(
-            fields={"s": SweepValue(start=EvalValue(expr="x"), stop=1.0, expts=11)}
+            fields={
+                "s": SweepValue(
+                    start=EvalValue(expr="general.ext.x"), stop=1.0, expts=11
+                )
+            }
         ),
     )
-    schema_to_raw_dict(schema, _md(x=0.0), _ml())
+    schema_to_raw_dict(schema, _parameters(x=0.0))
 
 
 def test_sweep_eval_edge_fails():
@@ -119,12 +118,14 @@ def test_sweep_eval_edge_fails():
         spec=spec,
         value=CfgSectionValue(
             fields={
-                "s": SweepValue(start=EvalValue(expr="missing"), stop=1.0, expts=11)
+                "s": SweepValue(
+                    start=EvalValue(expr="general.ext.missing"), stop=1.0, expts=11
+                )
             }
         ),
     )
     with pytest.raises(RuntimeError, match="failed"):
-        schema_to_raw_dict(schema, _md(), _ml())
+        schema_to_raw_dict(schema, _parameters())
 
 
 def test_centered_sweep_eval_center_passes():
@@ -133,11 +134,13 @@ def test_centered_sweep_eval_center_passes():
         spec=spec,
         value=CfgSectionValue(
             fields={
-                "s": CenteredSweepValue(center=EvalValue(expr="x"), span=1.0, expts=11)
+                "s": CenteredSweepValue(
+                    center=EvalValue(expr="general.ext.x"), span=1.0, expts=11
+                )
             }
         ),
     )
-    schema_to_raw_dict(schema, _md(x=0.0), _ml())
+    schema_to_raw_dict(schema, _parameters(x=0.0))
 
 
 def test_centered_sweep_eval_center_fails():
@@ -147,7 +150,7 @@ def test_centered_sweep_eval_center_fails():
         value=CfgSectionValue(
             fields={
                 "s": CenteredSweepValue(
-                    center=EvalValue(expr="missing"),
+                    center=EvalValue(expr="general.ext.missing"),
                     span=1.0,
                     expts=11,
                 )
@@ -155,7 +158,7 @@ def test_centered_sweep_eval_center_fails():
         ),
     )
     with pytest.raises(RuntimeError, match="failed"):
-        schema_to_raw_dict(schema, _md(), _ml())
+        schema_to_raw_dict(schema, _parameters())
 
 
 # --- Required device selector -------------------------------------------------
@@ -176,7 +179,7 @@ def test_device_empty_raises():
         spec=spec, value=CfgSectionValue(fields={"dev": DirectValue("")})
     )
     with pytest.raises(RuntimeError, match="required and must not be empty"):
-        schema_to_raw_dict(schema, _md(), _ml())
+        schema_to_raw_dict(schema, _parameters())
 
 
 def test_device_none_raises():
@@ -194,7 +197,7 @@ def test_device_none_raises():
         spec=spec, value=CfgSectionValue(fields={"dev": DirectValue(None)})
     )
     with pytest.raises(RuntimeError, match="unset"):
-        schema_to_raw_dict(schema, _md(), _ml())
+        schema_to_raw_dict(schema, _parameters())
 
 
 def test_device_selected_passes():
@@ -211,7 +214,7 @@ def test_device_selected_passes():
     schema = CfgSchema(
         spec=spec, value=CfgSectionValue(fields={"dev": DirectValue("YOKO_1")})
     )
-    schema_to_raw_dict(schema, _md(), _ml())
+    schema_to_raw_dict(schema, _parameters())
 
 
 # --- refs (disabled / enabled recursion) --------------------------------------
@@ -224,7 +227,7 @@ def test_disabled_optional_ref_skipped():
         }
     )
     schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"m": None}))
-    schema_to_raw_dict(schema, _md(), _ml())
+    schema_to_raw_dict(schema, _parameters())
 
 
 def test_enabled_ref_recurses_into_unset_scalar():
@@ -249,7 +252,7 @@ def test_enabled_ref_recurses_into_unset_scalar():
         ),
     )
     with pytest.raises(RuntimeError, match="m.gain.*is unset"):
-        schema_to_raw_dict(schema, _md(), _ml())
+        schema_to_raw_dict(schema, _parameters())
 
 
 # --- LiteralSpec (skipped by dynamic) ----------------------------------------
@@ -258,7 +261,7 @@ def test_enabled_ref_recurses_into_unset_scalar():
 def test_literal_skipped():
     spec = CfgSectionSpec(fields={"t": LiteralSpec(value=1)})
     schema = CfgSchema(spec=spec, value=CfgSectionValue(fields={"t": DirectValue(1)}))
-    schema_to_raw_dict(schema, _md(), _ml())
+    schema_to_raw_dict(schema, _parameters())
 
 
 # --- nested CfgSectionSpec ---------------------------------------------------
@@ -277,7 +280,7 @@ def test_nested_section_recurses():
         ),
     )
     with pytest.raises(RuntimeError, match="sub.x.*is unset"):
-        schema_to_raw_dict(schema, _md(), _ml())
+        schema_to_raw_dict(schema, _parameters())
 
 
 # --- integration with to_raw_dict --------------------------------------------
@@ -289,17 +292,6 @@ def test_to_raw_dict_calls_dynamic_before_lowering():
         spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(None)})
     )
     with pytest.raises(RuntimeError, match="is unset") as exc_info:
-        schema_to_raw_dict(schema, _md(), _ml())
+        schema_to_raw_dict(schema, _parameters())
     # validate_dynamic message includes "(no value to lower)"
     assert "no value to lower" in str(exc_info.value)
-
-
-def test_to_raw_dict_skips_dynamic_when_no_md():
-    spec = CfgSectionSpec(fields={"freq": ScalarSpec("Freq", float)})
-    schema = CfgSchema(
-        spec=spec,
-        value=CfgSectionValue(fields={"freq": EvalValue(expr="r_f", resolved=6.0)}),
-    )
-    # md=None → dynamic validate skipped, lowering uses snapshot
-    result = schema_to_raw_dict(schema, None, _ml())
-    assert result["freq"] == 6.0

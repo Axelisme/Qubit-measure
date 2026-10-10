@@ -67,33 +67,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         agent=AgentMethodPolicy(reveals=("context",)),
     ),
     method_entry(
-        "context.md_get",
-        "context:h_context_md_get",
-        MethodSpec(
-            5.0,
-            "List MetaDict keys; summaries=true also returns {values} with scalars "
-            "and descriptions, never full non-scalar contents.",
-            (
-                ParamSpec(
-                    "summaries",
-                    JsonType.BOOLEAN,
-                    required=False,
-                    default=False,
-                    description="Include compact value summaries",
-                ),
-            ),
-        ),
-    ),
-    method_entry(
-        "context.md_get_attr",
-        "context:h_context_md_get_attr",
-        MethodSpec(
-            5.0,
-            "Read one MetaDict attribute",
-            (required_string("key", "MetaDict key"),),
-        ),
-    ),
-    method_entry(
         "value.list",
         "context:h_value_list",
         MethodSpec(
@@ -119,23 +92,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 optional_string(
                     "type", "Optional expected type: int, float, str, or bool"
                 ),
-            ),
-        ),
-    ),
-    method_entry(
-        "context.ml_get",
-        "context:h_context_ml_get",
-        MethodSpec(
-            5.0,
-            "List ModuleLibrary modules/waveforms as {modules, waveforms}, each "
-            "entry carrying name, discriminator kind/style and description. "
-            "With name, return {name, kind: 'module'|'waveform', cfg} for the "
-            "named stored cfg without opening an editor. Require kind if the "
-            "same name exists in both collections; unknown names fail with "
-            "available options.",
-            (
-                optional_string("name", "Entry to read; omit for the index"),
-                optional_string("kind", "module or waveform when names collide"),
             ),
         ),
     ),

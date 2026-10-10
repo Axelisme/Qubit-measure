@@ -419,7 +419,11 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
 def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
     class RecordingSnapshotAdapter(FakeAdapter):
         def run(
-            self, req: RunRequest, raw_cfg: Mapping[str, object], *, context: RunContext
+            self,
+            req: RunRequest,
+            raw_cfg: Mapping[str, ExperimentCfgValue],
+            *,
+            context: RunContext,
         ) -> FakeRunResult:
             # Controlled execution produces an artifact with the real domain cfg builder.
             return RunRecord(

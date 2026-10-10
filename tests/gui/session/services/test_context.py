@@ -10,7 +10,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
-    ComponentFocus,
     ContextSourceBinding,
     EntryDraft,
     EntryInfo,
@@ -21,7 +20,6 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
-    ComponentFocusChangedPayload,
     ContextSwitchedPayload,
 )
 from zcu_tools.gui.session.services.context import ContextService
@@ -337,49 +335,16 @@ def test_target_requires_a_point_and_a_declared_alias(
         context.read_alias_context({}, "Q1")
 
 
-def test_single_candidate_point_publishes_automatic_focus(context, tmp_path):
-    entry = _entry(tmp_path)
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0)
-    context.install_entry(entry)
-    context.new_point(_new_request("first"))
-    first = context.get_component_focus()
-    assert first.name == "Q1"
-    assert first.target == context.read_context().target
-    context.set_component_focus(None)
-    context.use_point(PointUseRequest("first"))
-    assert context.get_component_focus().name == "Q1"
-
-
-def test_multiple_candidates_do_not_guess_focus(context, rich_entry):
-    context.install_entry(rich_entry)
-    context.new_point(_new_request("first"))
-    assert context.get_component_focus().name is None
-    context.set_component_focus("Q2")
-    context.use_point(PointUseRequest("first"))
-    assert context.get_component_focus().name is None
-
-
-def test_first_component_uses_default_focus_without_overwriting_selection(
-    context, tmp_path
-):
-    context.install_entry(_entry(tmp_path))
-    context.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
-    assert context.get_component_focus().name == "Q1"
-    context.add_component("Q2", "fake/drive/a", {"rate": 5100.0})
-    assert context.get_component_focus().name == "Q1"
-    context.set_component_focus(None)
-    assert context.get_component_focus().name is None
-
-
-def test_parameter_write_preserves_selected_component_focus(
+def test_parameter_write_preserves_global_aliases(
     context: ContextService,
     rich_entry: ResultEntry,
 ) -> None:
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("a"))
-    focus = context.set_component_focus("Q1")
+    context.set_alias_rows((AliasRow("driver", "Q1"),))
+    rows = context.get_alias_rows()
     context.set_parameter(target, "Q1.rate", 4500.0)
-    assert context.get_component_focus() == focus
+    assert context.get_alias_rows() == rows
     assert context.read_context().value("Q1.rate") == 4500.0
 
 
@@ -391,7 +356,10 @@ def test_empty_queries_have_no_entry_point_or_component_selection(
     assert not context.is_active_context()
     assert context.get_entry_info() is None
     assert context.list_points() == ()
-    assert context.get_component_focus() == ComponentFocus(None, None, ())
+    assert context.get_alias_rows() == (
+        AliasRow("driver", ""),
+        AliasRow("sense", "$driver.sense"),
+    )
 
 
 def test_empty_read_rejects_instead_of_returning_default_parameters(
@@ -412,8 +380,21 @@ def test_entry_commands_without_entry_fail_explicitly(
 
 
 def test_install_entry_publishes_empty_draft_and_preserves_nonparameter_capabilities(
-    context: ContextService, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
+    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
+    predictor = FluxoniumPredictor(
+        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
+    )
+    context = ContextService(
+        SessionState(
+            SessionEnv(parameters=None, soc=None, soccfg=None, predictor=predictor)
+        ),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+    )
     entry = _entry(tmp_path)
     old = context.get_session_env()
     info = context.install_entry(entry)
@@ -423,6 +404,7 @@ def test_install_entry_publishes_empty_draft_and_preserves_nonparameter_capabili
     assert info.database_path == entry.database_path
     assert current.readiness is ContextReadiness.DRAFT
     assert current.soc is old.soc and current.values is old.values
+    assert current.predictor is predictor
     assert current.parameters is not None
     assert current.parameters.roles is None
     assert context.read_context().target == EntryDraft(entry_id=entry.entry_id)
@@ -545,7 +527,7 @@ def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
     context.install_entry(entry)
     ledger = context.entry_ledger(entry.entry_id)
     assert ledger.events() == before
-    context.capture_roles({}, focus=None, explicit={})
+    context.read_alias_context({})
     assert entry.ledger.events() == before
 
 
@@ -593,68 +575,33 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
     assets = Assets()
     context = ContextService(state, bus, bind_assets=assets.bind)
     observations: list[
-        tuple[
-            str,
-            int,
-            SessionEnv,
-            EntryInfo | None,
-            ComponentFocus,
-            ContextSourceBinding | None,
-        ]
+        tuple[int, SessionEnv, EntryInfo | None, ContextSourceBinding | None]
     ] = []
 
     def switched(payload: ContextSwitchedPayload) -> None:
         observations.append(
             (
-                "context",
                 state.version.get("context"),
                 state.session_env,
                 context.get_entry_info(),
-                context.get_component_focus(),
                 payload.sources,
             )
         )
 
-    def focused(payload: ComponentFocusChangedPayload) -> None:
-        observations.append(
-            (
-                "focus",
-                state.version.get("context"),
-                state.session_env,
-                context.get_entry_info(),
-                payload.focus,
-                context.get_source_binding(),
-            )
-        )
-
-    switch_subscription = bus.subscribe(ContextSwitchedPayload, switched)
-    focus_subscription = bus.subscribe(ComponentFocusChangedPayload, focused)
+    subscription = bus.subscribe(ContextSwitchedPayload, switched)
     try:
         assert state.version.get("context") == 0 and observations == []
         info = context.install_entry(rich_entry)
         context.use_point(PointUseRequest("first"))
-        context.set_component_focus("Q1")
-        context.set_component_focus("Q1")
         assert state.version.get("context") == 2
         context.new_point(_new_request("second"))
         assert state.version.get("context") == 3
         context.clear_context()
-        assert [(kind, version) for kind, version, *_ in observations] == [
-            ("context", 1),
-            ("focus", 1),
-            ("context", 2),
-            ("focus", 2),
-            ("focus", 2),
-            ("context", 3),
-            ("focus", 3),
-            ("context", 4),
-            ("focus", 4),
-        ]
-        for kind, version, env, entry_info, focus, sources in observations:
+        assert [version for version, *_ in observations] == [1, 2, 3, 4]
+        for version, env, entry_info, sources in observations:
             if version == 4:
                 assert env.readiness is ContextReadiness.EMPTY
                 assert env.parameters is None and entry_info is None and sources is None
-                assert focus == ComponentFocus(None, None, ())
                 continue
             assert entry_info == info
             assert env.parameters is not None
@@ -665,32 +612,18 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
                     entry_id=info.entry_id, point="first" if version == 2 else "second"
                 )
             )
-            assert env.parameters.target == expected and focus.target == expected
+            assert env.parameters.target == expected
             assert sources is not None and sources.sources
             assert env.result_dir == str(info.result_path)
             assert env.database_path == str(info.database_path)
             assert env.active_label == (
                 "" if version == 1 else "first" if version == 2 else "second"
             )
-            if version == 1:
-                assert (
-                    env.readiness is ContextReadiness.DRAFT and focus.components == ()
-                )
-            else:
-                assert env.readiness is ContextReadiness.ACTIVE
-                assert {option.name for option in focus.components} == {
-                    "Q1",
-                    "Q2",
-                    "R1",
-                    "R2",
-                }
-            if kind == "focus" and focus.name is not None:
-                assert version == 2 and focus.name == "Q1"
-            else:
-                assert focus.name is None
+            assert env.readiness is (
+                ContextReadiness.DRAFT if version == 1 else ContextReadiness.ACTIVE
+            )
     finally:
-        switch_subscription.unsubscribe()
-        focus_subscription.unsubscribe()
+        subscription.unsubscribe()
 
 
 def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
@@ -701,9 +634,8 @@ def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
     bus = BaseEventBus()
     assets = Assets()
     context = ContextService(state, bus, bind_assets=assets.bind)
-    events: list[ContextSwitchedPayload | ComponentFocusChangedPayload] = []
+    events: list[ContextSwitchedPayload] = []
     switched = bus.subscribe(ContextSwitchedPayload, events.append)
-    focused = bus.subscribe(ComponentFocusChangedPayload, events.append)
     try:
         context.install_entry(rich_entry)
         target = context.use_point(PointUseRequest("first"))
@@ -722,4 +654,3 @@ def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
         assert rich_entry.list_points() == ["first", "retained"]
     finally:
         switched.unsubscribe()
-        focused.unsubscribe()

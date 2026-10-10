@@ -5,18 +5,20 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec
+from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec, waveform_spec_from_raw
 from zcu_tools.gui.remote.errors import ErrorCode
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import ContextSourceFault
+from zcu_tools.gui.session.events import MdChangedPayload, MlChangedPayload
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformError
 
-from ._helpers import open_client, recv_response, send
+from ._helpers import open_client, recv_push, recv_response, send
 from ._point_application import PointApplication
 
 
-def test_active_point_label_and_real_window_follow_published_target_not_focus(
+def test_active_point_label_and_real_window_follow_published_target_not_aliases(
     application: PointApplication, qapp, caplog: pytest.LogCaptureFixture
 ) -> None:
     import logging
@@ -64,8 +66,8 @@ def test_active_point_label_and_real_window_follow_published_target_not_focus(
             application.result("point.new", {"label": point, "description": point})
             assert application.result("context.active", {}) == {"label": point}
             assert_visible_snapshot(info.name, point)
-            for focus in ("Q1", "Q2", None):
-                context.set_component_focus(focus)
+            for name in ("Q1", "Q2", ""):
+                context.set_alias_rows((AliasRow("driver", name),))
                 assert application.result("context.active", {}) == {"label": point}
                 assert_visible_snapshot(info.name, point)
         assert application.result("context.labels", {}) == {"labels": ["base", "next"]}
@@ -76,7 +78,7 @@ def test_active_point_label_and_real_window_follow_published_target_not_focus(
         window.refresh_context_panel()
         assert_visible_snapshot(info.name, "No point selected")
         assert not caplog.records, (
-            "Entry/point/focus facts must not raise in GUI subscribers"
+            "Entry/point/alias facts must not raise in GUI subscribers"
         )
     finally:
         application.remote.render_view = previous_view
@@ -133,6 +135,51 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     # The asset was never created: a full Spec read must still succeed.
     with pytest.raises(ArbWaveformError):
         _ = captured.library.get_waveform("Q1.waveforms.arbitrary").length
+
+
+@pytest.mark.parametrize("event", ["md_changed", "ml_changed"])
+def test_context_notification_requery_reads_complete_native_capture(
+    application: PointApplication, event: str
+) -> None:
+    info = application.open_entry()
+    context = application.controller.context_control
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    entry = ResultEntry.open(
+        info.name,
+        result_root=info.result_path.parent,
+        database_root=info.database_path.parent,
+    )
+    entry.new_point("base")
+    with entry.module_library("base").edit() as draft:
+        draft.set_waveform(
+            "Q1.waveforms.drive_wav",
+            waveform_spec_from_raw({"style": "const", "length": 1.0}),
+        )
+    application.result("point.use", {"label": "base"})
+    application.result("events.subscribe", {"events": [event]})
+    application.controller.get_bus().emit(
+        MdChangedPayload(binding_id=0, content_changed=True, fault=None)
+        if event == "md_changed"
+        else MlChangedPayload(binding_id=0, content_changed=True, fault=None)
+    )
+    notification = recv_push(application.client, event)
+    # Consume the advertised query, not a hard-coded method or catalog entry.
+    snapshot = application.result(notification["payload"]["requery"][0], {})
+    point = snapshot["point"]
+    library = snapshot["library"]
+    assert isinstance(point, dict) and isinstance(library, dict)
+    components = point["components"]
+    partitions = library["components"]
+    assert isinstance(components, dict) and isinstance(partitions, dict)
+    q1 = components["Q1"]
+    q1_library = partitions["Q1"]
+    assert isinstance(q1, dict) and isinstance(q1_library, dict)
+    assert q1["rate"] == 10.0
+    waveforms = q1_library["waveforms"]
+    assert isinstance(waveforms, dict)
+    drive = waveforms["drive_wav"]
+    assert isinstance(drive, dict)
+    assert drive["style"] == "const" and drive["length"] == 1.0
 
 
 def test_snapshot_reads_the_memory_draft_and_unlocks_only_its_connection(

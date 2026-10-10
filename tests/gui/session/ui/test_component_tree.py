@@ -54,16 +54,14 @@ def component_widget(
         restore_registry(before)
 
 
-def test_add_component_renders_tree_and_can_select_focus(component_widget):
-    widget, control = component_widget
+def test_add_component_renders_tree(component_widget):
+    widget, _control = component_widget
     assert widget.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     tree = widget.findChild(QTreeWidget, "component_tree")
     assert tree is not None
     assert any(
         tree.topLevelItem(i).text(0) == "Q1" for i in range(tree.topLevelItemCount())
     )
-    widget.set_focus("Q1")
-    assert control.get_component_focus().name == "Q1"
 
 
 def test_missing_required_field_displays_error_without_mutation(component_widget):

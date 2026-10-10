@@ -18,6 +18,7 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.cfg.binding import (
     CenteredSweepField,
+    CfgDraft,
     CfgField,
     LiteralField,
     ReferenceField,
@@ -34,7 +35,8 @@ from zcu_tools.gui.widgets.cfg import (
 )
 from zcu_tools.gui.widgets.cfg.registry import FieldWidgetProtocol
 
-from tests.gui.widgets.cfg._form_support import attach_draft, section_schema
+from tests.gui.cfg.binding._fakes import BindingPorts
+from tests.gui.widgets.cfg._form_support import section_schema
 
 _RENDERED_FIELD_TYPES = (
     LiteralField,
@@ -97,7 +99,8 @@ def test_form_propagates_renderer_registry_through_reference_subtree(qapp, ctrl)
     )
     form = CfgFormWidget(renderers=registry)
 
-    attach_draft(form, schema, ctrl)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
+    form.attach(draft)
 
     assert sorted(context.path for context in contexts) == [
         "reference",
@@ -149,8 +152,8 @@ def test_attach_failure_does_not_observe_failed_draft(
         {"value": ScalarSpec(label="Value", type=int, required=True)},
         {"value": DirectValue(1)},
     )
-    failed_draft = MeasureCfgBindings(ctrl).new_draft(schema)
-    active_draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    failed_draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
+    active_draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     fail_rendering = True
     default_renderer = default_cfg_renderers().resolve(ScalarField)
 
@@ -212,7 +215,7 @@ def test_detach_and_reattach_validity_subscription_emits_once(qapp, ctrl):
         {"value": ScalarSpec(label="Value", type=int, required=True)},
         {"value": DirectValue(1)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     validity: list[bool] = []
     form.validity_changed.connect(validity.append)
@@ -239,11 +242,13 @@ def test_detach_and_reattach_validity_subscription_emits_once(qapp, ctrl):
 def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     """The widget reflects expression refreshes from its attached draft."""
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.resources.context import MetaDict
 
-    md = MetaDict()
-    md.r_f = 6000.0
-    ctrl.get_current_md.return_value = md
+    frequency = 6000.0
+
+    def evaluate(expression: str) -> float:
+        assert expression == "r_f"
+        return frequency
+
     schema = section_schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
         {"freq": EvalValue("r_f")},
@@ -251,16 +256,28 @@ def test_cfg_form_reflects_model_external_refresh(qapp, ctrl):
     w = CfgFormWidget()
     emitted = []
     w.schema_changed.connect(emitted.append)
-    model = attach_draft(w, schema, ctrl)
+    ports = BindingPorts()
+    draft = CfgDraft(
+        schema,
+        evaluate_expression=evaluate,
+        provide_options=ports.provide,
+        references=ports,
+    )
+    try:
+        w.attach(draft)
+        frequency = 6100.0
+        draft.refresh_expressions()
+        qapp.processEvents()
 
-    md.r_f = 6100.0
-    model.refresh_expressions()
-    qapp.processEvents()
-
-    val = w.read_values().fields["freq"]
-    assert isinstance(val, EvalValue)
-    assert val.resolved == 6100.0
-    assert emitted
+        val = w.read_values().fields["freq"]
+        assert isinstance(val, EvalValue)
+        assert val.resolved == 6100.0
+        assert emitted
+    finally:
+        w.detach()
+        draft.close()
+        w.close()
+        w.deleteLater()
 
 
 def test_same_tick_edits_materialize_schema_once_at_form_boundary(
@@ -272,7 +289,7 @@ def test_same_tick_edits_materialize_schema_once_at_form_boundary(
         {"nested": CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)})},
         {"nested": CfgSectionValue({"reps": DirectValue(10)})},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     form.attach(draft)
     emitted: list[CfgSchema] = []
@@ -313,7 +330,7 @@ def test_validity_feedback_stays_synchronous_while_schema_is_coalesced(qapp, ctr
         {"value": ScalarSpec(label="Value", type=int, required=True)},
         {"value": DirectValue(1)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     validity: list[bool] = []
     schemas: list[CfgSchema] = []
@@ -345,7 +362,7 @@ def test_detach_drops_pending_schema_and_reattach_can_schedule(qapp, ctrl):
         {"value": ScalarSpec(label="Value", type=int)},
         {"value": DirectValue(1)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     schemas: list[CfgSchema] = []
     form.schema_changed.connect(schemas.append)
@@ -376,7 +393,7 @@ def test_close_drops_pending_schema_and_reattach_can_schedule(qapp, ctrl):
         {"value": ScalarSpec(label="Value", type=int)},
         {"value": DirectValue(1)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     schemas: list[CfgSchema] = []
     form.schema_changed.connect(schemas.append)

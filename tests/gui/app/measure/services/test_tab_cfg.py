@@ -42,10 +42,6 @@ def resolution() -> CfgResolution:
     )
 
 
-def make_range(start: float, stop: float, *, expts: int) -> object:
-    return (start, stop, expts)
-
-
 def defaults() -> CfgSchema:
     return CfgSchema(
         CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
@@ -55,15 +51,13 @@ def defaults() -> CfgSchema:
 
 def make_owner() -> TabCfgResources:
     return TabCfgResources(
-        resolution=resolution,
-        make_range=make_range,
         mutation_allowed=lambda tab_id: True,
     )
 
 
 def test_headless_create_edit_and_accept_use_one_resource() -> None:
     owner = make_owner()
-    resource = owner.create("tab", defaults)
+    resource = owner.create("tab", defaults, resolution=resolution)
     editing = owner.lookup("tab")
     before = editing.observe()
     changed = editing.edit(before.ref.revision, (CfgEdit(("value",), 7.0),))
@@ -84,7 +78,7 @@ def test_restore_skips_defaults_but_reset_uses_them() -> None:
 
     initial = defaults()
     initial.value.fields["value"] = DirectValue(8.0)
-    owner.create("restored", fresh, initial=initial)
+    owner.create("restored", fresh, resolution=resolution, initial=initial)
     assert calls == []
     editing = owner.lookup("restored")
     before = editing.observe()
@@ -101,7 +95,7 @@ def test_restore_skips_defaults_but_reset_uses_them() -> None:
 
 def test_retire_revokes_retained_handles_and_recreate_has_new_identity() -> None:
     owner = make_owner()
-    owner.create("tab", defaults)
+    owner.create("tab", defaults, resolution=resolution)
     old = owner.lookup("tab")
     acceptance = owner.acceptance("tab")
     before = old.observe()
@@ -114,16 +108,16 @@ def test_retire_revokes_retained_handles_and_recreate_has_new_identity() -> None
         with pytest.raises(CfgPreconditionError) as caught:
             read()
         assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
-    owner.create("tab", defaults)
+    owner.create("tab", defaults, resolution=resolution)
     assert owner.lookup("tab").observe().ref.cfg_id != before.ref.cfg_id
 
 
 def test_duplicate_create_does_not_replace_existing_resource() -> None:
     owner = make_owner()
-    owner.create("tab", defaults)
+    owner.create("tab", defaults, resolution=resolution)
     before = owner.lookup("tab").observe()
     with pytest.raises(RuntimeError, match="already owns"):
-        owner.create("tab", defaults)
+        owner.create("tab", defaults, resolution=resolution)
     assert owner.lookup("tab").observe() == before
 
 
@@ -135,27 +129,23 @@ def test_failed_creation_does_not_reserve_tab_identity() -> None:
             raise RuntimeError("source unavailable")
         return resolution()
 
-    owner = TabCfgResources(
-        resolution=source, make_range=make_range, mutation_allowed=lambda tab_id: True
-    )
+    owner = TabCfgResources(mutation_allowed=lambda tab_id: True)
     with pytest.raises(RuntimeError, match="source unavailable"):
-        owner.create("tab", defaults)
+        owner.create("tab", defaults, resolution=source)
     with pytest.raises(CfgPreconditionError):
         owner.lookup("tab")
     failing = False
-    owner.create("tab", defaults)
+    owner.create("tab", defaults, resolution=source)
     assert owner.lookup("tab").observe().status is CfgStatus.VALID
 
 
 def test_busy_policy_is_bound_to_the_correct_tab_and_does_not_block_refresh() -> None:
     running: str | None = None
     owner = TabCfgResources(
-        resolution=resolution,
-        make_range=make_range,
         mutation_allowed=lambda tab_id: tab_id != running,
     )
-    owner.create("running", defaults)
-    owner.create("other", defaults)
+    owner.create("running", defaults, resolution=resolution)
+    owner.create("other", defaults, resolution=resolution)
     running = "running"
     busy = owner.lookup("running")
     with pytest.raises(CfgPreconditionError) as caught:
@@ -171,7 +161,7 @@ def test_busy_policy_is_bound_to_the_correct_tab_and_does_not_block_refresh() ->
 
 def test_retire_during_notification_keeps_association_and_handle_alive() -> None:
     owner = make_owner()
-    owner.create("tab", defaults)
+    owner.create("tab", defaults, resolution=resolution)
     editing = owner.lookup("tab")
     failures: list[CfgPreconditionReason] = []
 
