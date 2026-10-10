@@ -291,7 +291,7 @@ def test_yoko_readback_stores_unit_from_one_mode_observation(
 def test_fake_readback_stores_native_coordinate() -> None:
     device = FakeDevice(fast_mode=True)
     device.output_on()
-    device.set_value(0.125, progress=False)
+    device.set_value(0.125)
     info = device.get_info()
     assert info.value_unit == "native"
     assert info.model_dump()["value_unit"] == "native"

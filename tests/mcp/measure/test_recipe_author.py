@@ -767,7 +767,15 @@ def test_author_flux_device_uses_declared_native_coordinate(tmp_path, type_name)
     before_sweep = deepcopy(gui.publication["tree"]["children"]["sweep"])
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        tab.use_flux_device("coil", unit="native")
+        try:
+            tab.use_flux_device("coil", unit="native")
+        except GuiRpcError as error:
+            if error.reason == "invalid_device" and str(error) in (
+                "Fake flux requires confirmed native coordinates",
+                "Flux device has no physical unit",
+            ):
+                pytest.fail(f"declared native coordinate must be accepted: {error}")
+            raise
     children = gui.publication["tree"]["children"]
     assert children["dev"]["children"]["flux_dev"]["input"]["resolved"] == "coil"
     assert children["flux_unit"]["input"]["resolved"] == "native"

@@ -159,7 +159,7 @@ def test_yoko_info_rejects_mode_unit_mismatch(
         and "mode" in item["msg"]
         and "unit" in item["msg"]
         for item in error.value.errors()
-    )
+    ), error.value.errors()
 
 
 def test_yoko_info_requires_explicit_mode() -> None:
@@ -189,4 +189,4 @@ def test_fake_info_rejects_non_native_unit(unit: str) -> None:
     assert any(
         item["loc"] == ("value_unit",) and item["type"] == "literal_error"
         for item in error.value.errors()
-    )
+    ), error.value.errors()
