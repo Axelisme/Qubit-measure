@@ -1092,8 +1092,10 @@ def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
         assert gate.has_active(OperationKind.RUN)
 
     flux.before_read = unused.before_read = require_lease
+    inputs = _make_inputs(state, tab_id, adapter)
     inputs = replace(
-        _make_inputs(state, tab_id, adapter),
+        inputs,
+        request=replace(inputs.request, soc=None, soccfg=None),
         snapshot=_run_snapshot(),
         experiment_tag=adapter.experiment_tag,
     )
@@ -1160,7 +1162,7 @@ def test_gui_save_uses_fixed_run_device_snapshot(
         path = next(
             item.output.path
             for item in report.outputs
-            if item.output.format == "native"
+            if item.output.format == "data_h5"
         )
         restored = load_run_data(path)
         assert restored.metadata.device_snapshot is not None

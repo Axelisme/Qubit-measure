@@ -141,7 +141,7 @@ def test_saved_run_keeps_its_device_snapshot_across_later_acquisitions(
     read_count = flux.events.count("read")
     report = saved.save()
     path = next(
-        item.output.path for item in report.outputs if item.output.format == "native"
+        item.output.path for item in report.outputs if item.output.format == "data_h5"
     )
     restored = load_run_data(path)
     assert restored.metadata.device_snapshot is not None
@@ -164,7 +164,7 @@ def test_saved_run_without_connected_devices_writes_empty_snapshot(
     path = next(
         item.output.path
         for item in saved.report.outputs
-        if item.output.format == "native"
+        if item.output.format == "data_h5"
     )
     assert load_run_data(path).metadata.device_snapshot == {}
 
