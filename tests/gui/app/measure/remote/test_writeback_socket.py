@@ -16,6 +16,7 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 from zcu_tools.resources.entry import RoleSpec
@@ -372,7 +373,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         setup=True,
     )
     application.result("point.new", {"label": "a"})
-    context.set_component_focus("Q1")
+    context.set_alias_rows((AliasRow("driver", "Q1"),))
     captured = context.read_context().bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
@@ -387,7 +388,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     assert analyzed["status"] == "finished", analyzed
     context.set_parameter(captured.target, "Q1.ext.value", 19.9)
     application.result("point.new", {"label": "b"})
-    context.set_component_focus("Q2")
+    context.set_alias_rows((AliasRow("driver", "Q2"),))
     active = context.read_context().target
     window = MainWindow(controller)
     window.add_tab_widget(tab, "pointed")
@@ -416,7 +417,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         assert any("±" in text and "0.18" in text for text in texts)
         assert any("19.9" in text for text in texts)
         assert context.read_context().target == active
-        assert context.get_component_focus().name == "Q2"
+        assert context.get_alias_rows() == (AliasRow("driver", "Q2"),)
     finally:
         controller.tab_control.close_tab(tab)
         window.deleteLater()

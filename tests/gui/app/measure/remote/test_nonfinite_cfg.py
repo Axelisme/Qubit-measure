@@ -68,7 +68,12 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
     sock = open_client(fx.service.port)
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
     try:
-        tab = call(sock, "tab.get_cfg", {"tab_id": tab_id}, rid="tab")
+        tab = call(
+            sock,
+            "tab.get_cfg",
+            {"tab_id": tab_id, "expected": encode_ref(resource.observe().ref)},
+            rid="tab",
+        )
         assert tab["ok"]
         tree = tab["result"]["tree"]
         assert not tree["children"]["gain"]["valid"]
@@ -77,13 +82,29 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
         assert "finite" in tree["children"]["gain"]["input"]["error"]
 
         invoke("connect", {"port": fx.service.port})
-        for method, params in (("tab.get_cfg", {"tab_id": tab_id}),):
+        for method, params in (
+            (
+                "tab.get_cfg",
+                {"tab_id": tab_id, "expected": encode_ref(resource.observe().ref)},
+            ),
+        ):
             assert (
                 invoke("rpc_call", {"method": method, "params": params})["tree"] == tree
             )
 
         observe_run_inputs(
-            fx, tab_id, lambda method, params: call(sock, method, params)["result"]
+            fx,
+            tab_id,
+            lambda method, params: call(
+                sock,
+                method,
+                {
+                    **params,
+                    "expected": encode_ref(resource.observe().ref),
+                }
+                if method == "tab.get_cfg"
+                else params,
+            )["result"],
         )
         rejected = call(
             sock,

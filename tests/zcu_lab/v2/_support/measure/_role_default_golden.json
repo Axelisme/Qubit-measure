@@ -27,13 +27,15 @@
        }
       },
       "ch": {
-       "D": 0
+       "E": "$resonator.wiring.ch",
+       "r": null
       },
       "nqz": {
        "D": 2
       },
       "freq": {
-       "D": 6000.0
+       "E": "$resonator.freq",
+       "r": null
       },
       "gain": {
        "D": 0.1
@@ -72,13 +74,15 @@
        }
       },
       "ch": {
-       "D": 0
+       "E": "$qubit.wiring.L01.ch",
+       "r": null
       },
       "nqz": {
        "D": 2
       },
       "freq": {
-       "D": 4000.0
+       "E": "$qubit.freq",
+       "r": null
       },
       "gain": {
        "D": 0.2
@@ -117,13 +121,15 @@
        }
       },
       "ch": {
-       "D": 0
+       "E": "$qubit.wiring.L01.ch",
+       "r": null
       },
       "nqz": {
        "D": 2
       },
       "freq": {
-       "D": 4000.0
+       "E": "$qubit.freq",
+       "r": null
       },
       "gain": {
        "D": 0.1
@@ -171,14 +177,14 @@
        }
       },
       "ch": {
-       "E": "res_ch",
+       "E": "$resonator.wiring.ch",
        "r": null
       },
       "nqz": {
        "D": 2
       },
       "freq": {
-       "E": "r_f",
+       "E": "$resonator.freq",
        "r": null
       },
       "gain": {
@@ -218,14 +224,14 @@
        }
       },
       "ch": {
-       "E": "qub_ch",
+       "E": "$qubit.wiring.L01.ch",
        "r": null
       },
       "nqz": {
        "D": 2
       },
       "freq": {
-       "E": "q_f",
+       "E": "$qubit.freq",
        "r": null
       },
       "gain": {
@@ -265,14 +271,14 @@
        }
       },
       "ch": {
-       "E": "qub_ch",
+       "E": "$qubit.wiring.L01.ch",
        "r": null
       },
       "nqz": {
        "D": 2
       },
       "freq": {
-       "E": "q_f",
+       "E": "$qubit.freq",
        "r": null
       },
       "gain": {
@@ -304,16 +310,19 @@
      "D": "readout/direct"
     },
     "ro_ch": {
-     "D": 0
+     "E": "$resonator.wiring.ro_ch",
+     "r": null
     },
     "ro_freq": {
-     "D": 6000.0
+     "E": "$resonator.freq",
+     "r": null
     },
     "ro_length": {
      "D": 0.9
     },
     "trig_offset": {
-     "D": 0.55
+     "E": "$resonator.ext.time_of_fly + 0.05",
+     "r": null
     },
     "gen_ch": {
      "D": null
@@ -328,18 +337,18 @@
      "D": "readout/direct"
     },
     "ro_ch": {
-     "E": "ro_ch",
+     "E": "$resonator.wiring.ro_ch",
      "r": null
     },
     "ro_freq": {
-     "E": "r_f",
+     "E": "$resonator.freq",
      "r": null
     },
     "ro_length": {
      "D": 0.9
     },
     "trig_offset": {
-     "E": "timeFly + 0.05",
+     "E": "$resonator.ext.time_of_fly + 0.05",
      "r": null
     },
     "gen_ch": {
@@ -389,13 +398,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$qubit.wiring.L01.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 4000.0
+     "E": "$qubit.freq",
+     "r": null
     },
     "gain": {
      "D": 0.1
@@ -434,13 +445,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$qubit.wiring.L01.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 4000.0
+     "E": "$qubit.freq",
+     "r": null
     },
     "gain": {
      "D": 0.1
@@ -480,14 +493,14 @@
      }
     },
     "ch": {
-     "E": "qub_ch",
+     "E": "$qubit.wiring.L01.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "q_f",
+     "E": "$qubit.freq",
      "r": null
     },
     "gain": {
@@ -527,14 +540,14 @@
      }
     },
     "ch": {
-     "E": "qub_ch",
+     "E": "$qubit.wiring.L01.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "q_f",
+     "E": "$qubit.freq",
      "r": null
     },
     "gain": {
@@ -577,13 +590,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$qubit.wiring.L01.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 4000.0
+     "E": "$qubit.freq",
+     "r": null
     },
     "gain": {
      "D": 0.1
@@ -622,13 +637,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$qubit.wiring.L01.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 4000.0
+     "E": "$qubit.freq",
+     "r": null
     },
     "gain": {
      "D": 0.1
@@ -668,14 +685,14 @@
      }
     },
     "ch": {
-     "E": "qub_ch",
+     "E": "$qubit.wiring.L01.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "q_f",
+     "E": "$qubit.freq",
      "r": null
     },
     "gain": {
@@ -715,14 +732,14 @@
      }
     },
     "ch": {
-     "E": "qub_ch",
+     "E": "$qubit.wiring.L01.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "q_f",
+     "E": "$qubit.freq",
      "r": null
     },
     "gain": {
@@ -765,13 +782,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$qubit.wiring.L01.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 4000.0
+     "E": "$qubit.freq",
+     "r": null
     },
     "gain": {
      "D": 0.1
@@ -810,13 +829,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$qubit.wiring.L01.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 4000.0
+     "E": "$qubit.freq",
+     "r": null
     },
     "gain": {
      "D": 0.1
@@ -856,14 +877,14 @@
      }
     },
     "ch": {
-     "E": "qub_ch",
+     "E": "$qubit.wiring.L01.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "q_f",
+     "E": "$qubit.freq",
      "r": null
     },
     "gain": {
@@ -903,14 +924,14 @@
      }
     },
     "ch": {
-     "E": "qub_ch",
+     "E": "$qubit.wiring.L01.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "q_f",
+     "E": "$qubit.freq",
      "r": null
     },
     "gain": {
@@ -945,19 +966,6 @@
     }
    }
   },
-  "ref/empty/opt=False": {
-   "ref": "<Custom:Cosine>",
-   "ov": false,
-   "v": {
-    "style": {
-     "D": "cosine"
-    },
-    "length": {
-     "D": 0.1
-    }
-   }
-  },
-  "ref/empty/opt=True": null,
   "blank/pop": {
    "ref": "<Custom:Cosine>",
    "ov": false,
@@ -969,20 +977,7 @@
      "D": 0.1
     }
    }
-  },
-  "ref/pop/opt=False": {
-   "ref": "<Custom:Cosine>",
-   "ov": false,
-   "v": {
-    "style": {
-     "D": "cosine"
-    },
-    "length": {
-     "D": 0.1
-    }
-   }
-  },
-  "ref/pop/opt=True": null
+  }
  },
  "rabi_pulse": {
   "blank/empty": {
@@ -1005,13 +1000,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$qubit.wiring.L01.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 4000.0
+     "E": "$qubit.freq",
+     "r": null
     },
     "gain": {
      "D": 0.1
@@ -1050,13 +1047,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$qubit.wiring.L01.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 4000.0
+     "E": "$qubit.freq",
+     "r": null
     },
     "gain": {
      "D": 0.1
@@ -1096,14 +1095,14 @@
      }
     },
     "ch": {
-     "E": "qub_ch",
+     "E": "$qubit.wiring.L01.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "q_f",
+     "E": "$qubit.freq",
      "r": null
     },
     "gain": {
@@ -1143,14 +1142,14 @@
      }
     },
     "ch": {
-     "E": "qub_ch",
+     "E": "$qubit.wiring.L01.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "q_f",
+     "E": "$qubit.freq",
      "r": null
     },
     "gain": {
@@ -1197,13 +1196,15 @@
       }
      },
      "ch": {
-      "D": 0
+      "E": "$resonator.wiring.ch",
+      "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "D": 6000.0
+      "E": "$resonator.freq",
+      "r": null
      },
      "gain": {
       "D": 0.1
@@ -1226,16 +1227,19 @@
       "D": "readout/direct"
      },
      "ro_ch": {
-      "D": 0
+      "E": "$resonator.wiring.ro_ch",
+      "r": null
      },
      "ro_freq": {
-      "D": 6000.0
+      "E": "$resonator.freq",
+      "r": null
      },
      "ro_length": {
       "D": 0.9
      },
      "trig_offset": {
-      "D": 0.55
+      "E": "$resonator.ext.time_of_fly + 0.05",
+      "r": null
      },
      "gen_ch": {
       "D": null
@@ -1267,13 +1271,15 @@
       }
      },
      "ch": {
-      "D": 0
+      "E": "$resonator.wiring.ch",
+      "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "D": 6000.0
+      "E": "$resonator.freq",
+      "r": null
      },
      "gain": {
       "D": 0.1
@@ -1296,16 +1302,19 @@
       "D": "readout/direct"
      },
      "ro_ch": {
-      "D": 0
+      "E": "$resonator.wiring.ro_ch",
+      "r": null
      },
      "ro_freq": {
-      "D": 6000.0
+      "E": "$resonator.freq",
+      "r": null
      },
      "ro_length": {
       "D": 0.9
      },
      "trig_offset": {
-      "D": 0.55
+      "E": "$resonator.ext.time_of_fly + 0.05",
+      "r": null
      },
      "gen_ch": {
       "D": null
@@ -1338,14 +1347,14 @@
       }
      },
      "ch": {
-      "E": "res_ch",
+      "E": "$resonator.wiring.ch",
       "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "E": "r_f",
+      "E": "$resonator.freq",
       "r": null
      },
      "gain": {
@@ -1369,18 +1378,18 @@
       "D": "readout/direct"
      },
      "ro_ch": {
-      "E": "ro_ch",
+      "E": "$resonator.wiring.ro_ch",
       "r": null
      },
      "ro_freq": {
-      "E": "r_f",
+      "E": "$resonator.freq",
       "r": null
      },
      "ro_length": {
       "D": 0.9
      },
      "trig_offset": {
-      "E": "timeFly + 0.05",
+      "E": "$resonator.ext.time_of_fly + 0.05",
       "r": null
      },
      "gen_ch": {
@@ -1413,14 +1422,14 @@
       }
      },
      "ch": {
-      "E": "res_ch",
+      "E": "$resonator.wiring.ch",
       "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "E": "r_f",
+      "E": "$resonator.freq",
       "r": null
      },
      "gain": {
@@ -1444,18 +1453,18 @@
       "D": "readout/direct"
      },
      "ro_ch": {
-      "E": "ro_ch",
+      "E": "$resonator.wiring.ro_ch",
       "r": null
      },
      "ro_freq": {
-      "E": "r_f",
+      "E": "$resonator.freq",
       "r": null
      },
      "ro_length": {
       "D": 0.9
      },
      "trig_offset": {
-      "E": "timeFly + 0.05",
+      "E": "$resonator.ext.time_of_fly + 0.05",
       "r": null
      },
      "gen_ch": {
@@ -1486,21 +1495,25 @@
         "D": "const"
        },
        "length": {
-        "D": 1.1
+        "E": "$qubit.ext.best_ro_length + 0.1",
+        "r": null
        }
       }
      },
      "ch": {
-      "D": 0
+      "E": "$resonator.wiring.ch",
+      "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "D": 6000.0
+      "E": "$qubit.ext.best_ro_freq",
+      "r": null
      },
      "gain": {
-      "D": 0.1
+      "E": "$qubit.ext.best_ro_gain",
+      "r": null
      },
      "phase": {
       "D": 0.0
@@ -1520,16 +1533,20 @@
       "D": "readout/direct"
      },
      "ro_ch": {
-      "D": 0
+      "E": "$resonator.wiring.ro_ch",
+      "r": null
      },
      "ro_freq": {
-      "D": 6000.0
+      "E": "$qubit.ext.best_ro_freq",
+      "r": null
      },
      "ro_length": {
-      "D": 1.0
+      "E": "$qubit.ext.best_ro_length",
+      "r": null
      },
      "trig_offset": {
-      "D": 0.55
+      "E": "$resonator.ext.time_of_fly + 0.05",
+      "r": null
      },
      "gen_ch": {
       "D": null
@@ -1556,24 +1573,24 @@
         "D": "const"
        },
        "length": {
-        "E": "best_ro_length + 0.1",
+        "E": "$qubit.ext.best_ro_length + 0.1",
         "r": null
        }
       }
      },
      "ch": {
-      "E": "res_ch",
+      "E": "$resonator.wiring.ch",
       "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "E": "best_ro_freq",
+      "E": "$qubit.ext.best_ro_freq",
       "r": null
      },
      "gain": {
-      "E": "best_ro_gain",
+      "E": "$qubit.ext.best_ro_gain",
       "r": null
      },
      "phase": {
@@ -1594,19 +1611,19 @@
       "D": "readout/direct"
      },
      "ro_ch": {
-      "E": "ro_ch",
+      "E": "$resonator.wiring.ro_ch",
       "r": null
      },
      "ro_freq": {
-      "E": "best_ro_freq",
+      "E": "$qubit.ext.best_ro_freq",
       "r": null
      },
      "ro_length": {
-      "E": "best_ro_length",
+      "E": "$qubit.ext.best_ro_length",
       "r": null
      },
      "trig_offset": {
-      "E": "timeFly + 0.05",
+      "E": "$resonator.ext.time_of_fly + 0.05",
       "r": null
      },
      "gen_ch": {
@@ -1637,13 +1654,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$resonator.wiring.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 6000.0
+     "E": "$resonator.freq",
+     "r": null
     },
     "gain": {
      "D": 0.05
@@ -1682,13 +1701,15 @@
      }
     },
     "ch": {
-     "D": 0
+     "E": "$resonator.wiring.ch",
+     "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "D": 6000.0
+     "E": "$resonator.freq",
+     "r": null
     },
     "gain": {
      "D": 0.05
@@ -1728,14 +1749,14 @@
      }
     },
     "ch": {
-     "E": "res_ch",
+     "E": "$resonator.wiring.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "r_f",
+     "E": "$resonator.freq",
      "r": null
     },
     "gain": {
@@ -1775,14 +1796,14 @@
      }
     },
     "ch": {
-     "E": "res_ch",
+     "E": "$resonator.wiring.ch",
      "r": null
     },
     "nqz": {
      "D": 2
     },
     "freq": {
-     "E": "r_f",
+     "E": "$resonator.freq",
      "r": null
     },
     "gain": {
@@ -1817,19 +1838,6 @@
     }
    }
   },
-  "ref/empty/opt=False": {
-   "ref": "<Custom:Const>",
-   "ov": false,
-   "v": {
-    "style": {
-     "D": "const"
-    },
-    "length": {
-     "D": 1.0
-    }
-   }
-  },
-  "ref/empty/opt=True": null,
   "blank/pop": {
    "ref": "<Custom:Const>",
    "ov": false,
@@ -1841,20 +1849,7 @@
      "D": 1.0
     }
    }
-  },
-  "ref/pop/opt=False": {
-   "ref": "<Custom:Const>",
-   "ov": false,
-   "v": {
-    "style": {
-     "D": "const"
-    },
-    "length": {
-     "D": 1.0
-    }
-   }
-  },
-  "ref/pop/opt=True": null
+  }
  },
  "reset": {
   "blank/empty": {
@@ -1881,13 +1876,15 @@
       }
      },
      "ch": {
-      "D": 0
+      "E": "$qubit.wiring.L01.ch",
+      "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "D": 4000.0
+      "E": "$qubit.freq",
+      "r": null
      },
      "gain": {
       "D": 0.2
@@ -1931,13 +1928,15 @@
       }
      },
      "ch": {
-      "D": 0
+      "E": "$qubit.wiring.L01.ch",
+      "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "D": 4000.0
+      "E": "$qubit.freq",
+      "r": null
      },
      "gain": {
       "D": 0.2
@@ -1982,14 +1981,14 @@
       }
      },
      "ch": {
-      "E": "qub_ch",
+      "E": "$qubit.wiring.L01.ch",
       "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "E": "q_f",
+      "E": "$qubit.freq",
       "r": null
      },
      "gain": {
@@ -2034,14 +2033,14 @@
       }
      },
      "ch": {
-      "E": "qub_ch",
+      "E": "$qubit.wiring.L01.ch",
       "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "E": "q_f",
+      "E": "$qubit.freq",
       "r": null
      },
      "gain": {
@@ -2089,13 +2088,15 @@
       }
      },
      "ch": {
-      "D": 0
+      "E": "$qubit.wiring.L01.ch",
+      "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "D": 4000.0
+      "E": "$qubit.freq",
+      "r": null
      },
      "gain": {
       "D": 0.2
@@ -2130,13 +2131,15 @@
       }
      },
      "ch": {
-      "D": 0
+      "E": "$qubit.wiring.L01.ch",
+      "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "D": 4000.0
+      "E": "$qubit.freq",
+      "r": null
      },
      "gain": {
       "D": 0.2
@@ -2180,14 +2183,14 @@
       }
      },
      "ch": {
-      "E": "qub_ch",
+      "E": "$qubit.wiring.L01.ch",
       "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "E": "q_f",
+      "E": "$qubit.freq",
       "r": null
      },
      "gain": {
@@ -2223,14 +2226,14 @@
       }
      },
      "ch": {
-      "E": "qub_ch",
+      "E": "$qubit.wiring.L01.ch",
       "r": null
      },
      "nqz": {
       "D": 2
      },
      "freq": {
-      "E": "q_f",
+      "E": "$qubit.freq",
       "r": null
      },
      "gain": {

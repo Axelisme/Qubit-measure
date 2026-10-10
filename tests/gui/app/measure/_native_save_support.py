@@ -167,7 +167,7 @@ def native_save_session(
     tmp_path: Path, qapp: QApplication
 ) -> Generator[NativeSaveSession]:
     entry = ResultEntry.create(
-        "original", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
+        "original", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
     entry.new_point("p")
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))

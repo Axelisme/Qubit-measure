@@ -48,13 +48,13 @@ _VALUE_PATHS = (
     ("resetf_w", "Q1.ext.reset_fwhm"),
     ("best_jpa_freq", "J1.pump_freq"),
     ("best_jpa_power", "J1.pump_power"),
-    ("flux_unit", "general.flux_unit"),
+    ("flux_unit", "general.ext.flux_unit"),
     ("local_flux_unit", "Q1.flux_unit"),
     ("jpa_flux_unit", "J1.flux_unit"),
 )
 
 _FLUX_PATHS = (
-    ("cur_A", "general.flux_value", "flux_unit"),
+    ("cur_A", "general.ext.flux_value", "flux_unit"),
     ("flx_half", "Q1.flux_half", "flux_unit"),
     ("flx_period", "Q1.flux_period", "flux_unit"),
     ("flx_int", "Q1.flux_int", "flux_unit"),

@@ -9,43 +9,60 @@ import pytest
 from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+from zcu_tools.cfg_model import module_spec_from_raw, waveform_spec_from_raw
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.measure.cfg_schemas import (
+    module_cfg_to_value,
+    waveform_cfg_to_value,
+)
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui import inspect_dialog
 from zcu_tools.gui.app.measure.ui.inspect_dialog import (
     InspectDialog,
     _MlCreateDialog,
 )
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
-from zcu_tools.resources.context import ModuleLibrary
+from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.session.parameters import ParameterContext
+
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
-def _make_ml() -> ModuleLibrary:
-    ml = ModuleLibrary()
-    ml.modules["readout_rf"] = ModuleCfgFactory.from_raw(
-        {
-            "type": "readout/direct",
-            "ro_ch": 0,
-            "ro_freq": 6000.0,
-            "ro_length": 1.0,
-            "trig_offset": 0.0,
-        }
+def _make_ml() -> ParameterContext:
+    components = {
+        "R1": ResonatorSchema(kind="resonator"),
+        "Q1": QubitSchema(kind="qubit/transmon"),
+    }
+    parameters = parameter_capture(components)
+    library = parameters.library.replaced_module(
+        "R1.readout.readout_rf",
+        module_spec_from_raw(
+            {
+                "type": "readout/direct",
+                "ro_ch": 0,
+                "ro_freq": 6000.0,
+                "ro_length": 1.0,
+                "trig_offset": 0.0,
+            }
+        ),
+    ).replaced_waveform(
+        "Q1.waveforms.drive_wav",
+        waveform_spec_from_raw({"style": "const", "length": 1.0}),
     )
-    ml.waveforms["drive_wav"] = WaveformCfgFactory.from_raw(
-        {"style": "const", "length": 1.0}
-    )
-    return ml
+    return parameter_capture(components, library)
 
 
 def _make_ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.context_control = ctrl
+    ctrl.inspect_document.side_effect = lambda **_kwargs: ctrl.read_context().document()
     return ctrl
 
 
-def _make_ctrl_with_ml(ml: ModuleLibrary) -> MagicMock:
+def _make_ctrl_with_ml(parameters: ParameterContext) -> MagicMock:
     ctrl = _make_ctrl()
-    ctrl.get_current_ml.return_value = ml
-    ctrl.get_current_md.return_value = None
+    ctrl.read_context.return_value = parameters
     ctrl.get_bus.return_value = MagicMock()
     ctrl.list_device_names.return_value = []
     ctrl.arb_waveforms.list_data_keys.return_value = []
@@ -62,15 +79,7 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
     per open so attach() works, keyed by a fake editor_id, with owner→id discovery,
     commit (records last commit), and teardown.
     """
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.measure.cfg_schemas import (
-        module_cfg_to_value,
-        waveform_cfg_to_value,
-    )
-    from zcu_tools.gui.cfg import CfgSchema
-    from zcu_tools.gui.cfg.binding import CfgDraft
 
-    ml = ctrl.get_current_ml.return_value
     drafts: dict[str, CfgDraft] = {}
     owner_to_id: dict[str, str] = {}
     counter = {"n": 0}
@@ -80,7 +89,9 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
             drafts.pop(owner_to_id.pop(owner_key), None)
         counter["n"] += 1
         eid = f"editor-{counter['n']}"
-        drafts[eid] = MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, value))
+        drafts[eid] = MeasureCfgBindings(ctrl).new_draft(
+            CfgSchema(spec, value), parameters=ctrl.read_context()
+        )
         if owner_key is not None:
             owner_to_id[owner_key] = eid
         return eid
@@ -90,11 +101,16 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
 
     def _open(item_kind, *, from_name, gc=True, owner_key=None):
         # Load the existing entry's shape from the live ml (from_name path).
-        store = ml.modules if item_kind == "module" else ml.waveforms
+        library = ctrl.read_context().library
+        stored = (
+            library.get_module(from_name)
+            if item_kind == "module"
+            else library.get_waveform(from_name)
+        )
         to_value = (
             module_cfg_to_value if item_kind == "module" else waveform_cfg_to_value
         )
-        spec, value = to_value(store[from_name])
+        spec, value = to_value(stored)
         return _register(spec, value, owner_key), []
 
     def _remove(editor_id):
@@ -111,19 +127,25 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
         draft = drafts[editor_id]
         schema = draft.snapshot()
         from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-        from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
-        raw = schema_to_raw_dict(schema, ctrl.get_current_md.return_value, ml)
-        is_module = old_name in ml.modules
+        parameters = ctrl.read_context()
+        raw = schema_to_raw_dict(schema, parameters)
+        library = parameters.library
+        is_module = old_name in library.module_keys()
+        kind = "module" if is_module else "waveform"
         if old_name != new_name:
-            if is_module:
-                del ml.modules[old_name]
-            else:
-                del ml.waveforms[old_name]
-        if is_module:
-            ml.register_module(**{new_name: ModuleCfgFactory.from_raw(raw, ml=ml)})
-        else:
-            ml.register_waveform(**{new_name: WaveformCfgFactory.from_raw(raw, ml=ml)})
+            library = library.renamed(old_name, new_name, kind=kind)
+        library = (
+            library.replaced_module(new_name, module_spec_from_raw(raw))
+            if is_module
+            else library.replaced_waveform(new_name, waveform_spec_from_raw(raw))
+        )
+        ctrl.read_context.return_value = ParameterContext(
+            point=parameters.document(),
+            library=library,
+            target=parameters.target,
+            roles=None,
+        )
         ctrl.replaced = (old_name, new_name, schema)
         _remove(editor_id)
 
@@ -150,7 +172,7 @@ def test_inspect_dialog_init_and_refresh(qapp):
     }.items()
     ctrl.get_current_md.return_value = mock_md
 
-    ctrl.get_current_ml.return_value = _make_ml()
+    ctrl.read_context.return_value = _make_ml()
 
     dialog = InspectDialog(ctrl, bus)
 
@@ -227,7 +249,7 @@ def test_inspect_dialog_ml_embeds_service_editor_without_raw_or_modify_controls(
     assert dialog._del_ml_btn.text() == "Delete"
 
     _select_ml_child(dialog, 0)
-    assert dialog._ml_name_edit.text() == "readout_rf"
+    assert dialog._ml_name_edit.text() == "R1.readout.readout_rf"
     assert dialog._ml_status_label.text() == "Saved"
     assert dialog._ml_revert_btn.text() == "Revert"
     assert dialog._ml_apply_btn.text() == "Apply"
@@ -244,23 +266,28 @@ def test_inspect_dialog_ml_apply_replaces_name_and_opens_fresh_clean_draft(qapp)
 
     draft = ctrl._drafts[old_editor_id]
     draft.root.fields["ro_freq"].set_value(6123.0)
-    dialog._ml_name_edit.setText("readout_v2")
-    dialog._ml_name_edit.textEdited.emit("readout_v2")
+    dialog._ml_name_edit.setText("R1.readout.readout_v2")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.readout_v2")
     qapp.processEvents()
 
-    assert ml.modules["readout_rf"].to_dict()["ro_freq"] == 6000.0
+    assert ml.library.get_module("R1.readout.readout_rf").to_dict()["ro_freq"] == 6000.0
     assert dialog._ml_status_label.text() == "Unsaved"
     assert dialog._ml_apply_btn.isEnabled()
 
     dialog._ml_apply_btn.click()
     qapp.processEvents()
 
-    assert "readout_rf" not in ml.modules
-    assert ml.modules["readout_v2"].to_dict()["ro_freq"] == 6123.0
-    ctrl.replace_cfg_editor.assert_called_once_with(
-        old_editor_id, "readout_rf", "readout_v2"
+    assert "R1.readout.readout_rf" not in ctrl.read_context().library.module_keys()
+    assert (
+        ctrl.read_context()
+        .library.get_module("R1.readout.readout_v2")
+        .to_dict()["ro_freq"]
+        == 6123.0
     )
-    assert dialog._ml_selected_data == ("modules", "readout_v2")
+    ctrl.replace_cfg_editor.assert_called_once_with(
+        old_editor_id, "R1.readout.readout_rf", "R1.readout.readout_v2"
+    )
+    assert dialog._ml_selected_data == ("modules", "R1.readout.readout_v2")
     assert dialog._ml_status_label.text() == "Saved"
     assert dialog._ml_editor_id != old_editor_id
     assert (
@@ -283,8 +310,13 @@ def test_inspect_dialog_ml_waveform_selection_uses_same_embedded_session(qapp):
     qapp.processEvents()
     dialog._ml_apply_btn.click()
 
-    assert ml.waveforms["drive_wav"].to_dict()["length"] == 1.5
-    assert dialog._ml_selected_data == ("waveforms", "drive_wav")
+    assert (
+        ctrl.read_context()
+        .library.get_waveform("Q1.waveforms.drive_wav")
+        .to_dict()["length"]
+        == 1.5
+    )
+    assert dialog._ml_selected_data == ("waveforms", "Q1.waveforms.drive_wav")
     assert dialog._ml_status_label.text() == "Saved"
 
 
@@ -300,18 +332,20 @@ def test_inspect_dialog_ml_context_switch_apply_failure_keeps_draft(qapp, monkey
     editor_id = dialog._ml_editor_id
     assert editor_id is not None
     ctrl._drafts[editor_id].root.fields["ro_freq"].set_value(6123.0)
-    dialog._ml_name_edit.setText("readout_v2")
-    dialog._ml_name_edit.textEdited.emit("readout_v2")
+    dialog._ml_name_edit.setText("R1.readout.readout_v2")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.readout_v2")
 
-    ctrl.get_current_ml.return_value = ml_b
+    ctrl.read_context.return_value = ml_b
     dialog.refresh()
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     ctrl.replace_cfg_editor.side_effect = CfgEditorError("different context")
     dialog._ml_apply_btn.click()
 
-    assert ml_b.modules["readout_rf"].to_dict()["ro_freq"] == 6000.0
+    assert (
+        ml_b.library.get_module("R1.readout.readout_rf").to_dict()["ro_freq"] == 6000.0
+    )
     assert dialog._ml_editor_id == editor_id
-    assert dialog._ml_name_edit.text() == "readout_v2"
+    assert dialog._ml_name_edit.text() == "R1.readout.readout_v2"
     assert dialog._ml_status_label.text() == "Unsaved"
 
 
@@ -326,15 +360,15 @@ def test_inspect_dialog_ml_apply_failure_keeps_live_and_draft(qapp, monkeypatch)
     assert editor_id is not None
     draft = ctrl._drafts[editor_id]
     draft.root.fields["ro_freq"].set_value(6123.0)
-    dialog._ml_name_edit.setText("drive_wav")
-    dialog._ml_name_edit.textEdited.emit("drive_wav")
+    dialog._ml_name_edit.setText("Q1.waveforms.drive_wav")
+    dialog._ml_name_edit.textEdited.emit("Q1.waveforms.drive_wav")
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     ctrl.replace_cfg_editor.side_effect = ValueError("collision")
 
     dialog._ml_apply_btn.click()
 
-    assert set(ml.modules) == {"readout_rf"}
-    assert set(ml.waveforms) == {"drive_wav"}
+    assert set(ml.library.module_keys()) == {"R1.readout.readout_rf"}
+    assert set(ml.library.waveform_keys()) == {"Q1.waveforms.drive_wav"}
     assert dialog._ml_editor_id == editor_id
     assert (
         getattr(
@@ -353,13 +387,13 @@ def test_inspect_dialog_ml_revert_reloads_live_entry(qapp):
     editor_id = dialog._ml_editor_id
     assert editor_id is not None
     ctrl._drafts[editor_id].root.fields["ro_freq"].set_value(6123.0)
-    dialog._ml_name_edit.setText("renamed")
-    dialog._ml_name_edit.textEdited.emit("renamed")
+    dialog._ml_name_edit.setText("R1.readout.renamed")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.renamed")
 
     dialog._ml_revert_btn.click()
 
-    assert dialog._ml_selected_data == ("modules", "readout_rf")
-    assert dialog._ml_name_edit.text() == "readout_rf"
+    assert dialog._ml_selected_data == ("modules", "R1.readout.readout_rf")
+    assert dialog._ml_name_edit.text() == "R1.readout.readout_rf"
     assert dialog._ml_status_label.text() == "Saved"
     assert dialog._ml_editor_id != editor_id
     assert (
@@ -368,7 +402,10 @@ def test_inspect_dialog_ml_revert_reloads_live_entry(qapp):
         )
         == 6000.0
     )
-    assert "readout_rf" in ml.modules and "renamed" not in ml.modules
+    assert (
+        "R1.readout.readout_rf" in ml.library.module_keys()
+        and "R1.readout.renamed" not in ml.library.module_keys()
+    )
 
 
 def test_inspect_dialog_ml_dirty_selection_cannot_silently_discard(qapp, monkeypatch):
@@ -377,8 +414,8 @@ def test_inspect_dialog_ml_dirty_selection_cannot_silently_discard(qapp, monkeyp
     ctrl = _make_ctrl_with_ml(_make_ml())
     dialog = InspectDialog(ctrl, MagicMock())
     _select_ml_child(dialog, 0)
-    dialog._ml_name_edit.setText("draft_name")
-    dialog._ml_name_edit.textEdited.emit("draft_name")
+    dialog._ml_name_edit.setText("R1.readout.draft_name")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.draft_name")
     monkeypatch.setattr(
         QMessageBox,
         "question",
@@ -387,9 +424,9 @@ def test_inspect_dialog_ml_dirty_selection_cannot_silently_discard(qapp, monkeyp
 
     _select_ml_child(dialog, 1)
 
-    assert dialog._ml_selected_data == ("modules", "readout_rf")
-    assert dialog._current_ml_item_data() == ("modules", "readout_rf")
-    assert dialog._ml_name_edit.text() == "draft_name"
+    assert dialog._ml_selected_data == ("modules", "R1.readout.readout_rf")
+    assert dialog._current_ml_item_data() == ("modules", "R1.readout.readout_rf")
+    assert dialog._ml_name_edit.text() == "R1.readout.draft_name"
 
 
 def test_inspect_dialog_ml_dirty_selection_save_refreshes_tree_after_apply(
@@ -401,8 +438,8 @@ def test_inspect_dialog_ml_dirty_selection_save_refreshes_tree_after_apply(
     ctrl = _make_ctrl_with_ml(ml)
     dialog = InspectDialog(ctrl, MagicMock())
     _select_ml_child(dialog, 0)
-    dialog._ml_name_edit.setText("readout_v2")
-    dialog._ml_name_edit.textEdited.emit("readout_v2")
+    dialog._ml_name_edit.setText("R1.readout.readout_v2")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.readout_v2")
 
     replace = ctrl.replace_cfg_editor.side_effect
 
@@ -419,10 +456,10 @@ def test_inspect_dialog_ml_dirty_selection_save_refreshes_tree_after_apply(
     _select_ml_child(dialog, 1)
     qapp.processEvents()
 
-    assert dialog._ml_selected_data == ("waveforms", "drive_wav")
-    assert dialog._ml_name_edit.text() == "drive_wav"
-    assert dialog._find_ml_item(("modules", "readout_rf")) is None
-    assert dialog._find_ml_item(("modules", "readout_v2")) is not None
+    assert dialog._ml_selected_data == ("waveforms", "Q1.waveforms.drive_wav")
+    assert dialog._ml_name_edit.text() == "Q1.waveforms.drive_wav"
+    assert dialog._find_ml_item(("modules", "R1.readout.readout_rf")) is None
+    assert dialog._find_ml_item(("modules", "R1.readout.readout_v2")) is not None
     assert not dialog._ml_refresh_pending
 
 
@@ -432,8 +469,8 @@ def test_inspect_dialog_ml_dirty_close_requires_explicit_decision(qapp, monkeypa
     ctrl = _make_ctrl_with_ml(_make_ml())
     dialog = InspectDialog(ctrl, MagicMock())
     _select_ml_child(dialog, 0)
-    dialog._ml_name_edit.setText("draft_name")
-    dialog._ml_name_edit.textEdited.emit("draft_name")
+    dialog._ml_name_edit.setText("R1.readout.draft_name")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.draft_name")
     dialog.show()
     dialog.raise_()
 
@@ -496,7 +533,7 @@ def test_inspect_dialog_ml_delete_button_confirms_and_delete_key_is_direct(
     )
     QApplication.sendEvent(dialog._ml_tree, event)
     qapp.processEvents()
-    ctrl.del_ml_module.assert_called_once_with("readout_rf")
+    ctrl.del_ml_module.assert_called_once_with("R1.readout.readout_rf")
 
 
 def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):
@@ -512,7 +549,7 @@ def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):
     )
     QApplication.sendEvent(dialog._ml_name_edit, event)
     assert ctrl.del_ml_module.call_count == 0
-    assert dialog._ml_name_edit.text() == "eadout_rf"
+    assert dialog._ml_name_edit.text() == "1.readout.readout_rf"
 
 
 def _catalog():
@@ -632,7 +669,7 @@ def test_inspect_create_selects_embedded_editor_without_blocking(qapp, monkeypat
                         self.cb(None)
 
             self.finished = DummySignal()
-            self.created: tuple[str, str] | None = ("module", "readout_rf")
+            self.created: tuple[str, str] | None = ("module", "R1.readout.readout_rf")
 
         def setAttribute(self, *args: Any) -> None:
             pass
@@ -644,8 +681,8 @@ def test_inspect_create_selects_embedded_editor_without_blocking(qapp, monkeypat
     dialog._on_create_clicked()
 
     assert dialog._new_ml_dialog is None
-    assert dialog._ml_selected_data == ("modules", "readout_rf")
-    assert dialog._ml_name_edit.text() == "readout_rf"
+    assert dialog._ml_selected_data == ("modules", "R1.readout.readout_rf")
+    assert dialog._ml_name_edit.text() == "R1.readout.readout_rf"
     assert dialog._ml_status_label.text() == "Saved"
 
 
@@ -670,20 +707,29 @@ def test_inspect_create_closes_previous_editor_before_selecting_new_entry(
                         self.cb(None)
 
             self.finished = DummySignal()
-            self.created: tuple[str, str] | None = ("module", "new_mod")
+            self.created: tuple[str, str] | None = ("module", "R1.readout.new_mod")
 
         def setAttribute(self, *args: Any) -> None:
             pass
 
         def open(self) -> None:
-            ml.modules["new_mod"] = ml.modules["readout_rf"]
+            current = ctrl.read_context()
+            ctrl.read_context.return_value = ParameterContext(
+                point=current.document(),
+                library=current.library.replaced_module(
+                    "R1.readout.new_mod",
+                    current.library.module_spec("R1.readout.readout_rf"),
+                ),
+                target=current.target,
+                roles=None,
+            )
             self.finished.emit()
 
     monkeypatch.setattr(inspect_dialog, "_MlCreateDialog", FakeCreateDialog)
     dialog._on_create_clicked()
 
-    assert dialog._ml_selected_data == ("modules", "new_mod")
-    assert dialog._ml_name_edit.text() == "new_mod"
+    assert dialog._ml_selected_data == ("modules", "R1.readout.new_mod")
+    assert dialog._ml_name_edit.text() == "R1.readout.new_mod"
     assert dialog._ml_status_label.text() == "Saved"
     assert dialog._ml_editor_id != old_editor_id
 

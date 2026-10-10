@@ -148,7 +148,7 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
 
     run_plots = Plots(NonPresentingHost())
     result = adapter.run(
-        RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
+        RunRequest(soc=ctx.soc, soccfg=ctx.soccfg),
         schema_to_raw_dict(schema, ctx.md, ctx.ml),
         context=RunContext(
             ctx.soc, ctx.soccfg, run_plots, devices={}, cancel_signal=StopSignal()

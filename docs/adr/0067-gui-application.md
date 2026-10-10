@@ -16,7 +16,11 @@ GUI 與 remote 是 application 的 driving adapters。它們讀同一個 owner �
 
 Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。WritebackService 則先以分析來源的固定 capture 解析全部選定的 `$alias.path` proposals，再追加 accepted，依序呼叫 ContextService 的 parameter／module／waveform setters。首個 setter 失敗停止，保留已成功寫入與 accepted 證據，不宣稱跨檔原子性或 rollback。
 
-全域 alias 表由 ContextService 擁有，只存在 session memory，不寫 preference、文件或 ledger。每列保存元件名稱或引用前列的 `$` 軟連結，整表提交原子驗證語法與重名，使用時才驗元件和 consumer kind。Shared `gui.session.ui.alias_dialog` 是編輯入口，Measure 直接 import，不設 app-local wrapper。Tab 不顯示角色列，也不在建立時固定環境。Cfg refresh 使用目前 point／library 和 alias 表；Run admission 才固定 ParameterContext、解析名稱與 storage capability。FIT、interactive、Post、Writeback 和 Save 使用結果的固定來源，不因後來選取而換目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
+全域 alias 表由 ContextService 擁有，只存在 session memory，不寫 preference、文件或 ledger。每列保存元件名稱或引用前列的 `$` 軟連結，整表提交原子驗證語法與重名。
+
+公開 `read_context(aliases=None)` 固定全表，使用時解析元件，不檢查 consumer kind。Template create 使用這份 capture；既有 declaration-based adapter caller 的遷移尚未完成。
+
+Shared `gui.session.ui.alias_dialog` 是編輯入口，Measure 直接 import，不設 app-local wrapper。Tab 不顯示角色列，也不在建立時固定環境。Cfg refresh 使用目前 point／library 和 alias 表；Run admission 才固定 ParameterContext、解析名稱與 storage capability。FIT、interactive、Post、Writeback 和 Save 使用結果的固定來源，不因後來選取而換目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
 
 Device 的可觀察狀態在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作；remembered device 的磁碟保存由 Persistence owner 從已提交狀態選擇性投影。State 是否供多方觀察與資料是否重啟後保存是兩個問題。Live SoC handle 可屬 session environment 而不落盤，worker、lease 和 driver 的控制權也不因有人需要觀察其狀態而交給 State。
 

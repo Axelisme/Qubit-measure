@@ -1,16 +1,11 @@
-"""Characterization snapshot of every role factory's default value tree.
+"""Characterize canonical role factories against manually reviewed expectations.
 
-This pins the EXACT value tree each ``ROLE_FACTORIES`` entry produces — for the
-blank factory and (where present) the ref factory under optional True/False — so
-the role-engine data-ization refactor cannot silently change a default payload.
-The golden lives in ``_role_default_golden.json`` next to this file; regenerate it
-ONLY for a deliberate, reviewed behavior change (e.g. the readout_dpm live-eval
-normalization) by running ``_serialize`` over the current factories.
-
-The serialization preserves the DirectValue-vs-EvalValue distinction (the GUI's
-live-vs-snapshot behavior), the chosen ref tag, nested ref shapes, and the
-None disabled-optional-ref state (ADR-0010) — i.e. everything the refactor must
-keep identical.
+The shared golden preserves deferred EvalValue links, inline numeric literals,
+reference tags, nested shapes and disabled optional references. Expected edits
+must be reviewed field by field against the frozen migration/canonical contract,
+never generated from factory output. Waveform roles have blank variants only.
+Retire this migration pin when the role-factory facade is retired; the role-table
+owner retains the default-tree contract.
 """
 
 from __future__ import annotations
@@ -20,7 +15,8 @@ from typing import Any
 import pytest
 
 from tests.zcu_lab.v2._support.measure._role_characterization import (
-    POPULATED_MD as _POPULATED_MD,
+    POPULATED_QUBIT,
+    POPULATED_RESONATOR,
 )
 from tests.zcu_lab.v2._support.measure._role_characterization import (
     load_golden as _load_golden,
@@ -38,13 +34,14 @@ def _compute_role(role_id: str) -> dict[str, Any]:
     """Recompute the serialized blank + ref payloads for one role."""
     spec = ROLE_FACTORIES[role_id]
     entry: dict[str, Any] = {}
-    for fx_name, md in (("empty", {}), ("pop", _POPULATED_MD)):
-        entry[f"blank/{fx_name}"] = _serialize(spec.blank(_mk_ctx(md)))
+    for fx_name, ctx in (
+        ("empty", _mk_ctx()),
+        ("pop", _mk_ctx(qubit=POPULATED_QUBIT, resonator=POPULATED_RESONATOR)),
+    ):
+        entry[f"blank/{fx_name}"] = _serialize(spec.blank(ctx))
         if spec.ref is not None:
-            entry[f"ref/{fx_name}/opt=False"] = _serialize(spec.ref(_mk_ctx(md)))
-            entry[f"ref/{fx_name}/opt=True"] = _serialize(
-                spec.ref(_mk_ctx(md), optional=True)
-            )
+            entry[f"ref/{fx_name}/opt=False"] = _serialize(spec.ref(ctx))
+            entry[f"ref/{fx_name}/opt=True"] = _serialize(spec.ref(ctx, optional=True))
     return entry
 
 
@@ -52,6 +49,6 @@ def _compute_role(role_id: str) -> dict[str, Any]:
 def test_role_default_payload_matches_golden(role_id: str) -> None:
     golden = _load_golden()
     assert _compute_role(role_id) == golden[role_id], (
-        f"role {role_id!r} default payload changed vs golden — if this is a "
-        "deliberate, reviewed behavior change, regenerate the golden"
+        f"role {role_id!r} default payload differs from the manually reviewed "
+        "canonical golden"
     )

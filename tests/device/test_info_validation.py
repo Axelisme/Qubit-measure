@@ -110,14 +110,6 @@ def test_yoko_rampstep_limit_is_not_a_setup_field() -> None:
         )
 
 
-def test_yoko_set_flux_rejects_out_of_range_without_changing_level() -> None:
-    info = YOKOGS200Info(address="GPIB::1", mode="current")
-    info.set_flux(5e-3)
-    with pytest.raises(ValidationError, match="output limit"):
-        info.set_flux(2.1e-2)
-    assert info.value == pytest.approx(5e-3)
-
-
 @pytest.mark.parametrize("value", [float("inf"), float("nan")])
 def test_yoko_rejects_nonfinite_output_values(value: float) -> None:
     with pytest.raises(ValidationError, match="value"):

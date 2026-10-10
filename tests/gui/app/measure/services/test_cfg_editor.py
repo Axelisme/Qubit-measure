@@ -449,7 +449,9 @@ def test_complex_cfg_edit_and_remote_projection_share_lossless_tag(service):
     assert draft.snapshot().value.fields["center"] == DirectValue(value)
     entries = json.loads(json.dumps(project_target_entries(draft)))
     assert entries[0]["value"] == {"__complex__": [value.real, value.imag]}
-    with pytest.raises(CfgEditorError, match="two components"):
+    with pytest.raises(
+        CfgEditorError, match="Complex components must be a two-item list"
+    ):
         service.set_field(editor_id, "center", {"__complex__": [1]})
     assert draft.snapshot().value.fields["center"] == DirectValue(value)
 

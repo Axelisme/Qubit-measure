@@ -91,14 +91,6 @@ class YOKOGS200Info(BaseDeviceInfo):
             )
         return value
 
-    def set_flux(self, value: float) -> None:
-        """Set the output level in the active mode's units, enforcing its limit.
-
-        ValidationError leaves the previous level unchanged.
-        """
-        updated = self.with_updates(value=value)
-        self.value = updated.value
-
 
 class YOKOGS200(BaseDevice[YOKOGS200Info]):
     info_model = YOKOGS200Info

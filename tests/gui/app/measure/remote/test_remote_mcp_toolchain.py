@@ -67,12 +67,6 @@ def test_analyze_params_wire_describes_live_adapter_before_run(fx):
         sock.close()
 
 
-def test_event_requery_hints_point_to_registered_methods():
-    assert "device.active_operations" in METHOD_REGISTRY
-    assert "context.md_get_attr" in METHOD_REGISTRY
-    assert "context.ml_get" in METHOD_REGISTRY
-
-
 def test_device_setup_started_and_finished_push(fx):
     sock = open_client(fx.service.port)
     try:

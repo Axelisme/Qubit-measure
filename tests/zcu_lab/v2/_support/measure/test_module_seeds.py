@@ -36,6 +36,7 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
     EntryDraft,
 )
+from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -140,23 +141,35 @@ def _environment(
     [(False, None), (True, None), (True, 6.0)],
     ids=["absent", "explicit-null", "numeric"],
 )
-def test_optional_scalar_seed_lowers_calibration_or_explicit_fallback(
+def test_scalar_seed_lowers_calibration_or_rejects_missing_value(
     scaled: bool, present: bool, calibration: float | None
 ) -> None:
     env = _environment(calibration=calibration, calibration_present=present)
     seed = (
-        scaled_path_seed("qubit.calibration", factor=2.0, fallback_value=8.0)
+        scaled_path_seed("$qubit.calibration", factor=2.0, fallback_value=8.0)
         if scaled
-        else path_seed("qubit.calibration", fallback=8.0)
+        else path_seed("$qubit.calibration", fallback=8.0)
     )
     definition = MeasureCfgBuilder().float("value", label="Value", default=seed).build()
     schema = definition.instantiate(env)
     assert env.parameters is not None
-    raw = schema_to_raw_dict(schema, env.parameters)
-    expected = (
-        calibration * (2.0 if scaled else 1.0) if calibration is not None else 8.0
-    )
-    assert raw["value"] == expected
+    expression = "2.0 * $qubit.calibration" if scaled else "$qubit.calibration"
+    assert read_value_path(schema.value, "value") == EvalValue(expression)
+    if calibration is None:
+        message = (
+            "Parameter path '$qubit.calibration' is not numeric"
+            if present
+            else "Invalid parameter path '$qubit.calibration': missing parameter"
+        )
+        with pytest.raises(RuntimeError) as caught:
+            schema_to_raw_dict(schema, env.parameters)
+        assert str(caught.value) == (
+            f"Config field 'value' (Value) expression {expression!r} failed: {message}"
+        )
+        assert isinstance(caught.value.__cause__, ExpressionError)
+    else:
+        raw = schema_to_raw_dict(schema, env.parameters)
+        assert raw["value"] == calibration * (2.0 if scaled else 1.0)
 
 
 @pytest.mark.parametrize("scaled", [False, True], ids=["path", "scaled-path"])
@@ -165,15 +178,21 @@ def test_optional_scalar_seed_does_not_hide_non_null_invalid_calibration(
 ) -> None:
     env = _environment(calibration="bad-calibration", calibration_present=True)
     seed = (
-        scaled_path_seed("qubit.calibration", factor=2.0, fallback_value=8.0)
+        scaled_path_seed("$qubit.calibration", factor=2.0, fallback_value=8.0)
         if scaled
-        else path_seed("qubit.calibration", fallback=8.0)
+        else path_seed("$qubit.calibration", fallback=8.0)
     )
     definition = MeasureCfgBuilder().float("value", label="Value", default=seed).build()
     schema = definition.instantiate(env)
     assert env.parameters is not None
-    with pytest.raises(RuntimeError, match="is not numeric"):
+    with pytest.raises(RuntimeError) as caught:
         schema_to_raw_dict(schema, env.parameters)
+    expression = "2.0 * $qubit.calibration" if scaled else "$qubit.calibration"
+    assert str(caught.value) == (
+        f"Config field 'value' (Value) expression {expression!r} failed: "
+        "Parameter path '$qubit.calibration' is not numeric"
+    )
+    assert isinstance(caught.value.__cause__, ExpressionError)
 
 
 @pytest.mark.parametrize("scaled", [False, True], ids=["path", "scaled-path"])
@@ -188,12 +207,17 @@ def test_optional_scalar_seed_does_not_hide_unavailable_source(
         ),
     )
     seed = (
-        scaled_path_seed("qubit.calibration", factor=2.0, fallback_value=8.0)
+        scaled_path_seed("$qubit.calibration", factor=2.0, fallback_value=8.0)
         if scaled
-        else path_seed("qubit.calibration", fallback=8.0)
+        else path_seed("$qubit.calibration", fallback=8.0)
     )
-    with pytest.raises(ContextSourceUnavailableError):
-        seed.resolve(env)
+    definition = MeasureCfgBuilder().float("value", label="Value", default=seed).build()
+    schema = definition.instantiate(env)
+    with pytest.raises(RuntimeError, match="point: gone") as caught:
+        schema_to_raw_dict(schema, env.parameters)
+    assert isinstance(caught.value.__cause__, ContextSourceUnavailableError)
+    assert env.parameters is not None
+    assert caught.value.__cause__.faults == env.parameters.source_faults
 
 
 @pytest.mark.parametrize("scaled", [False, True], ids=["path", "scaled-path"])
@@ -203,11 +227,11 @@ def test_unbound_scalar_defaults_publish_invalid_then_refresh_or_reset(
 ) -> None:
     environment = _environment(bound=False)
     seed = (
-        scaled_path_seed("qubit.calibration", factor=2.0, fallback_value=8.0)
+        scaled_path_seed("$qubit.calibration", factor=2.0, fallback_value=8.0)
         if scaled
-        else path_seed("qubit.calibration", fallback=8.0)
+        else path_seed("$qubit.calibration", fallback=8.0)
     )
-    expression = "2.0 * qubit.calibration" if scaled else "qubit.calibration"
+    expression = "2.0 * $qubit.calibration" if scaled else "$qubit.calibration"
     definition = (
         MeasureCfgBuilder()
         .float("value", label="Value", default=seed)
@@ -256,8 +280,23 @@ def test_unbound_scalar_defaults_publish_invalid_then_refresh_or_reset(
         with pytest.raises(CfgPreconditionError):
             resource.accept(refreshed.ref.revision)
         reset = resource.reset(refreshed.ref.revision)
-        assert reset.status is CfgStatus.VALID
-        assert resource.accept(reset.ref.revision).values["value"] == 8.0
+        assert reset.ref.cfg_id == initial.ref.cfg_id
+        assert reset.ref.revision > refreshed.ref.revision
+        assert reset.status is CfgStatus.INVALID
+        assert read_value_path(resource.snapshot_inputs().value, "value") == EvalValue(
+            expression
+        )
+        assert read_value_path(
+            resource.snapshot_inputs().value, "neighbor"
+        ) == DirectValue(3.0)
+        assert any(
+            diagnostic.path == ("value",)
+            and diagnostic.message
+            == "Parameter path '$qubit.calibration' is not numeric"
+            for diagnostic in reset.diagnostics
+        )
+        with pytest.raises(CfgPreconditionError):
+            resource.accept(reset.ref.revision)
 
 
 def test_unbound_pulse_default_preserves_empty_link_and_refreshes_calibration() -> None:
@@ -578,45 +617,67 @@ def test_unavailable_capture_does_not_become_fallback(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("slot", [None, "Q1.pulses.missing"])
-def test_scaled_module_calibration_absence_uses_explicit_fallback(
+def test_scaled_module_calibration_absence_fails_at_resolution(
     slot: str | None,
 ) -> None:
     seed = scaled_path_seed(
-        "qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
+        "$qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
     )
-    assert seed.resolve(_environment(slot=slot)) == 0.3
+    environment = _environment(slot=slot)
+    value = seed.resolve(environment)
+    assert isinstance(value, EvalValue)
+    assert value.expr == "4.0 * $qubit.module.x180.waveform.length"
+    message = "Unset" if slot is None else "Dangling"
+    with pytest.raises(AttributeError) as caught:
+        evaluate_scalar_expr(value.expr, environment.parameters)
+    assert str(caught.value) == f"{message} module slot: 'Q1.module.x180'"
+    if slot is not None:
+        assert isinstance(caught.value.__cause__, KeyError)
+        assert caught.value.__cause__.args == ("missing",)
 
 
 def test_scaled_module_calibration_preserves_capture_expression() -> None:
     value = scaled_path_seed(
-        "qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
+        "$qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
     ).resolve(_environment())
     assert isinstance(value, EvalValue)
-    assert value.expr == "4.0 * qubit.module.x180.waveform.length"
+    assert value.expr == "4.0 * $qubit.module.x180.waveform.length"
 
 
 def test_scaled_module_calibration_does_not_hide_materialization_errors() -> None:
     seed = scaled_path_seed(
-        "qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
+        "$qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
     )
-    with pytest.raises((ValueError, KeyError)):
-        seed.resolve(_environment(broken_waveform=True))
+    environment = _environment(broken_waveform=True)
+    value = seed.resolve(environment)
+    assert isinstance(value, EvalValue)
+    with pytest.raises(ExpressionError) as caught:
+        evaluate_scalar_expr(value.expr, environment.parameters)
+    assert str(caught.value) == (
+        "Invalid parameter path '$qubit.module.x180.waveform.length': "
+        "Root Q1.pulses.cal; chain Q1.pulses.cal -> Q1.waveforms.missing; "
+        "expected waveform: 'missing'"
+    )
+    assert isinstance(caught.value.__cause__, ValueError)
 
 
 def test_scaled_module_calibration_does_not_hide_source_faults(tmp_path: Path) -> None:
     seed = scaled_path_seed(
-        "qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
+        "$qubit.module.x180.waveform.length", factor=4.0, fallback_value=0.3
     )
-    with pytest.raises(ContextSourceUnavailableError):
-        seed.resolve(
-            _environment(
-                faults=(
-                    ContextSourceFault(
-                        "point", tmp_path / "point.yaml", "ValueError", "broken"
-                    ),
-                )
-            )
+    environment = _environment(
+        faults=(
+            ContextSourceFault(
+                "point", tmp_path / "point.yaml", "ValueError", "broken"
+            ),
         )
+    )
+    value = seed.resolve(environment)
+    assert isinstance(value, EvalValue)
+    with pytest.raises(ContextSourceUnavailableError, match="point: broken") as caught:
+        evaluate_scalar_expr(value.expr, environment.parameters)
+    assert environment.parameters is not None
+    assert caught.value.faults == environment.parameters.source_faults
 
 
 def test_nested_materialization_failure_does_not_become_fallback() -> None:

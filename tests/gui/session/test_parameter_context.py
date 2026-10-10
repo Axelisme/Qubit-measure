@@ -574,3 +574,49 @@ def test_wrong_kind_authored_alias_is_reported_only_when_consumed(
     assert caught.value.required_kind == "capture/drive"
     with pytest.raises(RoleResolutionError):
         _ = context.roles
+
+
+def test_alias_projection_is_fixed_and_ignores_consumer_kind_constraints(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    point, _ = source
+    rows = (
+        AliasRow("capture_driver", "R1"),
+        AliasRow("drive", "Q1"),
+        AliasRow("sensor", "$drive.sense"),
+        AliasRow("unbound", ""),
+        AliasRow("missing", "Absent"),
+    )
+    context = capture(source).bind_aliases(rows, declarations())
+    # Mutating the supplied document cannot change this capture's resolution.
+    point.components["Q1"] = point.components["Q1"].model_copy(update={"sense": "R2"})
+    projection = context.resolved_aliases()
+    assert [(row.alias, row.value, row.resolved) for row in projection] == [
+        ("capture_driver", "R1", "R1"),
+        ("drive", "Q1", "Q1"),
+        ("sensor", "$drive.sense", "R1"),
+        ("unbound", "", None),
+        ("missing", "Absent", None),
+    ]
+    assert [row.error for row in projection[:3]] == [None, None, None]
+    assert "Alias is not bound" in str(projection[3].error)
+    assert "missing component" in str(projection[4].error)
+    assert context.aliases == rows
+
+
+def test_alias_projection_source_fault_fails_the_whole_read(
+    source: tuple[PointDocument, LibrarySnapshot],
+    tmp_path: Path,
+) -> None:
+    fault = ContextSourceFault(
+        "point", tmp_path / "point.yaml", "OSError", "source fault"
+    )
+    context = capture(
+        source,
+        roles=RoleBinding(
+            focus=None, declarations={}, names={}, aliases=(AliasRow("drive", "Q1"),)
+        ),
+        faults=(fault,),
+    )
+    with pytest.raises(ContextSourceUnavailableError):
+        context.resolved_aliases()

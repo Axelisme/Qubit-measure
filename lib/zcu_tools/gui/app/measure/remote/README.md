@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-10，device 名稱政策與 remote observations 分界
+**Last updated:** 2026-10-10, native context browse and Run snapshot boundaries
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -128,8 +128,8 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 88`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 120`: GUI process code revision. It is displayed, not compared.
+- `WIRE_VERSION = 89`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 121`: GUI process code revision. It is displayed, not compared.
 - `MCP_VERSION = 112`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
@@ -206,7 +206,19 @@ GUI owns observation and write tracking:
   image saves reject replaced results with `result_superseded`; image saves also
   retain the existing seen guards. No failed read or stale write triggers a retry.
 - `soc.info(include_cfg=true)` reveals the full SoC cfg. `context.snapshot`
-  returns `{target, point, library}` from the published parameter capture.
+  returns `{target, point, library, aliases}` from one published parameter capture.
+  Every successful reply includes complete ordered `{alias, value, resolved}` rows;
+  a failed alias has `resolved=null` and `error`. The public capture owner resolves
+  each row against its fixed point without consumer kind checks. Alias failures
+  do not hide source failures. Optional `summaries=true` preserves dict trees and
+  scalars, replacing array/list leaves with array/matrix/items descriptions.
+  Optional `path` takes priority and returns `{target, aliases, path, value}` with
+  a complete value. Dotted paths start with `target`, `point`, `library` or
+  `aliases`; mapping segments are literal keys and list indices are canonical
+  nonnegative decimals, such as `aliases.0.resolved`. Invalid/missing segments
+  return invalid input naming the first bad segment. There is no escaping or
+  domain-path alias. Only omission of both optional parameters establishes seen;
+  explicit `summaries=false` or an empty `path` cannot refresh the guard.
   `target` is the existing `entry_draft` or `saved_point` locator. `point` and
   `library` contain the complete working-unit native documents, including
   headers, registered component fields and provenance. The library contains
@@ -246,7 +258,7 @@ The wire surface is grouped by ownership:
 
 - `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布空 DRAFT，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
 - `context.*`：透過 `ContextControlPort` 讀取目前工作單位並提交參數／library 命令。
-  Caller 使用 `context.snapshot` 取得 native `{target, point, library}`，不讀舊扁平
+  Caller 使用 `context.snapshot` 取得 native `{target, point, library, aliases}`，不讀舊扁平
   md keys 或 ml runtime index。這是目前已發布的固定投影，不是歷史 Run 的參數版本。
   Role-catalog create/list 仍由 app controller 擁有。
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.

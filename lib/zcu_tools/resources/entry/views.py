@@ -63,6 +63,34 @@ class _ViewRead:
     source_metadata: Callable[[Provenance], YamlMap] | None
 
 
+def _validate_view_component_name(name: str, *, source: Path | None) -> None:
+    # Local import avoids a cycle: PointView uses the shared view machinery.
+    from .points import PointView
+
+    if any(
+        name in dir(view_type) and not name.startswith("_")
+        for view_type in (SetupView, PointView, EditView)
+    ):
+        raise ValueError(
+            f"{source}: invalid component name {name!r}; would shadow a view member {name!r}"
+        )
+
+
+def validate_view_components(
+    document: SetupDocument | PointDocument, *, source: Path | None
+) -> None:
+    """Reject components that shadow any SetupView/PointView/EditView public member.
+
+    Entry-internal helper, not a package export. document is a typed cached
+    document or store validation candidate; source identifies its YAML path,
+    or None for an unbound edit draft. Raise ValueError naming the conflicting
+    member before binding/publication. No mutation, model hooks or I/O occurs.
+    Public class members are discovered on each call, without a reserved table.
+    """
+    for name in document.components:
+        _validate_view_component_name(name, source=source)
+
+
 def register_view_read(
     view: object,
     document: _ViewDocument,
@@ -78,9 +106,14 @@ def register_view_read(
     for setup/edit). source_metadata is an edit's local source-validation
     capability, absent for read-only views. The private attribute cannot collide
     with legal components.
-    Already bound handles raise ValueError; objects without an instance dictionary
-    raise TypeError. No model hook or callback runs.
+    Already bound handles or components shadowing any public view member raise
+    ValueError; objects without an instance dictionary raise TypeError.
+    Validate the cached document without I/O before binding. No model hook runs.
     """
+    validate_view_components(
+        document.snapshot() if isinstance(document, DocumentStore) else document,
+        source=source,
+    )
     state = vars(view)
     if "_entry_read" in state:
         raise ValueError("Entry view is already bound")
@@ -445,6 +478,7 @@ def add_component_to_draft(
     Invalid names, fields, values or duplicates leave the draft unchanged.
     """
     validate_component_name(name, source=source)
+    _validate_view_component_name(name, source=source)
     model = component_registry.get(kind, source=source, component=name)
     if name in draft.components:
         raise ValueError(f"Component {name!r} already exists")
@@ -860,9 +894,18 @@ def _set_document_value(
 
 
 class EditView:
+    """An isolated edit draft whose components cannot shadow public view members."""
+
     def __init__(
         self, draft: SetupDocument | PointDocument, *, ledger: Path, entry_id: str
     ) -> None:
+        """Bind a typed setup/point draft, rejecting view-shadowing component names.
+
+        ledger is this entry's ledger.jsonl path and entry_id its immutable UUID.
+        set validates explicit sources against that ledger. Binding does not run
+        model hooks, read disk, mutate the draft or commit; the enclosing edit
+        owns publication. Shadowing raises ValueError naming the member.
+        """
         self._draft = draft
         self._ledger = ledger
         self._entry_id = entry_id
@@ -948,6 +991,13 @@ class SetupView:
         Reads use the cached working-unit snapshot. All edits commit only this
         template; existing points neither change nor participate in validation.
         ResultEntry supplies the validated store, source, identity and ledger path.
+        Components shadowing any SetupView/PointView/EditView public member raise
+        ValueError naming the member before this handle is bound.
+        ResultEntry's store callback also rejects collisions on refresh/mutation
+        before publication. A caller-provided store must supply its own validate
+        callback for that subsequent lifecycle. Without it, refresh/mutation can
+        publish shadowing names: those components cannot be accessed as view
+        attributes and must be read through snapshot/document_value instead.
         """
         self._store = store
         self._source = source
@@ -987,6 +1037,13 @@ class SetupView:
         self._store.refresh()
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
+        """Add a registered component with working-unit fields to this template.
+
+        name must be a public identifier, not a keyword or a public member of
+        SetupView, PointView or EditView. Shadowing raises ValueError naming the
+        member. Unknown kind, duplicate or original model validation errors
+        propagate without publishing values, sources or file changes.
+        """
         with self._edit_document() as draft:
             add_component_to_draft(draft, name, kind, fields, self._source)
 

@@ -303,6 +303,7 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
         ("internal", "injected", "unknown"),
         ("stale", "stale_version", "not_started"),
         ("busy", "operation_busy", "not_started"),
+        ("invalid_params", "execution_failed", "not_started"),
     ],
 )
 def test_analysis_start_failure_retains_a_queryable_execution(
@@ -311,7 +312,7 @@ def test_analysis_start_failure_retains_a_queryable_execution(
     method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
     client = _client(tmp_path, clients)
     pending = Event()
-    if receipt in {"handler_timeout", "internal", "stale", "busy"}:
+    if receipt in {"handler_timeout", "internal", "stale", "busy", "invalid_params"}:
         client.transport.replies[method] = {
             "ok": False,
             "error": {
@@ -320,8 +321,11 @@ def test_analysis_start_failure_retains_a_queryable_execution(
                     "internal": "internal",
                     "stale": "precondition_failed",
                     "busy": "busy",
+                    "invalid_params": "invalid_params",
                 }[receipt],
-                "reason": None if receipt == "handler_timeout" else reason,
+                "reason": None
+                if receipt in {"handler_timeout", "invalid_params"}
+                else reason,
                 "message": "Analysis start did not provide a handle",
             },
         }
@@ -360,6 +364,12 @@ def test_analysis_start_failure_retains_a_queryable_execution(
     assert summary["status"] == "failed"
     assert summary["steps"]["analysis"][stage]["status"] == step_status
     assert summary["error"]["reason"] == reason
+    if receipt == "invalid_params":
+        assert summary["error"]["code"] == "invalid_params"
+        assert summary["error"]["message"] == (
+            "GUI Error (invalid_params): Analysis start did not provide a handle"
+        )
+        assert full["error"] == summary["error"]
     assert full["start"]["status"] == step_status
     assert full["op"] is None
     assert full["params"] is None

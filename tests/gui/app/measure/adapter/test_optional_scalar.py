@@ -24,7 +24,8 @@ from zcu_tools.gui.cfg.codec import (
     _section_value_from_raw,
     _section_value_to_raw,
 )
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 
 
 def _spec() -> CfgSectionSpec:
@@ -51,19 +52,19 @@ def test_make_default_value_optional_scalar_is_unset_none() -> None:
 def test_static_validate_allows_optional_none() -> None:
     val = make_default_value(_spec())
     # Must not raise: optional None is a legal final state.
-    validate_schema(CfgSchema(spec=_spec(), value=val), ModuleLibrary())
+    validate_schema(CfgSchema(spec=_spec(), value=val), parameter_capture())
 
 
 def test_lowering_omits_optional_unset_scalar() -> None:
     val = make_default_value(_spec())
-    raw = schema_to_raw_dict(CfgSchema(spec=_spec(), value=val), None, None)
+    raw = schema_to_raw_dict(CfgSchema(spec=_spec(), value=val), None)
     assert "mixer_freq" not in raw
     assert raw["reps"] == 0
 
 
 def test_lowering_includes_optional_when_set() -> None:
     val = make_default_value(_spec()).with_field("mixer_freq", 5000.0)
-    raw = schema_to_raw_dict(CfgSchema(spec=_spec(), value=val), None, None)
+    raw = schema_to_raw_dict(CfgSchema(spec=_spec(), value=val), None)
     assert raw["mixer_freq"] == 5000.0
 
 
@@ -71,20 +72,20 @@ def test_lowering_non_optional_unset_still_raises() -> None:
     spec = CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=float)})
     val = make_default_value(spec).with_field("x", DirectValue(value=None))
     with pytest.raises(RuntimeError, match="unset"):
-        schema_to_raw_dict(CfgSchema(spec=spec, value=val), None, None)
+        schema_to_raw_dict(CfgSchema(spec=spec, value=val), None)
 
 
 def test_lowering_with_context_allows_optional_none() -> None:
     val = make_default_value(_spec())
     # md present → dynamic validation runs; optional None must not raise.
-    schema_to_raw_dict(CfgSchema(spec=_spec(), value=val), MetaDict(), ModuleLibrary())
+    schema_to_raw_dict(CfgSchema(spec=_spec(), value=val), parameter_capture())
 
 
 def test_lowering_with_context_rejects_non_optional_none() -> None:
     spec = CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=float)})
     val = make_default_value(spec).with_field("x", DirectValue(value=None))
     with pytest.raises(RuntimeError, match="unset"):
-        schema_to_raw_dict(CfgSchema(spec=spec, value=val), MetaDict(), ModuleLibrary())
+        schema_to_raw_dict(CfgSchema(spec=spec, value=val), parameter_capture())
 
 
 def test_codec_round_trips_optional_none() -> None:
@@ -133,7 +134,7 @@ def test_pulse_default_has_unset_mixer_freq_and_lowers_omitted() -> None:
     val = make_default_value(spec)
     mf = val.fields["mixer_freq"]
     assert isinstance(mf, DirectValue) and mf.value is None
-    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), None, None)
+    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), None)
     assert "mixer_freq" not in raw  # unset → omitted → PulseCfg default None
 
 
@@ -142,7 +143,7 @@ def test_pulse_with_mixer_freq_lowers_value() -> None:
 
     spec = make_pulse_spec()
     val = make_default_value(spec).with_field("mixer_freq", 500.0)
-    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), None, None)
+    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), None)
     assert raw["mixer_freq"] == 500.0
 
 
@@ -166,7 +167,7 @@ def test_direct_readout_default_has_unset_gen_ch_and_lowers_omitted() -> None:
     val = make_default_value(spec)
     gen_ch = val.fields["gen_ch"]
     assert isinstance(gen_ch, DirectValue) and gen_ch.value is None
-    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), None, None)
+    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), None)
     assert "gen_ch" not in raw
 
 
@@ -175,5 +176,5 @@ def test_direct_readout_with_gen_ch_lowers_value() -> None:
 
     spec = make_direct_readout_spec()
     val = make_default_value(spec).with_field("gen_ch", 9)
-    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), None, None)
+    raw = schema_to_raw_dict(CfgSchema(spec=spec, value=val), None)
     assert raw["gen_ch"] == 9

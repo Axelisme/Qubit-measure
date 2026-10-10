@@ -485,10 +485,10 @@ def test_reconnect_replaces_catalog_without_replaying_previous_mutation(
     next_transport.replies["rpc.catalog"] = {
         "ok": True,
         "result": {
-            "methods": [{**CATALOG[0], "method": "project.info"}],
+            "methods": [{**CATALOG[0], "method": "entry.info"}],
         },
     }
-    next_transport.replies["project.info"] = {"ok": True, "result": {"chip": "new"}}
+    next_transport.replies["entry.info"] = {"ok": True, "result": {"chip": "new"}}
     transports = iter((first, next_transport))
     ports: list[int] = []
 
@@ -503,7 +503,7 @@ def test_reconnect_replaces_catalog_without_replaying_previous_mutation(
         "adapters": ["old"]
     }
     client.context.bridge.disconnect()
-    assert client.call("rpc_call", {"method": "project.info", "params": {}}) == {
+    assert client.call("rpc_call", {"method": "entry.info", "params": {}}) == {
         "chip": "new"
     }
     with pytest.raises(RuntimeError) as error:
@@ -561,11 +561,11 @@ def test_ambiguous_mutation_timeout_does_not_replay_on_reconnect(
         "ok": True,
         "result": {
             "methods": [
-                {**CATALOG[0], "method": "project.info"},
+                {**CATALOG[0], "method": "entry.info"},
             ]
         },
     }
-    second.replies["project.info"] = {"ok": True, "result": {"chip": "new"}}
+    second.replies["entry.info"] = {"ok": True, "result": {"chip": "new"}}
     client.context.session.ensure_connected()
     real_send = client.context.bridge.send_rpc_raw
     attempted: list[str] = []
@@ -588,7 +588,7 @@ def test_ambiguous_mutation_timeout_does_not_replay_on_reconnect(
     with pytest.raises(RuntimeError) as error:
         client.call("rpc_call", {"method": "adapter.list", "params": {}})
     assert getattr(error.value, "reason", None) == "gui_transport_timeout"
-    assert client.call("rpc_call", {"method": "project.info"}) == {"chip": "new"}
+    assert client.call("rpc_call", {"method": "entry.info"}) == {"chip": "new"}
     assert attempted == ["adapter.list"]
     assert all(method != "adapter.list" for method, _ in second.sent)
 
@@ -634,7 +634,7 @@ def test_connect_switches_an_explicit_port_and_expires_operation_handles(
         "ok": True,
         "result": {
             "methods": [
-                {**CATALOG[0], "method": "project.info"},
+                {**CATALOG[0], "method": "entry.info"},
             ]
         },
     }
@@ -654,7 +654,7 @@ def test_connect_switches_an_explicit_port_and_expires_operation_handles(
     assert ports == [9911, 9912]
     assert not client.context.session.operation_handles
     assert client.call("rpc_list", {})["methods"] == [
-        {"method": "project.info", "description": "List adapters", "tool_names": []},
+        {"method": "entry.info", "description": "List adapters", "tool_names": []},
     ]
 
 

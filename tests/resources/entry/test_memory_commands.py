@@ -32,7 +32,7 @@ def _source(entry: ResultEntry) -> Provenance:
             entry_id=entry.entry_id,
             origin="gui",
             payload=AcceptedPayload(
-                writes=(AcceptedWrite(path="general.flux_value", value=0.2),),
+                writes=(AcceptedWrite(path="general.ext.flux_value", value=0.2),),
                 analysis_summary={},
             ),
         )
@@ -69,7 +69,7 @@ def test_entry_point_candidate_rejects_unknown_local_source_without_mutation(
     before = original.model_copy(deep=True)
     bad = Provenance(str(uuid4()), "fit", None, AT, 0.01)
     with pytest.raises(ValueError, match="source.*does not exist") as error:
-        entry.updated_point(original, "general.flux_value", 0.2, source=bad)
+        entry.updated_point(original, "general.ext.flux_value", 0.2, source=bad)
     assert error.value.__cause__ is not None
     assert original == before
     assert snapshot(entry.use_point("a")).model_dump() == before.model_dump()

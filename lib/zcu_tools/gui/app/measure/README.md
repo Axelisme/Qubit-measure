@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，device 使用時查名與 GUI flux unit 初始值
+**Last updated:** 2026-10-10，Run device snapshot 與 alias-aware template capture
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -260,8 +260,11 @@ for setup/context/device/predictor/progress domains.
 
 Measure composition 在一處宣告 session-memory alias 初值：qubit 留空，resonator
 保存 `$qubit.resonator`。ContextService 在第一份非空元件 snapshot 以 registry
-的唯一候選填 qubit，不硬編 component kind。之後切 point 不重設表。參數捕捉
-經 `read_alias_context`，adapter 只宣告 used aliases 與 kind。Shared `session.ui.alias_dialog.AliasDialog` 編輯全域表，tab 不顯示角色列。
+的唯一候選填 qubit，不硬編 component kind。之後切 point 不重設表。
+公開 `read_context(aliases=None)` 固定目前全表，不要求 consumer 宣告或 kind 檢查。
+Template create 已使用這條接縫。既有 adapter caller 仍經 declaration-based
+`read_alias_context`，整批遷移尚未完成。Shared
+`session.ui.alias_dialog.AliasDialog` 編輯全域表，tab 不顯示角色列。
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
@@ -596,7 +599,11 @@ ModuleLibrary reference enumeration只以`experiment.cfg_editing.program_shape_f
 不normalize typed cfg或建立Spec/Value。resolve才呼main materializer façade一次。Experiment
 composition把fresh canonical shape factory與eval-aware value factory一起註冊到immutable `TemplateEntry`；catalog
 registration只驗shape/kind，Controller create依序取得value與fresh shape並直接組`CfgSchema`，不從
-value sniff discriminator。既有 role_id／roles wire metadata 與 blank template 順序保持不變。
+value sniff discriminator。
+Create 先取得 alias-aware `read_context()`，將同一固定 capture 放進 factory 的
+`SessionEnv.parameters` 並交 library write lowering。後來的來源或 selection 修改
+不改該次建立值與目的地。TemplateEntry 不要求 consumer roles。
+既有 role_id／roles wire metadata 與 blank template 順序保持不變。
 
 ModuleLibrary 新建唯一走 template catalog 的 `create_from_template`；`CfgEditorService.open`
 只以 required `from_name` 開啟既有 module/waveform 的 modify session，不提供

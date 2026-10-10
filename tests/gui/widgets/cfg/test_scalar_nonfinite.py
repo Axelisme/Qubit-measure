@@ -39,7 +39,7 @@ def test_form_preserves_nonfinite_scalar_error_until_corrected(
         ),
         value=CfgSectionValue(fields={"value": DirectValue(valid_value)}),
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     widget = CfgFormWidget()
     widget.attach(draft)
     try:

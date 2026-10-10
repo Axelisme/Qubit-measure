@@ -34,7 +34,11 @@ Tab 建立時資源已可 headless 編輯。Qt attach／detach 只管理 view �
 
 ## 固定來源與 reference
 
-Source owner 發布本地來源及版本。Measure 在 cfg refresh／reset 讀取目前全域 point／library 和 alias 表，建立固定 ParameterContext，不保留 tab 建立時的環境。Adapter 只宣告 used aliases 與 kind，不以 via 推論 GUI 角色。解析使用固定 `CfgResolution`，不輪詢硬體或做外部 I/O。Device lookup 使用已發布 cache。Source 更新先準備並安裝所有受影響 cfg 的 publication，再通知；某個 cfg 解析故障不撤銷其他資源或 source 的更新。
+Source owner 發布本地來源及版本。Measure 在 cfg refresh／reset 讀取目前全域 point／library 和 alias 表，建立固定 ParameterContext，不保留 tab 建立時的環境。
+
+公開 `read_context(aliases=None)` 固定全表，不要求 consumer 宣告或 kind 檢查，template create 已使用它。既有 adapter 的 declaration-based capture 尚未整批遷移，也不以 via 推論 GUI 角色。
+
+解析使用固定 `CfgResolution`，不輪詢硬體或做外部 I/O。Device lookup 使用已發布 cache。Source 更新先準備並安裝所有受影響 cfg 的 publication，再通知；某個 cfg 解析故障不撤銷其他資源或 source 的更新。
 
 實驗 cfg 的 `dev` 只保存角色到 device 名稱的對應，不保存 DeviceInfo、設定 patch 或 snapshot。Adapter 不將 label lower 成裝置設定。使用 flux 的 cfg 必填 `flux_unit`，值為 A、V 或 native，core 與 Notebook 不提供隱含 default。呼叫者負責單位換算。GUI 表單提供 A／V／native 三選一，初始值為 A，使用者可改，不從 device cache 推測。MCP `RecipeTab.use_flux_device` 在既有 name／unit 驗證成功後，將 resolved unit 寫入實驗 cfg.flux_unit，不改 unit 判定、recipe policy 或 binding capture。
 

@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
@@ -84,7 +85,7 @@ def test_storage_retains_entry_point_description_and_roles_after_switch(
     session.control.set_parameter(target, "general.description", "original")
     capture = _bound(session)
     session.control.set_parameter(target, "general.description", "edited")
-    session.control.set_component_focus("Q2")
+    session.control.set_alias_rows((AliasRow("driver", "Q2"),))
     session.entry.new_point("q")
     session.control.use_point(PointUseRequest("q"))
     other = ResultEntry.create(

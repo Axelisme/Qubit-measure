@@ -30,6 +30,22 @@ class AliasRow:
     value: str
 
 
+@dataclass(frozen=True)
+class ResolvedAliasRow:
+    """One row projected from a fixed capture without consumer kind checks.
+
+    alias and value preserve the authored name and binding in table order.
+    resolved is the concrete component name on success, otherwise None.
+    error is None on success or the RoleResolutionError diagnostic on failure.
+    Context source failures are not represented as rows; the whole read raises.
+    """
+
+    alias: str
+    value: str
+    resolved: str | None
+    error: str | None = None
+
+
 class AliasTable:
     """Own an ordered in-memory table; read links only when an alias is used.
 

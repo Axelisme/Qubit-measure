@@ -12,7 +12,6 @@ from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
-    QComboBox,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -58,23 +57,12 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.context_types import (
-    ComponentFocus,
-    ComponentOption,
-    EntryDraft,
-)
-from zcu_tools.gui.session.events import ComponentFocusChangedPayload, SocChangedPayload
-from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
+from zcu_tools.gui.session.events import SocChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import (
-    ComponentSchema,
     RoleResolutionError,
-    RoleSpec,
-    component_registry,
 )
-from zcu_tools.resources.entry.schema import PointDocument
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._cfg_fakes import PublishedHost, configure_cfg_lookup
@@ -85,130 +73,8 @@ def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
     configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value.__getitem__.return_value.actual_path = "r_f"
     return ctrl
-
-
-@pytest.fixture
-def focus_captures() -> Iterator[tuple[ParameterContext, ParameterContext]]:
-    before = component_registry.kinds()
-    component_registry.register("ui-focus/driver", ComponentSchema)
-    component_registry.register("ui-focus/sensor", ComponentSchema)
-    try:
-        point = PointDocument.model_validate(
-            {
-                "format": "zcu.parameter-container",
-                "format_version": "1.0",
-                "general": {"created_at": "2026-10-08T00:00:00Z"},
-                "components": {
-                    "Q1": {"kind": "ui-focus/driver"},
-                    "Q2": {"kind": "ui-focus/driver"},
-                    "R1": {"kind": "ui-focus/sensor"},
-                    "R2": {"kind": "ui-focus/sensor"},
-                },
-            }
-        )
-        library = LibrarySnapshot(
-            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
-        )
-        declarations = {
-            "qubit": RoleSpec("ui-focus/driver"),
-            "resonator": RoleSpec("ui-focus/sensor"),
-        }
-        captures = tuple(
-            ParameterContext(
-                point=point,
-                library=library,
-                target=EntryDraft(entry_id="entry"),
-                roles=RoleBinding(
-                    qubit, declarations, {"qubit": qubit, "resonator": resonator}
-                ),
-            )
-            for qubit, resonator in (("Q1", "R1"), ("Q2", "R2"))
-        )
-        yield captures[0], captures[1]
-    finally:
-        component_registry.unregister("ui-focus/driver")
-        component_registry.unregister("ui-focus/sensor")
-        assert component_registry.kinds() == before
-
-
-def test_main_window_focus_selection_projects_owner_without_rebinding_tabs(qapp):
-    ctrl = _apply_window_defaults(_mock_ctrl())
-    bus = EventBus()
-    ctrl.get_bus.return_value = bus
-    target = EntryDraft(entry_id="entry")
-    options = (
-        ComponentOption("Q1", "qubit/a"),
-        ComponentOption("Q2", "qubit/a"),
-        ComponentOption("R1", "resonator"),
-    )
-    focus = ComponentFocus(target, "Q1", options)
-    facet = ctrl.context_control
-    facet.get_component_focus.return_value = focus
-    window = MainWindow(ctrl)
-    combo = window.findChild(QComboBox, "component_focus")
-    assert combo is not None
-    window.refresh_context_panel()
-    assert combo.currentData() == "Q1"
-    assert {
-        combo.itemData(index)
-        for index in range(combo.count())
-        if combo.itemData(index) is not None
-    } == {"Q1", "Q2", "R1"}
-    facet.set_component_focus.assert_not_called()
-
-    def select(name: str | None) -> ComponentFocus:
-        selected = replace(focus, name=name)
-        facet.get_component_focus.return_value = selected
-        bus.emit(ComponentFocusChangedPayload(focus=selected))
-        return selected
-
-    facet.set_component_focus.side_effect = select
-    combo.setCurrentIndex(combo.findData("Q2"))
-    assert facet.get_component_focus().name == "Q2"
-    facet.set_component_focus.assert_called_once_with("Q2")
-    ctrl.new_tab.assert_not_called()
-    externally_selected = replace(focus, name="R1")
-    facet.get_component_focus.return_value = externally_selected
-    bus.emit(ComponentFocusChangedPayload(focus=externally_selected))
-    assert combo.currentData() == "R1"
-    facet.set_component_focus.assert_called_once_with("Q2")
-
-
-def test_main_window_titles_keep_captured_roles_after_focus_and_activity(
-    qapp, focus_captures
-):
-    ctrl = _apply_window_defaults(_mock_ctrl())
-    bus = EventBus()
-    ctrl.get_bus.return_value = bus
-    ctrl.get_running_tab_id.return_value = None
-    captures = dict(zip(("a", "b"), focus_captures, strict=True))
-    snapshots = {
-        tab_id: replace(
-            _snapshot(tab_id, supports_analysis=False, analyze_params=None),
-            parameters=capture,
-        )
-        for tab_id, capture in captures.items()
-    }
-    ctrl.get_tab_snapshot.side_effect = snapshots.__getitem__
-    window = MainWindow(ctrl)
-    window.add_tab_widget("a", "fake")
-    window.add_tab_widget("b", "fake")
-    tabs = window.findChild(QTabWidget)
-    assert tabs is not None and tabs.count() == 2
-    for index, qubit, resonator in ((0, "Q1", "R1"), (1, "Q2", "R2")):
-        assert f"qubit={qubit}" in tabs.tabText(index)
-        assert f"resonator={resonator}" in tabs.tabToolTip(index)
-    selected = ComponentFocus(EntryDraft(entry_id="entry"), "Q2", ())
-    ctrl.context_control.get_component_focus.return_value = selected
-    bus.emit(ComponentFocusChangedPayload(focus=selected))
-    window.refresh_run_lock("a")
-    assert "qubit=Q1" in tabs.tabText(0)
-    assert "resonator=R1" in tabs.tabToolTip(0)
-    window.refresh_run_lock(None)
-    assert "qubit=Q1" in tabs.tabText(0)
-    assert "resonator=R1" in tabs.tabToolTip(0)
-    assert snapshots["a"].parameters is focus_captures[0]
 
 
 def test_main_window_role_failure_is_presented_without_registering_tab(qapp):
@@ -236,9 +102,7 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     ctrl.get_active_context_label.return_value = None
     ctrl.has_draft_context.return_value = False
     ctrl.has_project.return_value = False
-    ctrl.context_control.get_component_focus.return_value = ComponentFocus(
-        None, None, ()
-    )
+    ctrl.context_control.get_alias_rows.return_value = ()
     ctrl.get_session_env.return_value = SessionEnv(
         parameters=None, soc=None, soccfg=None
     )
@@ -1504,11 +1368,30 @@ def test_exp_tab_detach_preserves_resource_for_later_views(qapp):
     assert other.cfg_form.is_valid() == (after.status.value == "Valid")
 
 
-def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
-    from dataclasses import replace
-    from typing import Any, cast
+@pytest.fixture
+def library_components():
+    from tests.resources.entry.fakes import (
+        register_fakes,
+        registry_state,
+        restore_registry,
+    )
+
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        yield
+        assert registry_state() == installed
+    finally:
+        restore_registry(before)
+
+
+def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
+    qapp, library_components
+):
 
     from qtpy.QtWidgets import QComboBox, QWidget
+    from zcu_tools.cfg_model import PulseSpec
     from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
     from zcu_tools.gui.app.measure.specs import make_pulse_spec
     from zcu_tools.gui.cfg import (
@@ -1518,15 +1401,12 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
         ReferenceSpec,
         ReferenceValue,
     )
-    from zcu_tools.gui.session.events import MlChangedPayload
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     from tests.gui.app.measure.remote._helpers import Fixture
     from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
     fx = Fixture(headless=True)
-    ml = ModuleLibrary(None)
-    fx.state.set_context(replace(fx.state.session_env, md=MetaDict(None), ml=ml))
+    fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     raw = {
         "type": "pulse",
         "waveform": {"style": "const", "length": 1.0},
@@ -1545,11 +1425,18 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
         CfgSectionSpec(
             fields={"drive": ReferenceSpec("module", [spec], label="Drive")}
         ),
-        CfgSectionValue({"drive": ReferenceValue("drive-pulse", value)}),
+        CfgSectionValue({"drive": ReferenceValue("Q1.pulses.drive", value)}),
     )
-    cfg = fx.prepare_tab("tab-1", FakeAdapter(), schema)
-    tab = ExpTabWidget("tab-1", fx.ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
-    snapshot = _snapshot("tab-1", has_run_result=False)
+
+    class LibraryAdapter(FakeAdapter):
+        def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+            return schema
+
+    fx.registry.register("library-ui-test", LibraryAdapter)
+    tab_id = fx.ctrl.tab_control.new_tab("library-ui-test")
+    cfg = fx.state.get_tab(tab_id).cfg
+    tab = ExpTabWidget(tab_id, fx.ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
+    snapshot = _snapshot(tab_id, has_run_result=False)
 
     class GateActions(_RecordingTabActions):
         def refresh_interaction(self, tab_id):
@@ -1559,12 +1446,15 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(qapp):
     tab.attach(snapshot, GateActions())
     assert not tab.cfg_form.is_valid()
     assert not tab.run_btn.isEnabled()
-    ml.modules["drive-pulse"] = cast(Any, raw)
-    fx.bus.emit(MlChangedPayload(binding_id=1, content_changed=True, fault=None))
+    fx.ctrl.context_control.set_module(
+        fx.ctrl.context_control.read_context().target,
+        "Q1.pulses.drive",
+        PulseSpec.model_validate(raw),
+    )
     widget = tab.cfg_form.findChild(QWidget, "cfgInput:drive")
     assert widget is not None
     combo = widget.findChild(QComboBox)
-    assert combo is not None and combo.currentText() == "Lib: drive-pulse"
+    assert combo is not None and combo.currentText() == "Lib: Q1.pulses.drive"
     assert tab.cfg_form.is_valid()
     assert tab.run_btn.isEnabled()
     assert cfg.observe().status.value == "Valid"

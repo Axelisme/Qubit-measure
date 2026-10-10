@@ -39,10 +39,6 @@ class NoReferences:
         return None
 
 
-def make_range(start: float, stop: float, *, expts: int) -> object:
-    return (start, stop, expts)
-
-
 @dataclass
 class RangeEditor:
     resource: CfgResource
@@ -83,7 +79,6 @@ def editor(qapp: QApplication, request) -> Iterator[RangeEditor]:
             lambda _: 0,
             lambda _: None,
         ),
-        make_range=make_range,
     )
 
     def submit(edge: str, value: DirectValue | EvalValue) -> None:
@@ -113,7 +108,12 @@ def test_sampling_round_trip_uses_owner_normalization(editor: RangeEditor):
     assert points.text() == "5"
     observation = editor.resource.observe()
     assert observation.ref.revision == 1
-    assert editor.resource.accept(observation.ref.revision).values["range"] == (0, 2, 5)
+    assert editor.resource.accept(observation.ref.revision).values["range"] == {
+        "start": 0,
+        "stop": 2,
+        "expts": 5,
+        "step": 0.5,
+    }
 
     points.setText("-")
     observation = editor.resource.observe()

@@ -52,7 +52,13 @@ Load Data 同時提供 File 選檔與 opened entry ledger 清單。清單按 run
 
 參數容器框架只消費已註冊的 model 與角色宣告。具體 kinds、欄位與內建角色由 `zcu_lab.components` 擁有。Lib 外的組合根顯式傳入共用 ComponentRegistry，在 startup 註冊，不在 import 或 reload 時註冊。`.importlinter` 的 `entry-definitions-composition-only` 與 `framework-no-user` 禁止框架反向 import 定義。使用者 model 可用 validator 處理舊欄位；框架不猜兼容規則。
 
-DocumentStore 分開保存 raw YAML 節點、驗證後的 normalized tree 與 public typed snapshot。讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。這讓 model 的讀檔轉換在下一次 commit 寫回，同時保留未改節點與 forward-minor 的剩餘未知欄位。Forbid／ignore 的 typed snapshot 隱藏未來欄位，allow model 保留它們。Entry 只為明確接受的值記錄來源，不把格式轉換記為 manual acceptance。
+DocumentStore 分開保存 raw YAML 節點、驗證後的 normalized tree 與 public typed snapshot。讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。Model 的讀檔轉換在下一次 commit 寫回，未改節點保留原樣。
+
+Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入；forward-minor 保留容器層剩餘未知欄位，不覆寫元件或 nested model 的 extra 策略。
+
+任何 minor 都由元件定義者的 model 決定 defaults、validators 與舊寫法演進。Forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們；ignore 丟棄的欄位在非空 commit 時移除。
+
+框架不提供版本遷移鏈或相容 loader。Entry 只為明確接受的值記錄來源，不把格式轉換記為 manual acceptance。
 
 Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Data Variable 是結果語意，state／phase 等離散座標仍是 axis。正規 data.h5 的各 Data Variable 可以使用不同 grid，共用一份結果身分與 metadata。Labber 的 canonical one-shot grouped 輸出才要求共同 grid 與明確 variable-to-channel mapping。必需 variables 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
 

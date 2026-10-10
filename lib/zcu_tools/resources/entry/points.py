@@ -52,12 +52,19 @@ class PointView:
         source is store's point.yaml path under the owning entry's points/label.
         The store owns single-file validation, conflict checks and persistence.
         ResultEntry supplies these dependencies; construction does not reload or
-        validate them. ledger is this entry's records/ledger.jsonl and entry_id
+        revalidate field values. Binding rejects components shadowing any public
+        SetupView/PointView/EditView member with ValueError naming the member.
+        ledger is this entry's records/ledger.jsonl and entry_id
         its immutable UUID. result_root and database_root are the caller's owning
         roots; they are resolved once. Complete clone identity is bound here,
         including for directly constructed views. Cloning requires matching roots
         and reloads the published source, not this cached snapshot. No later
         identity registration is required. There are no multi-file callbacks.
+        ResultEntry's store callback rejects shadowing on refresh/mutation before
+        publication. With a caller-provided store, the caller supplies validate
+        for that subsequent lifecycle. Without it, refresh/mutation can publish
+        shadowing names; those components cannot be read as view attributes and
+        must be read through snapshot/document_value instead.
         """
         self._store = store
         self._source = source
@@ -161,7 +168,9 @@ class PointView:
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
         """Add a complete registered component to this point, not its template.
 
-        name is an unreserved public identifier and kind is a registered kind.
+        name is a public identifier, not a keyword or a public member of
+        SetupView, PointView or EditView. Shadowing raises ValueError naming the
+        member. kind is a registered kind.
         fields are working-unit YAML values, including all required model fields.
         Original field validators and defaults run; references resolve only in
         this point, when resolve is called. Invalid names, schema values or

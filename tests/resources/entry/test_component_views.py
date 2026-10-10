@@ -82,7 +82,7 @@ def test_static_units_follow_declared_fields_without_reading_values(
             "N1.missing",
             "missing.frequency",
             "general.ext.frequency",
-            "general.flux_value",
+            "general.ext.flux_value",
         ):
             assert document_unit(document, path) is None
         assert document_value(document, "N1.frequency") == 12.0
@@ -908,9 +908,15 @@ def test_public_document_read_preserves_forward_minor_visibility(
         stored = yaml.load(path)
         stored["format_version"] = "1.2"
         stored["components"]["N1"]["future"] = {"count": 2}
+        cached = snapshot(entry.setup)
         yaml.dump(stored, path)
-        entry.setup.refresh()
         before = path.read_bytes()
+        if extra_policy == "forbid":
+            with pytest.raises(ValidationError, match="future"):
+                entry.setup.refresh()
+            assert snapshot(entry.setup) == cached
+        else:
+            entry.setup.refresh()
         document = snapshot(entry.setup)
         if extra_policy == "allow":
             assert document_value(document, "N1.future.count") == 2
