@@ -640,7 +640,7 @@ def test_accept_writes_role_values_and_local_accepted_provenance(
     assert metadata is not None
     assert (metadata.source, metadata.kind, metadata.run_id, metadata.at) == (
         event_id,
-        SavingCore.AXES_SPEC.tag,
+        "test/saving",
         saved.run_id,
         event.at,
     )
@@ -867,7 +867,7 @@ def test_accept_writes_parameter_module_waveform_with_one_event(
         assert metadata is not None
         assert (metadata.source, metadata.kind, metadata.run_id, metadata.at) == (
             event_id,
-            SavingCore.AXES_SPEC.tag,
+            "test/saving",
             saved.run_id,
             event.at,
         )
