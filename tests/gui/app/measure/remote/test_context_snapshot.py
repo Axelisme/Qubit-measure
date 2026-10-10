@@ -12,7 +12,7 @@ from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import ContextSourceFault
 from zcu_tools.gui.session.events import MdChangedPayload, MlChangedPayload
-from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
 from zcu_tools.resources.waveform_assets import ArbWaveformError
 
@@ -352,10 +352,30 @@ def test_snapshot_summary_preserves_native_array_shape_and_numpy_scalars(
     component_registry.register("browse/array", ArrayComponent)
     try:
         application.open_entry()
-        application.controller.context_control.add_component(
-            "Trace",
-            "browse/array",
-            {"trace": np.arange(6).reshape(2, 3), "scalar": np.float64(4.5)},
+        captured = application.controller.context_control.read_context()
+        point = captured.document()
+        point = point.model_copy(
+            update={
+                "components": {
+                    **point.components,
+                    "Trace": ArrayComponent(
+                        kind="browse/array",
+                        trace=np.arange(6).reshape(2, 3),
+                        scalar=np.float64(4.5),
+                    ),
+                }
+            }
+        )
+        native = ParameterContext(
+            point=point,
+            library=captured.library,
+            target=captured.target,
+            roles=RoleBinding(None, {}, {}, aliases=captured.aliases),
+            source_faults=captured.source_faults,
+            storage=captured.storage,
+        )
+        application.state.set_context(
+            replace(application.state.session_env, parameters=native)
         )
         summary = application.result("context.snapshot", {"summaries": True})
         components = snapshot_mapping(snapshot_mapping(summary["point"])["components"])
