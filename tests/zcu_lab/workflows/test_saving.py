@@ -158,3 +158,33 @@ def test_t1_saver_collision_preserves_published_native_data(
     with pytest.raises(FileExistsError):
         save_t1(source, path, snapshot=snapshot)
     assert path.read_bytes() == before
+
+
+def test_callback_snapshot_stays_detached_through_acquire_and_repeated_native_save(
+    inputs: Inputs,
+    tmp_path: Path,
+) -> None:
+    driver = FakeDevice(fast_mode=True)
+    driver.set_value(0.12)
+    captured = capture_device_snapshot({"unused": driver})
+    expected = deepcopy(captured)
+    run = Run(
+        inputs.t1,
+        StopSignal(),
+        soc=inputs.soc,
+        soccfg=inputs.soccfg,
+        device_snapshot=captured,
+    )
+    captured["unused"]["value"] = 0.7
+    driver.set_value(0.9)
+    result = run_t1(run)
+    assert run.outcome.status == "completed"
+    assert result.evidence.device_snapshot == expected
+    source = Completed(run.cfg, result)
+    snapshot = make_snapshot()
+    for name in ("first.h5", "again.h5"):
+        driver.set_value(0.8)
+        path = tmp_path / name
+        save_t1(source, path, snapshot=snapshot)
+        _, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
+        assert metadata.device_snapshot == expected

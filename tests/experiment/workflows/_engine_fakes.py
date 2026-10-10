@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
-from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.datafile import JsonObject, SoftwareProvenance
+from zcu_tools.device import FakeDevice
+from zcu_tools.experiment.acquisition import capture_device_snapshot
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Completed,
@@ -55,6 +57,12 @@ class RecordingDevices:
         self.on_set: Callable[[StopSignal], object] | None = None
         self.units: list[Literal["A", "V", "native"]] = []
         self.signals: list[StopSignal] = []
+        self.drivers: dict[str, FakeDevice] = {}
+        self.captures = 0
+
+    def capture_snapshot(self) -> dict[str, JsonObject]:
+        self.captures += 1
+        return capture_device_snapshot(self.drivers)
 
     def set_value(
         self,
