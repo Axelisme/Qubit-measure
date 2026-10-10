@@ -33,7 +33,7 @@ def test_rpc_preserves_reply_and_sends_one_request(tmp_path: Path) -> None:
             {"applied": [], "failed": None, "skipped": []},
         ),
         (
-            "project.info",
+            "entry.info",
             {},
             {"chip_name": "chip", "qub_name": "q1", "result_dir": "/results/q1"},
         ),

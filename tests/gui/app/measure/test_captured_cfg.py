@@ -4,10 +4,8 @@ from collections.abc import Generator, Mapping
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, ContextReadiness
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
 from zcu_tools.gui.app.measure.state import State
@@ -18,6 +16,7 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
 from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
@@ -55,7 +54,10 @@ def captures() -> Generator[tuple[ParameterContext, ParameterContext]]:
                 library=library,
                 target=EntryDraft(entry_id="entry"),
                 roles=RoleBinding(
-                    name, {"qubit": RoleSpec("capture/driver")}, {"qubit": name}
+                    None,
+                    {"qubit": RoleSpec("capture/driver")},
+                    {},
+                    aliases=(AliasRow("qubit", name),),
                 ),
             )
             for name in ("Q1", "Q2")
@@ -71,13 +73,14 @@ class PublishedHost:
         self.current = current
         self.arb_waveforms = self
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        return ParameterContext(
-            point=self.current.document(),
-            library=self.current.library,
-            target=self.current.target,
-            roles=roles,
-        )
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix supplied authored rows with temporary named overrides."""
+        table = AliasTable(self.current.aliases)
+        for alias, component in (aliases or {}).items():
+            table = table.with_override(alias, component)
+        return self.current.bind_aliases(table.rows, {})
 
     def list_device_names(self) -> list[str]:
         return []
@@ -94,7 +97,7 @@ class PublishedHost:
 def expression_schema() -> CfgSchema:
     return CfgSchema(
         CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
-        CfgSectionValue(fields={"value": EvalValue("qubit.rate")}),
+        CfgSectionValue(fields={"value": EvalValue("$qubit.rate")}),
     )
 
 
@@ -106,13 +109,13 @@ def test_binding_snapshot_keeps_supplied_capture_after_live_selection_changes(
     bindings = MeasureCfgBindings(host)
     source = bindings.snapshot((), captured_values={}, parameters=first)
     host.current = second
-    assert source.evaluate_expression("qubit.rate") == 10.0
+    assert source.evaluate_expression("$qubit.rate") == 10.0
     draft = bindings.new_draft(expression_schema(), parameters=first)
     assert draft.is_valid()
     assert (
         bindings.snapshot(
             (), captured_values={}, parameters=second
-        ).evaluate_expression("qubit.rate")
+        ).evaluate_expression("$qubit.rate")
         == 20.0
     )
 
@@ -148,57 +151,6 @@ def test_tab_refresh_preserves_distinct_captures_and_publishes_before_notificati
     assert observed == [publications]
     assert one.accept(publications[0].ref.revision).values == {"value": 10.0}
     assert two.accept(publications[1].ref.revision).values == {"value": 20.0}
-
-
-def test_tab_creation_and_guard_keep_the_capture_after_focus_changes(
-    captures: tuple[ParameterContext, ParameterContext],
-) -> None:
-    first, second = captures
-    host = PublishedHost(first)
-    bindings = MeasureCfgBindings(host)
-    state = State(
-        SessionEnv(
-            parameters=first,
-            soc=None,
-            soccfg=None,
-            readiness=ContextReadiness.ACTIVE,
-        )
-    )
-    adapter = MagicMock()
-    adapter.capabilities = AdapterCapabilities(requires_soc=False)
-    adapter.parameter_roles.return_value = {"qubit": RoleSpec("capture/driver")}
-    adapter.make_default_cfg.return_value = expression_schema()
-    registry = MagicMock(spec=Registry)
-    registry.create.return_value = adapter
-    resources = TabCfgResources(mutation_allowed=lambda _tab: True)
-    service = TabService(
-        state,
-        registry,
-        MagicMock(),
-        resources,
-        cfg_resolution=lambda parameters: bindings.snapshot(
-            (), captured_values={}, parameters=parameters
-        ),
-        captured_parameters=lambda _roles, _target: host.current,
-    )
-    one = service.new_tab("capture")
-    host.current = second
-    two = service.new_tab("capture")
-    assert state.get_tab(one).parameters is first
-    assert state.get_tab(two).parameters is second
-    assert [
-        call.args[0].parameters for call in adapter.make_default_cfg.call_args_list
-    ] == [first, second]
-    resources.refresh_all()
-    inputs = GuardService(state).capture_run_inputs(
-        one, expected_revision=state.get_tab(one).cfg.observe().ref.revision
-    )
-    assert inputs.accepted_cfg.values == {"value": 10.0}
-    assert inputs.request.cfg_context is not None
-    assert inputs.request.cfg_context.modules is first.library
-    assert state.get_tab(two).cfg.accept(
-        state.get_tab(two).cfg.observe().ref.revision
-    ).values == {"value": 20.0}
 
 
 def test_role_capture_failure_does_not_register_a_tab() -> None:

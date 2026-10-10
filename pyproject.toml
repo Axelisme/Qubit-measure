@@ -67,7 +67,8 @@ development = ["zcu-tools[all]"]
 [dependency-groups]
 dev = [
   "zcu-tools[gui]",
-  "pytest",
+  # Remove this pin after a release includes fix fc8f56bd2 for pytest-dev/pytest#14635.
+  "pytest==9.0.3",
   "pytest-cov",
   "pytest-xdist",
   "pyright",

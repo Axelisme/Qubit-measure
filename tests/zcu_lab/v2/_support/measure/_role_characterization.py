@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 from zcu_tools.gui.cfg import (
     CfgSectionValue,
@@ -14,36 +13,104 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     SweepValue,
 )
+from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
+from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueLookup
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry import RoleSpec, component_registry
+from zcu_tools.resources.entry.schema import PointDocument
+
+from zcu_lab.components import (
+    ChannelSchema,
+    QubitSchema,
+    QubitWiringSchema,
+    ResonatorSchema,
+    WiringSchema,
+)
 
 GOLDEN_PATH = Path(__file__).with_name("_role_default_golden.json")
 
-# A representative populated MetaDict: every md key the role factories read, so
-# present keys lower to EvalValue and absent keys to their DirectValue fallback.
-POPULATED_MD = {
-    "q_f": 4200.0,
-    "qub_ch": 4,
-    "r_f": 6500.0,
-    "res_ch": 3,
-    "ro_ch": 1,
-    "timeFly": 0.7,
-    "best_ro_freq": 6300.0,
-    "best_ro_gain": 0.22,
-    "best_ro_length": 2.0,
-}
+# Frozen representative literals; the synthetic channel=4 is explicitly L01.
+# Empty and populated captures both keep scalar defaults deferred.
+POPULATED_QUBIT = QubitSchema(
+    kind="qubit/transmon",
+    freq=4200.0,
+    wiring=QubitWiringSchema(L01=ChannelSchema(ch=4)),
+    ext={"best_ro_freq": 6300.0, "best_ro_gain": 0.22, "best_ro_length": 2.0},
+)
+POPULATED_RESONATOR = ResonatorSchema(
+    kind="resonator",
+    freq=6500.0,
+    wiring=WiringSchema(ch=3, ro_ch=1),
+    ext={"time_of_fly": 0.7},
+)
 
 
-def make_context(md: dict[str, Any]) -> MagicMock:
-    """A ctx whose md answers from ``md`` and whose ml is empty (no adoption —
-    the library-lookup selector is exercised by test_role_factories / kept
-    verbatim; this snapshot pins the blank-seed payload)."""
-    ctx = MagicMock()
-    ctx.md.get.side_effect = lambda k, d=None: md.get(k, d)
-    ctx.md.__contains__ = lambda _self, k: k in md
-    ml = MagicMock()
-    ml.modules = {}
-    ml.waveforms = {}
-    ctx.ml = ml
-    return ctx
+def make_context(
+    *,
+    qubit: QubitSchema | None = None,
+    resonator: ResonatorSchema | None = None,
+    library: ModuleLibraryDocument | None = None,
+    values: ValueLookup | None = None,
+) -> SessionEnv:
+    """Capture bound Q1/R1 facts and a native library for one role scenario.
+
+    Omitted models keep calibration and module slots unset, not unbound aliases.
+    Inputs are detached by ParameterContext/LibrarySnapshot. The optional value
+    lookup is a live collaborator for Source seeds. Component kinds are installed
+    only during point validation and restored before returning; no role registry,
+    session selection, file I/O or hardware capability is changed.
+    """
+    qubit = QubitSchema(kind="qubit/transmon") if qubit is None else qubit
+    resonator = ResonatorSchema(kind="resonator") if resonator is None else resonator
+    before = component_registry.kinds()
+    added: list[str] = []
+    try:
+        for kind, model in [
+            (qubit.kind, QubitSchema),
+            (resonator.kind, ResonatorSchema),
+        ]:
+            if kind not in before:
+                component_registry.register(kind, model)
+                added.append(kind)
+        point = PointDocument.model_validate(
+            {
+                "format": "zcu.parameter-container",
+                "format_version": "1.0",
+                "general": {"created_at": "2026-10-08T00:00:00Z"},
+                "components": {
+                    "Q1": qubit.model_dump(mode="json", exclude_unset=True),
+                    "R1": resonator.model_dump(mode="json", exclude_unset=True),
+                },
+            }
+        )
+    finally:
+        for kind in reversed(added):
+            component_registry.unregister(kind)
+        assert component_registry.kinds() == before
+    parameters = ParameterContext(
+        point=point,
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            if library is None
+            else library
+        ),
+        target=EntryDraft(entry_id="role-characterization"),
+        roles=RoleBinding(
+            focus=None,
+            declarations={
+                "qubit": RoleSpec("qubit/*"),
+                "resonator": RoleSpec("resonator"),
+            },
+            names={"qubit": "Q1", "resonator": "R1"},
+        ),
+    )
+    return SessionEnv(
+        parameters=parameters,
+        soc=None,
+        soccfg=None,
+        values=EmptyValueLookup() if values is None else values,
+    )
 
 
 def serialize(node: object) -> Any:

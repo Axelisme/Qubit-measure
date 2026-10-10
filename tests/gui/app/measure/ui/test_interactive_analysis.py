@@ -21,7 +21,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
 from zcu_lab.v2._support.measure.flux_pick_plugin import (
@@ -51,8 +50,7 @@ def _frontend(qapp):
     req = AnalyzeRequest(
         run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
         analyze_params=object(),
-        md=MetaDict(),
-        ml=ModuleLibrary(),
+        parameters=None,
         predictor=None,
     )
     plots = Plots(NonPresentingHost())

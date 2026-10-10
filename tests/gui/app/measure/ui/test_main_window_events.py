@@ -153,24 +153,6 @@ def _coordinator(
     )
 
 
-def test_role_rebind_fact_queries_once_and_only_projects_roles_and_interaction() -> (
-    None
-):
-    coordinator, log, ctrl, _host = _coordinator()
-    bus = BaseEventBus()
-    coordinator.bind(bus)
-    bus.emit(
-        TabContentChangedPayload(tab_id="tab-1", fact=TabContentFact.ROLES_COMMITTED)
-    )
-    assert log.calls == [
-        call("host", "has_tab_widget", "tab-1"),
-        call("ctrl", "get_tab_snapshot", "tab-1"),
-        call("host", "refresh_tab_roles", "tab-1", ctrl.snapshot),
-        call("host", "refresh_tab_interaction", "tab-1", ctrl.snapshot),
-    ]
-    coordinator.close()
-
-
 def test_reaction_matrices_cover_every_closed_fact_exactly() -> None:
     assert set(_INTERACTION_REACTIONS) == set(TabInteractionFact)
     assert set(_CONTENT_REACTIONS) == set(TabContentFact)

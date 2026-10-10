@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -32,7 +32,7 @@ class ContextControlPort(Protocol):
     """Cached reads and owner-thread commands using ContextService's contract.
 
     Reads never refresh implicitly. read_context rejects EMPTY/unavailable
-    sources, preserving fixed supplied role names. Point commands validate the
+    sources, fixing current alias rows with optional temporary named overrides. Point commands validate the
     opened entry UUID before resource preparation. Preparation failures preserve
     the binding; a created-but-unbound point raises PointBindingError.
     """
@@ -68,8 +68,17 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        """Capture published values; EMPTY/source/role errors propagate."""
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix point/library/storage and all alias rows without I/O or kind checks.
+
+        aliases maps alias names to temporary concrete components, preserving
+        dependent links without changing global state. Later edits do not change
+        the capture. Missing/unbound $ aliases fail by name when read, never
+        falling back to bare concrete paths. EMPTY/source/invalid override errors
+        propagate; see ContextService.read_context for the full contract.
+        """
         ...
 
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
@@ -220,8 +229,11 @@ class ContextControlFacet(ContextControlPort):
         """Edit only the owning setup template."""
         self._context.set_setup_parameter(path, value)
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        return self._context.read_context(roles=roles)
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Return the fixed alias-aware capture described by ContextControlPort."""
+        return self._context.read_context(aliases=aliases)
 
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return the fixed capture's storage using the service contract."""

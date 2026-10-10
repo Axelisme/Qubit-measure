@@ -1,5 +1,6 @@
 """Real cfg resources for application tests that do not mount a frontend."""
 
+from collections.abc import Mapping
 from unittest.mock import MagicMock
 
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
@@ -7,11 +8,13 @@ from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg.model import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgResource
+from zcu_tools.gui.session.aliases import AliasTable
 from zcu_tools.gui.session.context_types import EntryDraft
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
+from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.entry.registry import component_registry
+from zcu_tools.resources.entry.schema import ComponentSchema, PointDocument
 
 
 class PublishedHost:
@@ -20,17 +23,17 @@ class PublishedHost:
     def __init__(self, state: State) -> None:
         self.state = state
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        """Read the published capture, optionally binding caller roles."""
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix supplied authored rows with temporary named overrides."""
         parameters = self.state.session_env.parameters
         if parameters is None:
             raise RuntimeError("Test context is unavailable")
-        return ParameterContext(
-            point=parameters.document(),
-            library=parameters.library,
-            target=parameters.target,
-            roles=roles,
-        )
+        table = AliasTable(parameters.aliases)
+        for alias, component in (aliases or {}).items():
+            table = table.with_override(alias, component)
+        return parameters.bind_aliases(table.rows, {})
 
     def list_device_names(self) -> list[str]:
         return [device.name for device in self.state.list_devices()]
@@ -48,19 +51,52 @@ class PublishedHost:
         raise RuntimeError("Test sources do not query live values")
 
 
-def parameter_capture(**values: float) -> ParameterContext:
-    """Build an entry draft capture with numeric values under general.ext."""
-    point = PointDocument.model_validate(
-        {
-            "format": "zcu.parameter-container",
-            "format_version": "1.0",
-            "general": {"created_at": "2026-10-08T00:00:00Z", "ext": values},
-            "components": {},
-        }
-    )
-    library = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
-    )
+def parameter_capture(
+    components: Mapping[str, ComponentSchema] | None = None,
+    library: LibrarySnapshot | None = None,
+    /,
+    **values: float,
+) -> ParameterContext:
+    """Capture original component models and optional general.ext numeric values.
+
+    components maps native names such as R1/Q1 to existing ComponentSchema
+    instances. Missing kinds are registered only while validating the point;
+    pre-existing registrations retain their model identity and order on failure
+    as well as success. No source files or consumer roles are created.
+    """
+    components = {} if components is None else components
+    before = component_registry.kinds()
+    added: list[str] = []
+    try:
+        for component in components.values():
+            if component.kind not in component_registry.kinds():
+                component_registry.register(component.kind, type(component))
+                added.append(component.kind)
+            if component_registry.get(component.kind) is not type(component):
+                raise ValueError(
+                    f"Different model already registered for {component.kind!r}"
+                )
+        point = PointDocument.model_validate(
+            {
+                "format": "zcu.parameter-container",
+                "format_version": "1.0",
+                "general": {"created_at": "2026-10-08T00:00:00Z", "ext": values},
+                "components": {
+                    name: component.model_dump(mode="python", exclude_unset=True)
+                    for name, component in components.items()
+                },
+            }
+        )
+    finally:
+        for kind in reversed(added):
+            component_registry.unregister(kind)
+        assert component_registry.kinds() == before, (
+            "parameter_capture polluted component registry"
+        )
+    if library is None:
+        library = LibrarySnapshot(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        )
     return ParameterContext(
         point=point, library=library, target=EntryDraft(entry_id="entry"), roles=None
     )

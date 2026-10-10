@@ -18,7 +18,7 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
 from zcu_tools.gui.cfg.edit_codec import encode_ref
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.resources.entry import AcquiredPayload
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -48,7 +48,11 @@ def native_save_rpc(
     with native_save_session(tmp_path, qapp) as session:
         tab = session.state.get_tab("tab")
         session.state.update_tab_result(
-            "tab", tab.run.result, source_operation_id=101, metadata=session.metadata
+            "tab",
+            tab.run.result,
+            source_operation_id=101,
+            metadata=session.metadata,
+            parameters=tab.run.parameters,
         )
         declare_panes(session)
         post = tab.post_analysis
@@ -63,6 +67,8 @@ def native_save_rpc(
         controller = Controller(
             session.state, registry, None, session.bus, project_root=str(tmp_path)
         )
+        controller.setup_control.open_entry(EntryRequest("original"))
+        controller.setup_control.use_point(PointUseRequest("p"))
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), controller.owner_scheduler
         )
@@ -102,11 +108,9 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
         events = session.entry.ledger.events()
         tab = session.state.get_tab("tab")
         if draft_capture:
-            session.context.install_entry(session.entry)
-            captured = ContextControlFacet(context=session.context).read_context()
-            assert captured.storage is None
-            tab.parameters = captured
-            tab.save_context = captured
+            assert call(sock, "entry.open", {"name": "original"})["ok"] is True
+            captured = session.state.session_env.parameters
+            assert captured is not None and captured.storage is None
         if analysis_failure:
 
             def unavailable(
@@ -162,8 +166,8 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
         assert rejected["error"]["reason"] == "result_superseded"
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["result"] == before
         if draft_capture:
-            assert tab.save_context is not None
-            assert tab.save_context.storage is None
+            assert tab.run.parameters is not None
+            assert tab.run.storage is None
             assert tab.artifacts.snapshot() == ()
         assert session.entry.ledger.events() == events
 
@@ -186,7 +190,7 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         events = session.entry.ledger.events()
         session.state.set_active_tab("tab")
         if draft_capture:
-            session.context.install_entry(session.entry)
+            assert call(sock, "entry.open", {"name": "original"})["ok"] is True
         if analysis_failure:
 
             def unavailable(
@@ -224,8 +228,8 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         assert tab.run.metadata == history
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
-        assert tab.save_context is not None
-        assert (tab.save_context.storage is None) is draft_capture
+        assert tab.run.parameters is not None
+        assert (tab.run.storage is None) is draft_capture
         if draft_capture:
             assert tab.artifacts.snapshot() == ()
         assert session.state.active_tab_id == new_id
@@ -464,6 +468,7 @@ def test_save_rpc_rejects_stale_snapshot_without_publishing_comment_or_outputs(
                 tab.run.result,
                 source_operation_id=101,
                 metadata=session.metadata,
+                parameters=tab.run.parameters,
             )
         elif resource == "analyze":
             session.state.swap_analysis_pane("tab", replace(tab.analysis))
@@ -497,6 +502,7 @@ def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
                 tab.run.result,
                 source_operation_id=102,
                 metadata=session.metadata,
+                parameters=tab.run.parameters,
             )
             params = {
                 "tab_id": "tab",
