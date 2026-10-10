@@ -247,31 +247,46 @@ class T1CurveFit:
             section["max_nfev"] = int(self.max_nfev)
         if self.init is not None:
             section["init"] = self.init.to_json_params()
-        if self.bounds:
-            bounds: dict[str, list[float]] = {}
-            for name, bound in self.bounds.items():
-                if name not in _T1_CURVE_FIT_PARAM_NAMES:
-                    raise QubitParamsError(
-                        f"t1_curve_fit.bounds.{name} is not a known T1 fit parameter",
-                        reason_code="params_value_invalid",
-                    )
-                if name not in active_param_names:
-                    raise QubitParamsError(
-                        f"t1_curve_fit.bounds.{name} is not an active T1 fit parameter",
-                        reason_code="params_value_invalid",
-                    )
-                bounds[name] = [
-                    _json_required_float(
-                        bound[0], path=f"t1_curve_fit.bounds.{name}[0]"
-                    ),
-                    _json_required_float(
-                        bound[1], path=f"t1_curve_fit.bounds.{name}[1]"
-                    ),
-                ]
-            section["bounds"] = bounds
+        section.update(
+            _t1_curve_fit_bounds_section(
+                self.bounds, active_param_names=active_param_names
+            )
+        )
         if self.timestamp is not None:
             section["timestamp"] = self.timestamp
         return section
+
+
+def _t1_curve_fit_bounds_section(
+    bounds: Mapping[str, tuple[float, float]], *, active_param_names: tuple[str, ...]
+) -> dict[str, dict[str, list[float]]]:
+    """Serialize bounds for active T1 parameters into a partial JSON section.
+
+    Empty bounds omit the key; nonempty bounds retain the input Mapping order.
+    Each name must be known, then active, before its lower and upper endpoints
+    are converted to finite floats. Invalid names or endpoints raise
+    QubitParamsError with params_value_invalid and retain conversion causes.
+    """
+    section: dict[str, dict[str, list[float]]] = {}
+    if bounds:
+        json_bounds: dict[str, list[float]] = {}
+        for name, bound in bounds.items():
+            if name not in _T1_CURVE_FIT_PARAM_NAMES:
+                raise QubitParamsError(
+                    f"t1_curve_fit.bounds.{name} is not a known T1 fit parameter",
+                    reason_code="params_value_invalid",
+                )
+            if name not in active_param_names:
+                raise QubitParamsError(
+                    f"t1_curve_fit.bounds.{name} is not an active T1 fit parameter",
+                    reason_code="params_value_invalid",
+                )
+            json_bounds[name] = [
+                _json_required_float(bound[0], path=f"t1_curve_fit.bounds.{name}[0]"),
+                _json_required_float(bound[1], path=f"t1_curve_fit.bounds.{name}[1]"),
+            ]
+        section["bounds"] = json_bounds
+    return section
 
 
 def params_path_for_result_dir(result_dir: str | Path) -> str:

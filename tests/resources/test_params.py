@@ -415,3 +415,114 @@ def test_params_path_for_result_dir() -> None:
     assert params_path_for_result_dir("result/ChipA/Q1").endswith(
         "result/ChipA/Q1/params.json"
     )
+
+
+def test_t1_curve_fit_rejects_inactive_bound_on_write(tmp_path) -> None:
+    path = tmp_path / "params.json"
+    params = QubitParams(path)
+    params.ensure_project(ParamsProject("ChipA", "Q1"))
+    params.set_fluxdep_fit(_fit())
+    before = path.read_bytes()
+
+    with pytest.raises(
+        QubitParamsError,
+        match=r"t1_curve_fit\.bounds\.Q_ind is not an active T1 fit parameter",
+    ) as exc_info:
+        params.set_t1_curve_fit(
+            T1CurveFit(
+                params=T1CurveFitParams(Temp=0.055, Q_cap=7.2e5),
+                bounds={"Q_ind": (1.0e5, 1.0e10)},
+            )
+        )
+
+    assert exc_info.value.reason_code == "params_value_invalid"
+    assert exc_info.value.__cause__ is None
+    assert path.read_bytes() == before
+    assert params.get_t1_curve_fit() is None
+
+
+@pytest.mark.parametrize(
+    "bound, endpoint",
+    [((float("inf"), 1.0), 0), ((0.0, float("nan")), 1)],
+    ids=["lower", "upper"],
+)
+def test_t1_curve_fit_rejects_nonfinite_bound_on_write(
+    tmp_path, bound: tuple[float, float], endpoint: int
+) -> None:
+    path = tmp_path / "params.json"
+    params = QubitParams(path)
+    params.ensure_project(ParamsProject("ChipA", "Q1"))
+    params.set_fluxdep_fit(_fit())
+    before = path.read_bytes()
+
+    with pytest.raises(QubitParamsError) as exc_info:
+        params.set_t1_curve_fit(
+            T1CurveFit(
+                params=T1CurveFitParams(Temp=0.055, Q_cap=7.2e5),
+                bounds={"Temp": bound},
+            )
+        )
+
+    assert str(exc_info.value) == (
+        f"t1_curve_fit.bounds.Temp[{endpoint}] must be finite"
+    )
+    assert exc_info.value.reason_code == "params_value_invalid"
+    assert exc_info.value.__cause__ is None
+    assert path.read_bytes() == before
+    assert params.get_t1_curve_fit() is None
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [{}, {"Temp": (0.01, 0.3), "Q_cap": (1.0e4, 1.0e8)}],
+    ids=["empty", "present"],
+)
+def test_t1_curve_fit_section_preserves_bounds_order_and_timestamp(
+    bounds: dict[str, tuple[float, float]],
+) -> None:
+    fit = T1CurveFit(
+        params=T1CurveFitParams(Temp=0.055, Q_cap=7.2e5),
+        stderr=T1CurveFitUncertainty(Temp=0.002, Q_cap=1.1e4),
+        fixed=("Q_cap",),
+        free=("Temp",),
+        cost=1.25,
+        reduced_chi2=0.42,
+        success=True,
+        message="converged",
+        residual_mode="log",
+        loss="soft_l1",
+        max_nfev=200,
+        init=T1CurveFitParams(Temp=0.08, Q_cap=5.0e5),
+        bounds=bounds,
+        timestamp="2020-01-02T03:04:05Z",
+    )
+
+    section = fit.to_json_section()
+
+    expected_keys = [
+        "params",
+        "fixed",
+        "free",
+        "stderr",
+        "cost",
+        "reduced_chi2",
+        "success",
+        "message",
+        "residual_mode",
+        "loss",
+        "max_nfev",
+        "init",
+    ]
+    if bounds:
+        assert section["bounds"] == {
+            "Temp": [0.01, 0.3],
+            "Q_cap": [1.0e4, 1.0e8],
+        }
+        assert list(section["bounds"]) == ["Temp", "Q_cap"]
+        expected_keys.append("bounds")
+    else:
+        assert "bounds" not in section
+    expected_keys.append("timestamp")
+    assert list(section) == expected_keys
+    assert section["timestamp"] == "2020-01-02T03:04:05Z"
+    assert section["params"] == {"Q_cap": 7.2e5, "Temp": 0.055}
