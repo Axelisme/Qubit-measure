@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -60,6 +61,7 @@ class FluxSweepCfg(ConfigBase):
 
 
 class FluxCfg(ProgramV2Cfg, ExpCfgModel):
+    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxModuleCfg
     sweep: FluxSweepCfg
     skew_penalty: float = Field(default=0.0, ge=0.0)

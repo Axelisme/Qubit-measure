@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from matplotlib import colormaps
@@ -79,6 +79,7 @@ class JPAOptSweepCfg(ConfigBase):
 
 
 class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
+    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: JPAOptModuleCfg
     # Field(...) makes dev required in this subclass, overriding the Optional
     # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).

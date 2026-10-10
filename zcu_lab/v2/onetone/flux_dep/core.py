@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -57,6 +57,7 @@ class FluxDepSweepCfg(ConfigBase):
 
 
 class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
+    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxDepModuleCfg
     # Field(...) makes dev required in this subclass, overriding the Optional
     # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).

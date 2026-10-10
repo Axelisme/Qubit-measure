@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -53,6 +54,7 @@ class OneToneFluxSweepCfg(ConfigBase):
 
 
 class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
+    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: OneToneFluxModuleCfg
     # Field(...) makes dev required in this subclass, overriding the Optional
     # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
