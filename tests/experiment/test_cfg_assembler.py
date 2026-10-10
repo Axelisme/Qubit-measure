@@ -548,13 +548,20 @@ def test_make_cfg_preserves_role_names_without_hardware_reads(
     device = FakeDevice()
     manager.register_device("flux_source", device)
 
-    def unreadable() -> FakeDeviceInfo:
-        raise OSError("Cfg assembly must not read hardware")
+    info = device.get_info()
+    reads: list[str] = []
 
-    monkeypatch.setattr(device, "get_info", unreadable)
+    def recording_info() -> FakeDeviceInfo:
+        reads.append("flux_source")
+        return info
+
+    monkeypatch.setattr(device, "get_info", recording_info)
     env = CfgEnv(md=MetaDict(), ml=_library(), device_manager=manager)
+    make_cfg({}, _DeviceOnlyCfg, env)
+    assert reads == []
     raw: dict[str, ExperimentCfgValue] = {"dev": {"flux_dev": "flux_source"}}
     cfg = make_cfg(raw, _DeviceOnlyCfg, env)
+    assert reads == []
     assert cfg.dev == {"flux_dev": "flux_source"}
     assert cfg.model_dump(mode="json")["dev"] == {"flux_dev": "flux_source"}
     assert raw == {"dev": {"flux_dev": "flux_source"}}
