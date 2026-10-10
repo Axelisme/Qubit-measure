@@ -8,6 +8,7 @@ from time import perf_counter
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from pydantic import ValidationError
 from zcu_tools.datafile import SoftwareProvenance, load_run_data
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import (
@@ -33,7 +34,7 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainExp
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.workflows.calibration import Calibrated, CalibrationTunables
-from zcu_lab.workflows.t1 import T1Tunables, t1_fluxdep
+from zcu_lab.workflows.t1 import T1Plan, T1Tunables, t1_fluxdep
 
 from ._sim_inputs import Inputs, make_plan, make_snapshot, seed_from_inputs
 
@@ -44,6 +45,7 @@ def start_t1(
     tun: T1Tunables,
     devices: RecordingDevices,
     plots: Plots,
+    *, plan: T1Plan | None = None,
 ) -> Engine[Calibrated]:
     """Start the shipped declaration with real acquisitions and isolated offline ports."""
     engine = Engine(
@@ -59,7 +61,7 @@ def start_t1(
     )
     engine.start(
         t1_fluxdep,
-        plan=make_plan(inputs),
+        plan=make_plan(inputs) if plan is None else plan,
         tunables=tun,
         paths=RunPaths(root / "metadata", root / "data"),
         identity=RunIdentity(
@@ -132,6 +134,31 @@ def test_native_t1_checks_ports_before_hardware_effects(
     assert len(plots) == 0
     assert engine.records("workflow") == ()
     assert not tuple(paths.data_root.glob("iter/*/runs/*.h5"))
+
+
+@pytest.mark.parametrize("unit", ["A", "V", "native", None, "mA"])
+def test_native_t1_requires_flux_unit_and_forwards_it_before_acquisition(
+    inputs: Inputs, tmp_path: Path, unit: str | None
+) -> None:
+    data = make_plan(inputs).model_dump(mode="python")
+    data.pop("flux_unit", None)
+    if unit is not None:
+        data["flux_unit"] = unit
+    if unit not in ("A", "V", "native"):
+        with pytest.raises(ValidationError, match="flux_unit"):
+            T1Plan.model_validate(data)
+        return
+    plan = T1Plan.model_validate(data)
+    devices, plots = RecordingDevices(), Plots(NonPresentingHost())
+    engine = start_t1(inputs, tmp_path, tunables(), devices, plots, plan=plan)
+    devices.on_set = lambda _signal: engine.pause("workflow")
+    status = engine.execute("workflow")
+    assert status.lifecycle == "paused", status.reason
+    assert devices.values == [("flux", 1.0)]
+    assert devices.units == [unit]
+    assert devices.signals[0].is_set()
+    assert engine.records("workflow") == ()
+    assert not tuple((tmp_path / "data").glob("iter/*/runs/*"))
 
 
 def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
