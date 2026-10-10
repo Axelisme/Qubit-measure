@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-07，Notebook stop 保留可存的部分數據
+**Last updated:** 2026-10-10，Notebook accept 共用逐項寫回
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -28,9 +28,9 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
 
-`SavedRun.accept(values, kind=..., analysis_params=...)` 接受普通點分路徑的工作單位 JSON 值，可用 `(value, stderr)` 帶有限非負的誤差。Role 首段沿保存時固定的映射展開。它先追加同條目的 typed accepted 事件，再由原 bound point 的單次 edit 寫入值與 provenance，成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。
+`SavedRun.accept(parameter=..., module=..., waveform=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, stderr)` 帶有限非負的誤差。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空；目前傳入 samples 明確拒絕，樣本接線由後續切片完成。Role 首段沿保存時固定的映射展開，provenance kind 自動使用該 run 的實驗名稱。
 
-Notebook 不走 GUI WritebackService，也不做 append 前候選驗證。Ledger、point schema、commit 與 I/O 錯誤直接傳播。Point 寫入失敗可留下未引用事件，不提供失敗收據、retry 或恢復流程。
+流程先追加一筆 typed accepted 事件，再依 parameter → module → waveform 及各 mapping 的迭代順序逐項提交。第一個錯誤直接傳播並停止後項，已成功前項及事件保留，不提供跨項回復、retry 或恢復流程。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI WritebackService 尚未改接此流程。
 
 ## 工作家族
 
