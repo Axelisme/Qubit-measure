@@ -299,7 +299,7 @@ class ContextService:
                 )
             self._setup.add_component(name, kind=kind, **fields)
             return
-        parameters = self.read_context()
+        parameters = self._published_parameters()
         if isinstance(parameters.target, EntryDraft):
             document = self._entry.updated_component(
                 parameters.document(), name, kind, fields
@@ -334,12 +334,20 @@ class ContextService:
         with self._setup.edit() as draft:
             draft.set(path, value)
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        """Capture published point/library on the owner sequence without I/O.
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Capture published point/library/storage and all current alias rows.
 
-        roles=None allows direct component/general paths only. Supplied names
-        stay fixed; missing/wrong-kind destinations raise RoleResolutionError.
-        EMPTY raises FailedPreconditionError(no_context). Necessary source
+        aliases optionally maps alias names to temporary concrete component
+        names. Overrides retain dependent authored links and change only this
+        capture, never global rows, versions, publication or selection. Invalid
+        identifiers raise InvalidInputError(alias_invalid). $alias.path reads
+        resolve lazily without consumer declarations or kind checks; missing or
+        unbound aliases raise RoleResolutionError naming the alias, with no
+        concrete-name fallback. Bare concrete paths remain independent.
+        The capture never follows later source or alias edits and performs no
+        I/O. EMPTY raises FailedPreconditionError(no_context). Necessary source
         faults raise ContextSourceUnavailableError, never returning old values.
         """
         self._owner.assert_owner()
@@ -348,14 +356,10 @@ class ContextService:
             raise FailedPreconditionError(
                 "No parameter context is installed", reason_code="no_context"
             )
-        return ParameterContext(
-            point=parameters.document(),
-            library=parameters.library,
-            target=parameters.target,
-            roles=roles,
-            source_faults=parameters.source_faults,
-            storage=parameters.storage,
-        )
+        table = self._aliases
+        for alias, component in (aliases or {}).items():
+            table = table.with_override(alias, component)
+        return parameters.bind_aliases(table.rows, {})
 
     def get_alias_rows(self) -> tuple[AliasRow, ...]:
         """Read immutable authored global rows without expanding links or I/O."""
@@ -440,7 +444,14 @@ class ContextService:
         self._owner.assert_owner()
         entry = self._require_write_target(target)
         if isinstance(target, EntryDraft):
-            return self.read_context(roles=roles)
+            parameters = self._published_parameters()
+            return ParameterContext(
+                point=parameters.document(),
+                library=parameters.library,
+                target=target,
+                roles=roles,
+                storage=parameters.storage,
+            )
         point = entry.use_point(target.point)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(target.point, assets=assets)

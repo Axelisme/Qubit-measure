@@ -124,7 +124,9 @@ class LoadService:
         )
         # Native history owns aliases; Save needs only the Load-time entry capability.
         storage = (
-            None if request.parameters is None else self._context.read_context().storage
+            None
+            if request.parameters is None
+            else self._context.read_context().bind_aliases((), {}).storage
         )
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
