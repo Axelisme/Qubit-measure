@@ -539,3 +539,34 @@ def test_named_multi_sweep_is_not_single_sweep_normalized() -> None:
     )
     np.testing.assert_array_equal(cfg.sweep.gain, [0.1, 0.2])
     np.testing.assert_array_equal(cfg.sweep.delay, [1.0, 2.0])
+
+
+def test_make_cfg_preserves_role_names_without_hardware_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = DeviceManager()
+    device = FakeDevice()
+    manager.register_device("flux_source", device)
+
+    def unreadable() -> FakeDeviceInfo:
+        raise OSError("Cfg assembly must not read hardware")
+
+    monkeypatch.setattr(device, "get_info", unreadable)
+    env = CfgEnv(md=MetaDict(), ml=_library(), device_manager=manager)
+    raw: dict[str, ExperimentCfgValue] = {"dev": {"flux_dev": "flux_source"}}
+    cfg = make_cfg(raw, _DeviceOnlyCfg, env)
+    assert cfg.dev == {"flux_dev": "flux_source"}
+    assert cfg.model_dump(mode="json")["dev"] == {"flux_dev": "flux_source"}
+    assert raw == {"dev": {"flux_dev": "flux_source"}}
+    assert device.get_value() == 0.0
+    assert device.get_output() == "off"
+
+
+def test_make_cfg_without_roles_does_not_inject_connected_settings() -> None:
+    manager = DeviceManager()
+    device = FakeDevice()
+    manager.register_device("unrelated", device)
+    env = CfgEnv(md=MetaDict(), ml=_library(), device_manager=manager)
+    cfg = make_cfg({}, _DeviceOnlyCfg, env)
+    assert cfg.dev is None
+    assert device.get_value() == 0.0

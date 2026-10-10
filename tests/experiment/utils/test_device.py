@@ -204,3 +204,18 @@ def test_output_helper_changes_only_output() -> None:
     assert device.get_info() == before.with_updates(output="on")
     helpers.set_output(device, "off")
     assert device.get_info() == before
+
+
+def test_run_device_names_validate_entire_mapping_without_writes() -> None:
+    first = FakeDevice()
+    second = FakeDevice()
+    drivers = {"first": first, "second": second}
+    with pytest.raises(ValueError, match="missing"):
+        helpers.validate_device_names(
+            {"flux_dev": "first", "rf_dev": "missing"}, drivers
+        )
+    assert first.get_value() == second.get_value() == 0.0
+    assert first.get_output() == second.get_output() == "off"
+    helpers.validate_device_names({"flux_dev": "first"}, drivers)
+    helpers.validate_device_names(None, {})
+    assert first.get_value() == second.get_value() == 0.0
