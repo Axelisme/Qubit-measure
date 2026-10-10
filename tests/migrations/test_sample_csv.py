@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.sample_table import LegacyDeviceValueUnit
 
 from migrations import sample_csv
 
@@ -62,7 +63,7 @@ def test_v2_conversion_renames_measurements_preserves_source_and_appends(
 def test_legacy_conversion_requires_explicit_units(
     tmp_path: Path,
     entry: ResultEntry,
-    source_unit: str,
+    source_unit: LegacyDeviceValueUnit,
     expected_value: float,
     expected_unit: str,
 ) -> None:
