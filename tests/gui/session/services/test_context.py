@@ -31,7 +31,6 @@ from zcu_tools.resources.entry import (
     ResultEntry,
     RoleResolutionError,
     RoleSpec,
-    source_path,
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 

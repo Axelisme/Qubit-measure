@@ -117,6 +117,9 @@ def test_bound_resonator_creates_original_readout_with_adc_channel(
     session: TemplateSession,
 ) -> None:
     ctrl = session.controller
+    ctrl.context_control.set_parameter(
+        ctrl.read_context().target, "R1.ext.time_of_fly", 0.5
+    )
     try:
         ctrl.create_from_template("module", "readout", "R1.readout.rf")
     except InvalidInputError as error:
