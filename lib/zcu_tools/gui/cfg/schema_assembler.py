@@ -194,19 +194,8 @@ class CfgSchemaAssembler:
 
 def _wrap_default(spec: CfgNodeSpec, default: object) -> CfgNodeValue | None:
     match spec:
-        case SweepSpec():
-            if not isinstance(default, SweepValue):
-                raise TypeError(
-                    f"SweepSpec default must be SweepValue, got {type(default).__name__}"
-                )
-            return default
-        case CenteredSweepSpec():
-            if not isinstance(default, CenteredSweepValue):
-                raise TypeError(
-                    "CenteredSweepSpec default must be CenteredSweepValue, "
-                    f"got {type(default).__name__}"
-                )
-            return default
+        case SweepSpec() | CenteredSweepSpec():
+            return _wrap_sweep_default(spec, default)
         case ScalarSpec():
             return (
                 default
@@ -216,14 +205,7 @@ def _wrap_default(spec: CfgNodeSpec, default: object) -> CfgNodeValue | None:
         case LiteralSpec():
             return default if isinstance(default, DirectValue) else DirectValue(default)
         case ReferenceSpec():
-            if default is None and spec.optional:
-                return None
-            if not isinstance(default, ReferenceValue):
-                raise TypeError(
-                    "ReferenceSpec default must be ReferenceValue, "
-                    f"got {type(default).__name__}"
-                )
-            return default
+            return _wrap_reference_default(spec, default)
         case CfgSectionSpec():
             if not isinstance(default, CfgSectionValue):
                 raise TypeError(
@@ -232,23 +214,60 @@ def _wrap_default(spec: CfgNodeSpec, default: object) -> CfgNodeValue | None:
                 )
             return default
         case _:
-            if default is None:
-                return None
-            if not isinstance(
-                default,
-                (
-                    CenteredSweepValue,
-                    CfgSectionValue,
-                    DirectValue,
-                    EvalValue,
-                    ReferenceValue,
-                    SweepValue,
-                ),
-            ):
-                raise TypeError(
-                    f"unsupported default {type(default).__name__} for {type(spec).__name__}"
-                )
-            return default
+            return _wrap_other_default(spec, default)
+
+
+def _wrap_sweep_default(
+    spec: SweepSpec | CenteredSweepSpec, default: object
+) -> SweepValue | CenteredSweepValue:
+    """Require the range carrier matching the declared sweep family."""
+    if isinstance(spec, SweepSpec):
+        if not isinstance(default, SweepValue):
+            raise TypeError(
+                f"SweepSpec default must be SweepValue, got {type(default).__name__}"
+            )
+        return default
+    if not isinstance(default, CenteredSweepValue):
+        raise TypeError(
+            "CenteredSweepSpec default must be CenteredSweepValue, "
+            f"got {type(default).__name__}"
+        )
+    return default
+
+
+def _wrap_reference_default(
+    spec: ReferenceSpec, default: object
+) -> ReferenceValue | None:
+    """Keep disabled optional references bare; require a carrier otherwise."""
+    if default is None and spec.optional:
+        return None
+    if not isinstance(default, ReferenceValue):
+        raise TypeError(
+            "ReferenceSpec default must be ReferenceValue, "
+            f"got {type(default).__name__}"
+        )
+    return default
+
+
+def _wrap_other_default(spec: CfgNodeSpec, default: object) -> CfgNodeValue | None:
+    """Accept only existing value carriers for an unrecognized spec family."""
+    if default is None:
+        return None
+    if not isinstance(
+        default,
+        (
+            CenteredSweepValue,
+            CfgSectionValue,
+            DirectValue,
+            EvalValue,
+            ReferenceValue,
+            SweepValue,
+        ),
+    ):
+        raise TypeError(
+            f"unsupported default {type(default).__name__} for {type(spec).__name__}"
+        )
+    return default
 
 
 def _ensure_parent(
