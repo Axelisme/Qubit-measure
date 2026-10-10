@@ -31,7 +31,12 @@ from .schema import (
     SetupDocument,
     is_forward_minor,
 )
-from .views import SetupView, add_component_to_draft, prepare_point_update
+from .views import (
+    SetupView,
+    add_component_to_draft,
+    prepare_point_update,
+    validate_view_components,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary, ModuleLibraryDocument
@@ -97,6 +102,7 @@ class ResultEntry:
         )
 
     def _validate_setup(self, document: SetupDocument) -> None:
+        validate_view_components(document, source=self._result_path / "setup.yaml")
         if self._entry_id is None:
             self._entry_id = document.general.entry_id
         elif document.general.entry_id != self._entry_id:
@@ -502,6 +508,7 @@ class ResultEntry:
             EntryPointDocument,
             format=PARAMETER_FORMAT,
             supported_version=PARAMETER_VERSION,
+            validate=lambda document: validate_view_components(document, source=source),
         )
 
     @classmethod
