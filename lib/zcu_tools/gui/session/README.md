@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-10，公開 alias-aware context capture
+**Last updated:** 2026-10-10，固定 capture 的逐列 alias 解析投影
 
 # gui/session/ — 量測 session core
 
@@ -15,6 +15,7 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 
 - **Entry 與 point** 的持久資源由 [`resources.entry`](../../resources/entry/README.md) 管理，module library 由 [`resources.context`](../../resources/context/README.md) 管理。Session 不重建文件版面，也不在清除選取時刪除資源。
 - **ParameterContext** 是隔離的 point/library/storage 投影，`EntryDraft` 與 `SavedPoint` 標識來源。`bind_aliases` 固定當次有序 rows 與 consumer kind declarations。`$alias.path` 只沿這份表解析，bare concrete paths 使用獨立 namespace。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，包括 adapter 未宣告的自訂 alias；空列略過，consumer declarations 只限制其列的 kind。
+- **Alias 瀏覽投影** 使用 `ParameterContext.resolved_aliases()`，回傳有序 `ResolvedAliasRow(alias, value, resolved, error)`。它保留 authored softlinks，對固定 point 使用既有 resolver，不沿用 consumer kind 限制。只有單列 `RoleResolutionError` 變成 resolved=None 與 error；source/readability 失敗仍拒絕整個讀取，不從 live 表或檔案补值。
 - **全域 alias 表** 由 `ContextService` 持有，只留在 session memory。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列，讀取才解析元件和 kind。App composition 宣告初值，第一份非空元件 snapshot 以 registry 的唯一候選填 primary row。此初值只初始化一次；明確提交表後不再覆蓋。`set_alias_rows` 安裝後才發布變更 fact。公開 `read_context(aliases=None)` 每次固定 point/library/storage 與全表，GUI 不要求 consumer declarations 或 kind 檢查。`aliases={"qubit": "Q2"}` 只覆寫該次 capture 的具名列，保留 dependent authored links，不改全域 rows、版本或 selection。EMPTY 沿 `no_context` 失敗，缺或未綁定的 `$alias` 在讀取時指名報錯。歷史 `read_target(target, roles=...)` 使用已固定的 names，不展開目前全表。既有 declaration-based `read_alias_context` 的 caller 遷移尚未完成；Notebook 的 role resolver 與 via 保留原契約。
 - **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，DRAFT／ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC、predictor 與 cached value sources 保持各自 owner。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。

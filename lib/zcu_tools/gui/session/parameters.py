@@ -10,7 +10,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.gui.session.aliases import AliasRow, AliasTable
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable, ResolvedAliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
     SavedPoint,
@@ -170,6 +170,28 @@ class ParameterContext:
     def aliases(self) -> tuple[AliasRow, ...]:
         """Return fixed authored alias rows; empty means none were captured."""
         return () if self._aliases is None else self._aliases.rows
+
+    def resolved_aliases(self) -> tuple[ResolvedAliasRow, ...]:
+        """Project every authored row against this capture's fixed point.
+
+        Preserve order and softlink values. No consumer kind declaration limits
+        this projection. A RoleResolutionError becomes a row with resolved=None
+        and its diagnostic in error; other rows remain readable. Source faults
+        raise ContextSourceUnavailableError for the whole read, even with no rows.
+        Reads neither live aliases nor files and never materializes assets.
+        """
+        self._ensure_readable()
+        if self._aliases is None:
+            return ()
+        rows: list[ResolvedAliasRow] = []
+        for row in self._aliases.rows:
+            try:
+                name = self._aliases.resolve(row.alias, self._point)
+            except RoleResolutionError as exc:
+                rows.append(ResolvedAliasRow(row.alias, row.value, None, str(exc)))
+            else:
+                rows.append(ResolvedAliasRow(row.alias, row.value, name))
+        return tuple(rows)
 
     @property
     def storage(self) -> PointStorageBinding | None:

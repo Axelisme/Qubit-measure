@@ -10,6 +10,36 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 from ._support import make_client
 
 
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"summaries": True},
+        {"summaries": False},
+        {"path": "aliases.0.resolved", "summaries": True},
+        {"path": ""},
+    ],
+)
+def test_context_browse_forwarding_preserves_one_request_and_reply(
+    tmp_path: Path,
+    params: dict[str, object],
+) -> None:
+    expected = {
+        "target": {"kind": "entry_draft", "entry_id": "entry"},
+        "aliases": [{"alias": "drive", "value": "Q1", "resolved": "Q1"}],
+        "path": "aliases.0.resolved",
+        "value": "Q1",
+    }
+    client = make_client(tmp_path, lambda method, params: expected)
+    client.context.session.ensure_connected()
+    client.transport.sent.clear()
+    assert (
+        client.call("rpc_call", {"method": "context.snapshot", "params": params})
+        == expected
+    )
+    assert client.transport.sent == [("context.snapshot", params)]
+
+
 def test_rpc_preserves_reply_and_sends_one_request(tmp_path: Path) -> None:
     expected = {"loaded": True, "cfg_backfill": "not_applied"}
     client = make_client(tmp_path, lambda method, params: expected)

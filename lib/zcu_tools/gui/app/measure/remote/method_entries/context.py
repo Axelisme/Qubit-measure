@@ -56,15 +56,28 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:h_context_snapshot",
         MethodSpec(
             15.0,
-            "Explicit full read of the published parameter context: {target, point, "
-            "library}. target is the existing entry_draft or saved_point locator. "
+            "Read the published parameter context: {target, point, library, aliases}. "
+            "aliases contains ordered {alias, value, resolved} rows; failed rows have "
+            "resolved=null and error. All come from one fixed capture without kind checks. "
+            "target is the existing entry_draft or saved_point locator. "
             "point and library are complete working-unit native documents, including "
             "components and provenance; library contains Specs without asset materialization. "
             "Complex numbers use {__complex__: [real, imag]}. May return large or sensitive data; "
-            "use rpc_call only when you need to re-snapshot the whole context "
-            "before a guarded mutation. Unsupported values fail the entire read.",
+            "summaries=true preserves dict trees and scalars and describes array/list leaves. "
+            "path selects a complete subtree, takes priority over summaries, and returns "
+            "{target, aliases, path, value}. Dotted paths start with target/point/library/aliases; "
+            "list indices must be canonical nonnegative decimals. Invalid paths name the first bad segment. "
+            "Only omitting both parameters establishes context observation before guarded writes; "
+            "explicit summaries=false or path='' remains partial and does not refresh the guard. "
+            "Unsupported values fail the entire read in every mode.",
+            (
+                ParamSpec("summaries", JsonType.BOOLEAN, required=False, default=False),
+                optional_string("path"),
+            ),
         ),
-        agent=AgentMethodPolicy(reveals=("context",)),
+        agent=AgentMethodPolicy(
+            reveals=("context",), reveals_without=("summaries", "path")
+        ),
     ),
     method_entry(
         "value.list",
