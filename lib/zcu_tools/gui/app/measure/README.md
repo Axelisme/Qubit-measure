@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，Run 前 device snapshot 與實驗 helper 分工
+**Last updated:** 2026-10-10，device 使用時查名與 GUI flux unit 初始值
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -388,10 +388,12 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    lease and before adapter.run, the Run framework reads get_info once from every
    connected device. Any read failure rejects Run without entering the adapter/core,
    writing settings or falling back to cache. No devices produce an empty snapshot.
-   Run admission validates every cfg.dev name. RunService creates a fresh RunContext
-   with borrowed drivers, operation plots and one StopSignal, without instrument setters.
+   Run does not precheck whether cfg.dev names exist. Cfg format and required unit
+   validation remain. RunService creates a fresh RunContext with borrowed drivers,
+   operation plots and one StopSignal, without instrument setters.
    The adapter passes this context to the core. Core selects context.devices[cfg.dev[role]]
-   and uses experiment helpers; flux cfg requires flux_unit. Only progress remains ambient.
+   when using a device; a missing name raises an error naming that device.
+   Core uses experiment helpers; flux cfg requires flux_unit. Only progress remains ambient.
    Driver lookup does not refresh accepted cfg. RunMetadata.device_snapshot retains the
    pre-experiment settings even after a sweep. Native Save stores them at `/device`,
    not in tab preferences, and does not read hardware. A failed Run with no data
@@ -522,6 +524,10 @@ remote tab views, and captured sessions all use the same tab order as the Qt tab
 bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config Model
+
+GUI flux adapter 表單的 `flux_unit` 是 A／V／native 三選一，初始 A，使用者可改。
+這是表單初始值，不從 cached DeviceInfo 推測。Core 與 Notebook cfg 仍必填
+`flux_unit`，不提供隱含 default，cfg 格式與 unit 驗證不變。
 
 Measure Config uses `ResourceCfgFormWidget` and a State-owned cfg resource.
 The form submits every input change at once, so it always shows the published
@@ -739,6 +745,9 @@ use `SetupControlPort` and explicit entry names; there is no project identity ma
 short waits and live catalog. The GUI remote adapter owns per-connection seen
 and operation outcomes; MCP only maps opaque agent handles to GUI operation IDs.
 New GUI RPC methods that should be agent-accessible need a live catalog policy and tests.
+
+MCP `RecipeTab.use_flux_device` 在既有 name／unit 驗證成功後，把 resolved unit
+寫入實驗 cfg.flux_unit。Unit 判定、recipe policy 與 binding capture 保持不變。
 
 ## Dialog Rules
 
