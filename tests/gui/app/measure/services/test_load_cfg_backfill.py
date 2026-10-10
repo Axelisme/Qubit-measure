@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.datafile import RunMetadata
-from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
@@ -185,7 +184,7 @@ def test_missing_device_option_without_other_fields_keeps_cfg(
 ) -> None:
     app = device_app
     app.adapter.load.return_value = make_record(
-        ExpCfgModel(dev={"stale": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
+        ExpCfgModel(dev={"jpa_rf_dev": "stale"})
     )
     before = app.cfg.observe()
     outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
@@ -199,9 +198,7 @@ def test_missing_device_option_preserves_selector_when_other_fields_apply(
     device_app: LoadApp,
 ) -> None:
     app = device_app
-    app.adapter.load.return_value = make_record(
-        RuntimeCfg(dev={"stale": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
-    )
+    app.adapter.load.return_value = make_record(RuntimeCfg(dev={"jpa_rf_dev": "stale"}))
     before = app.cfg.observe()
     outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
     assert outcome.cfg_backfill == "applied"
@@ -216,9 +213,7 @@ def test_candidate_device_missing_from_fixed_source_rejects_complete_backfill(
 ) -> None:
     app = device_app
     app.options.return_value = ["stable", "new"]
-    app.adapter.load.return_value = make_record(
-        RuntimeCfg(dev={"new": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
-    )
+    app.adapter.load.return_value = make_record(RuntimeCfg(dev={"jpa_rf_dev": "new"}))
     before = app.cfg.observe()
     outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
     assert outcome.cfg_backfill == "not_applied"
@@ -242,9 +237,7 @@ def test_option_failure_keeps_entire_cfg_and_loaded_result(
     device_app: LoadApp, response
 ) -> None:
     app = device_app
-    app.adapter.load.return_value = make_record(
-        RuntimeCfg(dev={"new": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
-    )
+    app.adapter.load.return_value = make_record(RuntimeCfg(dev={"jpa_rf_dev": "new"}))
     if isinstance(response, Exception):
         app.options.side_effect = response
     else:
