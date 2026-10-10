@@ -33,35 +33,15 @@ def is_forward_minor(document: Mapping[str, YamlValue], *, source: Path) -> bool
     return version.minor > PARAMETER_VERSION.minor
 
 
-_VIEW_NAMES = frozenset(
-    {
-        "description",
-        "edit",
-        "refresh",
-        "add_component",
-        "general",
-        "meta",
-        "set",
-        "resolve",
-        "components",
-        "entry_id",
-        "created_at",
-        "kind",
-        "wiring",
-        "ext",
-    }
-)
-
-
 def validate_component_name(name: str, *, source: Path | None = None) -> None:
-    if (
-        not name.isidentifier()
-        or name.startswith("_")
-        or keyword.iskeyword(name)
-        or name in _VIEW_NAMES
-    ):
+    """Require a public Python identifier, excluding keywords and leading underscores.
+
+    source is the optional document path for diagnostics. Invalid names raise
+    ValueError. View namespace collisions belong to view binding, not schema.
+    """
+    if not name.isidentifier() or name.startswith("_") or keyword.iskeyword(name):
         raise ValueError(
-            f"{source}: invalid component name {name!r}; expected a public identifier that does not shadow a view"
+            f"{source}: invalid component name {name!r}; expected a public identifier"
         )
 
 
@@ -216,8 +196,9 @@ class PointDocument(_ParameterDocument):
     format and format_version are the parameter-container header, initially 1.0.
     The store validates header compatibility. Values remain in working units;
     general is point-local.
-    components maps public names to original registered ComponentSchema models,
-    including kind; each original model owns validation. No value or source falls back to setup.
+    components maps public identifiers to original registered ComponentSchema models,
+    including kind; each original model owns validation. Schema loading does not
+    reserve view members; binding a view checks those namespace collisions. No value or source falls back to setup.
     provenance maps logical component-field paths to YAML source metadata.
     Component models choose extra policy. Forward-minor unknown fields remain
     on disk; only extra=allow models expose them in the typed view.
