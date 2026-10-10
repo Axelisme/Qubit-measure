@@ -18,9 +18,59 @@ from zcu_tools.notebook import NotebookAdapter, NotebookExperiment
 from zcu_tools.notebook import adapter as adapter_module
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
+from tests.device._snapshot_fakes import SnapshotDevice
+from tests.experiment._saving_support import SavingCfg
+from tests.experiment._snapshot_support import SnapshotCore
 from tests.notebook._adapter_fakes import Cfg as _Cfg
 from tests.notebook._adapter_fakes import Options as _Options
 from tests.notebook._adapter_fakes import RecordingCore as _Core
+
+
+def test_run_captures_devices_before_core_and_freezes_evidence() -> None:
+    flux, unused = SnapshotDevice(), SnapshotDevice()
+    flux.set_value(0.25)
+    unused.set_value(0.6)
+    flux.events.clear()
+    unused.events.clear()
+    manager = DeviceManager()
+    manager.register_device("flux", flux)
+    manager.register_device("unused", unused)
+    adapter = NotebookAdapter(
+        soc=object(), soccfg=object(), device_manager=manager, host=NonPresentingHost()
+    )(SnapshotCore())
+    record = adapter.run(SavingCfg())
+    assert flux.events == ["read", "write"]
+    assert unused.events == ["read"]
+    evidence = adapter.acquisition_for(record)
+    assert evidence.device_snapshot is not None
+    assert evidence.device_snapshot["flux"]["value"] == 0.25
+    assert evidence.device_snapshot["unused"]["value"] == 0.6
+    flux.set_value(0.9)
+    evidence.device_snapshot["flux"]["value"] = 9.0
+    retained = adapter.acquisition_for(record)
+    assert retained.device_snapshot is not None
+    assert retained.device_snapshot["flux"]["value"] == 0.25
+    assert flux.events.count("read") == 1
+
+
+def test_device_read_failure_retains_previous_notebook_acquisition() -> None:
+    flux = SnapshotDevice()
+    manager = DeviceManager()
+    manager.register_device("flux", flux)
+    adapter = NotebookAdapter(
+        soc=object(), soccfg=object(), device_manager=manager, host=NonPresentingHost()
+    )(SnapshotCore())
+    previous = adapter.run(SavingCfg())
+    evidence = adapter.acquisition_for(previous)
+    flux.events.clear()
+    failure = OSError("snapshot unavailable")
+    flux.read_failure = failure
+    with pytest.raises(OSError, match="snapshot unavailable") as caught:
+        adapter.run(SavingCfg())
+    assert caught.value is failure
+    assert flux.events == ["read"]
+    assert adapter.last_run is previous
+    assert adapter.acquisition_for(previous) == evidence
 
 
 class _Host(NonPresentingHost):

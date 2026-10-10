@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal, Self
 from unittest.mock import Mock
 
+import h5py
 import numpy as np
 import pytest
 from zcu_tools.datafile import (
@@ -42,7 +43,9 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.schema import PointDocument
 
 from tests._native_support import native_metadata
+from tests.device._snapshot_fakes import SnapshotDevice
 from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
+from tests.experiment._snapshot_support import SnapshotCore
 from tests.notebook import _interrupt_fakes
 from tests.notebook._interrupt_fakes import InterruptedCore
 from tests.resources.entry.fakes import Driver, registry_state, restore_registry
@@ -113,6 +116,57 @@ def point(tmp_path: Path) -> PointView:
         database_root=tmp_path / "Database",
     )
     return entry.new_point("sweet", description="save-time context")
+
+
+def test_saved_run_keeps_its_device_snapshot_across_later_acquisitions(
+    point: PointView,
+) -> None:
+    manager = DeviceManager()
+    flux = SnapshotDevice()
+    flux.set_value(0.25)
+    flux.events.clear()
+    manager.register_device("flux", flux)
+    exp = NotebookAdapter(
+        soc=object(), soccfg=object(), device_manager=manager, host=NonPresentingHost()
+    )(SnapshotCore())
+    first = exp.run(SavingCfg())
+    assert flux.events == ["read", "write"]
+    saved = exp.save_run(point, source=first)
+    flux.set_value(0.9)
+    second = exp.run(SavingCfg())
+    second_evidence = exp.acquisition_for(second)
+    assert second_evidence.device_snapshot is not None
+    assert second_evidence.device_snapshot["flux"]["value"] == 0.9
+    flux.read_failure = OSError("Save must not read hardware")
+    read_count = flux.events.count("read")
+    report = saved.save()
+    path = next(
+        item.output.path for item in report.outputs if item.output.format == "native"
+    )
+    restored = load_run_data(path)
+    assert restored.metadata.device_snapshot is not None
+    assert restored.metadata.device_snapshot["flux"]["value"] == 0.25
+    with h5py.File(path, "r") as file:
+        dataset = file["device"]
+        assert isinstance(dataset, h5py.Dataset)
+        assert dataset.shape == ()
+        string = h5py.check_string_dtype(dataset.dtype)
+        assert string is not None and string.encoding == "utf-8"
+    assert flux.events.count("read") == read_count
+
+
+def test_saved_run_without_connected_devices_writes_empty_snapshot(
+    point: PointView,
+) -> None:
+    exp = experiment()
+    record = exp.run(SavingCfg())
+    saved = exp.save_run(point, source=record)
+    path = next(
+        item.output.path
+        for item in saved.report.outputs
+        if item.output.format == "native"
+    )
+    assert load_run_data(path).metadata.device_snapshot == {}
 
 
 def acquired_payload(ledger: RecordsLedger) -> AcquiredPayload:
