@@ -30,3 +30,30 @@ def test_fit_rabi_with_decay():
     assert freq_err >= 0
     assert pi_x_err >= 0
     assert pi2_x_err >= 0
+
+
+def test_fit_rabi_retains_parameter_tuple_shape_for_both_models():
+    xs = np.linspace(0, 6, 400)
+    for decay in (False, True):
+        expected_params = (
+            (0.2, 0.8, 0.5, 0.0, 10.0) if decay else (0.2, 0.8, 0.5, 0.0)
+        )
+        model = decaycos if decay else cosfunc
+        signals = model(xs, *expected_params)
+
+        pi_x, pi_x_err, pi2_x, pi2_x_err, freq, freq_err, fitted, fit_result = fit_rabi(
+            xs, signals, decay=decay, init_phase=0.0
+        )
+        params, covariance = fit_result
+
+        assert isinstance(params, tuple)
+        assert len(params) == (5 if decay else 4)
+        np.testing.assert_allclose(params, expected_params, rtol=1e-5, atol=1e-7)
+        assert covariance.shape == (len(params), len(params))
+        assert np.all(np.isfinite(covariance))
+        np.testing.assert_allclose(covariance, covariance.T, atol=1e-12)
+        np.testing.assert_allclose(fitted, signals, rtol=1e-5, atol=1e-7)
+        np.testing.assert_allclose((pi_x, pi2_x, freq), (1.0, 0.5, 0.5), atol=1e-6)
+        assert 0 <= pi_x_err < 1e-6
+        assert 0 <= pi2_x_err < 1e-6
+        assert 0 <= freq_err < 1e-6
