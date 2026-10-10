@@ -202,11 +202,11 @@ def test_prepare_t2_dephasing_data_default_keeps_nan_error_points(
             "dev_unit": ["A", "A"],
             "flux_int": [0.5, 0.5],
             "flux_period": [1.0, 1.0],
-            "Freq (MHz)": [350.0, 360.0],
-            "T1 (us)": [60.0, 61.0],
-            "T1err (us)": [0.5, 0.5],
-            "T2e (us)": [30.0, 25.0],
-            "T2e err (us)": [np.nan, 0.2],
+            "freq_mhz": [350.0, 360.0],
+            "t1_us": [60.0, 61.0],
+            "t1_err_us": [0.5, 0.5],
+            "t2e_us": [30.0, 25.0],
+            "t2e_err_us": [np.nan, 0.2],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -302,12 +302,12 @@ def test_t2e_and_t2r_rows_with_null_freq_reach_analysis() -> None:
             "flux": [0.5, np.nan, np.nan, 0.5, np.nan, np.nan],
             "flux_int": [np.nan, 0.5, np.nan, np.nan, 0.5, np.nan],
             "flux_period": [np.nan, 1.0, np.nan, np.nan, 1.0, np.nan],
-            "Freq (MHz)": [np.nan] * 6,
-            "T1 (us)": [60.0, 61.0, 62.0, 63.0, 64.0, 65.0],
-            "T1err (us)": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
-            "T2e (us)": [30.0, 28.0, 26.0, np.nan, np.nan, np.nan],
-            "T2e err (us)": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
-            "T2r (us)": [np.nan, np.nan, np.nan, 24.0, 22.0, 20.0],
+            "freq_mhz": [np.nan] * 6,
+            "t1_us": [60.0, 61.0, 62.0, 63.0, 64.0, 65.0],
+            "t1_err_us": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+            "t2e_us": [30.0, 28.0, 26.0, np.nan, np.nan, np.nan],
+            "t2e_err_us": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
+            "t2r_us": [np.nan, np.nan, np.nan, 24.0, 22.0, 20.0],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -372,7 +372,7 @@ def test_t2e_and_t2r_rows_with_null_freq_reach_analysis() -> None:
         assert coverage["n_row_frame"] == 1
         assert coverage["n_fallback_frame"] == 1
 
-    # Null Freq (MHz) rows keep raw coordinates, align into the window, and
+    # Null freq_mhz rows keep raw coordinates, align into the window, and
     # every one of them reaches a finite model f01 at its aligned flux.
     for coverage in (coverage_t2e, coverage_t2r):
         assert coverage["n_with_f01"] == 0
@@ -446,12 +446,12 @@ def test_duplicate_index_labels_keep_positional_row_identity() -> None:
             "flux": [0.5, np.nan, np.nan],
             "flux_int": [np.nan, 0.5, np.nan],
             "flux_period": [np.nan, 1.0, np.nan],
-            "Freq (MHz)": [np.nan] * 3,
-            "T1 (us)": [60.0, 61.0, 62.0],
-            "T1err (us)": [0.5, 0.5, 0.5],
-            "T2e (us)": [np.nan, 28.0, np.nan],
-            "T2e err (us)": [0.2, 0.2, 0.2],
-            "T2r (us)": [24.0, np.nan, np.nan],
+            "freq_mhz": [np.nan] * 3,
+            "t1_us": [60.0, 61.0, 62.0],
+            "t1_err_us": [0.5, 0.5, 0.5],
+            "t2e_us": [np.nan, 28.0, np.nan],
+            "t2e_err_us": [0.2, 0.2, 0.2],
+            "t2r_us": [24.0, np.nan, np.nan],
         },
         index=[7, 7, 8],
     )
@@ -507,11 +507,11 @@ def test_t2_calibration_reports_resolution_provenance() -> None:
             "flux": [0.5, np.nan, np.nan],
             "flux_int": [np.nan, 0.5, np.nan],
             "flux_period": [np.nan, 1.0, np.nan],
-            "Freq (MHz)": [350.0, 351.0, 352.0],
-            "T1 (us)": [60.0, 61.0, 62.0],
-            "T1err (us)": [0.5, 0.5, 0.5],
-            "T2e (us)": [30.0, 28.0, 26.0],
-            "T2e err (us)": [0.2, 0.2, 0.2],
+            "freq_mhz": [350.0, 351.0, 352.0],
+            "t1_us": [60.0, 61.0, 62.0],
+            "t1_err_us": [0.5, 0.5, 0.5],
+            "t2e_us": [30.0, 28.0, 26.0],
+            "t2e_err_us": [0.2, 0.2, 0.2],
         }
     )
     cal = calibrate_t2_flux(_synthetic_calibration(samples).context)
@@ -530,17 +530,17 @@ def test_t2_unresolved_flux_rows_fail_fast() -> None:
         {
             "dev_value": [0.0, 0.01],
             "dev_unit": ["V", "V"],
-            "Freq (MHz)": [np.nan, np.nan],
-            "T1 (us)": [60.0, 61.0],
-            "T1err (us)": [0.5, 0.5],
-            "T2e (us)": [30.0, 28.0],
-            "T2e err (us)": [0.2, 0.2],
+            "freq_mhz": [np.nan, np.nan],
+            "t1_us": [60.0, 61.0],
+            "t1_err_us": [0.5, 0.5],
+            "t2e_us": [30.0, 28.0],
+            "t2e_err_us": [0.2, 0.2],
         }
     )
     context = T2CurveContext(
         result_dir="/tmp/result",
         image_dir="/tmp/result/t2_curve",
-        samples_filename="samples.csv",
+        samples_filename="samples.jsonl",
         params=(3.4, 0.9, 0.6),
         flux_half=0.0,
         flux_int=0.5,
@@ -568,11 +568,11 @@ def test_t2_integer_equivalent_branches_align_to_same_flux(
             "flux": [0.5, np.nan],
             "flux_int": [np.nan, 0.5],
             "flux_period": [np.nan, 1.0],
-            "Freq (MHz)": [350.0, 351.0],
-            "T1 (us)": [60.0, 61.0],
-            "T1err (us)": [0.5, 0.5],
-            "T2e (us)": [30.0, 28.0],
-            "T2e err (us)": [0.2, 0.2],
+            "freq_mhz": [350.0, 351.0],
+            "t1_us": [60.0, 61.0],
+            "t1_err_us": [0.5, 0.5],
+            "t2e_us": [30.0, 28.0],
+            "t2e_err_us": [0.2, 0.2],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -649,11 +649,11 @@ def test_t2_explicit_rows_are_not_auto_corrected(
             "flux": [0.5, np.nan],
             "flux_int": [np.nan, 0.5],
             "flux_period": [np.nan, 1.0],
-            "Freq (MHz)": [350.0, 351.0],
-            "T1 (us)": [60.0, 61.0],
-            "T1err (us)": [0.5, 0.5],
-            "T2e (us)": [30.0, 28.0],
-            "T2e err (us)": [0.2, 0.2],
+            "freq_mhz": [350.0, 351.0],
+            "t1_us": [60.0, 61.0],
+            "t1_err_us": [0.5, 0.5],
+            "t2e_us": [30.0, 28.0],
+            "t2e_err_us": [0.2, 0.2],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -692,11 +692,11 @@ def test_t2_correction_disabled_preserves_raw_flux_and_reports_disabled(
             "flux": [0.5, np.nan],
             "flux_int": [np.nan, 0.5],
             "flux_period": [np.nan, 1.0],
-            "Freq (MHz)": [350.0, 351.0],
-            "T1 (us)": [60.0, 61.0],
-            "T1err (us)": [0.5, 0.5],
-            "T2e (us)": [30.0, 28.0],
-            "T2e err (us)": [0.2, 0.2],
+            "freq_mhz": [350.0, 351.0],
+            "t1_us": [60.0, 61.0],
+            "t1_err_us": [0.5, 0.5],
+            "t2e_us": [30.0, 28.0],
+            "t2e_err_us": [0.2, 0.2],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -830,7 +830,7 @@ def _synthetic_dephasing_data(
     context = T2CurveContext(
         result_dir="/tmp/result",
         image_dir="/tmp/result/t2_curve",
-        samples_filename="samples.csv",
+        samples_filename="samples.jsonl",
         params=(3.4, 0.9, 0.6),
         flux_half=0.5,
         flux_int=0.0,
@@ -913,7 +913,7 @@ def _synthetic_calibration(samples: pd.DataFrame) -> T2FluxCalibration:
     context = T2CurveContext(
         result_dir="/tmp/result",
         image_dir="/tmp/result/t2_curve",
-        samples_filename="samples.csv",
+        samples_filename="samples.jsonl",
         params=(3.4, 0.9, 0.6),
         flux_half=0.0,
         flux_int=0.5,

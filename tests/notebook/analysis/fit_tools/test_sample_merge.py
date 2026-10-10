@@ -43,7 +43,7 @@ def _target_frame(
     )
 
 
-def _write_v2_csv(
+def _write_v2_jsonl(
     path: Path,
     *,
     dev_values: np.ndarray,
@@ -75,7 +75,12 @@ def _write_v2_csv(
         )
     if measurements:
         frame.update(measurements)
-    pd.DataFrame(frame).to_csv(path, index=False)
+    data = pd.DataFrame(frame)
+    data["run_id"] = [f"run-{index}" for index in range(len(data))]
+    data["point"] = None
+    data["at"] = "2026-10-10T00:00:00Z"
+    data["source"] = "manual"
+    data.to_json(path, orient="records", lines=True)
     return path
 
 
@@ -173,8 +178,8 @@ def test_from_result_dir_requires_explicit_dev_unit(tmp_path: Path) -> None:
 
 def test_merge_requires_exactly_one_target_identity(tmp_path: Path) -> None:
     target_dir = _write_params(tmp_path / "target")
-    source_path = _write_v2_csv(
-        tmp_path / "samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "samples.jsonl",
         dev_values=np.array([1.0, 2.0]),
         dev_unit="A",
         flux=np.array([0.5, 0.55]),
@@ -197,14 +202,14 @@ def test_merge_explicit_flux_provenance_and_target_output(tmp_path: Path) -> Non
     target = _target_frame()
     fluxs = np.array([0.50, 0.55], dtype=np.float64)
     source_values = target.dev_value_from_flux(fluxs)
-    source_path = _write_v2_csv(
-        tmp_path / "source_samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "source_samples.jsonl",
         dev_values=np.asarray(source_values, dtype=np.float64),
         dev_unit="A",
         flux=fluxs,
         measurements={
-            "Freq (MHz)": [410.0, 430.0],
-            "T1 (us)": [80.0, 70.0],
+            "freq_mhz": [410.0, 430.0],
+            "t1_us": [80.0, 70.0],
             "T2E": [4.0, 5.0],
             "T2R": [2.0, 3.0],
             "date": ["2026-07-08", "2026-07-08"],
@@ -226,9 +231,9 @@ def test_merge_explicit_flux_provenance_and_target_output(tmp_path: Path) -> Non
     np.testing.assert_allclose(merged[FLUX_INT_COLUMN], target.flux_int)
     np.testing.assert_allclose(merged[FLUX_PERIOD_COLUMN], target.flux_period)
     # Caller-owned measurement columns pass through with their original names.
-    np.testing.assert_allclose(merged["T1 (us)"], [80.0, 70.0])
+    np.testing.assert_allclose(merged["t1_us"], [80.0, 70.0])
     np.testing.assert_allclose(merged["T2E"], [4.0, 5.0])
-    assert "T2e (us)" not in merged.columns
+    assert "t2e_us" not in merged.columns
     assert list(merged["date"]) == ["2026-07-08", "2026-07-08"]
 
     assert list(result.diagnostics["flux_source"]) == ["explicit", "explicit"]
@@ -253,13 +258,13 @@ def test_merge_row_frame_provenance(tmp_path: Path) -> None:
     source_values = np.asarray(
         source_frame.dev_value_from_flux(fluxs), dtype=np.float64
     )
-    source_path = _write_v2_csv(
-        tmp_path / "row_frame_samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "row_frame_samples.jsonl",
         dev_values=source_values,
         dev_unit="A",
         flux_int=source_frame.flux_int,
         flux_period=source_frame.flux_period,
-        measurements={"Freq (MHz)": [410.0, 430.0], "T1 (us)": [80.0, 70.0]},
+        measurements={"freq_mhz": [410.0, 430.0], "t1_us": [80.0, 70.0]},
     )
 
     result = merge_sample_sources(
@@ -288,11 +293,11 @@ def test_merge_fallback_frame_provenance(tmp_path: Path) -> None:
     fluxs = np.array([0.50, 0.55], dtype=np.float64)
     source_values = np.asarray(fallback.dev_value_from_flux(fluxs), dtype=np.float64)
     # Migrated rows: only dev_value / dev_unit, no flux or row frame.
-    source_path = _write_v2_csv(
-        tmp_path / "migrated_samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "migrated_samples.jsonl",
         dev_values=source_values,
         dev_unit="A",
-        measurements={"Freq (MHz)": [410.0, 430.0], "T1 (us)": [80.0, 70.0]},
+        measurements={"freq_mhz": [410.0, 430.0], "t1_us": [80.0, 70.0]},
     )
 
     result = merge_sample_sources(
@@ -319,8 +324,8 @@ def test_merge_fallback_frame_unit_mismatch_fails(tmp_path: Path) -> None:
         flux_period=0.0246,
         label="fallback_A",
     )
-    source_path = _write_v2_csv(
-        tmp_path / "voltage_migrated.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "voltage_migrated.jsonl",
         dev_values=np.array([0.0, 0.05]),
         dev_unit="V",
     )
@@ -334,8 +339,8 @@ def test_merge_fallback_frame_unit_mismatch_fails(tmp_path: Path) -> None:
 
 def test_merge_unresolved_rows_fail_with_indexes(tmp_path: Path) -> None:
     target = _target_frame()
-    source_path = _write_v2_csv(
-        tmp_path / "unresolved_samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "unresolved_samples.jsonl",
         dev_values=np.array([1.0, 2.0, 3.0]),
         dev_unit="A",
         flux=np.array([0.5, np.nan, np.nan]),
@@ -350,11 +355,11 @@ def test_merge_unresolved_rows_fail_with_indexes(tmp_path: Path) -> None:
 
 def test_merge_rejects_legacy_columns(tmp_path: Path) -> None:
     target = _target_frame()
-    legacy_path = _write_v2_csv(
-        tmp_path / "legacy.csv",
+    legacy_path = _write_v2_jsonl(
+        tmp_path / "legacy.jsonl",
         dev_values=np.array([1.0, 2.0]),
         dev_unit="A",
-        measurements={"calibrated mA": [1.0, 2.0], "Freq (MHz)": [410.0, 430.0]},
+        measurements={"calibrated mA": [1.0, 2.0], "freq_mhz": [410.0, 430.0]},
     )
     with pytest.raises(SampleTableV2Error, match="calibrated mA"):
         merge_sample_sources(
@@ -362,8 +367,8 @@ def test_merge_rejects_legacy_columns(tmp_path: Path) -> None:
             sources=(SampleSource(path=legacy_path),),
         )
 
-    flux_alias_path = _write_v2_csv(
-        tmp_path / "legacy_flux.csv",
+    flux_alias_path = _write_v2_jsonl(
+        tmp_path / "legacy_flux.jsonl",
         dev_values=np.array([1.0, 2.0]),
         dev_unit="A",
         measurements={"Flux": [0.5, 0.55]},
@@ -395,21 +400,21 @@ def test_merge_a_and_v_sources_into_one_target_frame(tmp_path: Path) -> None:
     v_fluxs = np.array([-0.40, 0.10], dtype=np.float64)
     a_values = np.asarray(a_frame.dev_value_from_flux(a_fluxs), dtype=np.float64)
     v_values = np.asarray(v_frame.dev_value_from_flux(v_fluxs), dtype=np.float64)
-    a_path = _write_v2_csv(
-        tmp_path / "a_source.csv",
+    a_path = _write_v2_jsonl(
+        tmp_path / "a_source.jsonl",
         dev_values=a_values,
         dev_unit="A",
         flux_int=a_frame.flux_int,
         flux_period=a_frame.flux_period,
-        measurements={"Freq (MHz)": [410.0, 430.0], "T1 (us)": [80.0, 70.0]},
+        measurements={"freq_mhz": [410.0, 430.0], "t1_us": [80.0, 70.0]},
     )
-    v_path = _write_v2_csv(
-        tmp_path / "v_source.csv",
+    v_path = _write_v2_jsonl(
+        tmp_path / "v_source.jsonl",
         dev_values=v_values,
         dev_unit="V",
         flux_int=v_frame.flux_int,
         flux_period=v_frame.flux_period,
-        measurements={"Freq (MHz)": [520.0, 540.0], "T1 (us)": [60.0, 50.0]},
+        measurements={"freq_mhz": [520.0, 540.0], "t1_us": [60.0, 50.0]},
     )
 
     result = merge_sample_sources(
@@ -429,7 +434,7 @@ def test_merge_a_and_v_sources_into_one_target_frame(tmp_path: Path) -> None:
     assert (result.merged[DEV_UNIT_COLUMN] == "A").all()
     np.testing.assert_allclose(result.merged[FLUX_INT_COLUMN], target.flux_int)
     np.testing.assert_allclose(result.merged[FLUX_PERIOD_COLUMN], target.flux_period)
-    np.testing.assert_allclose(result.merged["T1 (us)"], [80.0, 70.0, 60.0, 50.0])
+    np.testing.assert_allclose(result.merged["t1_us"], [80.0, 70.0, 60.0, 50.0])
     assert list(result.diagnostics["flux_source"]) == [
         "row-frame",
         "row-frame",
@@ -449,20 +454,20 @@ def test_merge_a_and_v_sources_into_one_target_frame(tmp_path: Path) -> None:
 
 def test_integer_flux_offset_aligns_equivalent_branches(tmp_path: Path) -> None:
     target = _target_frame()
-    zero_path = _write_v2_csv(
-        tmp_path / "zero.csv",
+    zero_path = _write_v2_jsonl(
+        tmp_path / "zero.jsonl",
         dev_values=np.array([1.0, 2.0]),
         dev_unit="A",
         flux=np.array([0.5, 0.55]),
     )
-    minus_half_path = _write_v2_csv(
-        tmp_path / "minus_half.csv",
+    minus_half_path = _write_v2_jsonl(
+        tmp_path / "minus_half.jsonl",
         dev_values=np.array([1.0, 2.0]),
         dev_unit="A",
         flux=np.array([-0.5, -0.45]),
     )
-    plus_half_path = _write_v2_csv(
-        tmp_path / "plus_half.csv",
+    plus_half_path = _write_v2_jsonl(
+        tmp_path / "plus_half.jsonl",
         dev_values=np.array([1.0, 2.0]),
         dev_unit="A",
         flux=np.array([0.5, 0.55]),
@@ -500,8 +505,8 @@ def test_integer_flux_offset_aligns_equivalent_branches(tmp_path: Path) -> None:
 
 def test_merge_does_not_guess_integer_branch_without_offset(tmp_path: Path) -> None:
     target = _target_frame()
-    minus_half_path = _write_v2_csv(
-        tmp_path / "minus_half.csv",
+    minus_half_path = _write_v2_jsonl(
+        tmp_path / "minus_half.jsonl",
         dev_values=np.array([1.0, 2.0]),
         dev_unit="A",
         flux=np.array([-0.5, -0.45]),
@@ -518,8 +523,8 @@ def test_merge_does_not_guess_integer_branch_without_offset(tmp_path: Path) -> N
 
 
 def test_integer_flux_offset_must_be_an_int(tmp_path: Path) -> None:
-    source_path = _write_v2_csv(
-        tmp_path / "samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "samples.jsonl",
         dev_values=np.array([1.0]),
         dev_unit="A",
         flux=np.array([0.5]),
@@ -536,14 +541,14 @@ def test_merge_fits_one_batch_flux_offset_against_target_model(
     true_offset = 0.014
     max_abs = 0.05
     source_values = np.asarray(target.dev_value_from_flux(raw_fluxs), dtype=np.float64)
-    source_path = _write_v2_csv(
-        tmp_path / "samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "samples.jsonl",
         dev_values=source_values,
         dev_unit="A",
         flux=raw_fluxs,
         measurements={
-            "Freq (MHz)": 1000.0 + 200.0 * (raw_fluxs + true_offset),
-            "T1 (us)": [10.0, 10.0, 10.0],
+            "freq_mhz": 1000.0 + 200.0 * (raw_fluxs + true_offset),
+            "t1_us": [10.0, 10.0, 10.0],
         },
     )
 
@@ -583,7 +588,7 @@ def test_sample_source_rejects_manual_flux_offset(tmp_path: Path) -> None:
     """The unapproved manual offset field is not part of the Interface."""
     with pytest.raises(TypeError):
         SampleSource(
-            path=str(tmp_path / "samples.csv"),
+            path=str(tmp_path / "samples.jsonl"),
             label="manual",
             manual_flux_offset=1.0,  # type: ignore[call-arg]
         )
@@ -602,13 +607,13 @@ def test_batch_fit_cannot_shift_flux_across_integer_branch(
     raw_fluxs = np.array([-0.5, -0.45], dtype=np.float64)
     max_abs = 0.03
     source_values = np.asarray(target.dev_value_from_flux(raw_fluxs), dtype=np.float64)
-    source_path = _write_v2_csv(
-        tmp_path / "samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "samples.jsonl",
         dev_values=source_values,
         dev_unit="A",
         flux=raw_fluxs,
         # data consistent with flux -0.47 / -0.42: batch fit would like +0.03
-        measurements={"Freq (MHz)": 1000.0 + 200.0 * (raw_fluxs + max_abs)},
+        measurements={"freq_mhz": 1000.0 + 200.0 * (raw_fluxs + max_abs)},
     )
 
     def _linear_f01(
@@ -648,12 +653,12 @@ def test_write_merged_samples_never_overwrites_a_source_csv(
     tmp_path: Path,
 ) -> None:
     target = _target_frame()
-    source_path = _write_v2_csv(
-        tmp_path / "samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "samples.jsonl",
         dev_values=np.array([1.0, 2.0]),
         dev_unit="A",
         flux=np.array([0.5, 0.55]),
-        measurements={"T1 (us)": [80.0, 70.0]},
+        measurements={"t1_us": [80.0, 70.0]},
     )
     result = merge_sample_sources(
         target_frame=target,
@@ -661,11 +666,11 @@ def test_write_merged_samples_never_overwrites_a_source_csv(
     )
     original_bytes = source_path.read_bytes()
 
-    with pytest.raises(ValueError, match="refusing to overwrite source CSV"):
+    with pytest.raises(ValueError, match="refusing to overwrite source JSONL"):
         write_merged_samples(result, source_path)
     assert source_path.read_bytes() == original_bytes
 
-    with pytest.raises(ValueError, match="refusing to overwrite source CSV"):
+    with pytest.raises(ValueError, match="refusing to overwrite source JSONL"):
         write_sample_merge_report(result, source_path)
     assert source_path.read_bytes() == original_bytes
 
@@ -681,15 +686,15 @@ def test_write_merged_samples_never_overwrites_a_source_csv(
     assert report_path.exists()
 
 
-def test_write_guards_protect_zero_row_header_only_sources(
+def test_write_guards_protect_zero_row_jsonl_sources(
     tmp_path: Path,
 ) -> None:
     """Zero-row sources have no row diagnostics, so per-source paths must
-    still protect the original (empty) source CSV from being overwritten.
+    still protect the original (empty) source JSONL from being overwritten.
     """
     target = _target_frame()
-    source_path = _write_v2_csv(
-        tmp_path / "samples.csv",
+    source_path = _write_v2_jsonl(
+        tmp_path / "samples.jsonl",
         dev_values=np.asarray([], dtype=np.float64),
         dev_unit="A",
         flux=np.asarray([], dtype=np.float64),
@@ -703,11 +708,11 @@ def test_write_guards_protect_zero_row_header_only_sources(
     assert len(result.merged) == 0
     assert list(result.summary_table["path"]) == [str(source_path.resolve())]
 
-    with pytest.raises(ValueError, match="refusing to overwrite source CSV"):
+    with pytest.raises(ValueError, match="refusing to overwrite source JSONL"):
         write_merged_samples(result, source_path)
     assert source_path.read_bytes() == source_bytes
 
-    with pytest.raises(ValueError, match="refusing to overwrite source CSV"):
+    with pytest.raises(ValueError, match="refusing to overwrite source JSONL"):
         write_sample_merge_report(result, source_path)
     assert source_path.read_bytes() == source_bytes
 
