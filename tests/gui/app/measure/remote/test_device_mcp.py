@@ -310,3 +310,28 @@ def test_connect_wait_timeout_does_not_cancel_operation(
         invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
         == "finished"
     )
+
+
+def test_fake_device_snapshot_reports_stored_native_unit(device_client) -> None:
+    invoke = device_client
+    started = invoke(
+        "rpc_call",
+        {
+            "method": "device.connect",
+            "params": {"name": "bias", "type_name": "FakeDevice", "address": "none"},
+        },
+    )
+    try:
+        assert invoke("wait", {"op": started["handle"], "timeout": 3})["status"] == "finished"
+        snapshot = invoke(
+            "rpc_call", {"method": "device.snapshot", "params": {"name": "bias"}}
+        )["snapshot"]
+        assert snapshot["unit"] == "native"
+        assert snapshot["info"]["value_unit"] == "native"
+    finally:
+        disconnected = invoke(
+            "rpc_call", {"method": "device.disconnect", "params": {"name": "bias"}}
+        )
+        assert invoke(
+            "wait", {"op": disconnected["handle"], "timeout": 3}
+        )["status"] == "finished"

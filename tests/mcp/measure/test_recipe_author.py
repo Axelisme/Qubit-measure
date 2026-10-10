@@ -500,7 +500,7 @@ def test_author_sweep_rejects_empty_sources_before_any_edit(tmp_path, key, label
 def test_author_flux_device_writes_validated_unit_into_cfg(tmp_path, unit):
     gui = _SweepGui()
     gui.device = {
-        "unit": "none" if unit == "native" else unit,
+        "unit": unit,
         "type_name": "FakeDevice" if unit == "native" else "YOKOGS200",
         "info": {"type": "FakeDevice" if unit == "native" else "YOKOGS200"},
     }
@@ -542,7 +542,7 @@ def test_author_flux_device_checks_units_without_changing_coordinates(tmp_path):
         ),
         ({"unit": "A", "type_name": "YOKOGS200", "info": {"type": "YOKOGS200"}}, "V"),
         (
-            {"unit": "none", "type_name": "FakeDevice", "info": {"type": "FakeDevice"}},
+            {"unit": "native", "type_name": "FakeDevice", "info": {"type": "FakeDevice"}},
             "A",
         ),
         (
@@ -568,7 +568,7 @@ def test_author_flux_device_rejects_mismatched_or_unconfirmed_units_before_edit(
 def test_author_fake_flux_requires_explicit_native_opt_in(tmp_path):
     gui = _SweepGui()
     gui.device = {
-        "unit": "none",
+        "unit": "native",
         "type_name": "FakeDevice",
         "info": {"type": "FakeDevice"},
     }
@@ -756,3 +756,36 @@ def test_author_run_captures_asserted_flux_unit_without_conversion(tmp_path):
         }
         assert fields["sweep.flux"].get("unit") == "A"
         assert fields["sweep.flux"].get("source") == "explicit"
+
+
+@pytest.mark.parametrize("type_name", ["FakeDevice", "OtherDevice"])
+def test_author_flux_device_uses_declared_native_coordinate(tmp_path, type_name):
+    gui = _SweepGui()
+    gui.device = {
+        "unit": "native", "type_name": type_name, "info": {"type": type_name}
+    }
+    before_sweep = deepcopy(gui.publication["tree"]["children"]["sweep"])
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.use_flux_device("coil", unit="native")
+    children = gui.publication["tree"]["children"]
+    assert children["dev"]["children"]["flux_dev"]["input"]["resolved"] == "coil"
+    assert children["flux_unit"]["input"]["resolved"] == "native"
+    assert children["sweep"] == before_sweep
+    assert gui.publication["cfg_ref"]["revision"] == "4"
+
+
+def test_author_flux_device_rejects_unknown_coordinate_before_edit(tmp_path):
+    gui = _SweepGui()
+    gui.device = {
+        "unit": "none", "type_name": "FakeDevice", "info": {"type": "FakeDevice"}
+    }
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        before = deepcopy(gui.publication)
+        with pytest.raises(GuiRpcError) as error:
+            tab.use_flux_device("coil", unit="native")
+        assert error.value.reason == "invalid_device"
+        assert not [call for call in client.transport.sent if call[0] == "tab.edit_cfg"]
+    assert gui.publication == before
+    assert gui.publication["cfg_ref"]["revision"] == "2"

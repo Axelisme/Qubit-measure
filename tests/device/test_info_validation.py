@@ -20,12 +20,12 @@ def test_fake_device_info_rejects_string_value() -> None:
 
 def test_yoko_info_rejects_bool_value() -> None:
     with pytest.raises(ValidationError, match="real numeric scalar"):
-        YOKOGS200Info(address="GPIB::1", value=cast(Any, True))
+        YOKOGS200Info(address="GPIB::1", mode="voltage", value=cast(Any, True))
 
 
 def test_yoko_info_rejects_string_value() -> None:
     with pytest.raises(ValidationError, match="real numeric scalar"):
-        YOKOGS200Info(address="GPIB::1", value=cast(Any, "1.23"))
+        YOKOGS200Info(address="GPIB::1", mode="voltage", value=cast(Any, "1.23"))
 
 
 def test_fake_device_info_accepts_int_and_float_values() -> None:
@@ -34,8 +34,8 @@ def test_fake_device_info_accepts_int_and_float_values() -> None:
 
 
 def test_yoko_info_accepts_int_and_float_values() -> None:
-    assert YOKOGS200Info(address="GPIB::1", value=1).value == pytest.approx(1.0)
-    assert YOKOGS200Info(address="GPIB::1", value=1.23).value == pytest.approx(1.23)
+    assert YOKOGS200Info(address="GPIB::1", mode="voltage", value=1).value == pytest.approx(1.0)
+    assert YOKOGS200Info(address="GPIB::1", mode="voltage", value=1.23).value == pytest.approx(1.23)
 
 
 @pytest.mark.parametrize("mode, expected", [("current", 1e-6), ("voltage", 1e-3)])
@@ -64,7 +64,7 @@ def test_yoko_explicit_rampstep_survives_updates(
 @pytest.mark.parametrize("step", [0.0, -1e-6, float("inf"), float("nan")])
 def test_yoko_rejects_invalid_rampstep_at_model_boundary(step: float) -> None:
     with pytest.raises(ValidationError, match="rampstep"):
-        YOKOGS200Info(address="GPIB::1", rampstep=step)
+        YOKOGS200Info(address="GPIB::1", mode="voltage", rampstep=step)
     info = YOKOGS200Info(address="GPIB::1", mode="current")
     with pytest.raises(ValidationError, match="rampstep"):
         info.with_updates(rampstep=step)
@@ -106,11 +106,87 @@ def test_yoko_fixed_rampstep_limit_boundary(
 def test_yoko_rampstep_limit_is_not_a_setup_field() -> None:
     with pytest.raises(ValidationError):
         YOKOGS200Info.model_validate(
-            {"address": "GPIB::1", "max_voltage_rampstep": 1.0}
+            {"address": "GPIB::1", "mode": "voltage", "max_voltage_rampstep": 1.0}
         )
 
 
 @pytest.mark.parametrize("value", [float("inf"), float("nan")])
 def test_yoko_rejects_nonfinite_output_values(value: float) -> None:
     with pytest.raises(ValidationError, match="value"):
-        YOKOGS200Info(address="GPIB::1", value=value)
+        YOKOGS200Info(address="GPIB::1", mode="voltage", value=value)
+
+
+@pytest.mark.parametrize("mode, unit", [("current", "A"), ("voltage", "V")])
+def test_yoko_info_stores_mode_derived_unit(
+    mode: Literal["current", "voltage"], unit: Literal["A", "V"]
+) -> None:
+    info = YOKOGS200Info(address="YOKO::INSTR", mode=mode, value=0.001)
+    assert info.value_unit == unit
+    assert info.model_dump()["value_unit"] == unit
+    assert YOKOGS200Info.model_validate(info.model_dump()) == info
+    assert YOKOGS200Info.model_validate_json(info.model_dump_json()) == info
+    assert info.mode == mode
+    assert info.value == 0.001
+
+
+@pytest.mark.parametrize("mode, unit", [("current", "A"), ("voltage", "V")])
+def test_yoko_info_preserves_explicit_unit(
+    mode: Literal["current", "voltage"], unit: Literal["A", "V"]
+) -> None:
+    derived = YOKOGS200Info(address="YOKO::INSTR", mode=mode, value=0.001)
+    assert derived.value_unit == unit
+    info = YOKOGS200Info.model_validate(
+        {"address": "YOKO::INSTR", "mode": mode, "value": 0.001, "value_unit": unit}
+    )
+    assert info.value_unit == unit
+    assert info.model_dump()["value_unit"] == unit
+    assert YOKOGS200Info.model_validate(info.model_dump()) == info
+    assert YOKOGS200Info.model_validate_json(info.model_dump_json()) == info
+    assert info.mode == mode
+    assert info.value == 0.001
+
+
+@pytest.mark.parametrize("mode, unit", [("current", "V"), ("voltage", "A")])
+def test_yoko_info_rejects_mode_unit_mismatch(
+    mode: Literal["current", "voltage"], unit: Literal["A", "V"]
+) -> None:
+    with pytest.raises(ValidationError) as error:
+        YOKOGS200Info.model_validate(
+            {"address": "YOKO::INSTR", "mode": mode, "value": 0.001, "value_unit": unit}
+        )
+    assert any(
+        item["type"] == "value_error"
+        and "mode" in item["msg"]
+        and "unit" in item["msg"]
+        for item in error.value.errors()
+    )
+
+
+def test_yoko_info_requires_explicit_mode() -> None:
+    with pytest.raises(ValidationError) as error:
+        YOKOGS200Info.model_validate({"address": "YOKO::INSTR"})
+    assert any(
+        item["loc"] == ("mode",) and item["type"] == "missing"
+        for item in error.value.errors()
+    )
+
+
+def test_fake_info_stores_native_unit() -> None:
+    info = FakeDeviceInfo(address="none", value=0.125)
+    assert info.value_unit == "native"
+    assert info.model_dump()["value_unit"] == "native"
+    assert FakeDeviceInfo.model_validate(info.model_dump()) == info
+    assert FakeDeviceInfo.model_validate_json(info.model_dump_json()) == info
+    assert info.value == 0.125
+
+
+@pytest.mark.parametrize("unit", ["A", "V"])
+def test_fake_info_rejects_non_native_unit(unit: str) -> None:
+    with pytest.raises(ValidationError) as error:
+        FakeDeviceInfo.model_validate(
+            {"address": "none", "value": 0.125, "value_unit": unit}
+        )
+    assert any(
+        item["loc"] == ("value_unit",) and item["type"] == "literal_error"
+        for item in error.value.errors()
+    )
