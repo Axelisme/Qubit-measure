@@ -6,13 +6,19 @@ from copy import deepcopy
 from typing import Any, TypeVar
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.device import DeviceInfo
 
 T_CfgModel = TypeVar("T_CfgModel", bound="ExpCfgModel")
 
 
 class ExpCfgModel(ConfigBase):
-    dev: Mapping[str, DeviceInfo] | None = None
+    """Experiment inputs with optional role-to-connected-device-name selection.
+
+    dev maps experiment role keys to driver names, or is None when no roles
+    are selected. It contains neither driver settings nor acquisition metadata.
+    The experiment resolves a name through RunContext.devices when it uses it.
+    """
+
+    dev: Mapping[str, str] | None = None
 
     @classmethod
     def validate_or_warn(
