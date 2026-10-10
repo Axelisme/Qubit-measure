@@ -66,3 +66,31 @@ def test_describe_soc_accepts_plain_dict() -> None:
     # GUI's thinner SocCfgProtocol handle — must work without a QickConfig wrapper
     cfg = make_mock_soccfg()._cfg
     assert "Generators" in describe_soc(cfg)
+
+
+def test_describe_soc_handles_gen_without_envelope_or_clocks() -> None:
+    cfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    gen = cfg["gens"][0]
+    del gen["maxlen"]
+    del gen["samps_per_clk"]
+    del gen["f_fabric"]
+
+    text = describe_soc(cfg)
+
+    assert "Generators (1)" in text
+    assert "Readouts (1)" in text
+    assert "max pulse len" in text
+    assert "buf maxlen" in text
+    gen_row = next(line for line in text.splitlines() if "axis_signal_gen_v6" in line)
+    ro_row = next(line for line in text.splitlines() if "axis_readout_v2" in line)
+    assert gen_row.split() == ["0", "axis_signal_gen_v6", "0_228", "12288.000", "-"]
+    assert ro_row.split() == [
+        "0",
+        "axis_readout_v2",
+        "0_224",
+        "2457.600",
+        "8192",
+        "smp",
+        "(26.667",
+        "us)",
+    ]
