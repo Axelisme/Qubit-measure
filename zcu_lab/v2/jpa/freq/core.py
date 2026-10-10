@@ -61,7 +61,7 @@ class FreqSweepCfg(ConfigBase):
 
 
 class FreqCfg(ProgramV2Cfg, ExpCfgModel):
-    dev: Mapping[str, str] | None = None  # Optional external RF selection.
+    dev: Mapping[str, str] | None = None  # jpa_rf_dev: connected name; None: no RF.
     modules: FreqModuleCfg
     sweep: FreqSweepCfg
     skew_penalty: float = Field(default=0.0, ge=0.0)

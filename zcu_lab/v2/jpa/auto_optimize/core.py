@@ -75,7 +75,7 @@ class JPAOptSweepCfg(ConfigBase):
 class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: JPAOptModuleCfg
-    # This experiment requires an explicit role-name mapping.
+    # Map jpa_flux_dev and jpa_rf_dev to connected driver names.
     dev: Mapping[str, str] = Field(...)
     sweep: JPAOptSweepCfg
     num_points: int = Field(ge=4, strict=True)

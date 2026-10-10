@@ -57,7 +57,7 @@ class CheckSweepCfg(ConfigBase):
 
 class CheckCfg(ProgramV2Cfg, ExpCfgModel):
     modules: CheckModuleCfg
-    # This experiment requires an explicit role-name mapping.
+    # Map jpa_rf_dev to a connected driver name.
     dev: Mapping[str, str] = Field(...)
     sweep: CheckSweepCfg
 

@@ -58,7 +58,7 @@ class FreqFluxModuleCfg(ConfigBase):
 class FreqFluxCfg(ProgramV2Cfg, ExpCfgModel):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FreqFluxModuleCfg
-    dev: Mapping[str, str]
+    dev: Mapping[str, str]  # Map flux_dev to a connected driver name.
     sweep: FreqFluxSweepCfg
     fail_retry: int = 0
 

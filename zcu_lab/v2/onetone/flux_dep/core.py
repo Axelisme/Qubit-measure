@@ -55,7 +55,7 @@ class FluxDepSweepCfg(ConfigBase):
 class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxDepModuleCfg
-    # This experiment requires an explicit role-name mapping.
+    # Map flux_dev to a connected driver name.
     dev: Mapping[str, str] = Field(...)
     sweep: FluxDepSweepCfg
 

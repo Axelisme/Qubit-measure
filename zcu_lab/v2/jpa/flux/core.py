@@ -62,7 +62,7 @@ class FluxSweepCfg(ConfigBase):
 
 
 class FluxCfg(ProgramV2Cfg, ExpCfgModel):
-    dev: Mapping[str, str] | None = None  # Optional external bias selection.
+    dev: Mapping[str, str] | None = None  # jpa_flux_dev: connected name; None: no bias.
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxModuleCfg
     sweep: FluxSweepCfg

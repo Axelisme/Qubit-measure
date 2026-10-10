@@ -61,7 +61,7 @@ class PowerSweepCfg(ConfigBase):
 
 class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerModuleCfg
-    # This experiment requires an explicit role-name mapping.
+    # Map jpa_rf_dev to a connected driver name.
     dev: Mapping[str, str] = Field(...)
     sweep: PowerSweepCfg
     skew_penalty: float = Field(default=0.0, ge=0.0)

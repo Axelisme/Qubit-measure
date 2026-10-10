@@ -52,7 +52,7 @@ class OneToneFluxSweepCfg(ConfigBase):
 class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: OneToneFluxModuleCfg
-    # This experiment requires an explicit role-name mapping.
+    # Map jpa_flux_dev to a connected driver name.
     dev: Mapping[str, str] = Field(...)
     sweep: OneToneFluxSweepCfg
 
