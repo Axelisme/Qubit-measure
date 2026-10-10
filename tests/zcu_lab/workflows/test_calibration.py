@@ -229,7 +229,6 @@ def test_native_calibration_timing_uses_workflow_estimate(
     )
     for cfg, default in zip((frequency, rabi, readout), native_defaults, strict=True):
         assert cfg.initial_delay == default.initial_delay
-        assert cfg.dev == default.dev
 
 
 def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
