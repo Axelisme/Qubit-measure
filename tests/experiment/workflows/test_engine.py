@@ -667,7 +667,15 @@ def test_missing_port_fails_only_when_used_during_execute(rig: Rig, port: str) -
             yield from env.set_device("flux", 1.0, unit="native")
         return Done()
 
-    rig.engine = Engine(EnginePorts(rig.plots, rig.progress, rig.clock, context=7))
+    rig.engine = Engine(
+        EnginePorts(
+            rig.plots,
+            rig.progress,
+            rig.clock,
+            context=7,
+            devices=rig.devices if port == "soc" else None,
+        )
+    )
     rig.start(step)
     assert rig.initialized == []
     status = rig.engine.status()
