@@ -908,7 +908,7 @@ def test_accept_library_failure_keeps_prior_commits_and_stops(
             parameter={"D1.rate": 1700.0},
             module={
                 "D1.pulses.good": pulse_spec(),
-                "D1.pulses.bad": DirectReadoutCfg(ro_ch=0),
+                "D1.pulses.bad": DirectReadoutCfg(ro_ch=0, ro_length=0.1, ro_freq=100.0),
                 "D1.pulses.later": pulse_spec(gain=0.5),
             },
             waveform={"D1.waveforms.later": ConstWaveformCfg(length=0.1)},
