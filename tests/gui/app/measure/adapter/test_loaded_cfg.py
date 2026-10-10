@@ -370,3 +370,22 @@ def test_incomplete_module_does_not_invent_defaults():
         )
         is None
     )
+
+
+@pytest.mark.parametrize("options", ["available", b"available"], ids=["str", "bytes"])
+def test_projection_rejects_dynamic_text_options(options: str | bytes):
+    spec = CfgSectionSpec(
+        fields={"reps": ScalarSpec("Choice", str, choices_source="choices")}
+    )
+    current = CfgSchema(
+        spec=spec, value=CfgSectionValue(fields={"reps": DirectValue("old")})
+    )
+    before = deepcopy(current)
+
+    with pytest.raises(
+        TypeError, match="Dynamic choice provider must return an option sequence"
+    ):
+        project_loaded_cfg(
+            current, Snapshot(reps="available"), provide_options=lambda source: options
+        )
+    assert current == before
