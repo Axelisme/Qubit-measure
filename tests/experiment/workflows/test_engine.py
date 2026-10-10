@@ -198,6 +198,37 @@ def test_revision_is_captured_once_and_nested_inputs_are_detached(rig: Rig) -> N
     assert (change["path"], change["old"], change["new"]) == ("value", 1, 8)
 
 
+def test_resume_without_device_input_keeps_commits_and_latest_revision(rig: Rig) -> None:
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if state.index == plan.count:
+            return Done()
+        env.pbar("points", plan.count).set_progress(state.index)
+        yield from env.wait_until(START)
+        state.index += 1
+        if state.index == 1:
+            rig.engine.pause("run")
+        return Next(tun.value, state)
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "paused"
+    records = rig.engine.records("run")
+    assert len(records) == 1 and records[0].revision == 0
+    rig.engine.update_tunables(
+        "run", (TunableChange("value", 3),),
+        expected_revision=0, actor=Actor("user", "test"),
+    )
+    with pytest.raises(RunMismatch):
+        rig.engine.resume("old")
+    assert rig.engine.resume("run").lifecycle == "running"
+    assert rig.engine.records("run") == records
+    assert len(rig.bars) == 1 and not rig.bars[0].closed
+    assert rig.engine.execute("run").lifecycle == "done"
+    assert [record.revision for record in rig.engine.records("run")] == [0, 1]
+    assert rig.initialized == [START] and rig.bars[0].closed
+
+
 def test_pause_discards_mutated_copy_and_resume_repeats_deadline(rig: Rig) -> None:
     deadline = START + timedelta(seconds=10)
     seen: list[tuple[int, list[int], int]] = []

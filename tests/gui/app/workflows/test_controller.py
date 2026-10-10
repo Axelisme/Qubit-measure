@@ -13,6 +13,7 @@ from zcu_tools.experiment.workflows import (
     Done,
     EnginePorts,
     InvalidRunState,
+    Next,
     RunIdentity,
     RunMismatch,
     RunPaths,
@@ -108,6 +109,68 @@ def declare(rig: Rig):
         return finish(env, plan, tun, state)
 
     return workflow("example", plan=Plan, tunables=Tunables, init=rig.init)(invoke)
+
+
+@pytest.mark.parametrize("stop_pending", [False, True])
+def test_resume_without_device_callback_retains_handle_lease_records_and_bar(
+    tmp_path: Path, stop_pending: bool,
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    controller = create_controller(harness, rig, lambda _status, _error: None)
+
+    @workflow("snapshotless-resume", plan=Plan, tunables=Tunables, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        del plan
+        env.pbar("points", 2).set_progress(state.index)
+        yield from env.wait_until(env.started_at)
+        if state.index == 1:
+            return Done()
+        state.index += 1
+        controller.pause("run")
+        return Next(tun.value, state)
+
+    token = controller.start(
+        step, plan=Plan(), tunables=Tunables(),
+        ports=EnginePorts(rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices),
+        binding=create_binding(), paths=rig.paths, identity=identity(),
+    )
+    harness.complete_segment()
+    engine = controller.engine
+    assert engine is not None
+    records = engine.records("run")
+    assert len(records) == 1
+    bars = harness.progress.bars_for_owner("example")
+    assert len(bars) == 1 and harness.gate.snapshot()
+    with pytest.raises(RunMismatch):
+        controller.resume("old")
+    harness.background.fail_submit = True
+    with pytest.raises(OSError, match="submit failed"):
+        controller.resume("run")
+    paused = controller.status()
+    assert paused is not None and paused.lifecycle == "paused"
+    assert controller.operation_id == token and harness.gate.snapshot()
+    assert harness.progress.bars_for_owner("example") == bars
+    assert harness.handles.known_outcome(token) is None
+    harness.background.fail_submit = False
+    assert controller.resume("run") == token
+    with pytest.raises(InvalidRunState):
+        controller.resume("run")
+    assert engine.records("run") == records
+    if stop_pending:
+        controller.stop("run")
+    assert harness.gate.snapshot() and harness.handles.known_outcome(token) is None
+    harness.background.execute()
+    harness.owner.pump_all()
+    assert harness.gate.snapshot() and controller.has_pending_segment
+    harness.background.deliver()
+    assert harness.handles.known_outcome(token) == OperationOutcome(
+        "cancelled" if stop_pending else "finished"
+    )
+    assert len(rig.initialized) == 1 and engine.records("run") == records
+    assert not harness.gate.snapshot() and controller.operation_id is None
+    assert not harness.progress.bars_for_owner("example")
 
 
 def test_target_check_is_available_before_acceptance_without_changing_admission(
