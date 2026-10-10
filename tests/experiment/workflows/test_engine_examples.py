@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     CommittedRecord,
@@ -82,6 +82,38 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
     assert len(tuple((root / "data/iter").iterdir())) == len(records) + 1
     assert not tuple((root / "data").glob("iter/*/runs/.*.tmp.h5"))
     return records, clock, devices
+
+
+@pytest.mark.parametrize("name", ["echo", "overnight"])
+@pytest.mark.parametrize("unit", ["A", "V", "native", None, "mA"])
+def test_v0_plan_requires_explicit_flux_unit_and_forwards_it(
+    tmp_path: Path, name: str, unit: str | None
+) -> None:
+    data: dict[str, object] = {"flux_dev": "flux", "points": 7}
+    if unit is not None:
+        data["flux_unit"] = unit
+    if name == "echo":
+        data["fluxes"] = (0.1, 0.2)
+        if unit not in ("A", "V", "native"):
+            with pytest.raises(ValidationError, match="flux_unit"):
+                FluxPlan.model_validate(data)
+            return
+        plan = FluxPlan.model_validate(data)
+        _, _, devices = execute_example(tmp_path, t2echo_fluxdep, plan, T2EchoTunables())
+        assert devices.values == [("flux", 0.1), ("flux", 0.2)]
+        assert devices.units == [unit, unit]
+    else:
+        data.update(flux=0.2, rounds=1)
+        if unit not in ("A", "V", "native"):
+            with pytest.raises(ValidationError, match="flux_unit"):
+                OvernightPlan.model_validate(data)
+            return
+        overnight = OvernightPlan.model_validate(data)
+        _, _, devices = execute_example(
+            tmp_path, t1_overnight, overnight, OvernightTunables()
+        )
+        assert devices.values == [("flux", 0.2)]
+        assert devices.units == [unit]
 
 
 @pytest.mark.parametrize("name", ["echo", "overnight"])
