@@ -5,6 +5,13 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+from zcu_tools.cfg_model import (
+    BathResetSpec,
+    PulseResetSpec,
+    PulseSpec,
+    TwoPulseResetSpec,
+)
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.registry import Registry
@@ -16,16 +23,27 @@ from zcu_tools.gui.cfg import (
     is_custom_reference_key,
     read_value_path,
 )
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
     EntryDraft,
+    PointUseRequest,
 )
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry import RoleResolutionError, RoleSpec, component_registry
+from zcu_tools.resources.entry import (
+    ResultEntry,
+    RoleResolutionError,
+    RoleSpec,
+    component_registry,
+)
 from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.definitions import register_all
@@ -460,3 +478,224 @@ def test_registered_adapter_does_not_hide_missing_aliases_or_source_faults(
         adapter.make_default_cfg(
             SessionEnv(parameters=unavailable, soc=None, soccfg=None)
         )
+
+
+_RESET_READERS = {
+    "single-freq": "twotone/reset/single_tone/freq",
+    "single-length": "twotone/reset/single_tone/length",
+    "dual-freq": "twotone/reset/dual_tone/freq",
+    "dual-length": "twotone/reset/dual_tone/length",
+    "dual-power": "twotone/reset/dual_tone/power",
+    "bath-length": "twotone/reset/bath/length",
+    "bath-phase": "twotone/reset/bath/phase",
+}
+_RESET_REQUIRED = [
+    ("single-freq", "reset_f"),
+    ("single-freq", "reset_fwhm"),
+    ("single-length", "reset_f"),
+    ("dual-freq", "reset_f1"),
+    ("dual-freq", "reset_f2"),
+    ("dual-freq", "reset_gain1"),
+    ("dual-freq", "reset_gain2"),
+    ("dual-length", "reset_f1"),
+    ("dual-length", "reset_f2"),
+    ("dual-length", "reset_gain1"),
+    ("dual-length", "reset_gain2"),
+    ("dual-power", "reset_f1"),
+    ("dual-power", "reset_f2"),
+    ("bath-length", "reset_bath_freq"),
+    ("bath-length", "reset_bath_gain"),
+    ("bath-phase", "reset_bath_freq"),
+    ("bath-phase", "reset_bath_gain"),
+]
+
+
+def _reset_seed_source() -> ParameterContext:
+    """Two legal captures with different ext seeds and unrelated old slots."""
+    source = _source(calibrated=True)
+    point = source.document()
+    library = source.library
+    for index in (1, 2):
+        qubit = f"Q{index}"
+        component = QubitSchema.model_validate(point.components[qubit].model_dump())
+        component.ext.update({
+            "reset_f": 3200.0 + 1000 * index,
+            "reset_fwhm": 8.0,
+            "reset_f1": 3300.0 + 1000 * index,
+            "reset_f2": 3400.0 + 1000 * index,
+            "reset_gain1": 0.21 if index == 1 else 0.41,
+            "reset_gain2": 0.31 if index == 1 else 0.51,
+            "reset_bath_freq": 6200.0 + 100 * index,
+            "reset_bath_gain": 0.25 if index == 1 else 0.35,
+        })
+        old = PulseSpec.model_validate({
+            "ch": 1, "nqz": 1, "freq": 4120.0, "gain": 0.7,
+            "waveform": {"style": "const", "length": 0.9},
+        })
+        single = PulseResetSpec(pulse_cfg=old)
+        dual = TwoPulseResetSpec(
+            pulse1_cfg=old,
+            pulse2_cfg=old.model_copy(update={"freq": 4220.0, "gain": 0.8}),
+        )
+        bath = BathResetSpec(
+            cavity_tone_cfg=old.model_copy(update={"freq": 6100.0}),
+            qubit_tone_cfg=old,
+            pi2_cfg=old.model_copy(update={"phase": 31.0}),
+        )
+        for slot, spec in (
+            ("sideband", single), ("dual_tone", dual),
+            ("bath_g", bath), ("bath_e", bath),
+        ):
+            root = f"{qubit}.reset.old_{slot}"
+            component.module[slot] = root
+            library = library.replaced_module(root, spec)
+        point.components[qubit] = component
+    return ParameterContext(
+        point=point, library=library, target=source.target, roles=None,
+    )
+
+
+def _reset_seed_capture(
+    *, missing: str | None = None, value: YamlValue = None,
+    absent: bool = False,
+) -> ParameterContext:
+    source = _reset_seed_source()
+    if missing is not None:
+        point = source.document()
+        component = QubitSchema.model_validate(point.components["Q1"].model_dump())
+        if absent:
+            component.ext.pop(missing)
+        else:
+            component.ext[missing] = value
+        point.components["Q1"] = component
+        source = ParameterContext(
+            point=point, library=source.library, target=source.target, roles=None,
+        )
+    return source.bind_aliases(
+        (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")), {}
+    )
+
+
+def _reset_seed_projection(name: str, capture: ParameterContext) -> dict[str, object]:
+    adapter = _registry().create(_RESET_READERS[name])
+    schema = adapter.make_default_cfg(SessionEnv(parameters=capture, soc=None, soccfg=None))
+    raw = schema_to_raw_dict(schema, capture)
+    paths = {
+        "single-freq": ("sweep.freq.start", "sweep.freq.stop", "sweep.freq.expts"),
+        "single-length": ("modules.tested_reset.pulse_cfg.freq",),
+        "dual-freq": (
+            "modules.tested_reset.pulse1_cfg.gain", "modules.tested_reset.pulse2_cfg.gain",
+            "sweep.freq1.start", "sweep.freq1.stop", "sweep.freq1.expts",
+            "sweep.freq2.start", "sweep.freq2.stop", "sweep.freq2.expts",
+        ),
+        "dual-length": (
+            "modules.tested_reset.pulse1_cfg.freq", "modules.tested_reset.pulse2_cfg.freq",
+            "modules.tested_reset.pulse1_cfg.gain", "modules.tested_reset.pulse2_cfg.gain",
+        ),
+        "dual-power": ("modules.tested_reset.pulse1_cfg.freq", "modules.tested_reset.pulse2_cfg.freq"),
+        "bath-length": ("modules.tested_reset.cavity_tone_cfg.freq", "modules.tested_reset.cavity_tone_cfg.gain"),
+        "bath-phase": ("modules.tested_reset.cavity_tone_cfg.freq", "modules.tested_reset.cavity_tone_cfg.gain"),
+    }
+    result: dict[str, object] = {}
+    for path in paths[name]:
+        current: object = raw
+        for part in path.split("."):
+            if not isinstance(current, dict):
+                raise AssertionError(f"Missing cfg section for {path}")
+            current = current[part]
+        result[path] = current
+    return result
+
+
+def _reset_seed_expected(name: str, index: int) -> dict[str, object]:
+    single = 4200.0 if index == 1 else 5200.0
+    first, second = (4300.0, 4400.0) if index == 1 else (5300.0, 5400.0)
+    gain1, gain2 = (0.21, 0.31) if index == 1 else (0.41, 0.51)
+    bath_freq, bath_gain = (6300.0, 0.25) if index == 1 else (6400.0, 0.35)
+    match name:
+        case "single-freq":
+            return {"sweep.freq.start": single - 12, "sweep.freq.stop": single + 12, "sweep.freq.expts": 201}
+        case "single-length":
+            return {"modules.tested_reset.pulse_cfg.freq": single}
+        case "dual-freq":
+            return {
+                "modules.tested_reset.pulse1_cfg.gain": gain1, "modules.tested_reset.pulse2_cfg.gain": gain2,
+                "sweep.freq1.start": first - 50, "sweep.freq1.stop": first + 50, "sweep.freq1.expts": 201,
+                "sweep.freq2.start": second - 50, "sweep.freq2.stop": second + 50, "sweep.freq2.expts": 201,
+            }
+        case "dual-length":
+            return {
+                "modules.tested_reset.pulse1_cfg.freq": first, "modules.tested_reset.pulse2_cfg.freq": second,
+                "modules.tested_reset.pulse1_cfg.gain": gain1, "modules.tested_reset.pulse2_cfg.gain": gain2,
+            }
+        case "dual-power":
+            return {"modules.tested_reset.pulse1_cfg.freq": first, "modules.tested_reset.pulse2_cfg.freq": second}
+        case "bath-length" | "bath-phase":
+            return {"modules.tested_reset.cavity_tone_cfg.freq": bath_freq, "modules.tested_reset.cavity_tone_cfg.gain": bath_gain}
+        case _:
+            raise ValueError(name)
+
+
+@pytest.mark.parametrize("name", list(_RESET_READERS), ids=list(_RESET_READERS))
+def test_reset_defaults_lower_accumulated_extensions_on_fixed_capture(name: str) -> None:
+    capture = _reset_seed_capture()
+    assert _reset_seed_projection(name, capture) == pytest.approx(_reset_seed_expected(name, 1))
+
+
+@pytest.mark.parametrize(
+    ("name", "field", "state"),
+    [(name, field, state) for name, field in _RESET_REQUIRED for state in ("absent", "null")],
+    ids=[f"{name}-{field}-{state}" for name, field in _RESET_REQUIRED for state in ("absent", "null")],
+)
+def test_reset_defaults_reject_missing_accumulated_parameter(name: str, field: str, state: str) -> None:
+    capture = _reset_seed_capture(missing=field, absent=state == "absent")
+    with pytest.raises(RuntimeError, match="Config field") as error:
+        _reset_seed_projection(name, capture)
+    assert f"$qubit.ext.{field}" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("name", "invalid"),
+    [(name, invalid) for name in _RESET_READERS for invalid in ("bool", "string", "nonfinite")],
+    ids=[f"{name}-{invalid}" for name in _RESET_READERS for invalid in ("bool", "string", "nonfinite")],
+)
+def test_reset_defaults_reject_invalid_accumulated_parameter(name: str, invalid: str) -> None:
+    fields = {"single-freq": "reset_f", "single-length": "reset_f", "dual-freq": "reset_f1", "dual-length": "reset_f1", "dual-power": "reset_f1", "bath-length": "reset_bath_freq", "bath-phase": "reset_bath_freq"}
+    values: dict[str, YamlValue] = {"bool": True, "string": "not-a-number", "nonfinite": float("inf")}
+    capture = _reset_seed_capture(missing=fields[name], value=values[invalid])
+    with pytest.raises(RuntimeError, match="Config field") as error:
+        _reset_seed_projection(name, capture)
+    assert f"$qubit.ext.{fields[name]}" in str(error.value)
+
+
+@pytest.mark.io
+@pytest.mark.parametrize("name", list(_RESET_READERS), ids=list(_RESET_READERS))
+def test_reset_default_capture_isolated_from_later_point_and_aliases(tmp_path: Path, name: str) -> None:
+    entry = ResultEntry.create("seed-entry", result_root=tmp_path / "results", database_root=tmp_path / "Database")
+    entry.new_point("first")
+    entry.new_point("second")
+    context = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)), BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+    )
+    context.install_entry(entry)
+    control = ContextControlFacet(context=context)
+    source = _reset_seed_source()
+    document = source.document()
+    for point in ("first", "second"):
+        control.use_point(PointUseRequest(point))
+        for component, model in document.components.items():
+            control.add_component(component, model.kind, model.model_dump(exclude={"kind"}))
+    control.use_point(PointUseRequest("first"))
+    target = control.read_context().target
+    for root in source.library.module_keys():
+        control.set_module(target, root, source.library.module_spec(root))
+    control.set_alias_rows((AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")))
+    first = control.read_context()
+    first_values = _reset_seed_projection(name, first)
+    control.use_point(PointUseRequest("second"))
+    control.set_alias_rows((AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator")))
+    second = control.read_context()
+    assert _reset_seed_projection(name, first) == first_values == pytest.approx(_reset_seed_expected(name, 1))
+    assert _reset_seed_projection(name, second) == pytest.approx(_reset_seed_expected(name, 2))
+    assert control.read_context().target == second.target
