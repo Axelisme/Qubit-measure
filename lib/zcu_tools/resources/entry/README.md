@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-10，共用 accepted 逐項寫回與條目樣本 JSONL
+**Last updated:** 2026-10-10，共用 accepted 逐項寫回、條目樣本 JSONL 與跨 run 分析記錄
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -59,6 +59,8 @@ ResultEntry 管理的 store 在 use、refresh 與 edit 時也檢查遮蔽，失�
 `ResultEntry.ledger` 綁定條目的 UUID 與 records 目錄。RecordsLedger 擁有 typed 事件、JSON 附檔、完整 schema 驗證與 append-only 儲存。它不推導 run，也不產生 acquire、save 或 accept 領域事件。Caller 提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
 
 每次讀取與追加都持同一 resolved path 的 sidecar lock，不使用 cache。新事件只寫 1.0；較新 1.x 行可讀，原行與未知欄位保持不變。帶 record 的 append 先發布新 JSON 附檔，再追加事件，不修改 caller model 或既有附檔。讀取不跳過損壞行。失敗可以留下孤兒附檔或不完整尾行，不提供 crash recovery。
+
+`ResultEntry.record_analysis(analysis_kind, *, run_ids, summary, record=None)` 記錄跨 run 分析，回傳可供 `ledger.get(id)` 查詢的事件 UUID。事件保留 caller 的分析種類、輸入 runs 順序與 JSON 摘要，origin 為 notebook；不查 run 資料，也不要求工作點。非 None 的 record 交給 ledger 保存與引用，內容格式由 caller 決定。入口只記錄分析，不寫回值；使用者以一般 point 或 setup 編輯寫入值，來源沿既有 manual 契約，不連回分析事件。
 
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與來源。Point commit 失敗時 accepted 可以保留，值與來源仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
 
