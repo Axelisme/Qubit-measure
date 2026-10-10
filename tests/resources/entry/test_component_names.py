@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from ruamel.yaml import YAML
 from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import ResultEntry, snapshot, source_path
 from zcu_tools.resources.entry.points import PointView
@@ -112,40 +113,52 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
     assert "edit" not in snapshot(view).components
 
 
-@pytest.mark.parametrize("member_owner", [SetupView, PointView, EditView])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "general",
+        "description",
+        "edit",
+        "meta",
+        "refresh",
+        "add_component",
+        "resolve",
+        "set",
+    ],
+)
 @pytest.mark.parametrize("owner", ["setup", "point"])
 @pytest.mark.parametrize("operation", ["add", "bind"])
-def test_new_public_view_member_is_rejected_across_view_types_without_publication(
+def test_public_view_member_conflicts_are_named_without_publication(
     entry: ResultEntry,
-    monkeypatch: pytest.MonkeyPatch,
-    member_owner: type[SetupView] | type[PointView] | type[EditView],
+    entry_roots: tuple[Path, Path],
+    name: str,
     owner: str,
     operation: str,
 ) -> None:
     view = entry.setup if owner == "setup" else entry.new_point("a")
     view.add_component("R1", kind="fake/sensor", rate=10.0)
-    if operation == "bind":
-        view.add_component("calibrate", kind="fake/sensor", rate=20.0)
-    monkeypatch.setattr(
-        member_owner, "calibrate", property(lambda self: "calibration"), raising=False
-    )
-    before = source_path(view).read_bytes()
+    path = source_path(view)
     cached = snapshot(view)
-    failure = None
-    try:
+    if operation == "bind":
+        document = YAML(typ="safe").load(path)
+        document["components"][name] = {"kind": "fake/sensor"}
+        with path.open("w", encoding="utf-8") as stream:
+            YAML(typ="rt").dump(document, stream)
+    before = path.read_bytes()
+
+    def perform_operation() -> None:
         if operation == "add":
-            view.add_component("calibrate", kind="fake/sensor", rate=20.0)
+            view.add_component(name, kind="fake/sensor")
         elif owner == "setup":
-            _ = entry.setup
+            ResultEntry.open(
+                "entry", result_root=entry_roots[0], database_root=entry_roots[1]
+            )
         else:
             entry.use_point("a")
-    except ValueError as error:
-        failure = error
-    assert failure is not None, "new public view member must reserve its component name"
-    assert (
-        "calibrate" in str(failure)
-        and "shadow" in str(failure)
-        and "view" in str(failure)
-    )
-    assert source_path(view).read_bytes() == before
+
+    with pytest.raises(ValueError) as failure:
+        perform_operation()
+    assert name in str(failure.value)
+    assert "shadow" in str(failure.value) and "view" in str(failure.value)
+    assert path.read_bytes() == before
     assert snapshot(view) == cached
