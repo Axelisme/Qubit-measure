@@ -170,7 +170,7 @@ def test_helpers_preserve_driver_error() -> None:
     device, transport = _instrument()
     error = OSError("transport unavailable")
     transport.failure = error
-    with pytest.raises(OSError) as caught:
+    with pytest.raises(OSError, match="transport unavailable") as caught:
         helpers.set_flux(device, 1e-6, unit="A", stop=StopSignal())
     assert caught.value is error
     with pytest.raises(RuntimeError, match="Current"):
