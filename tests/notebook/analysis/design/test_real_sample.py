@@ -79,8 +79,6 @@ def result_dir(tmp_path, monkeypatch) -> str:
 
 
 def _write_sample_jsonl(result_dir: str, rows: list[dict[str, object]]) -> None:
-    import os
-
     _write_sample_frame(result_dir, pd.DataFrame(rows))
 
 

@@ -591,7 +591,7 @@ def test_sample_source_rejects_manual_flux_offset(tmp_path: Path) -> None:
     """The unapproved manual offset field is not part of the Interface."""
     with pytest.raises(TypeError):
         SampleSource(
-            path=str(tmp_path / "samples.jsonl"),
+            path=str(tmp_path / "samples.csv"),
             label="manual",
             manual_flux_offset=1.0,  # type: ignore[call-arg]
         )
