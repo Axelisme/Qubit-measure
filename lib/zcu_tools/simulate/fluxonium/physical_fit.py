@@ -120,12 +120,11 @@ def fit_local_fluxonium_model(
             base, f"least_squares failed: {exc}", fluxes.size, base_rms, math.nan
         )
 
-    if not result.success:
-        return _rejected(base, str(result.message), fluxes.size, base_rms, math.nan)
-    if not np.all(np.isfinite(result.x)):
-        return _rejected(
-            base, "fit result is not finite", fluxes.size, base_rms, math.nan
+    if not result.success or not np.all(np.isfinite(result.x)):
+        reason = (
+            str(result.message) if not result.success else "fit result is not finite"
         )
+        return _rejected(base, reason, fluxes.size, base_rms, math.nan)
 
     fitted = FluxoniumModelSnapshot(
         params=(float(result.x[0]), float(result.x[1]), float(result.x[2])),
