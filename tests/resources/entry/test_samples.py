@@ -119,8 +119,8 @@ def test_samples_export_csv_requires_explicit_overwrite(
     entry: ResultEntry, tmp_path: Path
 ) -> None:
     samples = entry.samples("Q1")
-    samples.append(run_id="run-a", dev_value=1.0, dev_unit="V", t1_us=15.0)
-    samples.append(run_id="run-a", dev_value=2.0, dev_unit="V", t1_us=25.0)
+    samples.append(run_id="run-a", dev_value=1.0, dev_unit="V", point="bias", t1_us=15.0)
+    samples.append(run_id="run-a", dev_value=2.0, dev_unit="V", point="bias", t1_us=25.0)
     destination = tmp_path / "export.csv"
     destination.write_text("keep me\n", encoding="utf-8")
     with pytest.raises(FileExistsError, match="export.csv"):
