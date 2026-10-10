@@ -61,9 +61,11 @@ def connected() -> tuple[StartHarness, DeviceService, RecordingDriver, SessionDe
     harness = StartHarness()
     driver = RecordingDriver()
     service = DeviceService(harness.bus, harness.state, harness.gate, harness.background,
-                            harness.runner, harness.handles, driver_factory=lambda _kind, _address: driver)
+                            harness.runner, harness.handles, driver_factory=lambda type_name, address: driver)
     service.start_connect_device(ConnectDeviceRequest("FakeDevice", "flux", driver.address))
     harness.complete_segment()
+    # The connect observation belongs to the cache; later reads may reuse a model.
+    driver.info = driver.info.model_copy(deep=True)
     driver.reads = 0
     return harness, service, driver, SessionDevices(service)
 
@@ -147,7 +149,9 @@ def test_worker_captures_each_run_after_setup_before_callback(connected, tmp_pat
 
     def acquire(run: Run[Cfg]) -> int:
         assert driver.reads == len(seen) + 1
-        seen.append(float(run.device_snapshot["flux"]["value"]))
+        value = run.device_snapshot["flux"]["value"]
+        assert isinstance(value, float)
+        seen.append(value)
         return 1
 
     def step(env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State) -> Step[State, int]:
