@@ -97,11 +97,16 @@ def test_v0_plan_requires_explicit_flux_unit_and_forwards_it(
                 FluxPlan.model_validate(data)
             return
         plan = FluxPlan.model_validate(data)
+        if unit != "native":
+            return  # A/V are valid plan coordinates, not Fake success paths.
         _, _, devices = execute_example(
             tmp_path, t2echo_fluxdep, plan, T2EchoTunables()
         )
         assert devices.values == [("flux", 0.1), ("flux", 0.2)]
-        assert devices.units == [unit, unit]
+        assert [cfg.model_dump()["value_unit"] for cfg in devices.configs] == [
+            unit,
+            unit,
+        ]
     else:
         data.update(flux=0.2, rounds=1)
         if unit not in ("A", "V", "native"):
@@ -109,11 +114,13 @@ def test_v0_plan_requires_explicit_flux_unit_and_forwards_it(
                 OvernightPlan.model_validate(data)
             return
         overnight = OvernightPlan.model_validate(data)
+        if unit != "native":
+            return  # A/V are valid plan coordinates, not Fake success paths.
         _, _, devices = execute_example(
             tmp_path, t1_overnight, overnight, OvernightTunables()
         )
         assert devices.values == [("flux", 0.2)]
-        assert devices.units == [unit]
+        assert [cfg.model_dump()["value_unit"] for cfg in devices.configs] == [unit]
 
 
 @pytest.mark.parametrize("name", ["echo", "overnight"])

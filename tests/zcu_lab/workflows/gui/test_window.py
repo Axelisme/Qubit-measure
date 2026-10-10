@@ -2887,6 +2887,7 @@ def _start_plan_batch(_inputs: Inputs) -> list[FormWrite]:
     """
     return [
         {"path": ["flux_dev"], "value": "flux"},
+        {"path": ["flux_unit"], "value": "native"},
         {"path": ["fluxes", "kind"], "value": "list"},
         {"path": ["fluxes", "values"], "value": [1.0, 1.1]},
         {"path": ["pi_length_us"], "value": {"expr": "0.06 * 2"}},

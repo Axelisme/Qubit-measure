@@ -3,12 +3,13 @@
 import json
 from dataclasses import asdict
 from pathlib import Path
+from threading import get_ident
 
 import numpy as np
 import pytest
 from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QApplication
-from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
+from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import CommittedRecord, TunablesSnapshot
 from zcu_tools.gui.form import FormEnv
@@ -27,6 +28,7 @@ def start_native(session: SimSession, inputs: Inputs, starter: str, run_id: str)
     """Start the shipped declaration via either caller using identical native inputs."""
     plan: list[FormWrite] = [
         {"path": ["flux_dev"], "value": "flux"},
+        {"path": ["flux_unit"], "value": "native"},
         {"path": ["fluxes", "kind"], "value": "list"},
         {
             "path": ["fluxes", "values"],
@@ -95,7 +97,7 @@ def apply_and_resume(
     token: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Apply revision one, reject a failed fresh read, then read every device once."""
+    """Apply revision one and resume the same handle without reading devices."""
     window = session.app.window
     controller, panel = window.controller, window.tuning_panel
     engine = controller.engine
@@ -115,23 +117,15 @@ def apply_and_resume(
     assert isinstance(monitor, FakeDevice)
     monitor.set_value(0.37)
 
-    def fail_read() -> FakeDeviceInfo:
-        raise OSError("monitor unavailable")
-
-    with monkeypatch.context() as patch:
-        patch.setattr(monitor, "get_info", fail_read)
-        with pytest.raises(RuntimeError, match="monitor"):
-            window.resume(run_id)
-    status = controller.status()
-    assert status is not None and status.lifecycle == "paused"
     assert controller.operation_id == token and engine.records(run_id) == prior
-    reads: list[str] = []
+    owner_thread = get_ident()
+    reads: list[tuple[str, int]] = []
     with monkeypatch.context() as patch:
         for name, driver in devices.items():
             original = driver.get_info
 
             def read(original=original, name=name):
-                reads.append(name)
+                reads.append((name, get_ident()))
                 return original()
 
             patch.setattr(driver, "get_info", read)
@@ -139,7 +133,9 @@ def apply_and_resume(
             assert window.resume(run_id) == token
         else:
             assert session.call("resume", {"run_id": run_id})["operation_id"] == token
-    assert reads == ["flux", "monitor"]
+    # Submitted worker acquisitions may already be capturing; Resume itself never reads.
+    assert all(thread != owner_thread for _, thread in reads)
+    assert controller.operation_id == token and engine.records(run_id) == prior
 
 
 def assert_native_files(
@@ -155,6 +151,11 @@ def assert_native_files(
         assert native.cfg is not None and native.cfg.rounds == record.revision + 2
         assert str(metadata.snapshot.entry_id) == session.entry.entry_id
         assert metadata.snapshot.point == "source" and metadata.completion == "complete"
+        assert metadata.device_snapshot is not None
+        assert metadata.device_snapshot["monitor"]["value"] == (
+            0.37 if record.revision else 0.0
+        )
+        assert metadata.device_snapshot["flux"]["value_unit"] == "native"
         assert native.result.times.shape == native.result.signals.shape == (21,)
         assert np.isfinite(native.result.signals).all()
         point = record.encoded_record.value
@@ -214,7 +215,7 @@ def assert_persisted_records(
         for line in (roots.result / "journal.jsonl").read_text().splitlines()
     ]
     resumed = next(e for e in events if e["kind"] == "resumed")
-    assert resumed["devices"]["items"]["monitor"]["value"] == 0.37
+    assert resumed["commit_seq"] == 1 and resumed["revision"] == 1
     assert any(e["kind"] == "step_discarded" and e["reason"] == "pause" for e in events)
     commits = [e for e in events if e["kind"] == "step_committed"]
     assert [e["encoded_record"]["value"] for e in commits] == [

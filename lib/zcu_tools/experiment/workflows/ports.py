@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Protocol
 
 from qick import QickConfig
 
 from ...datafile import JsonObject
+from ...device import BaseDeviceInfo
 from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from ..stop_signal import StopSignal
@@ -33,21 +34,23 @@ class DevicePort(Protocol):
         """
         ...
 
-    def set_value(
-        self,
-        name: str,
-        value: float,
-        cancel_signal: StopSignal,
-        *,
-        unit: Literal["A", "V", "native"],
-    ) -> None:
-        """Set an absolute value in explicit A, V or native units, or raise.
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Live-read detached settings retaining the actual driver Info subclass.
 
-        The host checks unit against the driver without converting values or
-        changing mode, rampstep or output. Fake devices require native.
-        Observe ``cancel_signal`` between cooperative work segments. Unknown or
-        disconnected names, invalid limits, and I/O failures must raise.
-        Unknown/disconnected-device errors must identify the requested name.
+        Synchronous worker read, not an effect or cached GUI mapping. Unknown or
+        disconnected errors identify name; native I/O failures propagate.
+        """
+        ...
+
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo, cancel_signal: StopSignal
+    ) -> None:
+        """Revalidate complete cfg through the selected driver's Info model.
+
+        Do not rely on model_validate(instance) to revalidate unchecked copies.
+        Pass the same StopSignal through this seam and its original Event to
+        native setup. Unknown/disconnected names identify name; model validation,
+        driver limits and I/O errors propagate without retries or clamping.
         """
         ...
 

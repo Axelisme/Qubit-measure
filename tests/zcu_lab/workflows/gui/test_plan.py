@@ -346,7 +346,9 @@ def test_captured_asset_directory_reaches_native_acquisition_without_global_scop
 
 
 @pytest.mark.parametrize("unit", [None, "native", "A", "V"])
-def test_explicit_flux_unit_is_required_and_reaches_native_plan(inputs: Inputs, unit: str | None) -> None:
+def test_explicit_flux_unit_is_required_and_reaches_native_plan(
+    inputs: Inputs, unit: str | None
+) -> None:
     data = inline_input(inputs).data
     data.pop("flux_unit", None)
     if unit is not None:

@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from ...device import BaseDeviceInfo
 from ...progress_bar import use_pbar_factory
 from ..stop_signal import ScheduleOutcomeError, StopSignal
 from .artifacts import IterationArtifacts, RunArtifacts
@@ -19,6 +20,7 @@ from .effects import RunEffect, dispatch_effect
 from .encoding import encode_record
 from .env import Displays, InitEnv, WorkflowEnv
 from .journal import (
+    DeviceSetup,
     ExperimentFailed,
     IterationStarted,
     Paused,
@@ -441,15 +443,14 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         )
         return Failed(reason)
 
-    def set_device(
-        self, name: str, value: float, *, unit: Literal["A", "V", "native"]
-    ) -> None:
-        """Forward an absolute value, explicit unit and the same active signal."""
+    def setup_device(self, name: str, cfg: BaseDeviceInfo) -> None:
+        """Forward complete settings with the active signal and journal the cfg."""
         signal = self._new_signal()
         try:
             if self._ports.devices is None:
                 raise MissingCapability("devices")
-            self._ports.devices.set_value(name, value, signal, unit=unit)
+            self._ports.devices.setup_device(name, cfg, signal)
+            self._artifacts.append(DeviceSetup(name, cfg))
             self._check_cancel()
         finally:
             self._clear_signal(signal)

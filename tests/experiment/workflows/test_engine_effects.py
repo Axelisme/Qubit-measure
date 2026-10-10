@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import BaseModel
+from zcu_tools.device import FakeDeviceInfo, YOKOGS200Info
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 from zcu_tools.experiment.workflows import (
     Aborted,
@@ -35,10 +36,17 @@ def rig(tmp_path: Path) -> Rig:
 
 @pytest.mark.parametrize("unit", ["A", "V", "native"])
 @pytest.mark.parametrize("pause", [False, True], ids=["complete", "pause"])
-def test_device_unit_reaches_port_with_engine_owned_stop_signal(
+def test_complete_cfg_reaches_port_with_engine_owned_stop_signal(
     rig: Rig, unit: Literal["A", "V", "native"], pause: bool
 ) -> None:
     observed: list[StopSignal] = []
+    cfg = (
+        FakeDeviceInfo(address="memory", value=0.25)
+        if unit == "native"
+        else YOKOGS200Info(
+            address="memory", mode="current" if unit == "A" else "voltage", value=0.001
+        )
+    )
 
     def operate(signal: StopSignal) -> None:
         observed.append(signal)
@@ -50,15 +58,15 @@ def test_device_unit_reaches_port_with_engine_owned_stop_signal(
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
     ) -> Step[State, int]:
-        yield from env.set_device("bias", 0.25, unit=unit)
+        yield from env.setup_device("bias", cfg)
         return Done()
 
     rig.devices.on_set = operate
     rig.start(step)
     status = rig.engine.execute("run")
     assert status.lifecycle == ("paused" if pause else "done"), status.reason
-    assert rig.devices.values == [("bias", 0.25)]
-    assert rig.devices.units == [unit]
+    assert rig.devices.values == [("bias", cfg.value)]
+    assert rig.devices.configs[0].model_dump() == cfg.model_dump()
     assert len(observed) == 1
     assert rig.devices.signals[0] is observed[0]
     assert rig.devices.signals[0].is_set() == pause
@@ -285,7 +293,7 @@ def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
             return Done()
         yield from env.run(run_value, Cfg(), save=save_integer)
         observed.append(1)
-        yield from env.set_device("flux", 0.2, unit="native")
+        yield from env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.2))
         state.index = 1
         return Next(1, state)
 
@@ -362,8 +370,10 @@ def test_run_resolves_role_names_only_when_experiment_uses_device(
             dev = run.cfg.dev
             if dev is None:
                 raise ValueError("This experiment requires device roles")
-            run.devices.set_value(
-                dev["selected"], 0.5, run.cancel_signal, unit="native"
+            run.devices.setup_device(
+                dev["selected"],
+                FakeDeviceInfo(address="memory", value=0.5),
+                run.cancel_signal,
             )
         buffer = run.buffer((1,), axes=(np.array([0.0]),))
         with run.schedule(buffer):
@@ -699,7 +709,7 @@ def test_device_operation_error_is_not_recoverable_schedule_failure(rig: Rig) ->
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
     ) -> Step[State, int]:
-        yield from env.set_device("flux", 0.1, unit="native")
+        yield from env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.1))
         yield from env.run(acquire, Cfg(), save=save_integer)
         return Next(1, state)
 

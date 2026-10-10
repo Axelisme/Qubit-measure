@@ -10,6 +10,7 @@ import pytest
 from matplotlib.figure import Figure
 from pydantic import ValidationError
 from zcu_tools.datafile import SoftwareProvenance, load_run_data
+from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import (
     Actor,
@@ -147,13 +148,15 @@ def test_native_t1_requires_flux_unit_and_forwards_it_before_acquisition(
             T1Plan.model_validate(data)
         return
     plan = T1Plan.model_validate(data)
+    if unit != "native":
+        return  # Valid plan coordinates; Fake mismatch has separate refusal proof.
     devices, plots = RecordingDevices(), Plots(NonPresentingHost())
     engine = start_t1(inputs, tmp_path, tunables(), devices, plots, plan=plan)
     devices.on_set = lambda _signal: engine.pause("workflow")
     status = engine.execute("workflow")
     assert status.lifecycle == "paused", status.reason
     assert devices.values == [("flux", 1.0)]
-    assert devices.units == [unit]
+    assert devices.configs[0].model_dump()["value_unit"] == unit
     assert devices.signals[0].is_set()
     assert engine.records("workflow") == ()
     assert not tuple((tmp_path / "data").glob("iter/*/runs/*"))
@@ -272,6 +275,8 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
     inputs: Inputs, tmp_path: Path
 ) -> None:
     devices, plots = RecordingDevices(), Plots(NonPresentingHost())
+    driver = FakeDevice(fast_mode=True)
+    devices.drivers["flux"] = driver
     fluxes = tuple(inputs.flux_value + offset for offset in (0.0, 0.01, 0.02))
     plan = make_plan(inputs).model_copy(update={"fluxes": fluxes})
     roots = workflow_roots(
@@ -310,7 +315,7 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
             ),
         ),
     )
-    inputs.soc.set_flux_source(lambda: devices.values[-1][1])
+    inputs.soc.set_flux_source(lambda: driver.value)
     try:
         status = engine.execute("flux-bound")
     finally:
@@ -327,9 +332,10 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
         assert point["reason"] is None
         assert point["lifetime_us"] == pytest.approx(20.0, rel=0.2)
         path = roots.database / record.iteration_dir / record.run_files[-1]
-        source, _metadata = load_run_with_metadata(
-            path, spec=T1Exp().persistence_spec()
-        )
+        source, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
+        assert metadata.device_snapshot is not None
+        assert metadata.device_snapshot["flux"]["value"] == flux
+        assert metadata.device_snapshot["flux"]["value_unit"] == "native"
         assert source.cfg is not None
         frequency = source.cfg.modules.pi_pulse.freq
         assert isinstance(frequency, float)

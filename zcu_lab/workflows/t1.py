@@ -38,6 +38,7 @@ from zcu_lab.workflows.calibration import (
     apply_readout_calibration,
     calibrate,
 )
+from zcu_lab.workflows.devices import set_flux
 from zcu_lab.workflows.saving import save_frequency, save_rabi, save_readout, save_t1
 
 
@@ -45,7 +46,7 @@ class T1Plan(BaseModel):
     """Fixed setpoints, two resolved module choices and historical capture.
 
     flux_dev names the connected device. Required flux_unit is A, V or native
-    (Fake); the host rejects mismatched driver units without conversion or mode
+    (Fake); the workflow tool rejects mismatched driver units without conversion or mode
     changes. fluxes retain absolute values in that unit and order; points >= 5 controls each uniform delay grid. qub_pulse/readout
     are the shared host-resolved drive and pulse-backed readout selections.
     Drive routing/waveform/gain are fixed; runtime overwrites frequency/pi
@@ -226,7 +227,7 @@ def t1_fluxdep(
         return Done()
 
     flux = state.remaining.pop(0)
-    yield from env.set_device(plan.flux_dev, flux, unit=plan.flux_unit)
+    yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
     cal = yield from calibrate(
         env,
         plan.qub_pulse,

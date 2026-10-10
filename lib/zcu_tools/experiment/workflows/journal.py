@@ -7,8 +7,9 @@ from datetime import datetime
 from traceback import TracebackException
 from typing import Literal
 
-from pydantic import JsonValue
+from pydantic import JsonValue, SerializeAsAny
 
+from ...device import BaseDeviceInfo
 from .models import Actor, CommittedRecord, RunIdentity, RunPaths
 
 
@@ -52,6 +53,19 @@ class IterationStarted:
     revision: int
     iteration_dir: str
     kind: Literal["iteration_started"] = field(default="iteration_started", init=False)
+
+
+@dataclass(frozen=True)
+class DeviceSetup:
+    """One completed setup attempt: requested name and all typed cfg fields.
+
+    cfg retains the selected Info subclass in its JSON projection; the journal
+    does not interpret settings, units, limits or hardware readback.
+    """
+
+    name: str
+    cfg: SerializeAsAny[BaseDeviceInfo]
+    kind: Literal["device_setup"] = field(default="device_setup", init=False)
 
 
 @dataclass(frozen=True)
@@ -237,6 +251,7 @@ type JournalPayload = (
     RunStarted
     | IterationStarted
     | ExperimentFailed
+    | DeviceSetup
     | StepCommitted
     | StepFinished
     | StepDiscarded

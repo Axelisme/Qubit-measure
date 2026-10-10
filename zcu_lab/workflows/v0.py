@@ -34,6 +34,8 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 
+from .devices import set_flux
+
 
 @dataclass(frozen=True)
 class DemoContext:
@@ -482,7 +484,7 @@ def t2echo_fluxdep(
     if not state.remaining:
         return Done()
     flux = state.remaining.pop(0)
-    yield from env.set_device(plan.flux_dev, flux, unit=plan.flux_unit)
+    yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
     cal = yield from calibrate(env, tun.cal, flux, state.cal)
     if isinstance(cal, CalibrationFailed):
         return Next(T2EchoPoint(index, flux, cal, None, cal.reason), state)
@@ -627,7 +629,7 @@ def t1_overnight(
     state.index += 1
     yield from env.wait_until(state.start + timedelta(seconds=index * plan.period_s))
     if index == 0:
-        yield from env.set_device(plan.flux_dev, plan.flux, unit=plan.flux_unit)
+        yield from set_flux(env, plan.flux_dev, plan.flux, unit=plan.flux_unit)
 
     cal = state.cal
     if cal is None:

@@ -144,7 +144,9 @@ def test_live_cfg_read_is_synchronous_and_complete_setup_is_journaled(rig: Rig) 
     observed: list[object] = []
     cfg = FakeDeviceInfo(address="memory", value=0.25, rampstep=0.05, output="on")
 
-    def step(env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State) -> Step[State, int]:
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
         observed.append(env.get_device_cfg("flux"))
         yield from env.setup_device("flux", cfg)
         return Done()

@@ -6,8 +6,8 @@ from collections.abc import Callable, Generator
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
-from typing import Literal
 
+from ...device import BaseDeviceInfo
 from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from .effects import DeviceEffect, RunEffect, WaitEffect
@@ -173,16 +173,25 @@ class WorkflowEnv[C](InitEnv[C]):
             raise RuntimeError("Engine did not complete the run effect")
         return request.outcome
 
-    def set_device(
-        self, name: str, value: float, *, unit: Literal["A", "V", "native"]
-    ) -> Generator[Effect, None, None]:
-        """Set a finite absolute device value in the explicitly supplied unit.
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Synchronously live-read detached device settings in the worker.
 
-        unit is A, V or native; no conversion or mode change occurs. Empty names,
-        nonfinite values and unknown units raise ValueError. The adapter enforces
-        connectivity and limits. Cancellation discards the entire step.
+        This read is not an effect. The host returns the actual Info subclass;
+        unknown/disconnected names identify name and read failures propagate.
+        Missing devices raises MissingCapability('devices') at use.
         """
-        request = DeviceEffect(name, value, unit)
+        return self.devices.get_device_cfg(name)
+
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo
+    ) -> Generator[Effect, None, None]:
+        """Apply complete typed settings with the engine's cooperative signal.
+
+        The host revalidates all fields with the selected driver's Info model.
+        Limits, validation and I/O failures propagate; no conversion, retries or
+        clamping occurs. Cancellation discards the entire step.
+        """
+        request = DeviceEffect(name, cfg)
         yield request
         if not request.done:
             raise RuntimeError("Engine did not complete the device effect")

@@ -65,7 +65,11 @@ def test_native_set_device_limit_failure_is_terminal_before_acquisition(
     assert isinstance(service.get_connected_devices()["limited"], YOKOGS200)
     window = app.window
     window.plan_panel.state.write(
-        {("flux_dev",): "limited", ("fluxes", "values"): [sign * MAX_CURRENT * 1.01]},
+        {
+            ("flux_dev",): "limited",
+            ("flux_unit",): "A",
+            ("fluxes", "values"): [sign * MAX_CURRENT * 1.01],
+        },
         window.plan_panel.env,
     )
     run_id = "limit-negative" if sign < 0 else "limit-positive"

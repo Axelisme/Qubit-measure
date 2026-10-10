@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from math import isfinite
 from pathlib import Path
 from re import fullmatch
-from typing import Literal, Protocol
+from typing import Protocol
 
+from ...device import BaseDeviceInfo
 from .models import Completed, Effect, Failed
 from .run import LiveUpdate, Run
 
@@ -33,10 +33,8 @@ class EffectExecutor(Protocol):
         """
         ...
 
-    def set_device(
-        self, name: str, value: float, *, unit: Literal["A", "V", "native"]
-    ) -> None:
-        """Set a connected device's absolute value in unit, or raise."""
+    def setup_device(self, name: str, cfg: BaseDeviceInfo) -> None:
+        """Apply complete connected-device settings, or raise."""
         ...
 
     def wait_until(self, target: datetime) -> None:
@@ -77,27 +75,17 @@ class RunEffect[Cfg, Result](Effect):
 
 @dataclass
 class DeviceEffect(Effect):
-    """Internal absolute setpoint request; done is true after adapter return."""
+    """Internal full-settings request; done is true after adapter return."""
 
     name: str
-    value: float
-    unit: Literal["A", "V", "native"]
+    cfg: BaseDeviceInfo
     done: bool = field(default=False, init=False)
 
-    def __post_init__(self) -> None:
-        if not self.name.strip() or not isfinite(self.value):
-            raise ValueError(
-                "Device setpoint requires a name and finite absolute value"
-            )
-
-        if self.unit not in ("A", "V", "native"):
-            raise ValueError("Device unit must be A, V or native")
-
     def execute(self, executor: EffectExecutor) -> None:
-        """Apply name/value/unit once; propagate cancellation and device errors."""
+        """Apply name/cfg once; propagate cancellation and device errors."""
         if self.done:
             raise RuntimeError("Device effect has already completed")
-        executor.set_device(self.name, self.value, unit=self.unit)
+        executor.setup_device(self.name, self.cfg)
         self.done = True
 
 

@@ -10,6 +10,7 @@ from threading import Event
 import pytest
 from pydantic import ValidationError
 from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.workflows import (
     Actor,
     Done,
@@ -693,7 +694,9 @@ def test_missing_port_fails_only_when_used_during_execute(rig: Rig, port: str) -
         if port == "soc":
             yield from env.run(needs_soc, Cfg(), save=lambda _source, _path: None)
         else:
-            yield from env.set_device("flux", 1.0, unit="native")
+            yield from env.setup_device(
+                "flux", FakeDeviceInfo(address="memory", value=1.0)
+            )
         return Done()
 
     rig.engine = Engine(

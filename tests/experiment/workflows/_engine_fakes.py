@@ -5,11 +5,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from zcu_tools.datafile import JsonObject, SoftwareProvenance
-from zcu_tools.device import FakeDevice
+from zcu_tools.device import BaseDeviceInfo, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.acquisition import capture_device_snapshot
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
@@ -54,7 +53,7 @@ class RecordingDevices:
     def __init__(self) -> None:
         self.values: list[tuple[str, float]] = []
         self.on_set: Callable[[StopSignal], object] | None = None
-        self.units: list[Literal["A", "V", "native"]] = []
+        self.configs: list[BaseDeviceInfo] = []
         self.signals: list[StopSignal] = []
         self.drivers: dict[str, FakeDevice] = {}
         self.captures = 0
@@ -63,19 +62,24 @@ class RecordingDevices:
         self.captures += 1
         return capture_device_snapshot(self.drivers)
 
-    def set_value(
-        self,
-        name: str,
-        value: float,
-        cancel_signal: StopSignal,
-        *,
-        unit: Literal["A", "V", "native"],
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        if name in self.drivers:
+            return self.drivers[name].get_info().model_copy(deep=True)
+        return FakeDeviceInfo(address="memory")
+
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo, cancel_signal: StopSignal
     ) -> None:
+        value = cfg.model_dump()["value"]
         self.values.append((name, value))
-        self.units.append(unit)
+        self.configs.append(cfg.model_copy(deep=True))
         self.signals.append(cancel_signal)
         if self.on_set is not None:
             self.on_set(cancel_signal)
+        if name in self.drivers:
+            driver = self.drivers[name]
+            validated = driver.info_model.model_validate(cfg.model_dump(mode="python"))
+            driver.setup(validated, progress=False, stop_event=cancel_signal.event)
 
 
 class RecordingBar(TQDMProgressBar):

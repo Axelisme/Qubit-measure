@@ -1,6 +1,7 @@
 """User-facing T1 choices; the workflow constructs each acquisition cfg."""
 
 from collections.abc import Mapping
+from typing import Literal
 
 import numpy as np
 from pydantic import Field, JsonValue
@@ -31,7 +32,8 @@ from zcu_lab.workflows.t1 import T1Plan
 class T1PlanForm(FormModel):
     """Start-time setpoints and two shared module reference/inline selections.
 
-    flux_dev names the host device; fluxes contain absolute values in its units.
+    flux_dev names the host device; required flux_unit declares A, V or native.
+    fluxes contain absolute values in that coordinate; no conversion occurs.
     points >= 5 controls runtime T1 delay resolution. qub_pulse selects the
     shared pulse drive; readout selects a pulse-backed readout because native
     readout landscape acquisition requires gain control. Both use ModuleInput
@@ -42,6 +44,9 @@ class T1PlanForm(FormModel):
     """
 
     flux_dev: str = Field(min_length=1, description="Host flux device name")
+    flux_unit: Literal["A", "V", "native"] = Field(
+        description="Explicit flux coordinate: YOKO A/V, Fake native"
+    )
     fluxes: RangeInput = Field(description="Ordered absolute device setpoints")
     pi_length_us: float = Field(
         gt=0,
@@ -171,6 +176,7 @@ class T1PlanForm(FormModel):
         )
         return T1Plan(
             flux_dev=self.flux_dev,
+            flux_unit=self.flux_unit,
             fluxes=fluxes,
             points=self.points,
             qub_pulse=qub_pulse,

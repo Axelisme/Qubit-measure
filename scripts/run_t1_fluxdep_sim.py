@@ -18,7 +18,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 from zcu_tools.datafile import JsonObject
-from zcu_tools.device import DeviceInfo, DeviceManager, FakeDevice
+from zcu_tools.device import BaseDeviceInfo, DeviceManager, FakeDevice
 from zcu_tools.experiment.acquisition import (
     capture_device_snapshot,
     capture_software_provenance,
@@ -51,23 +51,23 @@ class _Devices:
         """Capture connected drivers before each callback in the Engine worker."""
         return capture_device_snapshot(self.manager.get_all_devices())
 
-    def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
-        """Set absolute native flux through the driver, observing cancellation.
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Read detached live settings, identifying missing names at use."""
+        devices = self.manager.get_all_devices()
+        if name not in devices:
+            raise ValueError(f"Device not connected: {name!r}")
+        return devices[name].get_info().model_copy(deep=True)
 
-        The native owner validates names, model, address and settings.
-        Unsupported flux setters and driver failures propagate.
-        """
-        info = self.manager.get_info(name)
-        info.set_flux(value)
-        self.setup({name: info}, cancel_signal)
-
-    def setup(
-        self, settings: Mapping[str, DeviceInfo], cancel_signal: StopSignal
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo, cancel_signal: StopSignal
     ) -> None:
-        """Apply native device settings in order through the same manager."""
-        self.manager.setup_devices(
-            settings, progress=False, cancel_signal=cancel_signal.event
-        )
+        """Revalidate full selected-model cfg and pass the original stop event."""
+        devices = self.manager.get_all_devices()
+        if name not in devices:
+            raise ValueError(f"Device not connected: {name!r}")
+        driver = devices[name]
+        validated = driver.info_model.model_validate(cfg.model_dump(mode="python"))
+        driver.setup(validated, progress=False, stop_event=cancel_signal.event)
 
 
 class _Arguments(argparse.Namespace):
