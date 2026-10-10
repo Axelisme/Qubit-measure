@@ -121,7 +121,20 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
         "target": captured.target.model_dump(),
         "point": captured.document().model_dump(serialize_as_any=True),
         "library": captured.library.document().model_dump(serialize_as_any=True),
-        "aliases": [],
+        "aliases": [
+            {
+                "alias": "qubit",
+                "value": "",
+                "resolved": None,
+                "error": "Role 'qubit' requires kind None; focus=None: Alias is not bound",
+            },
+            {
+                "alias": "resonator",
+                "value": "$qubit.resonator",
+                "resolved": None,
+                "error": "Role 'resonator' requires kind None; focus=None: Alias is not bound",
+            },
+        ],
     }
     wire_point = result["point"]
     assert isinstance(wire_point, dict)
