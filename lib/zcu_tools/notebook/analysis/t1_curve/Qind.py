@@ -87,5 +87,4 @@ def calc_Qind_vs_omega(
         Qind_vs_omega_err = T1errs * dipoles
 
         return Qind_vs_omega, Qind_vs_omega_err
-    else:
-        return Qind_vs_omega
+    return Qind_vs_omega
