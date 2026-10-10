@@ -205,7 +205,12 @@ def test_empty_lookup_uses_default_or_raises_missing() -> None:
 
 @pytest.mark.parametrize(
     ("type_", "value", "type_name"),
-    [(int, 7, "int"), (float, 0.25, "float"), (str, "ready", "str"), (bool, True, "bool")],
+    [
+        (int, 7, "int"),
+        (float, 0.25, "float"),
+        (str, "ready", "str"),
+        (bool, True, "bool"),
+    ],
     ids=["int", "float", "str", "bool"],
 )
 def test_describe_preserves_registered_scalar_types(

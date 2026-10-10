@@ -138,10 +138,10 @@ class _Entry(Generic[T]):
     description: str
     token: object
 
-    def info(self) -> ValueInfo:
+    def info(self: _Entry[ScalarValue]) -> ValueInfo:
         return ValueInfo(
             key=self.key.path,
-            type_=cast(ScalarType, self.key.type_),
+            type_=self.key.type_,
             owner=self.owner,
             description=self.description,
         )
