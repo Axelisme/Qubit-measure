@@ -158,6 +158,7 @@ def make_plan(inputs: Inputs) -> T1Plan:
     """Build complete native inputs without replacing acquisition logic."""
     return T1Plan(
         flux_dev="flux",
+        flux_unit="native",
         fluxes=(1.0, 1.1),
         points=21,
         qub_pulse=inputs.rabi.modules.qub_pulse,

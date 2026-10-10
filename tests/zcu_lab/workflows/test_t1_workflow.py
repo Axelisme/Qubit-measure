@@ -45,7 +45,8 @@ def start_t1(
     tun: T1Tunables,
     devices: RecordingDevices,
     plots: Plots,
-    *, plan: T1Plan | None = None,
+    *,
+    plan: T1Plan | None = None,
 ) -> Engine[Calibrated]:
     """Start the shipped declaration with real acquisitions and isolated offline ports."""
     engine = Engine(

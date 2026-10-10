@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from functools import partial
+from typing import Literal
 
 from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field
@@ -43,8 +44,9 @@ from zcu_lab.workflows.saving import save_frequency, save_rabi, save_readout, sa
 class T1Plan(BaseModel):
     """Fixed setpoints, two resolved module choices and historical capture.
 
-    flux_dev names the connected device. fluxes retain absolute device units
-    and order; points >= 5 controls each uniform delay grid. qub_pulse/readout
+    flux_dev names the connected device. Required flux_unit is A, V or native
+    (Fake); the host rejects mismatched driver units without conversion or mode
+    changes. fluxes retain absolute values in that unit and order; points >= 5 controls each uniform delay grid. qub_pulse/readout
     are the shared host-resolved drive and pulse-backed readout selections.
     Drive routing/waveform/gain are fixed; runtime overwrites frequency/pi
     duration and applies accepted readout frequency/gain on shared routing.
@@ -56,6 +58,9 @@ class T1Plan(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
     flux_dev: str = Field(min_length=1, description="Connected flux device name")
+    flux_unit: Literal["A", "V", "native"] = Field(
+        description="Explicit setpoint unit: A, V or native (Fake); no conversion"
+    )
     fluxes: tuple[float, ...] = Field(
         description="Ordered absolute setpoints in native device units"
     )
@@ -221,7 +226,7 @@ def t1_fluxdep(
         return Done()
 
     flux = state.remaining.pop(0)
-    yield from env.set_device(plan.flux_dev, flux)
+    yield from env.set_device(plan.flux_dev, flux, unit=plan.flux_unit)
     cal = yield from calibrate(
         env,
         plan.qub_pulse,
