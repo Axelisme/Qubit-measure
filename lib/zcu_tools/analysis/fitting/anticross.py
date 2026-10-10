@@ -94,10 +94,7 @@ def fit_hyperbolic(
     if not lsq_result.success:
         return a, b, c, d, e, f
 
-    if horizontal_line:
-        fit_params = np.array([0.0, *lsq_result.x])
-    else:
-        fit_params = lsq_result.x
+    fit_params = np.array([0.0, *lsq_result.x]) if horizontal_line else lsq_result.x
 
     return tuple(fit_params / np.linalg.norm(fit_params))
 
