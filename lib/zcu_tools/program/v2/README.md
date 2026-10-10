@@ -1,12 +1,12 @@
 # README - program/v2
 
-**Last updated:** 2026-10-06 — packed lookup hardware shift limits
+**Last updated:** 2026-10-10 — typed mock interfaces
 
 ## Testing & Type Checking Conventions
 
 - **Type Narrowing**: When a mock or abstract base class type is too generic in tests (e.g., retrieving an item from an `IRNode.insts` list where you expect a `RegWriteInst`), use an explicit assertion (`assert isinstance(item, RegWriteInst)`) rather than `cast()`. This ensures Pyright can perform type narrowing safely while maintaining a runtime guarantee.
 - **Mock Overrides**: When testing edge cases that intentionally return unexpected types to trigger errors, prefer a narrow helper/protocol or an explicit runtime assertion at the boundary. Do not widen signatures to `Any` or use `cast()` just to silence the type checker unless there is a reviewed reason.
-- **Mock Interfaces**: For simple fake objects passed to functions (like `_FakeTracker` to `snr_as_signal`), if it structurally satisfies the requirements for the test, a single `# type: ignore[arg-type]` at the injection site is preferred over verbose `cast(list[Interface], ...)` syntax to keep the testing code clean.
+- **Mock Interfaces**: Use type-compatible fakes or an existing typed seam when passing test collaborators to functions. Do not add type suppressions or `cast()` to silence an incompatible interface.
 - **Program Emission Tests**: Unit tests that assert emitted program actions use a typed `ProgramTrace` adapter rather than loose `MagicMock` program objects. The trace records semantic program intents (readout declarations, triggers, pulses, loops, delays, register writes, and jumps) without acting as a second compiler or IR parser.
 - **MagicMock Scope**: Keep `MagicMock` for non-program collaborators, child-module spy hooks, and deliberate error-injection tests. Do not use it as the default stand-in for a program object when the test is asserting emitted program behavior.
 - **MockSoc Role**: `MockSoc` remains the compile/acquire/sim adapter for integration-style tests. `ProgramTrace` is a unit-test recorder and does not replace hardware-aligned compile or acquisition coverage.
