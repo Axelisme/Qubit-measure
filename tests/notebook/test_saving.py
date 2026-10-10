@@ -15,7 +15,7 @@ from zcu_tools.datafile import (
     load_labber_data,
     load_run_data,
 )
-from zcu_tools.device import DeviceManager
+from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
@@ -46,7 +46,6 @@ from tests._native_support import native_metadata
 from tests.device._snapshot_fakes import SnapshotDevice
 from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
 from tests.experiment._snapshot_support import SnapshotCore
-from tests.notebook import _interrupt_fakes
 from tests.notebook._interrupt_fakes import InterruptedCore
 from tests.resources.entry.fakes import Driver, registry_state, restore_registry
 
@@ -223,22 +222,29 @@ def test_interrupted_acquisition_preserves_saveable_partial(
     )
 
 
-def test_setup_devices_interrupt_escapes_and_preserves_previous_record(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    core = InterruptedCore("setup")
+def test_device_operation_interrupt_escapes_and_preserves_previous_record() -> None:
+    core = InterruptedCore("device")
+    manager = DeviceManager()
     exp = NotebookAdapter(
         soc=object(),
         soccfg=object(),
-        device_manager=DeviceManager(),
+        device_manager=manager,
         host=NonPresentingHost(),
     )(core)
     previous = exp.run(SavingCfg())
     evidence = exp.acquisition_for(previous)
-    interrupt = KeyboardInterrupt("setup_devices stopped")
-    monkeypatch.setattr(_interrupt_fakes, "setup_devices", Mock(side_effect=interrupt))
+    interrupt = KeyboardInterrupt("Device operation stopped")
+
+    class InterruptingDevice(FakeDevice):
+        info_model = FakeDeviceInfo
+
+        def set_value(self, value: float) -> float:
+            del value
+            raise interrupt
+
+    manager.register_device("sensor", InterruptingDevice())
     with pytest.raises(KeyboardInterrupt) as caught:
-        exp.run(SavingCfg())
+        exp.run(SavingCfg(dev={"probe": "sensor"}))
     assert caught.value is interrupt
     assert exp.last_run is previous
     assert exp.acquisition_for(previous) == evidence

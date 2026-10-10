@@ -32,7 +32,7 @@ from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -71,6 +71,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
@@ -617,22 +618,17 @@ def test_cancel_run_sets_operation_stop_event():
     assert gate.has_active(OperationKind.RUN)
 
 
-def test_cancel_run_stops_experiment_setup_devices_before_first_device():
+def test_cancel_run_stops_selected_flux_before_first_write():
     state, tab_id, adapter = _make_state()
     dev = FakeDevice(fast_mode=True)
-    cfg = FakeDeviceInfo(address="none", output="on", value=1.0, rampstep=0.1)
 
-    def run_setup_devices(*_args: Any, context: RunContext) -> object:
-        exp_cfg = ExpCfgModel(dev={"run-dev": cfg})
-        setup_devices(
-            exp_cfg,
-            context.devices,
-            progress=False,
-            cancel_signal=context.cancel_signal,
+    def run_flux(*_args: Any, context: RunContext) -> object:
+        set_flux(
+            context.devices["run-dev"], 1.0, unit="native", stop=context.cancel_signal
         )
         return object()
 
-    adapter.run.side_effect = run_setup_devices
+    adapter.run.side_effect = run_flux
     svc, _gate, bg, handles = _make_run_service(state, devices={"run-dev": dev})
     token = svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
     svc.cancel_run()
@@ -651,18 +647,17 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
     second_device = FakeDevice(fast_mode=True)
     devices = {"flux": first_device}
     contexts: list[RunContext] = []
-    cfg = ExpCfgModel(
-        dev={"flux": FakeDeviceInfo(address="none", output="on", value=0.5)}
-    )
 
-    def run_setup(*_args: Any, context: RunContext) -> object:
+    def run_flux(*_args: Any, context: RunContext) -> object:
         contexts.append(context)
-        setup_devices(cfg, context.devices, cancel_signal=context.cancel_signal)
+        set_flux(
+            context.devices["flux"], 0.5, unit="native", stop=context.cancel_signal
+        )
         if len(contexts) == 1:
             context.cancel_signal.set_error("failed", "first run failed", None)
         return object()
 
-    adapter.run.side_effect = run_setup
+    adapter.run.side_effect = run_flux
     service, gate, background, handles = _make_run_service(state, devices=devices)
     inputs = _make_inputs(state, tab_id, adapter)
     first_token = service.start_run(inputs, plots=_plots())
@@ -839,8 +834,15 @@ def test_run_publishes_record_and_historical_metadata_together(
         experiment_tag="test/native",
     )
     settings = FakeDeviceInfo(address="offline", value=1.25)
-    inputs = replace(
-        inputs, request=replace(inputs.request, device_snapshot={"flux": settings})
+    state.put_device(
+        DeviceState(
+            name="flux",
+            type_name="FakeDevice",
+            address="offline",
+            status=DeviceStatus.CONNECTED,
+            remember=False,
+            info=settings,
+        )
     )
     identity = MagicMock(wraps=new_run_id)
     monkeypatch.setattr("zcu_tools.gui.app.measure.services.run.new_run_id", identity)
