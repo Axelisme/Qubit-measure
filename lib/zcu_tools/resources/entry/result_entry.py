@@ -16,6 +16,7 @@ from ruamel.yaml import YAML
 from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
+from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
@@ -142,6 +143,20 @@ class ResultEntry:
         Missing records directories raise; accessing this property writes no files.
         """
         return RecordsLedger(self._result_path / "records", entry_id=self.entry_id)
+
+    def samples(self, component: str) -> JsonlSampleTable:
+        """Bind this component's append-only sample history without touching disk.
+
+        component is a safe single path segment, not a role alias. Rows live at
+        result_path/samples/<component>.jsonl; no component schema or ledger is
+        read. Unsafe names and symlinks escaping this entry raise ValueError.
+        The returned table owns append, latest-per-run read and CSV export.
+        """
+        validate_path_segment(component, field="component")
+        path = self._result_path / "samples" / f"{component}.jsonl"
+        if not path.resolve().is_relative_to(self._result_path.resolve()):
+            raise ValueError(f"{path}: samples escape their entry")
+        return JsonlSampleTable(path)
 
     def updated_point(
         self,
