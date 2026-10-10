@@ -11,7 +11,17 @@
 root_packages =
     zcu_tools
     zcu_lab
+    migrations
 include_external_packages = True
+
+# D334: offline migration tools cannot become runtime dependencies.
+[importlinter:contract:runtime-no-migrations]
+name = C20: zcu_tools does not depend on offline migrations
+type = forbidden
+source_modules =
+    zcu_tools
+forbidden_modules =
+    migrations
 
 # ADR-0063: only an external composition root bootstraps concrete entry definitions.
 [importlinter:contract:entry-definitions-composition-only]

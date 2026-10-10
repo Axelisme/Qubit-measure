@@ -155,12 +155,13 @@ max-args = 6
 "tests/**" = ["PLR0913", "ARG001", "ARG002", "FBT001", "FBT002", "B011"]
 
 [tool.pyright]
-include = ["lib", "zcu_lab", "tests", "scripts", "tools"]
+include = ["lib", "zcu_lab", "tests", "scripts", "tools", "migrations"]
 executionEnvironments = [
   { root = "zcu_lab", extraPaths = ["lib", "."] },
   { root = "lib", extraPaths = ["lib", "."] },
   { root = "tests", extraPaths = ["lib", "tools", "."] },
   { root = "scripts", extraPaths = ["lib", "."] },
+  { root = "migrations", extraPaths = ["lib", "."] },
   { root = "tools", extraPaths = ["lib", "tools", "."] },
 ]
 # strict, minus the rules whose diagnostics are produced by untyped third-party
