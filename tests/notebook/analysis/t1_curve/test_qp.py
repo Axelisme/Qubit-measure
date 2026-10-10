@@ -67,5 +67,5 @@ def test_qp_error_arrays_preserve_values_and_inputs() -> None:
         assert np.all(np.isfinite(output))
         for array in inputs:
             assert not np.shares_memory(output, array)
-    for array, original in zip(inputs, originals):
+    for array, original in zip(inputs, originals, strict=True):
         np.testing.assert_array_equal(array, original)
