@@ -490,3 +490,19 @@ def test_stop_during_native_acquisition_preserves_only_prior_committed_point(
     source, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
     assert source.cfg is not None and np.isfinite(source.result.signals).all()
     assert metadata.completion == "complete"
+
+
+@pytest.mark.parametrize("unit", ["A", "V"])
+def test_flux_unit_mismatch_fails_before_setup_or_acquisition(
+    inputs: Inputs, tmp_path: Path, unit: str
+) -> None:
+    plan = make_plan(inputs).model_copy(update={"flux_unit": unit})
+    devices, plots = RecordingDevices(), Plots(NonPresentingHost())
+    engine = start_t1(inputs, tmp_path, tunables(), devices, plots, plan=plan)
+    devices.on_set = lambda _signal: engine.pause("workflow")
+    status = engine.execute("workflow")
+    assert status.lifecycle == "failed", status.reason
+    assert status.reason is not None and "unit" in status.reason
+    assert devices.values == []
+    assert engine.records("workflow") == ()
+    assert not tuple((tmp_path / "data").glob("iter/*/runs/*"))

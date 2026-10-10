@@ -138,3 +138,22 @@ def test_env_run_distinguishes_missing_devices_from_explicit_empty_port(
         assert status.lifecycle == "done"
         assert callbacks == ["acquire"]
         assert rig.devices.captures == 1
+
+
+def test_live_cfg_read_is_synchronous_and_complete_setup_is_journaled(rig: Rig) -> None:
+    observed: list[object] = []
+    cfg = FakeDeviceInfo(address="memory", value=0.25, rampstep=0.05, output="on")
+
+    def step(env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State) -> Step[State, int]:
+        observed.append(env.get_device_cfg("flux"))
+        yield from env.setup_device("flux", cfg)
+        return Done()
+
+    rig.start(step)
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "done", status.reason
+    assert len(observed) == 1 and isinstance(observed[0], FakeDeviceInfo)
+    assert rig.devices.values == [("flux", 0.25)]
+    setup = next(event for event in rig.events() if event["kind"] == "device_setup")
+    assert setup["name"] == "flux"
+    assert setup["cfg"] == cfg.model_dump(mode="json")
