@@ -18,6 +18,6 @@
 
 Workflow 透過 `env.plots` 的 typed handles 更新 live trace，buffer 回呼只送座標與複數資料。校準參考線、靜態圖與 fit 疊圖經 draw 在 host owner 執行；每點 decay／最終 summary 經 save 保存。跨 retry 清除並重建具名圖的 axes，再接新模板，不把 handles 存進 state。核心不再持 Live artist 宣告。
 
-`saving` 的四個具體 writer 使用各 experiment 的既有 persistence declaration 與 native `save_run`。Writer 接 Engine 的 exact path，不決定 entry layout，也不捕捉 live context。Acquisition evidence 提供 run_id、時間、completion 與 software provenance；caller 的 RunSnapshot 提供當時的 entry／point／roles。保存不以 workflow run_id 或保存時間覆寫 acquisition facts。
+`saving` 的四個具體 writer 使用各 experiment 的既有 persistence declaration 與 native `save_run`。Writer 接 Engine 的 exact path，不決定 entry layout，也不捕捉 live context。Acquisition evidence 提供 run_id、時間、completion 與 software provenance；caller 的 RunSnapshot 提供當時的 entry／point／roles。保存不以 workflow run_id 或保存時間覆寫 acquisition facts。Saver 原樣將已提供的 `AcquisitionEvidence.device_snapshot` 交給 native metadata；`{}` 表示無 device，`None` 保留舊資料未記錄的語意。Sweep 與再次 Save 不刷新這份資料。Workflow 的 per-env.run capture 與 callback 傳遞仍待接線，這項 saver 修正不代表整條 snapshot 資料流已完成。
 
 `tests/experiment/workflows/` 驗證通用 Engine 契約。`tests/zcu_lab/workflows/` 由具體 callback、calibration 與 native T1 的 Engine seam，驗證真實 simulator、typed native load、完整與拒絕路徑、pause 新 revision 重做及 stop 保留 prior commit。不測宿主腳本或文件內容。

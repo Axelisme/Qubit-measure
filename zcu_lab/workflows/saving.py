@@ -3,6 +3,8 @@
 The host captures the entry snapshot. Acquisition callbacks capture times and
 software evidence. These writers combine those facts with each experiment's
 existing persistence declaration; they never select paths or recapture context.
+Device evidence is forwarded unchanged: {} records no devices and None retains
+unrecorded legacy evidence. Saving never reads drivers or refreshes settings.
 """
 
 from pathlib import Path
@@ -48,6 +50,7 @@ def _save[Cfg: ExpCfgModel, Result](
         labber_path=None,
         snapshot=snapshot,
         provenance=evidence.provenance,
+        device_snapshot=evidence.device_snapshot,
     )
     save_run(source, destination, spec=spec, metadata=metadata)
 

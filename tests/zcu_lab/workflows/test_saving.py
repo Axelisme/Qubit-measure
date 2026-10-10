@@ -8,7 +8,10 @@ import numpy as np
 import pytest
 from zcu_tools.datafile import RunMetadata, RunSnapshot
 from zcu_tools.device import FakeDevice
-from zcu_tools.experiment.acquisition import AcquisitionEvidence, capture_device_snapshot
+from zcu_tools.experiment.acquisition import (
+    AcquisitionEvidence,
+    capture_device_snapshot,
+)
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import Completed, Run
@@ -126,7 +129,9 @@ def test_t1_saver_preserves_fixed_device_evidence_in_native_metadata(
     )
     expected = deepcopy(captured)
     result = run_t1(Run(inputs.t1, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg))
-    result = replace(result, evidence=replace(result.evidence, device_snapshot=captured))
+    result = replace(
+        result, evidence=replace(result.evidence, device_snapshot=captured)
+    )
     driver.set_value(0.9)
     if captured:
         captured["flux"]["value"] = 0.75
