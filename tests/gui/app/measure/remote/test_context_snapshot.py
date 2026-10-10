@@ -386,6 +386,7 @@ def test_snapshot_summary_keeps_scalars_and_complete_aliases(
 ) -> None:
     full = browse_context.result("context.snapshot", {})
     summary = browse_context.result("context.snapshot", {"summaries": True})
+    assert "aliases" in summary and "aliases" in full
     assert summary["target"] == full["target"]
     assert summary["aliases"] == full["aliases"]
     point = snapshot_mapping(summary["point"])
@@ -429,6 +430,7 @@ def test_snapshot_path_reads_complete_subtree_before_summaries(
     result = browse_context.result(
         "context.snapshot", {"path": path, "summaries": True}
     )
+    assert "path" in result and "value" in result, result
     assert result["path"] == path and result["value"] == expected
     assert set(result) == {"target", "aliases", "path", "value"}
     assert snapshot_rows(result["aliases"])[1] == {
@@ -449,9 +451,9 @@ def test_partial_snapshot_does_not_establish_or_refresh_context_seen(
     application.result("context.snapshot", params)
     mutation = {"kind": "module", "name": "x", "edits": []}
     assert (
-        snapshot_mapping(application.rpc("context.ml_edit", mutation)["error"])[
+        snapshot_mapping(application.rpc("context.ml_edit", mutation)["error"]).get(
             "reason"
-        ]
+        )
         == "stale_version"
     )
     application.result("context.snapshot", {})
@@ -463,9 +465,9 @@ def test_partial_snapshot_does_not_establish_or_refresh_context_seen(
     context.set_parameter(context.read_context().target, "Q1.rate", 11.0)
     application.result("context.snapshot", params)
     assert (
-        snapshot_mapping(application.rpc("context.ml_edit", mutation)["error"])[
+        snapshot_mapping(application.rpc("context.ml_edit", mutation)["error"]).get(
             "reason"
-        ]
+        )
         == "stale_version"
     )
     application.result("context.snapshot", {})

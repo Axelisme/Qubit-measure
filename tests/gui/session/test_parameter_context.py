@@ -611,8 +611,12 @@ def test_alias_projection_source_fault_fails_the_whole_read(
     fault = ContextSourceFault(
         "point", tmp_path / "point.yaml", "OSError", "source fault"
     )
-    context = capture(source, faults=(fault,)).bind_aliases(
-        (AliasRow("drive", "Q1"),), {}
+    context = capture(
+        source,
+        roles=RoleBinding(
+            focus=None, declarations={}, names={}, aliases=(AliasRow("drive", "Q1"),)
+        ),
+        faults=(fault,),
     )
     with pytest.raises(ContextSourceUnavailableError):
         context.resolved_aliases()
