@@ -17,9 +17,9 @@ from zcu_tools.experiment.context import RunContext
 
 
 class SavingCfg(ExpCfgModel):
-    dev: Mapping[str, str] | None = None
     """Synthetic gain in volts per unit signal."""
 
+    dev: Mapping[str, str] | None = None
     gain: float = 1.0
 
 
