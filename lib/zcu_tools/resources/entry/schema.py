@@ -13,7 +13,6 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
-    ValidationInfo,
     field_validator,
 )
 
@@ -92,7 +91,9 @@ class PointGeneral(BaseModel):
 class ComponentSchema(BaseModel):
     """Base for registered components, requiring only a string kind.
 
-    Definitions own extra policy, validators, hooks and optional containers.
+    Definitions own extra policy, validators, hooks and optional containers,
+    independently of the parameter-container version. Forbid rejects unknown
+    fields, ignore discards them, and allow retains them at every minor version.
     Loading uses model_validate and saving uses model_dump. Mapping keys with
     dots or an empty name cannot be addressed by set/meta dotted paths.
     """
@@ -151,21 +152,12 @@ class _ParameterDocument(BaseModel):
 
     @field_validator("components", mode="before")
     @classmethod
-    def validate_components(
-        cls, value: object, info: ValidationInfo
-    ) -> dict[str, ComponentSchema]:
+    def validate_components(cls, value: object) -> dict[str, ComponentSchema]:
         # Import locally because registered models derive from ComponentSchema.
         from .registry import component_registry
 
-        # This dynamic dispatch starts a separate validation call, so propagate the
-        # document's future-field policy explicitly into each registered model.
-        forward_minor = is_forward_minor(
-            {
-                "format": info.data["format"],
-                "format_version": info.data["format_version"],
-            },
-            source=cls._source,
-        )
+        # A separate validation call keeps the container's unknown-field policy
+        # from overriding the original component and nested models' extra policies.
         components = TypeAdapter(dict[str, YamlMap]).validate_python(value)
         result: dict[str, ComponentSchema] = {}
         for name, fields in components.items():
@@ -178,9 +170,7 @@ class _ParameterDocument(BaseModel):
             )
             # Validators may mutate mapping inputs; keep the caller isolated.
             adapter = TypeAdapter[dict[str, ComponentSchema]](dict[str, model])
-            result[name] = adapter.validate_python(
-                {name: deepcopy(fields)}, extra="allow" if forward_minor else None
-            )[name]
+            result[name] = adapter.validate_python({name: deepcopy(fields)})[name]
         return result
 
 
@@ -200,8 +190,9 @@ class PointDocument(_ParameterDocument):
     including kind; each original model owns validation. Schema loading does not
     reserve view members; binding a view checks those namespace collisions. No value or source falls back to setup.
     provenance maps logical component-field paths to YAML source metadata.
-    Component models choose extra policy. Forward-minor unknown fields remain
-    on disk; only extra=allow models expose them in the typed view.
+    Component and nested models choose extra policy at every minor version:
+    forbid rejects unknown fields, ignore discards them, and allow retains them.
+    Forward-minor preservation applies only to unknown container fields.
     """
 
     _source: ClassVar[Path] = Path("point.yaml")
