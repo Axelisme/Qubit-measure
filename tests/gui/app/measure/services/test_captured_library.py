@@ -100,7 +100,7 @@ def _seed(session: LibrarySession, *, saved: bool) -> ParameterContext:
     if saved:
         _select(session, "a")
     capture = session.control.read_context()
-    session.control.set_parameter(capture.target, "general.flux_value", 2.0)
+    session.control.set_parameter(capture.target, "general.ext.flux_value", 2.0)
     session.control.set_waveform(
         capture.target, "Q1.waveforms.base", ConstWaveformCfg(length=1.0)
     )
@@ -113,11 +113,11 @@ def test_editor_commit_after_point_switch_uses_original_target_and_values(
     first = _seed(session, saved=True)
     editor_id, _ = session.editor.open("waveform", from_name="Q1.waveforms.base")
     session.editor.set_field(
-        editor_id, "length", {"__kind": "eval", "expr": "general.flux_value"}
+        editor_id, "length", {"__kind": "eval", "expr": "general.ext.flux_value"}
     )
     _select(session, "b")
     second = session.control.read_context()
-    session.control.set_parameter(second.target, "general.flux_value", 9.0)
+    session.control.set_parameter(second.target, "general.ext.flux_value", 9.0)
     version = session.state.version.get("context")
     events: list[MlChangedPayload] = []
     session.bus.subscribe(MlChangedPayload, events.append)
@@ -287,9 +287,9 @@ def test_module_editor_lowers_values_and_children_from_capture(
     )
     editor_id, _ = session.editor.open("module", from_name="Q1.pulses.pi")
     session.editor.set_field(
-        editor_id, "gain", {"__kind": "eval", "expr": "general.flux_value / 10"}
+        editor_id, "gain", {"__kind": "eval", "expr": "general.ext.flux_value / 10"}
     )
-    session.control.set_parameter(capture.target, "general.flux_value", 8.0)
+    session.control.set_parameter(capture.target, "general.ext.flux_value", 8.0)
     session.control.set_waveform(
         capture.target, "Q1.waveforms.base", ConstWaveformCfg(length=8.0)
     )

@@ -82,7 +82,7 @@ def test_static_units_follow_declared_fields_without_reading_values(
             "N1.missing",
             "missing.frequency",
             "general.ext.frequency",
-            "general.flux_value",
+            "general.ext.flux_value",
         ):
             assert document_unit(document, path) is None
         assert document_value(document, "N1.frequency") == 12.0

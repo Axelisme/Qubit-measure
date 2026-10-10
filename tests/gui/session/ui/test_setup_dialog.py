@@ -325,7 +325,7 @@ def test_working_point_create_clones_source_and_replaces_description(
     source = controller.setup_control.new_point(
         PointCreateRequest("source", "source description", CommandOrigin("gui"))
     )
-    controller.context_control.set_parameter(source, "general.flux_value", 0.27)
+    controller.context_control.set_parameter(source, "general.ext.flux_value", 0.27)
     clone = point_combo(dialog, "clone_from")
     clone.setCurrentIndex(clone.findData("source"))
     point_field(dialog, "point_label").setText("cloned")
@@ -333,7 +333,7 @@ def test_working_point_create_clones_source_and_replaces_description(
     entry_button(dialog, "Create").click()
     capture = controller.context_control.read_context()
     assert capture.target != source
-    assert capture.value("general.flux_value") == 0.27
+    assert capture.value("general.ext.flux_value") == 0.27
     assert capture.document().general.description == description
     assert {p.label: p.description for p in controller.setup_control.list_points()} == {
         "cloned": description,
@@ -347,13 +347,13 @@ def test_working_point_empty_create_does_not_clone_memory_draft(
 ) -> None:
     dialog, controller, state = entry_dialog
     draft = controller.context_control.read_context().target
-    controller.context_control.set_parameter(draft, "general.flux_value", 0.88)
+    controller.context_control.set_parameter(draft, "general.ext.flux_value", 0.88)
     assert point_combo(dialog, "clone_from").currentText() == "(empty)"
     point_field(dialog, "point_label").setText("fresh")
     entry_button(dialog, "Create").click()
     capture = controller.context_control.read_context()
     assert capture.target != draft
-    assert capture.document().general.flux_value != 0.88
+    assert not capture.lookup("general.ext.flux_value").present
     assert capture.document().general.description == ""
     assert capture.document().components == {}
     assert state.session_env.readiness == ContextReadiness.ACTIVE
