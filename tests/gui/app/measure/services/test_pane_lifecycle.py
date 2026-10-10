@@ -598,7 +598,7 @@ def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
         MagicMock(),
         provide_options=lambda _kind: [],
         context=MagicMock(),
-        captured_parameters=lambda _roles, _target: state.session_env.parameters,
+        captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
     with pytest.raises(LoadDataError) as exc_info:
@@ -620,7 +620,7 @@ def test_guard_and_load_accept_enabled_concrete_adapter() -> None:
     state.get_tab(tab_id).adapter = EnabledAdapter()  # type: ignore[assignment]
     GuardService(
         state,
-        captured_parameters=lambda _roles, _target: state.session_env.parameters,
+        captured_parameters=lambda _aliases: state.session_env.parameters,
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
     ).check_load(tab_id)
     assert state.get_tab(tab_id).run.result == "run"

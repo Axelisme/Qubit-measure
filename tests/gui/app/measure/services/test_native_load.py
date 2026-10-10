@@ -51,7 +51,6 @@ from zcu_tools.resources.entry import (
     AcceptedPayload,
     ResultEntry,
     RoleResolutionError,
-    RoleSpec,
     SavedPayload,
 )
 
@@ -74,10 +73,8 @@ def _native_controls(
 ) -> tuple[RunAnalyzeControlFacet, WritebackControlFacet]:
     """Compose real admission/load/analysis/WB owners; no Run is executed."""
 
-    def capture(
-        declarations: Mapping[str, RoleSpec], target: str | None
-    ) -> ParameterContext | None:
-        return session.context.read_alias_context(declarations, target=target)
+    def capture(aliases: Mapping[str, str] | None) -> ParameterContext | None:
+        return session.capture_parameters(aliases)
 
     def resolve(parameters: ParameterContext | None) -> CfgResolution:
         return cfg_resolution(session.state, parameters)
@@ -152,8 +149,6 @@ def role_load_session(
     with native_save_session(tmp_path, qapp) as session:
         control = ContextControlFacet(context=session.context)
         tab = session.state.get_tab("tab")
-        declarations = {"source_qubit": RoleSpec("run-source/qubit")}
-        monkeypatch.setattr(tab.adapter, "parameter_roles", lambda: declarations)
         control.add_component("Q1", "run-source/qubit", {"rate": 1.0})
         control.add_component("Q2", "run-source/qubit", {"rate": 2.0})
         session.context.set_alias_rows(
@@ -162,7 +157,7 @@ def role_load_session(
                 AliasRow("custom", "Q2"),
             )
         )
-        captured = session.context.read_alias_context(declarations)
+        captured = session.context.read_context()
         assert captured is not None and captured.roles is not None
         session.metadata = replace(
             session.metadata,
@@ -204,7 +199,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
         MagicMock(),
         provide_options=lambda _: (),
         context=control,
-        captured_parameters=session.context.read_alias_context,
+        captured_parameters=session.capture_parameters,
     )
 
     service.load_result("tab", str(path))
@@ -305,7 +300,7 @@ def test_native_load_historical_source_failure_preserves_previous_result(
         MagicMock(),
         provide_options=lambda _: (),
         context=ContextControlFacet(context=session.context),
-        captured_parameters=session.context.read_alias_context,
+        captured_parameters=session.capture_parameters,
     )
     error = FileNotFoundError if failure == "missing_point" else RoleResolutionError
 
@@ -474,7 +469,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
         outcome = service.load_result("tab", str(path))
         original_capture = session.state.get_tab("tab").run.parameters
@@ -533,7 +528,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
         service.load_result("tab", str(source))
         assert tab.run.confirmed_run_id is None
@@ -649,7 +644,7 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
         service.load_result("tab", str(source))
         assert tab.run.metadata == load_run_data(source).metadata
@@ -712,7 +707,7 @@ def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
 
         outcome = service.load_result("tab", str(path))
@@ -765,7 +760,7 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
 
         with pytest.raises(LoadDataError) as error:
@@ -787,7 +782,7 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
 
         with pytest.raises(LoadDataError) as error:

@@ -22,7 +22,6 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
@@ -95,14 +94,6 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
             "response you want to inspect."
         ),
     )
-
-    def parameter_roles(self) -> dict[str, RoleSpec]:
-        """Declare consumer kinds; bindings come only from the global alias table."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-            "jpa": RoleSpec("amplifier/jpa"),
-        }
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

@@ -40,7 +40,11 @@ def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
             raise ValueError(f"{name} must be a non-empty string or null")
     if span_mhz is not None and span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
-    tab = session.open_tab("onetone/freq", target=target, reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "onetone/freq",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     tab.use_library("modules.readout", readout_ref)
     tab.set_frequency_sweep(
         "sweep.freq",

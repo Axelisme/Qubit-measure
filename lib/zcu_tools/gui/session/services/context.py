@@ -71,7 +71,6 @@ if TYPE_CHECKING:
         ComponentSchema,
         PointView,
         ResultEntry,
-        RoleSpec,
         SetupView,
     )
     from zcu_tools.resources.entry.ledger import RecordsLedger
@@ -383,42 +382,6 @@ class ContextService:
         if self._aliases.rows != previous:
             self._state.version.bump("context")
             self._bus.emit(AliasesChangedPayload(rows=self._aliases.rows))
-
-    def read_alias_context(
-        self,
-        declarations: Mapping[str, RoleSpec],
-        target: str | None = None,
-    ) -> ParameterContext | None:
-        """Capture current point/library/storage and authored global aliases.
-
-        Consumer declarations constrain kinds, never focus/via inference. No
-        target means lazy bindings: unbound aliases fail only when read. EMPTY
-        returns None for deferred cfg construction. Unavailable sources raise.
-        A target temporarily binds the first declared alias; its component and
-        kind must resolve now. Empty declarations/target raise InvalidInputError;
-        target with EMPTY raises FailedPreconditionError(no_context). Neither
-        global rows, source versions nor publications are changed by a target.
-        Returned captures retain no live callback and never follow later edits.
-        """
-        self._owner.assert_owner()
-        parameters = self._state.session_env.parameters
-        if parameters is None:
-            if target is not None:
-                raise FailedPreconditionError(
-                    "No parameter context is installed", reason_code="no_context"
-                )
-            return None
-        table = self._aliases
-        if target is not None:
-            if not declarations:
-                raise InvalidInputError("target requires a declared alias")
-            alias = next(iter(declarations))
-            table = table.with_override(alias, target)
-        captured = parameters.bind_aliases(table.rows, declarations)
-        if target is not None:
-            # Validate the one-use destination without copying or reading its fields.
-            captured.resolve_path(f"${next(iter(declarations))}.kind")
-        return captured
 
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.

@@ -25,11 +25,7 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
-from zcu_tools.resources.entry import (
-    ResultEntry,
-    RoleResolutionError,
-    RoleSpec,
-)
+from zcu_tools.resources.entry import ResultEntry, RoleResolutionError
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import (
@@ -128,7 +124,7 @@ def test_alias_defaults_initialize_once_without_resetting_on_point_changes(
     context.set_alias_rows((AliasRow("driver", ""), AliasRow("sense", "$driver.sense")))
     context.new_point(_new_request("second"))
     assert context.get_alias_rows()[0].value == ""
-    capture = context.read_alias_context({"driver": RoleSpec("fake/drive/*")})
+    capture = context.read_context()
     assert capture is not None
     with pytest.raises(RoleResolutionError, match="driver"):
         capture.value("$driver.rate")
@@ -154,7 +150,7 @@ def test_alias_defaults_use_an_already_published_snapshot_without_binding_assets
         alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
     )
     assert installed.get_alias_rows()[0] == AliasRow("driver", "Q1")
-    captured = installed.read_alias_context({"driver": RoleSpec("fake/drive/*")})
+    captured = installed.read_context()
     assert captured is not None
     assert captured.value("$driver.rate") == 4300.0
 
@@ -162,7 +158,9 @@ def test_alias_defaults_use_an_already_published_snapshot_without_binding_assets
 def test_empty_alias_submission_before_a_point_prevents_default_rebinding(
     context: ContextService, tmp_path: Path
 ) -> None:
-    assert context.read_alias_context({"driver": RoleSpec("fake/drive/*")}) is None
+    with pytest.raises(FailedPreconditionError) as caught:
+        context.read_context()
+    assert caught.value.reason_code == "no_context"
     context.set_alias_rows(context.get_alias_rows())
     entry = _entry(tmp_path)
     entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0)
@@ -215,17 +213,13 @@ def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fi
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("first"))
     assert context.get_alias_rows()[0].value == ""
-    declarations = {
-        "driver": RoleSpec("fake/drive/*"),
-        "sense": RoleSpec("fake/sensor"),
-    }
     context.set_alias_rows(
         (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
     )
-    first = context.read_alias_context(declarations)
+    first = context.read_context()
     assert first is not None
     context.set_parameter(target, "Q1.rate", 4400.0)
-    current = context.read_alias_context(declarations)
+    current = context.read_context()
     assert current is not None
     assert first.value("$driver.rate") == 4300.0
     assert current.value("$driver.rate") == 4400.0
@@ -233,7 +227,7 @@ def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fi
     context.set_alias_rows(
         (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
     )
-    second = context.read_alias_context(declarations)
+    second = context.read_context()
     assert second is not None
     assert second.value("$driver.rate") == 5100.0
     assert first.target == target
@@ -259,11 +253,7 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     context.new_point(_new_request("first"))
     before = context.get_alias_rows()
     version = state.version.snapshot()
-    declarations = {
-        "driver": RoleSpec("fake/drive/*"),
-        "sense": RoleSpec("fake/sensor"),
-    }
-    temporary = context.read_alias_context(declarations, "Q2")
+    temporary = context.read_context(aliases={"driver": "Q2"})
     assert temporary is not None
     assert temporary.value("$driver.rate") == 5100.0
     assert temporary.roles is not None
@@ -271,7 +261,7 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     assert temporary.capture_storage().roles == temporary.roles.names
     assert context.get_alias_rows() == before
     assert state.version.snapshot() == version
-    current = context.read_alias_context(declarations)
+    current = context.read_context()
     assert current is not None
     assert current.roles is not None
     assert current.roles.names == {}
@@ -281,7 +271,7 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     assert temporary.value("$driver.rate") == 5100.0
 
 
-@pytest.mark.parametrize("target", ["", "missing", "R1"])
+@pytest.mark.parametrize("target", ["", "missing"])
 def test_bad_one_run_target_keeps_the_global_table(
     context: ContextService,
     rich_entry: ResultEntry,
@@ -291,7 +281,7 @@ def test_bad_one_run_target_keeps_the_global_table(
     context.new_point(_new_request("first"))
     before = context.get_alias_rows()
     with pytest.raises((InvalidInputError, RoleResolutionError)):
-        context.read_alias_context({"driver": RoleSpec("fake/drive/*")}, target)
+        context.read_context(aliases={"driver": target}).value("$driver.rate")
     assert context.get_alias_rows() == before
 
 
@@ -304,11 +294,7 @@ def test_historical_target_reads_keep_resolved_alias_names_when_point_links_chan
     context.set_alias_rows(
         (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
     )
-    declarations = {
-        "driver": RoleSpec("fake/drive/*"),
-        "sense": RoleSpec("fake/sensor"),
-    }
-    captured = context.read_alias_context(declarations)
+    captured = context.read_context()
     assert captured is not None
     fixed_names = captured.roles
     assert fixed_names is not None
@@ -316,23 +302,19 @@ def test_historical_target_reads_keep_resolved_alias_names_when_point_links_chan
     context.set_parameter(target, "Q1.sense", "R2")
     historical = context.read_target(target, roles=fixed_names)
     assert historical.resolve_path("$sense.rate") == "R1.rate"
-    current = context.read_alias_context(declarations)
+    current = context.read_context()
     assert current is not None
     assert current.resolve_path("$sense.rate") == "R2.rate"
     assert captured.value("$driver.sense") == "R1"
 
 
-def test_target_requires_a_point_and_a_declared_alias(
+def test_temporary_aliases_require_parameter_context(
     context: ContextService,
     rich_entry: ResultEntry,
 ) -> None:
     with pytest.raises(FailedPreconditionError) as caught:
-        context.read_alias_context({"driver": RoleSpec("fake/drive/*")}, "Q1")
+        context.read_context(aliases={"driver": "Q1"})
     assert caught.value.reason_code == "no_context"
-    context.install_entry(rich_entry)
-    context.new_point(_new_request("first"))
-    with pytest.raises(InvalidInputError, match="declared alias"):
-        context.read_alias_context({}, "Q1")
 
 
 def test_parameter_write_preserves_global_aliases(
@@ -527,7 +509,7 @@ def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
     context.install_entry(entry)
     ledger = context.entry_ledger(entry.entry_id)
     assert ledger.events() == before
-    context.read_alias_context({})
+    context.read_context()
     assert entry.ledger.events() == before
 
 

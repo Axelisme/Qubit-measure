@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
@@ -51,22 +51,24 @@ class TabControlPort(Protocol):
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
     def capture_parameters(
-        self, tab_id: str, *, target: str | None = None
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> ParameterContext | None:
-        """Freeze current sources with optional single-use first-alias target.
+        """Freeze current sources with optional named aliases overrides.
 
-        Unknown tab and source/target errors propagate. EMPTY returns None
-        without target. No tab/session mutation or guard observation occurs.
+        aliases maps alias names to concrete components. None and {} use global
+        rows. Unknown tab and source/alias errors propagate. EMPTY returns None
+        without overrides and rejects nonempty overrides with no_context. No tab/session mutation or guard observation occurs.
         """
         ...
 
     def preview_cfg(
-        self, tab_id: str, expected: CfgRef, *, target: str
+        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
     ) -> CfgObservation:
-        """Resolve exact observed inputs for target without publication.
+        """Resolve exact observed inputs with named aliases without publication.
 
-        Stale identity/revision, notification and source/target errors propagate.
-        Return Valid or Invalid with the same ref and temporary source basis.
+        Stale identity/revision, notification and source/alias errors propagate.
+        None and {} return the cached observation. Nonempty aliases returns
+        Valid or Invalid with the same ref and temporary source basis.
         """
         ...
 
@@ -155,13 +157,13 @@ class TabControlFacet:
         return self._tab.get_snapshot(tab_id)
 
     def capture_parameters(
-        self, tab_id: str, *, target: str | None = None
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> ParameterContext | None:
         """Freeze current sources; see TabControlPort.capture_parameters."""
-        return self._tab.capture_parameters(tab_id, target=target)
+        return self._tab.capture_parameters(tab_id, aliases=aliases)
 
     def preview_cfg(
-        self, tab_id: str, expected: CfgRef, *, target: str
+        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
     ) -> CfgObservation:
         """Read temporary cfg; see TabControlPort.preview_cfg."""
-        return self._tab.preview_cfg(tab_id, expected, target=target)
+        return self._tab.preview_cfg(tab_id, expected, aliases=aliases)

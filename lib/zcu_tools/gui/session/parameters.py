@@ -95,7 +95,8 @@ class ParameterContext:
     ) -> None:
         """Detach input data and retain the immutable library projection.
 
-        RoleResolutionError reports missing/wrong-kind explicitly bound destinations.
+        RoleResolutionError reports missing explicitly bound destinations even
+        without declarations; declared kinds also reject wrong-kind destinations.
         Declared roles absent from names are unbound, not constructor failures.
         A setup diagnostic is outside this capture contract and raises
         ValueError. storage optionally retains a resource-owned saved-point
@@ -131,6 +132,15 @@ class ParameterContext:
             and self._roles is not None
             and not self._source_faults
         ):
+            for role, name in self._roles.names.items():
+                if name not in self._point.components:
+                    spec = self._roles.declarations.get(role)
+                    raise RoleResolutionError(
+                        role,
+                        self._roles.focus,
+                        None if spec is None else spec.kind,
+                        f"Captured target {name!r} is missing or has the wrong kind",
+                    )
             for role, spec in self._roles.declarations.items():
                 if role not in self._roles.names:
                     continue

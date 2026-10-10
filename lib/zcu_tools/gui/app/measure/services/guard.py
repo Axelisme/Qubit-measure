@@ -15,7 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg.resource import AcceptedConfig, CfgResolution, CfgRevision
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
-from zcu_tools.resources.entry import PointStorageBinding, RoleSpec
+from zcu_tools.resources.entry import PointStorageBinding
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +92,14 @@ class GuardService:
         state: State,
         *,
         captured_parameters: Callable[
-            [Mapping[str, RoleSpec], str | None], ParameterContext | None
+            [Mapping[str, str] | None], ParameterContext | None
         ],
         cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
     ) -> None:
         """Use owner-sequence captures for preview-independent Run admission.
 
         captured_parameters freezes current point/library/storage and aliases;
-        its optional target overrides only this capture. cfg_resolution must
+        its optional named aliases overrides affect only this capture. cfg_resolution must
         resolve cfg using exactly the supplied capture and published caches.
         Neither callback may poll hardware or retain live sources in its result.
         """
@@ -133,7 +133,7 @@ class GuardService:
         tab_id: str,
         *,
         expected_revision: CfgRevision,
-        target: str | None = None,
+        aliases: Mapping[str, str] | None = None,
     ) -> RunInputs:
         """Check tab_id and capture the exact cfg revision and observed inputs.
 
@@ -142,21 +142,22 @@ class GuardService:
         raise GuardError; stale or invalid publications keep their cfg errors.
         Cached device settings do not participate in admission.
         Captures current global parameters once for cfg context and all resolved
-        alias names. target overrides this Run's first declared alias, never
-        global rows or tab cfg publication. Temporary acceptance uses that same
-        capture, can resolve Invalid inputs, and retains revision guards.
+        alias names. Nonempty aliases maps names to concrete components for
+        this Run, never changing global rows or tab cfg publication. None and {}
+        use cached acceptance. Temporary acceptance uses that same capture,
+        can resolve Invalid inputs, and retains revision guards.
         Current saved-point storage supplies entry/point/description. No Run,
-        lease, file or ledger write starts; source and target errors propagate.
+        lease, file or ledger write starts; source and alias errors propagate.
         """
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "run")
 
         ctx = self._state.session_env
-        parameters = self._captured_parameters(tab.adapter.parameter_roles(), target)
-        # Temporary target resolution does not publish or change global aliases.
+        parameters = self._captured_parameters(aliases)
+        # Temporary alias resolution does not publish or change global aliases.
         accepted = tab.cfg.accept(
             expected_revision,
-            resolution=None if target is None else self._cfg_resolution(parameters),
+            resolution=self._cfg_resolution(parameters) if aliases else None,
         )
         raw_cfg = accepted.values
         req = RunRequest(

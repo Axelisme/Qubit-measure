@@ -16,6 +16,7 @@ from zcu_tools.gui.cfg import (
     is_custom_reference_key,
     read_value_path,
 )
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
@@ -41,7 +42,18 @@ def _role_adapters() -> list[str]:
     return [
         name
         for name in registry.list_names()
-        if set(registry.create(name).parameter_roles()) == {"qubit", "resonator"}
+        if name.startswith(("onetone/", "twotone/rabi/"))
+        or name
+        in {
+            "lookback",
+            "singleshot/ge",
+            "singleshot/ac_stark",
+            "twotone/freq",
+            "twotone/ro_optimize/freq_gain",
+            "twotone/t1",
+            "twotone/t2ramsey",
+            "twotone/t2echo",
+        }
     ]
 
 
@@ -166,8 +178,12 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
     adapter = _registry().create(name)
     assert isinstance(adapter, BaseAdapter)
     source = _source(calibrated=calibrated)
-    first = source.bind_roles(adapter.parameter_roles(), focus="Q1", explicit={})
-    second = source.bind_roles(adapter.parameter_roles(), focus="Q2", explicit={})
+    first = source.bind_aliases(
+        (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")), {}
+    )
+    second = source.bind_aliases(
+        (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator")), {}
+    )
     definition = type(adapter).cfg_definition()
     schema = definition.instantiate(SessionEnv(parameters=first, soc=None, soccfg=None))
     second_schema = definition.instantiate(
@@ -255,7 +271,7 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
                 lowered_pulse = modules[pulse_key]
                 assert isinstance(lowered_pulse, dict)
                 assert (
-                    lowered_pulse["ch"] == capture.lookup("qubit.wiring.L01.ch").value
+                    lowered_pulse["ch"] == capture.lookup("$qubit.wiring.L01.ch").value
                 )
         for ref in references:
             if not is_custom_reference_key(ref.chosen_key):
@@ -274,10 +290,12 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
             lowered_readout["ro_cfg"],
         )
         assert isinstance(readout_pulse, dict) and isinstance(readout_ro, dict)
-        assert readout_pulse["ch"] == capture.lookup("resonator.wiring.ch").value
-        assert readout_ro["ro_ch"] == capture.lookup("resonator.wiring.ro_ch").value
+        assert readout_pulse["ch"] == capture.lookup("$resonator.wiring.ch").value
+        assert readout_ro["ro_ch"] == capture.lookup("$resonator.wiring.ro_ch").value
     # Later target selection does not alter the original source or the template.
-    source.bind_roles(adapter.parameter_roles(), focus="Q2", explicit={})
+    source.bind_aliases(
+        (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator")), {}
+    )
     assert schema_to_raw_dict(schema, first) == raw_first
     assert (
         definition.instantiate(SessionEnv(parameters=first, soc=None, soccfg=None))
@@ -309,8 +327,10 @@ def test_registered_readout_frequency_sweep_uses_captured_probe_timing(
         pulse_spec.fields["freq"], LiteralSpec
     ):
         pytest.skip("adapter does not own an inline readout-frequency sweep")
-    capture = _source(calibrated=True, null_calibrations=null_calibrations).bind_roles(
-        adapter.parameter_roles(), focus="Q2", explicit={}
+    capture = _source(
+        calibrated=True, null_calibrations=null_calibrations
+    ).bind_aliases(
+        (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator")), {}
     )
     schema = adapter.make_default_cfg(
         SessionEnv(parameters=capture, soc=None, soccfg=None)
@@ -351,8 +371,8 @@ def test_registered_role_adapter_rejects_missing_required_calibrations(
     name: str,
 ) -> None:
     adapter = _registry().create(name)
-    capture = _source(calibrated=False, null_calibrations=True).bind_roles(
-        adapter.parameter_roles(), focus="Q2", explicit={}
+    capture = _source(calibrated=False, null_calibrations=True).bind_aliases(
+        (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator")), {}
     )
     schema = adapter.make_default_cfg(
         SessionEnv(parameters=capture, soc=None, soccfg=None)
@@ -397,19 +417,21 @@ def test_registered_role_adapter_rejects_missing_required_calibrations(
 
 
 @pytest.mark.parametrize("name", _role_adapters())
-def test_registered_role_adapter_does_not_hide_missing_roles_or_source_faults(
+def test_registered_adapter_does_not_hide_missing_aliases_or_source_faults(
     name: str,
 ) -> None:
     adapter = _registry().create(name)
     source = _source(calibrated=True)
-    unbound = source.bind_roles(adapter.parameter_roles(), focus=None, explicit={})
-    for role, spec in adapter.parameter_roles().items():
+    unbound = source.bind_aliases(
+        (AliasRow("qubit", ""), AliasRow("resonator", "$qubit.resonator")), {}
+    )
+    for role in ("qubit", "resonator"):
         with pytest.raises(RoleResolutionError) as error:
             unbound.resolve_path(f"${role}.freq")
         assert error.value.role == role
-        assert error.value.required_kind == spec.kind
-        assert error.value.focus is None
-    capture = source.bind_roles(adapter.parameter_roles(), focus="Q1", explicit={})
+    capture = source.bind_aliases(
+        (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")), {}
+    )
     unavailable = ParameterContext(
         point=capture.document(),
         library=capture.library,

@@ -74,7 +74,11 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         points,
     )
 
-    tab = session.open_tab("twotone/t2ramsey", target=target, reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "twotone/t2ramsey",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     if use_reset is None:
         tab.disable_library("modules.reset")
     else:
