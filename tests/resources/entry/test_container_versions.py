@@ -237,7 +237,7 @@ def test_minor_commit_keeps_container_unknowns_but_applies_component_extra_polic
             database_root=entry.database_path.parent,
         )
         again = reloaded.setup if owner == "setup" else reloaded.use_point("a")
-        assert snapshot(again) == snapshot(view)
+        assert snapshot(again).model_dump() == snapshot(view).model_dump()
         for header, value, expected in (
             ("format", "wrong", FormatError),
             ("format_version", "2.0", VersionError),
