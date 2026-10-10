@@ -28,7 +28,13 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 `experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。上層保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
 
-RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。Labber 成功後，保存編排才更新最近成功的 labber_path；本次失敗保留此前連結。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
+RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。
+
+`RunMetadata.device_snapshot` 保存 Run 框架在 hardware lease 後、adapter.run 前讀取的全部已連線 device 設定。每台只呼叫一次 get_info，任一台失敗就拒絕 Run，不寫設定、不進 adapter/core，也不用 cache 補值。Snapshot 表示實驗前狀態，不是 setup 後或每個 core 的 checkpoint。後續 sweep 不改寫它，實驗使用的值由 cfg 的 dev、flux_unit、sweep 範圍與 persisted axes 記錄。Notebook 的既有入口沒有 lease；其 lease 接縫尚待核實，不以這條契約宣稱 locking 已實作。
+
+Native writer 沿既有 `/device` 保存 snapshot，dataset 的 shape 是 `()`，內容為 UTF-8 JSON。Key 是 device 名稱，value 是 get_info 的設定。Snapshot 為 None 時不建 dataset，空 mapping 則寫 `{}`。單位沿各 DeviceInfo 既有欄位。YOKO current 模式的 value／rampstep 為 A，RF 頻率為 Hz，功率為 dBm，不新增 unit 欄位。GUI 和 Notebook Save 都使用當次 Run 的固定 snapshot，不重讀硬體或取下一輪值。
+
+Labber 成功後，保存編排才更新最近成功的 labber_path；本次失敗保留此前連結。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
 
 `datafile.AnalysisDocument` 與 encoder 擁有窗格 JSON 格式。`experiment.run_saving.save_artifacts` 接 typed data、Figure 與 AnalysisDocument，逐成員編碼一次，逐輸出隔離失敗，回傳一次 SaveReport 並追加 saved。`NotebookExperiment.save_run` 綁定 PointView，使用 entry owner 的 capture_point_storage，保存 adapter 驗證過的 acquisition source。SavedRun 固定該 run 的資料、context 與 evidence，PartialSaveError 保留同一 handle 供明確再存，不建立恢復收據或自動 retry。
 

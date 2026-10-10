@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，全域 alias、ParameterWriteback 與參數容器寫入
+**Last updated:** 2026-10-10，Run 前 device snapshot 與實驗 helper 分工
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -13,7 +13,10 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
 RunInputs 固定 admission 的 entry／point、alias、storage capability 與 adapter 的 persistence tag。
 `RunService` 在 worker submission 前固定 UTC started_at 和 run ID。
 Worker 在 acquisition 前捕捉 software provenance，完成後補 finished_at／completion。
-當次已捕捉的 device settings 投影成 JSON metadata，native Save 寫入 `/device`，不查 live hardware。
+Run 框架在 hardware lease 後、adapter.run 前讀取全部已連線 device 的 get_info，各一次。
+任一讀取失敗拒絕 Run，不寫設定、不進 adapter/core、不以 State cache 補值，無 device 記 `{}`。
+這份實驗前 snapshot 沿 RunMetadata.device_snapshot 保存，不被後續 sweep 改寫。
+Native Save 寫入既有 `/device`，不查 live hardware；實際 sweep 值由 cfg 與 persisted axes 記錄。
 可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
 再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
 但不建立 run 資料夾。Draft、未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
@@ -377,18 +380,22 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 3. `Controller.start_run(tab_id, expected)` requires the observed `CfgRef`.
    Qt supplies the form's displayed ref; remote callers supply their observed ref.
    A different cfg identity or revision rejects Run without refresh or fallback.
-   `GuardService.capture_run_inputs` accepts that exact Valid revision and captures RunInputs with
-   `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
-   settings for a live device reject admission without querying hardware.
-   `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
-4. RunService fixes started_at and run_id before worker submission. It projects
-   the admitted device settings into RunMetadata.device_snapshot; native saving
-   stores them at `/device`, not in tab preferences. A failed Run with no data
+   `GuardService.capture_run_inputs` accepts that exact Valid revision and captures
+   RunInputs with AcceptedConfig provenance, fixed ParameterContext and storage.
+   Cfg.dev stores role-to-device names, not State-owned settings or setup patches.
+   Cached observations used for cfg sources or remote guards are not the Run snapshot.
+4. RunService fixes started_at and run_id before worker submission. After the hardware
+   lease and before adapter.run, the Run framework reads get_info once from every
+   connected device. Any read failure rejects Run without entering the adapter/core,
+   writing settings or falling back to cache. No devices produce an empty snapshot.
+   Run admission validates every cfg.dev name. RunService creates a fresh RunContext
+   with borrowed drivers, operation plots and one StopSignal, without instrument setters.
+   The adapter passes this context to the core. Core selects context.devices[cfg.dev[role]]
+   and uses experiment helpers; flux cfg requires flux_unit. Only progress remains ambient.
+   Driver lookup does not refresh accepted cfg. RunMetadata.device_snapshot retains the
+   pre-experiment settings even after a sweep. Native Save stores them at `/device`,
+   not in tab preferences, and does not read hardware. A failed Run with no data
    publishes no metadata or ledger event. Usable stopped data retains its evidence.
-   RunService captures borrowed drivers and creates a fresh RunContext with
-   operation plots and one StopSignal. The adapter passes this context to the core;
-   Schedule uses its StopSignal and device setup uses the same signal's event.
-   Only progress remains ambient. Driver lookup does not refresh accepted cfg.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
    terminal callbacks back to the main thread.
 6. RunService uses State directly for busy checks and atomic result/evidence
@@ -679,9 +686,9 @@ controlled fields.
 
 Cancellation is operation-specific through the registered cancel hook. Each run
 owns a fresh RunContext and StopSignal. Adapters pass that context to the core;
-Schedule roots receive its cancel_signal explicitly. Device setup
-receives context.devices and cancel_signal.event, so ramps observe the same stop
-request without ambient scopes or a global registry. Run terminal policy treats the cancel hook as
+Schedule roots receive its cancel_signal explicitly. Experiment set_flux helpers
+receive the selected driver and the same cancel_signal, so YOKO ramps observe the
+same stop request without ambient scopes or a global registry. Run terminal policy treats the cancel hook as
 the source of user cancellation intent; `Schedule` may also set the same stop flag
 for internal failed/interrupted outcomes, and those are surfaced as failed
 operation outcomes instead of cancelled.

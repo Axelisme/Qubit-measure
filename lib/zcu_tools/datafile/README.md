@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-10，正規資料與 Labber 衍生輸出
+**Last updated:** 2026-10-10，Run 前 device snapshot 保存
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -15,9 +15,11 @@ facade。caller 優先從 package root import model 與 function。`data.h5` 是
   Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
   Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。
 - `RunMetadata`、`RunSnapshot`、`CfgSnapshot` 是 caller 傳入的歷史資料，writer
-  不擷取 live context。`RunMetadata.device_snapshot` 保存當次裝置的 JSON settings，
-  native 將它獨立寫在 `/device`。空 mapping 表示當次沒有裝置，缺 dataset 表示未記錄。
-  Reader 不讀硬體，拒絕非法 JSON 或 external-linked 已知資料。
+  不擷取 live context 或讀硬體。`RunMetadata.device_snapshot` 保存 Run 前固定的
+  JSON settings，key 是 device 名稱，value 是 get_info 設定。Native 沿既有 `/device`
+  寫入 shape `()` 的 UTF-8 JSON dataset。None 不建 dataset，空 mapping 寫 `{}`，
+  表示已捕捉但當次沒有裝置。單位沿各 DeviceInfo 既有欄位，不加 unit 欄位。
+  Save 不重讀或改寫為 sweep 後的設定。Reader 不讀硬體，拒絕非法 JSON 或 external-linked 已知資料。
   Native saving 使用 caller 的 exact path，先寫同目錄 temp，
   關檔後發布；`replace=True` 原子替換，失敗清理 temp 並保留原 destination。
 - `RunSnapshot` 只記 entry UUID、當時名稱、工作點、描述與角色對應，不記引用參數。

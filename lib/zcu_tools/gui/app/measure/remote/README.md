@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-10，native context snapshot 與 parameter／library event requery
+**Last updated:** 2026-10-10，Run snapshot 與 remote observations 分界
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -152,7 +152,13 @@ rejects off-main observations at construction. Measure keeps only the writeback
 pane alias mapping and app-specific lifetime hooks. Missing observations, including
 version zero, are stale. Wire methods do not accept `expected_versions`.
 
-Run uses the explicit cfg ref and observed device snapshots, not live md/ml.
+Run uses the explicit cfg ref and fixed ParameterContext, not live md/ml.
+Cfg.dev contains role-to-device names, not settings patches. Device seen guards
+remain connection-local observations; they do not supply RunMetadata.device_snapshot.
+After the hardware lease and before adapter.run, the Run framework separately reads
+get_info once from every connected device. Any failure rejects Run without hardware
+writes or cache fallback; no devices produce `{}`. Save uses that fixed pre-experiment
+snapshot and never re-reads hardware.
 Cfg admission uses only the resource identity and revision. A ref observed by
 another connection is valid, but tab, SoC and device seen guards still belong to
 the requesting connection. Run and existing-tab native Load do not require exporting

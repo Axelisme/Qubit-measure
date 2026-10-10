@@ -50,6 +50,10 @@ _Avoid_: active environment
 使用特定 cfg 和硬體狀態執行一次實驗。一次 Run 產生一個 Experiment Result。
 _Avoid_: job, task run, measurement job
 
+**Device Snapshot**:
+一次 Experiment Run 開始前的全體已連線儀器設定記錄。它表示實驗前狀態，不是該次 sweep 的實際測點值。
+_Avoid_: cached observation, setup result, sweep values
+
 **Experiment Result**:
 一次 Experiment Run 的量測成果，包含分析該次量測所需的資料。
 _Avoid_: output blob, save payload
