@@ -130,7 +130,6 @@ def _make_inputs(state: State, tab_id: str, adapter: ExpAdapterProtocol) -> RunI
         request=RunRequest(
             soc=ctx.soc,
             soccfg=ctx.soccfg,
-            device_snapshot={},
             cfg_context=None
             if parameters is None
             else parameters.library.validation_context(),
@@ -1008,7 +1007,7 @@ def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
         tab_id=tab_id,
         adapter_name="twotone/t1",
         adapter=adapter,
-        request=RunRequest(soc=None, soccfg=None, device_snapshot={}, cfg_context=None),
+        request=RunRequest(soc=None, soccfg=None, cfg_context=None),
         accepted_cfg=tab.cfg.accept(tab.cfg.observe().ref.revision),
         snapshot=_run_snapshot(),
         experiment_tag=adapter.experiment_tag,

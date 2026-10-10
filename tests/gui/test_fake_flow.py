@@ -47,7 +47,7 @@ def test_fake_adapter_full_flow():
 
     # 3. run
     schema.value.fields["noise_scale"] = DirectValue(0.05)
-    run_req = RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={})
+    run_req = RunRequest(soc=ctx.soc, soccfg=ctx.soccfg)
     run_plots = Plots(NonPresentingHost())
     result = adapter.run(
         run_req,
