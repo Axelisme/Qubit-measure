@@ -201,3 +201,29 @@ def test_empty_lookup_uses_default_or_raises_missing() -> None:
     assert lookup.get_as("missing", float, default=3.0) == pytest.approx(3.0)
     with pytest.raises(MissingValue):
         lookup.get_as("missing", float)
+
+
+@pytest.mark.parametrize(
+    ("type_", "value", "type_name"),
+    [(int, 7, "int"), (float, 0.25, "float"), (str, "ready", "str"), (bool, True, "bool")],
+    ids=["int", "float", "str", "bool"],
+)
+def test_describe_preserves_registered_scalar_types(
+    type_: type[int] | type[float] | type[str] | type[bool],
+    value: int | float | str | bool,
+    type_name: str,
+) -> None:
+    registry = ValueRegistry()
+    registry.register(
+        ValueKey("source.scalar", type_),
+        lambda: value,
+        owner="scalar-source",
+        description="registered scalar metadata",
+    )
+
+    (info,) = registry.describe()
+    assert info.type_ is type_
+    assert info.key == "source.scalar"
+    assert info.owner == "scalar-source"
+    assert info.description == "registered scalar metadata"
+    assert info.type_name == type_name
