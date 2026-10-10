@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from pathlib import Path
+
 import pytest
+from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
 from zcu_tools.gui.project import ProjectInfo
+from zcu_tools.gui.result_scope import (
+    ResultScope,
+    ResultScopeManager,
+    write_params_identity,
+)
 from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
 
@@ -137,3 +146,175 @@ def test_selecting_result_scope_updates_names_and_paths(qapp, tmp_path):
         )
     finally:
         d.deleteLater()
+
+
+@pytest.fixture
+def scope_dialog(
+    qapp: QApplication,
+) -> Iterator[Callable[[ProjectInfo], ProjectDialog]]:
+    dialogs: list[ProjectDialog] = []
+
+    def create(project: ProjectInfo) -> ProjectDialog:
+        widget = ProjectDialog(project)
+        dialogs.append(widget)
+        return widget
+
+    yield create
+    for widget in dialogs:
+        widget.deleteLater()
+    qapp.processEvents()
+
+
+@pytest.fixture
+def scope_catalog(tmp_path: Path) -> tuple[ResultScope, ...]:
+    for chip, qub in (("Previous", "QP"), ("Result", "QR"), ("Names", "QN")):
+        write_params_identity(
+            tmp_path / "result" / chip / qub / "params.json",
+            chip_name=chip,
+            qub_name=qub,
+        )
+    return ResultScopeManager(tmp_path).list_scopes()
+
+
+def _scope_picker(widget: ProjectDialog) -> QComboBox:
+    picker = widget.findChild(QComboBox)
+    assert picker is not None
+    return picker
+
+
+def _edit_with_text(widget: ProjectDialog, text: str) -> QLineEdit:
+    return next(edit for edit in widget.findChildren(QLineEdit) if edit.text() == text)
+
+
+def test_scope_dropdown_preserves_previous_selection_over_result_and_names(
+    scope_dialog: Callable[[ProjectInfo], ProjectDialog],
+    scope_catalog: tuple[ResultScope, ...],
+    tmp_path: Path,
+):
+    previous = next(scope for scope in scope_catalog if scope.chip_name == "Previous")
+    result = next(scope for scope in scope_catalog if scope.chip_name == "Result")
+    names = next(scope for scope in scope_catalog if scope.chip_name == "Names")
+    project = ProjectInfo(
+        chip_name="Initial",
+        qub_name="Q0",
+        result_dir=previous.result_dir,
+        database_path=str(tmp_path / "custom-database"),
+        root_dir=str(tmp_path),
+    )
+    widget = scope_dialog(project)
+    picker = _scope_picker(widget)
+    assert picker.currentData() == previous.scope_id
+
+    _edit_with_text(widget, previous.result_dir).setText(result.result_dir)
+    _edit_with_text(widget, "Initial").setText(names.chip_name)
+    _edit_with_text(widget, "Q0").setText(names.qub_name)
+
+    assert picker.currentData() == previous.scope_id
+    assert widget.result_project() == ProjectInfo(
+        chip_name=names.chip_name,
+        qub_name=names.qub_name,
+        result_dir=result.result_dir,
+        database_path=project.database_path,
+        root_dir=project.root_dir,
+    )
+
+
+def test_scope_dropdown_matches_result_before_names(
+    scope_dialog: Callable[[ProjectInfo], ProjectDialog],
+    scope_catalog: tuple[ResultScope, ...],
+    tmp_path: Path,
+):
+    result = next(scope for scope in scope_catalog if scope.chip_name == "Result")
+    names = next(scope for scope in scope_catalog if scope.chip_name == "Names")
+    project = ProjectInfo(
+        chip_name=names.chip_name,
+        qub_name=names.qub_name,
+        result_dir=result.result_dir,
+        root_dir=str(tmp_path),
+    )
+    widget = scope_dialog(project)
+
+    assert _scope_picker(widget).currentData() == result.scope_id
+    assert widget.result_project() == project
+
+
+def test_scope_dropdown_matches_names_after_unmatched_result(
+    scope_dialog: Callable[[ProjectInfo], ProjectDialog],
+    scope_catalog: tuple[ResultScope, ...],
+    tmp_path: Path,
+):
+    names = next(scope for scope in scope_catalog if scope.chip_name == "Names")
+    project = ProjectInfo(
+        chip_name=names.chip_name,
+        qub_name=names.qub_name,
+        result_dir=str(tmp_path / "unmatched-result"),
+        root_dir=str(tmp_path),
+    )
+    widget = scope_dialog(project)
+
+    assert _scope_picker(widget).currentData() == names.scope_id
+    assert widget.result_project() == project
+
+
+@pytest.mark.parametrize("discovery", ["discovered", "empty"])
+def test_scope_dropdown_fallback_keeps_unnamed_project(
+    scope_dialog: Callable[[ProjectInfo], ProjectDialog],
+    tmp_path: Path,
+    discovery: str,
+):
+    params_path = tmp_path / "result" / "Discovered" / "Q1" / "params.json"
+    if discovery == "discovered":
+        write_params_identity(params_path, chip_name="Discovered", qub_name="Q1")
+    project = ProjectInfo(
+        chip_name="",
+        qub_name="",
+        result_dir=str(tmp_path / "custom-result"),
+        database_path=str(tmp_path / "custom-database"),
+        root_dir=str(tmp_path),
+    )
+    widget = scope_dialog(project)
+    picker = _scope_picker(widget)
+
+    assert picker.count() == 1
+    if discovery == "discovered":
+        assert picker.currentData() == str(params_path.parent.resolve())
+    else:
+        assert picker.currentData() is None
+        assert picker.currentText() == "(no result scopes found)"
+    assert widget.result_project() == project
+
+
+@pytest.mark.parametrize("checked", [False, True], ids=["unchecked", "checked"])
+def test_scope_refresh_accepts_clicked_check_state(
+    scope_dialog: Callable[[ProjectInfo], ProjectDialog],
+    tmp_path: Path,
+    checked: bool,
+):
+    existing_path = tmp_path / "result" / "Existing" / "Q1" / "params.json"
+    write_params_identity(existing_path, chip_name="Existing", qub_name="Q1")
+    project = ProjectInfo(chip_name="Initial", qub_name="Q0", root_dir=str(tmp_path))
+    widget = scope_dialog(project)
+    picker = _scope_picker(widget)
+    new_path = tmp_path / "result" / "New" / "Q2" / "params.json"
+    new_scope_id = str(new_path.parent.resolve())
+    assert picker.findData(str(existing_path.parent.resolve())) >= 0
+    assert picker.findData(new_scope_id) < 0
+    write_params_identity(new_path, chip_name="New", qub_name="Q2")
+
+    refresh = next(
+        button
+        for button in widget.findChildren(QPushButton)
+        if button.toolTip() == "Refresh result scopes"
+    )
+    refresh.clicked.emit(checked)
+
+    assert widget.result_project() == project
+    new_index = picker.findData(new_scope_id)
+    assert new_index >= 0
+    picker.setCurrentIndex(new_index)
+    assert widget.result_project() == ProjectInfo(
+        chip_name="New",
+        qub_name="Q2",
+        result_dir=new_scope_id,
+        root_dir=str(tmp_path),
+    )
