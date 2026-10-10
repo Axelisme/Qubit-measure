@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal, Self, override
+from typing import ClassVar, Literal, Self, override
 from uuid import UUID
 
 from pydantic import (
@@ -71,8 +71,6 @@ class SetupGeneral(BaseModel):
     entry_id: str
     created_at: str
     description: str | None = None
-    flux_unit: Literal["A", "V"] | None = None
-    flux_value: Annotated[float | None, Field(strict=True, allow_inf_nan=False)] = None
     ext: YamlMap = Field(default_factory=dict)
 
     @field_validator("entry_id")
@@ -96,7 +94,6 @@ class PointGeneral(BaseModel):
     description is optional human-readable text; None means no description.
     ext is a YAML mapping, empty by default, with no unit conversion.
     Empty keys or keys containing dots cannot be addressed by set/meta.
-    Global flux_value uses flux_unit (A or V); both are optional.
     Unknown metadata fields and invalid timestamps raise Pydantic ValidationError.
     """
 
@@ -104,8 +101,6 @@ class PointGeneral(BaseModel):
 
     created_at: str
     description: str | None = None
-    flux_unit: Literal["A", "V"] | None = None
-    flux_value: Annotated[float | None, Field(strict=True, allow_inf_nan=False)] = None
     ext: YamlMap = Field(default_factory=dict)
 
     @field_validator("created_at")

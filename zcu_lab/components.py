@@ -80,7 +80,7 @@ class QubitSchema(BuiltinComponent):
     EJ: Energy = None
     EC: Energy = None
     EL: Energy = None
-    # These three values belong to global flux, interpreted by general.flux_unit.
+    # These three values belong to global flux, interpreted by general.ext.flux_unit.
     flux_half: Flux = None
     flux_period: Flux = None
     flux_int: Flux = None
