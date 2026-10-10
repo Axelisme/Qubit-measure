@@ -71,6 +71,15 @@ def test_describe_soc_accepts_plain_dict() -> None:
 def test_describe_soc_handles_gen_without_envelope_or_clocks() -> None:
     cfg = make_mock_soccfg(n_gens=1, n_readouts=1)
     gen = cfg["gens"][0]
+    gen["type"] = "axis_sg_int4_v1"
+    gen["dac"] = "21"
+    cfg["rf"]["dacs"]["21"] = {"fs": 8192.0}
+    ro = cfg["readouts"][0]
+    ro["ro_type"] = "axis_readout_v3"
+    ro["adc"] = "12"
+    ro["buf_maxlen"] = 4096
+    ro["f_output"] = 192.0
+    cfg["rf"]["adcs"]["12"] = {"fs": 1536.0}
     del gen["maxlen"]
     del gen["samps_per_clk"]
     del gen["f_fabric"]
@@ -81,16 +90,16 @@ def test_describe_soc_handles_gen_without_envelope_or_clocks() -> None:
     assert "Readouts (1)" in text
     assert "max pulse len" in text
     assert "buf maxlen" in text
-    gen_row = next(line for line in text.splitlines() if "axis_signal_gen_v6" in line)
-    ro_row = next(line for line in text.splitlines() if "axis_readout_v2" in line)
-    assert gen_row.split() == ["0", "axis_signal_gen_v6", "0_228", "12288.000", "-"]
+    gen_row = next(line for line in text.splitlines() if "axis_sg_int4_v1" in line)
+    ro_row = next(line for line in text.splitlines() if "axis_readout_v3" in line)
+    assert gen_row.split() == ["0", "axis_sg_int4_v1", "1_230", "8192.000", "-"]
     assert ro_row.split() == [
         "0",
-        "axis_readout_v2",
-        "0_224",
-        "2457.600",
-        "8192",
+        "axis_readout_v3",
+        "2_225",
+        "1536.000",
+        "4096",
         "smp",
-        "(26.667",
+        "(21.333",
         "us)",
     ]
