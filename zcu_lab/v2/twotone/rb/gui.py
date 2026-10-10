@@ -23,7 +23,7 @@ from zcu_lab.v2._support.measure import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     SweepDefault,
-    scaled_md,
+    scaled_path_seed,
 )
 from zcu_lab.v2.twotone.rb.core import RB_Exp, RB_Result, RBCfg
 
@@ -77,7 +77,9 @@ class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult, NoAnalyzeParams
             .pulse("X90_pulse", role_id="pi2_pulse", label="X90 Pulse")
             .pulse("X180_pulse", role_id="pi_pulse", label="X180 Pulse")
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=200.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=200.0)
+            )
             .sweep(
                 "depth",
                 label="Clifford depth",

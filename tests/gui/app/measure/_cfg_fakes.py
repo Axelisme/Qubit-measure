@@ -1,5 +1,6 @@
 """Real cfg resources for application tests that do not mount a frontend."""
 
+from collections.abc import Mapping
 from unittest.mock import MagicMock
 
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
@@ -7,8 +8,9 @@ from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg.model import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgResource
+from zcu_tools.gui.session.aliases import AliasTable
 from zcu_tools.gui.session.context_types import EntryDraft
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
+from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument
@@ -20,17 +22,17 @@ class PublishedHost:
     def __init__(self, state: State) -> None:
         self.state = state
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        """Read the published capture, optionally binding caller roles."""
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix supplied authored rows with temporary named overrides."""
         parameters = self.state.session_env.parameters
         if parameters is None:
             raise RuntimeError("Test context is unavailable")
-        return ParameterContext(
-            point=parameters.document(),
-            library=parameters.library,
-            target=parameters.target,
-            roles=roles,
-        )
+        table = AliasTable(parameters.aliases)
+        for alias, component in (aliases or {}).items():
+            table = table.with_override(alias, component)
+        return parameters.bind_aliases(table.rows, {})
 
     def list_device_names(self) -> list[str]:
         return [device.name for device in self.state.list_devices()]

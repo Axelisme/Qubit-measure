@@ -17,7 +17,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    MetaDictWriteback,
+    ParameterWriteback,
     WritebackItem,
 )
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
@@ -27,12 +27,12 @@ from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 def items(count: int) -> list[WritebackItem]:
     result: list[WritebackItem] = []
     for index in range(count):
-        item = MetaDictWriteback(
+        item = ParameterWriteback(
             target_name=f"p{index}",
             description="parameter",
             proposed_value=float(index),
         )
-        item.session_id = f"md-{index}"
+        item.session_id = f"param-{index}"
         result.append(item)
     return result
 

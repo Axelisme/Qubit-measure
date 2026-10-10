@@ -27,8 +27,9 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import custom, scaled_md
+from zcu_lab.v2._support.measure.seeds import custom, scaled_path_seed
 from zcu_lab.v2._support.measure.singleshot_shared import (
+    read_confusion_matrix,
     readout_probe_freq,
     readout_probe_freq_range,
 )
@@ -111,7 +112,7 @@ class MistPowerFreqAdapter(
                 },
             )
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=30.5))
+            .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
             .sweep(
                 "freq",
                 label="Probe frequency (MHz)",
@@ -128,17 +129,17 @@ class MistPowerFreqAdapter(
             .field(
                 "g_center",
                 spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("g_center"),
+                default=EvalValue("$qubit.ext.readout_cal.g_center"),
             )
             .field(
                 "e_center",
                 spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("e_center"),
+                default=EvalValue("$qubit.ext.readout_cal.e_center"),
             )
             .field(
                 "radius",
                 spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("ge_radius"),
+                default=EvalValue("$qubit.ext.readout_cal.radius"),
             )
             .reps(1000)
             .rounds(100)
@@ -164,7 +165,7 @@ class MistPowerFreqAdapter(
         plots: Plots,
     ) -> MistPowerFreqAnalyzeResult:
         options = FreqPowerAnalyzeOptions(
-            confusion_matrix=req.md.get("confusion_matrix"),
+            confusion_matrix=read_confusion_matrix(req.parameters),
         )
         FreqPowerExp().analyze(req.run_result, options, plots=plots)
         return MistPowerFreqAnalyzeResult()

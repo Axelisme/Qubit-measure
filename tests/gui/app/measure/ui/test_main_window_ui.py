@@ -23,7 +23,7 @@ from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    MetaDictWriteback,
+    ParameterWriteback,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactSectionSnapshot,
@@ -358,7 +358,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
         ),
     )
     tab.update_writeback_items(
-        [MetaDictWriteback("r_f", "freq", proposed_value=6100.0)]
+        [ParameterWriteback("r_f", "freq", proposed_value=6100.0)]
     )
     tab.update_interaction_state(
         _snapshot(
@@ -501,7 +501,7 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     assert snap.capabilities is not None
     tab = ExpTabWidget("tab-1", _mock_ctrl(), snap.capabilities)
     tab.update_writeback_items(
-        [MetaDictWriteback("r_f", "freq", proposed_value=6100.0)]
+        [ParameterWriteback("r_f", "freq", proposed_value=6100.0)]
     )
     tab.update_interaction_state(snap)
 
@@ -700,8 +700,8 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp)
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     ctrl.apply_writeback_for_pane.return_value = {
-        "applied_ids": ["md-1"],
-        "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []},
+        "applied_ids": ["param-1"],
+        "written": {"parameter": ["r_f"], "ml_modules": [], "ml_waveforms": []},
     }
     window = MainWindow(ctrl)
     window._tab_widgets["tab-1"] = MagicMock()
@@ -712,7 +712,7 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp)
 
     ctrl.apply_writeback_for_pane.assert_called_once_with("tab-1", "analysis")
     window.refresh_tab_writeback.assert_not_called()
-    window.show_status_message.assert_called_once_with("Writeback applied: md-1")
+    window.show_status_message.assert_called_once_with("Writeback applied: param-1")
 
 
 def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):

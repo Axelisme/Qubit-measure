@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -223,12 +223,12 @@ class FreqAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.freq",
                 description="Qubit frequency (MHz)",
                 proposed_value=result.freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.kappa",
                 description="Qubit linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,

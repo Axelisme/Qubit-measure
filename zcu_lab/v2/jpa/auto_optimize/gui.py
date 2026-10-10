@@ -19,8 +19,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -260,17 +260,17 @@ class JpaAutoOptimizeAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_flux",
                 description="Best JPA flux device value",
                 proposed_value=result.best_flux,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_freq",
                 description="Best JPA pump frequency (MHz)",
                 proposed_value=result.best_freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=result.best_power,

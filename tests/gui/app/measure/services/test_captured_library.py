@@ -1,5 +1,6 @@
 """Library editors retain captured targets and resource atomicity."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -19,7 +20,7 @@ from zcu_tools.gui.session.context_types import LibraryChange, PointUseRequest
 from zcu_tools.gui.session.events import MlChangedPayload
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
+from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
@@ -33,8 +34,11 @@ class EditorHost:
         self.arb_waveforms = self
         self.versions: dict[str, int] = {}
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        return self.control.read_context(roles=roles)
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Forward fixed alias captures to the public owner."""
+        return self.control.read_context(aliases=aliases)
 
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange
@@ -96,7 +100,7 @@ def _seed(session: LibrarySession, *, saved: bool) -> ParameterContext:
     if saved:
         _select(session, "a")
     capture = session.control.read_context()
-    session.control.set_parameter(capture.target, "general.flux_value", 2.0)
+    session.control.set_parameter(capture.target, "general.ext.flux_value", 2.0)
     session.control.set_waveform(
         capture.target, "Q1.waveforms.base", ConstWaveformCfg(length=1.0)
     )
@@ -109,11 +113,11 @@ def test_editor_commit_after_point_switch_uses_original_target_and_values(
     first = _seed(session, saved=True)
     editor_id, _ = session.editor.open("waveform", from_name="Q1.waveforms.base")
     session.editor.set_field(
-        editor_id, "length", {"__kind": "eval", "expr": "general.flux_value"}
+        editor_id, "length", {"__kind": "eval", "expr": "general.ext.flux_value"}
     )
     _select(session, "b")
     second = session.control.read_context()
-    session.control.set_parameter(second.target, "general.flux_value", 9.0)
+    session.control.set_parameter(second.target, "general.ext.flux_value", 9.0)
     version = session.state.version.get("context")
     events: list[MlChangedPayload] = []
     session.bus.subscribe(MlChangedPayload, events.append)
@@ -283,9 +287,9 @@ def test_module_editor_lowers_values_and_children_from_capture(
     )
     editor_id, _ = session.editor.open("module", from_name="Q1.pulses.pi")
     session.editor.set_field(
-        editor_id, "gain", {"__kind": "eval", "expr": "general.flux_value / 10"}
+        editor_id, "gain", {"__kind": "eval", "expr": "general.ext.flux_value / 10"}
     )
-    session.control.set_parameter(capture.target, "general.flux_value", 8.0)
+    session.control.set_parameter(capture.target, "general.ext.flux_value", 8.0)
     session.control.set_waveform(
         capture.target, "Q1.waveforms.base", ConstWaveformCfg(length=8.0)
     )

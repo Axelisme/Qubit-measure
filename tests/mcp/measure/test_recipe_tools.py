@@ -79,7 +79,7 @@ class WritebackGui(AnalysisRecipeGui):
                 "written": [
                     {
                         "id": item["id"],
-                        "kind": "md",
+                        "kind": "parameter",
                         "target": "frequency",
                         "before": {"value": 1.0},
                         "after": {"value": 2.0},

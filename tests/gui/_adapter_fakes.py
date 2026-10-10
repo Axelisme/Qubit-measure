@@ -13,8 +13,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     LoadDataRequest,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     PostWritebackRequest,
     RunRequest,
     SaveDataRequest,
@@ -123,7 +123,7 @@ class DummyAdapter:
     def get_writeback_items(
         self,
         req: WritebackRequest[object, DummyAnalyzeResult],
-    ) -> Sequence[MetaDictWriteback]:
+    ) -> Sequence[ParameterWriteback]:
         del req
         return []
 
@@ -150,7 +150,7 @@ class DummyAdapter:
     def get_post_writeback_items(
         self,
         req: PostWritebackRequest[object, DummyAnalyzeResult, DummyAnalyzeResult],
-    ) -> Sequence[MetaDictWriteback]:
+    ) -> Sequence[ParameterWriteback]:
         del req
         return []
 

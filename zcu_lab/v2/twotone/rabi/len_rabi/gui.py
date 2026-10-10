@@ -13,8 +13,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -284,7 +284,7 @@ class LenRabiAdapter(
             raise ValueError("Length Rabi writeback requires captured parameters")
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.rabi_freq",
                 description="Rabi oscillation frequency (MHz)",
                 proposed_value=result.rabi_f,
@@ -317,14 +317,14 @@ class LenRabiAdapter(
                 )
             )
             items.append(
-                MetaDictWriteback(
+                ParameterWriteback(
                     target_name=slot,
                     description=f"{description} slot",
                     proposed_value=key,
                 )
             )
         items.append(
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.pi_product",
                 description="Pi pulse gain times length (a.u. * us)",
                 proposed_value=gain * result.pi_len,

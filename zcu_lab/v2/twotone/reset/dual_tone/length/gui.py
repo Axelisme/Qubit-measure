@@ -28,7 +28,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import md
+from zcu_lab.v2._support.measure.seeds import path_seed
 from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_lab.v2.twotone.reset.dual_tone.length.core import (
     LengthCfg,
@@ -104,10 +104,18 @@ class DualToneLengthAdapter(
                 label="Tested Reset",
                 shape="two_pulse",
                 overrides={
-                    "pulse1_cfg.freq": md("reset_f1", fallback=0.0),
-                    "pulse2_cfg.freq": md("reset_f2", fallback=0.0),
-                    "pulse1_cfg.gain": md("reset_gain1", fallback=1.0),
-                    "pulse2_cfg.gain": md("reset_gain2", fallback=1.0),
+                    "pulse1_cfg.freq": path_seed(
+                        "$qubit.module.dual_tone.pulse1_cfg.freq", fallback=0.0
+                    ),
+                    "pulse2_cfg.freq": path_seed(
+                        "$qubit.module.dual_tone.pulse2_cfg.freq", fallback=0.0
+                    ),
+                    "pulse1_cfg.gain": path_seed(
+                        "$qubit.module.dual_tone.pulse1_cfg.gain", fallback=1.0
+                    ),
+                    "pulse2_cfg.gain": path_seed(
+                        "$qubit.module.dual_tone.pulse2_cfg.gain", fallback=1.0
+                    ),
                 },
             )
             .readout()

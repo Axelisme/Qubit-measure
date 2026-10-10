@@ -250,7 +250,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
                 {
                     "tab_id": "t1",
                     "subtab_id": "analysis",
-                    "id": "md-0",
+                    "id": "param-0",
                     "selected": True,
                 },
             ),

@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -29,7 +29,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import md
+from zcu_lab.v2._support.measure.seeds import path_seed
 from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_lab.v2.twotone.reset.dual_tone.power.core import (
     PowerAnalyzeOptions,
@@ -112,8 +112,12 @@ class DualTonePowerAdapter(
                 shape="two_pulse",
                 locked={"pulse1_cfg.gain": 0.0, "pulse2_cfg.gain": 0.0},
                 overrides={
-                    "pulse1_cfg.freq": md("reset_f1", fallback=0.0),
-                    "pulse2_cfg.freq": md("reset_f2", fallback=0.0),
+                    "pulse1_cfg.freq": path_seed(
+                        "$qubit.module.dual_tone.pulse1_cfg.freq", fallback=0.0
+                    ),
+                    "pulse2_cfg.freq": path_seed(
+                        "$qubit.module.dual_tone.pulse2_cfg.freq", fallback=0.0
+                    ),
                 },
             )
             .readout()
@@ -162,12 +166,12 @@ class DualTonePowerAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="reset_gain1",
                 description="Dual-tone reset gain 1 (a.u.)",
                 proposed_value=result.gain1,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="reset_gain2",
                 description="Dual-tone reset gain 2 (a.u.)",
                 proposed_value=result.gain2,

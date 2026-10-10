@@ -149,7 +149,7 @@ class TimeRabiGui(LookbackGui):
                 "written": [
                     {
                         "id": item["id"],
-                        "kind": "md",
+                        "kind": "parameter",
                         "target": self.target_name,
                         "before": {"value": 0.14},
                         "after": {"value": 0.21},
@@ -169,8 +169,8 @@ class TimeRabiGui(LookbackGui):
                 "has_draft": True,
                 "items": [
                     {
-                        "id": "md-1",
-                        "kind": "metadict",
+                        "id": "param-1",
+                        "kind": "parameter",
                         "target_name": self.target_name,
                         "proposed": 0.21,
                         "current": 0.14,
@@ -752,7 +752,7 @@ def test_drive_primary_handoff_waits_for_question_before_actual_write(
         receipts = reply.data["writeback"]["receipts"]
         if decision == "accepted":
             assert gui.writes == [
-                {"tab_id": "t", "subtab_id": "analysis", "write": [{"id": "md-1"}]}
+                {"tab_id": "t", "subtab_id": "analysis", "write": [{"id": "param-1"}]}
             ]
             assert receipts[0]["completed"][0]["written"][0]["target"] == target
         else:

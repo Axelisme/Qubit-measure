@@ -17,8 +17,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -166,7 +166,7 @@ class JpaFreqAdapter(
         self, req: WritebackRequest[JpaFreqRunResult, JpaFreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_freq",
                 description="Best JPA pump frequency (MHz)",
                 proposed_value=req.analyze_result.best_freq,

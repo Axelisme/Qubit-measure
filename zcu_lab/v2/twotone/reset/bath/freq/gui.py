@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -25,13 +25,12 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.reset_bath import bath_reset_writeback_items
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import Seed, custom, scaled_md
+from zcu_lab.v2._support.measure.seeds import Seed, custom, scaled_path_seed
 from zcu_lab.v2.twotone.reset.bath.freq.core import (
     FreqGainAnalyzeOptions,
     FreqGainCfg,
@@ -48,25 +47,12 @@ _PI2_PHASE_OFFSET_DEG: float = 90.0
 
 
 def _cavity_freq_range(expts: int) -> Seed[SweepValue]:
-    """Cavity-tone frequency sweep range: ``r_f - rabi_f`` centred.
+    """Store cavity frequency minus 0.8–1.2 times calibrated Rabi frequency."""
 
-    Mirrors the notebook span ``[r_f - 1.2*rabi_f, r_f - 0.8*rabi_f]``. When both
-    md keys exist each edge stays an EvalValue (the GUI re-derives if md
-    changes); otherwise a fixed fallback span around the available centre.
-    """
-
-    def resolve(ctx: SessionEnv) -> SweepValue:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rabi_f = md_get_float(ctx, "rabi_f", 20.0)
-        if md_has_key(ctx, "r_f") and md_has_key(ctx, "rabi_f"):
-            return SweepValue(
-                start=EvalValue(expr="r_f - 1.2 * rabi_f"),
-                stop=EvalValue(expr="r_f - 0.8 * rabi_f"),
-                expts=expts,
-            )
+    def resolve(_ctx: SessionEnv) -> SweepValue:
         return SweepValue(
-            start=r_f - 1.2 * rabi_f,
-            stop=r_f - 0.8 * rabi_f,
+            start=EvalValue("$resonator.freq - 1.2 * $qubit.ext.rabi_freq"),
+            stop=EvalValue("$resonator.freq - 0.8 * $qubit.ext.rabi_freq"),
             expts=expts,
         )
 
@@ -151,7 +137,7 @@ class BathFreqGainAdapter(
             )
             .readout()
             .relax_delay(
-                scaled_md("t1", factor=5.0, fallback_value=30.5),
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5),
             )
             .sweep(
                 "freq",
@@ -197,12 +183,12 @@ class BathFreqGainAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="bathreset_gain",
                 description="Bath-reset cavity gain (a.u.)",
                 proposed_value=result.gain,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="bathreset_freq",
                 description="Bath-reset cavity frequency (MHz)",
                 proposed_value=result.freq,

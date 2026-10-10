@@ -25,7 +25,6 @@ from zcu_tools.gui.session.value_lookup import (
 from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.v2._support.measure.ctx_helpers import (
-    md_has_key,
     proper_flux_range,
     proper_qub_freq_range,
     proper_res_freq_range,
@@ -67,25 +66,6 @@ def custom(resolve: Callable[[SessionEnv], T], *, description: str) -> Seed[T]:
     if not description.strip():
         raise ValueError("custom seed description must not be empty")
     return Seed(resolve, description=description)
-
-
-def md(
-    key: str,
-    *,
-    fallback: ScalarLeafInput,
-    expr: str | None = None,
-) -> Seed[ScalarLeafInput]:
-    """Use a live md expression when ``key`` exists, else a fixed fallback."""
-
-    if not key.strip():
-        raise ValueError("md seed key must not be empty")
-
-    def resolve(ctx: SessionEnv) -> ScalarLeafInput:
-        if md_has_key(ctx, key):
-            return EvalValue(expr=expr if expr is not None else key)
-        return fallback
-
-    return Seed(resolve, description=f"md:{key}")
 
 
 def path_seed(
@@ -168,25 +148,6 @@ def scaled_path_seed(
         return EvalValue(expr=f"{factor} * {path}")
 
     return Seed(resolve, description=f"{factor} * parameter:{path}")
-
-
-def scaled_md(
-    key: str,
-    *,
-    factor: float,
-    fallback_value: float,
-) -> Seed[float | EvalValue]:
-    """Use ``factor * key`` live; ``fallback_value`` is already the final value."""
-
-    if not key.strip():
-        raise ValueError("scaled_md seed key must not be empty")
-
-    def resolve(ctx: SessionEnv) -> float | EvalValue:
-        if md_has_key(ctx, key):
-            return EvalValue(expr=f"{factor} * {key}")
-        return fallback_value
-
-    return Seed(resolve, description=f"{factor} * md:{key}")
 
 
 @dataclass(frozen=True)
@@ -281,12 +242,10 @@ __all__ = [
     "custom",
     "flux_range",
     "literal",
-    "md",
     "module_seed",
     "path_seed",
     "qub_freq_range",
     "scaled_path_seed",
     "res_freq_range",
-    "scaled_md",
     "value_source",
 ]

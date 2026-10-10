@@ -19,7 +19,7 @@ this module as the session services move in.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
@@ -30,7 +30,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_types import EntryInfo
     from zcu_tools.gui.session.services.device import DeviceProtocol
-    from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
+    from zcu_tools.gui.session.types import ParameterContext, SessionEnv
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
     from zcu_tools.resources.entry import ResultEntry
 
@@ -278,12 +278,17 @@ class ProjectIOPort(Protocol):
 class ContextReadPort(Protocol):
     """Fixed parameter capture, without file I/O or writable resource handles."""
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        """Copy published sources with fixed supplied names.
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix published point/library/storage and all current authored aliases.
 
-        roles=None permits direct component/general paths. EMPTY raises
-        FailedPreconditionError(no_context); source faults or invalid captured
-        destinations propagate through the parameter owner.
+        aliases optionally maps alias names to temporary concrete components;
+        dependent links remain authored and no global state changes. Reads use
+        $ for aliases, bare paths for concrete components, with no kind policy
+        or same-name fallback. Missing/unbound aliases fail by name on use.
+        EMPTY raises FailedPreconditionError(no_context); source faults and
+        invalid override identifiers propagate. No I/O or later live reads occur.
         """
         ...
 

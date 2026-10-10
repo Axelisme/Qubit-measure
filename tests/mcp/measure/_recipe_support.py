@@ -247,8 +247,8 @@ class LookbackGui:
                 "has_draft": True,
                 "items": [
                     {
-                        "id": "md-1",
-                        "kind": "metadict",
+                        "id": "param-1",
+                        "kind": "parameter",
                         "target_name": "trigger_offset",
                         "selected": False,
                         "proposed": 0.24,

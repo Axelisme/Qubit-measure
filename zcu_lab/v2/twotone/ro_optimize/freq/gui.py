@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -25,7 +25,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import res_freq_range, scaled_md
+from zcu_lab.v2._support.measure.seeds import res_freq_range, scaled_path_seed
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq.core import (
     FreqAnalyzeOptions,
@@ -110,7 +110,7 @@ class RoOptFreqAdapter(
                 pulse_only=True,
                 locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
             )
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=30.5))
+            .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
             .sweep(
                 "freq",
                 label="Readout freq (MHz)",
@@ -153,7 +153,7 @@ class RoOptFreqAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_ro_freq",
                 description="Optimal readout frequency (MHz)",
                 proposed_value=result.best_freq,

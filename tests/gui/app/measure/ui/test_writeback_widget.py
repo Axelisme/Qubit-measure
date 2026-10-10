@@ -23,7 +23,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    MetaDictWriteback,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WaveformWriteback,
@@ -195,12 +195,12 @@ def test_writeback_widget_non_scalar_item_is_read_only(qapp):
     """A non-scalar md item (e.g. a confusion matrix) renders selectable but
     with no Edit button — it is a derived value applied verbatim."""
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
-    scalar = MetaDictWriteback(target_name="fid", description="d", proposed_value=0.95)
-    scalar.session_id = "md-1"
-    nonscalar = MetaDictWriteback(
+    scalar = ParameterWriteback(target_name="fid", description="d", proposed_value=0.95)
+    scalar.session_id = "param-1"
+    nonscalar = ParameterWriteback(
         target_name="confusion_matrix", description="d", proposed_value=matrix
     )
-    nonscalar.session_id = "md-2"
+    nonscalar.session_id = "param-2"
 
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.populate([scalar, nonscalar])
@@ -216,31 +216,31 @@ def test_writeback_widget_non_scalar_item_is_read_only(qapp):
 
 
 def test_writeback_widget_projects_draft_owned_applied_state(qapp):
-    item = MetaDictWriteback(target_name="r_f", description="d", proposed_value=6000.0)
-    item.session_id = "md-1"
+    item = ParameterWriteback(target_name="r_f", description="d", proposed_value=6000.0)
+    item.session_id = "param-1"
     ctrl = MagicMock()
-    ctrl.get_writeback_applied_for_pane.return_value = {"md-1": False}
+    ctrl.get_writeback_applied_for_pane.return_value = {"param-1": False}
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
 
     widget.populate([item])
 
-    checkbox = widget._checks["md-1"]
+    checkbox = widget._checks["param-1"]
     assert checkbox.text() == "r_f*"
     assert checkbox.font().bold()
     assert any(
         label.text() == "* = not applied" for label in widget.findChildren(QLabel)
     )
 
-    ctrl.get_writeback_applied_for_pane.return_value = {"md-1": True}
+    ctrl.get_writeback_applied_for_pane.return_value = {"param-1": True}
     widget.populate([item])
-    checkbox = widget._checks["md-1"]
+    checkbox = widget._checks["param-1"]
     assert checkbox.text() == "r_f"
     assert not checkbox.font().bold()
 
 
 def test_writeback_widget_does_not_hide_applied_projection_failures(qapp):
-    item = MetaDictWriteback(target_name="r_f", description="d", proposed_value=6000.0)
-    item.session_id = "md-1"
+    item = ParameterWriteback(target_name="r_f", description="d", proposed_value=6000.0)
+    item.session_id = "param-1"
     ctrl = MagicMock()
     ctrl.get_writeback_applied_for_pane.side_effect = RuntimeError("projection failed")
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
@@ -253,14 +253,14 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
     """A1 — target-only labels, tooltip, centered Current → Proposed,
     shared backgrounds/borders and equal 56x26 actions."""
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
-    scalar = MetaDictWriteback(
+    scalar = ParameterWriteback(
         target_name="r_f", description="resonator freq", proposed_value=6000.0
     )
-    scalar.session_id = "md-1"
-    nonscalar = MetaDictWriteback(
+    scalar.session_id = "param-1"
+    nonscalar = ParameterWriteback(
         target_name="confusion_matrix", description="matrix desc", proposed_value=matrix
     )
-    nonscalar.session_id = "md-2"
+    nonscalar.session_id = "param-2"
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.resize(600, 400)
     widget.populate([scalar, nonscalar])
@@ -362,13 +362,13 @@ def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qap
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
     controller = MagicMock()
     controller.get_writeback_summaries_for_pane.return_value = {
-        "md-1": ("3 × 3 matrix", "3 × 3 matrix")
+        "param-1": ("3 × 3 matrix", "3 × 3 matrix")
     }
     widget = WritebackWidget(controller, tab_id="tab-1", pane="analysis")
-    item = MetaDictWriteback(
+    item = ParameterWriteback(
         target_name="confusion_matrix", description="d", proposed_value=matrix
     )
-    item.session_id = "md-1"
+    item.session_id = "param-1"
     widget.resize(600, 400)
     widget.populate([item])
     widget.show()
@@ -406,10 +406,10 @@ def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qap
         # long value cannot widen ledger
         long_val = list(range(200))
         w2 = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
-        long_item = MetaDictWriteback(
+        long_item = ParameterWriteback(
             target_name="long_list", description="d", proposed_value=long_val
         )
-        long_item.session_id = "md-1"
+        long_item.session_id = "param-1"
         w2.resize(600, 400)
         w2.populate([long_item])
         w2.show()
@@ -475,22 +475,22 @@ def _assert_matrix_row_reflows(row: QFrame, *, narrow: bool) -> None:
 def test_static_units_display_once_after_stderr_without_converting_values(
     qapp, pane: Literal["analysis", "post_analysis"]
 ) -> None:
-    fixed = MetaDictWriteback(
+    fixed = ParameterWriteback(
         "driver.frequency", "Frequency", proposed_value=20.09, stderr=0.18
     )
-    unset = MetaDictWriteback("driver.duration", "Duration", proposed_value=0.25)
-    ext = MetaDictWriteback("general.ext.value", "Value", proposed_value=9.0)
+    unset = ParameterWriteback("driver.duration", "Duration", proposed_value=0.25)
+    ext = ParameterWriteback("general.ext.value", "Value", proposed_value=9.0)
     items = [fixed, unset, ext]
     for index, item in enumerate(items, 1):
-        item.session_id = f"md-{index}"
+        item.session_id = f"param-{index}"
     facts = {
-        "md-1": WritebackValues(
+        "param-1": WritebackValues(
             actual_path="Q1.frequency", current=19.8, proposed=20.09, unit="MHz"
         ),
-        "md-2": WritebackValues(
+        "param-2": WritebackValues(
             actual_path="Q1.duration", current=None, proposed=0.25, unit="us"
         ),
-        "md-3": WritebackValues(
+        "param-3": WritebackValues(
             actual_path="general.ext.value", current=7.0, proposed=9.0, unit=None
         ),
     }
@@ -516,27 +516,27 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
     qapp, pane: Literal["analysis", "post_analysis"]
 ) -> None:
     matrix = [[0.9, 0.1], [0.2, 0.8]]
-    scalar = MetaDictWriteback(
+    scalar = ParameterWriteback(
         "driver.ext.value", "Value", proposed_value=20.09, stderr=0.18
     )
-    scalar.session_id = "md-1"
-    table = MetaDictWriteback("driver.ext.matrix", "Matrix", proposed_value=matrix)
-    table.session_id = "md-2"
+    scalar.session_id = "param-1"
+    table = ParameterWriteback("driver.ext.matrix", "Matrix", proposed_value=matrix)
+    table.session_id = "param-2"
     values = {
-        "md-1": WritebackValues(
+        "param-1": WritebackValues(
             actual_path="Q1.ext.value", current=19.8, proposed=20.09, unit=None
         ),
-        "md-2": WritebackValues(
+        "param-2": WritebackValues(
             actual_path="Q1.ext.matrix", current=None, proposed=matrix, unit=None
         ),
     }
     ctrl = MagicMock()
-    applied = {"md-1": False, "md-2": False}
+    applied = {"param-1": False, "param-2": False}
     ctrl.get_writeback_applied_for_pane.return_value = applied
     ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied
     ctrl.get_writeback_summaries_for_pane.return_value = {
-        "md-1": ("18.0", "19.0"),  # stale baseline, not the supplied live facts
-        "md-2": ("—", "2 × 2 matrix"),
+        "param-1": ("18.0", "19.0"),  # stale baseline, not the supplied live facts
+        "param-2": ("—", "2 × 2 matrix"),
     }
     widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
     try:
@@ -583,7 +583,7 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
             if check.text() == "driver.ext.value*"
         )
         assert unapplied.font().bold()
-        applied["md-1"] = True
+        applied["param-1"] = True
         widget.populate([scalar, table], values)
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         written = next(
@@ -603,13 +603,13 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
 
 
 def test_nonempty_preview_requires_each_service_fact(qapp) -> None:
-    item = MetaDictWriteback("driver.ext.value", "Value", proposed_value=1.0)
-    item.session_id = "md-1"
+    item = ParameterWriteback("driver.ext.value", "Value", proposed_value=1.0)
+    item.session_id = "param-1"
     ctrl = MagicMock()
     ctrl.get_writeback_applied_for_pane.return_value = {}
     widget = WritebackWidget(ctrl, tab_id="captured")
     try:
-        with pytest.raises(KeyError, match="md-1"):
+        with pytest.raises(KeyError, match="param-1"):
             widget.populate([item], {})
     finally:
         widget.close()
@@ -861,14 +861,14 @@ def test_cfg_edit_and_retarget_refresh_live_facts_and_applied_state(
 def test_retarget_edit_refreshes_captured_path_current_and_proposal(
     qapp, pane: Literal["analysis", "post_analysis"]
 ) -> None:
-    item = MetaDictWriteback("driver.frequency", "Value", proposed_value=20.09)
-    item.session_id = "md-1"
+    item = ParameterWriteback("driver.frequency", "Value", proposed_value=20.09)
+    item.session_id = "param-1"
     original = WritebackValues(
         actual_path="Q1.frequency", current=19.8, proposed=20.09, unit="MHz"
     )
     ctrl = MagicMock()
     ctrl.get_writeback_applied_for_pane.return_value = {}
-    ctrl.get_writeback_summaries_for_pane.return_value = {"md-1": ("19.8", "20.09")}
+    ctrl.get_writeback_summaries_for_pane.return_value = {"param-1": ("19.8", "20.09")}
 
     def commit_edit(
         tab_id: str,
@@ -878,10 +878,10 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
         target_name: str,
         proposed_value: object,
     ) -> None:
-        assert (tab_id, requested_pane, session_id) == ("captured", pane, "md-1")
+        assert (tab_id, requested_pane, session_id) == ("captured", pane, "param-1")
         assert target_name == "driver.ext.other"
         ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
-            "md-1": WritebackValues(
+            "param-1": WritebackValues(
                 actual_path="Q1.ext.other",
                 current=7.0,
                 proposed=proposed_value,
@@ -893,7 +893,7 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
     ctrl.writeback_control.set_writeback_item_for_pane.side_effect = commit_edit
     widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
     try:
-        widget.populate([item], {"md-1": original})
+        widget.populate([item], {"param-1": original})
         initial_texts = [label.text() for label in widget.findChildren(QLabel)]
         assert "19.8 MHz" in initial_texts
         assert "20.09 MHz" in initial_texts

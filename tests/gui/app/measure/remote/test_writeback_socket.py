@@ -5,8 +5,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.gui.app.measure.adapter import (
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     WaveformWriteback,
 )
 from zcu_tools.gui.app.measure.cfg_schemas import (
@@ -52,7 +52,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
         FakeAdapter,
         "get_writeback_items",
         lambda self, request: [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="value", description="V", proposed_value=after
             ),
         ],
@@ -92,14 +92,14 @@ def test_complete_md_values_survive_preview_and_write_socket(
         assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
         assert call(sock, "context.snapshot", {})["ok"]
         written = call(
-            sock, "tab.writeback_write", {**params, "write": [{"id": "md-1"}]}
+            sock, "tab.writeback_write", {**params, "write": [{"id": "param-1"}]}
         )
         assert written["ok"], written
         assert written["result"] == {
             "written": [
                 {
-                    "id": "md-1",
-                    "kind": "md",
+                    "id": "param-1",
+                    "kind": "parameter",
                     "target": "value",
                     "before": wire_before,
                     "after": wire_after,
@@ -120,7 +120,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
         ):
             md.value = 1.0
             fx.ctrl.set_writeback_item_for_pane(
-                tab, "analysis", "md-1", proposed_value=invalid
+                tab, "analysis", "param-1", proposed_value=invalid
             )
             rejected_preview = call(sock, "tab.writeback_preview", params)
             assert not rejected_preview["ok"]
@@ -133,7 +133,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
                 "tab.writeback_write",
                 {
                     **params,
-                    "write": [{"id": "md-1"}],
+                    "write": [{"id": "param-1"}],
                 },
             )
             assert not rejected_write["ok"]
@@ -249,8 +249,8 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         FakeAdapter,
         "get_writeback_items",
         lambda self, request: [
-            MetaDictWriteback(target_name="a", description="A", proposed_value=11.0),
-            MetaDictWriteback(target_name="b", description="B", proposed_value=22.0),
+            ParameterWriteback(target_name="a", description="A", proposed_value=11.0),
+            ParameterWriteback(target_name="b", description="B", proposed_value=22.0),
         ],
     )
     fx = Fixture(active_label="ctx001")
@@ -283,16 +283,16 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         assert [
             (item["current"], item["proposed"]) for item in before["result"]["items"]
         ] == [(1.0, 11.0), (2.0, 22.0)]
-        applied = call(sock, "tab.writeback_apply", {**params, "ids": ["md-1"]})
+        applied = call(sock, "tab.writeback_apply", {**params, "ids": ["param-1"]})
         assert applied["ok"]
-        assert applied["result"]["applied_ids"] == ["md-1"]
+        assert applied["result"]["applied_ids"] == ["param-1"]
         assert md.a == 11.0 and md.b == 2.0
         after = call(sock, "tab.writeback_preview", params)["result"]
         assert [item["current"] for item in after["items"]] == [11.0, 2.0]
         assert all(item["selected"] for item in after["items"])
         assert fx.ctrl.get_writeback_applied_for_pane(tab, "analysis") == {
-            "md-1": True,
-            "md-2": False,
+            "param-1": True,
+            "param-2": False,
         }
         assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
         assert call(sock, "context.snapshot", {})["ok"]
@@ -301,7 +301,7 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
             "tab.writeback_write",
             {
                 **params,
-                "write": [{"id": "md-2", "value": 33.0}, {"id": "missing"}],
+                "write": [{"id": "param-2", "value": 33.0}, {"id": "missing"}],
             },
         )
         assert failed["ok"] is False
@@ -317,15 +317,15 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
             "tab.writeback_write",
             {
                 **params,
-                "write": [{"id": "md-2"}],
+                "write": [{"id": "param-2"}],
             },
         )
         assert written["ok"], written
         assert written["result"] == {
             "written": [
                 {
-                    "id": "md-2",
-                    "kind": "md",
+                    "id": "param-2",
+                    "kind": "parameter",
                     "target": "b",
                     "before": 2.0,
                     "after": 33.0,
@@ -350,10 +350,10 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         PointAdapter,
         "get_writeback_items",
         lambda self, req: [
-            MetaDictWriteback(
+            ParameterWriteback(
                 "driver.ext.value", "Value", proposed_value=20.09, stderr=0.18
             ),
-            MetaDictWriteback("driver.ext.other", "Other", proposed_value=23.0),
+            ParameterWriteback("driver.ext.other", "Other", proposed_value=23.0),
         ],
     )
     application.open_entry()

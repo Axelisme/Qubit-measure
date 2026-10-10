@@ -9,9 +9,9 @@ import pytest
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    MetaDictWriteback,
     ModuleWriteback,
     NoAnalysisResult,
+    ParameterWriteback,
     WaveformWriteback,
     require_soc_handles,
 )
@@ -513,13 +513,13 @@ def test_make_default_value_module_ref():
 # ---------------------------------------------------------------------------
 
 
-def test_meta_dict_writeback_requires_proposed_value():
+def test_parameter_writeback_requires_proposed_value():
     with pytest.raises(TypeError):
-        MetaDictWriteback(target_name="k", description="d")  # type: ignore[call-arg]
+        ParameterWriteback(target_name="k", description="d")  # type: ignore[call-arg]
 
 
-def test_meta_dict_writeback_valid():
-    item = MetaDictWriteback(target_name="freq", description="d", proposed_value=1)
+def test_parameter_writeback_valid():
+    item = ParameterWriteback(target_name="freq", description="d", proposed_value=1)
     assert item.target_name == "freq"
     assert item.proposed_value == 1
     # session_id is stamped by the service, not the adapter; editor identity is

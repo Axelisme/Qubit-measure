@@ -25,7 +25,8 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_path_seed
+from zcu_lab.v2._support.measure.singleshot_shared import read_confusion_matrix
 from zcu_lab.v2.singleshot.t1.t1.core import T1AnalyzeOptions, T1Cfg, T1Exp, T1Result
 
 # Transition-rate analysis publishes figures without numeric writeback.
@@ -89,31 +90,35 @@ class SsT1Adapter(
             .reset(optional=True)
             .pulse("pi_pulse", role_id="pi_pulse")
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
+            )
             .sweep(
                 "length",
                 label="Delay (us)",
                 default=SweepDefault(
                     start=0.0,
                     # The fallback is the fully scaled 5 * 100 us window.
-                    stop=scaled_md("t1", factor=5.0, fallback_value=500.0),
+                    stop=scaled_path_seed(
+                        "$qubit.t1", factor=5.0, fallback_value=500.0
+                    ),
                     expts=101,
                 ),
             )
             .field(
                 "g_center",
                 spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("g_center"),
+                default=EvalValue("$qubit.ext.readout_cal.g_center"),
             )
             .field(
                 "e_center",
                 spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("e_center"),
+                default=EvalValue("$qubit.ext.readout_cal.e_center"),
             )
             .field(
                 "radius",
                 spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("ge_radius"),
+                default=EvalValue("$qubit.ext.readout_cal.radius"),
             )
             .bool("uniform", label="Uniform (linear) sweep", default=False)
             .reps(1000)
@@ -133,7 +138,7 @@ class SsT1Adapter(
         # ``confusion_matrix`` is the GE 3×3 readout-correction matrix from md.
         # ``skip`` is not exposed as a user knob — users can re-run with a shorter
         # sweep instead.
-        confusion = req.md.get("confusion_matrix")
+        confusion = read_confusion_matrix(req.parameters)
         T1Exp().analyze(
             req.run_result, T1AnalyzeOptions(confusion_matrix=confusion), plots=plots
         )

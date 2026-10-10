@@ -10,6 +10,7 @@ import pytest
 from zcu_tools.cfg_model import NoneResetCfg, PulseReadoutSpec, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    AnalyzeRequest,
     ExpAdapterProtocol,
     SessionEnv,
 )
@@ -25,6 +26,7 @@ from zcu_tools.gui.cfg.resource import CfgResource, CfgStatus
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
@@ -34,6 +36,31 @@ from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from zcu_lab.components import JpaSchema, QubitSchema, ResonatorSchema
 from zcu_lab.definitions import register_all
+from zcu_lab.v2.singleshot.mist.power.core import PowerExp
+
+
+@pytest.mark.parametrize("log_scale", [False, True])
+def test_registry_analysis_input_controls_mist_power_scale(
+    monkeypatch, log_scale: bool
+) -> None:
+    adapter = _registry().create("singleshot/mist/power")
+    environment = _ctx(rich=True)
+    params = adapter.get_analyze_params(object(), environment)
+    assert getattr(params, "log_scale", None) is False
+    selected = replace(params, log_scale=log_scale)
+    analyze = MagicMock()
+    monkeypatch.setattr(PowerExp, "analyze", analyze)
+    adapter.analyze(
+        AnalyzeRequest(
+            run_result=object(),
+            analyze_params=selected,
+            parameters=environment.parameters,
+            predictor=None,
+        ),
+        plots=Plots(NonPresentingHost()),
+    )
+    options = analyze.call_args.args[1]
+    assert options.log_scale is log_scale
 
 
 def _registry() -> Registry:

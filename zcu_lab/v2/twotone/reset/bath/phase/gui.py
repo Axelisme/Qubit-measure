@@ -11,8 +11,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -29,7 +29,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import md
+from zcu_lab.v2._support.measure.seeds import path_seed
 from zcu_lab.v2.twotone.reset.bath.phase.core import PhaseCfg, PhaseExp, PhaseResult
 
 BathPhaseRunResult: TypeAlias = RunRecord[PhaseCfg, PhaseResult]
@@ -102,8 +102,12 @@ class BathPhaseAdapter(
                 shape="bath",
                 locked={"pi2_cfg.phase": 0.0},
                 overrides={
-                    "cavity_tone_cfg.freq": md("bathreset_freq", fallback=0.0),
-                    "cavity_tone_cfg.gain": md("bathreset_gain", fallback=0.1),
+                    "cavity_tone_cfg.freq": path_seed(
+                        "$qubit.module.bath_g.cavity_tone_cfg.freq", fallback=0.0
+                    ),
+                    "cavity_tone_cfg.gain": path_seed(
+                        "$qubit.module.bath_g.cavity_tone_cfg.gain", fallback=0.1
+                    ),
                 },
             )
             .readout()
@@ -145,12 +149,12 @@ class BathPhaseAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="bathreset_max_phase",
                 description="Bath-reset pi/2 phase for ground reset (deg)",
                 proposed_value=result.max_phase,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="bathreset_min_phase",
                 description="Bath-reset pi/2 phase for excited reset (deg)",
                 proposed_value=result.min_phase,

@@ -28,7 +28,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import md
+from zcu_lab.v2._support.measure.seeds import path_seed
 from zcu_lab.v2.twotone.reset.bath.length.core import LengthCfg, LengthExp, LengthResult
 
 BathLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
@@ -103,8 +103,12 @@ class BathLengthAdapter(
                 shape="bath",
                 locked={"pi2_cfg.phase": _PI2_PHASE_OFFSET_DEG},
                 overrides={
-                    "cavity_tone_cfg.freq": md("bathreset_freq", fallback=0.0),
-                    "cavity_tone_cfg.gain": md("bathreset_gain", fallback=0.1),
+                    "cavity_tone_cfg.freq": path_seed(
+                        "$qubit.module.bath_g.cavity_tone_cfg.freq", fallback=0.0
+                    ),
+                    "cavity_tone_cfg.gain": path_seed(
+                        "$qubit.module.bath_g.cavity_tone_cfg.gain", fallback=0.1
+                    ),
                 },
             )
             .readout()

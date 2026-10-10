@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import Annotated, Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -10,7 +10,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
+    ParamMeta,
     RunRequest,
     SessionEnv,
 )
@@ -27,8 +27,12 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import custom, scaled_md
-from zcu_lab.v2._support.measure.singleshot_shared import readout_probe_freq
+from zcu_lab.v2._support.measure.seeds import custom, scaled_path_seed
+from zcu_lab.v2._support.measure.singleshot_shared import (
+    read_analysis_float,
+    read_confusion_matrix,
+    readout_probe_freq,
+)
 from zcu_lab.v2.singleshot.mist.power.core import (
     PowerAnalyzeOptions,
     PowerCfg,
@@ -44,8 +48,17 @@ class MistPowerAnalyzeResult(AnalyzeResultBase):
     pass
 
 
+@dataclass
+class MistPowerAnalyzeParams:
+    """MIST plot settings; log_scale uses a logarithmic gain/photon-number axis."""
+
+    log_scale: Annotated[bool, ParamMeta(label="Logarithmic x-axis")] = False
+
+
 class MistPowerAdapter(
-    BaseAdapter[PowerCfg, MistPowerRunResult, MistPowerAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[
+        PowerCfg, MistPowerRunResult, MistPowerAnalyzeResult, MistPowerAnalyzeParams
+    ]
 ):
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
@@ -103,7 +116,7 @@ class MistPowerAdapter(
                 },
             )
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=30.5))
+            .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
             .sweep(
                 "gain",
                 label="Probe gain (a.u.)",
@@ -112,17 +125,17 @@ class MistPowerAdapter(
             .field(
                 "g_center",
                 spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("g_center"),
+                default=EvalValue("$qubit.ext.readout_cal.g_center"),
             )
             .field(
                 "e_center",
                 spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("e_center"),
+                default=EvalValue("$qubit.ext.readout_cal.e_center"),
             )
             .field(
                 "radius",
                 spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("ge_radius"),
+                default=EvalValue("$qubit.ext.readout_cal.radius"),
             )
             .reps(1000)
             .rounds(100)
@@ -143,14 +156,14 @@ class MistPowerAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[MistPowerRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[MistPowerRunResult, MistPowerAnalyzeParams],
         *,
         plots: Plots,
     ) -> MistPowerAnalyzeResult:
         options = PowerAnalyzeOptions(
-            ac_coeff=req.md.get("ac_stark_coeff"),
-            log_scale=bool(req.md.get("log_scale", False)),
-            confusion_matrix=req.md.get("confusion_matrix"),
+            ac_coeff=read_analysis_float(req.parameters, "$qubit.ext.ac_stark_coeff"),
+            log_scale=req.analyze_params.log_scale,
+            confusion_matrix=read_confusion_matrix(req.parameters),
         )
         PowerExp().analyze(req.run_result, options, plots=plots)
         return MistPowerAnalyzeResult()

@@ -1,4 +1,4 @@
-"""Fixed parameter range policies and remaining legacy seed reads."""
+"""Fixed parameter scalar reads and deferred frequency/flux range policies."""
 
 from __future__ import annotations
 
@@ -8,21 +8,7 @@ from typing import TYPE_CHECKING
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.session.parameters import ParameterContext
-
-
-def md_get_float(ctx: SessionEnv, key: str, default: float) -> float:
-    value = ctx.md.get(key)
-    if isinstance(value, (int, float)):
-        return float(value)
-    return default
-
-
-def md_has_key(ctx: SessionEnv, key: str) -> bool:
-    sentinel = object()
-    value = ctx.md.get(key, sentinel)
-    return value is not sentinel and value is not None
 
 
 def optional_parameter_float(parameters: ParameterContext, path: str) -> float | None:

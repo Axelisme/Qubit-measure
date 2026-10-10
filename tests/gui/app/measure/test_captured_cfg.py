@@ -18,6 +18,7 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
+from zcu_tools.gui.session.aliases import AliasTable
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
 from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
@@ -71,13 +72,14 @@ class PublishedHost:
         self.current = current
         self.arb_waveforms = self
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        return ParameterContext(
-            point=self.current.document(),
-            library=self.current.library,
-            target=self.current.target,
-            roles=roles,
-        )
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix supplied authored rows with temporary named overrides."""
+        table = AliasTable(self.current.aliases)
+        for alias, component in (aliases or {}).items():
+            table = table.with_override(alias, component)
+        return self.current.bind_aliases(table.rows, {})
 
     def list_device_names(self) -> list[str]:
         return []
