@@ -141,6 +141,39 @@ def application(
         restore_registry(before)
 
 
+def test_named_aliases_apply_to_parameter_and_library_queries_without_mutating_sources(
+    application: TargetApplication,
+) -> None:
+    context = application.controller.context_control
+    context.set_alias_rows(
+        (
+            AliasRow("other", "Q1"),
+            AliasRow("driver", "Q1"),
+            AliasRow("sense", "$driver.sense"),
+        )
+    )
+    tab_id = application.controller.tab_control.new_tab("targeted")
+    rows = context.get_alias_rows()
+    versions = application.state.version.snapshot()
+    publication = application.state.get_tab(tab_id).cfg.observe()
+    result = h_tab_parameter_read(
+        application.remote,
+        {
+            "tab_id": tab_id,
+            "aliases": {"driver": "QL", "sense": "R2"},
+            "paths": ["$driver.rate", "$sense.rate", "$other.rate"],
+            "module_refs": ["$driver.pulses.pi"],
+        },
+    )
+    assert result == {
+        "values": {"$driver.rate": 40.0, "$sense.rate": 30.0, "$other.rate": 10.0},
+        "modules": {"$driver.pulses.pi": "QL.pulses.pi"},
+    }
+    assert context.get_alias_rows() == rows
+    assert application.state.version.snapshot() == versions
+    assert application.state.get_tab(tab_id).cfg.observe() == publication
+
+
 def test_parameter_read_uses_current_sources_and_temporary_aliases(
     application: TargetApplication,
 ) -> None:

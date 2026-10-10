@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.services.app_services import (
     AppServices,
     build_app_services,
 )
-from zcu_tools.gui.app.measure.services.guard import RunInputs
+from zcu_tools.gui.app.measure.services.guard import GuardService, RunInputs
 from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg.model import (
@@ -36,6 +36,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgStatus,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
@@ -383,6 +384,79 @@ def global_sources(
     finally:
         component_registry.unregister("cfg/drive")
         assert component_registry.kinds() == before
+
+
+def test_named_aliases_preview_and_admission_share_capture_without_publication(
+    global_sources: tuple[AppServices, State],
+) -> None:
+    services, state = global_sources
+    services.context.set_alias_rows((AliasRow("custom", "Q2"), AliasRow("qubit", "Q1")))
+    tab_id = services.tab.new_tab("global-source")
+    cfg = state.get_tab(tab_id).cfg
+    expression = "2 * $custom.gain + $qubit.gain"
+    observed = cfg.edit(
+        cfg.observe().ref.revision, (CfgEdit(("gain",), EvalValue(expression)),)
+    )
+    rows = services.context.get_alias_rows()
+    versions = state.version.snapshot()
+    aliases = {"custom": "Q1"}
+    preview = services.tab.preview_cfg(tab_id, observed.ref, aliases=aliases)
+    assert preview.ref == observed.ref
+    assert preview.status is CfgStatus.VALID
+    admitted = services.guard.capture_run_inputs(
+        tab_id, expected_revision=observed.ref.revision, aliases=aliases
+    )
+    assert admitted.accepted_cfg.ref == observed.ref
+    assert admitted.accepted_cfg.values["gain"] == 30.0
+    assert admitted.snapshot is not None
+    assert admitted.snapshot.roles == {"custom": "Q1", "qubit": "Q1"}
+    assert admitted.parameters is not None
+    assert admitted.parameters.value("$custom.gain") == 10.0
+    assert admitted.parameters.value("$qubit.gain") == 10.0
+    assert cfg.accept(observed.ref.revision).values["gain"] == 50.0
+    assert cfg.observe() == observed
+    assert services.context.get_alias_rows() == rows
+    assert state.version.snapshot() == versions
+    services.context.set_parameter(admitted.parameters.target, "Q1.gain", 40.0)
+    assert admitted.parameters.value("$custom.gain") == 10.0
+    assert admitted.accepted_cfg.values["gain"] == 30.0
+    with pytest.raises(CfgStaleError):
+        services.tab.preview_cfg(tab_id, observed.ref, aliases=aliases)
+    with pytest.raises(CfgStaleError):
+        services.guard.capture_run_inputs(
+            tab_id, expected_revision=observed.ref.revision, aliases=aliases
+        )
+
+
+@pytest.mark.parametrize("aliases", [None, {}], ids=["none", "empty"])
+def test_empty_aliases_preserve_cached_acceptance_and_deferred_context(
+    global_sources: tuple[AppServices, State], aliases: Mapping[str, str] | None
+) -> None:
+    services, state = global_sources
+    tab_id = services.tab.new_tab("global-source")
+    observed = state.get_tab(tab_id).cfg.observe()
+
+    def unavailable_resolution(_parameters: object) -> NoReturn:
+        raise AssertionError("No override must accept the cached publication")
+
+    guard = GuardService(
+        state,
+        captured_parameters=lambda overrides: services.tab.capture_parameters(
+            tab_id, aliases=overrides
+        ),
+        cfg_resolution=unavailable_resolution,
+    )
+    admitted = guard.capture_run_inputs(
+        tab_id, expected_revision=observed.ref.revision, aliases=aliases
+    )
+    assert admitted.accepted_cfg.values["gain"] == 10.0
+    assert admitted.accepted_cfg.ref == observed.ref
+    services.context.clear_context()
+    deferred = services.tab.new_tab("global-source")
+    assert services.tab.capture_parameters(deferred, aliases=aliases) is None
+    with pytest.raises(FailedPreconditionError) as caught:
+        services.tab.capture_parameters(deferred, aliases={"custom": "Q2"})
+    assert caught.value.reason_code == "no_context"
 
 
 def test_existing_tab_and_run_admission_use_current_point(

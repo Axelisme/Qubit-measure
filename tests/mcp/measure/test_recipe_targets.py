@@ -102,6 +102,84 @@ class TargetGui(LookbackGui):
         return super().__call__(method, params)
 
 
+class NamedAliasesGui(TargetGui):
+    """Record the public aliases wire contract without changing recipe logic."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.alias_requests: list[tuple[str, dict[str, object]]] = []
+        self.modules = {"$resonator.module.readout": "R2.readout.main"}
+        self.publication["tree"]["children"]["modules"]["children"]["readout"][
+            "ref"
+        ] = "$resonator.module.readout"
+
+    def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
+        if params.get("aliases"):
+            self.alias_requests.append((method, dict(params)))
+            plain = {key: value for key, value in params.items() if key != "aliases"}
+            reply = super().__call__(method, plain)
+            if method == "tab.get_cfg":
+                reply["source_basis"] = [{"source_id": "aliases", "revision": "1"}]
+            return reply
+        return super().__call__(method, params)
+
+
+@pytest.mark.parametrize("reuse", [None, "t"], ids=["new", "reuse"])
+def test_open_tab_preserves_named_aliases_for_new_and_reused_recipe_runs(
+    tmp_path: Path, reuse: str | None
+) -> None:
+    gui = NamedAliasesGui()
+    aliases = {"custom": "Q1", "resonator": "R2"}
+
+    def recipe(session: RecipeSession) -> RecipeGenerator:
+        tab = session.open_tab("lookback", aliases=aliases, reuse=reuse)
+        aliases["resonator"] = "missing"
+        tab.use_library("modules.readout", None, required="readout_ref")
+        tab.set_frequency(
+            "modules.readout", calibration="resonator", required="readout_ref"
+        )
+        yield tab.run()
+
+    registered = definition(
+        recipe, {"type": "object", "properties": {}, "additionalProperties": False}
+    )
+    client = make_client(tmp_path, gui, recipes=(registered,))
+    with closing(client.context.session):
+        reply = client.call("sample", {})
+        assert reply.data["status"] == "finished"
+        assert gui.ran
+        assert {method for method, _ in gui.alias_requests} == {
+            "tab.get_cfg",
+            "tab.parameter_read",
+            "tab.run_start",
+        }
+        assert all(
+            params["aliases"] == {"custom": "Q1", "resonator": "R2"}
+            for _, params in gui.alias_requests
+        )
+        run = next(
+            params for method, params in gui.alias_requests if method == "tab.run_start"
+        )
+        preview = [
+            params for method, params in gui.alias_requests if method == "tab.get_cfg"
+        ][-1]
+        assert run["expected"] == preview["expected"] == gui.publication["cfg_ref"]
+        assert all(
+            "aliases" not in params
+            for method, params in client.transport.sent
+            if method in ("tab.new", "tab.reset_cfg")
+        )
+        assert gui.created == (
+            [] if reuse is not None else [{"adapter_name": "lookback"}]
+        )
+        full = client.call(
+            "status", {"execution": reply.data["execution"], "detail": "full"}
+        )
+        assert full["actual"]["source_basis"] == [
+            {"source_id": "aliases", "revision": "1"}
+        ]
+
+
 def frequency_sweep(
     session: RecipeSession,
     *,
