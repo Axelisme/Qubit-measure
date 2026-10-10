@@ -140,10 +140,10 @@ class State:
 
 @dataclass
 class Cfg:
-    """Mutable experiment config and optional native device setup."""
+    """Mutable experiment value and optional role-to-device-name mapping."""
 
     value: int = 1
-    dev: tuple[DeviceSetup, ...] | None = None
+    dev: dict[str, str] | None = None
 
 
 @dataclass
