@@ -1,6 +1,8 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-08-18 — v2 flux resolution (resolve_sample_flux) in T1 analysis workflow
+**Last updated:** 2026-10-11 — JSONL sample consumers
+
+Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us` 與 `t1_err_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -46,7 +48,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 ### `workflow.py` — notebook-facing fixed workflow
 
-- `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、v2 flux resolution（explicit → row-frame → caller-declared fallback）、f01-based flux correction（derived rows 且 observed f01 finite 才執行）、integer branch alignment、T1/T1err 單位轉換與 fit-window filtering。以 `resolve_sample_flux` 取得 normalized flux；`Freq (MHz)` 為 null 的行仍可由 resolved flux 進入 analysis，missing observed f01 改用 model 在該 flux 預測的 f01。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
+- `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、v2 flux resolution（explicit → row-frame → caller-declared fallback）、f01-based flux correction（derived rows 且 observed f01 finite 才執行）、integer branch alignment、T1/T1err 單位轉換與 fit-window filtering。以 `resolve_sample_flux` 取得 normalized flux；`freq_mhz` 為 null 的行仍可由 resolved flux 進入 analysis，missing observed f01 改用 model 在該 flux 預測的 f01。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
 - `plot_t1_flux_calibration(data)` 將每個 retained sample 的 raw flux 與 f01-corrected flux 畫在對應 f01 frequency 高度，供檢查 half-flux 附近是否發生不合理 branch jump。
 - `PurcellEffectParams(kappa_ghz, bare_rf, g)` 是 optional Purcell 設定本身的完整值容器；三個欄位都必填且必須為正 finite GHz。`load_t1_purcell_params(context, kappa_ghz=...)` 會從 `params.json` 的 `dispersive` section 解析 `bare_rf/g`，目前 `kappa_ghz` 仍由 notebook 明確輸入。
 - `calculate_purcell_t1_limit()` 對 Purcell sweep 使用 bounded LRU cache，並在 notebook workflow 內部關閉 scqubits sweep progress；cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。

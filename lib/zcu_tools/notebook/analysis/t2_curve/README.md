@@ -1,6 +1,8 @@
 # `t2_curve` 模塊重點文檔
 
-**Last updated:** 2026-08-18 — T2r row-diagnostics interface
+**Last updated:** 2026-10-11 — JSONL sample consumers
+
+Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us`、`t1_err_us`、`t2e_us`、`t2e_err_us` 與 `t2r_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
 Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxation bound `1/(2*T1)` 後，以 rate model 同時擬合 first-order flux noise 與 readout thermal-photon shot noise。
 
@@ -32,7 +34,7 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 - `make_t2_fit_init(...)`：用單機制 probe 結果組出 combined fit 初值；photon channel 使用 `n_th_init`，不是 photon-only `n_th_fit`。`active_mechanisms=("flux_noise",)` 或 `("photon_shot_noise",)` 可只納入部分機制。
 - `fit_t2_curve(...)`：只使用 fit window 內的實際 sample，不再加入人工 half-flux 點。`T2e err = NaN` 的點由 `MeasurementErrorPolicy(nan_policy="bin_median")` 補 effective error；`FluxResidualWeighting(mode="equal_flux_bin", ...)` 配合預設 `loss="linear"`，讓每個 occupied flux bin 對 least-squares loss 的總權重一致，避免 sample-dense 區域主導結果。
 - `mechanisms_to_fixed_params(...)`：把 notebook 面向使用者的 `fixed_mechanisms` 轉成 fit layer 的 `fixed=("A_phi", "n_th")` 語義；固定代表該 channel 留在模型中但不擬合。
-- `prepare_t2_dephasing_data(...)` 的 branch coverage 與 dephasing summary 對 T2e/T2r 各自記錄 resolution provenance（explicit / row-frame / fallback-frame counts）、observed/model f01 與 exact correction skipped reasons；`Freq (MHz)=null` 的 row 保留 raw coordinate，以 model f01 驗證 frequency reachability。`T2DephasingAnalysis.t2r_diagnostics`（型別 `T2RowDiagnostics`，由 `t2_curve` facade 匯出）提供逐 row 診斷：每個 resolved T2r row 依 `samples_df` positional order 一個 entry，含穩定 positional `sample_indexes`、in-window 狀態、flux source、observed/model/used f01（null-observed row 的 model f01 直接有限可查）、raw/corrected/aligned flux、integer shift、correction-applied flag 與 exact skip reason。
+- `prepare_t2_dephasing_data(...)` 的 branch coverage 與 dephasing summary 對 T2e/T2r 各自記錄 resolution provenance（explicit / row-frame / fallback-frame counts）、observed/model f01 與 exact correction skipped reasons；`freq_mhz=null` 的 row 保留 raw coordinate，以 model f01 驗證 frequency reachability。`T2DephasingAnalysis.t2r_diagnostics`（型別 `T2RowDiagnostics`，由 `t2_curve` facade 匯出）提供逐 row 診斷：每個 resolved T2r row 依 `samples_df` positional order 一個 entry，含穩定 positional `sample_indexes`、in-window 狀態、flux source、observed/model/used f01（null-observed row 的 model f01 直接有限可查）、raw/corrected/aligned flux、integer shift、correction-applied flag 與 exact skip reason。
 - `run_t2_curve_analysis(config, display_fn=None)` 保留為薄 wrapper，供需要一鍵重跑時使用；互動式 notebook 優先用逐步 API。
 
 ### `fit.py` — joint pure-dephasing fit
