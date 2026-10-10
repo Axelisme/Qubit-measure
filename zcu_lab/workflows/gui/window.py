@@ -65,7 +65,7 @@ from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
-from zcu_tools.resources.entry import RoleResolutionError, RoleSpec
+from zcu_tools.resources.entry import RoleResolutionError
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from ..calibration import Calibrated
@@ -333,20 +333,15 @@ class T1WorkflowWindow(QWidget):
 
     def _sync_source_status(self, *_args: object) -> None:
         try:
-            parameters = self._services.context.read_alias_context(
-                {"qubit": RoleSpec("qubit/*")}
-            )
-            source = (
-                parameters.resolve_path("$qubit.kind")
-                if parameters is not None
-                else None
-            )
+            parameters = self._services.context.read_context()
+            source = parameters.resolve_path("$qubit.kind")
+        except FailedPreconditionError:
+            # EMPTY is expected at fresh app startup; status must not block it.
+            self._source_status.setText("Qubit: no context")
         except (RoleResolutionError, ContextSourceUnavailableError) as error:
             self._source_status.setText(f"Qubit unavailable: {error}")
         else:
-            self._source_status.setText(
-                f"Qubit: {source}" if source is not None else "Qubit: no context"
-            )
+            self._source_status.setText(f"Qubit: {source}")
 
     def _use_source_clicked(self) -> None:
         try:
@@ -363,6 +358,8 @@ class T1WorkflowWindow(QWidget):
         this Window's form attachments. Previous edits and local parse text are
         discarded on success; subsequent source changes do not update the forms.
         No live device reads, submission, storage write or input reload occurs.
+        EMPTY raises FailedPreconditionError; missing/unbound qubit raises the
+        base RoleResolutionError naming that alias. No component kind is checked.
         Source/editor failures propagate without replacing the existing panels.
         Pending, running or paused operations raise InvalidRunState before capture.
         """
@@ -372,12 +369,7 @@ class T1WorkflowWindow(QWidget):
         )
         if env.parameters is None:
             raise FailedPreconditionError("No parameter context is installed")
-        try:
-            env.parameters.resolve_path("$qubit.kind")
-        except RoleResolutionError as error:
-            raise FailedPreconditionError(
-                "Bind a readable global qubit alias before preparing forms"
-            ) from error
+        env.parameters.resolve_path("$qubit.kind")
         plan_panel = T1PlanPanel(env, self)
         try:
             tunables_panel = T1TunablesPanel(
@@ -400,11 +392,7 @@ class T1WorkflowWindow(QWidget):
 
     def _capture_env(self, devices: DeviceSnapshot) -> FormEnv:
         context = self._services.context
-        parameters = context.read_alias_context({"qubit": RoleSpec("qubit/*")})
-        if parameters is None:
-            raise FailedPreconditionError(
-                "No parameter context is installed", reason_code="no_context"
-            )
+        parameters = context.read_context()
         return FormEnv(
             parameters=parameters, library=parameters.library, devices=devices.items
         )
