@@ -1,6 +1,6 @@
 # `zcu_tools.resources.sample_table` — sample records
 
-**Last updated:** 2026-10-11 — JSONL sample history and native coordinates
+**Last updated:** 2026-10-11，JSONL samples and offline CSV migration
 
 ## 條目樣本（`jsonl.py`）
 
@@ -12,7 +12,7 @@
 
 ## 舊 CSV `SampleTable`（`table.py`）
 
-以 CSV 儲存量測樣品紀錄（pandas DataFrame 包裝）。`SampleTable` 本身不固定 schema；notebook 與 GUI/script export 以呼叫端約定欄位，例如 single-qubit producer 使用 v2 的 `dev_value`／`dev_unit`，再加 `Freq (MHz)`、T1/T2r/T2e、error、`comment` 與 `date` 欄位。舊 CSV 的 `calibrated mA` 只供明示 legacy conversion，不是新樣品的欄位。`extend_samples()` 會接在既有 CSV 後面；要重建檔案需由 caller 先刪除或使用 export script 的 overwrite mode。
+`SampleTable` 是保留給尚未遷移 caller 的 CSV API，以 pandas DataFrame 儲存量測樣品紀錄。它不固定 schema，欄位由 caller 約定，與 JSONL 讀取 API 分開。`extend_samples()` 追加到既有 CSV；重建檔案由 caller 明確安排。
 
 ```python
 st = SampleTable("samples.csv")  # 也接受 pathlib.Path
@@ -24,10 +24,10 @@ df = st.get_samples()
 
 ## SampleTable v2 協定（`schema.py`）
 
-v2 是**深層 opt-in** 的 flat coordinate 契約：generic `SampleTable` 維持 schema-free，既有 CSV 的 custody 絕不自動變更；只有明確呼叫 contract API（`validate_sample_table_v2` / `resolve_sample_flux`）或明確呼叫純轉換函式的資料才受 v2 欄位規則約束。指定 runtime producer/consumer 顯式呼叫並強制 v2 contract：AutoFlux exporter（`gui/app/autofluxdep/services/sample_table_export.py`）、notebook `single_qubit` producer（`notebook_md/single_qubit.md`）、T1/T2（`notebook/analysis/t1_curve/workflow.py` / `notebook/analysis/t2_curve/workflow.py`）、SampleMerge（`notebook/analysis/fit_tools/sample_merge.py`）與 fluxdep/design（`notebook/analysis/fluxdep/utils.py` / `notebook/analysis/design/search.py`）。v2 欄位全為英文小寫 snake_case：`flux`、`dev_value`、`dev_unit`、`flux_int`、`flux_period`（`SAMPLE_COORDINATE_COLUMNS`）。
+v2 定義 flat coordinate 契約。Generic `SampleTable` 不固定 schema，也不自動轉換既有 CSV。呼叫端明確使用 `validate_sample_table_v2`、`resolve_sample_flux` 或純轉換函式時，才套用座標規則。Notebook 的 T1/T2 workflow、SampleMerge、fluxdep utils 與 design search 使用此契約。座標欄位為 `flux`、`dev_value`、`dev_unit`、`flux_int`、`flux_period`（`SAMPLE_COORDINATE_COLUMNS`）。
 
 **驗證（`validate_sample_table_v2`）**：`dev_value`/`dev_unit` 必填，unit 為 A/V/native；coordinate 只接受 real numeric（拒絕 datetime/timedelta、boolean、complex），required value 必須 finite；`flux` 可空、只接受有限值或 null；`flux_int`/`flux_period` 成對出現，每 row 兩者同為有限或同為 null，period 必須 > 0；拒絕 legacy 別名欄位（`calibrated mA`、`calibrated A`、`Flux`、`flux_bias`）、重複欄位與孤立 frame 欄位。
 
 **flux 解析（`resolve_sample_flux`）**：closed per-row 來源順序 `explicit → row-frame → fallback-frame`，`sources` 為每 row 的權威來源、`explicit_mask` 只由 `sources` 推導；任一 row 無法解析即 fail-fast 列出 index。fallback frame 的單位必須與該 row 的 `dev_unit` 一致。native 不隱含 A/V 換算；caller 的 frame 明示 native device value 到 flux 的映射。JSONL 寫入不計算 flux，notebook consumers 以 `JsonlSampleTable.read()` 取得最新 rows 後才解析座標。
 
-**legacy 遷移（`migrate_sample_table_v2`）**：caller 明確提供單一 A/mA/V/mV 來源單位，函式將 dev value 與宣告的 frame 縮放到 base A/V，回傳經驗證的 v2 DataFrame，不推論、不 alias，也不改寫輸入。repo 不提供 CSV 遷移 CLI；若 operator 要儲存結果，須自行核對來源欄位與 flux/frame 證據，取得目的檔寫入授權，並以不覆蓋來源或既有目的檔的方式輸出。
+**legacy 遷移（`migrate_sample_table_v2`）**：caller 明確提供單一 A/mA/V/mV 來源單位，函式將 dev value 與宣告的 frame 縮放到 base A/V，回傳經驗證的 v2 DataFrame，不推論、不 alias，也不改寫輸入。離線的 [root migrations 工具](../../../../migrations/README.md) 提供公開轉換函式與 `python -m migrations` CLI。它明示改名有來源證據的舊量測欄位，重用這裡的座標轉換，並經 `ResultEntry.samples(component)` 追加 JSONL。來源檔不變；無法確定的列不寫入，列入報告。工具不操作硬體，也不自行選擇真實資料。
