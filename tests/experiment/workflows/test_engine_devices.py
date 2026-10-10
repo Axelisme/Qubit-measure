@@ -139,7 +139,7 @@ def test_snapshot_read_failure_fails_run_before_callback_and_save(rig: Rig) -> N
     rig.start(step)
     status = rig.engine.execute("run")
     assert status.lifecycle == "failed"
-    assert status.reason == "unused driver read failed"
+    assert status.reason == "OSError: unused driver read failed"
     assert callbacks == []
     assert broken.reads == 1
     assert list(rig.paths.data_root.rglob("*.h5")) == []
