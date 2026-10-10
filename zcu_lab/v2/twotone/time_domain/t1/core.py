@@ -27,7 +27,6 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
@@ -111,13 +110,6 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
     def _run_non_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
         soc, soccfg, plots = context.soc, context.soccfg, context.plots
 
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
-
         delay_table = materialize_nonuniform_t1_delays(
             cfg.sweep.length,
             soccfg=soccfg,
@@ -157,13 +149,6 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
 
     def _run_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
         soc, soccfg, plots = context.soc, context.soccfg, context.plots
-
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
 
         lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
 
@@ -299,12 +284,6 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
     def run(self, cfg: T1WithToneCfg, *, context: RunContext) -> T1Result:
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
         modules = cfg.modules
 
         lengths = sweep2array(
@@ -436,12 +415,6 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
     ) -> ScanT1WithToneResult:
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
         modules = cfg.modules
 
         gains = sweep2array(

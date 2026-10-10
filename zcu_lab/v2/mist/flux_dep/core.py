@@ -3,13 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -20,10 +19,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import (
-    set_flux_in_dev_cfg,
-    setup_devices,
-)
+from zcu_tools.experiment.utils import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -83,10 +79,10 @@ class FluxDepSweepCfg(ConfigBase):
 
 
 class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
+    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxDepModuleCfg
-    # Field(...) makes dev required in this subclass, overriding the Optional
-    # default from ExpCfgModel — intentional Pydantic pattern (type: ignore[override]).
-    dev: Mapping[str, DeviceInfo] = Field(...)  # type: ignore[override]
+    # Map flux_dev to a connected driver name.
+    dev: Mapping[str, str] = Field(...)
     sweep: FluxDepSweepCfg
 
 
@@ -136,12 +132,12 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for flux, step in sched.scan("flux", values.tolist()):
-                set_flux_in_dev_cfg(step.cfg.dev, flux)
-                setup_devices(
-                    step.cfg,
-                    context.devices,
+                set_flux(
+                    context.devices[step.cfg.dev["flux_dev"]],
+                    flux,
+                    unit=step.cfg.flux_unit,
+                    stop=context.cancel_signal,
                     progress=False,
-                    cancel_signal=context.cancel_signal,
                 )
                 modules = step.cfg.modules
                 modules.probe_pulse.set_param(

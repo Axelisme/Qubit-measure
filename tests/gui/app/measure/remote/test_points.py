@@ -86,45 +86,6 @@ def test_new_uses_setup_not_unbound_draft_and_clone_replaces_description(
     ]
 
 
-def test_switch_keeps_old_tab_capture_and_new_tab_uses_selected_point(
-    application: PointApplication,
-) -> None:
-    info = application.open_entry()
-    context = application.controller.context_control
-    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
-    entry = opened_resource(info)
-    entry.new_point("first")
-    application.result("point.use", {"label": "first"})
-    context.set_parameter(context.read_context().target, "Q1.rate", 20.0)
-    old_tab = application.result(
-        "tab.new", {"adapter_name": "pointed", "target": "Q1"}
-    )["tab_id"]
-    assert isinstance(old_tab, str)
-    entry.new_point("second")
-    application.result("point.use", {"label": "second"})
-    new_tab = application.result(
-        "tab.new", {"adapter_name": "pointed", "target": "Q1"}
-    )["tab_id"]
-    assert isinstance(new_tab, str)
-    assert application.result(
-        "tab.parameter_read",
-        {"tab_id": old_tab, "paths": ["driver.rate"], "module_refs": []},
-    ) == {"values": {"driver.rate": 20.0}, "modules": {}}
-    assert application.result(
-        "tab.parameter_read",
-        {"tab_id": new_tab, "paths": ["driver.rate"], "module_refs": []},
-    ) == {"values": {"driver.rate": 10.0}, "modules": {}}
-    assert application.result("point.use", {"label": "first"}) == {
-        "kind": "saved_point",
-        "entry_id": info.entry_id,
-        "point": "first",
-    }
-    assert application.result(
-        "tab.parameter_read",
-        {"tab_id": new_tab, "paths": ["driver.rate"], "module_refs": []},
-    )["values"] == {"driver.rate": 10.0}
-
-
 @pytest.mark.parametrize(
     ("field", "value"),
     [

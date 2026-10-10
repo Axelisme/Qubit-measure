@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import is_dataclass
@@ -12,7 +12,6 @@ from numpy.typing import NDArray
 from pydantic import BaseModel
 from qick import QickConfig
 
-from ...device import DeviceInfo
 from ..stop_signal import StopSignal
 from ..v2.runtime import Schedule, SignalBuffer
 from ..v2.runtime.schedule import ScheduleOutcome
@@ -84,25 +83,6 @@ class Run[Cfg]:
         if self._devices is None:
             raise MissingCapability("devices")
         return self._devices
-
-    @property
-    def device_setup(self) -> Mapping[str, DeviceInfo] | None:
-        """Return the native cfg.dev mapping, or None when absent/disabled.
-
-        The mapping belongs to this Run's cfg copy and preserves setup order.
-        Keys must be strings and values must be native typed DeviceInfo models;
-        other inputs raise TypeError before the device adapter is invoked.
-        Driver-specific validation and setup belong to the device owner.
-        """
-        settings = getattr(self.cfg, "dev", None)
-        if settings is None:
-            return None
-        if not isinstance(settings, Mapping) or not all(
-            isinstance(name, str) and isinstance(info, DeviceInfo)
-            for name, info in settings.items()
-        ):
-            raise TypeError("cfg.dev must be Mapping[str, DeviceInfo] or None")
-        return settings
 
     @property
     def live_error(self) -> BaseException | None:

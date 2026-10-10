@@ -18,7 +18,6 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -135,12 +134,6 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         g_center, e_center, radius = cfg.g_center, cfg.e_center, cfg.radius
         classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, radius)
         cfg = deepcopy(cfg)
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
         rounds, cfg.rounds = cfg.rounds, 1
         gains = sweep2array(
             cfg.sweep.gain,

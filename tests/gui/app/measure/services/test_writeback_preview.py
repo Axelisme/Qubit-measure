@@ -21,6 +21,7 @@ from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding.fields import ScalarField
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
@@ -97,7 +98,7 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
             entry.new_point("b")
             control.use_point(PointUseRequest("b"))
             control.add_component("Q2", "fake/drive/a", {})
-            control.set_component_focus("Q2")
+            control.set_alias_rows((AliasRow("driver", "Q2"),))
             refreshed = service.preview_values(draft)["param-1"]
             assert (refreshed.actual_path, refreshed.unit) == ("U1.frequency", "MHz")
             assert (refreshed.current, refreshed.proposed) == (21.5, 20.09)

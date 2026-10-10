@@ -302,7 +302,7 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     plots = Plots(NonPresentingHost())
     with use_pbar_factory(factory):
         run_result = adapter.run(
-            RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
+            RunRequest(soc=ctx.soc, soccfg=ctx.soccfg),
             raw_cfg,
             context=RunContext(
                 ctx.soc, ctx.soccfg, plots, devices={}, cancel_signal=StopSignal()

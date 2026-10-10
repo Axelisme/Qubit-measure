@@ -147,7 +147,6 @@ class WorkflowEnv[C](InitEnv[C]):
         *,
         save: Callable[[Completed[Cfg, Result], Path], None],
         live: LiveUpdate | None = None,
-        setup_devices: bool = True,
     ) -> Generator[Effect, None, Completed[Cfg, Result] | Failed]:
         """Execute and save an experiment; return its typed Completed or Failed.
 
@@ -161,12 +160,13 @@ class WorkflowEnv[C](InitEnv[C]):
         dimension order, and complex128 samples of the buffer shape, including
         partial NaNs. Do not mutate or retain these arrays; use Plots handles to
         copy/dispatch real projected values to the host owner. Callback failures
-        fail the workflow even when Schedule catches them. setup_devices=False skips
-        automatic cfg.dev setup. Outer, live, saver, and deepcopy errors
-        propagate; Schedule failures return Failed without data or a run file.
+        fail the workflow even when Schedule catches them. The experiment owns
+        device operations; the engine does not inspect cfg.dev or apply settings.
+        Outer, live, saver, and deepcopy errors propagate; Schedule failures
+        return Failed without data or a run file.
         Cancellation discards the step and never returns a cancellation value.
         """
-        request = RunEffect(experiment, cfg, save, live, setup_devices)
+        request = RunEffect(experiment, cfg, save, live)
         yield request
         if request.outcome is None:
             raise RuntimeError("Engine did not complete the run effect")

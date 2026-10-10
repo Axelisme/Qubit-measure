@@ -374,7 +374,7 @@ def test_detached_description_write_updates_cache_without_changing_selected_sour
     before = session.control.read_context()
     version = session.state.version.get("context")
     binding = session.control.get_source_binding()
-    aliases = session.control.get_alias_rows()
+    rows = session.control.get_alias_rows()
     descriptions = {
         info.label: info.description for info in session.control.list_points()
     }
@@ -400,7 +400,7 @@ def test_detached_description_write_updates_cache_without_changing_selected_sour
     assert after.library.document() == before.library.document()
     assert session.state.version.get("context") == version
     assert session.control.get_source_binding() == binding
-    assert session.control.get_alias_rows() == aliases
+    assert session.control.get_alias_rows() == rows
     assert events == []
 
 

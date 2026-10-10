@@ -312,6 +312,64 @@ def test_unlink_failure_keeps_final_but_does_not_deliver_completed(
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/.*.tmp.h5"))) == 1
 
 
+@pytest.mark.parametrize("use_device", [False, True])
+def test_run_resolves_role_names_only_when_experiment_uses_device(
+    rig: Rig, use_device: bool
+) -> None:
+    original = Cfg(value=7, dev={"selected": "missing", "unused": "disconnected"})
+    observed: list[Completed[Cfg, int] | Failed] = []
+    entered: list[bool] = []
+    cause = OSError("Device 'missing' is disconnected")
+
+    def unavailable(_signal: StopSignal) -> None:
+        raise cause
+
+    rig.devices.on_set = unavailable
+
+    def acquire(run: Run[Cfg]) -> int:
+        entered.append(True)
+        if use_device:
+            dev = run.cfg.dev
+            if dev is None:
+                raise ValueError("This experiment requires device roles")
+            run.devices.set_value(dev["selected"], 0.5, run.cancel_signal)
+        buffer = run.buffer((1,), axes=(np.array([0.0]),))
+        with run.schedule(buffer):
+            buffer.set(np.array([1 + 0j]))
+        run.cfg.value = 9
+        return 11
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if state.index:
+            return Done()
+        observed.append((yield from env.run(acquire, original, save=save_integer)))
+        state.index = 1
+        return Next(1, state)
+
+    rig.start(step)
+    status = rig.engine.execute("run")
+    if use_device:
+        assert status.lifecycle == "failed"
+        assert status.reason == "OSError: Device 'missing' is disconnected"
+        assert rig.devices.values == [("missing", 0.5)]
+        assert observed == []
+        assert rig.engine.records("run") == ()
+        assert not tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))
+    else:
+        assert status.lifecycle == "done"
+        assert rig.devices.values == []
+        assert observed == [Completed(Cfg(value=9, dev=original.dev), 11)]
+        assert rig.engine.records("run")[0].run_files == ("runs/01-acquire.h5",)
+        final = rig.paths.data_root / "iter/000001/runs/01-acquire.h5"
+        assert final.read_text(encoding="utf-8") == "9:11"
+    assert entered == [True]
+    assert original == Cfg(
+        value=7, dev={"selected": "missing", "unused": "disconnected"}
+    )
+
+
 @pytest.mark.parametrize("rethrow", [False, True])
 def test_live_callback_caught_by_schedule_is_still_run_failure(
     rig: Rig, rethrow: bool
@@ -593,6 +651,34 @@ def test_analysis_error_after_completed_effect_retains_file_but_never_commits(
     assert failed["error"]["type"] == "builtins.ValueError"
     assert "raise ValueError" in str(failed["error"]["traceback"])
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
+
+
+def test_device_operation_error_is_not_recoverable_schedule_failure(rig: Rig) -> None:
+    observed: list[int] = []
+
+    def operate(_signal: StopSignal) -> None:
+        rig.engine.pause("run")
+        raise OSError("Device 'flux' failed")
+
+    def acquire(_run: Run[Cfg]) -> int:
+        observed.append(1)
+        return 1
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
+    ) -> Step[State, int]:
+        yield from env.set_device("flux", 0.1)
+        yield from env.run(acquire, Cfg(), save=save_integer)
+        return Next(1, state)
+
+    rig.devices.on_set = operate
+    rig.start(step)
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "failed"
+    assert "Device 'flux' failed" in str(status.reason)
+    assert observed == []
+    assert "experiment_failed" not in rig.kinds()
+    assert "step_discarded" not in rig.kinds()
 
 
 def test_active_update_journal_failure_cancels_then_reports_original_cause(

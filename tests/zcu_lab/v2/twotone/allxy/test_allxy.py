@@ -49,7 +49,7 @@ def test_allxy_default_form_lowers_to_core_cfg() -> None:
         raw = schema_to_resolved_dict(draft.snapshot())
     finally:
         draft.close()
-    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock())
 
     cfg = AllXYAdapter().build_exp_cfg(raw, request)
 

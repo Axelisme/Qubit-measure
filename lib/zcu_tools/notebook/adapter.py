@@ -15,6 +15,7 @@ from zcu_tools.datafile import AnalysisDocument, format_ext, reserve_labber_file
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.acquisition import (
     AcquisitionEvidence,
+    capture_device_snapshot,
     capture_software_provenance,
     new_run_id,
 )
@@ -139,7 +140,11 @@ class NotebookExperiment(Generic[CoreT]):
         """Acquire a copied cfg and publish its record/evidence after plots finish.
 
         Require soc, soccfg and a DeviceManager before starting. Capture
-        software-only provenance before acquisition; propagate capture errors.
+        every connected driver's get_info once after RunContext construction,
+        before core.run, without a lease (resources belong to the synchronous
+        caller). Propagate any read error before writes/acquisition; no cached
+        fallback. Retain that pre-Run snapshot unchanged through sweeps and Save.
+        Capture software-only provenance before acquisition; propagate errors.
         Time core.run and its error check in UTC, excluding plot finalization.
         Normal stopped or interrupted returns publish stopped evidence and a
         saveable record. Failed signals and exceptions escaping core.run raise.
@@ -165,6 +170,7 @@ class NotebookExperiment(Generic[CoreT]):
         )
         try:
             working_cfg = deepcopy(retained_cfg)
+            device_snapshot = capture_device_snapshot(context.devices)
             provenance = capture_software_provenance(context=context)
             provenance = replace(
                 provenance, software_versions=dict(provenance.software_versions)
@@ -182,6 +188,7 @@ class NotebookExperiment(Generic[CoreT]):
                 finished_at=finished_at,
                 completion="stopped" if context.cancel_signal.is_set() else "complete",
                 provenance=provenance,
+                device_snapshot=device_snapshot,
             )
             plots.finish()
             record = RunRecord(cfg=retained_cfg, result=result)

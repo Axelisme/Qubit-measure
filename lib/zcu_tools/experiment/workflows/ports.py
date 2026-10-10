@@ -39,20 +39,8 @@ class DevicePort(Protocol):
         """Set an absolute value in native device units, or raise on failure.
 
         Observe ``cancel_signal`` between cooperative work segments. Unknown or
-        disconnected names, driver-limit violations, and I/O failures must raise.
-        """
-        ...
-
-    def setup(
-        self, settings: Mapping[str, DeviceInfo], cancel_signal: StopSignal
-    ) -> None:
-        """Apply native DeviceInfo models in mapping order, or raise on failure.
-
-        Keys name connected devices. Reuse the native device owner for name,
-        address, model, and setting validation; retain its original failures.
-        Pass cancel_signal.event to cooperative native setup and return when
-        cancelled. The engine decides whether to discard the step. It does not
-        connect devices, repair settings, or retry this operation.
+        disconnected names, invalid limits, and I/O failures must raise.
+        Unknown/disconnected-device errors must identify the requested name.
         """
         ...
 

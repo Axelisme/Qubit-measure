@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import cast
+from typing import Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.device import DeviceManager, FakeDeviceInfo
+from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, ContextReadiness
 from zcu_tools.gui.app.measure.services.guard import (
     GuardError,
@@ -211,34 +211,6 @@ def test_run_inputs_rejects_stale_revision_without_preflight() -> None:
     ).validate_run_request.assert_not_called()
 
 
-def test_run_inputs_detaches_observed_device_settings(monkeypatch) -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    info = FakeDeviceInfo(address="fake", value=0.25)
-    state.put_device(
-        DeviceState(
-            name="bias",
-            type_name="FakeDevice",
-            address="fake",
-            status=DeviceStatus.CONNECTED,
-            remember=False,
-            info=info,
-        )
-    )
-    live_read = MagicMock(side_effect=AssertionError("Unexpected hardware read"))
-    monkeypatch.setattr(DeviceManager, "get_all_info", live_read)
-
-    inputs = _make_guard(state).capture_run_inputs(
-        tab_id, expected_revision=CfgRevision(0)
-    )
-    info.value = 0.5
-    state.set_device_info("bias", FakeDeviceInfo(address="fake", value=0.75))
-
-    captured = inputs.request.device_snapshot["bias"]
-    assert isinstance(captured, FakeDeviceInfo)
-    assert captured.value == 0.25
-    live_read.assert_not_called()
-
-
 @pytest.mark.parametrize(
     "status",
     [
@@ -248,8 +220,17 @@ def test_run_inputs_detaches_observed_device_settings(monkeypatch) -> None:
         DeviceStatus.SETTING_UP,
     ],
 )
-def test_run_inputs_rejects_live_device_without_observed_settings(status) -> None:
+@pytest.mark.parametrize("cached", ["missing", "invalid"])
+def test_run_inputs_admits_live_devices_without_valid_cached_settings(
+    status: DeviceStatus,
+    cached: Literal["missing", "invalid"],
+) -> None:
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    info = (
+        None
+        if cached == "missing"
+        else BaseDeviceInfo(address="fake", type="unsupported")
+    )
     state.put_device(
         DeviceState(
             name="bias",
@@ -257,32 +238,22 @@ def test_run_inputs_rejects_live_device_without_observed_settings(status) -> Non
             address="fake",
             status=status,
             remember=False,
+            info=info,
         )
     )
-
-    with pytest.raises(GuardError, match="no observed settings"):
-        _make_guard(state).capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
-    adapter = state.get_tab(tab_id).adapter
-    assert isinstance(adapter, MagicMock)
-    adapter.validate_run_request.assert_not_called()
-
-
-def test_run_inputs_excludes_remembered_disconnected_device() -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    state.put_device(
-        DeviceState(
-            name="bias",
-            type_name="FakeDevice",
-            address="fake",
-            status=DeviceStatus.MEMORY_ONLY,
-            remember=True,
+    inputs: RunInputs | None = None
+    admission_error: GuardError | None = None
+    try:
+        inputs = _make_guard(state).capture_run_inputs(
+            tab_id,
+            expected_revision=CfgRevision(0),
         )
-    )
-
-    inputs = _make_guard(state).capture_run_inputs(
-        tab_id, expected_revision=CfgRevision(0)
-    )
-    assert inputs.request.device_snapshot == {}
+    except GuardError as error:
+        admission_error = error
+    assert admission_error is None
+    assert inputs is not None
+    assert inputs.accepted_cfg.values == {}
+    assert inputs.request.soc is state.session_env.soc
 
 
 def test_run_inputs_translates_adapter_preflight_error() -> None:

@@ -1,6 +1,6 @@
 """Deterministic host ports for public Engine seam tests."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import StringIO
@@ -8,7 +8,6 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from zcu_tools.datafile import SoftwareProvenance
-from zcu_tools.device import DeviceInfo, DeviceManager
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Completed,
@@ -48,30 +47,17 @@ class ManualClock:
 
 
 class RecordingDevices:
-    """Record native setpoints and setup calls without touching hardware."""
+    """Record requested native setpoints without touching hardware."""
 
     def __init__(self) -> None:
         self.values: list[tuple[str, float]] = []
-        self.settings: list[Mapping[str, DeviceInfo]] = []
-        self.manager: DeviceManager | None = None
         self.on_set: Callable[[StopSignal], object] | None = None
-        self.on_setup: Callable[[StopSignal], object] | None = None
 
     def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
         self.values.append((name, value))
         if self.on_set is not None:
             self.on_set(cancel_signal)
 
-    def setup(
-        self, settings: Mapping[str, DeviceInfo], cancel_signal: StopSignal
-    ) -> None:
-        self.settings.append(settings)
-        if self.on_setup is not None:
-            self.on_setup(cancel_signal)
-        if self.manager is not None:
-            self.manager.setup_devices(
-                settings, progress=False, cancel_signal=cancel_signal.event
-            )
 
 
 class RecordingBar(TQDMProgressBar):
@@ -111,10 +97,10 @@ class State:
 
 @dataclass
 class Cfg:
-    """Mutable experiment config and optional native device setup."""
+    """Mutable experiment value and optional role-to-device-name mapping."""
 
     value: int = 1
-    dev: Mapping[str, DeviceInfo] | None = None
+    dev: dict[str, str] | None = None
 
 
 def save_integer(source: Completed[Cfg, int], path: Path) -> None:

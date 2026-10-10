@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
@@ -94,13 +93,14 @@ class FakeAdapter(
     def build_exp_cfg(
         self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
     ) -> FakeExpCfg:
+        """Build the stub from explicit fields; it uses no device roles or settings."""
+        del req
         return FakeExpCfg(
             reps=_require_int(raw_cfg, "reps"),
             rounds=_require_int(raw_cfg, "rounds"),
             gain=_require_float(raw_cfg, "gain"),
             noise_scale=_require_float(raw_cfg, "noise_scale"),
             sweep=SweepCfg.model_validate(raw_cfg["sweep"]),
-            dev=deepcopy(req.device_snapshot),
         )
 
     def run(
@@ -129,7 +129,7 @@ class FakeAdapter(
     ) -> Sequence[ParameterWriteback]:
         return [
             ParameterWriteback(
-                target_name="fake_peak",
+                target_name="general.ext.fake_peak",
                 description="Fake peak value from FakeAdapter analysis",
                 proposed_value=req.analyze_result.peak,
             )

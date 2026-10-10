@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
+**Last updated:** 2026-10-10，D219 實驗 device 契約與 Run snapshot 測試歸屬
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -150,6 +150,12 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 `tests/zcu_lab/test_adapter_definition.py` 逐一走過 registry，驗證 adapter conformance、
 empty／rich context 的成品 cfg validation、context-free spec 與 fresh schema。
 `test_definitions.py` 驗證 startup／reload 註冊結果非空且符合框架契約。
+
+### Experiment device contracts
+
+`tests/experiment/utils/test_device.py` 在選定 driver 的公開接縫驗證 flux 單位、模式、安全限制、取消與錯誤傳播。Cfg assembly tests 驗證角色到名稱的 mapping，且不讀硬體。用到 device 的合成 cfg 在自身宣告該欄位，不依賴 framework base 的 default。
+
+GUI Guard tests 驗證 cached settings 缺失或無效時仍可 admission；Guard 沒有可觀測的 driver 接縫，不在這些案例加入硬體讀取計數。Run 與 Notebook owner tests 驗證 acquisition 前讀全部 connected drivers 一次、讀取失敗拒 Run，以及固定 metadata 經 Save 後的讀回。DeviceInfo label 逆向投影與實驗自動 setup 的專用案例已退休，手動設定與 manager 的有效 owner tests 保留。
 
 ### Device manager tests
 

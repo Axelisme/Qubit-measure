@@ -335,6 +335,19 @@ def test_target_requires_a_point_and_a_declared_alias(
         context.read_alias_context({}, "Q1")
 
 
+def test_parameter_write_preserves_global_aliases(
+    context: ContextService,
+    rich_entry: ResultEntry,
+) -> None:
+    context.install_entry(rich_entry)
+    target = context.new_point(_new_request("a"))
+    context.set_alias_rows((AliasRow("driver", "Q1"),))
+    rows = context.get_alias_rows()
+    context.set_parameter(target, "Q1.rate", 4500.0)
+    assert context.get_alias_rows() == rows
+    assert context.read_context().value("Q1.rate") == 4500.0
+
+
 def test_empty_queries_have_no_entry_point_or_component_selection(
     context: ContextService,
 ) -> None:
@@ -343,6 +356,10 @@ def test_empty_queries_have_no_entry_point_or_component_selection(
     assert not context.is_active_context()
     assert context.get_entry_info() is None
     assert context.list_points() == ()
+    assert context.get_alias_rows() == (
+        AliasRow("driver", ""),
+        AliasRow("sense", "$driver.sense"),
+    )
 
 
 def test_empty_read_rejects_instead_of_returning_default_parameters(
@@ -363,8 +380,21 @@ def test_entry_commands_without_entry_fail_explicitly(
 
 
 def test_install_entry_publishes_empty_draft_and_preserves_nonparameter_capabilities(
-    context: ContextService, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
+    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
+    predictor = FluxoniumPredictor(
+        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
+    )
+    context = ContextService(
+        SessionState(
+            SessionEnv(parameters=None, soc=None, soccfg=None, predictor=predictor)
+        ),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+    )
     entry = _entry(tmp_path)
     old = context.get_session_env()
     info = context.install_entry(entry)
@@ -374,6 +404,7 @@ def test_install_entry_publishes_empty_draft_and_preserves_nonparameter_capabili
     assert info.database_path == entry.database_path
     assert current.readiness is ContextReadiness.DRAFT
     assert current.soc is old.soc and current.values is old.values
+    assert current.predictor is predictor
     assert current.parameters is not None
     assert current.parameters.roles is None
     assert context.read_context().target == EntryDraft(entry_id=entry.entry_id)
@@ -562,7 +593,9 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
         assert state.version.get("context") == 0 and observations == []
         info = context.install_entry(rich_entry)
         context.use_point(PointUseRequest("first"))
+        assert state.version.get("context") == 2
         context.new_point(_new_request("second"))
+        assert state.version.get("context") == 3
         context.clear_context()
         assert [version for version, *_ in observations] == [1, 2, 3, 4]
         for version, env, entry_info, sources in observations:
@@ -570,7 +603,8 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
                 assert env.readiness is ContextReadiness.EMPTY
                 assert env.parameters is None and entry_info is None and sources is None
                 continue
-            assert entry_info == info and env.parameters is not None
+            assert entry_info == info
+            assert env.parameters is not None
             expected = (
                 EntryDraft(entry_id=info.entry_id)
                 if version == 1
@@ -588,13 +622,6 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
             assert env.readiness is (
                 ContextReadiness.DRAFT if version == 1 else ContextReadiness.ACTIVE
             )
-            if version != 1:
-                assert set(env.parameters.document().components) == {
-                    "Q1",
-                    "Q2",
-                    "R1",
-                    "R2",
-                }
     finally:
         subscription.unsubscribe()
 

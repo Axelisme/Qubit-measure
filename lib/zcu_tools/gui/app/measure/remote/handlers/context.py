@@ -6,9 +6,6 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-import numpy as np
-
-from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
 from zcu_tools.gui.app.measure.services.ports import CfgEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -105,57 +102,6 @@ def h_context_snapshot(
         ) from exc
 
 
-def _md_summary(value: object) -> object:
-    if isinstance(value, np.generic):
-        value = value.item()
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return value
-    if isinstance(value, np.ndarray):
-        return f"{' × '.join(str(size) for size in value.shape)} array"
-    if isinstance(value, (list, tuple)):
-        if value and all(isinstance(row, (list, tuple)) for row in value):
-            widths = {len(row) for row in value}
-            if len(widths) == 1:
-                return f"{len(value)} × {widths.pop()} matrix"
-        return f"{len(value)} items"
-    if isinstance(value, dict):
-        return f"{len(value)} keys"
-    return type(value).__name__
-
-
-def h_context_md_get(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    md = adapter.context_control.get_current_md()
-    keys = sorted(str(k) for k in md.keys())
-    if not params.get("summaries", False):
-        return {"keys": keys}
-    return {"keys": keys, "values": {key: _md_summary(md.get(key)) for key in keys}}
-
-
-def h_context_md_get_attr(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    key = str(params["key"])
-    md = adapter.context_control.get_current_md()
-    sentinel = object()
-    value = md.get(key, sentinel)
-    if value is sentinel:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"unknown md key: {key!r}; available: {sorted(map(str, md.keys()))}",
-            reason="unknown_md_key",
-        )
-    try:
-        return {"key": key, "value": context_wire_value(value)}
-    except (TypeError, ValueError, RecursionError) as exc:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            f"cannot fully read MetaDict key {key!r}: {exc}",
-            reason="unserializable_context",
-        ) from exc
-
-
 def _value_info_to_wire(info: ValueInfo) -> dict[str, object]:
     return {
         "key": info.key,
@@ -190,65 +136,6 @@ def h_value_read(
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {**_value_info_to_wire(info), "value": value}
-
-
-def h_context_ml_get(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    ml = adapter.context_control.get_current_ml()
-    raw_name = params.get("name")
-    raw_kind = params.get("kind")
-    if raw_kind is not None and raw_kind not in ("module", "waveform"):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "kind must be 'module' or 'waveform'"
-        )
-    if raw_name is not None:
-        if not isinstance(raw_name, str) or not raw_name:
-            raise RemoteError(ErrorCode.INVALID_PARAMS, "name must be nonempty")
-        matches = [
-            kind
-            for kind, collection in (("module", ml.modules), ("waveform", ml.waveforms))
-            if raw_name in collection
-        ]
-        if not matches:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"unknown library name {raw_name!r}; available modules: "
-                f"{sorted(ml.modules)}, waveforms: {sorted(ml.waveforms)}",
-            )
-        if raw_kind is None and len(matches) > 1:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"ambiguous library name {raw_name!r}; supply kind='module' or 'waveform'",
-            )
-        if raw_kind is not None and raw_kind not in matches:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                f"no {raw_kind} named {raw_name!r}; available kinds: {matches}",
-            )
-        kind = raw_kind or matches[0]
-        cfg = ml.modules[raw_name] if kind == "module" else ml.waveforms[raw_name]
-        return {"name": raw_name, "kind": kind, "cfg": cfg.to_dict()}
-
-    # Descriptions belong to the GUI's live shape catalog, not an MCP copy.
-    return {
-        "modules": [
-            {
-                "name": name,
-                "kind": cfg.type,
-                "description": PROGRAM_SHAPES.module(cfg.type).label,
-            }
-            for name, cfg in sorted(ml.modules.items())
-        ],
-        "waveforms": [
-            {
-                "name": name,
-                "style": cfg.style,
-                "description": PROGRAM_SHAPES.waveform(cfg.style).label,
-            }
-            for name, cfg in sorted(ml.waveforms.items())
-        ],
-    }
 
 
 def h_context_ml_list_roles(

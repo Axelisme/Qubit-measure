@@ -22,11 +22,13 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.widgets.cfg._form_support import (
     attach_draft,
     scalar_field,
     section_schema,
 )
+from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
 def test_sweep_widget_publishes_incomplete_edge_in_form_snapshot(qapp, ctrl):
@@ -201,15 +203,17 @@ def test_sweep_step_shows_canonical_value_without_replacing_raw(qapp, ctrl):
 
 def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.resources.context import MetaDict
 
-    md = MetaDict()
-    md.r_f = 6000.0
-    ctrl.get_current_md.return_value = md
+    ctrl.read_context.return_value = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     field = scalar_field(
         ctrl,
         ScalarSpec(label="Freq", type=float),
-        EvalValue("r_f"),
+        EvalValue("R1.freq"),
     )
 
     widget = ScalarWidget(field)
@@ -217,13 +221,13 @@ def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
         ghost = widget.findChild(QLabel)
         editor = widget.findChild(QLineEdit)
         assert ghost is not None and ghost.text() == "= 6000.0"
-        assert editor is not None and editor.text() == "r_f"
+        assert editor is not None and editor.text() == "R1.freq"
 
-        editor.setText("r_f + 1")
+        editor.setText("R1.freq + 1")
 
         value = field.get_value()
         assert isinstance(value, EvalValue)
-        assert value.expr == "r_f + 1" and value.resolved == 6001.0
+        assert value.expr == "R1.freq + 1" and value.resolved == 6001.0
         assert field.is_valid()
         assert ghost.text() == "= 6001.0"
     finally:
@@ -278,20 +282,22 @@ def test_measure_cfg_form_value_source_resolves_on_space_in_eval_input(qapp, ctr
     )
     from zcu_tools.gui.session.value_lookup import ValueInfo
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.resources.context import MetaDict
 
-    md = MetaDict()
-    md.r_f = 6000.0
-    ctrl.get_current_md.return_value = md
+    ctrl.read_context.return_value = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     ctrl.read_value_source.return_value = (
         ValueInfo("device.flux.value", float, "device:flux"),
         0.125,
     )
     schema = section_schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
-        {"freq": EvalValue("r_f")},
+        {"freq": EvalValue("R1.freq")},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=ctrl.read_context())
     form = CfgFormWidget(text_input_enhancer=make_value_source_input_enhancer(ctrl))
     try:
         form.attach(draft)
@@ -325,15 +331,17 @@ def test_scalar_widget_context_menu_uses_resolved_direct_value(qapp, ctrl, monke
     from qtpy.QtCore import QPoint
     from qtpy.QtWidgets import QMenu
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.resources.context import MetaDict
 
-    md = MetaDict()
-    md.r_f = 6000.0
-    ctrl.get_current_md.return_value = md
+    ctrl.read_context.return_value = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     field = scalar_field(
         ctrl,
         ScalarSpec(label="Freq", type=float),
-        EvalValue("r_f"),
+        EvalValue("R1.freq"),
     )
 
     def choose(menu: QMenu, _position: QPoint):
@@ -345,7 +353,7 @@ def test_scalar_widget_context_menu_uses_resolved_direct_value(qapp, ctrl, monke
     widget = ScalarWidget(field)
     try:
         editor = widget.findChild(QLineEdit)
-        assert editor is not None and editor.text() == "r_f"
+        assert editor is not None and editor.text() == "R1.freq"
 
         editor.customContextMenuRequested.emit(QPoint())
 
@@ -362,30 +370,32 @@ def test_scalar_widget_context_menu_uses_resolved_direct_value(qapp, ctrl, monke
 
 def test_sweep_widget_start_supports_eval_mode(qapp, ctrl):
     from qtpy.QtWidgets import QWidget
-    from zcu_tools.resources.context import MetaDict
 
-    md = MetaDict()
-    md.r_f = 6000.0
-    ctrl.get_current_md.return_value = md
+    ctrl.read_context.return_value = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     schema = section_schema(
         {"f": SweepSpec(label="Freq")},
-        {"f": SweepValue(start=EvalValue("r_f - 1"), stop=6005.0, expts=11)},
+        {"f": SweepValue(start=EvalValue("R1.freq - 1"), stop=6005.0, expts=11)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=ctrl.read_context())
     form = CfgFormWidget()
     try:
         form.attach(draft)
         start = form.findChild(QWidget, "start")
         assert start is not None
         editor = start.findChild(QLineEdit)
-        assert editor is not None and editor.text() == "r_f - 1"
+        assert editor is not None and editor.text() == "R1.freq - 1"
 
-        editor.setText("r_f + 1")
+        editor.setText("R1.freq + 1")
 
         value = form.read_values().fields["f"]
         assert isinstance(value, SweepValue)
         assert isinstance(value.start, EvalValue)
-        assert value.start.expr == "r_f + 1" and value.start.resolved == 6001.0
+        assert value.start.expr == "R1.freq + 1" and value.start.resolved == 6001.0
         assert value.stop == 6005.0
         assert form.is_valid()
     finally:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -19,7 +21,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
+from zcu_tools.experiment.utils import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
@@ -60,6 +62,8 @@ class FluxSweepCfg(ConfigBase):
 
 
 class FluxCfg(ProgramV2Cfg, ExpCfgModel):
+    dev: Mapping[str, str] | None = None  # jpa_flux_dev: connected name; None: no bias.
+    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxModuleCfg
     sweep: FluxSweepCfg
     skew_penalty: float = Field(default=0.0, ge=0.0)
@@ -91,17 +95,13 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
                 if step.cfg.dev is not None:
-                    set_flux_in_dev_cfg(
-                        step.cfg.dev,
+                    set_flux(
+                        context.devices[step.cfg.dev["jpa_flux_dev"]],
                         jpa_flux,
-                        label="jpa_flux_dev",
+                        unit=step.cfg.flux_unit,
+                        stop=context.cancel_signal,
+                        progress=False,
                     )
-                setup_devices(
-                    step.cfg,
-                    context.devices,
-                    progress=False,
-                    cancel_signal=context.cancel_signal,
-                )
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (
