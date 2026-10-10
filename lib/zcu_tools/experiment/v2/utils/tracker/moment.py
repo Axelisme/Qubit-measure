@@ -1,22 +1,34 @@
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.program import TrackerProtocol
 
 
-def _merge_moments3(
-    n1: int,
-    mean1: NDArray[np.float64],
-    M2_1: NDArray[np.float64],
-    M3_1: NDArray[np.float64],
-    n2: int,
-    mean2: NDArray[np.float64],
-    M2_2: NDArray[np.float64],
-    M3_2: NDArray[np.float64],
-) -> tuple[int, NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Extend :func:`_merge_moments` to also combine third central moments.
+class _CentralMoments(NamedTuple):
+    """Keep each sample group's statistics together between chunking and merging.
+
+    Arrays share the same leading channel dimensions. Construction retains their
+    references without copying; only the tuple's field bindings are immutable.
+    """
+
+    n: int
+    """Sample count shared by all leading channels."""
+    mean: NDArray[np.float64]
+    """Mean IQ vector, shape ``(..., 2)``; array reference is not copied."""
+    M2: NDArray[np.float64]
+    """Second central sum, shape ``(..., 2, 2)``; array reference is not copied."""
+    M3: NDArray[np.float64]
+    """Third central sum, shape ``(..., 2, 2, 2)``; array reference is not copied."""
+
+
+def _merge_moments3(first: _CentralMoments, second: _CentralMoments) -> _CentralMoments:
+    """Combine two nonempty groups with matching leading channel shapes.
+
+    Return merged statistics in newly computed arrays, leaving inputs unchanged.
 
     For 1D (scalar case):
         M3 = M3_A + M3_B
@@ -24,6 +36,8 @@ def _merge_moments3(
              + δ³·n_A·n_B·(n_A − n_B)/n²
     Tensor generalization keeps full symmetry in (i, j, k).
     """
+    n1, mean1, M2_1, M3_1 = first
+    n2, mean2, M2_2, M3_2 = second
     n = n1 + n2
     mean = (mean1 * n1 + mean2 * n2) / float(n)
     delta = mean2 - mean1  # (..., 2)
@@ -43,7 +57,7 @@ def _merge_moments3(
     ddd = d_i * d_j * d_k
     cubic = ddd * (n1 * n2 * (n1 - n2) / float(n * n))
     M3 = M3_1 + M3_2 + sym_term + cubic
-    return n, mean, M2, M3
+    return _CentralMoments(n, mean, M2, M3)
 
 
 class MomentTracker(TrackerProtocol):
@@ -66,15 +80,13 @@ class MomentTracker(TrackerProtocol):
         self.M3: NDArray[np.float64] | None = None
         self._leading_shape: tuple[int, ...] = ()
 
-    def _chunk_moments(
-        self, points: NDArray[np.float64]
-    ) -> tuple[int, NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    def _chunk_moments(self, points: NDArray[np.float64]) -> _CentralMoments:
         n = points.shape[-2]
         mean = np.mean(points, axis=-2)
         centered = points - mean[..., None, :]
         M2 = np.einsum("...mi,...mj->...ij", centered, centered)
         M3 = np.einsum("...mi,...mj,...mk->...ijk", centered, centered, centered)
-        return n, mean.astype(np.float64, copy=False), M2, M3
+        return _CentralMoments(n, mean.astype(np.float64, copy=False), M2, M3)
 
     def update(self, points: NDArray[np.float64]) -> None:
         assert points.ndim >= 2
@@ -93,7 +105,8 @@ class MomentTracker(TrackerProtocol):
         for start in range(0, total, self.BATCH_SIZE):
             end = min(start + self.BATCH_SIZE, total)
             chunk = points[..., start:end, :]
-            n_b, mean_b, M2_b, M3_b = self._chunk_moments(chunk)
+            batch = self._chunk_moments(chunk)
+            n_b, mean_b, M2_b, M3_b = batch
 
             if self.n == 0:
                 self.n = n_b
@@ -105,14 +118,8 @@ class MomentTracker(TrackerProtocol):
                 assert self.M2 is not None
                 assert self.M3 is not None
                 self.n, self._mean, self.M2, self.M3 = _merge_moments3(
-                    self.n,
-                    self._mean,
-                    self.M2,
-                    self.M3,
-                    n_b,
-                    mean_b,
-                    M2_b,
-                    M3_b,
+                    _CentralMoments(self.n, self._mean, self.M2, self.M3),
+                    batch,
                 )
 
     @property
