@@ -1,6 +1,6 @@
 """New-tab loading through the public GUI socket contract."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
@@ -14,8 +14,9 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg import DirectValue
 from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import CfgResource
-from zcu_tools.gui.session.types import ContextReadiness
+from zcu_tools.gui.session.context_types import EntryRequest
 
+from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._reload_fakes import OldAdapter
 
 from ._helpers import Fixture, call, open_client, reset_inbox
@@ -37,19 +38,17 @@ class FileAdapter(OldAdapter):
         load_data=True, analysis=AnalysisMode.NONE
     )
 
-    def load(self, req: LoadDataRequest) -> RunRecord[LoadedCfg, LoadedResult]:
+    def load(self, req: LoadDataRequest):
         if req.data_path == "bad.h5":
             raise ValueError("wrong experiment")
         cfg = None if req.data_path == "no-cfg.h5" else LoadedCfg()
-        return RunRecord(cfg=cfg, result=LoadedResult(req.data_path))
+        return RunRecord(cfg=cfg, result=LoadedResult(req.data_path)), historical_metadata()
 
 
 @pytest.fixture
 def app(qapp):
     fx = Fixture(empty_project=True)
-    fx.state.set_context(
-        replace(fx.state.session_env, readiness=ContextReadiness.DRAFT)
-    )
+    fx.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
     fx.registry.register("file", FileAdapter)
     fx.start()
     sock = open_client(fx.service.port)
@@ -68,7 +67,8 @@ def test_open_file_requires_current_context_before_creating_tab(app):
     assert reply["error"]["reason"] == "stale_version"
     assert fx.state.list_tab_ids() == []
     assert call(sock, "context.snapshot")["ok"] is True
-    fx.ctrl.context_control.create_md_attr("changed", 1)
+    context = fx.ctrl.context_control
+    context.set_parameter(context.read_context().target, "general.ext.changed", 1)
     reply = call(sock, "tab.open_file", params)
     assert reply["error"]["reason"] == "stale_version"
     assert fx.state.list_tab_ids() == []

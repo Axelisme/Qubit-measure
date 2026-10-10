@@ -30,7 +30,7 @@ from ._helpers import dispatch_handler as _dispatch
 def _ctrl_backed_by_real_service() -> MagicMock:
     """A ctrl mock whose predictor methods delegate to a real PredictorService."""
     state = State(
-        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+        SessionEnv(parameters=None, soc=None, soccfg=None)
     )
     svc = PredictorService(state, EventBus())
     ctrl = MagicMock()

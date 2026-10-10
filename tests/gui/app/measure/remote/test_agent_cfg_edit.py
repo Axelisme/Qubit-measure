@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from threading import Event
 
 import pytest
@@ -630,7 +631,10 @@ def test_malformed_envelope_precedes_resource_lookup(live_tab):
 def test_library_editor_batch_retains_its_independent_prefix_contract(live_tab):
     fixture, _ = live_tab
     schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
-    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(schema, gc=False)
+    parameters = fixture.ctrl.read_context()
+    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
+        schema, parameters=parameters, gc=False
+    )
     sock = open_client(fixture.service.port)
     try:
         result = call(
@@ -675,7 +679,10 @@ def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
 
     fixture, _ = live_tab
     schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
-    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(schema, gc=False)
+    parameters = fixture.ctrl.read_context()
+    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
+        schema, parameters=parameters, gc=False
+    )
 
     def reject(*_args):
         if failure == "unavailable":
@@ -710,5 +717,78 @@ def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
         )
         tree = call(sock, "editor.get", {"editor_id": editor_id})["result"]["tree"]
         assert tree["children"]["gain"]["input"]["resolved"] == 0.25
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize("aliases_mode", ["omitted", "null", "empty"])
+def test_cached_cfg_read_without_expected_preserves_publication(
+    live_tab, aliases_mode, record_property
+):
+    fixture, tab_id = live_tab
+    owner = fixture.ctrl.cfg_resources.lookup(tab_id)
+    before = owner.observe().ref
+    expected = encode_ref(before)
+    sock = open_client(fixture.service.port)
+    try:
+        witness = call(
+            sock, "tab.get_cfg", {"tab_id": tab_id, "expected": expected}
+        )
+        record_property("legal_publication_witness", json.dumps(witness))
+        assert witness["ok"] is True, witness
+        publication = witness["result"]
+        assert set(publication) == {
+            "cfg_ref", "status", "tree", "source_basis", "diagnostics"
+        }
+        assert publication["cfg_ref"] == expected
+        assert publication["status"] == "Valid"
+        assert publication["tree"]["children"]["gain"]["input"]["resolved"] == 0.1
+        assert publication["tree"]["children"]["sweep"]["kind"] == "sweep"
+        assert owner.observe().ref == before
+
+        params = {"tab_id": tab_id}
+        if aliases_mode == "null":
+            params["aliases"] = None
+        elif aliases_mode == "empty":
+            params["aliases"] = {}
+        reply = call(sock, "tab.get_cfg", params)
+        record_property("target_reply", json.dumps(reply))
+        assert reply["ok"] is True, reply
+        assert reply["result"] == publication
+        assert owner.observe().ref == before
+    finally:
+        sock.close()
+
+
+def test_nonempty_alias_preview_without_expected_names_the_missing_reference(
+    live_tab, record_property
+):
+    fixture, tab_id = live_tab
+    owner = fixture.ctrl.cfg_resources.lookup(tab_id)
+    before = owner.observe().ref
+    sock = open_client(fixture.service.port)
+    try:
+        witness = call(
+            sock,
+            "tab.get_cfg",
+            {"tab_id": tab_id, "expected": encode_ref(before)},
+        )
+        record_property("legal_publication_witness", json.dumps(witness))
+        assert witness["ok"] is True, witness
+        rejected = call(
+            sock, "tab.get_cfg", {"tab_id": tab_id, "aliases": {"driver": "Q1"}}
+        )
+        record_property("target_reply", json.dumps(rejected))
+        assert rejected["ok"] is False, rejected
+        assert rejected["error"]["code"] == "invalid_params"
+        assert "expected" in rejected["error"]["message"]
+        assert owner.observe().ref == before
+        current = call(
+            sock,
+            "tab.get_cfg",
+            {"tab_id": tab_id, "expected": encode_ref(before)},
+        )
+        assert current["ok"] is True, current
+        assert current["result"] == witness["result"]
     finally:
         sock.close()

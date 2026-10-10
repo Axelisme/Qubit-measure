@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.cfg_model import ConstWaveformCfg, ModuleCfgFactory, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
     ParameterWriteback,
@@ -17,8 +18,7 @@ from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
@@ -26,6 +26,24 @@ from zcu_lab.v2.twotone.time_domain.t1.gui import T1AnalyzeParams
 
 from ._helpers import Fixture, call, open_client
 from ._point_application import PointAdapter, PointApplication
+
+
+def publish_value(fx, value):
+    """Publish an isolated public capture, including serializer fault inputs."""
+    captured = fx.ctrl.read_context()
+    point = captured.document()
+    general = point.general.model_copy(
+        update={"ext": {**point.general.ext, "value": value}}
+    )
+    parameters = ParameterContext(
+        point=point.model_copy(update={"general": general}),
+        library=captured.library,
+        target=captured.target,
+        roles=captured.roles,
+        source_faults=captured.source_faults,
+        storage=captured.storage,
+    )
+    fx.state.set_context(replace(fx.state.session_env, parameters=parameters))
 
 
 @pytest.mark.parametrize(
@@ -54,14 +72,12 @@ def test_complete_md_values_survive_preview_and_write_socket(
         "get_writeback_items",
         lambda self, request: [
             ParameterWriteback(
-                target_name="value", description="V", proposed_value=after
+                target_name="general.ext.value", description="V", proposed_value=after
             ),
         ],
     )
     fx = Fixture(active_label="ctx001")
-    md = MetaDict()
-    md.value = before
-    fx.state.set_context(replace(fx.state.session_env, md=md, ml=ModuleLibrary()))
+    publish_value(fx, before)
     fx.start()
     sock = open_client(fx.service.port)
     try:
@@ -101,14 +117,14 @@ def test_complete_md_values_survive_preview_and_write_socket(
                 {
                     "id": "param-1",
                     "kind": "parameter",
-                    "target": "value",
+                    "target": "general.ext.value",
                     "before": wire_before,
                     "after": wire_after,
                 }
             ]
         }
         # Unsupported live context values must fail rather than claim a full preview.
-        md.value = object()
+        publish_value(fx, object())
         rejected = call(sock, "tab.writeback_preview", params)
         assert not rejected["ok"]
         assert rejected["error"]["code"] == "precondition_failed"
@@ -119,7 +135,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
             complex(float("inf"), 1),
             complex(1, float("nan")),
         ):
-            md.value = 1.0
+            publish_value(fx, 1.0)
             fx.ctrl.set_writeback_item_for_pane(
                 tab, "analysis", "param-1", proposed_value=invalid
             )
@@ -163,7 +179,7 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(qapp, monkeypa
             "waveform": {"style": "const", "length": 0.1},
         }
     )
-    waveform = WaveformCfgFactory.from_raw({"style": "const", "length": 0.1})
+    waveform = ConstWaveformCfg(length=0.1)
     module_schema = CfgSchema(*module_cfg_to_value(module))
     waveform_schema = CfgSchema(*waveform_cfg_to_value(waveform))
     monkeypatch.setattr(
@@ -171,18 +187,18 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(qapp, monkeypa
         "get_writeback_items",
         lambda self, request: [
             ModuleWriteback(
-                target_name="same", description="M", edit_schema=module_schema
+                target_name="Q1.pulses.same", description="M", edit_schema=module_schema
             ),
             WaveformWriteback(
-                target_name="same", description="W", edit_schema=waveform_schema
+                target_name="Q1.waveforms.same", description="W", edit_schema=waveform_schema
             ),
         ],
     )
     fx = Fixture(active_label="ctx001")
-    ml = ModuleLibrary()
-    ml.modules["same"] = module
-    ml.waveforms["same"] = waveform
-    fx.state.set_context(replace(fx.state.session_env, md=MetaDict(), ml=ml))
+    context = fx.ctrl.context_control
+    target = context.read_context().target
+    context.set_module(target, "Q1.pulses.same", PulseSpec.model_validate(module.to_dict()))
+    context.set_waveform(target, "Q1.waveforms.same", waveform)
     before_module, before_waveform = module.to_dict(), waveform.to_dict()
     fx.start()
     sock = open_client(fx.service.port)
@@ -220,22 +236,22 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(qapp, monkeypa
             },
         )
         assert result["ok"], result
-        assert ml.modules["same"].to_dict()["gain"] == 0.8
-        assert ml.waveforms["same"].to_dict()["length"] == 0.2
+        assert fx.ctrl.read_context().library.module_spec("Q1.pulses.same").model_dump(mode="python")["gain"] == 0.8
+        assert fx.ctrl.read_context().library.waveform_spec("Q1.waveforms.same").model_dump(mode="python")["length"] == 0.2
         assert result["result"]["written"] == [
             {
                 "id": "ml-1",
                 "kind": "module",
-                "target": "same",
+                "target": "Q1.pulses.same",
                 "before": before_module,
-                "after": ml.modules["same"].to_dict(),
+                "after": fx.ctrl.read_context().library.module_spec("Q1.pulses.same").model_dump(mode="python"),
             },
             {
                 "id": "wf-1",
                 "kind": "waveform",
-                "target": "same",
+                "target": "Q1.waveforms.same",
                 "before": before_waveform,
-                "after": ml.waveforms["same"].to_dict(),
+                "after": fx.ctrl.read_context().library.waveform_spec("Q1.waveforms.same").model_dump(mode="python"),
             },
         ]
     finally:
@@ -250,14 +266,14 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         FakeAdapter,
         "get_writeback_items",
         lambda self, request: [
-            ParameterWriteback(target_name="a", description="A", proposed_value=11.0),
-            ParameterWriteback(target_name="b", description="B", proposed_value=22.0),
+            ParameterWriteback(target_name="general.ext.a", description="A", proposed_value=11.0),
+            ParameterWriteback(target_name="general.ext.b", description="B", proposed_value=22.0),
         ],
     )
     fx = Fixture(active_label="ctx001")
-    md = MetaDict()
-    md.a, md.b = 1.0, 2.0
-    fx.state.set_context(replace(fx.state.session_env, md=md, ml=ModuleLibrary()))
+    context = fx.ctrl.context_control
+    context.set_parameter(context.read_context().target, "general.ext.a", 1.0)
+    context.set_parameter(context.read_context().target, "general.ext.b", 2.0)
     fx.start()
     sock = open_client(fx.service.port)
     try:
@@ -287,7 +303,7 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         applied = call(sock, "tab.writeback_apply", {**params, "ids": ["param-1"]})
         assert applied["ok"]
         assert applied["result"]["applied_ids"] == ["param-1"]
-        assert md.a == 11.0 and md.b == 2.0
+        assert context.read_context().lookup("general.ext.a").value == 11.0 and context.read_context().lookup("general.ext.b").value == 2.0
         after = call(sock, "tab.writeback_preview", params)["result"]
         assert [item["current"] for item in after["items"]] == [11.0, 2.0]
         assert all(item["selected"] for item in after["items"])
@@ -307,7 +323,7 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         )
         assert failed["ok"] is False
         assert failed["error"]["code"] == "invalid_params"
-        assert md.b == 2.0
+        assert context.read_context().lookup("general.ext.b").value == 2.0
         retained = call(sock, "tab.writeback_preview", params)["result"]
         assert retained["items"][1]["proposed"] == 33.0
         assert all(item["selected"] for item in retained["items"])
@@ -327,13 +343,13 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
                 {
                     "id": "param-2",
                     "kind": "parameter",
-                    "target": "b",
+                    "target": "general.ext.b",
                     "before": 2.0,
                     "after": 33.0,
                 }
             ]
         }
-        assert md.a == 11.0 and md.b == 33.0
+        assert context.read_context().lookup("general.ext.a").value == 11.0 and context.read_context().lookup("general.ext.b").value == 33.0
     finally:
         sock.close()
         fx.stop()
@@ -352,9 +368,9 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         "get_writeback_items",
         lambda self, req: [
             ParameterWriteback(
-                "driver.ext.value", "Value", proposed_value=20.09, stderr=0.18
+                "$driver.ext.value", "Value", proposed_value=20.09, stderr=0.18
             ),
-            ParameterWriteback("driver.ext.other", "Other", proposed_value=23.0),
+            ParameterWriteback("$driver.ext.other", "Other", proposed_value=23.0),
         ],
     )
     application.open_entry()
@@ -400,7 +416,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         assert isinstance(items, list)
         item = items[0]
         assert isinstance(item, dict)
-        assert item["target_name"] == "driver.ext.value"
+        assert item["target_name"] == "$driver.ext.value"
         assert item["actual_path"] == "Q1.ext.value"
         assert item["stderr"] == 0.18
         assert item["current"] == 19.9
