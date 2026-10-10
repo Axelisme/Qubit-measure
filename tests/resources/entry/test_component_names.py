@@ -156,7 +156,7 @@ def test_public_view_member_conflicts_are_named_without_publication(
         else:
             entry.use_point("a")
 
-    with pytest.raises(ValueError) as failure:
+    with pytest.raises(ValueError, match="shadow.*view") as failure:
         perform_operation()
     assert name in str(failure.value)
     assert "shadow" in str(failure.value) and "view" in str(failure.value)
