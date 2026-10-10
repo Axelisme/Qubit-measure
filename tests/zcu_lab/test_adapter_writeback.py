@@ -552,15 +552,15 @@ def _reset_expected(name: str, tested: PulseResetCfg | TwoPulseResetCfg | BathRe
     expected: dict[str, dict[str, YamlValue]] = {}
     # Independent input models give the entire expected schema, including defaults.
     if name in ("single", "single-freq") and isinstance(tested, PulseResetCfg):
-        expected["reset_10"] = tested.with_updates(pulse_cfg=tested.pulse_cfg.with_updates(freq=4300.0)).model_dump(mode="json")
+        expected["reset_10"] = tested.with_updates(pulse_cfg=tested.pulse_cfg.with_updates(freq=4300.0)).to_dict()
     if name in ("dual", "dual-power") and isinstance(tested, TwoPulseResetCfg):
         expected["reset_120"] = tested.with_updates(
             pulse1_cfg=tested.pulse1_cfg.with_updates(gain=0.21),
             pulse2_cfg=tested.pulse2_cfg.with_updates(gain=0.31),
-        ).model_dump(mode="json")
+        ).to_dict()
     if name in ("bath", "bath-phase") and isinstance(tested, BathResetCfg):
-        expected["reset_bath"] = tested.with_updates(pi2_cfg=tested.pi2_cfg.with_updates(phase=75.0)).model_dump(mode="json")
-        expected["reset_bath_e"] = tested.with_updates(pi2_cfg=tested.pi2_cfg.with_updates(phase=-105.0)).model_dump(mode="json")
+        expected["reset_bath"] = tested.with_updates(pi2_cfg=tested.pi2_cfg.with_updates(phase=75.0)).to_dict()
+        expected["reset_bath_e"] = tested.with_updates(pi2_cfg=tested.pi2_cfg.with_updates(phase=-105.0)).to_dict()
     return expected
 
 
@@ -686,7 +686,7 @@ def _assert_reset_applied(session: WritebackSession, capture: ParameterContext, 
         assert source is not None and source.run_id == run_id and source.source == accepted[-1].id
     for root, expected in sample.expected.items():
         concrete = capture.resolve_path(f"$qubit.reset.{root}")
-        assert destination.library.get_module(concrete).model_dump(mode="json") == expected
+        assert destination.library.get_module(concrete).to_dict() == expected
         leaf = {
             "reset_10": "pulse_cfg.freq", "reset_120": "pulse1_cfg.gain",
             "reset_bath": "pi2_cfg.phase", "reset_bath_e": "pi2_cfg.phase",
@@ -840,7 +840,7 @@ def test_bath_reset_slot_can_select_excited_module(session: WritebackSession) ->
         draft.apply(item_ids=(draft.items[-2].session_id, draft.items[-1].session_id))
         destination = session.control.read_target(capture.target)
         assert destination.value("Q1.module.reset") == "Q1.reset.reset_bath_e"
-        assert destination.library.get_module("Q1.reset.reset_bath_e").model_dump(mode="json") == sample.expected["reset_bath_e"]
+        assert destination.library.get_module("Q1.reset.reset_bath_e").to_dict() == sample.expected["reset_bath_e"]
         assert schema_to_raw_dict(_module_schema(draft.preview()[2]), capture) == sample.expected["reset_bath"]
     finally:
         draft.teardown()
