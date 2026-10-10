@@ -1,6 +1,6 @@
 """Explicit target capture through the shipped remote tab/app/context seam."""
 
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,7 +36,7 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     EntryRequest,
 )
-from zcu_tools.resources.entry import RoleSpec, component_registry
+from zcu_tools.resources.entry import component_registry
 
 from tests.resources.entry.fakes import (
     Driver,
@@ -52,9 +52,6 @@ class LibraryDriver(Driver):
 
 
 class TargetAdapter(T1Adapter):
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        return {"driver": RoleSpec("fake/drive/*")}
-
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         return CfgSchema(
             CfgSectionSpec(fields={"rate": ScalarSpec("Rate", float)}),
@@ -63,9 +60,6 @@ class TargetAdapter(T1Adapter):
 
 
 class RolelessAdapter(TargetAdapter):
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        return {}
-
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         return CfgSchema(
             CfgSectionSpec(fields={"rate": ScalarSpec("Rate", float)}),
@@ -141,6 +135,39 @@ def application(
         restore_registry(before)
 
 
+def test_named_aliases_apply_to_parameter_and_library_queries_without_mutating_sources(
+    application: TargetApplication,
+) -> None:
+    context = application.controller.context_control
+    context.set_alias_rows(
+        (
+            AliasRow("other", "Q1"),
+            AliasRow("driver", "Q1"),
+            AliasRow("sense", "$driver.sense"),
+        )
+    )
+    tab_id = application.controller.tab_control.new_tab("targeted")
+    rows = context.get_alias_rows()
+    versions = application.state.version.snapshot()
+    publication = application.state.get_tab(tab_id).cfg.observe()
+    result = h_tab_parameter_read(
+        application.remote,
+        {
+            "tab_id": tab_id,
+            "aliases": {"driver": "QL", "sense": "R2"},
+            "paths": ["$driver.rate", "$sense.rate", "$other.rate"],
+            "module_refs": ["$driver.pulses.pi"],
+        },
+    )
+    assert result == {
+        "values": {"$driver.rate": 40.0, "$sense.rate": 30.0, "$other.rate": 10.0},
+        "modules": {"$driver.pulses.pi": "QL.pulses.pi"},
+    }
+    assert context.get_alias_rows() == rows
+    assert application.state.version.snapshot() == versions
+    assert application.state.get_tab(tab_id).cfg.observe() == publication
+
+
 def test_parameter_read_uses_current_sources_and_temporary_aliases(
     application: TargetApplication,
 ) -> None:
@@ -153,7 +180,7 @@ def test_parameter_read_uses_current_sources_and_temporary_aliases(
         application.remote,
         {
             "tab_id": tab_id,
-            "target": "Q2",
+            "aliases": {"driver": "Q2"},
             "paths": ["$driver.rate", "$driver.energy_a", "$driver.not_supplied"],
             "module_refs": [],
         },
@@ -189,7 +216,7 @@ def test_parameter_read_resolves_library_slots_in_current_temporary_source(
         {
             "tab_id": tab_id,
             "paths": [],
-            "target": "QL",
+            "aliases": {"driver": "QL"},
             "module_refs": [
                 "$driver.module.pi",
                 "$driver.pulses.pi",
@@ -211,7 +238,7 @@ def test_parameter_read_resolves_library_slots_in_current_temporary_source(
     }
 
 
-def test_parameter_read_rejects_undeclared_alias(
+def test_parameter_read_rejects_missing_alias(
     application: TargetApplication,
 ) -> None:
     from zcu_tools.resources.entry.errors import RoleResolutionError
@@ -245,7 +272,8 @@ def test_target_cfg_preview_keeps_publication_and_rejects_stale_ref(
         "revision": str(observed.ref.revision),
     }
     preview = h_tab_get_cfg(
-        application.remote, {"tab_id": tab_id, "target": "Q2", "expected": expected}
+        application.remote,
+        {"tab_id": tab_id, "aliases": {"driver": "Q2"}, "expected": expected},
     )
     assert preview["status"] == "Valid"
     assert preview["cfg_ref"] == expected
@@ -253,7 +281,8 @@ def test_target_cfg_preview_keeps_publication_and_rejects_stale_ref(
     cfg.edit(observed.ref.revision, (CfgEdit(("rate",), 18.0),))
     with pytest.raises(RemoteError) as caught:
         h_tab_get_cfg(
-            application.remote, {"tab_id": tab_id, "target": "Q2", "expected": expected}
+            application.remote,
+            {"tab_id": tab_id, "aliases": {"driver": "Q2"}, "expected": expected},
         )
     assert caught.value.reason == "stale_revision"
 
@@ -268,14 +297,19 @@ def test_target_source_reads_reject_malformed_target(
         (h_tab_get_cfg, {}),
     ):
         with pytest.raises(RemoteError) as caught:
-            handler(application.remote, {"tab_id": tab_id, "target": target, **query})
-        assert caught.value.reason == "invalid_target"
+            handler(
+                application.remote,
+                {"tab_id": tab_id, "aliases": {"driver": target}, **query},
+            )
+        assert caught.value.reason == "invalid_aliases"
 
 
 def test_target_preview_requires_expected_ref(application: TargetApplication) -> None:
     tab_id = application.controller.tab_control.new_tab("targeted")
     with pytest.raises(RemoteError) as caught:
-        h_tab_get_cfg(application.remote, {"tab_id": tab_id, "target": "Q2"})
+        h_tab_get_cfg(
+            application.remote, {"tab_id": tab_id, "aliases": {"driver": "Q2"}}
+        )
     assert caught.value.code is ErrorCode.INVALID_PARAMS
 
 

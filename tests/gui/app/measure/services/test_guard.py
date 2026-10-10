@@ -34,17 +34,14 @@ from zcu_tools.gui.cfg.resource import (
 )
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import RoleSpec
 
 from tests.gui.app.measure._cfg_fakes import cfg_resolution, make_cfg, parameter_capture
 
 
 def _make_guard(state: State) -> GuardService:
-    def capture(
-        roles: Mapping[str, RoleSpec], _target: str | None
-    ) -> ParameterContext | None:
+    def capture(_aliases: Mapping[str, str] | None) -> ParameterContext | None:
         parameters = state.session_env.parameters
-        return None if parameters is None else parameters.bind_aliases((), roles)
+        return None if parameters is None else parameters.bind_aliases((), {})
 
     return GuardService(
         state,
@@ -72,7 +69,6 @@ def _make_state(
     )
     tab_id = "tab-1"
     adapter = MagicMock()
-    adapter.parameter_roles.return_value = {}
     adapter.experiment_tag = None
     adapter.capabilities = AdapterCapabilities(
         requires_soc=requires_soc, load_data=load_data

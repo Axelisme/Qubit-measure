@@ -4,7 +4,7 @@ import threading
 import time
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 from ._ramp import ramp_linear
 from .base import BaseDevice, BaseDeviceInfo, device_operation
@@ -14,7 +14,18 @@ RAMP_INTERVAL = 0.01  # seconds between steps (skipped in fast_mode)
 
 
 class FakeDeviceInfo(BaseDeviceInfo):
+    """Memory-device settings and readback in unconverted native coordinates.
+
+    Construction requires address. value_unit defaults to native, is stored in
+    dumps, and rejects other units with Pydantic ValidationError. value is a
+    strict real scalar; output controls enable state and rampstep is the native
+    ramp increment.
+    """
+
     type: Literal["FakeDevice"] = "FakeDevice"
+    value_unit: Literal["native"] = Field(
+        default="native", description="Stored value/rampstep coordinate, always native."
+    )
     output: Literal["on", "off"] = "off"
     value: float = 0.0
     rampstep: float = DEFAULT_RAMPSTEP
@@ -111,6 +122,7 @@ class FakeDevice(BaseDevice[FakeDeviceInfo]):
         self._set_value_smart(cfg.value, progress=progress, stop_event=stop_event)
 
     def get_info(self) -> FakeDeviceInfo:
+        """Return fresh memory settings with stored native unit; no I/O or mutation."""
         return FakeDeviceInfo(
             address=self.address,
             output=self.output,

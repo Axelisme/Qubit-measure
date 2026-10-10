@@ -156,13 +156,8 @@ def test_tab_refresh_preserves_distinct_captures_and_publishes_before_notificati
 def test_role_capture_failure_does_not_register_a_tab() -> None:
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     registry = MagicMock(spec=Registry)
-    registry.create.return_value.parameter_roles.return_value = {
-        "qubit": RoleSpec("capture/driver")
-    }
 
-    def unavailable(
-        _roles: Mapping[str, RoleSpec], _target: str | None
-    ) -> ParameterContext | None:
+    def unavailable(_aliases: Mapping[str, str] | None) -> ParameterContext | None:
         raise ValueError("role target is unavailable")
 
     service = TabService(

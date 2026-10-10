@@ -32,6 +32,7 @@ from zcu_tools.gui.app.measure.state import (
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedErrorCategory
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -52,6 +53,7 @@ from tests.gui.app.measure._native_save_support import (
     PostSummary,
     native_save_session,
 )
+from zcu_lab.components import QubitSchema
 from zcu_lab.v2.singleshot.ge.core import GE_Cfg, GE_Exp, GE_Result
 from zcu_lab.v2.singleshot.ge.gui import (
     GEAdapter,
@@ -422,6 +424,20 @@ def _ge_source_with_excited_initial_state() -> RunRecord[GE_Cfg, GE_Result]:
     )
 
 
+def _ge_capture(original: ParameterContext | None) -> ParameterContext:
+    if original is None:
+        raise RuntimeError("Native fixture must retain its Run parameter capture")
+    return ParameterContext(
+        point=original.document().model_copy(
+            update={"components": {"Q1": QubitSchema(kind="qubit/fluxonium")}}
+        ),
+        library=original.library,
+        target=original.target,
+        roles=None,
+        storage=original.storage,
+    ).bind_aliases((AliasRow("qubit", "Q1"),), {})
+
+
 def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     native_session: NativeSaveSession,
 ) -> None:
@@ -434,7 +450,7 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
         metadata=replace(
             native_session.metadata, experiment=GE_Exp().persistence_spec().tag
         ),
-        parameters=None,
+        parameters=_ge_capture(state.get_tab(tab_id).run.parameters),
     )
     bus = EventBus()
     writeback = WritebackService(
@@ -455,10 +471,10 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     primary_draft = tab.analysis.writeback_draft
     assert isinstance(primary_draft, WritebackDraft)
     assert {item.target_name for item in writeback.preview_draft(primary_draft)} == {
-        "qubit.ext.readout_cal.fidelity",
-        "qubit.ext.readout_cal.sigma",
-        "qubit.ext.readout_cal.g_center",
-        "qubit.ext.readout_cal.e_center",
+        "$qubit.ext.readout_cal.fidelity",
+        "$qubit.ext.readout_cal.sigma",
+        "$qubit.ext.readout_cal.g_center",
+        "$qubit.ext.readout_cal.e_center",
     }
     # The post operation must use the adopted primary, not the later form edit.
     params.initial_state = "ground"
@@ -485,8 +501,8 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     post_draft = tab.post_analysis.writeback_draft
     assert isinstance(post_draft, WritebackDraft)
     assert {item.target_name for item in writeback.preview_draft(post_draft)} == {
-        "qubit.ext.readout_cal.radius",
-        "qubit.ext.readout_cal.confusion_matrix",
+        "$qubit.ext.readout_cal.radius",
+        "$qubit.ext.readout_cal.confusion_matrix",
     }
     snapshot = TabService(
         state,
@@ -598,7 +614,7 @@ def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
         MagicMock(),
         provide_options=lambda _kind: [],
         context=MagicMock(),
-        captured_parameters=lambda _roles, _target: state.session_env.parameters,
+        captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
     with pytest.raises(LoadDataError) as exc_info:
@@ -620,7 +636,7 @@ def test_guard_and_load_accept_enabled_concrete_adapter() -> None:
     state.get_tab(tab_id).adapter = EnabledAdapter()  # type: ignore[assignment]
     GuardService(
         state,
-        captured_parameters=lambda _roles, _target: state.session_env.parameters,
+        captured_parameters=lambda _aliases: state.session_env.parameters,
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
     ).check_load(tab_id)
     assert state.get_tab(tab_id).run.result == "run"

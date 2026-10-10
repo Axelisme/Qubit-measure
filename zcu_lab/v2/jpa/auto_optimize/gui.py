@@ -28,7 +28,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
@@ -121,14 +120,6 @@ class JpaAutoOptimizeAdapter(
             "evaluated point with no tuning knobs."
         ),
     )
-
-    def parameter_roles(self) -> dict[str, RoleSpec]:
-        """Declare consumer kinds; bindings come only from the global alias table."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-            "jpa": RoleSpec("amplifier/jpa"),
-        }
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

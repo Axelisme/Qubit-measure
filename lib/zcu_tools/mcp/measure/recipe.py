@@ -410,8 +410,8 @@ class _TabBinding:
 
     tools is the execution's fixed connection. tab is the GUI locator.
     publication is the last returned cfg observation, never refreshed on failure.
-    target is an optional single-use first-alias override, never tab binding.
-    Parameter sources are queried from current globals with this target. origins records sources
+    aliases is an owned single-use mapping of alias names to components, never tab binding.
+    Parameter sources are queried from current globals with these overrides. origins records sources
     by public/derived field name for the later Run capture, including individual
     sweep labels. flux_unit is the asserted device unit.
     """
@@ -422,7 +422,7 @@ class _TabBinding:
     observe_run: Callable[[RunOperation], None]
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
-    target: str | None = None
+    aliases: Mapping[str, str] | None = None
     origins: dict[str, str | SweepSources] = field(default_factory=dict)
     flux_unit: str | None = None
     frequency_sweep: str | None = None
@@ -524,6 +524,25 @@ def _finite_frequency(value: object) -> TypeGuard[int | float]:
         and not isinstance(value, bool)
         and isfinite(value)
     )
+
+
+def _alias_overrides(value: object) -> dict[str, str] | None:
+    """Own optional named overrides; reject malformed or empty names before RPC."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("aliases must map non-empty names to components")
+    overrides: dict[str, str] = {}
+    for alias, component in value.items():
+        if (
+            not isinstance(alias, str)
+            or not alias.strip()
+            or not isinstance(component, str)
+            or not component.strip()
+        ):
+            raise ValueError("aliases must map non-empty names to components")
+        overrides[alias] = component
+    return overrides or None
 
 
 class RecipeSession:
@@ -646,26 +665,30 @@ class RecipeSession:
         return operation.snapshot() if operation is not None else None
 
     def open_tab(
-        self, adapter: str, *, target: str | None = None, reuse: str | None = None
+        self,
+        adapter: str,
+        *,
+        aliases: Mapping[str, str] | None = None,
+        reuse: str | None = None,
     ) -> RecipeTab:
         """Open adapter's tab, or validate/reset the named reusable tab.
 
-        adapter is a non-empty public GUI adapter ID. target is a concrete
-        component for the adapter's first declared alias on this recipe's Run.
-        Omission uses current global aliases. It never changes tab/global binding.
-        reuse=None creates a fresh tab; otherwise reuse is a non-empty GUI locator
-        and may also specify target. Parameter/library reads and targeted cfg
-        previews use current sources with this same temporary override, not a
+        adapter is a non-empty public GUI adapter ID. aliases maps caller-owned
+        alias names to concrete components and is copied for this recipe's Run.
+        None and {} mean no override and retain cached preview/acceptance.
+        Nonempty overrides use temporary preview and acceptance without changing
+        tab/global binding. reuse=None creates a fresh tab; otherwise reuse is a
+        non-empty GUI locator. Parameter/library reads and cfg previews use
+        current sources with this same temporary mapping, not a
         tab birth capture or context.snapshot. Source/alias failures propagate
         without fallback. Busy, mismatched adapters
         and invalid locators fail without creating a fallback. Capture the cfg
         ref for edits and Run; each source query uses current globals. GUI/connection
-        errors propagate; invalid names raise ValueError before any GUI request.
+        errors propagate; empty/non-string names raise ValueError before any GUI request. Identifier errors propagate from the GUI context owner.
         """
         if not adapter or not adapter.strip():
             raise ValueError("adapter must be a non-empty GUI adapter ID")
-        if target is not None and (not target or not target.strip()):
-            raise ValueError("target must be a non-empty component name")
+        overrides = _alias_overrides(aliases)
         if reuse is not None and (not reuse or not reuse.strip()):
             raise ValueError("reuse must be a non-empty GUI tab locator")
         if reuse is None:
@@ -711,7 +734,7 @@ class RecipeSession:
                 closed=self._closed,
                 condition=self._condition,
                 consume_cancel=self._consume_cancel,
-                target=target,
+                aliases=overrides,
             )
         )
 
@@ -728,16 +751,20 @@ class RecipeTab:
 
     def __init__(self, binding: _TabBinding) -> None:
         self._binding = binding
-        self._preview_target()
+        self._preview_aliases()
 
-    def _preview_target(self) -> None:
-        """Project this target at the retained ref; stale failures never refresh."""
-        if self._binding.target is not None:
+    def _preview_aliases(self) -> None:
+        """Project named aliases at the retained ref; stale failures never refresh."""
+        if self._binding.aliases:
             reply = self._binding.tools.send_gui_rpc(
                 "tab.get_cfg",
                 {
                     "tab_id": self._binding.tab,
-                    "target": self._binding.target,
+                    **(
+                        {"aliases": self._binding.aliases}
+                        if self._binding.aliases
+                        else {}
+                    ),
                     "expected": self._binding.publication["cfg_ref"],
                 },
             )
@@ -751,13 +778,13 @@ class RecipeTab:
                 "tab_id": self._binding.tab,
                 "paths": [path],
                 "module_refs": [],
-                "target": self._binding.target,
+                **({"aliases": self._binding.aliases} if self._binding.aliases else {}),
             },
         )
         return _cfg_object(reply["values"]).get(path)
 
     def _library_reference(self, reference: str | None) -> str | None:
-        """Resolve a canonical module root using current sources and target."""
+        """Resolve a canonical module root using current sources and named aliases."""
         if reference is None:
             return None
         reply = self._binding.tools.send_gui_rpc(
@@ -766,7 +793,7 @@ class RecipeTab:
                 "tab_id": self._binding.tab,
                 "paths": [],
                 "module_refs": [reference],
-                "target": self._binding.target,
+                **({"aliases": self._binding.aliases} if self._binding.aliases else {}),
             },
         )
         root = _cfg_object(reply["modules"])[reference]
@@ -794,7 +821,7 @@ class RecipeTab:
                 },
             )
             self._binding.publication = _cfg_object(reply)
-            self._preview_target()
+            self._preview_aliases()
 
     def _reference(self, field: str) -> dict[str, object]:
         node = self._node(field)
@@ -1166,27 +1193,9 @@ class RecipeTab:
 
     def _flux_unit(self, snapshot: dict[str, object], requested: str) -> str:
         unit = snapshot["unit"]
-        info_value = snapshot.get("info")
-        info = _cfg_object(info_value) if info_value is not None else {}
-        native = (
-            unit == "none"
-            and snapshot.get("type_name") == "FakeDevice"
-            and info.get("type") == "FakeDevice"
-            and requested == "native"
-        )
-        if native:
-            return "native"
-        if (
-            snapshot.get("type_name") == "FakeDevice"
-            or info.get("type") == "FakeDevice"
-        ):
+        if not isinstance(unit, str) or not unit.strip() or unit == "none":
             raise GuiRpcError(
-                "Fake flux requires confirmed native coordinates",
-                reason="invalid_device",
-            )
-        if not isinstance(unit, str) or not unit.strip() or unit in ("none", "native"):
-            raise GuiRpcError(
-                "Flux device has no physical unit", reason="invalid_device"
+                "Flux device has no usable flux coordinate", reason="invalid_device"
             )
         if requested != unit:
             raise GuiRpcError(
@@ -1200,8 +1209,8 @@ class RecipeTab:
 
         name and unit must be non-empty strings; null or blanks raise ValueError.
         No GUI-observed default is selected. Unknown devices and mismatched units
-        fail as invalid_device. Physical units must match the device snapshot;
-        native requires confirmed FakeDevice type and snapshot unit none.
+        fail as invalid_device. Units must match the device snapshot exactly,
+        including native; none means no usable flux coordinate and is rejected.
         Selection edits dev.flux_dev and flux_unit only after validation. The
         asserted unit remains recorded for the subsequent Run snapshot. This
         method never connects a device or converts coordinates.
@@ -1284,7 +1293,7 @@ class RecipeTab:
         consume_cancel = self._binding.consume_cancel
         if consume_cancel is not None and consume_cancel():
             return suppressed
-        self._preview_target()
+        self._preview_aliases()
         if self._binding.publication["status"] != "Valid":
             raise GuiRpcError("Recipe cfg is not Valid", reason="invalid_cfg")
         actual = capture_actual(self._binding.publication, self._actual_fields())
@@ -1309,8 +1318,8 @@ class RecipeTab:
             binding.publish(replace(binding.capture, start_status="unknown"))
 
         payload: dict[str, object] = {"tab_id": tab, "expected": actual["cfg_ref"]}
-        if self._binding.target is not None:
-            payload["target"] = self._binding.target
+        if self._binding.aliases:
+            payload["aliases"] = self._binding.aliases
         try:
             started = tools.gui.send_gui_rpc(
                 "tab.run_start", payload, before_send=admit

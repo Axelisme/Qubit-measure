@@ -61,7 +61,7 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
             writeback,
             provide_options=lambda source_id: (),
             context=context,
-            captured_parameters=lambda _roles, _target: state.session_env.parameters,
+            captured_parameters=lambda _aliases: state.session_env.parameters,
         ),
         emit,
         writeback,

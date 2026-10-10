@@ -6,7 +6,10 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from zcu_tools.gui.app.measure.services.ports import CfgEdit
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.value_lookup import ValueInfo
@@ -70,18 +73,32 @@ def h_context_active(
 def h_context_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Return the complete published target, point and library as native JSON.
+    """Read one fixed native capture with complete resolved alias rows.
 
-    No params are accepted. Reads the fixed working-unit documents without
-    refreshing or materializing library assets. EMPTY and source faults retain
-    their owner errors. Unsupported/non-finite values fail the entire read with
-    PRECONDITION_FAILED/unserializable_context, never a partial observation.
-    Shared dispatch records context seen only after successful reply encoding.
+    Optional summaries=True describes array/list leaves using md_get rules.
+    Optional path selects a full subtree of target/point/library/aliases by
+    dotted mapping keys or canonical nonnegative list indices; it takes priority
+    over summaries. Invalid paths raise InvalidInputError naming the first bad
+    segment. Path replies include target, aliases, path and value.
+    No refresh, file I/O or asset materialization occurs. EMPTY/source faults
+    retain owner errors. Unsupported/nonfinite values fail the entire read with
+    PRECONDITION_FAILED/unserializable_context, even in partial modes. Shared
+    dispatch records context seen only after successfully encoding a read that
+    omitted both parameters; explicit false/empty values are partial too.
     """
-    del params
     parameters = adapter.context_control.read_context()
     try:
-        snapshot = {
+        aliases: list[dict[str, object]] = []
+        for row in parameters.resolved_aliases():
+            projected: dict[str, object] = {
+                "alias": row.alias,
+                "value": row.value,
+                "resolved": row.resolved,
+            }
+            if row.error is not None:
+                projected["error"] = row.error
+            aliases.append(projected)
+        snapshot: dict[str, object] = {
             "target": parameters.target.model_dump(mode="python"),
             # Registered component subclasses own the complete persisted fields.
             "point": parameters.document().model_dump(
@@ -90,16 +107,81 @@ def h_context_snapshot(
             "library": parameters.library.document().model_dump(
                 mode="python", serialize_as_any=True
             ),
+            "aliases": aliases,
         }
-        # Validate every nested value before JSON encoding. Success is a full
-        # context observation and advances the MCP guard baseline.
-        return json.loads(json.dumps(context_wire_value(snapshot), allow_nan=False))
+        # Validate the complete capture even when a projection hides some values.
+        wire: dict[str, object] = json.loads(
+            json.dumps(context_wire_value(snapshot), allow_nan=False)
+        )
+        path = params.get("path")
+        if isinstance(path, str):
+            return {
+                "target": wire["target"],
+                "aliases": wire["aliases"],
+                "path": path,
+                "value": _snapshot_path_value(wire, path),
+            }
+        if params.get("summaries", False):
+            summary = {
+                key: aliases if key == "aliases" else _snapshot_summary(value)
+                for key, value in snapshot.items()
+            }
+            return json.loads(json.dumps(context_wire_value(summary), allow_nan=False))
+        return wire
     except (TypeError, ValueError, RecursionError) as exc:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
             f"cannot fully snapshot the active context: {exc}",
             reason="unserializable_context",
         ) from exc
+
+
+def _md_summary(value: object) -> object:
+    # Retain the former md_get leaf descriptions; native complex scalars stay values.
+    if isinstance(value, np.generic):
+        value = value.item()
+    if value is None or isinstance(value, (str, bool, int, float, complex)):
+        return value
+    if isinstance(value, np.ndarray):
+        return f"{' × '.join(str(size) for size in value.shape)} array"
+    if isinstance(value, (list, tuple)):
+        if value and all(isinstance(row, (list, tuple)) for row in value):
+            widths = {len(row) for row in value}
+            if len(widths) == 1:
+                return f"{len(value)} × {widths.pop()} matrix"
+        return f"{len(value)} items"
+    if isinstance(value, dict):
+        return f"{len(value)} keys"
+    return type(value).__name__
+
+
+def _snapshot_summary(value: object) -> object:
+    if isinstance(value, dict):
+        if "__complex__" in value:
+            return value
+        return {key: _snapshot_summary(item) for key, item in value.items()}
+    return _md_summary(value)
+
+
+def _snapshot_path_value(snapshot: Mapping[str, object], path: str) -> object:
+    value: object = snapshot
+    for segment in path.split("."):
+        if segment and isinstance(value, Mapping) and segment in value:
+            value = value[segment]
+        elif (
+            isinstance(value, list)
+            and segment.isascii()
+            and segment.isdecimal()
+            and (segment == "0" or not segment.startswith("0"))
+            and len(segment) <= len(str(len(value)))
+            and int(segment) < len(value)
+        ):
+            value = value[int(segment)]
+        else:
+            raise InvalidInputError(
+                f"Invalid snapshot path {path!r}: segment {segment!r} is not readable"
+            )
+    return value
 
 
 def _value_info_to_wire(info: ValueInfo) -> dict[str, object]:

@@ -59,7 +59,11 @@ def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool in
         shots,
     )
 
-    tab = session.open_tab("singleshot/ge", target=target, reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "singleshot/ge",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     if use_reset is None:
         tab.disable_library("modules.reset")
     else:

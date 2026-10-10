@@ -16,6 +16,7 @@ from zcu_tools.gui.session.context_types import CommandOrigin
 from ..cfg_observation import cfg_error_to_remote
 from ..save_types import SaveArtifactRefWire, project_save_report
 from ._common import follow_tab
+from .tab import temporary_aliases
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -25,13 +26,7 @@ def h_tab_run_start(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
-    target = params.get("target")
-    if target is not None and (not isinstance(target, str) or not target.strip()):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            "target must be a non-empty component name",
-            reason="invalid_target",
-        )
+    aliases = temporary_aliases(params)
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
@@ -39,7 +34,7 @@ def h_tab_run_start(
         expected = decode_ref(params["expected"])
         follow_tab(adapter, tab_id, "run")
         operation_id = control.start_run(
-            tab_id, expected, target=target, origin=CommandOrigin("mcp")
+            tab_id, expected, aliases=aliases, origin=CommandOrigin("mcp")
         )
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc

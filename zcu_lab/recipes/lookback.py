@@ -34,7 +34,11 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     invalid cfg/native failures throw at their author step. Cancel returns without
     later saves/analyses/writes; finish_early saves usable partial Run data.
     """
-    tab = session.open_tab("lookback", target=target, reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "lookback",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     tab.use_library("modules.readout", readout_ref)
     if use_reset is None:
         tab.disable_library("modules.reset")

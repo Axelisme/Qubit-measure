@@ -16,7 +16,6 @@ from zcu_tools.gui.cfg.resource import (
     CfgStaleError,
 )
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import RoleSpec
 
 from ..adapter import AnalysisMode, WritebackItem
 from .plot_lifecycle import release_retired_plots
@@ -71,14 +70,14 @@ class TabService:
         cfg_resources: TabCfgResources,
         cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
         captured_parameters: Callable[
-            [Mapping[str, RoleSpec], str | None], ParameterContext | None
+            [Mapping[str, str] | None], ParameterContext | None
         ],
     ) -> None:
         """Inject owner-sequence captures and fixed cfg resolution construction.
 
-        captured_parameters freezes current global sources for the declared
-        aliases. An optional target overrides only that capture's first alias;
-        EMPTY returns None unless a target was requested. Source/target errors
+        captured_parameters freezes current global sources with optional named
+        aliases overrides. None and {} mean no override. EMPTY returns None
+        without overrides; nonempty aliases reject no_context. Source/alias errors
         propagate before registration. Every cfg refresh/reset captures current
         sources anew; cfg_resolution retains only its supplied fixed capture.
         """
@@ -92,32 +91,36 @@ class TabService:
         self._captured_parameters = captured_parameters
 
     def capture_parameters(
-        self, tab_id: str, *, target: str | None = None
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> ParameterContext | None:
         """Freeze current point/library/aliases for an existing tab's consumer.
 
-        target overrides this capture's first declared alias, not session rows
-        or tab state. EMPTY yields None without a target. Unknown tab and source,
-        alias or target failures propagate; no observation guard is refreshed.
+        aliases maps alias names to concrete components for this capture only.
+        None and {} use global rows. EMPTY yields None without overrides.
+        Unknown tab and source or alias failures propagate; no observation guard is refreshed.
         """
-        tab = self._state.get_tab(tab_id)
-        return self._captured_parameters(tab.adapter.parameter_roles(), target)
+        self._state.get_tab(tab_id)
+        return self._captured_parameters(aliases)
 
     def preview_cfg(
-        self, tab_id: str, expected: CfgRef, *, target: str
+        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
     ) -> CfgObservation:
-        """Preview one target's cfg without publishing or accepting a Run.
+        """Preview cfg with named aliases without publication or Run acceptance.
 
         Require an existing tab and its exact observed identity/revision.
         Resolve current inputs from the same capture owner as Run admission.
-        Stale refs, source/target failures and cfg notification guards propagate.
-        Return Valid or Invalid; do not change aliases, inputs or revision.
+        Stale refs, source/alias failures and cfg notification guards propagate.
+        None and {} return the cached observation. Nonempty aliases resolves
+        current inputs once. Return Valid or Invalid without changing global rows,
+        inputs or revision.
         """
         tab = self._state.get_tab(tab_id)
-        actual = tab.cfg.observe().ref
-        if expected != actual:
-            raise CfgStaleError(expected, actual)
-        parameters = self.capture_parameters(tab_id, target=target)
+        observed = tab.cfg.observe()
+        if expected != observed.ref:
+            raise CfgStaleError(expected, observed.ref)
+        if not aliases:
+            return observed
+        parameters = self.capture_parameters(tab_id, aliases=aliases)
         return tab.cfg.preview(
             expected.revision, resolution=self._cfg_resolution(parameters)
         )
@@ -211,7 +214,7 @@ class TabService:
         )
 
         def current_parameters() -> ParameterContext | None:
-            return self._captured_parameters(adapter.parameter_roles(), None)
+            return self._captured_parameters(None)
 
         cfg = self._cfg_resources.create(
             tab_id,
@@ -240,7 +243,7 @@ class TabService:
         """The adapter's default cfg under the current context — the base schema
         WorkspaceService needs to decode a persisted raw cfg into a live one."""
         adapter = self._registry.create(adapter_name)
-        parameters = self._captured_parameters(adapter.parameter_roles(), None)
+        parameters = self._captured_parameters(None)
         return adapter.make_default_cfg(
             replace(self._state.session_env, parameters=parameters)
         )

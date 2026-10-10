@@ -262,3 +262,39 @@ def test_yoko_setter_rejects_nonfinite_level_without_write(
     with pytest.raises(RuntimeError, match="finite"):
         setter(value, progress=False)
     assert session.level_writes == []
+
+
+@pytest.mark.parametrize("mode, unit", [("current", "A"), ("voltage", "V")])
+def test_yoko_readback_stores_unit_from_one_mode_observation(
+    mode: Literal["current", "voltage"], unit: str
+) -> None:
+    device, session = _make_yoko(output="on", mode=mode, level=0.001)
+    before_writes = list(session.writes)
+    before_state = (session.output, session.mode, session.level)
+    before_queries = len(session.queries)
+
+    info = device.get_info()
+
+    assert info.value_unit == unit
+    assert info.model_dump()["value_unit"] == unit
+    assert info.mode == mode
+    assert info.value == 0.001
+    assert session.queries[before_queries:] == [
+        ":OUTPut?",
+        ":SOURce:FUNCtion?",
+        ":SOURce:LEVel?",
+    ]
+    assert session.writes == before_writes
+    assert info.output == "on"
+    assert (session.output, session.mode, session.level) == before_state
+    assert info.rampstep == (1e-6 if mode == "current" else 1e-3)
+
+
+def test_fake_readback_stores_native_coordinate() -> None:
+    device = FakeDevice(fast_mode=True)
+    device.output_on()
+    device.set_value(0.125)
+    info = device.get_info()
+    assert info.value_unit == "native"
+    assert info.model_dump()["value_unit"] == "native"
+    assert info.value == 0.125

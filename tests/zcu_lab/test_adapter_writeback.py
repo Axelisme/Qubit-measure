@@ -301,7 +301,7 @@ def test_recipe_writeback_keeps_run_component_after_environment_change(
 ) -> None:
     adapter = _registry().create(name)
     calibration = _calibration(name)
-    captured = session.context.read_alias_context(adapter.parameter_roles())
+    captured = session.context.read_context()
     assert captured is not None
     run_env = SessionEnv(parameters=captured, soc=None, soccfg=None)
     session.control.set_alias_rows(

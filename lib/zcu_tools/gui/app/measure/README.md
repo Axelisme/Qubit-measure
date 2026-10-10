@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，全域 alias、Run admission 與 native Load 來源
+**Last updated:** 2026-10-10，named aliases、Run admission 與 native Load 來源
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -544,10 +544,15 @@ renders each publication after submitting an input change:
 
 Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
 remains valid. Run admission captures the current global `ParameterContext`, not tab birth sources.
-A single-use target resolves the same inputs against its temporary capture without
-changing the tab publication or global aliases. Recipe source queries also capture
-current globals through TabService. Targeted preview requires the original full
-CfgRef and returns a temporary observation without replacing it or publishing.
+Nonempty caller-owned `aliases` maps alias names to concrete components and
+resolves the same inputs against its temporary capture. It changes neither tab
+publication nor global rows. Omission, None and {} use cached acceptance.
+Recipe parameter/library queries and cfg preview use the same named overrides.
+Temporary preview requires the original full CfgRef and returns an observation
+without replacing it or publishing. Adapters do not declare parameter roles.
+EMPTY app captures without overrides retain deferred None; nonempty overrides
+reject no_context. Native Load takes Save storage from that one Load-time capture
+and reads historical fixed names without expanding current alias links.
 `schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
 fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves

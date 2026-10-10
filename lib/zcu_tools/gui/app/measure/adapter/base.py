@@ -48,7 +48,6 @@ from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
 from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.interactive import PluginDefinition, Session
-from zcu_tools.resources.entry import RoleSpec
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
@@ -450,15 +449,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         )
 
     # -- shared implementation (provided once) -----------------------------
-
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare ordered used aliases and their required component kinds.
-
-        Empty means no declared aliases. Global authored rows determine names;
-        RoleSpec.via is notebook-only and ignored by GUI. Cfg refresh and Run
-        admission each capture the current table, never a tab birth binding.
-        """
-        return {}
 
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         """Instantiate fresh defaults and validate their static input contract.

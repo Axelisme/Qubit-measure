@@ -35,9 +35,13 @@ def seed(value: int) -> CfgSchema:
 
 
 def test_reopen_owner_revokes_old_draft_and_handle(service: CfgEditorService) -> None:
-    original, _ = service.open_seeded(seed(1), owner_key="inspect-owner")
+    original, _ = service.open_seeded(
+        seed(1), owner_key="inspect-owner", parameters=None
+    )
     draft = service.get_draft(original)
-    replacement, _ = service.open_seeded(seed(2), owner_key="inspect-owner")
+    replacement, _ = service.open_seeded(
+        seed(2), owner_key="inspect-owner", parameters=None
+    )
     assert service.editor_id_for_owner("inspect-owner") == replacement
     with pytest.raises(CfgEditorError):
         service.set_field(original, "reps", 99)
@@ -51,10 +55,12 @@ def test_reopen_owner_revokes_old_draft_and_handle(service: CfgEditorService) ->
 def test_later_reopen_does_not_revive_retired_handles(
     service: CfgEditorService,
 ) -> None:
-    original, _ = service.open_seeded(seed(1), owner_key="inspect-owner")
-    second, _ = service.open_seeded(seed(2), owner_key="inspect-owner")
+    original, _ = service.open_seeded(
+        seed(1), owner_key="inspect-owner", parameters=None
+    )
+    second, _ = service.open_seeded(seed(2), owner_key="inspect-owner", parameters=None)
     service.teardown(second)
-    latest, _ = service.open_seeded(seed(3), owner_key="inspect-owner")
+    latest, _ = service.open_seeded(seed(3), owner_key="inspect-owner", parameters=None)
     for retired in (original, second):
         with pytest.raises(CfgEditorError):
             service.set_field(retired, "reps", 99)

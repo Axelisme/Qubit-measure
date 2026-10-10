@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-09, global aliases, explicit result-entry RPCs, synchronous Save reports and version handshake
+**Last updated:** 2026-10-11, stored device flux units
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -126,8 +126,8 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 88`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 120`: GUI process code revision. It is displayed, not compared.
+- `WIRE_VERSION = 91`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 123`: GUI process code revision. It is displayed, not compared.
 - `MCP_VERSION = 112`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
@@ -190,7 +190,19 @@ GUI owns observation and write tracking:
   image saves reject replaced results with `result_superseded`; image saves also
   retain the existing seen guards. No failed read or stale write triggers a retry.
 - `soc.info(include_cfg=true)` reveals the full SoC cfg. `context.snapshot`
-  returns `{target, point, library}` from the published parameter capture.
+  returns `{target, point, library, aliases}` from one published parameter capture.
+  Every successful reply includes complete ordered `{alias, value, resolved}` rows;
+  a failed alias has `resolved=null` and `error`. The public capture owner resolves
+  each row against its fixed point without consumer kind checks. Alias failures
+  do not hide source failures. Optional `summaries=true` preserves dict trees and
+  scalars, replacing array/list leaves with the former md_get descriptions.
+  Optional `path` takes priority and returns `{target, aliases, path, value}` with
+  a complete value. Dotted paths start with `target`, `point`, `library` or
+  `aliases`; mapping segments are literal keys and list indices are canonical
+  nonnegative decimals, such as `aliases.0.resolved`. Invalid/missing segments
+  return invalid input naming the first bad segment. There is no escaping or
+  domain-path alias. Only omission of both optional parameters establishes seen;
+  explicit `summaries=false` or an empty `path` cannot refresh the guard.
   `target` is the existing `entry_draft` or `saved_point` locator. `point` and
   `library` contain the complete working-unit native documents, including
   headers, registered component fields and provenance. The library contains
@@ -248,8 +260,13 @@ The wire surface is grouped by ownership:
 The `tab.get_figure` subtab locator is required and closed
 (`run|analysis|post_analysis`). It may bind a Run preview to
 `run_operation_id`, or an analysis preview to `operation_id`, never both.
-Omitting both retains the current-pane read. `device.snapshot.unit` comes from
-the registered device owner; `none` does not identify a physical flux unit. `method_entries/` owns the wire method
+Omitting both retains the current-pane read. `device.snapshot.unit` reads the cached Info's stored `value_unit`: YOKO reports
+A or V, and Fake reports native. Missing Info reports none without inferring from
+device type or polling hardware; none is not a usable flux coordinate. Recipe
+unit selection matches this snapshot exactly, including native, and rejects a
+mismatch before editing cfg. Remote cfg updates may include `value_unit`; Info
+validation rejects conflicting mode/unit pairs. The GUI panel does not expose
+an independent unit editor. `method_entries/` owns the wire method
 name, handler ref, schema, agent exposure and guard/reveal/operation policy.
 Adding a wire method requires one entry; MCP receives the projection through
 `rpc.catalog` after its version handshake. Descriptions direct the caller to
@@ -280,7 +297,13 @@ and saved files, adds no unsaved guard, and follows the Run pane only after succ
 `tab.run_start` requires the observed cfg_ref as `expected`. Cfg admission does
 not require a second per-connection cfg observation. Tab, SoC, device and
 authentication guards remain independent. A stale identity or revision returns expected/actual
-without starting an operation. An Invalid publication cannot run. Active Run
+without starting an operation. Optional `aliases` maps alias names to concrete
+components for parameter/library reads, cfg preview and Run acceptance. Omission,
+None and {} mean no override and use cached cfg. Nonempty preview requires the
+original expected ref and resolves current inputs without publication. Run uses
+that same mapping for its cfg and fixed metadata capture. An Invalid publication
+cannot run without a valid temporary resolution. Global rows and tab state never
+retain these overrides. Active Run
 blocks manual edits, reset, replacement and close on that tab; source publications
 and edits to other tabs remain allowed. Close becomes available after termination.
 
