@@ -16,20 +16,23 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import UUID
 
+import h5py
 import numpy as np
 import pytest
-from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
+from qtpy.QtWidgets import QApplication
+from zcu_tools.datafile import RunSnapshot, SoftwareProvenance, load_run_data
 from zcu_tools.device import BaseDevice, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -68,12 +71,16 @@ from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
+from tests.device._snapshot_fakes import SnapshotDevice
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
+from tests.gui.app.measure._native_save_support import native_save_session
+from tests.gui.app.measure.services._snapshot_adapter import SnapshotAdapter
 from zcu_lab.v2.fake.stub.core import FakeResult, FakeRunResult
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
@@ -123,7 +130,6 @@ def _make_inputs(state: State, tab_id: str, adapter: ExpAdapterProtocol) -> RunI
         request=RunRequest(
             soc=ctx.soc,
             soccfg=ctx.soccfg,
-            device_snapshot={},
             cfg_context=None
             if parameters is None
             else parameters.library.validation_context(),
@@ -171,7 +177,7 @@ class _FakeBg:
                 result = self.last_work()
                 assert self.last_on_done is not None
                 self.last_on_done(result)
-            except (RuntimeError, ValueError, TypeError) as exc:
+            except (RuntimeError, ValueError, TypeError, OSError) as exc:
                 assert self.last_on_error is not None
                 self.last_on_error(exc)
 
@@ -615,22 +621,17 @@ def test_cancel_run_sets_operation_stop_event():
     assert gate.has_active(OperationKind.RUN)
 
 
-def test_cancel_run_stops_experiment_setup_devices_before_first_device():
+def test_cancel_run_stops_selected_flux_before_first_write():
     state, tab_id, adapter = _make_state()
     dev = FakeDevice(fast_mode=True)
-    cfg = FakeDeviceInfo(address="none", output="on", value=1.0, rampstep=0.1)
 
-    def run_setup_devices(*_args: Any, context: RunContext) -> object:
-        exp_cfg = ExpCfgModel(dev={"run-dev": cfg})
-        setup_devices(
-            exp_cfg,
-            context.devices,
-            progress=False,
-            cancel_signal=context.cancel_signal,
+    def run_flux(*_args: Any, context: RunContext) -> object:
+        set_flux(
+            context.devices["run-dev"], 1.0, unit="native", stop=context.cancel_signal
         )
         return object()
 
-    adapter.run.side_effect = run_setup_devices
+    adapter.run.side_effect = run_flux
     svc, _gate, bg, handles = _make_run_service(state, devices={"run-dev": dev})
     token = svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
     svc.cancel_run()
@@ -649,18 +650,17 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
     second_device = FakeDevice(fast_mode=True)
     devices = {"flux": first_device}
     contexts: list[RunContext] = []
-    cfg = ExpCfgModel(
-        dev={"flux": FakeDeviceInfo(address="none", output="on", value=0.5)}
-    )
 
-    def run_setup(*_args: Any, context: RunContext) -> object:
+    def run_flux(*_args: Any, context: RunContext) -> object:
         contexts.append(context)
-        setup_devices(cfg, context.devices, cancel_signal=context.cancel_signal)
+        set_flux(
+            context.devices["flux"], 0.5, unit="native", stop=context.cancel_signal
+        )
         if len(contexts) == 1:
             context.cancel_signal.set_error("failed", "first run failed", None)
         return object()
 
-    adapter.run.side_effect = run_setup
+    adapter.run.side_effect = run_flux
     service, gate, background, handles = _make_run_service(state, devices=devices)
     inputs = _make_inputs(state, tab_id, adapter)
     first_token = service.start_run(inputs, plots=_plots())
@@ -837,12 +837,23 @@ def test_run_publishes_record_and_historical_metadata_together(
         experiment_tag="test/native",
     )
     settings = FakeDeviceInfo(address="offline", value=1.25)
-    inputs = replace(
-        inputs, request=replace(inputs.request, device_snapshot={"flux": settings})
+    state.put_device(
+        DeviceState(
+            name="flux",
+            type_name="FakeDevice",
+            address="offline",
+            status=DeviceStatus.CONNECTED,
+            remember=False,
+            info=settings,
+        )
     )
     identity = MagicMock(wraps=new_run_id)
     monkeypatch.setattr("zcu_tools.gui.app.measure.services.run.new_run_id", identity)
-    service, _gate, background, handles = _make_run_service(state)
+    driver = FakeDevice()
+    driver.set_value(1.25)
+    service, _gate, background, handles = _make_run_service(
+        state, devices={"flux": driver}
+    )
     before_run = datetime.now(UTC)
     token = service.start_run(inputs, plots=_plots())
     after_admission = datetime.now(UTC)
@@ -867,7 +878,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     assert metadata.labber_path is None
     assert metadata.finished_at is not None
     assert metadata.device_snapshot == {
-        "flux": FakeDeviceInfo(address="offline", value=1.25).model_dump(mode="json")
+        "flux": FakeDeviceInfo(address="none", value=1.25).model_dump(mode="json")
     }
     assert before_run <= datetime.fromisoformat(metadata.started_at) <= after_admission
     assert (
@@ -1000,7 +1011,7 @@ def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
         tab_id=tab_id,
         adapter_name="twotone/t1",
         adapter=adapter,
-        request=RunRequest(soc=None, soccfg=None, device_snapshot={}, cfg_context=None),
+        request=RunRequest(soc=None, soccfg=None, cfg_context=None),
         accepted_cfg=tab.cfg.accept(tab.cfg.observe().ref.revision),
         snapshot=_run_snapshot(),
         experiment_tag=adapter.experiment_tag,
@@ -1072,3 +1083,103 @@ def test_native_run_rejects_an_unpaired_result_without_publishing_evidence(
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
     assert outcome.error == "Native acquisition must return a RunRecord"
+
+
+def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
+    state, tab_id, _ = _make_state()
+    adapter = SnapshotAdapter()
+    flux, unused = SnapshotDevice(), SnapshotDevice()
+    flux.set_value(0.25)
+    unused.set_value(0.6)
+    flux.events.clear()
+    unused.events.clear()
+    service, gate, background, handles = _make_run_service(
+        state, devices={"flux": flux, "unused": unused}
+    )
+
+    def require_lease() -> None:
+        assert gate.has_active(OperationKind.RUN)
+
+    flux.before_read = unused.before_read = require_lease
+    inputs = _make_inputs(state, tab_id, adapter)
+    inputs = replace(
+        inputs,
+        request=replace(inputs.request, soc=None, soccfg=None),
+        snapshot=_run_snapshot(),
+        experiment_tag=adapter.experiment_tag,
+    )
+    token = service.start_run(inputs, plots=_plots())
+    assert flux.events == unused.events == []
+    background.run_work()
+    assert flux.events == ["read", "write"]
+    assert unused.events == ["read"]
+    metadata = state.get_tab(tab_id).run.metadata
+    assert metadata is not None
+    assert metadata.device_snapshot is not None
+    assert metadata.device_snapshot["flux"]["value"] == 0.25
+    assert metadata.device_snapshot["unused"]["value"] == 0.6
+    flux.set_value(0.9)
+    assert metadata.device_snapshot["flux"]["value"] == 0.25
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "finished"
+
+
+def test_device_read_failure_rejects_run_before_core() -> None:
+    state, tab_id, _ = _make_state()
+    adapter = SnapshotAdapter()
+    flux, unused = SnapshotDevice(), SnapshotDevice()
+    unused.read_failure = OSError("snapshot read failed")
+    service, gate, background, handles = _make_run_service(
+        state, devices={"flux": flux, "unused": unused}
+    )
+    token = service.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    background.run_work()
+    assert state.get_tab(tab_id).run.result is None
+    assert flux.events == unused.events == ["read"]
+    assert flux.get_value() == 0.0
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error == "snapshot read failed"
+    assert not gate.has_active(OperationKind.RUN)
+
+
+def test_gui_save_uses_fixed_run_device_snapshot(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    with native_save_session(tmp_path, qapp) as session:
+        state = session.state
+        adapter = SnapshotAdapter()
+        state.get_tab("tab").adapter = adapter
+        flux = SnapshotDevice()
+        flux.set_value(0.25)
+        flux.events.clear()
+        service, _gate, background, handles = _make_run_service(
+            state, devices={"flux": flux}
+        )
+        inputs = replace(
+            _make_inputs(state, "tab", adapter),
+            snapshot=session.metadata.snapshot,
+            experiment_tag=adapter.experiment_tag,
+        )
+        token = service.start_run(inputs, plots=_plots())
+        background.run_work()
+        outcome = handles.poll(token)
+        assert outcome is not None and outcome.status == "finished"
+        assert flux.events == ["read", "write"]
+        flux.read_failure = OSError("Save must not read hardware")
+        report = session.save()
+        path = next(
+            item.output.path
+            for item in report.outputs
+            if item.output.format == "data_h5"
+        )
+        restored = load_run_data(path)
+        assert restored.metadata.device_snapshot is not None
+        assert restored.metadata.device_snapshot["flux"]["value"] == 0.25
+        with h5py.File(path, "r") as file:
+            dataset = file["device"]
+            assert isinstance(dataset, h5py.Dataset)
+            assert dataset.shape == ()
+            string = h5py.check_string_dtype(dataset.dtype)
+            assert string is not None and string.encoding == "utf-8"
+        assert flux.events == ["read", "write"]

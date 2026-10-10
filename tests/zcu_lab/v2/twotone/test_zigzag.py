@@ -47,7 +47,7 @@ def _lowered_cfg(adapter_type):
         raw = schema_to_resolved_dict(draft.snapshot())
     finally:
         draft.close()
-    request = RunRequest(soc=MagicMock(), soccfg=MagicMock(), device_snapshot={})
+    request = RunRequest(soc=MagicMock(), soccfg=MagicMock())
     return adapter_type().build_exp_cfg(raw, request)
 
 

@@ -1,5 +1,6 @@
 """Typed fake acquisition and native figures shared by save contract tests."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -18,6 +19,7 @@ from zcu_tools.experiment.context import RunContext
 class SavingCfg(ExpCfgModel):
     """Synthetic gain in volts per unit signal."""
 
+    dev: Mapping[str, str] | None = None
     gain: float = 1.0
 
 

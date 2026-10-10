@@ -61,16 +61,7 @@ class DevicePort(Protocol):
 
         Observe ``cancel_signal`` between cooperative work segments. Unknown or
         disconnected names, invalid limits, and I/O failures must raise.
-        """
-        ...
-
-    def setup(
-        self, settings: tuple[DeviceSetup, ...], cancel_signal: StopSignal
-    ) -> None:
-        """Apply explicit settings in order; reject unknown settings or I/O errors.
-
-        Observe cancellation while operating hardware. The engine does not
-        connect devices, repair settings, or retry this operation.
+        Unknown/disconnected-device errors must identify the requested name.
         """
         ...
 

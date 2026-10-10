@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
@@ -46,7 +46,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 
 class _DeviceOnlyCfg(ExpCfgModel):
-    pass
+    dev: Mapping[str, str] | None = None
 
 
 class _PulseModules(ConfigBase):
@@ -133,7 +133,6 @@ def test_assembly_converts_nested_arb_with_capture_bound_paths(
         fields,
         _NativeExperimentCfg,
         context=captured.validation_context(),
-        device_snapshot={},
     )
     # Inspect the public serialized native cfg, not factory internals.
     restored = NativeModuleCfgFactory.from_raw(cfg.modules.drive.to_dict())
@@ -209,7 +208,6 @@ def test_library_arb_assembly_json_roundtrip_needs_no_provider(
         ),
         _NativeExperimentCfg,
         context=captured.validation_context(),
-        device_snapshot={},
     )
     restored = _NativeExperimentCfg.model_validate_json(cfg.model_dump_json())
     module = restored.modules.drive
@@ -239,7 +237,6 @@ def test_assembly_rejects_arb_without_assets() -> None:
             ExperimentCfgInput({"modules": {"drive": pulse}}),
             _PulseExperimentCfg,
             context=None,
-            device_snapshot={},
         )
 
 
@@ -258,17 +255,6 @@ class _NamedSweeps(ConfigBase):
 
 class _NamedSweepExperimentCfg(ExpCfgModel):
     sweep: _NamedSweeps
-
-
-def _device(value: float) -> FakeDeviceInfo:
-    return FakeDeviceInfo(address="fake", value=value)
-
-
-def _assert_fake_device_value(cfg: _DeviceOnlyCfg, name: str, value: float) -> None:
-    assert cfg.dev is not None
-    dev = cfg.dev[name]
-    assert isinstance(dev, FakeDeviceInfo)
-    assert dev.value == pytest.approx(value)
 
 
 def _pulse_raw(freq: float) -> dict[str, ExperimentCfgValue]:
@@ -303,55 +289,6 @@ def _library(freq: float | None = None) -> LibrarySnapshot:
     )
 
 
-def test_assemble_experiment_cfg_uses_explicit_device_snapshot() -> None:
-    snapshot = {"flux": _device(1.0)}
-
-    cfg = assemble_experiment_cfg(
-        ExperimentCfgInput({"dev": {"flux": {"value": 2.5, "output": "on"}}}),
-        _DeviceOnlyCfg,
-        context=None,
-        device_snapshot=snapshot,
-    )
-
-    _assert_fake_device_value(cfg, "flux", 2.5)
-    assert cfg.dev is not None
-    assert cfg.dev["flux"].output == "on"
-    assert snapshot["flux"].value == pytest.approx(1.0)
-
-
-def test_make_cfg_reads_current_devices_without_setup_or_mutating_prior_cfg() -> None:
-    manager = DeviceManager()
-    device = FakeDevice(fast_mode=True)
-    manager.register_device("flux", device)
-    env = CfgEnv(md=MetaDict(), ml=_library(), device_manager=manager)
-    raw: dict[str, ExperimentCfgValue] = {"dev": {"flux": {"output": "on"}}}
-
-    first = make_cfg(raw, _DeviceOnlyCfg, env)
-    device.set_value(0.4)
-    second = make_cfg(raw, _DeviceOnlyCfg, env)
-    _assert_fake_device_value(first, "flux", 0.0)
-    _assert_fake_device_value(second, "flux", 0.4)
-    assert device.get_output() == "off"
-    assert raw == {"dev": {"flux": {"output": "on"}}}
-
-
-def test_make_cfg_propagates_device_read_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    device = FakeDevice(fast_mode=True)
-    manager = DeviceManager()
-    manager.register_device("flux", device)
-    env = CfgEnv(md=MetaDict(), ml=_library(), device_manager=manager)
-    make_cfg({}, _DeviceOnlyCfg, env)
-
-    def failed_read() -> FakeDeviceInfo:
-        raise RuntimeError("device read failed")
-
-    monkeypatch.setattr(device, "get_info", failed_read)
-    with pytest.raises(RuntimeError, match="device read failed"):
-        make_cfg({}, _DeviceOnlyCfg, env)
-
-
 def test_assemble_experiment_cfg_uses_ml_from_each_call() -> None:
     fields = ExperimentCfgInput({"modules": {"drive": "Q1.pulses.drive"}})
 
@@ -359,13 +296,11 @@ def test_assemble_experiment_cfg_uses_ml_from_each_call() -> None:
         fields,
         _PulseExperimentCfg,
         context=_library(1000.0).validation_context(),
-        device_snapshot={},
     )
     cfg_b = assemble_experiment_cfg(
         fields,
         _PulseExperimentCfg,
         context=_library(2000.0).validation_context(),
-        device_snapshot={},
     )
 
     assert cfg_a.modules.drive.freq == pytest.approx(1000.0)
@@ -437,15 +372,11 @@ def test_inline_module_tokens_do_not_require_a_library(token_kind: str) -> None:
             ch=0, nqz=1, freq=1000.0, gain=0.1, waveform=ConstWaveformCfg(length=1.0)
         )
     fields = ExperimentCfgInput({"modules": {"drive": token}})
-    cfg = assemble_experiment_cfg(
-        fields, _PulseExperimentCfg, context=None, device_snapshot={}
-    )
+    cfg = assemble_experiment_cfg(fields, _PulseExperimentCfg, context=None)
     assert cfg.modules.drive.freq == pytest.approx(1000.0)
     assert cfg.modules.drive.waveform.length == pytest.approx(1.0)
     cfg.modules.drive.freq = 2000.0
-    again = assemble_experiment_cfg(
-        fields, _PulseExperimentCfg, context=None, device_snapshot={}
-    )
+    again = assemble_experiment_cfg(fields, _PulseExperimentCfg, context=None)
     assert again.modules.drive.freq == pytest.approx(1000.0)
 
 
@@ -455,7 +386,6 @@ def test_module_reference_without_context_preserves_resolution_error() -> None:
             ExperimentCfgInput({"modules": {"drive": "Q1.pulses.drive"}}),
             _PulseExperimentCfg,
             context=None,
-            device_snapshot={},
         )
 
 
@@ -463,7 +393,7 @@ def test_module_reference_without_context_preserves_resolution_error() -> None:
     ("values", "reason"),
     [
         ({"dev": 1}, "field 'dev' must be a mapping"),
-        ({"dev": {"flux": 1}}, "patch for 'flux' must be a mapping"),
+        ({"dev": {"flux": 1}}, "name for role 'flux' must be a string"),
         ({"modules": 1}, "field 'modules' must be a mapping"),
         ({"modules": {"drive": 1}}, "modules.drive"),
     ],
@@ -476,17 +406,6 @@ def test_invalid_assembly_tokens_fail_at_their_path(
             ExperimentCfgInput(values),
             _PulseExperimentCfg,
             context=None,
-            device_snapshot={"flux": _device(1.0)},
-        )
-
-
-def test_unknown_device_patch_does_not_add_a_device() -> None:
-    with pytest.raises(KeyError, match="not found in device snapshot"):
-        assemble_experiment_cfg(
-            ExperimentCfgInput({"dev": {"missing": {"value": 2.0}}}),
-            _DeviceOnlyCfg,
-            context=None,
-            device_snapshot={"flux": _device(1.0)},
         )
 
 
@@ -496,7 +415,6 @@ def test_validation_failure_retains_target_name_and_cause() -> None:
             ExperimentCfgInput({"reps": "invalid"}),
             _PulseExperimentCfg,
             context=None,
-            device_snapshot={},
         )
     assert isinstance(failure.value.__cause__, ValueError)
 
@@ -514,14 +432,10 @@ def test_single_sweep_preserves_values_and_capture_isolation(
     fields = ExperimentCfgInput({"sweep": sweep})
     samples[0] = 9.0
 
-    first = assemble_experiment_cfg(
-        fields, _SingleSweepExperimentCfg, context=None, device_snapshot={}
-    )
+    first = assemble_experiment_cfg(fields, _SingleSweepExperimentCfg, context=None)
     np.testing.assert_array_equal(first.sweep.gain, [0.1, 0.2])
     first.sweep.gain[0] = 8.0
-    second = assemble_experiment_cfg(
-        fields, _SingleSweepExperimentCfg, context=None, device_snapshot={}
-    )
+    second = assemble_experiment_cfg(fields, _SingleSweepExperimentCfg, context=None)
     np.testing.assert_array_equal(second.sweep.gain, [0.1, 0.2])
 
 
@@ -534,8 +448,44 @@ def test_named_multi_sweep_is_not_single_sweep_normalized() -> None:
             }
         }
     )
-    cfg = assemble_experiment_cfg(
-        fields, _NamedSweepExperimentCfg, context=None, device_snapshot={}
-    )
+    cfg = assemble_experiment_cfg(fields, _NamedSweepExperimentCfg, context=None)
     np.testing.assert_array_equal(cfg.sweep.gain, [0.1, 0.2])
     np.testing.assert_array_equal(cfg.sweep.delay, [1.0, 2.0])
+
+
+def test_make_cfg_preserves_role_names_without_hardware_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = DeviceManager()
+    device = FakeDevice()
+    manager.register_device("flux_source", device)
+
+    info = device.get_info()
+    reads: list[str] = []
+
+    def recording_info() -> FakeDeviceInfo:
+        reads.append("flux_source")
+        return info
+
+    monkeypatch.setattr(device, "get_info", recording_info)
+    env = CfgEnv(md=MetaDict(), ml=_library(), device_manager=manager)
+    make_cfg({}, _DeviceOnlyCfg, env)
+    assert reads == []
+    raw: dict[str, ExperimentCfgValue] = {"dev": {"flux_dev": "flux_source"}}
+    cfg = make_cfg(raw, _DeviceOnlyCfg, env)
+    assert reads == []
+    assert cfg.dev == {"flux_dev": "flux_source"}
+    assert cfg.model_dump(mode="json")["dev"] == {"flux_dev": "flux_source"}
+    assert raw == {"dev": {"flux_dev": "flux_source"}}
+    assert device.get_value() == 0.0
+    assert device.get_output() == "off"
+
+
+def test_make_cfg_without_roles_does_not_inject_connected_settings() -> None:
+    manager = DeviceManager()
+    device = FakeDevice()
+    manager.register_device("unrelated", device)
+    env = CfgEnv(md=MetaDict(), ml=_library(), device_manager=manager)
+    cfg = make_cfg({}, _DeviceOnlyCfg, env)
+    assert cfg.dev is None
+    assert device.get_value() == 0.0

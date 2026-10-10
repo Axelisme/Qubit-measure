@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.device import DeviceManager, FakeDeviceInfo
+from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
@@ -100,59 +100,6 @@ def test_measure_reference_missing_then_relinks_with_embedded_snapshot() -> None
     assert raw["drive"]["gain"] == 0.25  # type: ignore[index]
 
 
-@pytest.mark.parametrize("device_name", ["sensor", "probe"])
-def test_run_cfg_assembly_uses_only_the_frozen_device_snapshot(
-    device_name: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    adapter = CalibrationAdapter()
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-    schema = CfgSchema(
-        spec=CfgSectionSpec(
-            fields={
-                "dev": CfgSectionSpec(
-                    fields={
-                        device_name: CfgSectionSpec(
-                            fields={"label": ScalarSpec("Label", str)}
-                        ),
-                    }
-                )
-            }
-        ),
-        value=CfgSectionValue(
-            fields={
-                "dev": CfgSectionValue(
-                    fields={
-                        device_name: CfgSectionValue(
-                            fields={"label": DirectValue("frozen_label")}
-                        ),
-                    }
-                )
-            }
-        ),
-    )
-    raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
-    device = FakeDeviceInfo(address="frozen", value=0.125)
-    request = RunRequest(soc=None, soccfg=None, device_snapshot={device_name: device})
-    device.value = 99.0
-
-    def unexpected_device_read(_manager):
-        pytest.fail("Frozen Run must not read live devices")
-
-    monkeypatch.setattr(DeviceManager, "get_all_info", unexpected_device_read)
-    cfg = adapter.build_exp_cfg(raw, request)
-
-    assert cfg.dev is not None
-    observed = cfg.dev[device_name]
-    assert isinstance(observed, FakeDeviceInfo)
-    assert observed.label == "frozen_label"
-    assert observed.value == 0.125
-    assert observed.address == "frozen"
-    assert observed is not device
-    assert device.label != "frozen_label"
-    assert raw["dev"] == {device_name: {"label": "frozen_label"}}
-
-
 def _calibration_schema(mode: str) -> tuple[CalibrationAdapter, SessionEnv, CfgSchema]:
     adapter = CalibrationAdapter()
     ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
@@ -183,9 +130,7 @@ def test_resolved_calibration_is_assembled_from_cfg_not_metadict(mode: str) -> N
     ctx.md.width = 20.0
     ctx.md.phase = 0.2
     raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
-    cfg = adapter.build_exp_cfg(
-        raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
-    )
+    cfg = adapter.build_exp_cfg(raw, RunRequest(soc=None, soccfg=None))
 
     assert cfg.mode == mode
     assert cfg.calibration.model_dump() == {
@@ -203,7 +148,7 @@ def test_empty_optional_calibration_uses_model_defaults() -> None:
     schema.value.fields["mode"] = DirectValue("plain")
     raw = schema_to_raw_dict(schema, None)
     cfg = adapter.build_exp_cfg(
-        raw, RunRequest(soc=None, soccfg=None, device_snapshot={}, cfg_context=None)
+        raw, RunRequest(soc=None, soccfg=None, cfg_context=None)
     )
     assert cfg.mode == "plain"
     assert cfg.calibration == CalibrationCfg()
@@ -243,7 +188,7 @@ def test_adapter_run_rejects_invalid_calibration_before_device_io(
     monkeypatch.setattr(DeviceManager, "get_all_info", unexpected_device_read)
     with pytest.raises(ValueError, match=field):
         adapter.run(
-            RunRequest(soc=None, soccfg=None, device_snapshot={}, cfg_context=None),
+            RunRequest(soc=None, soccfg=None, cfg_context=None),
             raw,
             context=RunContext(
                 None,

@@ -37,7 +37,7 @@ from zcu_tools.cfg_model import (
     WaveformCfg,
     WaveformSpec,
 )
-from zcu_tools.device import DeviceInfo, DeviceManager
+from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import format_sweep1D, get_single_sweep_name
 from zcu_tools.program.v2 import SweepCfg
@@ -65,10 +65,9 @@ type ExperimentCfgValue = (
     | Sequence[ExperimentCfgValue]
     | Mapping[str, ExperimentCfgValue]
 )
-# Assembly adds device models and sweep arrays whose dtype the formatter infers.
+# Assembly adds native modules and sweep arrays whose dtype the formatter infers.
 type _AssemblyValue = (
     ExperimentCfgValue
-    | DeviceInfo
     | NativeModuleCfg
     | NDArray[np.generic]
     | Mapping[str, _AssemblyValue]
@@ -110,8 +109,9 @@ class CfgEnv:
 
     md is the borrowed parameter mapping; assembly never evaluates it.
     ml is a fixed library snapshot with its captured asset capability.
-    device_manager supplies fresh device info on each make_cfg call.
-    This container owns no resource lifetime and never refreshes ml.
+    device_manager remains the caller's borrowed driver resource; assembly
+    never reads or configures it. This container owns no resource lifetime
+    and never refreshes ml.
     """
 
     md: MetaDict
@@ -124,35 +124,34 @@ def assemble_experiment_cfg(
     cfg_model: type[T_ExpCfg],
     *,
     context: CfgValidationContext | None,
-    device_snapshot: Mapping[str, DeviceInfo],
     overrides: ExperimentCfgInput | None = None,
 ) -> T_ExpCfg:
     """Materialize captured experiment fields and validate the target cfg.
 
     overrides force-merge target fields without changing either input.
     context supplies fixed module references and assets; None permits only
-    dependency-free inline modules. device_snapshot maps registered names to
-    observed settings, and dev field patches cannot add devices.
-    Single-sweep normalization follows experiment.utils.
+    dependency-free inline modules. dev retains role-to-device-name strings,
+    without querying availability or reading settings. Single-sweep
+    normalization follows experiment.utils.
 
-    No input is mutated, library refreshed or hardware configured.
-    Malformed device/module tokens raise TypeError with their input path;
-    unknown devices raise KeyError. Core reference/asset/schema errors
-    propagate. Target validation raises ValueError retaining its cause.
+    No input is mutated, library refreshed or hardware read/configured.
+    Malformed role-name/module tokens raise TypeError with their input path.
+    Core reference/asset/schema errors propagate. Target validation raises
+    ValueError retaining its cause.
     """
     values = raw_cfg.to_raw()
     if overrides is not None:
         deepupdate(values, overrides.to_raw(), behavior="force")
 
-    devices = deepcopy(dict(device_snapshot))
-    for name, patch in _device_patches(values).items():
-        if name not in devices:
-            raise KeyError(f"Device {name} not found in device snapshot.")
-        if not isinstance(patch, Mapping):
-            raise TypeError(f"Device patch for {name!r} must be a mapping.")
-        devices[name] = devices[name].with_updates(**dict(patch))
+    roles = values.get("dev")
+    if roles is not None:
+        if not isinstance(roles, Mapping):
+            raise TypeError("Experiment config field 'dev' must be a mapping.")
+        for role, name in roles.items():
+            if not isinstance(name, str):
+                raise TypeError(f"Device name for role {role!r} must be a string.")
 
-    assembled: dict[str, _AssemblyValue] = {**values, "dev": devices}
+    assembled: dict[str, _AssemblyValue] = dict(values)
     modules = values.get("modules")
     if modules is not None:
         if not isinstance(modules, Mapping):
@@ -188,31 +187,19 @@ def make_cfg(
     *,
     overrides: Mapping[str, ExperimentCfgValue] | None = None,
 ) -> T_ExpCfg:
-    """Assemble mapping fields with env's fixed library and current device info.
+    """Assemble mapping fields with env's fixed library, without device reads.
 
     raw_cfg and overrides follow ExperimentCfgInput; cfg_model is the target
-    experiment model. env supplies borrowed resources. Device reads and
-    assembly errors propagate. Inputs and existing cfgs remain unchanged.
-    This call does not refresh sources, evaluate md expressions or setup devices.
+    experiment model. env supplies borrowed resources. Assembly errors
+    propagate. Inputs and existing cfgs remain unchanged. This call does not
+    refresh sources, evaluate md expressions or read/configure devices.
     """
     return assemble_experiment_cfg(
         ExperimentCfgInput(raw_cfg),
         cfg_model,
         context=env.ml.validation_context(),
-        device_snapshot=env.device_manager.get_all_info(),
         overrides=ExperimentCfgInput(overrides) if overrides is not None else None,
     )
-
-
-def _device_patches(
-    values: Mapping[str, ExperimentCfgValue],
-) -> Mapping[str, ExperimentCfgValue]:
-    patches = values.get("dev")
-    if patches is None:
-        return {}
-    if not isinstance(patches, Mapping):
-        raise TypeError("Experiment config field 'dev' must be a mapping.")
-    return patches
 
 
 def _module_input(

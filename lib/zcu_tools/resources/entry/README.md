@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-10，元件名稱與 view 綁定的驗證分界
+**Last updated:** 2026-10-10，容器版本與元件 model 的驗證分界
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -76,7 +76,9 @@ DocumentStore 擁有單檔衝突檢查與 atomic replace。檔案、快照與視
 
 Model 的 before validator 可把舊欄位改成新欄位。Open、refresh 與空 edit 不寫檔。非空 commit 在最新 normalized tree 合併與完整驗證，再把序列化差異套回 raw YAML，保留未改節點的引號、註解與順序。保存消費 actual model_dump 輸出，不用原欄位值繞過 serializer。格式轉換不生成 manual provenance。
 
-Forward-minor 先讓 validator 處理完整 input，再保存剩餘未知欄位。Forbid／ignore 的 typed snapshot 隱藏 temporary extras，allow model 保留它們。補回 temporary extras 的 model 位置若不再是 mapping，或 key 已被 serializer 佔用，直接 raise，不猜重塑後的位置。當前 minor 沿用原 model 的 extra 策略，ignore 丟棄的欄位在非空 commit 時移除。
+Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入。較新 minor 保留容器層的未知欄位，包括 general 與 provenance，不覆寫元件或 nested model 的 extra 策略。任何 minor 都由原 model 驗證完整元件 input：forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們。Ignore 丟棄的欄位在非空 commit 時移除。元件的 defaults、validators 與舊寫法演進由定義者決定，不綁容器版本號。非法元件在 load、refresh 與 commit 驗證時失敗，不發布新的值、來源或快照。
+
+容器層剩餘未知欄位的 serialization 位置若不再是 mapping，或 key 已被 serializer 佔用，直接 raise，不猜重塑後的位置。框架不提供版本遷移鏈或相容 loader；離線資料轉換由 caller 明確執行獨立工具。
 
 List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。Resize 保留 typed base／draft 的最長相等前綴，替換後綴不沿用舊位置的 future keys。框架不推測元素身分。
 

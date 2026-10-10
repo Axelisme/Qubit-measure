@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC
-from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -18,7 +16,6 @@ from typing_extensions import TypeVar
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import CfgValidationContext
     from zcu_tools.datafile import RunMetadata
-    from zcu_tools.device import DeviceInfo
     from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.entry.storage import PointStorageBinding
@@ -156,7 +153,7 @@ T_AnalyzeParams = TypeVar("T_AnalyzeParams", default=NoAnalyzeParams)
 
 @dataclass(frozen=True)
 class RunRequest:
-    """Runtime handles, observed device settings and captured cfg capability.
+    """Observed SoC handles and the fixed cfg materialization capability.
 
     cfg_context is the fixed library/assets validation context captured for
     this Run; None permits only dependency-free inline cfg inputs.
@@ -164,13 +161,7 @@ class RunRequest:
 
     soc: SocHandle | None
     soccfg: SocCfgHandle | None
-    device_snapshot: Mapping[str, DeviceInfo]
     cfg_context: CfgValidationContext | None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "device_snapshot", deepcopy(dict(self.device_snapshot))
-        )
 
 
 @dataclass(frozen=True)

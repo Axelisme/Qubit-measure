@@ -1202,8 +1202,9 @@ class RecipeTab:
         No GUI-observed default is selected. Unknown devices and mismatched units
         fail as invalid_device. Physical units must match the device snapshot;
         native requires confirmed FakeDevice type and snapshot unit none.
-        Selection edits dev.flux_dev only after validation and records the unit
-        for the subsequent Run snapshot. This method never connects a device.
+        Selection edits dev.flux_dev and flux_unit only after validation. The
+        asserted unit remains recorded for the subsequent Run snapshot. This
+        method never connects a device or converts coordinates.
         """
         if not name or not name.strip():
             raise ValueError("flux device name must be non-empty")
@@ -1213,6 +1214,7 @@ class RecipeTab:
         observed = self._binding.tools.send_gui_rpc("device.snapshot", {"name": name})
         resolved_unit = self._flux_unit(_cfg_object(observed["snapshot"]), unit)
         self.set("dev.flux_dev", name)
+        self.set("flux_unit", resolved_unit)
         self._binding.origins["dev.flux_dev"] = "explicit"
         self._binding.flux_unit = resolved_unit
 

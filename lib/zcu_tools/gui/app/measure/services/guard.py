@@ -5,10 +5,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter
-
 from zcu_tools.datafile import RunSnapshot
-from zcu_tools.device import DeviceInfo
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ExpAdapterProtocol,
@@ -45,7 +42,7 @@ class RunInputs:
 
     tab_id identifies the admitted tab. adapter_name is its registered adapter
     name; adapter is the instance that executes this Run. request holds the
-    observed SoC handles, device settings and fixed cfg context. accepted_cfg is
+    observed SoC handles and fixed cfg context. accepted_cfg is
     the exact accepted publication with detached resolved values and provenance.
     RunService never re-reads these inputs from State or re-lowers a schema.
     snapshot fixes the current saved entry/point and every resolved alias at
@@ -141,9 +138,9 @@ class GuardService:
         """Check tab_id and capture the exact cfg revision and observed inputs.
 
         Requires ACTIVE context and the adapter's Run preconditions, including
-        SoC when declared. Unknown tab, readiness, device settings and adapter
-        validation failures raise GuardError; stale or invalid publications keep
-        their cfg errors. Device settings are cached observations, not live reads.
+        SoC when declared. Unknown tab, readiness and adapter validation failures
+        raise GuardError; stale or invalid publications keep their cfg errors.
+        Cached device settings do not participate in admission.
         Captures current global parameters once for cfg context and all resolved
         alias names. target overrides this Run's first declared alias, never
         global rows or tab cfg publication. Temporary acceptance uses that same
@@ -161,28 +158,10 @@ class GuardService:
             expected_revision,
             resolution=None if target is None else self._cfg_resolution(parameters),
         )
-        try:
-            raw_cfg = accepted.values
-            device_snapshot: dict[str, DeviceInfo] = {}
-            info_type = TypeAdapter(DeviceInfo)
-            for device in self._state.list_devices():
-                if device.is_live():
-                    if device.info is None:
-                        raise ValueError(
-                            f"Device {device.name!r} has no observed settings"
-                        )
-                    device_snapshot[device.name] = info_type.validate_python(
-                        device.info
-                    )
-        except Exception as exc:
-            raise GuardError(
-                f"Config invalid: {exc}", reason_code="invalid_cfg"
-            ) from exc
-
+        raw_cfg = accepted.values
         req = RunRequest(
             soc=ctx.soc,
             soccfg=ctx.soccfg,
-            device_snapshot=device_snapshot,
             cfg_context=None
             if parameters is None
             else parameters.library.validation_context(),

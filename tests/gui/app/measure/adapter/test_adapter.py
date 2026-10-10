@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.measure.adapter import (
@@ -65,11 +65,7 @@ def test_require_soc_handles_is_framework_request_validation() -> None:
     from zcu_tools.gui.app.measure.adapter import RunRequest
 
     with pytest.raises(RuntimeError, match="soc is required"):
-        require_soc_handles(
-            RunRequest(
-                soc=None, soccfg=MagicMock(), device_snapshot={}, cfg_context=None
-            )
-        )
+        require_soc_handles(RunRequest(soc=None, soccfg=MagicMock(), cfg_context=None))
 
 
 # ---------------------------------------------------------------------------
@@ -892,37 +888,6 @@ def test_base_adapter_analyze_raises_by_default():
 # ---------------------------------------------------------------------------
 # BaseAdapter — default build_exp_cfg via ExpCfg_cls
 # ---------------------------------------------------------------------------
-
-
-def test_base_adapter_build_exp_cfg_uses_explicit_snapshot():
-    """Materialization receives detached device settings and no live library."""
-
-    class _Cfg:
-        pass
-
-    class _Adapter(BaseAdapter):
-        capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
-        exp_cls = MagicMock()
-        ExpCfg_cls = _Cfg
-
-        @classmethod
-        def cfg_definition(cls) -> MeasureCfgDefinition:
-            return _empty_cfg_definition()
-
-        def make_filename_stem(self, ctx):
-            return "stem"
-
-    req = MagicMock()
-    sentinel = object()
-    with patch(
-        "zcu_tools.gui.app.measure.adapter.base.assemble_experiment_cfg",
-        return_value=sentinel,
-    ) as make_cfg:
-        out = _Adapter().build_exp_cfg({"reps": 1}, req)
-    make_cfg.assert_called_once_with(
-        {"reps": 1}, _Cfg, ml=None, device_snapshot=req.device_snapshot
-    )
-    assert out is sentinel
 
 
 def test_base_adapter_build_exp_cfg_raises_without_expcfg_cls():

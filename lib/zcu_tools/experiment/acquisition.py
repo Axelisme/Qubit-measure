@@ -8,13 +8,18 @@ import json
 import platform
 import socket
 import subprocess
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from importlib import metadata
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from zcu_tools.datafile import SoftwareProvenance
+from pydantic import TypeAdapter
+
+from zcu_tools.datafile import JsonObject, SoftwareProvenance
+from zcu_tools.device import BaseDevice
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.resources.entry import new_run_id as generate_run_id
 
@@ -29,7 +34,11 @@ class AcquisitionEvidence:
     analysis and saving. completion is complete for normal return without stop,
     or stopped for normal return with the existing StopSignal set.
     provenance contains software/host/cached-config facts captured before the
-    acquisition; its version mapping is copied on construction.
+    acquisition; its version mapping is copied on construction. device_snapshot
+    holds detached pre-acquisition driver settings keyed by connected name. None
+    means unrecorded legacy evidence; {} means the Run had no devices. Snapshot
+    mappings are copied on construction, including when acquisition_for returns
+    a detached evidence copy. Later sweeps and Save never refresh these values.
     """
 
     run_id: str
@@ -37,8 +46,10 @@ class AcquisitionEvidence:
     finished_at: datetime
     completion: Literal["complete", "stopped"]
     provenance: SoftwareProvenance
+    device_snapshot: Mapping[str, JsonObject] | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "device_snapshot", deepcopy(self.device_snapshot))
         object.__setattr__(
             self,
             "provenance",
@@ -47,6 +58,26 @@ class AcquisitionEvidence:
                 software_versions=dict(self.provenance.software_versions),
             ),
         )
+
+
+def capture_device_snapshot(
+    devices: Mapping[str, BaseDevice[Any]],
+) -> dict[str, JsonObject]:
+    """Read every connected driver once into detached JSON settings.
+
+    The Run owner calls this after GUI hardware lease acquisition, or after
+    constructing the synchronous Notebook RunContext, before adapter/core.run.
+    Keys retain connected device names, fields/units follow driver get_info.
+    Empty devices returns {}. Any driver or serialization error propagates;
+    this checkpoint never writes hardware, retries or reads cached settings.
+    """
+    json_object = TypeAdapter(JsonObject)
+    return {
+        name: json_object.validate_python(
+            device.get_info().model_dump(mode="json"), strict=True
+        )
+        for name, device in devices.items()
+    }
 
 
 def new_run_id(started_at: datetime) -> str:

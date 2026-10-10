@@ -8,11 +8,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from pydantic import TypeAdapter
-
-from zcu_tools.datafile import JsonObject, RunMetadata
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.device.base import BaseDevice
-from zcu_tools.experiment.acquisition import capture_software_provenance, new_run_id
+from zcu_tools.experiment.acquisition import (
+    capture_device_snapshot,
+    capture_software_provenance,
+    new_run_id,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
@@ -361,13 +363,11 @@ class RunService:
             if snapshot is not None and experiment_tag is not None
             else None
         )
-        device_json = TypeAdapter(JsonObject)
-        device_snapshot = {
-            name: device_json.validate_python(info.model_dump(mode="json"), strict=True)
-            for name, info in request.device_snapshot.items()
-        }
 
         def work(factory: Any) -> object:
+            # OperationRunner has acquired the hardware lease before submission.
+            # A failed read rejects acquisition, including adapters without metadata.
+            device_snapshot = capture_device_snapshot(context.devices)
             # Provenance uses only software/host and the cached SoC config.
             if (
                 snapshot is not None
