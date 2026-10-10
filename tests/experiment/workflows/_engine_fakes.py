@@ -13,7 +13,6 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
-    DeviceSetup,
     DeviceSnapshot,
     Engine,
     EnginePorts,
@@ -49,25 +48,16 @@ class ManualClock:
 
 
 class RecordingDevices:
-    """Record native setpoints and setup calls without touching hardware."""
+    """Record requested native setpoints without touching hardware."""
 
     def __init__(self) -> None:
         self.values: list[tuple[str, float]] = []
-        self.settings: list[tuple[DeviceSetup, ...]] = []
         self.on_set: Callable[[StopSignal], object] | None = None
-        self.on_setup: Callable[[StopSignal], object] | None = None
 
     def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
         self.values.append((name, value))
         if self.on_set is not None:
             self.on_set(cancel_signal)
-
-    def setup(
-        self, settings: tuple[DeviceSetup, ...], cancel_signal: StopSignal
-    ) -> None:
-        self.settings.append(settings)
-        if self.on_setup is not None:
-            self.on_setup(cancel_signal)
 
 
 class RecordingPlots:

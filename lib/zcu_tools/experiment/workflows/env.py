@@ -137,7 +137,6 @@ class WorkflowEnv[C](InitEnv[C]):
         *,
         save: Callable[[Completed[Cfg, Result], Path], None],
         live: Live1D | Live2D | Live2DRow | None = None,
-        setup_devices: bool = True,
     ) -> Generator[Effect, None, Completed[Cfg, Result] | Failed]:
         """Execute and save an experiment; return its typed Completed or Failed.
 
@@ -145,12 +144,13 @@ class WorkflowEnv[C](InitEnv[C]):
         anonymous or unnamed callables raise ValueError at effect entry.
         cfg must be a deepcopy-able dataclass. save must write and close the
         exact temporary path; the engine publishes it before returning Completed.
-        live optionally projects a unique buffer. setup_devices=False skips
-        automatic cfg.dev setup. Outer, live, saver, and deepcopy errors
-        propagate; Schedule failures return Failed without data or a run file.
+        live optionally projects a unique buffer. The experiment owns device
+        operations; the engine does not inspect cfg.dev or apply settings.
+        Outer, live, saver, and deepcopy errors propagate; Schedule failures
+        return Failed without data or a run file.
         Cancellation discards the step and never returns a cancellation value.
         """
-        request = RunEffect(experiment, cfg, save, live, setup_devices)
+        request = RunEffect(experiment, cfg, save, live)
         yield request
         if request.outcome is None:
             raise RuntimeError("Engine did not complete the run effect")
