@@ -52,7 +52,7 @@ from .models import (
     TunableChange,
     TunablesSnapshot,
 )
-from .ports import DeviceSnapshot, EnginePorts
+from .ports import EnginePorts
 from .run import Run
 from .tunables import TunableValues
 
@@ -483,14 +483,12 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             raise
         return self.status()
 
-    def resume(self, devices: DeviceSnapshot) -> RunStatus:
-        """Resume only after paused segment return, with detached provenance."""
+    def resume(self) -> RunStatus:
+        """Resume only after paused segment return under the retained lease."""
         if self._lifecycle != "paused" or self._executing:
             raise InvalidRunState("resume", self._lifecycle)
         try:
-            self._artifacts.append(
-                Resumed(self._commit_seq, self._tunables.revision, deepcopy(devices))
-            )
+            self._artifacts.append(Resumed(self._commit_seq, self._tunables.revision))
             self._artifacts.set_lifecycle("running")
             self._lifecycle = "running"
         except Exception as error:

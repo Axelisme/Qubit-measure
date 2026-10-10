@@ -10,7 +10,6 @@ from typing import Literal
 from pydantic import JsonValue
 
 from .models import Actor, CommittedRecord, RunIdentity, RunPaths
-from .ports import DeviceSnapshot
 
 
 @dataclass(frozen=True)
@@ -209,15 +208,13 @@ class Paused:
 
 @dataclass(frozen=True)
 class Resumed:
-    """Segment resume provenance after the host acquired its device lease.
+    """Continuation of a paused run under the host's retained RUN lease.
 
     commit_seq counts existing commits; revision is the next call's version.
-    devices is the detached host-supplied current device snapshot.
     """
 
     commit_seq: int
     revision: int
-    devices: DeviceSnapshot
     kind: Literal["resumed"] = field(default="resumed", init=False)
 
 

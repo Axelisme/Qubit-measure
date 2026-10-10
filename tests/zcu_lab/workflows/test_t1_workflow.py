@@ -13,7 +13,6 @@ from zcu_tools.datafile import SoftwareProvenance, load_run_data
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import (
     Actor,
-    DeviceSnapshot,
     Engine,
     EnginePorts,
     RunIdentity,
@@ -67,7 +66,6 @@ def start_t1(
         paths=RunPaths(root / "metadata", root / "data"),
         identity=RunIdentity(
             "workflow",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -117,7 +115,6 @@ def test_native_t1_checks_ports_before_hardware_effects(
         paths=paths,
         identity=RunIdentity(
             "workflow",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -303,7 +300,6 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
         paths=RunPaths(roots.result, roots.database),
         identity=RunIdentity(
             "flux-bound",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -439,7 +435,7 @@ def test_pause_during_native_acquisition_discards_step_then_uses_new_revision(
         expected_revision=0,
         actor=Actor("user", "operator"),
     )
-    engine.resume("workflow", devices=DeviceSnapshot({}))
+    engine.resume("workflow")
     status = engine.execute("workflow")
     assert status.lifecycle == "done", status.reason
     records = engine.records("workflow")

@@ -13,7 +13,6 @@ from zcu_tools.experiment.workflows import (
     Aborted,
     Actor,
     Completed,
-    DeviceSnapshot,
     Done,
     Failed,
     Next,
@@ -299,7 +298,7 @@ def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
     assert discarded["run_files"] == ["runs/01-run_value.h5"]
     assert rig.engine.records("run") == ()
     rig.devices.on_set = None
-    rig.engine.resume("run", devices=DeviceSnapshot({}))
+    rig.engine.resume("run")
     assert rig.engine.execute("run").lifecycle == "done"
     assert observed == [1, 1]
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))) == 2

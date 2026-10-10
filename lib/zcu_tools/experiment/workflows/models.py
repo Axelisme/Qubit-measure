@@ -11,8 +11,6 @@ from pydantic import JsonValue
 
 from zcu_tools.datafile import SoftwareProvenance
 
-from .ports import DeviceSnapshot
-
 type Lifecycle = Literal[
     "running", "pausing", "paused", "stopping", "done", "aborted", "stopped", "failed"
 ]
@@ -178,8 +176,8 @@ class RunPaths:
 class RunIdentity:
     """Host-supplied identity and provenance, not inferred from directory names.
 
-    ``run_id`` is a nonempty stable run ID. ``devices`` is the detached start
-    snapshot. ``provenance`` is the native SoftwareProvenance captured by the
+    ``run_id`` is a nonempty stable run ID.
+    ``provenance`` is the native SoftwareProvenance captured by the
     host: its optional evidence remains None when genuinely unavailable.
     Manifest and journal preserve this value nested under provenance.
     ``entry_id`` and ``entry_label`` identify the workpoint, or None.
@@ -187,7 +185,6 @@ class RunIdentity:
     """
 
     run_id: str
-    devices: DeviceSnapshot
     provenance: SoftwareProvenance
     entry_id: str | None = None
     entry_label: str | None = None

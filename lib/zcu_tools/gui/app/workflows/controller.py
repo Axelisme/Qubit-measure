@@ -13,7 +13,6 @@ from pydantic import BaseModel, JsonValue
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Actor,
-    DeviceSnapshot,
     Engine,
     EnginePorts,
     InvalidRunState,
@@ -295,12 +294,11 @@ class WorkflowController[F: FormModel, C]:
                 self._record_native_failure(run, error)
                 raise
 
-    def resume(self, run_id: str, *, devices: Callable[[], DeviceSnapshot]) -> int:
-        """Read devices on owner and continue a delivered paused run's token.
+    def resume(self, run_id: str) -> int:
+        """Continue a delivered paused run with its retained token and RUN lease.
 
-        Target/state checks precede devices. devices synchronously reads all
-        connected drivers and raises a named failure; no cached fallback. Read
-        or submit failure preserves a healthy paused run and original ownership.
+        Target/state and Runner ownership checks precede continuation submission.
+        Submit failure preserves a healthy paused run and original ownership.
         Stop during admission with no producer finishes synchronously, then
         reraises any original error. Native resume/execute run off-main with
         unchanged context, cursor, progress and records; no repeated init.
@@ -320,14 +318,13 @@ class WorkflowController[F: FormModel, C]:
             engine = run.engine
             run.phase = "resuming"
         try:
-            captured = devices()
 
             def work() -> RunStatus | None:
                 with self._lock:
                     if run.stop.is_set():
-                        # Delivery still owns cleanup after Stop during capture.
+                        # Delivery still owns cleanup after Stop during admission.
                         return engine.status()
-                    engine.resume(run_id, devices=captured)
+                    engine.resume(run_id)
                 return engine.execute(run_id)
 
             token = self._runner.continue_operation(

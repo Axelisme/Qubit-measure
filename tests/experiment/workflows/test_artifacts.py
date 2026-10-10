@@ -39,7 +39,6 @@ from zcu_tools.experiment.workflows.models import (
     RunIdentity,
     RunPaths,
 )
-from zcu_tools.experiment.workflows.ports import DeviceSnapshot
 
 
 class ManualClock:
@@ -65,7 +64,6 @@ def metadata(tmp_path: Path, clock: ManualClock) -> RunMetadata:
     return RunMetadata(
         identity=RunIdentity(
             "id-not-the-directory-slug",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -254,7 +252,7 @@ def test_journal_round_trips_all_outcomes_in_append_order(
         TunablesChanged(Actor("agent", "協作者"), 0, 1, (ChangedValue("reps", 2, 3),)),
         PauseRequested(clock.now(), 1),
         Paused(1, 1),
-        Resumed(1, 1, DeviceSnapshot({})),
+        Resumed(1, 1),
         StopRequested(clock.now(), 1),
         RunEnded("failed", "original cause", 1, 1),
     )

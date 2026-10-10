@@ -8,7 +8,6 @@ from pydantic import BaseModel, ValidationError
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     CommittedRecord,
-    DeviceSnapshot,
     Engine,
     EnginePorts,
     RunIdentity,
@@ -60,7 +59,6 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
         paths=RunPaths(root / "metadata", root / "data"),
         identity=RunIdentity(
             "example",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -143,7 +141,6 @@ def test_demo_workflows_check_ports_before_effects(
     paths = RunPaths(tmp_path / "metadata", tmp_path / "data")
     identity = RunIdentity(
         "example",
-        DeviceSnapshot({}),
         SoftwareProvenance(
             software_versions={},
             git_commit=None,

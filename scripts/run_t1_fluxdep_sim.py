@@ -25,7 +25,6 @@ from zcu_tools.experiment.acquisition import (
 )
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
-    DeviceSnapshot,
     Engine,
     EnginePorts,
     RunIdentity,
@@ -145,7 +144,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             paths=RunPaths(roots.result, roots.database),
             identity=RunIdentity(
                 run_id,
-                DeviceSnapshot(manager.get_all_info()),
                 capture_software_provenance(),
                 entry_id=str(plan.snapshot.entry_id),
                 entry_label=plan.snapshot.entry_name,

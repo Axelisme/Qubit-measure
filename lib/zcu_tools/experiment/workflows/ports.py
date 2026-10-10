@@ -10,23 +10,9 @@ from typing import Literal, Protocol
 from qick import QickConfig
 
 from ...datafile import JsonObject
-from ...device import DeviceInfo
 from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from ..stop_signal import StopSignal
-
-
-@dataclass(frozen=True)
-class DeviceSnapshot:
-    """Provenance at start/resume, captured by the engine as detached data.
-
-    ``items`` maps connected-device names to native typed DeviceInfo models in
-    setup order; an empty mapping means no devices. Models contain the driver
-    identity, settings, and native units defined by their device owner.
-    This snapshot does not assert that hardware stays unchanged afterwards.
-    """
-
-    items: Mapping[str, DeviceInfo]
 
 
 class DevicePort(Protocol):

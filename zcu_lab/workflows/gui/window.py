@@ -21,12 +21,12 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.datafile import RunSnapshot
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Actor,
-    DeviceSnapshot,
     EnginePorts,
     InvalidRunState,
     RunIdentity,
@@ -241,9 +241,7 @@ class T1WorkflowWindow(QWidget):
         self._plots: Plots | None = None
 
         env = (
-            self._capture_env(
-                DeviceSnapshot(self._services.device.capture_native_device_info())
-            )
+            self._capture_env(self._services.device.capture_native_device_info())
             if state.session_env.parameters is not None
             else FormEnv()
         )
@@ -364,9 +362,7 @@ class T1WorkflowWindow(QWidget):
         Pending, running or paused operations raise InvalidRunState before capture.
         """
         self._ensure_can_start()
-        env = self._capture_env(
-            DeviceSnapshot(self._services.device.capture_native_device_info())
-        )
+        env = self._capture_env(self._services.device.capture_native_device_info())
         if env.parameters is None:
             raise FailedPreconditionError("No parameter context is installed")
         env.parameters.resolve_path("$qubit.kind")
@@ -390,11 +386,11 @@ class T1WorkflowWindow(QWidget):
         plan_panel.show()
         tunables_panel.show()
 
-    def _capture_env(self, devices: DeviceSnapshot) -> FormEnv:
+    def _capture_env(self, devices: Mapping[str, DeviceInfo]) -> FormEnv:
         context = self._services.context
         parameters = context.read_context()
         return FormEnv(
-            parameters=parameters, library=parameters.library, devices=devices.items
+            parameters=parameters, library=parameters.library, devices=devices
         )
 
     def _ensure_can_start(self) -> None:
@@ -433,17 +429,15 @@ class T1WorkflowWindow(QWidget):
         Both editors display ordinary values in this same fixed Start capture,
         not their old constructor capture; they do not poll later source changes.
         Draft/unbound storage, missing hardware, source/provenance and native
-        failures raise without fallback/retry. Every connected device is read
-        synchronously before submission, and read failure names that device.
+        failures raise without fallback/retry. Forms use detached native device
+        info from the session cache; Start does not read connected drivers.
         The returned operation token is
         pending, not proof of accepted startup. Calibrated uses the validated
         form's required pi_length_us and selected native module scalars.
         Expressions remain in the accepted FormInput used for later tuning.
         """
         self._ensure_can_start()
-        env = self._capture_env(
-            DeviceSnapshot(self._services.device.capture_live_native_device_info())
-        )
+        env = self._capture_env(self._services.device.capture_native_device_info())
         if env.parameters is None:
             raise ValueError("T1 Start requires captured parameters")
         storage = self._services.context.capture_storage(env.parameters)
@@ -516,7 +510,6 @@ class T1WorkflowWindow(QWidget):
                 binding=binding,
                 identity=RunIdentity(
                     run_id,
-                    DeviceSnapshot(env.devices),
                     provenance,
                     str(storage.entry_id),
                     storage.point,
@@ -698,24 +691,16 @@ class T1WorkflowWindow(QWidget):
         return self.controller.pause(run_id)
 
     def resume(self, run_id: str) -> int:
-        """Submit the targeted paused run after reading all connected devices.
+        """Submit the targeted paused run using its retained operation and lease.
 
-        run_id is the Start identity. Controller rejects wrong or absent targets
-        before device reads. Pending or illegal native states reject Resume.
-        Read every connected driver synchronously through DeviceService. Any
-        read failure names the device and rejects this Resume without falling
-        back to cache. Record read-back values as native device provenance.
-        Plan, context, roles, expressions and plots stay fixed. Return the same
-        pending run token, not proof of worker acceptance. Healthy read or
-        submission failure retains the paused run, its progress and local lease.
-        No retry, ramp-interleaving guard or hardware rollback is provided.
+        run_id is the Start identity. Controller rejects wrong or absent targets.
+        Pending or illegal native states reject Resume. Plan, context, roles,
+        expressions and plots stay fixed. Return the same pending run token, not
+        proof of worker acceptance. Submission failure retains the paused run,
+        its progress and local RUN lease. No device read, retry or hardware
+        rollback occurs here; each env.run captures its own native evidence.
         """
-        return self.controller.resume(
-            run_id,
-            devices=lambda: DeviceSnapshot(
-                self._services.device.capture_live_native_device_info()
-            ),
-        )
+        return self.controller.resume(run_id)
 
     def stop(self, run_id: str) -> RunStatus | None:
         """Request Stop of Start's explicit native target without waiting.

@@ -10,7 +10,6 @@ from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Completed,
-    DeviceSnapshot,
     Done,
     Engine,
     EnginePorts,
@@ -121,7 +120,6 @@ def _start(
         paths=RunPaths(tmp_path / "metadata", tmp_path / "data"),
         identity=RunIdentity(
             "run",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,

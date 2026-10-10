@@ -14,7 +14,6 @@ from zcu_tools.experiment.acquisition import capture_device_snapshot
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Completed,
-    DeviceSnapshot,
     Engine,
     EnginePorts,
     InitEnv,
@@ -162,7 +161,6 @@ class Rig:
         step: Callable[[WorkflowEnv[int], Plan, Tunables, State], Step[State, int]],
         *,
         plan: Plan | None = None,
-        devices: DeviceSnapshot | None = None,
     ) -> None:
         # A fresh declared wrapper avoids mutating shared module-level callables.
         def invoke(
@@ -183,7 +181,6 @@ class Rig:
             paths=self.paths,
             identity=RunIdentity(
                 "run",
-                DeviceSnapshot({}) if devices is None else devices,
                 SoftwareProvenance(
                     software_versions={},
                     git_commit=None,

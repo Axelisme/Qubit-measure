@@ -150,16 +150,14 @@ def run_attachment(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[T1WorkflowWindow, StartHarness, ResultEntry]:
-    """Supply a controlled device snapshot to test Window/Controller ownership.
+    """Supply typed cached native form info for Window/Controller ownership.
 
-    DeviceService's real live-read contract has separate formals. This boundary
-    substitute lets Window ownership tests reach admission before that seed body
-    is implemented; it does not replace Runner, Controller or native Engine.
+    The substitute does not replace Runner, Controller or native Engine.
     """
     _window, harness, _entry = attachment
     native: dict[str, DeviceInfo] = {"flux": FakeDeviceInfo(address="none", value=0.0)}
     monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", lambda: native
+        harness.services.device, "capture_native_device_info", lambda: native
     )
     return attachment
 
@@ -196,28 +194,6 @@ def settlements(
 
     monkeypatch.setattr(harness.handles, "settle", record)
     return tokens
-
-
-def test_start_live_read_failure_names_device_before_admission(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    window, harness, entry = attachment
-    driver = harness.services.device.get_connected_devices()["flux"]
-    before = window.plan_panel.state.input.data
-
-    def reject_read() -> DeviceInfo:
-        raise OSError("instrument read failed")
-
-    monkeypatch.setattr(driver, "get_info", reject_read)
-    with pytest.raises(RuntimeError, match="flux"):
-        window.start("live-read-failure")
-
-    assert window.plan_panel.state.input.data == before
-    assert harness.background.work is None and harness.handles.live_count() == 0
-    assert not harness.gate.snapshot()
-    assert not (entry.result_path / "workflows/live-read-failure").exists()
-    assert not (entry.database_path / "workflows/live-read-failure").exists()
 
 
 def test_invalid_pi_does_not_submit_or_create_workflow_directories(
@@ -630,22 +606,6 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     window, harness, entry = run_attachment
     attempts: list[float] = []
     figures: list[int] = []
-    captured: list[float] = []
-    live_value = 0.12
-
-    def capture() -> dict[str, DeviceInfo]:
-        captured.append(live_value)
-        return {"flux": FakeDeviceInfo(address="none", value=live_value)}
-
-    def forbid_cache() -> dict[str, DeviceInfo]:
-        raise AssertionError("Start/Resume must call the live capture boundary")
-
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", capture
-    )
-    monkeypatch.setattr(
-        harness.services.device, "capture_native_device_info", forbid_cache
-    )
 
     def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
         return None
@@ -686,17 +646,15 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     entry.new_point("later")
     harness.services.context.use_point(PointUseRequest("later"))
     harness.services.context.set_alias_rows((AliasRow("qubit", ""),))
-    assert captured == [0.12]
     assert controller.operation_id == token and harness.gate.snapshot()
     assert harness.handles.known_outcome(token) is None
     bars = harness.progress.bars_for_operation(token)
     assert bars
-    live_value = 0.34
     resume_button = window.findChild(QPushButton, "workflow.run.resume")
     assert resume_button is not None and resume_button.isEnabled()
     resume_button.click()
     resumed = controller.operation_id
-    assert resumed == token and captured == [0.12, 0.34]
+    assert resumed == token
     assert harness.handles.live_count() == 1
     assert harness.progress.bars_for_operation(token) == bars
     assert not window.plan_panel.isEnabled()
@@ -709,19 +667,13 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     )
     assert len(attempts) == 2 and attempts[0] == attempts[1]
     assert len(figures) == 2 and figures[0] == figures[1]
-    journal = entry.result_path / "workflows/paused/journal.jsonl"
-    events = [json.loads(line) for line in journal.read_text().splitlines()]
-    started = next(event for event in events if event["kind"] == "run_started")
-    resumed_event = next(event for event in events if event["kind"] == "resumed")
-    assert started["identity"]["devices"]["items"]["flux"]["value"] == 0.12
-    assert resumed_event["devices"]["items"]["flux"]["value"] == 0.34
     assert window.plan_panel.isEnabled()
     assert harness.handles.known_outcome(token) is not None
     assert not harness.gate.snapshot()
 
 
 @pytest.mark.parametrize("action", ["stop", "close"])
-def test_resume_capture_stop_or_close_keeps_window_locked_until_delivery(
+def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
     action: str,
@@ -753,9 +705,8 @@ def test_resume_capture_stop_or_close_keeps_window_locked_until_delivery(
 
     token = active_controller.operation_id
     assert token is not None
-    capture_live = harness.services.device.capture_live_native_device_info
 
-    def capture() -> dict[str, DeviceInfo]:
+    def during_submit() -> None:
         if action == "close":
             close_results.append(window.close())
         else:
@@ -763,12 +714,10 @@ def test_resume_capture_stop_or_close_keeps_window_locked_until_delivery(
         observations.append(
             (window.plan_panel.isEnabled(), active_controller.has_pending_segment)
         )
-        return capture_live()
 
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", capture
-    )
+    harness.background.on_submit = during_submit
     assert window.resume("register-window") == token
+    harness.background.on_submit = None
     assert observations == [(False, True)]
     assert active_controller.has_pending_segment
     assert close_results == ([False] if action == "close" else [])
@@ -787,11 +736,9 @@ def test_resume_capture_stop_or_close_keeps_window_locked_until_delivery(
     assert window.close()
 
 
-@pytest.mark.parametrize("failure", ["capture", "submit"])
 def test_resume_stop_rejection_unlocks_window_without_a_producer(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
-    failure: str,
 ) -> None:
     window, harness, _entry = run_attachment
     attempts: list[str] = []
@@ -813,25 +760,15 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     monkeypatch.setattr(window_module, "t1_fluxdep", step)
     assert isinstance(window.start("reject-window"), int)
     harness.complete_segment()
-    capture_native = harness.services.device.capture_live_native_device_info
-    capture_error = ValueError("flux live snapshot failed after Stop")
 
-    def capture() -> dict[str, DeviceInfo]:
+    def during_submit() -> None:
         window.stop("reject-window")
-        if failure == "capture":
-            raise capture_error
-        return capture_native()
 
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", capture
-    )
-    harness.background.fail_submit = failure == "submit"
-    with pytest.raises(ValueError if failure == "capture" else OSError) as raised:
+    harness.background.on_submit = during_submit
+    harness.background.fail_submit = True
+    with pytest.raises(OSError, match="submit failed"):
         window.resume("reject-window")
-    if failure == "capture":
-        assert raised.value is capture_error
-    else:
-        assert str(raised.value) == "submit failed"
+    harness.background.on_submit = None
     controller = window.controller
     assert controller is not None
     status = controller.status()
@@ -903,71 +840,9 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     assert harness.progress.bars_for_owner("t1-workflow") == ()
 
 
-def test_resume_live_capture_failure_retains_paused_run_and_presentation(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    window, harness, _entry = run_attachment
-
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
-        return None
-
-    @workflow("read-rejection", plan=T1Plan, tunables=T1Tunables, init=init)
-    def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
-    ) -> Step[None, int]:
-        del plan, tun, state
-        env.pbar("retained", 2).refresh()
-        window.pause("read-rejection")
-        yield from env.wait_until(env.started_at)
-        return Done()
-
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
-    token = window.start("read-rejection")
-    assert isinstance(token, int)
-    harness.complete_segment()
-    controller = window.controller
-    paused = controller.status()
-    binding = controller.binding
-    panel = window.tuning_panel
-    bars = harness.progress.bars_for_operation(token)
-    assert paused is not None and paused.lifecycle == "paused" and bars
-    failure = RuntimeError("flux: live instrument read failed")
-
-    def reject_live() -> dict[str, DeviceInfo]:
-        raise failure
-
-    def forbid_cache() -> dict[str, DeviceInfo]:
-        raise AssertionError("Resume must not fall back to cached device info")
-
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", reject_live
-    )
-    monkeypatch.setattr(
-        harness.services.device, "capture_native_device_info", forbid_cache
-    )
-    with pytest.raises(RuntimeError, match="flux") as raised:
-        window.resume("read-rejection")
-    assert raised.value is failure
-    assert window.controller is controller and controller.status() == paused
-    assert controller.binding is binding and window.tuning_panel is panel
-    assert controller.operation_id == token and not controller.has_pending_segment
-    assert harness.background.work is None and harness.handles.live_count() == 1
-    assert harness.handles.known_outcome(token) is None and harness.gate.snapshot()
-    assert harness.progress.bars_for_operation(token) == bars
-    assert not window.plan_panel.isEnabled() and not window.tunables_panel.isEnabled()
-    resume = window.findChild(QPushButton, "workflow.run.resume")
-    assert resume is not None and resume.isEnabled()
-    stopped = window.stop("read-rejection")
-    assert stopped is not None and stopped.lifecycle == "stopped"
-    assert not harness.gate.snapshot() and harness.handles.live_count() == 0
-
-
-@pytest.mark.parametrize("failure", ["capture", "submit"])
 def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
-    failure: str,
 ) -> None:
     window, harness, entry = run_attachment
     native_errors: list[IsADirectoryError] = []
@@ -993,13 +868,12 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     controller, panel = window.controller, window.tuning_panel
     assert panel is not None
     accepted = panel.host.accepted_input.data
-    capture_error = OSError("flux live read failed during Resume")
     journal = entry.result_path / "workflows/failed-read/journal.jsonl"
     original = journal.read_bytes()
     journal.unlink()
     journal.mkdir()
 
-    def capture() -> dict[str, DeviceInfo]:
+    def during_submit() -> None:
         try:
             window.apply_tunables(
                 "failed-read", {("guess_us",): 45.0}, actor=Actor("agent", "rpc")
@@ -1007,25 +881,16 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
         except IsADirectoryError as error:
             native_errors.append(error)
         observed.append((window.plan_panel.isEnabled(), controller.has_pending_segment))
-        if failure == "capture":
-            raise capture_error
-        return {"flux": FakeDeviceInfo(address="none", value=0.34)}
 
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", capture
-    )
-    harness.background.fail_submit = failure == "submit"
+    harness.background.on_submit = during_submit
+    harness.background.fail_submit = True
     try:
-        with pytest.raises(OSError, match="failed") as raised:
+        with pytest.raises(OSError, match="submit failed"):
             window.resume("failed-read")
     finally:
+        harness.background.on_submit = None
         journal.rmdir()
         journal.write_bytes(original)
-    assert (
-        raised.value is capture_error
-        if failure == "capture"
-        else str(raised.value) == "submit failed"
-    )
     assert len(native_errors) == 1 and observed == [(False, True)]
     failed = controller.status()
     assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
@@ -1140,16 +1005,6 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
     gate = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
     bars = harness.progress.bars_for_owner("t1-workflow")
     tuning = window.tuning_panel
-    captures: list[str] = []
-    original_capture = harness.services.device.capture_live_native_device_info
-
-    def capture() -> dict[str, DeviceInfo]:
-        captures.append("devices")
-        return original_capture()
-
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", capture
-    )
     for invoke in (
         lambda: window.pause("run-A"),
         lambda: window.resume("run-A"),
@@ -1168,7 +1023,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
             window.plan_panel.isEnabled(),
             window.tunables_panel.isEnabled(),
         ) == (tuning, False, False)
-    assert captures == [] and attempts == ([] if phase == "pending" else ["step"])
+    assert attempts == ([] if phase == "pending" else ["step"])
     stop_button = window.findChild(QPushButton, "workflow.run.stop")
     assert stop_button is not None
     stop_button.click()
@@ -2226,7 +2081,7 @@ def test_rpc_without_attached_run_reports_native_target(
     )
 
 
-def test_rpc_pause_resume_retains_token_lease_and_reads_live_devices(
+def test_rpc_pause_resume_retains_token_lease_and_fixed_inputs(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
     monkeypatch: pytest.MonkeyPatch,
@@ -2282,22 +2137,13 @@ def test_rpc_pause_resume_retains_token_lease_and_reads_live_devices(
     entry.new_point("later-rpc")
     harness.services.context.use_point(PointUseRequest("later-rpc"))
     harness.services.context.set_alias_rows((AliasRow("qubit", ""),))
-    captures: list[bool] = []
-
-    def capture() -> dict[str, DeviceInfo]:
-        captures.append(bool(harness.gate.snapshot()))
-        return {"flux": FakeDeviceInfo(address="none", value=0.34)}
-
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", capture
-    )
     resume_reply = rpc("workflow.resume", {"run_id": "rpc-run"})
     assert resume_reply["ok"] is True
     resumed = resume_reply["result"]
     assert isinstance(resumed, dict)
     assert resumed["run_id"] == "rpc-run"
     assert resumed["operation_id"] == token
-    assert captures == [True] and not window.plan_panel.isEnabled()
+    assert not window.plan_panel.isEnabled()
     assert (
         tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot()) == lease
     )
@@ -2312,10 +2158,6 @@ def test_rpc_pause_resume_retains_token_lease_and_reads_live_devices(
         and terminal["status"]["run_id"] == "rpc-run"
     )
     assert len(attempts) == 2 and attempts[0] == attempts[1]
-    journal = entry.result_path / "workflows/rpc-run/journal.jsonl"
-    events = [json.loads(line) for line in journal.read_text().splitlines()]
-    resumed_event = next(event for event in events if event["kind"] == "resumed")
-    assert resumed_event["devices"]["items"]["flux"]["value"] == 0.34
     assert harness.background.error is None
     assert harness.handles.known_outcome(token) is not None
     assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
@@ -2356,16 +2198,6 @@ def test_rpc_old_target_does_not_change_current_run(
         harness.complete_segment()
     before = rpc("workflow.status", {})["result"]
     gate = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
-    captures: list[str] = []
-    original = harness.services.device.capture_live_native_device_info
-
-    def capture() -> dict[str, DeviceInfo]:
-        captures.append("devices")
-        return original()
-
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", capture
-    )
     for method in ("workflow.pause", "workflow.resume", "workflow.stop"):
         reply = rpc(method, {"run_id": "old"})
         error = reply["error"]
@@ -2380,7 +2212,7 @@ def test_rpc_old_target_does_not_change_current_run(
             tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
             == gate
         )
-    assert captures == [] and attempts == ([] if phase == "pending" else ["step"])
+    assert attempts == ([] if phase == "pending" else ["step"])
     stopped = rpc("workflow.stop", {"run_id": "current"})["result"]
     assert isinstance(stopped, dict)
     if phase == "pending":
@@ -2517,7 +2349,6 @@ def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
     editor: str,
 ) -> None:
     window, harness, entry = attachment
@@ -2555,17 +2386,8 @@ def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
     # Resume also retains the original point/focus.
     entry.new_point("later-tuning")
     context.use_point(PointUseRequest("later-tuning"))
-    captures: list[bool] = []
-
-    def capture() -> dict[str, DeviceInfo]:
-        captures.append(bool(harness.gate.snapshot()))
-        return {"flux": FakeDeviceInfo(address="none", value=0.56)}
-
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", capture
-    )
     reply = rpc("workflow.resume", {"run_id": "tuning"})
-    assert reply["ok"] is True and captures == [True]
+    assert reply["ok"] is True
     result = reply["result"]
     assert isinstance(result, dict) and result["operation_id"] == token
     assert controller.operation_id == token and harness.handles.live_count() == 1
@@ -2583,10 +2405,6 @@ def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
     assert records[1].encoded_record.value == 40.0
     status = controller.status()
     assert status is not None and status.lifecycle == "done"
-    journal = entry.result_path / "workflows/tuning/journal.jsonl"
-    events = [json.loads(line) for line in journal.read_text().splitlines()]
-    resumed_event = next(event for event in events if event["kind"] == "resumed")
-    assert resumed_event["devices"]["items"]["flux"]["value"] == 0.56
     assert harness.handles.known_outcome(token) is not None
     assert not harness.gate.snapshot()
 
@@ -2744,7 +2562,6 @@ def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     del paused_tuning
     window, harness, _entry = attachment
@@ -2765,16 +2582,6 @@ def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
         controller.status(),
         controller.operation_id,
     )
-    captures: list[str] = []
-    original = harness.services.device.capture_live_native_device_info
-
-    def capture() -> dict[str, DeviceInfo]:
-        captures.append("devices")
-        return original()
-
-    monkeypatch.setattr(
-        harness.services.device, "capture_live_native_device_info", capture
-    )
     with pytest.raises(RunMismatch):
         window.apply_tunables("old", {("reps",): 200}, actor=Actor("agent", "rpc"))
     reply = rpc(
@@ -2792,7 +2599,7 @@ def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
         controller.status(),
         controller.operation_id,
     ) == before
-    assert captures == [] and controller.operation_id == token
+    assert controller.operation_id == token
     assert (
         tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot()) == lease
     )

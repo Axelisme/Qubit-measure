@@ -24,9 +24,11 @@ Complete、Stop 或 failure 只有一個終局入口。有 producer 時，必須
 
 ## 裝置讀回與 Resume
 
-Start 與每次 Resume 都在 owner thread 同步讀取所有已連線裝置。DeviceService 透過公開 get_device_info 讀 driver 並更新本程序 State cache，workflow snapshot 記錄這次讀回的值。任何一台裝置讀失敗都拒絕該次 Start／Resume，錯誤指名裝置，不使用 cache fallback 或 best-effort poll。健康 paused run 的讀取或提交失敗不建立新 operation，不清掉原 handle／lease。
+Start／Resume 不再讀取所有已連線裝置，也不在 journal 記錄 device snapshot。Start 表單直接使用 DeviceService 的公開 typed cached native mapping。Resume 只接受 run_id；健康 paused run 的提交失敗不建立新 operation，不清掉原 handle／lease。
 
-各裝置的讀值不是跨欄位、跨裝置或跨 process 的原子 snapshot。同步 I/O 可能阻塞，沒有固定 query 或 settling 時間保證。Ramp 期間可以讀到中間值，由使用者避開，不另加保護。Snapshot 只記錄讀回值，不要求硬體自動復原；workflow 的後續 device effect 仍由 driver 設定值與驗證 limits。
+Device 實際值只由每次 env.run 在同一 RUN lease 下、experiment callback 前捕捉。DevicePort.capture_snapshot 讀取所有 connected drivers，將固定 JSON 交給 Run，再由 native acquisition evidence 與 metadata 保存。讀取失敗使 run failed，不呼叫 experiment，不使用 cache fallback。缺 devices capability 不等於零 device，真正零 device 的 host 明確提供回傳 {} 的 port。D322 的 SessionDevices getter／setup 接線與完整 GUI host 驗證仍待完成。
+
+各裝置的讀值不是跨欄位、跨裝置或跨 process 的原子 snapshot。同步 I/O 可能阻塞，沒有固定 query 或 settling 時間保證。Snapshot 只記錄讀回值，不要求硬體自動復原；workflow 的後續 device effect 仍由 driver 設定值與驗證 limits。
 
 ## 取捨與 owner
 

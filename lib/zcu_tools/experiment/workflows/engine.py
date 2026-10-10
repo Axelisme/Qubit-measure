@@ -19,7 +19,7 @@ from .models import (
     TunableChange,
     TunablesSnapshot,
 )
-from .ports import DeviceSnapshot, EnginePorts
+from .ports import EnginePorts
 
 
 class _RunView(Protocol):
@@ -36,7 +36,7 @@ class _RunView(Protocol):
     def reserve_execution(self) -> None: ...
     def execute(self) -> RunStatus: ...
     def pause(self) -> RunStatus: ...
-    def resume(self, devices: DeviceSnapshot) -> RunStatus: ...
+    def resume(self) -> RunStatus: ...
     def stop(self) -> RunStatus: ...
     def update_tunables(
         self, changes: tuple[TunableChange, ...], expected_revision: int, actor: Actor
@@ -113,15 +113,15 @@ class Engine[C]:
         with self._lock:
             return self._current(run_id).pause()
 
-    def resume(self, run_id: str, *, devices: DeviceSnapshot) -> RunStatus:
-        """Journal detached device provenance and return paused to running.
+    def resume(self, run_id: str) -> RunStatus:
+        """Return paused to running while the host retains the same RUN lease.
 
-        The host must obtain its lease and snapshot first. Only paused with no
-        execute in flight is accepted. init/start time are unchanged. The next
-        execute repeats the uncommitted step using the latest tunables.
+        Only paused with no execute in flight is accepted. init/start time are
+        unchanged. The next execute repeats the uncommitted step using the
+        latest tunables. Devices are captured only when env.run executes.
         """
         with self._lock:
-            return self._current(run_id).resume(devices)
+            return self._current(run_id).resume()
 
     def stop(self, run_id: str) -> RunStatus:
         """Request Stop, upgrade Pause, or end an already paused run.

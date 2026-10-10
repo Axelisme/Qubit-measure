@@ -8,7 +8,6 @@ from qtpy.QtWidgets import QApplication, QLineEdit
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
-    DeviceSnapshot,
     Done,
     Engine,
     EnginePorts,
@@ -90,7 +89,6 @@ def tuning(
         paths=RunPaths(tmp_path / "metadata", tmp_path / "data"),
         identity=RunIdentity(
             "tuning",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
