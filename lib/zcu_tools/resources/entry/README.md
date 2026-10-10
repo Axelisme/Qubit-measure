@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-10，容器版本與元件 model 的驗證分界
+**Last updated:** 2026-10-10，條目樣本 JSONL 與容器 model 分界
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -49,6 +49,10 @@ ResultEntry 管理的 store 在 use、refresh 與 edit 時也檢查遮蔽，失�
 值與 provenance 在同一文件、同一交易提交。普通賦值、draft set、加入元件與子 view 寫入記錄 manual 來源和 UTC 時間。重新接受同值也更新來源並清除 clone 標記。`meta` 沒有值或來源時回 None，否則回傳獨立 Provenance。Stderr 保存 caller 提供的工作單位數字，不換算。
 
 `edit_view.set(..., provenance=...)` 透過 RecordsLedger.get 驗證來源的本地事件與附檔。非 manual source 必須是本條目同 ID、同 entry_id 的合法事件。未知 ID 轉成 ValueError 並保留 KeyError cause；格式與 I/O 錯誤傳播。Manual 不讀 ledger。
+
+## 樣本歷史
+
+`ResultEntry.samples(component)` 以安全單一路徑段綁定 `samples/<component>.jsonl`，不讀元件 schema、不解析角色，也不建立檔案。`JsonlSampleTable` 擁有只追加的行、每個 run 的最新整行讀取與明示 CSV 匯出；欄位、來源與失敗契約見 [sample table owner](../sample_table/README.md)。
 
 ## Records ledger
 
