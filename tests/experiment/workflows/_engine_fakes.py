@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from zcu_tools.datafile import SoftwareProvenance
@@ -52,9 +53,16 @@ class RecordingDevices:
     def __init__(self) -> None:
         self.values: list[tuple[str, float]] = []
         self.on_set: Callable[[StopSignal], object] | None = None
+        self.units: list[Literal["A", "V", "native"]] = []
+        self.signals: list[StopSignal] = []
 
-    def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
+    def set_value(
+        self, name: str, value: float, cancel_signal: StopSignal,
+        *, unit: Literal["A", "V", "native"],
+    ) -> None:
         self.values.append((name, value))
+        self.units.append(unit)
+        self.signals.append(cancel_signal)
         if self.on_set is not None:
             self.on_set(cancel_signal)
 

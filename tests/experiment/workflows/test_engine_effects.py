@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Never
+from typing import Literal, Never
 
 import numpy as np
 import pytest
@@ -32,6 +32,37 @@ from ._engine_fakes import Cfg, Plan, Rig, State, Tunables, save_integer
 @pytest.fixture
 def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path)
+
+
+@pytest.mark.parametrize("unit", ["A", "V", "native"])
+@pytest.mark.parametrize("pause", [False, True], ids=["complete", "pause"])
+def test_device_unit_reaches_port_with_engine_owned_stop_signal(
+    rig: Rig, unit: Literal["A", "V", "native"], pause: bool
+) -> None:
+    observed: list[StopSignal] = []
+
+    def operate(signal: StopSignal) -> None:
+        observed.append(signal)
+        assert not signal.is_set()
+        if pause:
+            rig.engine.pause("run")
+            assert signal.is_set()
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        yield from env.set_device("bias", 0.25, unit=unit)
+        return Done()
+
+    rig.devices.on_set = operate
+    rig.start(step)
+    status = rig.engine.execute("run")
+    assert status.lifecycle == ("paused" if pause else "done"), status.reason
+    assert rig.devices.values == [("bias", 0.25)]
+    assert rig.devices.units == [unit]
+    assert len(observed) == 1
+    assert rig.devices.signals[0] is observed[0]
+    assert rig.devices.signals[0].is_set() == pause
 
 
 def run_value(run: Run[Cfg]) -> int:
