@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
@@ -14,8 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     NoAnalyzeParams,
     RunRequest,
     SessionEnv,
-    WritebackItem,
-    WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import (
@@ -136,13 +133,6 @@ class SingleToneLengthAdapter(
     ) -> SingleToneLengthAnalyzeResult:
         LengthExp().analyze(req.run_result, None, plots=plots)
         return SingleToneLengthAnalyzeResult()
-
-    def get_writeback_items(
-        self,
-        req: WritebackRequest[SingleToneLengthRunResult, SingleToneLengthAnalyzeResult],
-    ) -> Sequence[WritebackItem]:
-        """Return no proposals: length analysis does not fit a calibration."""
-        return []
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_sidereset_length_{time.strftime('%m%d')}"
