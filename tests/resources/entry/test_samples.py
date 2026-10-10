@@ -134,6 +134,28 @@ def test_samples_export_csv_requires_explicit_overwrite(
     pd.testing.assert_frame_equal(pd.read_csv(new_destination), samples.read())
 
 
+@pytest.mark.parametrize("kind", ["canonical", "symlink", "hardlink"])
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_samples_export_rejects_own_history_without_changing_bytes(
+    entry: ResultEntry, tmp_path: Path, kind: str, overwrite: bool
+) -> None:
+    samples = entry.samples("Q1")
+    samples.append(run_id="run-a", dev_value=1.0, dev_unit="A", t1_us=15.0)
+    source = entry.result_path / "samples" / "Q1.jsonl"
+    original = source.read_bytes()
+    destination = source
+    if kind == "symlink":
+        destination = tmp_path / "sample-link.csv"
+        destination.symlink_to(source)
+    elif kind == "hardlink":
+        destination = tmp_path / "sample-hardlink.csv"
+        destination.hardlink_to(source)
+    with pytest.raises(ValueError, match="sample history"):
+        samples.export_csv(destination, overwrite=overwrite)
+    assert source.read_bytes() == original
+    assert samples.read().iloc[0]["t1_us"] == 15.0
+
+
 @pytest.mark.parametrize("component", ["", "..", "../Q1", "Q1/Q2", "Q1\\Q2", "C:\\Q1"])
 def test_samples_reject_unsafe_component_paths(
     entry: ResultEntry, component: str
