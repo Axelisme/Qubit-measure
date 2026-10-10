@@ -15,7 +15,7 @@ from zcu_tools.gui.session.events import AliasesChangedPayload
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.session.types import RoleBinding, SessionEnv
 from zcu_tools.resources.entry import ResultEntry, RoleResolutionError, source_path
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -184,3 +184,72 @@ def test_empty_read_context_keeps_no_context_failure(session: CaptureSession) ->
     with pytest.raises(FailedPreconditionError) as error:
         session.control.read_context()
     assert error.value.reason_code == "no_context"
+
+
+@pytest.mark.parametrize(
+    ("explicit", "names"),
+    [
+        ({"driver": "Q2"}, {"driver": "Q2", "sense": "R2"}),
+        ({"driver": None}, {}),
+        ({"driver": None, "sense": "R2"}, {"sense": "R2"}),
+    ],
+)
+def test_manual_history_keeps_fixed_names_storage_and_unbound_errors(
+    session: CaptureSession,
+    explicit: dict[str, str | None],
+    names: dict[str, str],
+) -> None:
+    ledger = session.entry.ledger.events()
+    target = session.control.read_context().target
+    binding = RoleBinding(None, {}, names, explicit)
+    fixed = session.control.read_target(target, roles=binding)
+    session.control.set_alias_rows((AliasRow("driver", "Q1"),))
+    assert fixed.roles == binding
+    assert dict(binding.explicit) == explicit
+    assert dict(fixed.capture_storage().roles) == names
+    assert fixed.value("Q1.rate") == 4300.0
+    if "driver" not in names:
+        with pytest.raises(RoleResolutionError) as error:
+            fixed.value("$driver.rate")
+        assert error.value.role == "driver"
+    assert session.entry.ledger.events() == ledger
+
+
+@pytest.mark.parametrize(
+    ("names", "old_value", "current_value"),
+    [
+        ({"driver": "Q1", "sense": "R1"}, 4300.0, 4700.0),
+        ({"driver": "Q2", "sense": "R2"}, 5100.0, 5100.0),
+    ],
+)
+def test_named_published_reads_keep_fixed_names_and_values_without_source_io(
+    session: CaptureSession,
+    names: dict[str, str],
+    old_value: float,
+    current_value: float,
+) -> None:
+    control = session.control
+    first = session.entry.use_point("first")
+    second = session.entry.use_point("second")
+    with second.edit() as edit:
+        edit.set("Q1.rate", 4700.0)
+    ledger = session.entry.ledger.events()
+    assert control.read_context().aliases == control.get_alias_rows()
+    captured = control.read_context(aliases=names)
+    original_target = captured.target
+    assert dict(captured.capture_storage().roles) == names
+    assert captured.resolve_path("$driver.rate") == f"{names['driver']}.rate"
+    assert captured.value("$driver.rate") == old_value
+    control.set_alias_rows((AliasRow("driver", "R2"),))
+    assert dict(control.read_context(aliases=names).capture_storage().roles) == names
+    control.use_point(PointUseRequest("second"))
+    source_path(first).unlink()
+    source_path(second).unlink()
+    assert captured.target == original_target
+    assert captured.value("$driver.rate") == old_value
+    current = control.read_context(aliases=names)
+    assert dict(current.capture_storage().roles) == names
+    assert current.value("$driver.rate") == current_value
+    assert current.target != captured.target
+    assert current.library.document() == captured.library.document()
+    assert session.entry.ledger.events() == ledger
