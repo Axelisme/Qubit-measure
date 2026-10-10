@@ -450,8 +450,8 @@ def _write_uniform_log_group(
     _write_config(target, axis_list, log_channels)
     if write_tags:
         _write_tags(target, as_tag_list(ld.tags), ld.project, ld.user)
-    _write_data_group(
-        target, axis_list, log_channels, step_dims, z_arr, n_entry, n_x, ts_rel
+    _write_multi_channel_data_group(
+        target, axis_list, log_channels, step_dims, [z_arr], n_entry, n_x, ts_rel
     )
 
 
@@ -740,6 +740,7 @@ def _write_config(
     f,
     step_channels,
     log_channels,
+    *,
     log_vector=False,
     trace_x_name="Index",
     trace_x_unit="",
@@ -874,20 +875,6 @@ def _write_tags(f, tags, project, user):
         g.attrs["Tags"] = _str_array(tags)
     else:
         g.attrs["Tags"] = np.array([], dtype=float)
-
-
-def _write_data_group(f, axis_list, log_channels, step_dims, z, n_entry, n_x, ts_rel):
-    """Write ``Data/`` for one complex scalar log channel."""
-    _write_multi_channel_data_group(
-        f,
-        axis_list,
-        log_channels,
-        step_dims,
-        [z],
-        n_entry,
-        n_x,
-        ts_rel,
-    )
 
 
 def _write_multi_channel_data_group(
