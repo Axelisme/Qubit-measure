@@ -99,7 +99,9 @@ def test_v0_plan_requires_explicit_flux_unit_and_forwards_it(
                 FluxPlan.model_validate(data)
             return
         plan = FluxPlan.model_validate(data)
-        _, _, devices = execute_example(tmp_path, t2echo_fluxdep, plan, T2EchoTunables())
+        _, _, devices = execute_example(
+            tmp_path, t2echo_fluxdep, plan, T2EchoTunables()
+        )
         assert devices.values == [("flux", 0.1), ("flux", 0.2)]
         assert devices.units == [unit, unit]
     else:
@@ -154,7 +156,7 @@ def test_demo_workflows_check_ports_before_effects(
     if name == "echo":
         engine.start(
             t2echo_fluxdep,
-            plan=FluxPlan(flux_dev="flux", fluxes=(0.1,), points=7),
+            plan=FluxPlan(flux_dev="flux", flux_unit="native", fluxes=(0.1,), points=7),
             tunables=T2EchoTunables(),
             paths=paths,
             identity=identity,
@@ -163,7 +165,12 @@ def test_demo_workflows_check_ports_before_effects(
         engine.start(
             t1_overnight,
             plan=OvernightPlan(
-                flux_dev="flux", flux=0.2, period_s=10, rounds=1, points=7
+                flux_dev="flux",
+                flux_unit="native",
+                flux=0.2,
+                period_s=10,
+                rounds=1,
+                points=7,
             ),
             tunables=OvernightTunables(),
             paths=paths,
@@ -185,7 +192,7 @@ def test_t2echo_fluxdep_uses_the_same_core_with_its_own_typed_record(
     records, _, _ = execute_example(
         tmp_path,
         t2echo_fluxdep,
-        FluxPlan(flux_dev="flux", fluxes=(0.1, 0.2), points=7),
+        FluxPlan(flux_dev="flux", flux_unit="native", fluxes=(0.1, 0.2), points=7),
         T2EchoTunables(),
     )
     assert len(records) == 2
@@ -203,7 +210,14 @@ def test_overnight_waits_absolute_round_deadlines_and_reuses_calibration(
     records, clock, devices = execute_example(
         tmp_path,
         t1_overnight,
-        OvernightPlan(flux_dev="flux", flux=0.2, period_s=10, rounds=3, points=7),
+        OvernightPlan(
+            flux_dev="flux",
+            flux_unit="native",
+            flux=0.2,
+            period_s=10,
+            rounds=3,
+            points=7,
+        ),
         OvernightTunables(),
     )
     assert [len(record.run_files) for record in records] == [4, 1, 1]
@@ -218,7 +232,14 @@ def test_overnight_retries_unaccepted_calibration_on_next_round(tmp_path: Path) 
     records, _, _ = execute_example(
         tmp_path,
         t1_overnight,
-        OvernightPlan(flux_dev="flux", flux=0.2, period_s=10, rounds=2, points=7),
+        OvernightPlan(
+            flux_dev="flux",
+            flux_unit="native",
+            flux=0.2,
+            period_s=10,
+            rounds=2,
+            points=7,
+        ),
         OvernightTunables(cal=CalTunables(min_snr=50)),
     )
     assert [len(record.run_files) for record in records] == [3, 3]
