@@ -31,6 +31,7 @@ from zcu_tools.resources.qubit_params import (
 )
 from zcu_tools.resources.sample_table import (
     DeviceValueUnit,
+    JsonlSampleTable,
     SampleFluxFrame,
     SampleFluxResolution,
     resolve_sample_flux,
@@ -81,7 +82,7 @@ MechanismOrParamName = Literal[
 ]
 ProbeStatistic = Literal["median", "mean", "min", "max", "p10", "p90"]
 
-_REQUIRED_COLUMNS = ("Freq (MHz)", "T1 (us)")
+_REQUIRED_COLUMNS = ("freq_mhz", "t1_us")
 _MECHANISM_TO_PARAM: dict[MechanismName, NoiseParameterName] = {
     "capacitive": "Q_cap",
     "quasiparticle": "x_qp",
@@ -129,7 +130,7 @@ class T1CurveAnalysisConfig:
     result_dir: str
     analysis_flux_range: tuple[float, float] = (0.0, 1.0)
     image_dir: str | None = None
-    samples_filename: str = "samples.csv"
+    samples_filename: str = "samples.jsonl"
     fallback_frame_unit: DeviceValueUnit = "A"
     max_abs_flux_correction: float = 0.03
     correct_flux_from_f01_enabled: bool = True
@@ -313,17 +314,24 @@ class T1CurveAnalysisResult:
 def load_t1_curve_context(
     *,
     result_dir: str,
-    samples_filename: str = "samples.csv",
+    samples_filename: str = "samples.jsonl",
     image_dir: str | None = None,
     preview_rows: int = 10,
 ) -> T1CurveContext:
+    """Load fluxdep params and latest JSONL sample rows from result_dir.
+
+    samples_filename is relative to result_dir and defaults to samples.jsonl;
+    required measurements are freq_mhz and t1_us. Create image_dir (default
+    result_dir/t1_curve) and return params, rows and preview_rows preview rows.
+    Missing params, invalid JSONL or missing required columns fail fast.
+    """
     resolved_image_dir = image_dir or os.path.join(result_dir, "t1_curve")
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(resolved_image_dir, exist_ok=True)
 
     params_file = QubitParams(os.path.join(result_dir, "params.json"), readonly=True)
     fit_inputs = params_file.require_fluxdep_fit()
-    samples_df = pd.read_csv(os.path.join(result_dir, samples_filename))
+    samples_df = JsonlSampleTable(os.path.join(result_dir, samples_filename)).read()
     _validate_required_columns(samples_df)
 
     params = fit_inputs.params
@@ -385,9 +393,9 @@ def calibrate_t1_flux(
         samples_df,
         fallback_frame=fallback_frame,
     )
-    t1_values = _float_column(samples_df, "T1 (us)")
+    t1_values = _float_column(samples_df, "t1_us")
     t1_mask = np.isfinite(t1_values)
-    freq_values = _float_column(samples_df, "Freq (MHz)")
+    freq_values = _float_column(samples_df, "freq_mhz")
     freq_mask = np.isfinite(freq_values)
     t1_df = cast(pd.DataFrame, samples_df.loc[t1_mask].copy())
     freq_rows = cast(pd.DataFrame, samples_df.loc[freq_mask].copy())
@@ -397,7 +405,7 @@ def calibrate_t1_flux(
     }
     summary_table = pd.DataFrame(
         [
-            ("samples.csv rows", str(len(samples_df))),
+            ("samples.jsonl rows", str(len(samples_df))),
             ("explicit flux rows", str(source_counts["explicit"])),
             ("row-frame flux rows", str(source_counts["row-frame"])),
             ("fallback-frame flux rows", str(source_counts["fallback-frame"])),
@@ -1707,7 +1715,7 @@ def _validate_required_columns(samples_df: pd.DataFrame) -> None:
         column for column in _REQUIRED_COLUMNS if column not in samples_df.columns
     ]
     if missing:
-        raise ValueError(f"samples.csv missing required columns: {missing}")
+        raise ValueError(f"samples.jsonl missing required columns: {missing}")
 
 
 def _float_column(frame: pd.DataFrame, column: str) -> NDArray[np.float64]:
@@ -1727,7 +1735,7 @@ def _prepare_t1_data(
     context = calibration.context
     samples_df = context.samples_df
 
-    t1_values = _float_column(samples_df, "T1 (us)")
+    t1_values = _float_column(samples_df, "t1_us")
     eligible = np.isfinite(t1_values) & (t1_values > 0.0)
     if not np.any(eligible):
         raise ValueError("no finite positive T1 rows are available for analysis")
@@ -1736,11 +1744,11 @@ def _prepare_t1_data(
     sources = calibration.resolution.sources
     raw_fluxs = np.asarray(resolved_values[eligible], dtype=np.float64)
     row_sources = tuple(sources[index] for index in np.flatnonzero(eligible))
-    f01_observed = _float_column(samples_df, "Freq (MHz)")
+    f01_observed = _float_column(samples_df, "freq_mhz")
     f01_observed = f01_observed[eligible]
     f01_measured = np.isfinite(f01_observed)
     T1_ns = 1e3 * t1_values[eligible]
-    T1err_ns = 1e3 * _float_column(samples_df, "T1err (us)")[eligible]
+    T1err_ns = 1e3 * _float_column(samples_df, "t1_err_us")[eligible]
 
     corrected_fluxs = np.asarray(raw_fluxs, dtype=np.float64).copy()
     applied = np.zeros(len(raw_fluxs), dtype=bool)

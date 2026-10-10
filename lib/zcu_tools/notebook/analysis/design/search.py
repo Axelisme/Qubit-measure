@@ -15,7 +15,8 @@ from numpy.typing import NDArray
 from tqdm.auto import tqdm
 
 from zcu_tools.resources.qubit_params import QubitParams
-from zcu_tools.resources.sample_table.schema import (
+from zcu_tools.resources.sample_table import (
+    JsonlSampleTable,
     SampleFluxFrame,
     resolve_sample_flux,
     validate_sample_table_v2,
@@ -446,12 +447,12 @@ def add_real_sample(
     # load freq data; the v2 table must resolve flux for every row (explicit
     # flux, row frame or the caller-declared fallback frame), and legacy
     # coordinate columns (e.g. "calibrated mA") fail before any comparison.
-    sample_path = os.path.join(result_dir, "sample.csv")
-    freq_df = pd.read_csv(sample_path)
+    sample_path = os.path.join(result_dir, "samples.jsonl")
+    freq_df = JsonlSampleTable(sample_path).read()
     validate_sample_table_v2(freq_df)
     resolution = resolve_sample_flux(freq_df, fallback_frame=fallback_frame)
     idx = int(np.argmin(np.abs(resolution.values - flux)))
-    t1 = freq_df["T1 (us)"].iloc[idx]
+    t1 = freq_df["t1_us"].iloc[idx]
 
     # calculate chi
     _, snrs = calc_ge_snr(
