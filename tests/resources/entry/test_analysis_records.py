@@ -43,7 +43,7 @@ def test_record_analysis_appends_evidence_and_optional_json_attachment(
         assert list((entry.result_path / "records").glob("*.json")) == []
     else:
         assert stored.event.record == f"records/{event_id}.json"
-        attachment = entry.result_path / stored.event.record
+        attachment = entry.result_path / "records" / f"{event_id}.json"
         assert json.loads(attachment.read_text(encoding="utf-8")) == record
 
     second_id = entry.record_analysis("custom/fit", run_ids=[], summary={})
