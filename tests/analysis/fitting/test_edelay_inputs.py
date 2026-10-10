@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 from zcu_tools.analysis.fitting.resonance import find_edelay_branch
@@ -120,7 +122,7 @@ def test_find_edelay_branch_rejects_invalid_sample_values(
     freqs = np.asarray(frequency_values, dtype=np.float64)
     signals = np.asarray(signal_values, dtype=np.complex128)
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError, match=f"^{re.escape(expected_error)}$") as exc_info:
         find_edelay_branch(freqs, signals)
 
     assert str(exc_info.value) == expected_error
