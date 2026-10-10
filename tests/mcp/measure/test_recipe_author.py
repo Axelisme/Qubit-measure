@@ -576,7 +576,7 @@ def test_author_fake_flux_requires_explicit_native_opt_in(tmp_path):
         RecipeSession(client.context).open_tab("lookback").use_flux_device(
             "coil", unit="native"
         )
-    assert gui.publication["cfg_ref"]["revision"] == "3"
+    assert gui.publication["cfg_ref"]["revision"] == "4"
 
 
 @pytest.mark.parametrize(
