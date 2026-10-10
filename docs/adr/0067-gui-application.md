@@ -22,7 +22,7 @@ Device 的可觀察狀態在 `SessionState`，`DeviceService` 控制 driver 與 
 
 RunContext 提供 devices 與 cancel_signal 等執行能力，不提供儀器設定方法。Device 層只提供 current／voltage、frequency／power、output 或 value 等操作，不知道 flux／RF 角色。實驗層 helper 負責把角色用途與明示單位對應到 driver 操作；新增儀器接口不因此擴充 RunContext。這沿既有 C8 分層與 C9 無循環 contracts，experiment 使用 device，而非由 device 反向理解實驗。
 
-State 的 cached DeviceInfo 仍供觀察與 cfg defaults 使用，不是 Run 的控制命令或保存 snapshot。Run 框架在 hardware lease 後、adapter.run 前另讀一次全部已連線 device，任一讀取失敗拒絕 Run。實驗不對未使用的 device 套用舊 setup patch，固定 snapshot 的保存見 [[0063]]。
+State 的 cached DeviceInfo 仍供觀察與 cfg defaults 使用，不是 Run 的控制命令或保存 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前另讀一次全部已連線 device，任一讀取失敗拒絕 Run。實驗不對未使用的 device 套用舊 setup patch，固定 snapshot 的保存見 [[0063]]。
 
 State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由 Qt queued signal 或 headless queue 實作；這個規則不等同於要求 core 依賴 Qt 主線程。操作的取消、handle 與 terminal settle 由 Operation owner 決定，本篇不複製生命週期規則。
 

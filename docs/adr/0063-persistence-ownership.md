@@ -30,7 +30,9 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。
 
-`RunMetadata.device_snapshot` 保存 Run 框架在 hardware lease 後、adapter.run 前讀取的全部已連線 device 設定。每台只呼叫一次 get_info，任一台失敗就拒絕 Run，不寫設定、不進 adapter/core，也不用 cache 補值。Snapshot 表示實驗前狀態，不是 setup 後或每個 core 的 checkpoint。後續 sweep 不改寫它，實驗使用的值由 cfg 的 dev、flux_unit、sweep 範圍與 persisted axes 記錄。Notebook 的既有入口沒有 lease；其 lease 接縫尚待核實，不以這條契約宣稱 locking 已實作。
+`RunMetadata.device_snapshot` 保存 Run 開始前讀取的全部已連線 device 設定。GUI 在取得 operation hardware lease 後、adapter.run 前讀取。Notebook 在使用者的程序內同步執行，由 caller 擁有資源，不新增 lease；snapshot 在建立 RunContext 後、core.run 前讀取。
+
+兩路每台只呼叫一次 get_info。任一台失敗就拒絕 Run，不寫設定、不進 adapter/core，也不用 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，不是 setup 後或每個 core 的 checkpoint。後續 sweep 不改寫它，實驗使用的值由 cfg 的 dev、flux_unit、sweep 範圍與 persisted axes 記錄。
 
 Native writer 沿既有 `/device` 保存 snapshot，dataset 的 shape 是 `()`，內容為 UTF-8 JSON。Key 是 device 名稱，value 是 get_info 的設定。Snapshot 為 None 時不建 dataset，空 mapping 則寫 `{}`。單位沿各 DeviceInfo 既有欄位。YOKO current 模式的 value／rampstep 為 A，RF 頻率為 Hz，功率為 dBm，不新增 unit 欄位。GUI 和 Notebook Save 都使用當次 Run 的固定 snapshot，不重讀硬體或取下一輪值。
 

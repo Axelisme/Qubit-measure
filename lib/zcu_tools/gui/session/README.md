@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-10，cached device source 與 Run snapshot 分界
+**Last updated:** 2026-10-10，cached device source 與 GUI Run snapshot 分界
 
 # gui/session/ — 量測 session core
 
@@ -19,7 +19,7 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 - **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，DRAFT／ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它公開參數投影，不公開 mutable 容器 handles；SoC、predictor 與 cached value sources 保持各自 owner。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。
 
-DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，供 dialog、defaults 與 resolve-once 輸入使用，不是 Run 的控制命令或硬體 snapshot。Run 框架在 hardware lease 後、adapter.run 前讀一次全部已連線 device 的 get_info。任一讀取失敗拒絕 Run，不以 cache 補值；無 device 記 `{}`。這份實驗前 snapshot 隨 RunMetadata 保存，後續 sweep 或 Save 不重讀、不改寫。實驗層 helpers 操作選定 driver，RunContext 不提供 setters。DeviceService 的獨立手動 setup 與 best-effort poll 保留各自責任，不代替 Run snapshot。
+DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，供 dialog、defaults 與 resolve-once 輸入使用，不是 Run 的控制命令或硬體 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前讀一次全部已連線 device 的 get_info。任一讀取失敗拒絕 Run，不以 cache 補值；無 device 記 `{}`。這份實驗前 snapshot 隨 RunMetadata 保存，後續 sweep 或 Save 不重讀、不改寫。實驗層 helpers 操作選定 driver，RunContext 不提供 setters。DeviceService 的獨立手動 setup 與 best-effort poll 保留各自責任，不代替 Run snapshot。
 
 ## 結構
 

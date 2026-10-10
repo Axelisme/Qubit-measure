@@ -14,7 +14,7 @@ ContextService 的寫入權威見 [[0067]]；cfg resource、expression 與獨立
 
 Provider 依 owner 成組替換或移除。Context、predictor 或 device 更新後，source binder 更新對應 providers，避免留下舊來源。Provider 同步、只讀且不做硬體 I/O。Device provider 只讀 `SessionState.devices[*].info` 的 cache。Lookup 區分 missing key、known-but-unavailable、provider failure、重複註冊和型別錯誤。
 
-Cached device values 供 defaults 和 resolve-once 輸入使用，不是 Run 的硬體 snapshot。Run 框架在取得 hardware lease 後、呼叫 adapter.run 前讀取所有已連線 device；讀取失敗不以 lookup cache 補值。Snapshot 的保存見 [[0063]]。
+Cached device values 供 defaults 和 resolve-once 輸入使用，不是 Run 的硬體 snapshot。GUI Run 框架在取得 hardware lease 後、呼叫 adapter.run 前讀取所有已連線 device；讀取失敗不以 lookup cache 補值。Snapshot 的保存見 [[0063]]。
 
 內建來源投影 SessionEnv 的 cached metadata、predictor metadata 與具名 device cache。ContextService 發布 entry 的 result／database paths 與 active_label；`context.chip_name`、`context.qub_name` 和 `context.res_name` 讀取各自 cached 欄位，不從 alias 表推導名稱。Device keys 包括 `device.<name>.name` 和 `device.<name>.value`。名稱中的 device 是具體裝置名稱；lookup 不推論哪個裝置代表 flux。
 

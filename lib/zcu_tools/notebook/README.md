@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-10，Run device 契約與 Notebook lease 待核實邊界
+**Last updated:** 2026-10-10，同步 Run 的資源責任與 core.run 前 snapshot
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -51,9 +51,9 @@ Notebook 不走 GUI WritebackService，也不做 append 前候選驗證。Ledger
 
 Cfg 組裝使用 `experiment.cfg_assembler` 的 CfgEnv 與 make_cfg。Cfg.dev 只保存角色到 device 名稱的對應，使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Core 以 `context.devices[cfg.dev[role]]` 選 driver，使用實驗層 helpers 設 flux／RF／output，不把 DeviceInfo 當設定命令，也不對未使用的 device 套 setup patch。單位換算由 caller 負責，RF helpers 接 Hz／dBm。RunContext 不提供 setters。CfgEnv 不執行 setup、不解析 md expression，也不關閉資源。切換參數／library 來源後由 caller 重建 CfgEnv。Run 不重做 make_cfg、不刷新 cfg、不重連或自動補裝置；make_cfg 的裝置讀取不能當成 Run snapshot。
 
-Run snapshot 契約要求 Run 框架在 hardware lease 後、core.run 前讀一次全部已連線 device 的 get_info。任一台失敗拒絕 Run，不寫設定、不進 core、不以 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，後續 sweep 不覆寫。保存沿 RunMetadata.device_snapshot 到既有 data.h5 `/device`，Save 不重讀硬體或取下一輪值。
+Notebook Run 在使用者的程序內同步執行，資源由 caller 擁有。入口只借用 drivers，不新增 lease、lock 或 registry。Driver mapping 只固定名稱到 instance，不是資源 lease。Hardware lease 後的 snapshot 時機只適用 GUI。
 
-Notebook 既有同步入口只借用 drivers，沒有 Run lease。Driver mapping 只固定名稱到 instance，不是資源 lease。上述 lease 後 snapshot 的 Notebook 實作接縫尚待核實，這裡不宣稱已有新 locking owner 或 lease API。
+Notebook 在建立 RunContext 後、core.run 前，對全部已連線 device 各讀一次 get_info 作為 snapshot。這一步只讀不寫。任一台失敗拒絕 Run，不進 core、不以 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，後續 sweep 不覆寫。保存沿 RunMetadata.device_snapshot 到既有 data.h5 `/device`，Save 不重讀硬體或取下一輪值。
 
 `acquisition_for(source)` 只接受此 NotebookExperiment 最近成功 run 的同一 RunRecord，回傳隔離的 run identity、UTC 開始／結束時間、complete／stopped 與 software provenance。Run 在 core acquire 前捕捉 software evidence，正常返回且 StopSignal 錯誤檢查通過後結束計時，不包含 plots.finish、analyze 或 save。Presentation 成功後才成組發布 record 與 evidence。Analyze 與所有失敗保留 evidence，下一次成功 run 取代它，成功 load 清除它。Loaded、手組、另一 adapter 或過期 record 不能取得此 acquisition evidence。Schedule 會接住 scope 內的一次 KeyboardInterrupt，保留 buffer 與 interrupted signal。Notebook 將這種正常返回發布為 stopped record，已完成點與其餘 NaN 可沿 save_run 保存。Adapter 不另加 cancellation 入口。
 
