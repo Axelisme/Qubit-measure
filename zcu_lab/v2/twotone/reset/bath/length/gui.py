@@ -23,7 +23,6 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.reset_bath import bath_reset_writeback_items
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -65,15 +64,14 @@ class BathLengthAdapter(
             "freq/gain are found, to pick the shortest fully-resetting length."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'bathreset_freq' / "
-            "'bathreset_gain' — the calibrated cavity frequency and gain "
-            "driving the tested reset (so the cfg snapshot carries them "
-            "forward); 'q_f' / 'qub_ch' / 'res_ch' seed the bath-reset and "
-            "init-pulse drive defaults."
+            "Requires $qubit.ext.reset_bath_freq and "
+            "$qubit.ext.reset_bath_gain for the tested cavity tone. Missing, "
+            "null or invalid values fail cfg lowering. Other drive defaults "
+            "use captured qubit/resonator frequency and wiring."
         ),
         expects_ml=(
-            "Needs a bath-reset module (the tested reset) and a readout "
-            "module. Optionally references a calibrated upstream reset and an "
+            "Builds the tested bath-reset cfg from captured defaults and "
+            "needs a readout module. Optionally references an upstream reset and an "
             "init pulse (a library pi pulse when present) — both disabled when "
             "no library entry exists."
         ),
@@ -104,10 +102,10 @@ class BathLengthAdapter(
                 locked={"pi2_cfg.phase": _PI2_PHASE_OFFSET_DEG},
                 overrides={
                     "cavity_tone_cfg.freq": path_seed(
-                        "$qubit.module.bath_g.cavity_tone_cfg.freq", fallback=0.0
+                        "$qubit.ext.reset_bath_freq", fallback=0.0
                     ),
                     "cavity_tone_cfg.gain": path_seed(
-                        "$qubit.module.bath_g.cavity_tone_cfg.gain", fallback=0.1
+                        "$qubit.ext.reset_bath_gain", fallback=0.1
                     ),
                 },
             )
@@ -146,12 +144,8 @@ class BathLengthAdapter(
         self,
         req: WritebackRequest[BathLengthRunResult, BathLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
-        # Gated per-experiment 'reset_bath' / 'reset_bath_e' proposals: emitted when
-        # md carries the calibrated cavity freq/gain and the matching pi/2 phase.
-        items: list[WritebackItem] = []
-        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg))
-        return items
+        """Return no proposals: length analysis does not fit a calibration."""
+        return []
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_bathreset_len_{time.strftime('%m%d')}"

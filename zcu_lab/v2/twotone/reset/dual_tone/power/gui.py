@@ -11,6 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    ModuleWriteback,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -19,18 +20,18 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
+    CfgSchema,
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.reset_dual_tone import RESET_120_FIELD_MD_MAP
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
 from zcu_lab.v2._support.measure.seeds import path_seed
-from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_lab.v2.twotone.reset.dual_tone.power.core import (
     PowerAnalyzeOptions,
     PowerCfg,
@@ -74,21 +75,23 @@ class DualTonePowerAdapter(
             "gain pair that resets most completely. Runs on real hardware."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'reset_f1' / 'reset_f2' — "
-            "the two sideband frequencies held fixed on the tested reset; "
-            "'q_f' / 'qub_ch' seed the tested-reset and init-pulse drive "
-            "defaults."
+            "Requires $qubit.ext.reset_f1 and $qubit.ext.reset_f2 for the "
+            "two tested-reset frequencies. Missing, null or invalid values "
+            "fail cfg lowering. Other drive defaults use captured qubit "
+            "frequency and wiring."
         ),
         expects_ml=(
-            "Needs a two-pulse-reset module (the tested reset) and a readout "
-            "module. Optionally references a calibrated upstream reset and an "
+            "Builds the tested two-pulse-reset cfg from captured defaults and "
+            "needs a readout module. Optionally references an upstream reset and an "
             "init pulse (a library pi pulse when present) — both disabled when "
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the two best gains into MetaDict 'reset_gain1' and "
-            "'reset_gain2'. No ModuleLibrary writeback — these seed the final "
-            "'reset_120' registration done at the length step (D2(a))."
+            "Proposes the best gains to $qubit.ext.reset_gain1 and "
+            "$qubit.ext.reset_gain2. With Run cfg and capture, proposes "
+            "$qubit.reset.reset_120 from tested_reset, replacing only the "
+            "two gains with this analysis. Tested frequencies and all other "
+            "fields remain. An optional $qubit.module.reset row selects it."
         ),
         recommended=(
             "Sweep each gain across its full usable range. Analysis denoises "
@@ -113,10 +116,10 @@ class DualTonePowerAdapter(
                 locked={"pulse1_cfg.gain": 0.0, "pulse2_cfg.gain": 0.0},
                 overrides={
                     "pulse1_cfg.freq": path_seed(
-                        "$qubit.module.dual_tone.pulse1_cfg.freq", fallback=0.0
+                        "$qubit.ext.reset_f1", fallback=0.0
                     ),
                     "pulse2_cfg.freq": path_seed(
-                        "$qubit.module.dual_tone.pulse2_cfg.freq", fallback=0.0
+                        "$qubit.ext.reset_f2", fallback=0.0
                     ),
                 },
             )
@@ -164,26 +167,45 @@ class DualTonePowerAdapter(
         self,
         req: WritebackRequest[DualTonePowerRunResult, DualTonePowerAnalyzeResult],
     ) -> Sequence[WritebackItem]:
+        """Propose ext gains and the Run-tested reset with those fitted gains.
+
+        None cfg or capture retains only scalars. Capture resolution and
+        materialization failures propagate; tested frequencies stay unchanged.
+        """
         result = req.analyze_result
         items: list[WritebackItem] = [
             ParameterWriteback(
-                target_name="reset_gain1",
+                target_name="$qubit.ext.reset_gain1",
                 description="Dual-tone reset gain 1 (a.u.)",
                 proposed_value=result.gain1,
             ),
             ParameterWriteback(
-                target_name="reset_gain2",
+                target_name="$qubit.ext.reset_gain2",
                 description="Dual-tone reset gain 2 (a.u.)",
                 proposed_value=result.gain2,
             ),
         ]
-        items.extend(
-            reset_module_writeback_items(
-                req.ctx,
-                req.run_result.cfg,
-                target="reset_120",
-                field_md_map=RESET_120_FIELD_MD_MAP,
-                desc="Reset with two pulse from 1 to 2 to 0",
+        cfg = req.run_result.cfg
+        parameters = req.ctx.parameters
+        if cfg is None or parameters is None:
+            return items
+
+        root = parameters.resolve_path("$qubit.reset.reset_120")
+        spec, value = module_cfg_to_value(cfg.modules.tested_reset)
+        value.with_field("pulse1_cfg.gain", result.gain1)
+        value.with_field("pulse2_cfg.gain", result.gain2)
+        items.append(
+            ModuleWriteback(
+                target_name="$qubit.reset.reset_120",
+                description="Reset with two pulses from 1 to 2 to 0",
+                edit_schema=CfgSchema(spec=spec, value=value),
+            )
+        )
+        items.append(
+            ParameterWriteback(
+                target_name="$qubit.module.reset",
+                description="Select dual-tone reset for downstream experiments",
+                proposed_value=root,
             )
         )
         return items

@@ -23,13 +23,11 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.reset_dual_tone import RESET_120_FIELD_MD_MAP
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
 from zcu_lab.v2._support.measure.seeds import path_seed
-from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_lab.v2.twotone.reset.dual_tone.length.core import (
     LengthCfg,
     LengthExp,
@@ -41,7 +39,7 @@ DualToneLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 @dataclass
 class DualToneLengthAnalyzeResult(AnalyzeResultBase):
-    """The fit publishes a curve without fitted scalar output."""
+    """Length analysis publishes a curve without fitted scalar output."""
 
     pass
 
@@ -66,24 +64,21 @@ class DualToneLengthAdapter(
             "last, to pick the shortest length that fully resets the qubit."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'reset_f1' / 'reset_f2' "
-            "and 'reset_gain1' / 'reset_gain2' — the calibrated sideband "
-            "frequencies and gains driving the tested reset (so the cfg "
-            "snapshot carries the fully calibrated reset); 'q_f' / 'qub_ch' "
-            "seed the tested-reset and init-pulse drive defaults."
+            "Requires $qubit.ext.reset_f1/reset_f2 and "
+            "$qubit.ext.reset_gain1/reset_gain2 for the tested frequencies "
+            "and gains. Missing, null or invalid values fail cfg lowering. "
+            "Other drive defaults use captured qubit frequency and wiring."
         ),
         expects_ml=(
-            "Needs a two-pulse-reset module (the tested reset) and a readout "
-            "module. Optionally references a calibrated upstream reset and an "
+            "Builds the tested two-pulse-reset cfg from captured defaults and "
+            "needs a readout module. Optionally references an upstream reset and an "
             "init pulse (a library pi pulse when present) — both disabled when "
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the ModuleLibrary module 'reset_120' — the calibrated "
-            "tested two-pulse reset (carrying its md-linked sideband "
-            "frequencies and gains) registered as the final reset module; the "
-            "user picks the final reset length in the writeback dialog. "
-            "Skipped when no source cfg is available (e.g. loaded from file)."
+            "No automatic writeback. Analysis plots the length response "
+            "without fitting a length. Choose the length manually; "
+            "DualTonePower proposes the tested reset module."
         ),
         recommended=(
             "A length sweep from ~0.05 us to a few times the expected reset "
@@ -105,16 +100,16 @@ class DualToneLengthAdapter(
                 shape="two_pulse",
                 overrides={
                     "pulse1_cfg.freq": path_seed(
-                        "$qubit.module.dual_tone.pulse1_cfg.freq", fallback=0.0
+                        "$qubit.ext.reset_f1", fallback=0.0
                     ),
                     "pulse2_cfg.freq": path_seed(
-                        "$qubit.module.dual_tone.pulse2_cfg.freq", fallback=0.0
+                        "$qubit.ext.reset_f2", fallback=0.0
                     ),
                     "pulse1_cfg.gain": path_seed(
-                        "$qubit.module.dual_tone.pulse1_cfg.gain", fallback=1.0
+                        "$qubit.ext.reset_gain1", fallback=1.0
                     ),
                     "pulse2_cfg.gain": path_seed(
-                        "$qubit.module.dual_tone.pulse2_cfg.gain", fallback=1.0
+                        "$qubit.ext.reset_gain2", fallback=1.0
                     ),
                 },
             )
@@ -153,21 +148,8 @@ class DualToneLengthAdapter(
         self,
         req: WritebackRequest[DualToneLengthRunResult, DualToneLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
-        # Gated per-experiment 'reset_120' proposal: when md carries the calibrated
-        # freqs + gains, register the calibrated two-pulse reset built from this
-        # run's tested_reset template (md overwrites those fields).
-        items: list[WritebackItem] = []
-        items.extend(
-            reset_module_writeback_items(
-                req.ctx,
-                req.run_result.cfg,
-                target="reset_120",
-                field_md_map=RESET_120_FIELD_MD_MAP,
-                desc="Reset with two pulse from 1 to 2 to 0",
-            )
-        )
-        return items
+        """Return no proposals: length analysis does not fit a calibration."""
+        return []
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_dualreset_length_{time.strftime('%m%d')}"

@@ -29,7 +29,6 @@ from zcu_lab.v2._support.measure.schema_builder import (
     ModuleInit,
 )
 from zcu_lab.v2._support.measure.seeds import path_seed
-from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_lab.v2.twotone.reset.single_tone.length.core import (
     LengthCfg,
     LengthExp,
@@ -41,7 +40,7 @@ SingleToneLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 @dataclass
 class SingleToneLengthAnalyzeResult(AnalyzeResultBase):
-    """The fit publishes a curve without fitted scalar output."""
+    """Length analysis publishes a curve without fitted scalar output."""
 
     pass
 
@@ -66,23 +65,20 @@ class SingleToneLengthAdapter(
             "found, to pick the shortest length that fully resets the qubit."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'reset_f' — the sideband "
-            "reset frequency (= r_f - q_f) driving the tested reset (fallback "
-            "0 MHz); 'q_f' / 'qub_ch' seed the tested-reset and init-pulse "
-            "drive defaults."
+            "Requires $qubit.ext.reset_f for the tested reset frequency. "
+            "Missing, null or invalid values fail cfg lowering. Other drive "
+            "defaults use captured qubit frequency and wiring."
         ),
         expects_ml=(
-            "Needs a pulse-reset module (the tested reset) and a readout "
+            "Builds the tested pulse reset inline and needs a readout "
             "module. Optionally references a calibrated upstream reset and an "
             "init pulse (a library pi pulse when present) — both disabled when "
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the ModuleLibrary module 'reset_10' — the calibrated "
-            "tested single-pulse reset (carrying its md-linked sideband "
-            "frequency) registered as the final reset module; the user picks "
-            "the final reset length in the writeback dialog. Skipped when no "
-            "source cfg is available (e.g. loaded from file)."
+            "No automatic writeback. Analysis plots the length response "
+            "without fitting a length. Choose the length manually; "
+            "SingleToneFreq proposes the tested reset module."
         ),
         recommended=(
             "A length sweep from ~0.1 us to a few times the expected reset "
@@ -106,7 +102,7 @@ class SingleToneLengthAdapter(
                 init=ModuleInit.INLINE,
                 overrides={
                     "pulse_cfg.freq": path_seed(
-                        "$qubit.module.sideband.pulse_cfg.freq", fallback=0.0
+                        "$qubit.ext.reset_f", fallback=0.0
                     )
                 },
             )
@@ -145,23 +141,8 @@ class SingleToneLengthAdapter(
         self,
         req: WritebackRequest[SingleToneLengthRunResult, SingleToneLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
-        # Gated per-experiment 'reset_10' proposal: when md carries the calibrated
-        # sideband freq, register the calibrated single-pulse reset built from this
-        # run's tested_reset template (md overwrites its freq).
-        items: list[WritebackItem] = []
-        items.extend(
-            reset_module_writeback_items(
-                req.ctx,
-                req.run_result.cfg,
-                target="reset_10",
-                field_md_map=[
-                    ("pulse_cfg.freq", "$qubit.module.sideband.pulse_cfg.freq")
-                ],
-                desc="Reset with one pulse from 1 to 0",
-            )
-        )
-        return items
+        """Return no proposals: length analysis does not fit a calibration."""
+        return []
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_sidereset_length_{time.strftime('%m%d')}"
