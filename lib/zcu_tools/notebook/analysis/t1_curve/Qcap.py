@@ -90,5 +90,4 @@ def calc_Qcap_vs_omega(
         Qcap_vs_omega_err = T1errs * dipoles
 
         return Qcap_vs_omega, Qcap_vs_omega_err
-    else:
-        return Qcap_vs_omega
+    return Qcap_vs_omega

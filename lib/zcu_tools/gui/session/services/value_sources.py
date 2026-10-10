@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -315,11 +315,11 @@ class ValueSourceBinder:
     def _device_float_attr(self, name: str, attr: str) -> float:
         info = self._require_device_info(name, f"device.{name}.{attr}")
         value = getattr(info, attr, None)
-        if type(value) not in (int, float):
+        if type(value) is not int and type(value) is not float:
             raise UnavailableValue(
                 f"device.{name}.{attr}", f"Device {name!r} has no numeric {attr!r}"
             )
-        return float(cast(int | float, value))
+        return float(value)
 
     def _device_str_attr(self, name: str, attr: str) -> str:
         info = self._require_device_info(name, f"device.{name}.{attr}")

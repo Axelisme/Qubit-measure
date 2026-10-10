@@ -29,7 +29,7 @@ class ParamMeta:
 
 
 def _resolve_field_info(
-    field: dataclasses.Field,
+    field: dataclasses.Field[object],
     hints: dict[str, Any],
 ) -> tuple[type, list[Any] | None, str, int | None, bool]:
     """Return (bare_type, choices, label, decimals, optional)."""
