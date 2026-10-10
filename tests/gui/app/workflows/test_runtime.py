@@ -121,11 +121,13 @@ def test_cancelled_native_setup_does_not_apply_value(connected) -> None:
 @pytest.mark.parametrize("operation", ["get", "setup"])
 def test_unknown_name_is_rejected_at_use_and_names_requested_device(connected, operation: str) -> None:
     _, _, driver, port = connected
+    operate = (
+        (lambda: port.get_device_cfg("missing"))
+        if operation == "get"
+        else (lambda: port.setup_device("missing", driver.info, StopSignal()))
+    )
     with pytest.raises(ValueError, match="missing"):
-        if operation == "get":
-            port.get_device_cfg("missing")
-        else:
-            port.setup_device("missing", driver.info, StopSignal())
+        operate()
     assert driver.calls == [] and driver.reads == 0
 
 
@@ -136,7 +138,7 @@ def test_wrong_address_and_io_cause_propagate_without_retry(connected) -> None:
     assert driver.value == 0.0
     cause = OSError("native write failed")
     driver.setup_error = cause
-    with pytest.raises(OSError) as caught:
+    with pytest.raises(OSError, match="native write failed") as caught:
         port.setup_device("flux", driver.info, StopSignal())
     assert caught.value is cause and len(driver.calls) == 2
 
@@ -198,10 +200,12 @@ def test_capture_failure_stops_before_callback_but_zero_devices_is_explicit(conn
 @pytest.mark.parametrize("operation", ["get", "setup"])
 def test_unregistered_blank_names_are_identified_at_use_without_io(connected, name: str, operation: str) -> None:
     _, _, driver, port = connected
-    with pytest.raises(ValueError) as caught:
-        if operation == "get":
-            port.get_device_cfg(name)
-        else:
-            port.setup_device(name, driver.info, StopSignal())
+    operate = (
+        (lambda: port.get_device_cfg(name))
+        if operation == "get"
+        else (lambda: port.setup_device(name, driver.info, StopSignal()))
+    )
+    with pytest.raises(ValueError, match="not connected") as caught:
+        operate()
     assert repr(name) in str(caught.value)
     assert driver.calls == [] and driver.reads == 0
