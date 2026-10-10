@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-10，條目樣本 JSONL 與容器 model 分界
+**Last updated:** 2026-10-10，共用 accepted 逐項寫回、條目樣本 JSONL 與跨 run 分析記錄
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -60,7 +60,11 @@ ResultEntry 管理的 store 在 use、refresh 與 edit 時也檢查遮蔽，失�
 
 每次讀取與追加都持同一 resolved path 的 sidecar lock，不使用 cache。新事件只寫 1.0；較新 1.x 行可讀，原行與未知欄位保持不變。帶 record 的 append 先發布新 JSON 附檔，再追加事件，不修改 caller model 或既有附檔。讀取不跳過損壞行。失敗可以留下孤兒附檔或不完整尾行，不提供 crash recovery。
 
+`ResultEntry.record_analysis(analysis_kind, *, run_ids, summary, record=None)` 記錄跨 run 分析，回傳可供 `ledger.get(id)` 查詢的事件 UUID。事件保留 caller 的分析種類、輸入 runs 順序與 JSON 摘要，origin 為 notebook；不查 run 資料，也不要求工作點。非 None 的 record 交給 ledger 保存與引用，內容格式由 caller 決定。入口只記錄分析，不寫回值；使用者以一般 point 或 setup 編輯寫入值，來源沿既有 manual 契約，不連回分析事件。
+
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與來源。Point commit 失敗時 accepted 可以保留，值與來源仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
+
+`writeback` 提供共用 parameter／module／waveform 項目與 `apply_writeback`。Caller 傳入 captured point、storage binding、已解析的具體路徑，以及具名 evidence（實驗／分析 kind、run_id、origin 與可選 source）。流程追加一筆 accepted 後沿項目順序各自提交，首錯停止並原樣傳出，前項保留。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨項交易或回復框架。Notebook 使用此入口；GUI 仍保留舊路徑，等待後續接線。
 
 ## 輸出位置
 

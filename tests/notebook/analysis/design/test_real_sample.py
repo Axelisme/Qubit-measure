@@ -39,7 +39,7 @@ def _actual_t1_trace(fig) -> Scatter:
 
 @pytest.fixture
 def result_dir(tmp_path, monkeypatch) -> str:
-    """Minimal result dir (params.json + no sample.csv yet) with fake physics."""
+    """Minimal result dir (params.json + no samples.jsonl yet) with fake physics."""
     result = tmp_path / "q1"
     result.mkdir()
     params_file = QubitParams(result / "params.json")
@@ -78,25 +78,36 @@ def result_dir(tmp_path, monkeypatch) -> str:
     return str(result)
 
 
-def _write_sample_csv(result_dir: str, rows: list[dict[str, object]]) -> None:
-    import os
-
-    pd.DataFrame(rows).to_csv(os.path.join(result_dir, "sample.csv"), index=False)
+def _write_sample_jsonl(result_dir: str, rows: list[dict[str, object]]) -> None:
+    _write_sample_frame(result_dir, pd.DataFrame(rows))
 
 
 def _write_sample_frame(result_dir: str, frame: pd.DataFrame) -> None:
     import os
 
-    frame.to_csv(os.path.join(result_dir, "sample.csv"), index=False)
+    frame = frame.copy()
+    frame["run_id"] = [f"run-{index}" for index in range(len(frame))]
+    frame["point"] = None
+    frame["at"] = "2026-10-10T00:00:00Z"
+    frame["source"] = "manual"
+    if "dev_value" not in frame:
+        frame["dev_value"] = 0.0
+        frame["dev_unit"] = "A"
+    path = os.path.join(result_dir, "samples.jsonl")
+    if frame.empty:
+        with open(path, "w", encoding="utf-8"):
+            pass
+    else:
+        frame.to_json(path, orient="records", lines=True)
 
 
 def test_selects_row_by_explicit_flux(result_dir: str) -> None:
-    _write_sample_csv(
+    _write_sample_jsonl(
         result_dir,
         [
-            {"dev_value": 0.3, "dev_unit": "A", "flux": 0.3, "T1 (us)": 11.0},
-            {"dev_value": 0.5, "dev_unit": "A", "flux": 0.5, "T1 (us)": 22.0},
-            {"dev_value": 0.7, "dev_unit": "A", "flux": 0.7, "T1 (us)": 33.0},
+            {"dev_value": 0.3, "dev_unit": "A", "flux": 0.3, "t1_us": 11.0},
+            {"dev_value": 0.5, "dev_unit": "A", "flux": 0.5, "t1_us": 22.0},
+            {"dev_value": 0.7, "dev_unit": "A", "flux": 0.7, "t1_us": 33.0},
         ],
     )
     fig = _new_fig()
@@ -111,7 +122,7 @@ def test_selects_row_by_explicit_flux(result_dir: str) -> None:
 
 
 def test_selects_row_by_row_frame_derived_flux(result_dir: str) -> None:
-    _write_sample_csv(
+    _write_sample_jsonl(
         result_dir,
         [
             {
@@ -119,21 +130,21 @@ def test_selects_row_by_row_frame_derived_flux(result_dir: str) -> None:
                 "dev_unit": "A",
                 "flux_int": 0.0,
                 "flux_period": 2.0,
-                "T1 (us)": 11.0,
+                "t1_us": 11.0,
             },  # flux 0.0
             {
                 "dev_value": 1.0,
                 "dev_unit": "A",
                 "flux_int": 0.0,
                 "flux_period": 2.0,
-                "T1 (us)": 22.0,
+                "t1_us": 22.0,
             },  # flux 0.5
             {
                 "dev_value": 1.4,
                 "dev_unit": "A",
                 "flux_int": 0.0,
                 "flux_period": 2.0,
-                "T1 (us)": 33.0,
+                "t1_us": 33.0,
             },  # flux 0.7
         ],
     )
@@ -144,11 +155,11 @@ def test_selects_row_by_row_frame_derived_flux(result_dir: str) -> None:
 
 
 def test_selects_row_by_declared_fallback_frame(result_dir: str) -> None:
-    _write_sample_csv(
+    _write_sample_jsonl(
         result_dir,
         [
-            {"dev_value": 0.3, "dev_unit": "A", "T1 (us)": 11.0},
-            {"dev_value": 0.5, "dev_unit": "A", "T1 (us)": 22.0},
+            {"dev_value": 0.3, "dev_unit": "A", "t1_us": 11.0},
+            {"dev_value": 0.5, "dev_unit": "A", "t1_us": 22.0},
         ],
     )
     fig = _new_fig()
@@ -166,7 +177,7 @@ def test_selects_row_by_declared_fallback_frame(result_dir: str) -> None:
 def test_cross_unit_rows_compare_in_flux_domain_only(result_dir: str) -> None:
     # The V row is flux-nearest (0.5) although its dev_value (3.0 V) is far from
     # the A row values; direct dev_value comparison across units would pick row0.
-    _write_sample_csv(
+    _write_sample_jsonl(
         result_dir,
         [
             {
@@ -174,14 +185,14 @@ def test_cross_unit_rows_compare_in_flux_domain_only(result_dir: str) -> None:
                 "dev_unit": "A",
                 "flux_int": 0.0,
                 "flux_period": 1.0,
-                "T1 (us)": 11.0,
+                "t1_us": 11.0,
             },  # flux 0.49
             {
                 "dev_value": 3.0,
                 "dev_unit": "V",
                 "flux_int": 2.0,
                 "flux_period": 2.0,
-                "T1 (us)": 22.0,
+                "t1_us": 22.0,
             },  # flux 0.5
         ],
     )
@@ -192,11 +203,11 @@ def test_cross_unit_rows_compare_in_flux_domain_only(result_dir: str) -> None:
 
 
 def test_unresolved_rows_fail_with_indexes_before_physics(result_dir: str) -> None:
-    _write_sample_csv(
+    _write_sample_jsonl(
         result_dir,
         [
-            {"dev_value": 0.3, "dev_unit": "A", "flux": 0.3, "T1 (us)": 11.0},
-            {"dev_value": 0.6, "dev_unit": "A", "T1 (us)": 22.0},  # no frame
+            {"dev_value": 0.3, "dev_unit": "A", "flux": 0.3, "t1_us": 11.0},
+            {"dev_value": 0.6, "dev_unit": "A", "t1_us": 22.0},  # no frame
         ],
     )
     fig = _new_fig()
@@ -208,9 +219,9 @@ def test_unresolved_rows_fail_with_indexes_before_physics(result_dir: str) -> No
 
 
 def test_fallback_frame_unit_mismatch_is_unresolved(result_dir: str) -> None:
-    _write_sample_csv(
+    _write_sample_jsonl(
         result_dir,
-        [{"dev_value": 0.5, "dev_unit": "A", "T1 (us)": 11.0}],
+        [{"dev_value": 0.5, "dev_unit": "A", "t1_us": 11.0}],
     )
     fig = _new_fig()
 
@@ -225,10 +236,10 @@ def test_fallback_frame_unit_mismatch_is_unresolved(result_dir: str) -> None:
 
 
 def test_legacy_coordinate_column_fails_before_physics(result_dir: str) -> None:
-    _write_sample_csv(
+    _write_sample_jsonl(
         result_dir,
         [
-            {"calibrated mA": 0.3, "Freq (MHz)": 4000.0, "T1 (us)": 11.0},
+            {"calibrated mA": 0.3, "freq_mhz": 4000.0, "t1_us": 11.0},
         ],
     )
     fig = _new_fig()
@@ -240,9 +251,9 @@ def test_legacy_coordinate_column_fails_before_physics(result_dir: str) -> None:
 
 
 def test_empty_table_fails_before_physics(result_dir: str) -> None:
-    # Header-only v2 table (zero rows): validation must fail before physics.
+    # Empty JSONL table: validation must fail before physics.
     _write_sample_frame(
-        result_dir, pd.DataFrame(columns=["dev_value", "dev_unit", "T1 (us)"])
+        result_dir, pd.DataFrame(columns=["dev_value", "dev_unit", "t1_us"])
     )
     fig = _new_fig()
 

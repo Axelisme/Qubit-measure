@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import shutil
+from collections.abc import Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +23,14 @@ from . import _point_origin
 from ._path_segments import validate_path_segment
 from .errors import RenameRecoveryError
 from .ledger import RecordsLedger
-from .ledger_models import ImportPayload, LedgerEvent, Origin, validate_origin
+from .ledger_models import (
+    AnalyzedPayload,
+    ImportPayload,
+    JsonObject,
+    LedgerEvent,
+    Origin,
+    validate_origin,
+)
 from .points import PointView
 from .provenance import Provenance, ProvenanceData, validate_source
 from .schema import (
@@ -143,6 +151,45 @@ class ResultEntry:
         Missing records directories raise; accessing this property writes no files.
         """
         return RecordsLedger(self._result_path / "records", entry_id=self.entry_id)
+
+    def record_analysis(
+        self,
+        analysis_kind: str,
+        *,
+        run_ids: Sequence[str],
+        summary: JsonObject,
+        record: JsonObject | None = None,
+    ) -> str:
+        """Append cross-run analysis evidence and return its new UUID string.
+
+        analysis_kind is the caller's method name. run_ids contains input run
+        identifiers in caller order, may be empty, and is not resolved against
+        run data. summary and optional record are strict JSON objects with
+        finite numbers; their contents have no framework-defined schema.
+
+        The analyzed event uses this entry's UUID, current UTC time and notebook
+        origin. A non-None record (including {}) is attached as records/<id>.json.
+        The returned ID can be read with ledger.get(id). No values are written;
+        callers use ordinary point or setup edits for manual value provenance.
+
+        Payload validation and RecordsLedger I/O/validation errors propagate
+        unchanged. The ledger owns locking and publication; failure may leave
+        an orphan attachment or partial tail, with no rollback or recovery.
+        """
+        event = LedgerEvent(
+            id=str(uuid4()),
+            kind="analyzed",
+            at=datetime.now(timezone.utc).isoformat(),
+            entry_id=self.entry_id,
+            origin="notebook",
+            payload=AnalyzedPayload(
+                analysis_kind=analysis_kind,
+                run_ids=tuple(run_ids),
+                summary=summary,
+            ),
+        )
+        self.ledger.append(event, record=record)
+        return event.id
 
     def samples(self, component: str) -> JsonlSampleTable:
         """Bind this component's append-only sample history without touching disk.

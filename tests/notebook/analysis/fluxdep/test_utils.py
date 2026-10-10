@@ -31,8 +31,8 @@ def _make_table(rows: list[dict[str, object]]) -> pd.DataFrame:
             {
                 "dev_value": 0.0,
                 "dev_unit": "A",
-                "Freq (MHz)": 4000.0,
-                "T1 (us)": 10.0,
+                "freq_mhz": 4000.0,
+                "t1_us": 10.0,
                 **row,
             }
             for row in rows
@@ -52,7 +52,7 @@ def test_explicit_flux_rows_plot_at_resolved_flux() -> None:
 
     trace = _sample_points_trace(vis.fig)
     np.testing.assert_allclose(trace.x, [0.3, 0.7])
-    # Freq (MHz) -> GHz display conversion is preserved.
+    # freq_mhz -> GHz display conversion is preserved.
     np.testing.assert_allclose(trace.y, [4.0, 4.0])
     assert vis.xlimits == [0.3, 0.7]
 
@@ -132,7 +132,7 @@ def test_hover_labels_exclude_coordinate_and_freq_columns() -> None:
                 "flux_period": 1.0,
                 "dev_value": 0.3,
                 "dev_unit": "A",
-                "T1 (us)": 11.0,
+                "t1_us": 11.0,
                 "comment": "hello",
             }
         ]
@@ -146,8 +146,8 @@ def test_hover_labels_exclude_coordinate_and_freq_columns() -> None:
     assert "dev_unit" not in label
     assert "flux_int" not in label
     assert "flux_period" not in label
-    assert "Freq (MHz)" not in label
-    assert "T1 (us)=11.0" in label
+    assert "freq_mhz" not in label
+    assert "t1_us=11.0" in label
     assert "comment=hello" in label
 
 
@@ -175,7 +175,7 @@ def test_legacy_coordinate_column_fails_before_analysis() -> None:
     table = pd.DataFrame(
         {
             "calibrated mA": [0.1, 0.2],
-            "Freq (MHz)": [4000.0, 4100.0],
+            "freq_mhz": [4000.0, 4100.0],
         }
     )
     vis = FreqFluxDependVisualizer()
@@ -245,8 +245,8 @@ def test_plot_md_fluent_chain_smoke() -> None:
         {
             "dev_value": [0.5, 0.8],
             "dev_unit": ["A", "A"],
-            "Freq (MHz)": [4000.0, 4100.0],
-            "T1 (us)": [10.0, 12.0],
+            "freq_mhz": [4000.0, 4100.0],
+            "t1_us": [10.0, 12.0],
         }
     )
 

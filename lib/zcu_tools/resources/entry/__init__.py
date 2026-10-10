@@ -53,3 +53,11 @@ from .views import (
     snapshot,
     source_path,
 )
+from .writeback import (
+    ModuleWriteback,
+    ParameterWriteback,
+    WaveformWriteback,
+    WritebackEvidence,
+    WritebackItem,
+    apply_writeback,
+)
