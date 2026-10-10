@@ -192,3 +192,16 @@ def test_capture_failure_stops_before_callback_but_zero_devices_is_explicit(conn
     if not empty:
         assert status.reason == "OSError: capture failed"
         assert driver.reads == 1
+
+
+@pytest.mark.parametrize("name", ["", " "])
+@pytest.mark.parametrize("operation", ["get", "setup"])
+def test_unregistered_blank_names_are_identified_at_use_without_io(connected, name: str, operation: str) -> None:
+    _, _, driver, port = connected
+    with pytest.raises(ValueError) as caught:
+        if operation == "get":
+            port.get_device_cfg(name)
+        else:
+            port.setup_device(name, driver.info, StopSignal())
+    assert repr(name) in str(caught.value)
+    assert driver.calls == [] and driver.reads == 0
