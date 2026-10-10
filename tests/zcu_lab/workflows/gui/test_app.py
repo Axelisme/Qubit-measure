@@ -304,7 +304,7 @@ def test_capture_failure_preserves_both_panels_and_local_input(
     edit.editingFinished.emit()
     before = knobs.state.input.data
     app.services.settings.open_entry(EntryRequest("sample"))
-    with pytest.raises(FailedPreconditionError):
+    with pytest.raises(RoleResolutionError, match="qubit"):
         app.window.prepare_forms()
     assert app.window.plan_panel is plan and app.window.tunables_panel is knobs
     assert knobs.state.input.data == before
