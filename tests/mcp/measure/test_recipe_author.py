@@ -268,6 +268,7 @@ class _SweepGui(LookbackGui):
         }
         self.publication["tree"]["children"].update(
             dev=section(flux_dev=scalar("coil")),
+            flux_unit=scalar("A"),
             sweep=section(
                 freq={
                     "kind": "sweep",
@@ -493,6 +494,30 @@ def test_author_sweep_rejects_empty_sources_before_any_edit(tmp_path, key, label
         with pytest.raises(ValueError, match="sources"):
             tab.set_sweep("sweep.freq", start=6000.0, sources=sources)
         assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
+
+
+@pytest.mark.parametrize("unit", ["A", "V", "native"])
+def test_author_flux_device_writes_validated_unit_into_cfg(tmp_path, unit):
+    gui = _SweepGui()
+    gui.device = {
+        "unit": "none" if unit == "native" else unit,
+        "type_name": "FakeDevice" if unit == "native" else "YOKOGS200",
+        "info": {"type": "FakeDevice" if unit == "native" else "YOKOGS200"},
+    }
+    previous = "V" if unit == "A" else "A"
+    gui.publication["tree"]["children"]["flux_unit"] = scalar(previous)
+    before_sweep = deepcopy(gui.publication["tree"]["children"]["sweep"])
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.use_flux_device("coil", unit=unit)
+    assert gui.publication["tree"]["children"]["flux_unit"]["input"]["resolved"] == unit
+    assert (
+        gui.publication["tree"]["children"]["dev"]["children"]["flux_dev"]["input"][
+            "resolved"
+        ]
+        == "coil"
+    )
+    assert gui.publication["tree"]["children"]["sweep"] == before_sweep
 
 
 def test_author_flux_device_checks_units_without_changing_coordinates(tmp_path):
