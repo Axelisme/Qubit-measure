@@ -35,9 +35,7 @@ def test_fit_rabi_with_decay():
 def test_fit_rabi_retains_parameter_tuple_shape_for_both_models():
     xs = np.linspace(0, 6, 400)
     for decay in (False, True):
-        expected_params = (
-            (0.2, 0.8, 0.5, 0.0, 10.0) if decay else (0.2, 0.8, 0.5, 0.0)
-        )
+        expected_params = (0.2, 0.8, 0.5, 0.0, 10.0) if decay else (0.2, 0.8, 0.5, 0.0)
         model = decaycos if decay else cosfunc
         signals = model(xs, *expected_params)
 
