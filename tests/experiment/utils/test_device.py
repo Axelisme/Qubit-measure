@@ -1,10 +1,16 @@
 """Explicit device-setup contract shared by experiment callers."""
 
+from typing import Literal
+from unittest.mock import MagicMock
+
 import pytest
-from zcu_tools.device import FakeDevice, FakeDeviceInfo
+from zcu_tools.device import YOKOGS200, FakeDevice, FakeDeviceInfo, RohdeSchwarzSGS100A
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.utils import device as helpers
 from zcu_tools.experiment.utils.device import setup_devices
+
+from tests.experiment.utils._device_transports import DeviceTransport
 
 
 def _cfg(*names: str) -> ExpCfgModel:
@@ -79,15 +85,6 @@ def test_setup_without_a_signal_configures_requested_devices():
 
 # New operations are accessed at runtime so missing helpers give behavioral red,
 # rather than preventing collection on the test-only commit.
-from unittest.mock import MagicMock
-from typing import Literal
-
-from zcu_tools.device import RohdeSchwarzSGS100A, YOKOGS200
-from zcu_tools.experiment.utils import device as helpers
-
-from tests.experiment.utils._device_transports import DeviceTransport
-
-
 def _instrument(mode: str = "CURR") -> tuple[YOKOGS200, DeviceTransport]:
     transport = DeviceTransport(mode)
     manager = MagicMock()
@@ -112,10 +109,14 @@ def test_flux_yoko_uses_explicit_units_and_preserves_configuration(
     helpers.set_flux(device, value, unit=unit, stop=StopSignal())
     assert device.get_info() == before.with_updates(value=value)
     assert transport.writes
-    assert all(command.startswith(":SOURce:LEVel:AUTO ") for command in transport.writes)
+    assert all(
+        command.startswith(":SOURce:LEVel:AUTO ") for command in transport.writes
+    )
 
 
-@pytest.mark.parametrize("unit,mode", [("A", "VOLT"), ("V", "CURR"), ("native", "CURR")])
+@pytest.mark.parametrize(
+    "unit,mode", [("A", "VOLT"), ("V", "CURR"), ("native", "CURR")]
+)
 def test_flux_rejects_unit_or_mode_before_writing(
     unit: Literal["A", "V", "native"], mode: str
 ) -> None:
@@ -172,21 +173,27 @@ def test_helpers_preserve_driver_error() -> None:
     with pytest.raises(OSError) as caught:
         helpers.set_flux(device, 1e-6, unit="A", stop=StopSignal())
     assert caught.value is error
-    with pytest.raises(RuntimeError, match="current"):
+    with pytest.raises(RuntimeError, match="Current"):
         helpers.set_flux(device, 0.021, unit="A", stop=StopSignal())
     assert transport.writes == []
 
 
-@pytest.mark.parametrize("operation", ["set_flux", "set_rf_frequency", "set_rf_power", "set_output"])
+@pytest.mark.parametrize(
+    "operation", ["set_flux", "set_rf_frequency", "set_rf_power", "set_output"]
+)
 def test_helpers_reject_unsupported_device(operation: str) -> None:
     helper = getattr(helpers, operation)
+    if operation == "set_flux":
+        args = (object(), 1.0)
+        kwargs = {"unit": "native", "stop": StopSignal()}
+    elif operation == "set_output":
+        args = (object(), "on")
+        kwargs = {}
+    else:
+        args = (object(), 1.0)
+        kwargs = {}
     with pytest.raises(TypeError):
-        if operation == "set_flux":
-            helper(object(), 1.0, unit="native", stop=StopSignal())
-        elif operation == "set_output":
-            helper(object(), "on")
-        else:
-            helper(object(), 1.0)
+        helper(*args, **kwargs)
 
 
 def test_output_helper_changes_only_output() -> None:
