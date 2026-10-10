@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from matplotlib.backend_bases import Event, MouseEvent
+from matplotlib.backend_bases import Event, MouseButton, MouseEvent
 from zcu_tools.gui.session.ui.predictor_canvas import (
     _compute_xlim,
     _pan_xlim_to_include,
@@ -487,7 +487,9 @@ def test_canvas_leave_events_lock_last_followed_marker(canvas, leave_event):
     canvas.bind_callbacks(on_follow=followed.append, on_lock=locked.append)
 
     x_pixel, y_pixel = ax.transData.transform((0.5, y))
-    press = MouseEvent("button_press_event", canvas.canvas, x_pixel, y_pixel, button=1)
+    press = MouseEvent(
+        "button_press_event", canvas.canvas, x_pixel, y_pixel, button=MouseButton.LEFT
+    )
     canvas.canvas.callbacks.process("button_press_event", press)
     assert followed == []
     assert locked == []
