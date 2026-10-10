@@ -95,9 +95,12 @@ def _write_sample_frame(result_dir: str, frame: pd.DataFrame) -> None:
     if "dev_value" not in frame:
         frame["dev_value"] = 0.0
         frame["dev_unit"] = "A"
-    frame.to_json(
-        os.path.join(result_dir, "samples.jsonl"), orient="records", lines=True
-    )
+    path = os.path.join(result_dir, "samples.jsonl")
+    if frame.empty:
+        with open(path, "w", encoding="utf-8"):
+            pass
+    else:
+        frame.to_json(path, orient="records", lines=True)
 
 
 def test_selects_row_by_explicit_flux(result_dir: str) -> None:
@@ -250,7 +253,7 @@ def test_legacy_coordinate_column_fails_before_physics(result_dir: str) -> None:
 
 
 def test_empty_table_fails_before_physics(result_dir: str) -> None:
-    # Header-only v2 table (zero rows): validation must fail before physics.
+    # Empty JSONL table: validation must fail before physics.
     _write_sample_frame(
         result_dir, pd.DataFrame(columns=["dev_value", "dev_unit", "t1_us"])
     )

@@ -80,7 +80,10 @@ def _write_v2_jsonl(
     data["point"] = None
     data["at"] = "2026-10-10T00:00:00Z"
     data["source"] = "manual"
-    data.to_json(path, orient="records", lines=True)
+    if data.empty:
+        path.write_text("", encoding="utf-8")
+    else:
+        data.to_json(path, orient="records", lines=True)
     return path
 
 
@@ -689,7 +692,7 @@ def test_write_merged_samples_never_overwrites_a_source_csv(
 def test_write_guards_protect_zero_row_jsonl_sources(
     tmp_path: Path,
 ) -> None:
-    """Zero-row sources have no row diagnostics, so per-source paths must
+    """Empty JSONL sources have no row diagnostics, so per-source paths must
     still protect the original (empty) source JSONL from being overwritten.
     """
     target = _target_frame()
