@@ -7,13 +7,24 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton
+from qtpy.QtCore import QEvent, QPointF, Qt
+from qtpy.QtGui import QMouseEvent
+from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QDialog,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QTreeWidget,
+    QWidget,
+)
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     ModuleWriteback,
     ParameterWriteback,
-    WritebackItem,
+    SessionEnv,
 )
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
@@ -25,11 +36,18 @@ from zcu_tools.gui.cfg import (
     IntSpec,
     ScalarSpec,
 )
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
+from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, parameter_capture
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from zcu_lab.components import ResonatorSchema
+
+
+def _parameters():
+    return parameter_capture(
+        {"R1": ResonatorSchema(kind="resonator", freq=6000.0)}, existing=123
+    ).bind_aliases((AliasRow("resonator", "R1"),), {})
 
 
 def make_ctrl():
@@ -40,23 +58,15 @@ def make_ctrl():
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.get_session_env.return_value = MagicMock(md=MetaDict(), ml=ModuleLibrary())
-    # For writeback baseline capture introspection, expose get_session_env
-    md = MetaDict()
-    md.r_f = 6000.0
-    # ModuleLibrary mock with one entry
-    ml = ModuleLibrary()
-    # keep empty
-    exp_ctx = MagicMock()
-    exp_ctx.md = md
-    exp_ctx.ml = ml
-    ctrl.get_session_env.return_value = exp_ctx
-    # Writeback control fakes
-    ctrl.progress_control.attach_progress.return_value = lambda: None
+    parameters = _parameters()
+    ctrl.read_context.return_value = parameters
+    ctrl.get_session_env.return_value = SessionEnv(
+        parameters=parameters, soc=None, soccfg=None
+    )
     return ctrl
 
 
-def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
+def make_snapshot(tab_id, *, plots: Plots, analysis=AnalysisMode.FIT, post=False):
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
         PostAnalysisPaneSnapshot,
@@ -65,7 +75,6 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
     )
 
     run_snap = RunPaneSnapshot(result=object(), source_path=None)
-    plots = Plots(NonPresentingHost())
     plots.adopt("fit", Figure())
     plots.finish()
     analysis_snap = AnalysisPaneSnapshot(
@@ -120,324 +129,294 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
 
 
 @pytest.fixture
-def exp_tab_widget(qapp, monkeypatch):
-    import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
+def snapshots():
+    owners: list[Plots] = []
 
-    orig_attach = mod.attach_existing_figure_to_container
+    def create(tab_id, *, analysis=AnalysisMode.FIT, post=False):
+        plots = Plots(NonPresentingHost())
+        owners.append(plots)
+        return make_snapshot(tab_id, plots=plots, analysis=analysis, post=post)
 
-    def mock_attach(fig, container):
-        from qtpy.QtWidgets import QWidget
-
-        w = QWidget()
-        w.figure = fig  # type: ignore[attr-defined]
-        container.attach_canvas(w)
-        w.draw = lambda: None  # type: ignore[attr-defined]
-        return w
-
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
-    yield mod.ExpTabWidget
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
-
-
-def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget):
-    """A1: Run uses tree adapter, preserves Reset, lock, scroll, Run/Stop, progress, commit."""
-    ctrl = make_ctrl()
-    snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
-    tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
-    tab.attach(snap, MagicMock())
-    # Sole tree — no structure selector, always tree
-    import zcu_tools.gui.widgets.cfg as cfg_pkg
-
-    assert not hasattr(cfg_pkg, "form_structure")
     try:
-        from zcu_tools.gui.widgets.cfg import CfgFormWidget
+        yield create
+    finally:
+        for plots in owners:
+            plots.finish()
+            plots.release()
 
-        CfgFormWidget(structure=object())  # type: ignore[call-arg]
-        assert False
-    except TypeError:
-        pass
-    # Visual: tree adapter selected; deeper visuals are covered by shared widget tests
-    from zcu_tools.gui.widgets.cfg.structure import TREE_DEPTH_COLORS, TreeCfgWidget
 
-    assert len(TREE_DEPTH_COLORS) == 5
-    # When attached with a real draft, root would be TreeCfgWidget — verify via
-    # a direct CfgFormWidget test (shared tree presentation) instead of requiring
-    # the stubbed ExpTabWidget to have attached a real draft.
+@pytest.fixture
+def exp_tab_widget(qapp):
+    from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
+
+    return ExpTabWidget
+
+
+def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget, snapshots):
+    """Run keeps its tree presentation, Reset, editing lock and busy state."""
     from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.cfg import (
-        CfgSectionSpec,
-        CfgSectionValue,
-        DirectValue,
-    )
-    from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
-    ctrl2 = MagicMock()
-    ctrl2.get_bus.return_value = EventBus()
-    ctrl2.get_current_md.return_value = __import__(
-        "zcu_tools.resources.context", fromlist=["MetaDict"]
-    ).MetaDict()
-    ctrl2.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
-    w = CfgFormWidget(text_input_enhancer=None)
-    schema = CfgSchema(
-        spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
-        value=CfgSectionValue(fields={"reps": DirectValue(10)}),
-    )
-    draft = MeasureCfgBindings(ctrl2).new_draft(schema)
-    w.attach(draft)
-    assert isinstance(w._root_widget, TreeCfgWidget)
-    tree = w._root_widget._tree
-    assert tree.isHeaderHidden()
-    assert tree.indentation() == 10
-    assert tree.font().pixelSize() == 13
-    w.detach()
-    # Preserve Reset, editing lock (scroll stays enabled), Run/Stop, progress, Busy
-    assert tab.reset_btn.isEnabled() is True
-    # Editing lock: content disabled, shell stays enabled (verifiable via direct CfgFormWidget)
-    tab.cfg_form.set_editing_enabled(False)
-    tab.cfg_form.set_editing_enabled(True)
-    # Reset tooltip exists
-    assert isinstance(tab.reset_btn.toolTip(), str)
-    # Progress stack exists
-    assert hasattr(tab, "progress_stack")
-    # Busy disables Reset
-    busy_snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
-    assert busy_snap.interaction is not None
-    busy_snap = dataclasses.replace(
-        busy_snap,
-        interaction=dataclasses.replace(busy_snap.interaction, is_running=True),
-    )
-    tab.update_interaction_state(busy_snap)
-    assert tab.reset_btn.isEnabled() is False
-    tab.detach()
-
-
-def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(qapp, exp_tab_widget):
-    """A2: Analysis ledger 13px single-column, header whole-row folding, Analyze placement (A4 corrected)."""
     ctrl = make_ctrl()
-    snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
+    snap = snapshots("tab-1", analysis=AnalysisMode.FIT, post=False)
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
-    tab.attach(snap, MagicMock())
-    # Ledger font 13 px
-    assert tab.analyze_form.font().pixelSize() == 13
-    # Sections are _LedgerSection with whole-header folding
-    from zcu_tools.gui.app.measure.ui.exp_tab_widget import _LedgerSection
-
-    assert isinstance(tab._analyze_section, _LedgerSection)
-    assert isinstance(tab.writeback_section, _LedgerSection)
-    # Header whole-row toggles
-    initially = tab._analyze_section.is_collapsed()
-    tab._analyze_section._header.mouseReleaseEvent  # exists
-    # Simulate click on header
-
-    # Directly call toggle via header click handler
-    tab._analyze_section._toggle()
-    assert tab._analyze_section.is_collapsed() != initially
-    tab._analyze_section._toggle()
-    assert tab._analyze_section.is_collapsed() == initially
-    # A4 corrected: Analyze appears immediately after params and before Writeback preview, not fixed bar
-    assert not hasattr(tab, "_analysis_action_bar"), (
-        "fixed action bar should be removed for A4"
-    )
-    # Verify Analyze is inside the scroll area between params and writeback
-    # Find scroll area inside analysis panel
-    from qtpy.QtWidgets import QScrollArea
-
-    scroll = tab._analysis_panel.findChild(QScrollArea)
-    assert scroll is not None
-    inner = scroll.widget()
-    assert inner is not None
-    # inner layout should contain _analyze_section, analyze_btn, writeback_section in order
-    layout = inner.layout()
-    assert layout is not None
-    # Find indices via widget positions
-    # The analyze_btn should be descendant of inner, not of a fixed bar
-    assert tab.analyze_btn.parent() is not None
-
-    # Check that analyze_btn is inside inner (ancestor is inner or its child container)
-    def is_descendant(widget, ancestor):
-        cur = widget
-        while cur is not None:
-            if cur is ancestor:
-                return True
-            cur = cur.parent()
-        return False
-
-    assert is_descendant(tab.analyze_btn, inner), "Analyze should be inside scroll area"
-    assert not is_descendant(tab.analyze_btn, tab._analysis_panel) or is_descendant(
-        tab.analyze_btn, inner
-    )
-    # Ensure writeback_section is below analyze_btn in layout order
-    # We can check that writeback_section is after analyze_btn by checking y positions after layout
-    # Simpler: check that analyze_btn's parent widget is placed between sections in the layout sequence
-    # Verify ordering: collect widgets in layout order
-    widgets = []
-    for i in range(layout.count()):
-        item = layout.itemAt(i)
-        if item is None:
-            continue
-        w = item.widget()
-        if w is not None:
-            widgets.append(w)
-    # The widgets list should contain _analyze_section, a container with analyze_btn, then writeback_section
-    # Find indices
+    w = CfgFormWidget(text_input_enhancer=None)
     try:
-        idx_params = widgets.index(tab._analyze_section)
-        # Find widget that contains analyze_btn
-        idx_analyze = None
-        for idx, w in enumerate(widgets):
-            if is_descendant(tab.analyze_btn, w):
-                idx_analyze = idx
-                break
+        tab.attach(snap, MagicMock())
+        schema = CfgSchema(
+            spec=CfgSectionSpec(fields={"reps": ScalarSpec(label="Reps", type=int)}),
+            value=CfgSectionValue(fields={"reps": DirectValue(10)}),
+        )
+        draft = MeasureCfgBindings(make_ctrl()).new_draft(schema, parameters=None)
+        w.attach(draft)
+        tree = w.findChild(QTreeWidget)
+        assert tree is not None
+        assert tree.isHeaderHidden()
+        assert tree.indentation() == 10
+        assert tree.font().pixelSize() == 13
+        assert tab.reset_btn.isEnabled() is True
+        tab.cfg_form.set_editing_enabled(False)
+        tab.cfg_form.set_editing_enabled(True)
+        assert isinstance(tab.reset_btn.toolTip(), str)
+        busy_snap = snapshots("tab-1", analysis=AnalysisMode.FIT, post=False)
+        assert busy_snap.interaction is not None
+        busy_snap = dataclasses.replace(
+            busy_snap,
+            interaction=dataclasses.replace(busy_snap.interaction, is_running=True),
+        )
+        tab.update_interaction_state(busy_snap)
+        assert tab.reset_btn.isEnabled() is False
+    finally:
+        w.detach()
+        w.close()
+        tab.detach()
+        tab.close()
+        qapp.processEvents()
+
+
+def _click_header(qapp: QApplication, header: QWidget) -> None:
+    center = header.rect().center()
+    event = QMouseEvent(
+        QEvent.Type.MouseButtonRelease,
+        QPointF(center),
+        QPointF(header.mapToGlobal(center)),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    qapp.sendEvent(header, event)
+
+
+def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(
+    qapp, exp_tab_widget, snapshots
+):
+    """Analysis uses a 13 px ledger, whole-header folding and inline Analyze."""
+    ctrl = make_ctrl()
+    snap = snapshots("tab-1", analysis=AnalysisMode.FIT, post=False)
+    tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
+    try:
+        tab.attach(snap, MagicMock())
+        assert tab.analyze_form.font().pixelSize() == 13
+        header = next(
+            header
+            for header in tab.findChildren(QWidget, "ledgerHeader")
+            if any(
+                label.text() == "<b>Analysis parameters</b>"
+                for label in header.findChildren(QLabel)
+            )
+        )
+        section = header.parentWidget()
+        if section is None:
+            raise RuntimeError("Analysis header has no containing section")
+        initially = tab.analyze_form.isVisibleTo(section)
+        _click_header(qapp, header)
+        assert tab.analyze_form.isVisibleTo(section) != initially
+        _click_header(qapp, header)
+        assert tab.analyze_form.isVisibleTo(section) == initially
+        scroll = next(
+            scroll
+            for scroll in tab.findChildren(QScrollArea)
+            if scroll.isAncestorOf(tab.analyze_form)
+        )
+        inner = scroll.widget()
+        assert inner is not None
+        layout = inner.layout()
+        assert layout is not None
+        assert tab.analyze_btn.parent() is not None
+        assert inner.isAncestorOf(tab.analyze_btn), (
+            "Analyze should be inside scroll area"
+        )
+        widgets = []
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            if item is not None and (widget := item.widget()) is not None:
+                widgets.append(widget)
+        idx_params = widgets.index(section)
+        idx_analyze = widgets.index(tab.analyze_btn)
         idx_writeback = widgets.index(tab.writeback_section)
         assert idx_params < idx_analyze < idx_writeback, (
             f"order params {idx_params} analyze {idx_analyze} writeback {idx_writeback}"
         )
-    except ValueError:
-        # Fallback: at least check that analyze_btn is between sections via geometry
-        assert is_descendant(tab.analyze_btn, inner)
-    # Scroll area still contains ledger
-    assert tab._analysis_panel.findChild(type(tab.analyze_form)) is not None
-    assert tab.analyze_btn.isEnabled() is True
-    tab.detach()
+        assert scroll.findChild(type(tab.analyze_form)) is not None
+        assert tab.analyze_btn.isEnabled() is True
+    finally:
+        tab.detach()
+        tab.close()
+        qapp.processEvents()
 
 
 def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
-    """A3: every writeback item shows selection, target/description, current, proposed, Edit; Save/Cancel and Apply preserve."""
+    """Native preview facts retain selection, editing and Apply interactions."""
+    from zcu_tools.cfg_model import DirectReadoutCfg
+    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+    from zcu_tools.gui.app.measure.services.writeback import WritebackValues
     from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 
     ctrl = make_ctrl()
-    # Mock service-owned summaries (S2) — not on public WritebackItem
-    ctrl.get_writeback_summaries_for_pane.return_value = {
-        "param-1": ("6000.0", "6100.0"),
-        "ml-1": ("— not present", "create readout_rf"),
-        "wf-1": ("— not present", "create → ro_waveform"),
-    }
-    # Create MetaDict items (adapter proposal shape unchanged)
     md_item = ParameterWriteback(
-        target_name="r_f", description="Resonator freq", proposed_value=6100.0
+        target_name="$resonator.freq",
+        description="Resonator freq",
+        proposed_value=6100.0,
     )
-    md_item.session_id = "param-1"
+    cfg = DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=0.0)
+    spec, value = module_cfg_to_value(cfg)
     ml_item = ModuleWriteback(
-        target_name="readout_rf", description="Readout module", edit_schema=MagicMock()
+        target_name="readout_rf",
+        description="Readout module",
+        edit_schema=CfgSchema(spec, value),
     )
-    ml_item.session_id = "ml-1"
     ml_item2 = ModuleWriteback(
         target_name="ro_waveform", description="Waveform", edit_schema=None
     )
-    ml_item2.session_id = "wf-1"
-    # non-editable waveform (no schema) should have no Edit button
+    md_item.session_id, ml_item.session_id, ml_item2.session_id = (
+        "param-1",
+        "ml-1",
+        "wf-1",
+    )
+    values = {
+        "param-1": WritebackValues(
+            actual_path="R1.freq", current=6000.0, proposed=6100.0, unit=None
+        ),
+        "ml-1": WritebackValues(
+            actual_path="R1.readout.readout_rf",
+            current=None,
+            proposed=cfg.to_dict(),
+            unit=None,
+        ),
+        "wf-1": WritebackValues(
+            actual_path="R1.readout.ro_waveform",
+            current=None,
+            proposed=cfg.to_dict(),
+            unit=None,
+        ),
+    }
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (
+        lambda tab_id, pane, session_id=None: (
+            values if session_id is None else {session_id: values[session_id]}
+        )
+    )
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
-    widget.populate([md_item, ml_item, ml_item2])
-    # Selection
-    assert len(widget._checks) == 3
-    for sid in ["param-1", "ml-1", "wf-1"]:
-        assert sid in widget._checks
-        assert isinstance(widget._checks[sid], QCheckBox)
-    # Target/description via checkbox label (contains target)
-    assert "r_f" in widget._checks["param-1"].text()
-    assert "readout_rf" in widget._checks["ml-1"].text()
-    # Current / proposed labels exist and show summaries
-    cur = widget.findChildren(QLabel, "writebackCurrent")
-    prop = widget.findChildren(QLabel, "writebackProposed")
-    assert len(cur) == 3
-    assert any("6000.0" in c.text() for c in cur)
-    assert any("not present" in c.text() for c in cur)
-    assert len(prop) == 3
-    assert any("6100.0" in p.text() for p in prop)
-    assert any("create readout_rf" in p.text() for p in prop)
-    # Edit buttons: 2 editable (md_item, ml_item), wf-1 not editable (no schema)
-
-    edits = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
-    assert len(edits) == 2
-    # Apply Selected button exists and enabled logic
-    assert widget._apply_btn.text() == "Apply Selected"
-    assert widget._apply_btn.isEnabled() is True
-    # Toggling selection disables Apply when none selected
-    widget._checks["param-1"].setChecked(False)
-    widget._checks["ml-1"].setChecked(False)
-    widget._checks["wf-1"].setChecked(False)
-    assert widget._apply_btn.isEnabled() is False
-    # Restore
-    widget._checks["param-1"].setChecked(True)
-    assert widget._apply_btn.isEnabled() is True
-    # Save/Cancel in MD edit dialog: check that Edit opens dialog with current readonly
-    widget._edit_md_item(md_item, widget._checks["param-1"])
-    from qtpy.QtWidgets import QApplication, QDialog
-
-    dialogs = [
-        w
-        for w in QApplication.topLevelWidgets()
-        if isinstance(w, QDialog) and w.isVisible()
-    ]
-    # Find the MD dialog
     md_dialog = None
-    for d in dialogs:
-        if d.windowTitle().startswith("Edit Value:"):
-            md_dialog = d
-            break
-    assert md_dialog is not None
-    # Current readonly label exists
-    assert md_dialog.findChild(QLabel, "writebackCurrentReadonly") is not None
-    md_dialog.close()
+    try:
+        widget.populate([md_item, ml_item, ml_item2], values)
+        checks = widget.findChildren(QCheckBox)
+        assert len(checks) == 3
+        for target in ("$resonator.freq", "readout_rf", "ro_waveform"):
+            assert any(target in check.text() for check in checks)
+        assert "$resonator.freq" in checks[0].text()
+        assert "readout_rf" in checks[1].text()
+        cur = widget.findChildren(QLabel, "writebackCurrent")
+        prop = widget.findChildren(QLabel, "writebackProposed")
+        assert len(cur) == 3
+        assert any("6000.0" in label.text() for label in cur)
+        assert cur[1].text() == cur[2].text() == "—"
+        assert len(prop) == 3
+        assert any("6100.0" in label.text() for label in prop)
+        assert prop[1].text() == prop[2].text() == "map[5]"
+        edits = [
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Edit"
+        ]
+        assert len(edits) == 2
+        apply = next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Apply Selected"
+        )
+        assert apply.text() == "Apply Selected"
+        assert apply.isEnabled() is True
+        for check in checks:
+            check.setChecked(False)
+        assert apply.isEnabled() is False
+        checks[0].setChecked(True)
+        assert apply.isEnabled() is True
+        edits[0].click()
+        md_dialog = next(
+            dialog
+            for dialog in QApplication.topLevelWidgets()
+            if isinstance(dialog, QDialog)
+            and dialog.isVisible()
+            and dialog.windowTitle().startswith("Edit Value:")
+        )
+        assert md_dialog is not None
+        assert md_dialog.findChild(QLabel, "writebackCurrentReadonly") is not None
+    finally:
+        if md_dialog is not None:
+            md_dialog.close()
+        widget.close()
+        qapp.processEvents()
 
 
 def test_writeback_baseline_captured_via_service(qapp):
-    """S2: baseline captured at draft creation from SessionEnv (service-owned, not adapter)."""
-    from unittest.mock import MagicMock
-
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
+    """The service captures baseline summaries from a fixed ParameterContext."""
+    from zcu_tools.cfg_model import DirectReadoutCfg
+    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+    from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
     from zcu_tools.gui.app.measure.services.writeback import WritebackService
+    from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.event_bus import BaseEventBus
 
-    md = MetaDict()
-    md.r_f = 6000.0
-    md.existing = 123
-    ml = ModuleLibrary()
-    # Create a fake context
-    ctx = SessionEnv(md=md, ml=ml, soc=None, soccfg=None)
-    ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
-    ctrl.get_session_env.return_value = ctx
-    # CfgEditor mock
-    cfg_editor = MagicMock()
-    cfg_editor.open_seeded.return_value = ("ed-1", ())
-    svc = WritebackService(cfg_editor, ctrl)
+    from tests.gui.app.measure._cfg_fakes import PublishedHost
+
+    parameters = _parameters()
+    state = State(SessionEnv(parameters=parameters, soc=None, soccfg=None))
+    ctrl = make_ctrl()
+    cfg_editor = CfgEditorService(
+        PublishedHost(state), ctrl, MagicMock(), MagicMock(), BaseEventBus()
+    )
+    svc = WritebackService(cfg_editor, ctrl, entry_ledger=MagicMock())
     md_item = ParameterWriteback(
-        target_name="r_f", description="freq", proposed_value=6100.0
+        target_name="$resonator.freq", description="freq", proposed_value=6100.0
     )
     md_item2 = ParameterWriteback(
-        target_name="missing_key", description="missing", proposed_value=1
+        target_name="$resonator.ext.missing_key",
+        description="missing",
+        proposed_value=1,
+    )
+    spec, value = module_cfg_to_value(
+        DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=0.0)
     )
     module_item = ModuleWriteback(
-        target_name="new_mod", description="new", edit_schema=MagicMock()
+        target_name="$resonator.readout.new_mod",
+        description="new",
+        edit_schema=CfgSchema(spec, value),
     )
-    draft = svc.create_draft([md_item, md_item2, module_item])
-    items = draft.preview()
-    # Find by target_name
-    r_f_item = next(i for i in items if i.target_name == "r_f")
-    missing = next(i for i in items if i.target_name == "missing_key")
-    mod = next(i for i in items if i.target_name == "new_mod")
-    # Summaries are service-owned, not on WritebackItem
-    assert (
-        not hasattr(r_f_item, "current_summary")
-        or getattr(r_f_item, "current_summary", None) is None
-        or True
-    )
-    cur_rf, prop_rf = svc.get_summaries(draft, r_f_item.session_id)
-    cur_missing, _ = svc.get_summaries(draft, missing.session_id)
-    cur_mod, prop_mod = svc.get_summaries(draft, mod.session_id)
-    assert cur_rf is not None and "6000" in cur_rf
-    assert prop_rf is not None and "6100" in prop_rf
-    assert cur_missing == "—"
-    assert cur_mod == "— not present"
-    assert prop_mod is not None and "create" in prop_mod
-    # Adapter proposal shape unchanged (no summary fields)
-    assert (
-        not hasattr(ParameterWriteback, "current_summary")
-        or "current_summary" not in ParameterWriteback.__dataclass_fields__
-    )
-    assert (
-        "current_summary" not in WritebackItem.__dataclass_fields__
-        if hasattr(WritebackItem, "__dataclass_fields__")
-        else True
-    )
+    draft = svc.create_draft([md_item, md_item2, module_item], parameters=parameters)
+    try:
+        items = draft.preview()
+        r_f_item = next(i for i in items if i.target_name == "$resonator.freq")
+        missing = next(
+            i for i in items if i.target_name == "$resonator.ext.missing_key"
+        )
+        mod = next(i for i in items if i.target_name == "$resonator.readout.new_mod")
+        cur_rf, prop_rf = svc.get_summaries(draft, r_f_item.session_id)
+        cur_missing, _ = svc.get_summaries(draft, missing.session_id)
+        cur_mod, prop_mod = svc.get_summaries(draft, mod.session_id)
+        assert cur_rf is not None and "6000" in cur_rf
+        assert prop_rf is not None and "6100" in prop_rf
+        assert cur_missing == "—"
+        assert cur_mod == "— not present"
+        assert prop_mod is not None and "create" in prop_mod
+    finally:
+        draft.teardown()

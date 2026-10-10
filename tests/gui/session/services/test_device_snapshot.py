@@ -16,9 +16,14 @@ from zcu_tools.gui.app.measure.state import DeviceState, DeviceStatus, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
+from zcu_tools.gui.session.ports import DeviceMemoryInfo
+from zcu_tools.gui.session.services.device import (
+    ConnectDeviceRequest,
+    DeviceService,
+)
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui._completion_helpers import (
@@ -225,3 +230,34 @@ def test_list_snapshots_does_not_read_hardware(qapp):
 
     assert snapshots[0].name == "flux"
     fake.get_info.assert_not_called()
+
+
+def test_cached_fake_unit_is_native(qapp) -> None:
+    svc = _make_svc(driver=FakeDevice(fast_mode=True))
+    _connect(svc)
+    before = svc.list_device_snapshots()
+
+    assert svc.get_device_unit("flux") == "native"
+    assert svc.get_device_unit_strict("flux") == "native"
+    info = before[0].info
+    assert info is not None
+    assert info.model_dump()["value_unit"] == "native"
+    assert svc.list_device_snapshots() == before
+
+
+@pytest.mark.parametrize("type_name", ["YOKOGS200", "FakeDevice"])
+def test_remembered_device_without_info_has_no_inferred_unit(
+    qapp, type_name: str
+) -> None:
+    svc = _make_svc()
+    svc.register_remembered_devices(
+        [DeviceMemoryInfo(name="flux", type_name=type_name, address="unused")]
+    )
+    before = svc.list_device_snapshots()
+    assert before[0].info is None
+    assert before[0].status == DeviceStatus.MEMORY_ONLY
+
+    assert svc.get_device_unit("flux") == "none"
+    with pytest.raises(DeviceRegistrationError, match="flux"):
+        svc.get_device_unit_strict("flux")
+    assert svc.list_device_snapshots() == before

@@ -1,15 +1,16 @@
-"""measure-gui Setup across launch, MCP screenshot, toolbar reopen and project tool."""
+"""Measure Setup across launch, screenshots, toolbar reopen and entry/point tools."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-from qtpy.QtWidgets import QApplication, QLineEdit, QPushButton, QSpinBox
+from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton, QSpinBox
 from zcu_tools.gui.app.measure.services.persistence_types import (
     AppPersistedState,
     PersistedStartup,
 )
+from zcu_tools.gui.session.context_types import EntryDraft, SavedPoint
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -22,9 +23,7 @@ from tests.gui.app.measure._app_launch import (
 
 _SAVED = AppPersistedState(
     startup=PersistedStartup(
-        chip_name="chipR",
-        qub_name="qubR",
-        res_name="resR",
+        entry_name="chipR",
         ip="10.1.2.3",
         port=4321,
     )
@@ -32,7 +31,9 @@ _SAVED = AppPersistedState(
 
 
 def _field_texts(dialog: SetupDialog) -> set[str]:
-    return {edit.text() for edit in dialog.findChildren(QLineEdit)}
+    return {edit.text() for edit in dialog.findChildren(QLineEdit)} | {
+        combo.currentText() for combo in dialog.findChildren(QComboBox)
+    }
 
 
 def _port_values(dialog: SetupDialog) -> list[int]:
@@ -64,7 +65,7 @@ def test_restored_settings_prefill_one_setup_that_survives_screenshot_and_toolba
 ) -> None:
     with launched_measure_app(qapp, tmp_path, restore=_SAVED) as app:
         (dialog,) = visible_setup_dialogs(app.window)
-        assert {"chipR", "qubR", "resR", "10.1.2.3"} <= _field_texts(dialog)
+        assert {"chipR", "10.1.2.3"} <= _field_texts(dialog)
         assert 4321 in _port_values(dialog)
         # Restoring only prefills: nothing is applied and nothing connects.
         assert not app.controller.has_project()
@@ -98,58 +99,51 @@ def test_restored_settings_prefill_one_setup_that_survives_screenshot_and_toolba
         assert visible_setup_dialogs(app.window) == [dialog]
 
         reopened = _reopen_setup(app, qapp)
-        assert {"chipR", "qubR", "resR", "10.1.2.3"} <= _field_texts(reopened)
+        assert {"chipR", "10.1.2.3"} <= _field_texts(reopened)
         assert not app.controller.has_project()
         assert not app.controller.has_soc()
 
 
 @pytest.mark.uses_wall_clock
-def test_project_tool_changes_show_in_reopened_setup_and_failures_keep_the_context(
+def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_context(
     qapp: QApplication, tmp_path: Path
 ) -> None:
     with launched_measure_app(qapp, tmp_path) as app:
-        ctrl = app.controller
-
-        app.invoke(
-            "rpc_call",
-            {
-                "method": "project.apply",
-                "params": {"chip_name": "chip-a", "qub_name": "q1", "res_name": "res"},
-            },
+        control = app.controller.context_control
+        entry = app.invoke(
+            "rpc_call", {"method": "entry.new", "params": {"name": "chip-a"}}
         )
-        scope_a = ctrl.setup_control.get_setup_preferences().scope_id
-        assert {"chip-a", "q1", "res"} <= _field_texts(_reopen_setup(app, qapp))
+        assert {"chip-a"} <= _field_texts(_reopen_setup(app, qapp))
 
-        label = app.invoke("rpc_call", {"method": "context.new"})["label"]
-        assert ctrl.get_active_context_label() == label
-
-        # An unchanged project is a no-op: the selected context stays selected.
-        app.invoke(
-            "rpc_call", {"method": "project.apply", "params": {"chip_name": "chip-a"}}
+        point = app.invoke(
+            "rpc_call", {"method": "point.new", "params": {"label": "q1"}}
         )
-        assert ctrl.get_active_context_label() == label
-        assert {"chip-a", "q1", "res"} <= _field_texts(_reopen_setup(app, qapp))
+        target = SavedPoint(entry_id=entry["entry_id"], point=point["point"])
+        assert control.read_context().target == target
 
-        # A rejected update changes neither the project, the context, nor Setup.
-        with pytest.raises(GuiRpcError) as failure:
+        # Selecting the same point keeps the selected resource identity.
+        app.invoke("rpc_call", {"method": "point.use", "params": {"label": "q1"}})
+        assert control.read_context().target == target
+        assert {"chip-a"} <= _field_texts(_reopen_setup(app, qapp))
+
+        # A missing entry leaves the entry, selected point and Setup unchanged.
+        binding = control.get_source_binding()
+        with pytest.raises(GuiRpcError):
             app.invoke(
-                "rpc_call",
-                {
-                    "method": "project.apply",
-                    "params": {"chip_name": "chip-b", "scope_id": scope_a},
-                },
+                "rpc_call", {"method": "entry.open", "params": {"name": "chip-b"}}
             )
-        assert failure.value.reason == "scope_identity_mismatch"
         assert (
-            app.invoke("rpc_call", {"method": "project.info"})["chip_name"] == "chip-a"
+            app.invoke("rpc_call", {"method": "entry.info"})["entry"]["name"]
+            == "chip-a"
         )
-        assert ctrl.get_active_context_label() == label
+        assert control.read_context().target == target
+        assert control.get_source_binding() == binding
         assert "chip-b" not in _field_texts(_reopen_setup(app, qapp))
 
-        # A real change deactivates the context and Setup shows the new project.
+        # A new entry publishes DRAFT; Setup shows the new entry name.
         changed = app.invoke(
-            "rpc_call", {"method": "project.apply", "params": {"chip_name": "chip-b"}}
+            "rpc_call", {"method": "entry.new", "params": {"name": "chip-b"}}
         )
-        assert changed["chip_name"] == "chip-b"
-        assert ctrl.get_active_context_label() is None
-        assert {"chip-b", "q1", "res"} <= _field_texts(_reopen_setup(app, qapp))
+        assert changed["name"] == "chip-b"
+        assert control.read_context().target == EntryDraft(entry_id=changed["entry_id"])
+        assert {"chip-b"} <= _field_texts(_reopen_setup(app, qapp))
