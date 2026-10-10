@@ -73,6 +73,7 @@ def test_registered_grouped_spec_native_round_trip(tmp_path: Path) -> None:
                 "readout": readout_cfg(),
             },
             "dev": {},
+            "flux_unit": "A",
             "sweep": {"jpa_flux": sweep, "jpa_freq": sweep, "jpa_power": sweep},
             "num_points": 4,
         }

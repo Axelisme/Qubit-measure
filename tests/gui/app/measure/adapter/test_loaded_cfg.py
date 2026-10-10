@@ -1,7 +1,6 @@
 from copy import deepcopy
 
 import pytest
-from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
 from zcu_tools.gui.app.measure.specs import make_bath_reset_spec, make_pulse_spec
@@ -141,25 +140,6 @@ def test_complete_pulse_becomes_custom_with_nested_waveform():
     assert is_custom_reference_key(waveform.chosen_key)
 
 
-def test_device_label_inverse_requires_unique_name():
-    spec = CfgSectionSpec(
-        fields={"dev": CfgSectionSpec(fields={"flux_dev": ScalarSpec("Flux", str)})}
-    )
-    current = CfgSchema(
-        spec=spec,
-        value=CfgSectionValue(
-            fields={"dev": CfgSectionValue(fields={"flux_dev": DirectValue("old")})}
-        ),
-    )
-    info = FakeDeviceInfo(address="fake", label="flux_dev")
-    result = project_loaded_cfg(current, Snapshot(dev={"flux_yoko": info}))
-    assert result is not None
-    dev = result.value.fields["dev"]
-    assert isinstance(dev, CfgSectionValue)
-    assert dev.fields["flux_dev"] == DirectValue("flux_yoko")
-    assert project_loaded_cfg(current, Snapshot(dev={"a": info, "b": info})) is None
-
-
 def test_device_selector_rejects_names_absent_from_live_options():
     spec = CfgSectionSpec(
         fields={
@@ -178,20 +158,19 @@ def test_device_selector_rejects_names_absent_from_live_options():
             fields={"dev": CfgSectionValue(fields={"jpa_rf_dev": DirectValue("old")})}
         ),
     )
-    info = FakeDeviceInfo(address="fake", label="jpa_rf_dev")
 
     assert (
         project_loaded_cfg(
             current,
-            Snapshot(dev={"stale": info}),
+            Snapshot(dev={"jpa_rf_dev": "stale"}),
             provide_options=lambda source: ("old",) if source == "devices" else (),
         )
         is None
     )
-    assert project_loaded_cfg(current, Snapshot(dev={"stale": info})) is None
+    assert project_loaded_cfg(current, Snapshot(dev={"jpa_rf_dev": "stale"})) is None
     adopted = project_loaded_cfg(
         current,
-        Snapshot(dev={"available": info}),
+        Snapshot(dev={"jpa_rf_dev": "available"}),
         provide_options=lambda source: ("old", "available"),
     )
     assert adopted is not None
