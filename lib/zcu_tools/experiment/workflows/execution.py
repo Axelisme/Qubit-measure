@@ -436,13 +436,15 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         )
         return Failed(reason)
 
-    def set_device(self, name: str, value: float) -> None:
-        """Apply an absolute setpoint through the device port and current signal."""
+    def set_device(
+        self, name: str, value: float, *, unit: Literal["A", "V", "native"]
+    ) -> None:
+        """Forward an absolute value, explicit unit and the same active signal."""
         signal = self._new_signal()
         try:
             if self._ports.devices is None:
                 raise MissingCapability("devices")
-            self._ports.devices.set_value(name, value, signal)
+            self._ports.devices.set_value(name, value, signal, unit=unit)
             self._check_cancel()
         finally:
             self._clear_signal(signal)

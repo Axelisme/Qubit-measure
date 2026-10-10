@@ -286,7 +286,7 @@ def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
             return Done()
         yield from env.run(run_value, Cfg(), save=save_integer)
         observed.append(1)
-        yield from env.set_device("flux", 0.2)
+        yield from env.set_device("flux", 0.2, unit="native")
         state.index = 1
         return Next(1, state)
 
@@ -363,7 +363,9 @@ def test_run_resolves_role_names_only_when_experiment_uses_device(
             dev = run.cfg.dev
             if dev is None:
                 raise ValueError("This experiment requires device roles")
-            run.devices.set_value(dev["selected"], 0.5, run.cancel_signal)
+            run.devices.set_value(
+                dev["selected"], 0.5, run.cancel_signal, unit="native"
+            )
         buffer = run.buffer((1,), axes=(np.array([0.0]),))
         with run.schedule(buffer):
             buffer.set(np.array([1 + 0j]))
@@ -698,7 +700,7 @@ def test_device_operation_error_is_not_recoverable_schedule_failure(rig: Rig) ->
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
     ) -> Step[State, int]:
-        yield from env.set_device("flux", 0.1)
+        yield from env.set_device("flux", 0.1, unit="native")
         yield from env.run(acquire, Cfg(), save=save_integer)
         return Next(1, state)
 

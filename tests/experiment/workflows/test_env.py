@@ -122,7 +122,7 @@ def test_invalid_setpoint_is_rejected_before_suspension(
     name: str,
     value: float,
 ) -> None:
-    request = env.set_device(name, value)
+    request = env.set_device(name, value, unit="native")
     with pytest.raises(ValueError, match="finite absolute value"):
         next(request)
 

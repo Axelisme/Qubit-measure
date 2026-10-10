@@ -57,4 +57,3 @@ def test_native_start_and_resume_snapshots_are_detached_in_journal(rig: Rig) -> 
     assert identity["devices"] == {"items": initial_json}
     resumed = next(event for event in rig.events() if event["kind"] == "resumed")
     assert resumed["devices"] == {"items": current_json}
-

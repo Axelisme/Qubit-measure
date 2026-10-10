@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from qick import QickConfig
 
@@ -35,9 +35,18 @@ class DevicePort(Protocol):
     Neither the adapter nor the engine declares or checks device limits.
     """
 
-    def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
-        """Set an absolute value in native device units, or raise on failure.
+    def set_value(
+        self,
+        name: str,
+        value: float,
+        cancel_signal: StopSignal,
+        *,
+        unit: Literal["A", "V", "native"],
+    ) -> None:
+        """Set an absolute value in explicit A, V or native units, or raise.
 
+        The host checks unit against the driver without converting values or
+        changing mode, rampstep or output. Fake devices require native.
         Observe ``cancel_signal`` between cooperative work segments. Unknown or
         disconnected names, invalid limits, and I/O failures must raise.
         Unknown/disconnected-device errors must identify the requested name.

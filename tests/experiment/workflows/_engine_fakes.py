@@ -57,15 +57,18 @@ class RecordingDevices:
         self.signals: list[StopSignal] = []
 
     def set_value(
-        self, name: str, value: float, cancel_signal: StopSignal,
-        *, unit: Literal["A", "V", "native"],
+        self,
+        name: str,
+        value: float,
+        cancel_signal: StopSignal,
+        *,
+        unit: Literal["A", "V", "native"],
     ) -> None:
         self.values.append((name, value))
         self.units.append(unit)
         self.signals.append(cancel_signal)
         if self.on_set is not None:
             self.on_set(cancel_signal)
-
 
 
 class RecordingBar(TQDMProgressBar):

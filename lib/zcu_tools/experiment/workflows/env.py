@@ -6,6 +6,7 @@ from collections.abc import Callable, Generator
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
+from typing import Literal
 
 from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
@@ -172,13 +173,16 @@ class WorkflowEnv[C](InitEnv[C]):
             raise RuntimeError("Engine did not complete the run effect")
         return request.outcome
 
-    def set_device(self, name: str, value: float) -> Generator[Effect, None, None]:
-        """Set a finite absolute native-device value, or propagate adapter failure.
+    def set_device(
+        self, name: str, value: float, *, unit: Literal["A", "V", "native"]
+    ) -> Generator[Effect, None, None]:
+        """Set a finite absolute device value in the explicitly supplied unit.
 
-        Empty names and nonfinite values raise ValueError. The adapter enforces
+        unit is A, V or native; no conversion or mode change occurs. Empty names,
+        nonfinite values and unknown units raise ValueError. The adapter enforces
         connectivity and limits. Cancellation discards the entire step.
         """
-        request = DeviceEffect(name, value)
+        request = DeviceEffect(name, value, unit)
         yield request
         if not request.done:
             raise RuntimeError("Engine did not complete the device effect")

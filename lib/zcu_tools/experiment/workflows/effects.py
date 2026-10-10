@@ -8,7 +8,7 @@ from datetime import datetime
 from math import isfinite
 from pathlib import Path
 from re import fullmatch
-from typing import Protocol
+from typing import Literal, Protocol
 
 from .models import Completed, Effect, Failed
 from .run import LiveUpdate, Run
@@ -33,8 +33,10 @@ class EffectExecutor(Protocol):
         """
         ...
 
-    def set_device(self, name: str, value: float) -> None:
-        """Set a connected device's absolute native value, or raise."""
+    def set_device(
+        self, name: str, value: float, *, unit: Literal["A", "V", "native"]
+    ) -> None:
+        """Set a connected device's absolute value in unit, or raise."""
         ...
 
     def wait_until(self, target: datetime) -> None:
@@ -79,6 +81,7 @@ class DeviceEffect(Effect):
 
     name: str
     value: float
+    unit: Literal["A", "V", "native"]
     done: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
@@ -87,11 +90,14 @@ class DeviceEffect(Effect):
                 "Device setpoint requires a name and finite absolute value"
             )
 
+        if self.unit not in ("A", "V", "native"):
+            raise ValueError("Device unit must be A, V or native")
+
     def execute(self, executor: EffectExecutor) -> None:
-        """Apply name/value once; propagate cancellation and device errors."""
+        """Apply name/value/unit once; propagate cancellation and device errors."""
         if self.done:
             raise RuntimeError("Device effect has already completed")
-        executor.set_device(self.name, self.value)
+        executor.set_device(self.name, self.value, unit=self.unit)
         self.done = True
 
 
