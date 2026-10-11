@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-10, caller-owned aliases and temporary cfg preview
+**Last updated:** 2026-10-11, MCP connection identity and control diagnostics
 
 # `zcu_tools/mcp/measure/`
 
@@ -75,7 +75,11 @@ Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一
 
 ## 連線與觀察
 
-`connect` 可連既有 GUI 或依 launch 參數啟動，這一步不連硬體。Control token 留在 session 供重新握手；顯式切換 port 不沿用前一 GUI token，tool log 遮蔽 token。認證失敗與 wire 不相容分別回報。Bridge 不會把仍活著的自有 GUI 當成可在另一空 port 再啟動的程序。
+`connect` 可連既有 GUI 或依 launch 參數啟動，這一步不連硬體。首次 label 預設 `agent`，mode 預設 `owner`；`readonly` 永不取得控制權。Owner 在未鎖定 Local 自動取得。GUI 鎖定或別的在線 holder 不阻止連線，回覆的 `control` 顯示 `{holder, locked, online, me}`。身份初始化在認證與 wire 檢查之後、catalog 之前。省略 label/mode 的重連保留原身份，顯式換身份會重開 socket。
+
+`rpc_call` 提供 `control.status`、`control.acquire`、`control.release`。重複 connect 同一身份只查詢現在的控制狀態，不自動再 acquire。四種控制拒絕 `not_holder`、`control_locked`、`control_held`、`readonly_connection` 在 MCP `isError` 的文字 content 中保留 JSON `error`，包含原生 code、message、reason、data。GUI 負責每次 dispatch 的權限判定，MCP 不複製 holder 規則。
+
+Control token 留在 session 供重新握手；顯式切換 port 不沿用前一 GUI token，tool log 遮蔽 token。認證失敗與 wire 不相容分別回報。Bridge 不會把仍活著的自有 GUI 當成可在另一空 port 再啟動的程序。
 
 Session 將 GUI operation ID 映射為 opaque integer handle。明確重連或 EOF 後清除 catalog 與舊 handle 對應。GUI 可重用 wire ID，MCP session 不重用已外露 handle。GUI-origin operation 經 `status` 使用同一映射。每次 wire 操作前先確認連線，再解析 handle；不向新 GUI 重送舊 ID。
 

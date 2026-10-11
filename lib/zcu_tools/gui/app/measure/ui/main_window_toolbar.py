@@ -61,6 +61,7 @@ class MainWindowToolbar:
     def __init__(self, host: MainWindowToolbarHost, *, parent: QWidget) -> None:
         self._host = host
         self._parent = parent
+        self._writable = True
         self._layout = QHBoxLayout()
         self._new_tab_btn = QPushButton("New Tab ▾")
         self._new_tab_btn.clicked.connect(self.show_new_tab_menu)
@@ -91,7 +92,14 @@ class MainWindowToolbar:
         return self._new_tab_btn
 
     def set_new_tab_enabled(self, enabled: bool) -> None:
-        self._new_tab_btn.setEnabled(enabled)
+        self._new_tab_btn.setEnabled(enabled and self._writable)
+
+    def set_writable(self, *, writable: bool) -> None:
+        """Gate commands, not buttons that merely open inspection dialogs."""
+        self._writable = writable
+        self.set_new_tab_enabled(True)
+        self._reload_btn.setEnabled(writable)
+        self._retry_tabs_btn.setEnabled(writable)
 
     def set_reload_recovery(self, *, retry_catalog: bool, skipped_count: int) -> None:
         self._reload_btn.setText(

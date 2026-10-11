@@ -56,6 +56,16 @@ class WireTransport:
         if method in self.replies:
             response = self.replies[method]
             reply = response(params) if callable(response) else response
+        elif method in {"control.connect", "control.status"}:
+            reply = {
+                "ok": True,
+                "result": {
+                    "holder": "rpc:agent",
+                    "locked": False,
+                    "online": True,
+                    "me": True,
+                },
+            }
         elif method == "resources.versions":
             reply = {"ok": True, "result": {"versions": {}}}
         elif method == "wire.version":

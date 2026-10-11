@@ -244,7 +244,7 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
         ("timeout", "gui_transport_timeout", "unknown"),
         ("handler_timeout", "gui_handler_timeout", "unknown"),
         ("internal", "injected", "unknown"),
-        ("stale", "stale_version", "not_started"),
+        ("not_holder", "not_holder", "not_started"),
         ("busy", "operation_busy", "not_started"),
     ],
 )
@@ -255,11 +255,11 @@ def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
     pending = Event()
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     with recipe_client(tmp_path, gui) as client:
-        if receipt in {"handler_timeout", "internal", "stale", "busy"}:
+        if receipt in {"handler_timeout", "internal", "not_holder", "busy"}:
             code = {
                 "handler_timeout": "timeout",
                 "internal": "internal",
-                "stale": "precondition_failed",
+                "not_holder": "precondition_failed",
                 "busy": "busy",
             }[receipt]
             client.transport.replies["tab.run_start"] = {

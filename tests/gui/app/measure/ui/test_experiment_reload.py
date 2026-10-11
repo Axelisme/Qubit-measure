@@ -199,7 +199,7 @@ class ObservedOwnerScheduler(QtOwnerScheduler):
             self.posted.put(None)
 
 
-@pytest.mark.parametrize("request_kind", ["stale", "gone", "new"])
+@pytest.mark.parametrize("request_kind", ["gone", "new"])
 def test_remote_requests_queued_during_reload_use_fresh_state(
     window_app: WindowApp, request_kind: str
 ) -> None:
@@ -224,9 +224,7 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
                 scheduler.record = True
                 params: dict[str, object] = {"tab_id": previous}
                 method = "tab.close"
-                if request_kind == "stale":
-                    method = "tab.run_start"
-                elif request_kind == "new":
+                if request_kind == "new":
                     method = "tab.new"
                     params = {"adapter_name": "demo"}
                 send(client, {"id": "queued", "method": method, "params": params})
@@ -250,10 +248,7 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
             else:
                 assert not reply["ok"]
                 assert app.ctrl.list_tab_ids() == restored
-                if request_kind == "stale":
-                    assert reply["error"]["reason"] == "stale_version"
-                else:
-                    assert "unknown tab_id" in reply["error"]["message"]
+                assert "unknown tab_id" in reply["error"]["message"]
             app.dialogs.assert_no_unexpected_messages()
     finally:
         remote.stop()

@@ -1,12 +1,26 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-06, analysis pipeline tools and native image delivery
+**Last updated:** 2026-10-11, connection identity and structured control errors
 
 Fluxdep MCP forwards the GUI's declared analysis methods over one shared bridge.
 The GUI owns published-resource observations, interactive identities and search
 operations. MCP does not maintain another guard or operation registry.
 
-`assembly.py` combines generated pipeline tools with shared lifecycle tools.
+`assembly.py` combines generated pipeline/control tools with Fluxdep lifecycle
+initialization. `fluxdep_connect(label="agent", mode="owner")` initializes fixed
+socket identity after authentication and wire checks. Owner auto-acquires unlocked
+Local; a GUI lock or another online holder still permits connection. The reply
+contains native `control` (`holder`, `locked`, `online`, `me`) and versions. GUI
+revision is reported, never compared. `readonly` never acquires, even when its
+label matches the holder. Omitted label/mode retain the prior choices on reconnect;
+launch supports the same choices, including a later attach after auto_connect=false.
+
+`fluxdep_control_status`, `fluxdep_control_acquire` and `fluxdep_control_release`
+forward to the GUI authority. `not_holder`, `control_locked`, `control_held` and
+`readonly_connection` become MCP isError replies with JSON `error` text preserving
+native code/message/reason/data. MCP never reclassifies these refusals or retries.
+Dispersive's shared readonly lifecycle does not initialize a control identity.
+
 Interactive replies retain the captured context/effect and deliver their PNG as
 MCP image content. Text carries MIME/byte metadata instead of base64; no image
 files are created. PNG integrity is checked by the same core producer used by

@@ -28,10 +28,13 @@ from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
+from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
+from zcu_tools.gui.widgets.control_indicator import ControlIndicator
+from zcu_tools.gui.widgets.remote_edit_gate import watch_control
 from zcu_tools.resources.entry import RoleResolutionError
 
 from .exp_tab_widget import ExpTabWidget, TabActions
@@ -157,9 +160,20 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("Ready")
 
         self._events.bind(self._ctrl.get_bus())
+        self._control_indicator = ControlIndicator(self._ctrl.control_identity, self)
+        self._status_bar.addPermanentWidget(self._control_indicator)
+        watch_control(self, self._ctrl.control_identity, self._refresh_control)
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
+
+    def _refresh_control(self, status: ControlStatus) -> None:
+        writable = status.holder == "gui"
+        self._toolbar.set_writable(writable=writable)
+        self._tabs.setTabsClosable(writable)
+        self._tabs.setMovable(writable)
+        for tab_id in self._tab_widgets:
+            self.refresh_tab_interaction(tab_id)
 
     def _build_context_bar(self) -> QHBoxLayout:
         """Assemble the persistent entry/point/predictor controls."""
@@ -468,6 +482,11 @@ class MainWindow(QMainWindow):
         widget = frontend_factory(self._ctrl)
         if not isinstance(widget, InteractiveFrontend):
             raise TypeError("interactive frontend must be an InteractiveFrontend")
+        watch_control(
+            widget,
+            self._ctrl.control_identity,
+            lambda status: widget.set_read_only(read_only=status.holder != "gui"),
+        )
         try:
             tab_w.mount_interactive_widget(widget)
         except Exception:
@@ -641,6 +660,8 @@ class MainWindow(QMainWindow):
             self.show_status_message(f"Restored {report.restored_tabs} experiment tabs")
 
     def _on_tab_close_requested(self, index: int) -> None:
+        if self._ctrl.control_identity.status().holder != "gui":
+            return
         tab_w = self._tabs.widget(index)
         if not isinstance(tab_w, ExpTabWidget):
             return
@@ -678,6 +699,8 @@ class MainWindow(QMainWindow):
         )
 
     def _on_tab_moved(self, from_index: int, to_index: int) -> None:
+        if self._ctrl.control_identity.status().holder != "gui":
+            return
         logger.debug("_on_tab_moved: from=%d to=%d", from_index, to_index)
         tab_ids: list[str] = []
         for index in range(self._tabs.count()):
@@ -692,7 +715,8 @@ class MainWindow(QMainWindow):
             return
         if not self._ctrl.has_tab(widget.tab_id):
             return
-        self._ctrl.set_active_tab(widget.tab_id)
+        if self._ctrl.control_identity.status().holder == "gui":
+            self._ctrl.set_active_tab(widget.tab_id)
 
     def _resolve_tab_widget(self, tab_id: str, action: str) -> ExpTabWidget | None:
         """Look up the widget; log + bail if tab_id is unknown to the controller."""
@@ -715,6 +739,8 @@ class MainWindow(QMainWindow):
         assert interaction is not None  # render snapshot fills live fields
         if interaction.is_running:
             logger.info("run_or_stop_tab: stop requested tab_id=%r", tab_id)
+            if self._ctrl.control_identity.status().holder != "gui":
+                self._ctrl.control_identity.reclaim_local()
             self._ctrl.cancel_run()
             return
         logger.info("run_or_stop_tab: run requested tab_id=%r", tab_id)
@@ -1135,6 +1161,32 @@ class MainWindow(QMainWindow):
         else:
             self.close()
 
+    def _present_remote_close_confirmation(self) -> None:
+        holder = self._ctrl.control_identity.status().holder.removeprefix("rpc:")
+        self._close_prompt_open = True
+
+        self._dialog_presenter.confirm_async(
+            self,
+            "Remote control",
+            f"{holder} holds remote control. Close the application?",
+            on_decision=lambda confirmed: self._on_remote_close_decision(
+                confirmed=confirmed
+            ),
+            default=False,
+        )
+
+    def _on_remote_close_decision(self, *, confirmed: bool) -> None:
+        self._close_prompt_open = False
+        if not confirmed or self._shutdown_requested or self._closing:
+            return
+        has_unsaved, active = self._current_close_risks()
+        if has_unsaved or active:
+            self._present_app_close_confirmation(has_unsaved=has_unsaved, active=active)
+        else:
+            self._schedule_shutdown(
+                lambda: self._finish_user_shutdown(unsaved_warning_accepted=False)
+            )
+
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         # Second pass: _perform_close → self.close() re-enters here once teardown
         # has begun; accept it straight through.
@@ -1154,6 +1206,10 @@ class MainWindow(QMainWindow):
             return
 
         has_unsaved, active = self._current_close_risks()
+        if self._ctrl.control_identity.status().holder != "gui":
+            self._present_remote_close_confirmation()
+            return
+
         if not has_unsaved and active == 0:
             self._schedule_shutdown(
                 lambda: self._finish_user_shutdown(unsaved_warning_accepted=False)

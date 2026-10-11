@@ -12,20 +12,19 @@ from zcu_tools.gui.remote.method_spec import (
     MethodSpec,
     build_method_registry,
 )
-from zcu_tools.gui.remote.observation import ResourceObservationPolicy
 from zcu_tools.gui.remote.param_spec import build_input_schema
 
 AgentExposure = Literal["rpc", "tool", "internal"]
 
 
 @dataclass(frozen=True, slots=True)
-class AgentMethodPolicy(ResourceObservationPolicy):
-    """Measure exposure metadata plus the shared resource observation contract.
+class AgentMethodPolicy:
+    """Measure agent exposure and operation metadata.
 
     exposure is rpc, tool or internal. tool_names names fixed tools only for tool
     exposure; operation_key is an agent-tracking resource key template, such as
-    tab:{tab_id}, or None when the method exposes no operation. Inherited fields declare GUI-owned observations and are
-    never exported to MCP. Invalid exposure/tool declarations raise ValueError.
+    tab:{tab_id}, or None when the method exposes no operation.
+    Invalid exposure/tool declarations raise ValueError.
     """
 
     exposure: AgentExposure = "rpc"
@@ -33,7 +32,6 @@ class AgentMethodPolicy(ResourceObservationPolicy):
     operation_key: str | None = None
 
     def __post_init__(self) -> None:
-        ResourceObservationPolicy.__post_init__(self)
         if self.exposure not in ("rpc", "tool", "internal"):
             raise ValueError(f"unknown agent exposure {self.exposure!r}")
         if (self.exposure == "tool") != bool(self.tool_names):
@@ -103,7 +101,6 @@ def build_dispatch_registry(
     specs = build_method_specs(entries)
     handlers: dict[str, Handler] = {}
     for entry in entries:
-        entry.agent.validate_owner_thread(off_main_thread=entry.spec.off_main_thread)
         handlers[entry.method] = _resolve_handler_ref(entry.handler_ref)
     return build_method_registry(handlers, specs)
 

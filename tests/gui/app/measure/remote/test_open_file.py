@@ -60,21 +60,6 @@ def app(qapp):
         fx.stop()
 
 
-def test_open_file_requires_current_context_before_creating_tab(app):
-    fx, sock = app
-    params = {"adapter_name": "file", "data_path": "saved.h5"}
-    reply = call(sock, "tab.open_file", params)
-    assert reply["error"]["reason"] == "stale_version"
-    assert fx.state.list_tab_ids() == []
-    assert call(sock, "context.snapshot")["ok"] is True
-    fx.ctrl.context_control.create_md_attr("changed", 1)
-    reply = call(sock, "tab.open_file", params)
-    assert reply["error"]["reason"] == "stale_version"
-    assert fx.state.list_tab_ids() == []
-    assert call(sock, "context.snapshot")["ok"] is True
-    assert call(sock, "tab.open_file", params)["ok"] is True
-
-
 @pytest.mark.parametrize(
     "path, backfill, knob",
     [("saved.h5", "applied", 42), ("no-cfg.h5", "not_applied", 7)],
@@ -84,7 +69,6 @@ def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
 ):
     fx, sock = app
     previous = fx.ctrl.new_tab("file")
-    assert call(sock, "context.snapshot")["ok"] is True
     reply = call(sock, "tab.open_file", {"adapter_name": "file", "data_path": path})
     assert reply["ok"] is True
     outcome = reply["result"]
@@ -100,20 +84,6 @@ def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
     assert fx.state.get_tab(tab).cfg.snapshot_inputs().value.fields[
         "knob"
     ] == DirectValue(knob)
-    stale = call(sock, "tab.load_data", {"tab_id": tab, "data_path": path})
-    assert stale["error"]["reason"] == "stale_version"
-    keys = stale["error"]["data"]["stale"]
-    assert f"tab:{tab}:result" in keys
-    assert f"tab:{tab}:analyze" in keys
-    assert f"tab:{tab}" not in keys
-    run = call(
-        sock,
-        "tab.run_start",
-        {
-            "tab_id": tab,
-        },
-    )
-    assert run["error"]["reason"] == "stale_version"
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
     assert snapshot["artifacts"][0]["status"] == "not_saved"
     assert snapshot["artifacts"][0]["last_saved_path"] is None

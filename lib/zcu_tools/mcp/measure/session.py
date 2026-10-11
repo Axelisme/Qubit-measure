@@ -17,13 +17,14 @@ from zcu_tools.mcp.core.bridge import (
     McpBridge,
     MCPBridgeConfig,
 )
-from zcu_tools.mcp.measure.session_policy import describe_stale_keys
+from zcu_tools.mcp.core.control import ControlConnection
+from zcu_tools.mcp.core.rpc import GuiInvocationError
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
 
-class GuiRpcError(RuntimeError):
+class GuiRpcError(GuiInvocationError):
     """A GUI or MCP boundary error with a stable agent-facing reason."""
 
     def __init__(
@@ -33,10 +34,12 @@ class GuiRpcError(RuntimeError):
         reason: str | None = None,
         code: str | None = None,
         request_rejected: bool = False,
+        data: dict[str, Any] | None = None,
+        wire_message: str | None = None,
     ) -> None:
-        super().__init__(message)
-        self.reason = reason
-        self.code = code
+        super().__init__(
+            message, reason=reason, code=code, data=data, wire_message=wire_message
+        )
         self.request_rejected = request_rejected
 
 
@@ -229,6 +232,7 @@ class MeasureMcpSession:
         self._auth_token: str | None = None
         self._versions: dict[str, int] = {}
         self._launched = False
+        self._control_connection = ControlConnection()
 
     def close(self) -> None:
         """Permanently stop admission, disconnect and drain work."""
@@ -339,6 +343,18 @@ class MeasureMcpSession:
                 raise GuiRpcError(
                     "invalid GUI wire.version revision", reason="incompatible_wire"
                 )
+            try:
+                control = self._control_connection.initialize(self.bridge)
+            except GuiInvocationError as exc:
+                if exc.code != "unauthorized":
+                    raise
+                raise GuiRpcError(
+                    "GUI authentication is required; provide its control token",
+                    reason="unauthorized",
+                    code="unauthorized",
+                    data=exc.data,
+                    wire_message=exc.message,
+                ) from exc
             reply = self.bridge.send_rpc_raw("rpc.catalog", {}, 5.0)
             if not reply.get("ok"):
                 error = reply.get("error")
@@ -358,6 +374,7 @@ class MeasureMcpSession:
                 "launched": launched,
                 "port": port,
                 "versions": dict(self._versions),
+                "control": control,
             }
         except Exception:  # Any failed handshake invalidates this socket.
             self.bridge.disconnect()
@@ -366,17 +383,39 @@ class MeasureMcpSession:
             raise
 
     def connect_to_gui(
-        self, *, port: int | None, launch: str, clean: bool, token: str | None = None
+        self,
+        *,
+        port: int | None,
+        launch: str,
+        clean: bool,
+        token: str | None = None,
+        label: str | None = None,
+        mode: Literal["owner", "readonly"] | None = None,
     ) -> dict[str, Any]:
-        """Serialize attach and handshake with all calls on the current GUI."""
+        """Attach and initialize identity before catalog; report native control.
+
+        Omitted label/mode retain the prior identity (initially agent/owner).
+        Changing them explicitly reconnects, since socket identity is immutable.
+        Auth/wire failures discard the socket. A GUI lock does not fail connect.
+        """
         with self._rpc_lock:
             self._require_open()
+            identity = ControlConnection(
+                self._control_connection.label if label is None else label,
+                self._control_connection.mode if mode is None else mode,
+            )
             return self._connect_to_gui(
-                port=port, launch=launch, clean=clean, token=token
+                port=port, launch=launch, clean=clean, token=token, identity=identity
             )
 
     def _connect_to_gui(
-        self, *, port: int | None, launch: str, clean: bool, token: str | None = None
+        self,
+        *,
+        port: int | None,
+        launch: str,
+        clean: bool,
+        token: str | None = None,
+        identity: ControlConnection,
     ) -> dict[str, Any]:
         """Attach or launch once; incompatible GUI contracts fail before mutations.
 
@@ -389,11 +428,13 @@ class MeasureMcpSession:
             and self._catalog
             and (port is None or port == self._connected_port)
             and (token is None or token == self._auth_token)
+            and identity == self._control_connection
         ):
             return {
                 "launched": self._launched,
                 "port": self._connected_port,
                 "versions": dict(self._versions),
+                "control": self._read_internal(self._generation, "control.status", {}),
             }
         selected = self._resolve_connect_port(self._config, port)
         existing = self._port_is_open(selected)
@@ -440,6 +481,7 @@ class MeasureMcpSession:
                 self._clear_connection()
                 self._auth_token = None
                 raise GuiRpcError(f"GUI attach failed: {exc}", reason="no_gui") from exc
+        self._control_connection = identity
         connection = self._load_catalog(
             selected, launched=launched, requested_port=port
         )
@@ -506,6 +548,8 @@ class MeasureMcpSession:
                 f"GUI Error ({error.get('code')}): {error.get('message')}",
                 reason=error.get("reason"),
                 code=error.get("code"),
+                data=error.get("data"),
+                wire_message=error.get("message"),
             )
         result = reply.get("result")
         if not isinstance(result, dict):
@@ -553,16 +597,6 @@ class MeasureMcpSession:
             raise _transport_timeout(exc) from exc
         if not resp.get("ok", False):
             err = resp.get("error", {})
-            if err.get("reason") == "stale_version":
-                stale = describe_stale_keys((err.get("data") or {}).get("stale", []))
-                detail = f" ({', '.join(stale)})" if stale else ""
-                raise GuiRpcError(
-                    "GUI Error (PRECONDITION_FAILED): a resource changed since your last read"
-                    f"{detail}; review then retry",
-                    reason="stale_version",
-                    code="precondition_failed",
-                    request_rejected=True,
-                )
             code = err.get("code")
             reason = err.get("reason")
             if code == "timeout" and reason is None:
@@ -571,6 +605,8 @@ class MeasureMcpSession:
                 f"GUI Error ({code}): {err.get('message')}",
                 reason=reason,
                 code=code,
+                data=err.get("data"),
+                wire_message=err.get("message"),
                 # Only explicit admission errors prove that dispatch did not start.
                 # Handler timeout and internal failures can follow side effects.
                 request_rejected=code

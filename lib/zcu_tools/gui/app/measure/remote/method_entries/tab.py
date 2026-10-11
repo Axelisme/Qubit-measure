@@ -23,11 +23,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "named alias overrides belong to a single Run. Returns {tab_id}.",
             (required_string("adapter_name", "Adapter to instantiate"),),
         ),
-        agent=AgentMethodPolicy(
-            refresh_after_write=True,
-            created_resource="tab:{tab_id}",
-            created_identity="tab_id",
-        ),
     ),
     method_entry(
         "tab.open_file",
@@ -35,18 +30,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             30.0,
             "Create a tab, load a result file without a SoC, and focus it. "
-            "Read context.snapshot explicitly first. A load failure closes the new "
+            "A load failure closes the new "
             "tab and restores prior focus. Returns the load outcome including "
             "tab_id, cfg_backfill and analysis_error. Failed analysis preparation "
-            "retains the loaded result and the new tab. not_applied retains the result. "
-            "Read tab.snapshot and tab.get_cfg before subsequent guarded writes.",
+            "retains the loaded result and the new tab. not_applied retains the result.",
             (required_string("adapter_name"), required_string("data_path")),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=("context",),
-            refresh_after_write=True,
-            created_resource="tab:{tab_id}",
-            created_identity="tab_id",
         ),
     ),
     method_entry(
@@ -64,7 +52,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            exposure="tool", tool_names=("tab_close",), refresh_after_write=True
+            exposure="tool",
+            tool_names=("tab_close",),
         ),
     ),
     method_entry(
@@ -99,19 +88,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "analysis revisions/availability, and all effective save paths. "
             "Result arrays are not required for this observation. Read writeback "
             "preview separately for proposal contents. The all-tabs summary is "
-            "only an index and does not refresh a per-tab guard baseline.",
+            "only an index.",
             (optional_string("tab_id", "Tab to inspect; omit for all tabs"),),
             readonly=True,
-        ),
-        agent=AgentMethodPolicy(
-            reveals=(
-                "tab:{tab_id}",
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:analyze",
-                "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:save",
-            ),
-            reveals_when_nonempty=("tab_id",),
         ),
     ),
     method_entry(
@@ -124,8 +103,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Returns {values, modules}: absent values are "
             "omitted, null is retained; each module ref maps to an existing "
             "canonical library root or null for missing/custom. Invalid paths, "
-            "unknown roles and source failures propagate. Does not observe "
-            "or refresh the live context guard.",
+            "unknown roles and source failures propagate.",
             (
                 required_string("tab_id"),
                 ParamSpec("paths", JsonType.ARRAY, required=True),
@@ -139,7 +117,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
             readonly=True,
         ),
-        agent=AgentMethodPolicy(),
     ),
     method_entry(
         "tab.get_cfg",
@@ -163,7 +140,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
             readonly=True,
         ),
-        agent=AgentMethodPolicy(),
     ),
     method_entry(
         "tab.reset_cfg",
@@ -175,7 +151,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "resets are rejected. Does not clear results or save artifacts.",
             (required_string("tab_id"),),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "tab.edit_cfg",
@@ -195,6 +170,5 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

@@ -34,6 +34,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
+from zcu_tools.gui.widgets.remote_edit_gate import bind_control_enabled
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -560,6 +561,7 @@ class WritebackWidget(QWidget):
 
     def _edit_md_item(self, item: ParameterWriteback) -> None:
         dialog = QDialog(self)
+        bind_control_enabled(dialog, self._ctrl.control_identity)
         dialog.setWindowTitle(f"Edit Value: {item.target_name}")
         layout = QVBoxLayout(dialog)
 
@@ -629,6 +631,7 @@ class WritebackWidget(QWidget):
             return
 
         dialog = QDialog(self)
+        bind_control_enabled(dialog, self._ctrl.control_identity)
         dialog.setWindowTitle(f"Edit Config: {item.target_name}")
         dialog.setMinimumSize(560, 500)
 

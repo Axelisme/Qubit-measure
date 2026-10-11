@@ -182,11 +182,6 @@ def test_inactive_read_is_inert_and_live_read_does_not_unlock_or_consume_undo(
     _image(context)
     assert native.session.can_undo()
     assert len(facts) == prior_facts
-    _error(
-        _picker_command(one_route, link, context, "undo"),
-        "precondition_failed",
-        "stale_version",
-    )
     assert native.session.can_undo()
 
 
@@ -392,39 +387,6 @@ def test_selection_stroke_duplicate_identities_apply_and_undo(
     assert joint_route.ctrl.interactive.inspect() is None
 
 
-@pytest.mark.parametrize(
-    "method,values",
-    [
-        ("spectrum.interactive.open", {"name": "one", "kind": "line"}),
-        (
-            "spectrum.interactive.command",
-            {"name": "one", "context_id": 1, "command": "undo"},
-        ),
-    ],
-)
-def test_picker_sources_are_per_client_and_gui_publication_requires_reread(
-    one_route: RouteHarness, method: str, values: dict[str, object]
-):
-    link, other = one_route.client(), one_route.client()
-    one_route.request(link, "spectrum.snapshot", name="one")
-    assert one_route.request(other, "interactive.read")["ok"]
-    _error(
-        one_route.request(other, method, **values),
-        "precondition_failed",
-        "stale_version",
-    )
-    one_route.ctrl.set_alignment("one", 0.1, 0.6)
-    _error(
-        one_route.request(link, method, **values),
-        "precondition_failed",
-        "stale_version",
-    )
-    one_route.request(link, "spectrum.snapshot", name="one")
-    assert one_route.request(
-        link, "spectrum.interactive.open", name="one", kind="line"
-    )["ok"]
-
-
 @pytest.mark.parametrize("missing", ["spectrums:__set__", "selection", "empty"])
 def test_joint_all_source_guard_includes_zero_point_spectrum(
     joint_route: RouteHarness, missing: str
@@ -437,19 +399,11 @@ def test_joint_all_source_guard_includes_zero_point_spectrum(
     for name in joint_route.ctrl.state.spectrums:
         if name != missing:
             joint_route.request(link, "spectrum.snapshot", name=name)
-    reply = joint_route.request(link, "selection.interactive.open")
-    _error(reply, "precondition_failed", "stale_version")
-    assert joint_route.ctrl.interactive.inspect() is None
     _read_sources(joint_route, link)
     context = _context(joint_route.request(link, "selection.interactive.open"))
     old_id = context["context_id"]
-    # Zero-point source publication retires the input and leaves seen stale.
+    # Zero-point source publication retires the input.
     joint_route.ctrl.reset_points("empty")
-    _error(
-        _joint_command(joint_route, link, context, "clear"),
-        "precondition_failed",
-        "stale_version",
-    )
     _read_sources(joint_route, link)
     new = _context(joint_route.request(link, "selection.interactive.open"))
     assert new["context_id"] != old_id
@@ -590,13 +544,6 @@ def test_render_failure_does_not_rollback_successful_finish_or_refresh_seen(
     assert reply["error"]["code"] == "controller_error"
     assert one_route.ctrl.state.spectrums["one"].points_completed
     assert one_route.ctrl.interactive.inspect() is None
-    _error(
-        one_route.request(
-            link, "spectrum.interactive.open", name="one", kind="onetone"
-        ),
-        "precondition_failed",
-        "stale_version",
-    )
 
 
 def test_route_agent_facts_drive_native_gui_and_reads_do_not_switch(
@@ -787,19 +734,9 @@ def test_joint_png_read_does_not_refresh_other_clients_and_apply_self_write(
     _read_sources(joint_route, link)
     context = _context(joint_route.request(link, "selection.interactive.open"))
     _image(_context(joint_route.request(other, "interactive.read")))
-    _error(
-        _joint_command(joint_route, other, context, "clear"),
-        "precondition_failed",
-        "stale_version",
-    )
     _read_sources(joint_route, other)
     assert _joint_command(joint_route, link, context, "clear")["ok"]
     assert _joint_command(joint_route, link, context, "apply")["ok"]
-    _error(
-        _joint_command(joint_route, other, context, "undo"),
-        "precondition_failed",
-        "stale_version",
-    )
     assert _joint_command(joint_route, link, context, "undo")["ok"]
     assert _joint_command(joint_route, link, context, "apply")["ok"]
     assert np.all(joint_route.ctrl.state.selection.selected)

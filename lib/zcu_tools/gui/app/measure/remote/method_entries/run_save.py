@@ -35,14 +35,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}",
-                "soc",
-                "device:*",
-                "devices:__set__",
-            ),
             operation_key="tab:{tab_id}",
-            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -62,14 +55,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("tab_id"),
                 required_string("data_path", "Exact native data.h5 file to load"),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}",
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:analyze",
-            ),
-            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -105,16 +90,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "fail, and the complete "
             "current artifacts with paths/status/error; no Save handle or await. "
             "Partial failures stay in the report. run_operation_id optionally "
-            "binds the Run source and does not replace seen guards.",
+            "binds the Run source.",
             (
                 required_string("tab_id"),
                 save_comment(),
                 optional_integer("run_operation_id"),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=("tab:{tab_id}:result", "tab:{tab_id}:save"),
-            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -139,16 +120,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "operation_id", "Require the selected analysis source"
                 ),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}",
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:analyze",
-                "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:save",
-            ),
-            refresh_after_write=True,
         ),
     ),
 )
