@@ -58,6 +58,7 @@ from .views import (
 from .writeback import (
     ModuleWriteback,
     ParameterWriteback,
+    SampleWriteback,
     WaveformWriteback,
     WritebackEvidence,
     WritebackItem,

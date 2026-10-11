@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
 
 import pandas as pd
 from pydantic import (
@@ -23,8 +22,6 @@ class _SampleRecord(BaseModel):
     point: str | None
     at: AwareDatetime
     source: str = Field(min_length=1)
-    dev_value: float
-    dev_unit: Literal["A", "V", "native"]
 
     @field_validator("at")
     @classmethod
@@ -37,9 +34,10 @@ class _SampleRecord(BaseModel):
 class JsonlSampleTable:
     """Store sample history at an exact UTF-8 JSONL path.
 
-    Each row has a nonempty run_id, nullable point, UTC at, nonempty source,
-    finite dev_value and dev_unit (A, V or native). Other fields are JSON values
-    declared by the producer; this store neither names nor derives quantities.
+    Each row has a nonempty run_id, nullable point, UTC at and nonempty source.
+    All other fields, including optional dev_value and dev_unit, are JSON values
+    declared by the producer; this store neither names nor derives quantities
+    and does not validate device units.
     Read returns the last complete row for each run_id, not a field-wise merge.
     No files are created until append. I/O and validation failures propagate;
     incomplete/corrupt lines are never silently skipped. There is no multi-file
@@ -54,30 +52,27 @@ class JsonlSampleTable:
         self,
         *,
         run_id: str,
-        dev_value: float,
-        dev_unit: Literal["A", "V", "native"],
         point: str | None = None,
         source: str = "manual",
+        at: datetime | None = None,
         **fields: JsonValue,
     ) -> None:
         """Validate and append one row, creating parent directories if necessary.
 
         run_id identifies the acquisition (or an explicit legacy synthetic key).
-        dev_value is the raw device value in dev_unit; it is not converted.
         point names the acquisition point, or None if none is known. source is
         manual, an accepted event ID, or workflow:<run_id>; the caller owns that
-        reference. at is generated as UTC now and cannot be supplied in fields.
+        reference. at is an aware UTC timestamp, or None to generate UTC now.
         fields carries producer-defined JSON measurements, including nested
-        values. Invalid or missing coordinates fail before touching the file.
+        values and optional device fields, preserved without unit conversion.
+        Invalid metadata or non-JSON fields fail before touching the file.
         Existing rows are never rewritten, even for an already-present run_id.
         """
         record = _SampleRecord(
             run_id=run_id,
             point=point,
-            at=datetime.now(timezone.utc),
+            at=datetime.now(timezone.utc) if at is None else at,
             source=source,
-            dev_value=dev_value,
-            dev_unit=dev_unit,
             **fields,
         )
         encoded = record.model_dump_json() + "\n"

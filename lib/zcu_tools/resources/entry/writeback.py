@@ -18,6 +18,7 @@ from zcu_tools.cfg_model import (
 from .ledger_models import (
     AcceptedPayload,
     AcceptedWrite,
+    JsonObject,
     JsonValue,
     LedgerEvent,
     Origin,
@@ -25,7 +26,7 @@ from .ledger_models import (
 )
 from .points import PointView
 from .provenance import Provenance
-from .storage import PointStorageBinding
+from .storage import PointStorageBinding, bind_sample_table
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,23 @@ class WaveformWriteback:
     value: WaveformSpec
 
 
-type WritebackItem = ParameterWriteback | ModuleWriteback | WaveformWriteback
+@dataclass(frozen=True)
+class SampleWriteback:
+    """One component's producer-defined JSON fields for an accepted sample.
+
+    component is a concrete safe single path segment, not a role alias. value
+    contains measurement fields, including optional device values and units;
+    none are inferred or converted. run_id, point, at and source are supplied
+    by the executor and override those keys if present in value.
+    """
+
+    component: str
+    value: JsonObject
+
+
+type WritebackItem = (
+    ParameterWriteback | ModuleWriteback | WaveformWriteback | SampleWriteback
+)
 
 
 @dataclass(frozen=True)
@@ -97,6 +114,8 @@ def _accepted_write(item: WritebackItem) -> AcceptedWrite:
             if not isfinite(stderr) or stderr < 0:
                 raise ValueError("stderr must be finite and non-negative, or None")
         return AcceptedWrite.model_validate({"path": item.path, "value": item.value})
+    if isinstance(item, SampleWriteback):
+        return AcceptedWrite(path=item.component, value=item.value)
     _require_named_spec(item.value)
     if isinstance(item, ModuleWriteback):
         value = module_spec_from_raw(item.value).to_dict()
@@ -119,6 +138,9 @@ def apply_writeback(
     Nonempty items, strict JSON/Spec values, finite non-negative stderr and a
     nonempty evidence.kind are validated before appending. Library key/family
     and point schema validation happen at their existing owner during apply.
+    Samples require a nonempty evidence.run_id and bind component history only
+    when reached. Their producer fields are preserved, including optional dev
+    fields and units; run_id, point, UTC at and source come from this acceptance.
 
     Each item uses its owner's single-file edit. The first failure propagates
     unchanged and stops later items; already committed items and the accepted
@@ -134,6 +156,10 @@ def apply_writeback(
     kind = TypeAdapter(str).validate_python(evidence.kind, strict=True)
     if not kind.strip():
         raise ValueError("writeback kind must be nonempty")
+    if any(isinstance(item, SampleWriteback) for item in items) and (
+        evidence.run_id is None or not evidence.run_id.strip()
+    ):
+        raise ValueError("sample writeback requires a nonempty run_id")
     writes = tuple(_accepted_write(item) for item in items)
     event = LedgerEvent(
         id=str(uuid4()),
@@ -158,7 +184,23 @@ def apply_writeback(
             at=event.at,
             stderr=item.stderr if isinstance(item, ParameterWriteback) else None,
         )
-        if isinstance(item, ParameterWriteback):
+        if isinstance(item, SampleWriteback):
+            # Metadata belongs to this acceptance, never to caller field values.
+            fields = {
+                key: value
+                for key, value in item.value.items()
+                if key not in {"run_id", "point", "at", "source"}
+            }
+            if evidence.run_id is None:
+                raise ValueError("sample writeback requires a run_id")
+            bind_sample_table(storage.result_path, item.component).append(
+                run_id=evidence.run_id,
+                point=storage.point,
+                at=datetime.fromisoformat(event.at),
+                source=event.id,
+                **fields,
+            )
+        elif isinstance(item, ParameterWriteback):
             with point.edit() as draft:
                 draft.set(write.path, write.value, provenance=provenance)
         else:

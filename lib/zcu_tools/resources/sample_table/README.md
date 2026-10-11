@@ -1,12 +1,12 @@
 # `zcu_tools.resources.sample_table` — sample records
 
-**Last updated:** 2026-10-11，JSONL samples and offline CSV migration
+**Last updated:** 2026-10-11，JSONL optional producer fields and accepted timestamps
 
 ## 條目樣本（`jsonl.py`）
 
 `ResultEntry.samples(component)` 回傳 `JsonlSampleTable`，綁定 `results/<name>/samples/<component>.jsonl`。JSONL 是只追加的樣本歷史；`read()` 回傳每個 `run_id` 最後一整行的 DataFrame，不合併舊行欄位。不存在的檔案回空表，損壞行則回報檔名與行號，不跳過。
 
-`append` 要求 `run_id`、`dev_value`、`dev_unit`，保留 device 原始值與 A／V／native 單位。`point` 可為空，`at` 由儲存層填 UTC，`source` 預設 manual，也可由 caller 提供 accepted 事件 ID 或 `workflow:<run_id>`。其餘欄位由 producer 宣告，可以保存巢狀 JSON。儲存層不計算 flux 座標，不讀 ledger 或元件 schema。
+`append` 要求 `run_id`。`dev_value`、`dev_unit` 與其他欄位皆由 producer 選填，保留原值與 caller 單位，不檢查 dev 存在或換算單位。`point` 可為空，`at` 預設由儲存層填 UTC，也可明示 accepted 事件的 UTC 時間。`source` 預設 manual，也可由 caller 提供 accepted 事件 ID 或 `workflow:<run_id>`。Producer 欄位可以保存巢狀 JSON。儲存層不計算 flux 座標，不讀 ledger 或元件 schema；下游查詢與 v2 驗證自行處理缺值。
 
 `export_csv(path, overwrite=False)` 只匯出最新列，不輸出 pandas index；既有目的檔預設拒絕覆寫。自身來源 JSONL 永遠拒絕作為目的地，包含 symlink 或 hardlink，不因 overwrite 放行；只保護自身 source，不掃描其他檔案。JSONL 與 CSV 匯出不提供跨檔交易、多 writer 協調或 crash recovery。舊 CSV API 保留給尚未遷移的 caller，不作 JSONL 的 fallback。
 

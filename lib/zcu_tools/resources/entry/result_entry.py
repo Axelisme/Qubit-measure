@@ -40,6 +40,7 @@ from .schema import (
     SetupDocument,
     is_forward_minor,
 )
+from .storage import bind_sample_table
 from .views import (
     SetupView,
     add_component_to_draft,
@@ -199,11 +200,7 @@ class ResultEntry:
         read. Unsafe names and symlinks escaping this entry raise ValueError.
         The returned table owns append, latest-per-run read and CSV export.
         """
-        validate_path_segment(component, field="component")
-        path = self._result_path / "samples" / f"{component}.jsonl"
-        if not path.resolve().is_relative_to(self._result_path.resolve()):
-            raise ValueError(f"{path}: samples escape their entry")
-        return JsonlSampleTable(path)
+        return bind_sample_table(self._result_path, component)
 
     def updated_point(
         self,
