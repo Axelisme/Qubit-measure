@@ -14,7 +14,7 @@ Qt、remote 與 Run 必須使用同一份 tab cfg。若 widget 持有唯一可�
 
 ## 共用機制與領域 owner
 
-`gui.cfg` 擁有 Spec／Value、`CfgSchema`、input codec、binding、組裝、成品驗證及 lowering 機制。它不辨認 program discriminator、MetaDict、ModuleLibrary 或 generation policy。`experiment.cfg_editing` 擁有 module／waveform 的 closed shape catalog、Spec factories 與 raw materialization policy。App 負責 runtime object normalization、選用子集合及 role defaults，composition 注入窄能力，converter 不寫 library。
+`gui.cfg` 擁有 Spec／Value、`CfgSchema`、input codec、binding、組裝、成品驗證及 lowering 機制。它不辨認 program discriminator、參數容器、ModuleLibrary 或 generation policy。`experiment.cfg_editing` 擁有 module／waveform 的 closed shape catalog、Spec factories 與 raw materialization policy。App 負責 runtime object normalization、選用子集合及 role defaults，composition 注入窄能力，converter 不寫 library。
 
 `experiment.cfg_editing` 可依賴 Qt-free `gui.cfg`。Experiment package root 的公開 exports 按需載入，匯入 cfg_editing 不載入 experiment base、device 或 datafile。Library-entry conversion 與兩 app 的 normalization 尚未全部收斂，剩餘目標見 [cfg editing draft](draft/cfg-editing-boundaries.md)。
 

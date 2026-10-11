@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-10，共用 accepted 逐項寫回、條目樣本 JSONL 與跨 run 分析記錄
+**Last updated:** 2026-10-11，現行前端入口與舊 context 退休
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -64,7 +64,7 @@ ResultEntry 管理的 store 在 use、refresh 與 edit 時也檢查遮蔽，失�
 
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與來源。Point commit 失敗時 accepted 可以保留，值與來源仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
 
-`writeback` 提供共用 parameter／module／waveform 項目與 `apply_writeback`。Caller 傳入 captured point、storage binding、已解析的具體路徑，以及具名 evidence（實驗／分析 kind、run_id、origin 與可選 source）。流程追加一筆 accepted 後沿項目順序各自提交，首錯停止並原樣傳出，前項保留。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨項交易或回復框架。Notebook 使用此入口；GUI 仍保留舊路徑，等待後續接線。
+`writeback` 提供共用 parameter／module／waveform 項目與 `apply_writeback`。Caller 傳入 captured point、storage binding、已解析的具體路徑，以及具名 evidence（實驗／分析 kind、run_id、origin 與可選 source）。流程追加一筆 accepted 後沿項目順序各自提交，首錯停止並原樣傳出，前項保留。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨項交易或回復框架。Notebook 使用此入口；GUI 的固定 capture 與命令編排見 [session owner](../../gui/session/README.md)。
 
 ## 輸出位置
 
@@ -100,4 +100,4 @@ Explicit 的 None 明確不綁該角色，不改用焦點或 via；讀取時指�
 
 `rename_entry` 移動兩個目錄，不改檔案內容。第二次移動失敗時復原第一次。復原也失敗時，RenameRecoveryError 回報兩個路徑與原始 I/O 原因，不承諾跨檔掉電保證。
 
-Entry／point 提供隔離的 publication 與 read binding。ResultEntry.list_names 只列含 setup.yaml 的直屬目錄，不解析文件或尋找 legacy 參數。ContextService、Notebook runtime、完整 GUI／MCP 參數操作、Ledger producer 與 accept／writeback 仍由後續切片接線。
+Entry／point 提供隔離的 publication 與 read binding。ResultEntry.list_names 只列含 setup.yaml 的直屬目錄，不解析文件或尋找 legacy 參數。Notebook 直接使用 ResultEntry、PointView 與 RoleView。GUI／MCP 經 ContextService 的固定 ParameterContext 讀取與命令入口操作，不使用舊具名 context 目錄或 metadata store。Acquisition、save 與 accept 的 producer 契約見 notebook、experiment 與 GUI owner 文件。

@@ -15,7 +15,7 @@ agent（MCP RPC）與 user（Qt View）都要編輯三類 cfg：tab 的 cfg、Mo
 
 - **(a) agent 改 cfg 必對 user 即時可見（WYSIWYG）**——不能背著 user 改。
 - **(b) widget 未開時 agent 也要能編輯**——writeback 草稿 / 未開的 tab，沒有 widget 但 agent 要能調。
-- **(c) 表達 EvalValue 與 ref 切換**：欄位值可引用 MetaDict，例如 `freq = r_f - 0.1`，binding 解析並保存 expr/resolved/error；module/waveform 使用 reference 節點，切換會**動態改變後續可填欄位**，agent 必須「切 ref → 看新欄位 → 再填」漸進進行（無法一次送整份 raw）——這是引入**有狀態 session** 的不可替代理由。
+- **(c) 表達 EvalValue 與 ref 切換**：欄位值可引用 captured 參數路徑，例如 `freq = $resonator.freq - 0.1`，binding 解析並保存 expr/resolved/error；module/waveform 使用 reference 節點，切換會**動態改變後續可填欄位**，agent 必須「切 ref → 看新欄位 → 再填」漸進進行（無法一次送整份 raw）——這是引入**有狀態 session** 的不可替代理由。
 
 ## 決策
 
