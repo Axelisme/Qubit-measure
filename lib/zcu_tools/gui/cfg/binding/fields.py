@@ -264,7 +264,20 @@ class ScalarField(CfgField):
             valid = False
         options = self.available_options()
         validation_error = None
-        if valid and raw is not None and options is not None and raw not in options:
+        # Dynamic string expressions resolve names, not catalog selections.
+        # Name availability belongs to the consumer at its point of use.
+        check_options = not (
+            self.spec.type is str
+            and self.spec.choices_source
+            and isinstance(self._value, EvalValue)
+        )
+        if (
+            check_options
+            and valid
+            and raw is not None
+            and options is not None
+            and raw not in options
+        ):
             valid = False
             validation_error = f"Value {raw!r} is not an available option"
         self._value = replace(self._value, validation_error=validation_error)
