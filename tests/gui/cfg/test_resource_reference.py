@@ -41,9 +41,7 @@ def test_convert_reference_to_inline_copies_published_value(reference_resource) 
     resource, catalog = reference_resource
     accepted = resource.accept()
     catalog.entries["first"] = entry(99.0)
-    converted = resource.convert_reference_to_inline(
-        ("ref",)
-    )
+    converted = resource.convert_reference_to_inline(("ref",))
     assert converted.tree.children["ref"].mode == "inline"
     assert not converted.tree.children["ref"].children["x"].readonly
     assert resource.accept().values == {"ref": {"x": 1.0}}
@@ -214,9 +212,7 @@ def test_ref_content_write_rejects_leaf_and_empty_aggregate(
 
 def test_complete_same_value_payload_selects_inline(reference_resource) -> None:
     resource, catalog = reference_resource
-    changed = resource.edit(
-        (CfgEdit(("ref",), {"x": 1.0}),)
-    )
+    changed = resource.edit((CfgEdit(("ref",), {"x": 1.0}),))
     assert changed.tree.children["ref"].mode == "inline"
     catalog.entries["first"] = entry(20.0)
     catalog.lookups.clear()
@@ -227,9 +223,7 @@ def test_complete_same_value_payload_selects_inline(reference_resource) -> None:
 
 def test_inline_conversion_no_longer_resolves_original_key(reference_resource) -> None:
     resource, catalog = reference_resource
-    resource.convert_reference_to_inline(
-        ("ref",)
-    )
+    resource.convert_reference_to_inline(("ref",))
     resource.edit((CfgEdit(("ref", "x"), 7.0),))
     del catalog.entries["first"]
     catalog.lookups.clear()

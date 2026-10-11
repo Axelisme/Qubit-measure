@@ -25,7 +25,6 @@ class TargetGui(LookbackGui):
             self.created.append(dict(params))
             return {"tab_id": "t"}
         if method == "tab.get_cfg" and params.get("aliases") is not None:
-
             projected = deepcopy(self.publication)
             projected["status"] = "Valid"
             readout = projected["tree"]["children"]["modules"]["children"]["readout"]
@@ -97,7 +96,6 @@ class SweepGui(TargetGui):
             edits = params["edits"]
             assert isinstance(edits, list)
             if len(edits) == 1 and edits[0]["path"] == ["sweep"]:
-
                 inputs = self.publication["tree"]["children"]["sweep"]["inputs"]
                 for key, value in edits[0]["value"].items():
                     if isinstance(value, dict):

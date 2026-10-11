@@ -89,7 +89,6 @@ def _acquire_to_terminal(
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
-    session.state.get_tab("tab").cfg
     inputs = GuardService(
         session.state,
         captured_parameters=session.capture_parameters,
@@ -259,7 +258,6 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     try:
         services.run_analyze_control.start_run(
             tab_id,
-            tab.cfg.observe().ref,
             origin=origin,
             aliases=None if target is None else {"driver": target},
         )

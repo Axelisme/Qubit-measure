@@ -121,9 +121,7 @@ def attach_header(
         submit=submit,
     )
 
-    widget.set_convert_action(
-        lambda: editing.convert_reference_to_inline(("ref",))
-    )
+    widget.set_convert_action(lambda: editing.convert_reference_to_inline(("ref",)))
 
     def display(published: CfgObservation) -> None:
         ref = published.tree.children["ref"]

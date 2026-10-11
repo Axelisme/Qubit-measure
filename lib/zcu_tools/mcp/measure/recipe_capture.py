@@ -46,11 +46,12 @@ class RecipeActual(TypedDict):
 
 
 def capture_actual(
-    publication: Mapping[str, object], fields: Mapping[str, ActualField]
+    _publication: Mapping[str, object], fields: Mapping[str, ActualField]
 ) -> RecipeActual:
     """Detach declared summary facts associated with a cfg publication.
 
-    publication is the tab.get_cfg/edit_cfg reply associated with fields.
+    _publication is the tab.get_cfg/edit_cfg reply associated with fields;
+    it is not retained. Only the declared facts in fields enter the capture.
     fields contains resolved value/source/unit facts, not cfg inputs or edits.
     Preserve source labels and units verbatim; do not read GUI state, retain
     publication, resolve expressions or convert.

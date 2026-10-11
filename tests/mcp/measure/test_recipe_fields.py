@@ -39,7 +39,6 @@ class FieldGui(LookbackGui):
                 and len(edits) == 1
                 and edits[0]["path"] == ["range"]
             ):
-
                 for key, value in edits[0]["value"].items():
                     state = scalar(value)["input"]
                     if isinstance(value, dict):
@@ -102,7 +101,6 @@ def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
         assert client.transport.sent == before
 
 
-
 def test_set_fields_writes_one_batch_and_keeps_none_default(
     tmp_path: Path,
 ) -> None:
@@ -134,7 +132,6 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
                 "tab.edit_cfg",
                 {
                     "tab_id": "t",
-
                     "edits": [
                         {
                             "path": ["modules", "readout", "pulse_cfg", "freq"],
@@ -184,7 +181,6 @@ def test_batch_preflight_rejects_all_before_first_edit(
                 ]
             )
         assert len(client.transport.sent) == before
-
 
 
 def test_empty_batch_and_default_only_batch_do_not_edit(tmp_path: Path) -> None:

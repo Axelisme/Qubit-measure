@@ -521,9 +521,7 @@ def test_run_control_rejects_unresolvable_target_before_execution(
     services, state = global_sources
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg
-    observed = cfg.edit(
-        (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
-    )
+    observed = cfg.edit((CfgEdit(("gain",), EvalValue("$qubit.gain")),))
     rows = services.context.get_alias_rows()
     executions: list[RunInputs] = []
 
@@ -548,9 +546,7 @@ def test_unbound_alias_publishes_invalid_cfg_with_named_diagnostic(
     services, state = global_sources
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg
-    cfg.edit(
-        (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
-    )
+    cfg.edit((CfgEdit(("gain",), EvalValue("$qubit.gain")),))
 
     services.context.set_alias_rows((AliasRow("qubit", ""),))
 

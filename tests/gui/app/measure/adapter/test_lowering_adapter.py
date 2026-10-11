@@ -72,12 +72,8 @@ def test_device_name_resource_refresh_preview_and_accept_share_fixed_sources(
             "$flux_dev", resolved="yoko2"
         )
         assert resource.observe() == observed
-        assert resource.accept(
-            resolution=resolution()
-        ).values == {"flux_dev": "yoko2"}
-        changed = resource.edit(
-            (CfgEdit(("flux_dev",), EvalValue("$flux_dev")),)
-        )
+        assert resource.accept(resolution=resolution()).values == {"flux_dev": "yoko2"}
+        changed = resource.edit((CfgEdit(("flux_dev",), EvalValue("$flux_dev")),))
         assert changed.status is CfgStatus.VALID
         current = base.bind_aliases((AliasRow("flux_dev", "yoko3"),), {})
         resource.refresh()

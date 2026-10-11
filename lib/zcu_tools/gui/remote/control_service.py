@@ -55,11 +55,12 @@ def _store_expected_error(
     try:
         error = remote_error_from_expected(exc)
         if isinstance(exc, ControlIdentityError):
-            error.data = {
+            data: dict[str, object] = {
                 "holder": exc.status.holder,
                 "locked": exc.status.locked,
                 "online": exc.status.online,
             }
+            error.data = data
         holder["remote_error"] = error
     except Exception as projection_exc:  # projection safety boundary
         logger.exception(

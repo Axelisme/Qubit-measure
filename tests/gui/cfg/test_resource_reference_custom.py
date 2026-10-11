@@ -17,8 +17,8 @@ from zcu_tools.gui.cfg.model import (
 from zcu_tools.gui.cfg.resource import (
     CfgEdit,
     CfgInputError,
-    CfgObservation,
     CfgInputReason,
+    CfgObservation,
     CfgPreconditionError,
     CfgResolution,
     CfgResource,
@@ -133,9 +133,7 @@ def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
     catalog.failed_keys = frozenset({"parent"})
     catalog.lookups.clear()
 
-    switched = resource.select_custom_reference(
-        ("ref",), "FlatTop"
-    )
+    switched = resource.select_custom_reference(("ref",), "FlatTop")
 
     selected = switched.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
@@ -163,27 +161,19 @@ def test_select_custom_nested_waveform_rejects_ref_ancestor() -> None:
     resource, _ = nested_waveform_resource()
     current = resource.observe()
     with pytest.raises(CfgInputError) as rejected:
-        resource.select_custom_reference(
-            ("ref", "raise_waveform"), "DRAG"
-        )
+        resource.select_custom_reference(("ref", "raise_waveform"), "DRAG")
     assert rejected.value.reason is CfgInputReason.READONLY
     assert resource.observe() == current
 
 
 def test_select_custom_preserves_nested_inline_without_old_source() -> None:
     resource, catalog = nested_waveform_resource()
-    resource.convert_reference_to_inline(
-        ("ref",)
-    )
-    resource.edit(
-        (CfgEdit(("ref", "raise_waveform", "length"), 0.6),)
-    )
+    resource.convert_reference_to_inline(("ref",))
+    resource.edit((CfgEdit(("ref", "raise_waveform", "length"), 0.6),))
     catalog.failed_keys = frozenset({"parent", "rise"})
     catalog.lookups.clear()
 
-    switched = resource.select_custom_reference(
-        ("ref",), "FlatTop"
-    )
+    switched = resource.select_custom_reference(("ref",), "FlatTop")
 
     selected = switched.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
@@ -218,9 +208,7 @@ def test_select_custom_notifies_once_and_rejects_reentrant_selection() -> None:
             resource.select_custom_reference(("ref",), "DRAG")
 
     unsubscribe = resource.watch(subscriber)
-    changed = resource.select_custom_reference(
-        ("ref",), "DRAG"
-    )
+    changed = resource.select_custom_reference(("ref",), "DRAG")
     assert seen == [seen[0], changed]
     assert resource.observe() == changed
     unsubscribe()
@@ -243,9 +231,7 @@ def test_select_custom_uses_default_label_for_unnamed_shape() -> None:
         resolution=Catalog().snapshot,
     )
 
-    resource.select_custom_reference(
-        ("ref",), "Custom"
-    )
+    resource.select_custom_reference(("ref",), "Custom")
 
     assert resource.accept().values == {"ref": {"x": 7.0}}
 

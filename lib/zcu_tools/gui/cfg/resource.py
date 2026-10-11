@@ -151,9 +151,7 @@ class CfgEditing(Protocol):
 
     def select_custom_reference(self, path: CfgPath, label: str) -> CfgObservation: ...
 
-    def convert_reference_to_inline(
-        self, path: CfgPath
-    ) -> CfgObservation:
+    def convert_reference_to_inline(self, path: CfgPath) -> CfgObservation:
         """Freeze a valid published ref as same-shape inline content; see CfgResource."""
         ...
 
@@ -289,9 +287,7 @@ class CfgResource:
             raise CfgInputError(exc.reason, str(exc), path=path) from exc
         return self._commit_inputs(editor.schema, source)
 
-    def convert_reference_to_inline(
-        self, path: CfgPath
-    ) -> CfgObservation:
+    def convert_reference_to_inline(self, path: CfgPath) -> CfgObservation:
         """Publish a same-shape inline copy of a valid ref from current publication.
 
         Uses only the current publication, not fresh source values. Nested ref,

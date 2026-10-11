@@ -16,6 +16,7 @@ from zcu_tools.datafile import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
+from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -127,7 +128,9 @@ def start_mounted(
     else:
         assert isinstance(run_result.result, FluxDepResult)
         load_native_onetone(fx, tab_id, native_source, run_result.result)
-    tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - test fixture locates the mounted presentation
+    tab_widget = next(
+        tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == tab_id
+    )
     if pane is not None:
         tab_widget.select_pane(pane)
     token = fx.ctrl.run_analyze_control.analyze(

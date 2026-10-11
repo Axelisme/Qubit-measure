@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
+from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
@@ -59,7 +60,7 @@ def mounted_fx(qapp, tmp_path):
         window.show()
         qapp.processEvents()
         yield fixture, window
-        fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - owner deliveries before Qt teardown
+        fixture.ctrl.quiesce()
         fixture.stop()
         window.deleteLater()
         qapp.processEvents()
@@ -483,7 +484,9 @@ def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
         assert committed["pick"] is not widget.figure
         assert window.interactive_presentation(tab_id) is None
         qapp.processEvents()
-        tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - locate the tested view
+        tab_widget = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == tab_id
+        )
         assert (
             tab_widget.get_current_figure_for_pane("analysis")
             is fx.state.get_tab(tab_id).analysis.plots["pick"]

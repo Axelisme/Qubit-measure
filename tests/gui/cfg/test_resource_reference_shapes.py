@@ -39,9 +39,7 @@ def test_complete_shape_switch_uses_new_inputs_and_existing_range_owner(
     switchable_resource: CfgResource,
 ) -> None:
     resource = switchable_resource
-    changed = resource.edit(
-        (CfgEdit(("ref",), complete_second_input()),)
-    )
+    changed = resource.edit((CfgEdit(("ref",), complete_second_input()),))
     assert changed.status is CfgStatus.VALID
     assert resource.accept().values == {
         "ref": {
@@ -109,9 +107,7 @@ def test_shape_switch_preserves_expression_and_nested_link_input(
     payload = complete_second_input()
     payload["number"] = EvalValue("dynamic")
     payload["child"] = {"__ref": "child"}
-    changed = resource.edit(
-        (CfgEdit(("ref",), payload),)
-    )
+    changed = resource.edit((CfgEdit(("ref",), payload),))
     ref = changed.tree.children["ref"]
     number = ref.children["number"].value
     child = ref.children["child"].value
@@ -128,9 +124,7 @@ def test_complete_single_shape_input_rebuilds_unavailable_reference(
     resource, catalog = reference_resource
     resource.observe()
     if unavailable == "disabled":
-        resource.edit(
-            (CfgEdit(("ref", "__ref"), None),)
-        )
+        resource.edit((CfgEdit(("ref", "__ref"), None),))
     else:
         del catalog.entries["first"]
         resource.refresh()
@@ -146,9 +140,7 @@ def test_shape_switch_accepts_complete_but_unfinished_text(
     resource = switchable_resource
     payload = complete_second_input()
     payload["number"] = DirectValue(None, raw="-")
-    changed = resource.edit(
-        (CfgEdit(("ref",), payload),)
-    )
+    changed = resource.edit((CfgEdit(("ref",), payload),))
     assert changed.status is CfgStatus.INVALID
     number = changed.tree.children["ref"].children["number"].value
     assert isinstance(number, DirectValue)
@@ -199,9 +191,7 @@ def test_empty_linked_reference_waits_for_catalog_shape(second: bool) -> None:
     )
     refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
-    assert resource.accept().values == {
-        "ref": {"type": type_name, field_name: 2.0}
-    }
+    assert resource.accept().values == {"ref": {"type": type_name, field_name: 2.0}}
 
 
 def test_missing_reference_diagnostic_survives_valid_cached_children(

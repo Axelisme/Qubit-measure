@@ -66,7 +66,7 @@ def fx(qapp, tmp_path):
     fixture = InteractiveFixture(project_root=str(tmp_path))
     fixture.start()
     yield fixture
-    fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - queued owner deliveries precede widget GC
+    fixture.ctrl.quiesce()
     for widget in fixture.widgets:
         widget.teardown()
         widget.deleteLater()

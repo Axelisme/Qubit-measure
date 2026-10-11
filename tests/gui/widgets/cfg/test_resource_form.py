@@ -596,9 +596,7 @@ class RejectingEditor:
     def select_custom_reference(self, path: CfgPath, label: str) -> CfgObservation:
         raise FailedPreconditionError("rejected")
 
-    def convert_reference_to_inline(
-        self, path: CfgPath
-    ) -> CfgObservation:
+    def convert_reference_to_inline(self, path: CfgPath) -> CfgObservation:
         return self.owner.convert_reference_to_inline(path)
 
     def reset(self) -> CfgObservation:

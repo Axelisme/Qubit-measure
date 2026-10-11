@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -14,6 +14,8 @@ from zcu_tools.gui.app.measure.adapter import (
     ExpAdapterProtocol,
     RunRequest,
 )
+from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
+from zcu_tools.gui.app.measure.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.measure.services.guard import RunInputs
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate,
@@ -26,6 +28,7 @@ from zcu_tools.gui.cfg import (
     CfgSectionValue,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.event_bus import BasePayload
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
@@ -95,6 +98,11 @@ class FakeBg:
     """Synchronous background executor stub: calls work() and on_done/on_error inline."""
 
     def __init__(self, *, fail_submit: bool = False, fail_work: bool = False) -> None:
+        self.bus = EventBus()
+        self.events: list[BasePayload] = []
+        self.bus.subscribe(RunStartedPayload, self.events.append)
+        self.bus.subscribe(RunFinishedPayload, self.events.append)
+        self.bus.subscribe(TabInteractionChangedPayload, self.events.append)
         self._fail_submit = fail_submit
         self._fail_work = fail_work
         self.last_work: Callable[[], Any] | None = None
@@ -168,18 +176,15 @@ def make_run_service(
     state: State,
     *,
     fail_submit: bool = False,
-    mock_emit: bool = True,
     devices: Mapping[str, BaseDevice[Any]] | None = None,
 ) -> tuple[RunService, OperationGate, FakeBg, OperationHandles]:
     bg = FakeBg(fail_submit=fail_submit)
-    bus = EventBus()
-    if mock_emit:
-        bus.emit = MagicMock()  # type: ignore[method-assign]
+    bus = bg.bus
     gate = OperationGate(bus)
     handles = OperationHandles()
     writeback = MagicMock()
     progress = ProgressService(DirectProgressTransport())
-    runner = OperationRunner(gate, handles, progress, bg, bus)  # type: ignore[arg-type]
+    runner = OperationRunner(gate, handles, progress, bg, bus)
     svc = RunService(
         state,
         runner,
@@ -192,11 +197,9 @@ def make_run_service(
     return svc, gate, bg, handles
 
 
-def last_run_finished_payload(bus_emit: MagicMock):
-    from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
-
-    for call in reversed(bus_emit.call_args_list):
-        (payload,) = call.args
+def last_run_finished_payload(events: Sequence[BasePayload]) -> RunFinishedPayload:
+    """Return the last finished outcome observed through the supplied event bus."""
+    for payload in reversed(events):
         if isinstance(payload, RunFinishedPayload):
             return payload
     raise AssertionError("no RUN_FINISHED emitted")
