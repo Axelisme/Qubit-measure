@@ -1,13 +1,18 @@
 """Generic batch and expression author edits retain the GUI cfg protocol."""
 
+from contextlib import closing
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from zcu_tools.mcp.measure import recipe
-from zcu_tools.mcp.measure.recipe import RecipeSession
+from zcu_tools.mcp.measure.execution_reply import SummaryParameter
+from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from ._recipe_execution_support import definition
 from ._recipe_support import LookbackGui, recipe_client, scalar
+from ._support import make_client
 
 
 class FieldGui(LookbackGui):
@@ -49,6 +54,56 @@ class FieldGui(LookbackGui):
                 )
                 return self.publication
         return super().__call__(method, params)
+
+
+def test_retain_source_records_scalar_and_sweep_without_cfg_edits(
+    tmp_path: Path,
+) -> None:
+    gui = FieldGui()
+
+    def run(session: RecipeSession) -> RecipeGenerator:
+        tab = session.open_tab("lookback")
+        tab.retain_source("rounds", "caller_rounds")
+        tab.retain_source("range", "caller_range")
+        yield tab.run()
+
+    sample = replace(
+        definition(run),
+        summary_parameters=(
+            SummaryParameter("rounds", "rounds"),
+            SummaryParameter("range", "range", "native"),
+        ),
+    )
+    client = make_client(tmp_path, gui, recipes=(sample,))
+    with closing(client.context.session):
+        reply = client.call("sample", {})
+        assert reply.data["status"] == "finished", reply.data
+        assert reply.data["actual"] == {
+            "rounds": {"value": 3, "source": "caller_rounds"},
+            "range": {
+                "value": {"start": 1.0, "stop": 2.0, "expts": 11},
+                "source": "caller_range",
+                "unit": "native",
+            },
+        }
+        assert gui.publication["cfg_ref"]["revision"] == "2"
+        assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
+
+
+@pytest.mark.parametrize(
+    "field,source", [("missing", "caller"), ("rounds", ""), ("range", " ")]
+)
+def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
+    tmp_path: Path, field: str, source: str
+) -> None:
+    gui = FieldGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        before = list(client.transport.sent)
+        with pytest.raises(ValueError):
+            tab.retain_source(field, source)
+        assert client.transport.sent == before
+        assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 def test_set_fields_writes_one_batch_revision_and_keeps_none_default(
