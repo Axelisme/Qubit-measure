@@ -46,6 +46,7 @@ class OnetoneGui(LookbackGui):
             sweep=section(
                 freq={
                     "kind": "sweep",
+                    "readonly": False,
                     "valid": True,
                     "inputs": {
                         "start": self.input(f"{center} - {width}" if md else 4500.0),
@@ -111,6 +112,7 @@ class PowerGui(OnetoneGui):
         )
         self.publication["tree"]["children"]["sweep"]["children"]["gain"] = {
             "kind": "sweep",
+            "readonly": False,
             "valid": True,
             "inputs": {
                 key: self.input(value)
@@ -148,6 +150,7 @@ class FluxGui(OnetoneGui):
         root["flux_unit"] = scalar("A")
         root["sweep"]["children"]["flux"] = {
             "kind": "sweep",
+            "readonly": False,
             "valid": True,
             "inputs": {
                 "start": self.input("2 * $qubit.flux_int - $qubit.flux_half"),

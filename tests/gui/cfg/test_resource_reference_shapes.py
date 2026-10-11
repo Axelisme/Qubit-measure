@@ -12,7 +12,6 @@ from zcu_tools.gui.cfg.model import (
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
-    SweepSpec,
 )
 from zcu_tools.gui.cfg.resource import (
     CfgEdit,
@@ -24,51 +23,6 @@ from zcu_tools.gui.cfg.resource import (
 )
 
 from ._reference_support import Catalog
-
-
-@pytest.fixture
-def switchable_resource() -> CfgResource:
-    first = CfgSectionSpec(
-        fields={"type": LiteralSpec("first"), "old": ScalarSpec("Old", float)},
-        label="First",
-    )
-    child = CfgSectionSpec(fields={"x": ScalarSpec("X", float)}, label="Child")
-    second = CfgSectionSpec(
-        fields={
-            "type": LiteralSpec("second"),
-            "fixed": LiteralSpec("locked"),
-            "number": ScalarSpec("Number", float),
-            "optional": ScalarSpec("Optional", float, optional=True),
-            "child": ReferenceSpec("test", [child]),
-            "range": SweepSpec(),
-        },
-        label="Second",
-    )
-    schema = CfgSchema(
-        CfgSectionSpec(
-            fields={"ref": ReferenceSpec("test", [first, second], discriminator="type")}
-        ),
-        CfgSectionValue(
-            {
-                "ref": ReferenceValue(
-                    "<Custom:First>",
-                    CfgSectionValue(
-                        {"type": DirectValue("first"), "old": DirectValue(99.0)}
-                    ),
-                )
-            }
-        ),
-    )
-    return CfgResource(
-        lambda: schema,
-        resolution=Catalog(
-            {
-                "child": ResolvedReference(
-                    "Child", CfgSectionValue({"x": DirectValue(2.0)})
-                )
-            }
-        ).snapshot,
-    )
 
 
 def complete_second_input() -> dict[str, CfgInput]:

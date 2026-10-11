@@ -46,9 +46,9 @@ from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 
 from ._run_support import (
     make_inputs,
+    make_plots,
     make_run_service,
     make_state,
-    plots,
 )
 
 
@@ -110,7 +110,7 @@ def test_run_publishes_record_and_historical_metadata_together(
         state, devices={"flux": driver}
     )
     before_run = datetime.now(UTC)
-    token = service.start_run(inputs, plots=plots())
+    token = service.start_run(inputs, plots=make_plots())
     after_admission = datetime.now(UTC)
     assert identity.called  # Identity is already fixed before acquisition starts.
     settings.value = 9.5
@@ -168,14 +168,14 @@ def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
         experiment_tag="test/native",
     )
     service, _gate, background, handles = make_run_service(state)
-    service.start_run(inputs, plots=plots())
+    service.start_run(inputs, plots=make_plots())
     background.run_work()
     assert state.get_tab(tab_id).run.metadata is not None
     if provenance_failure:
         capture.side_effect = RuntimeError("provenance failed")
     else:
         adapter.run.side_effect = RuntimeError("acquire failed")
-    token = service.start_run(inputs, plots=plots())
+    token = service.start_run(inputs, plots=make_plots())
     assert state.get_tab(tab_id).run.result is None
     assert state.get_tab(tab_id).run.metadata is None
     background.run_work()
@@ -200,7 +200,7 @@ def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence
         experiment_tag=None if has_snapshot else "test/native",
     )
     service, _gate, background, _handles = make_run_service(state)
-    service.start_run(inputs, plots=plots())
+    service.start_run(inputs, plots=make_plots())
     background.run_work()
     assert state.get_tab(tab_id).run.metadata is None
     capture.assert_not_called()
@@ -272,7 +272,7 @@ def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
         experiment_tag=adapter.experiment_tag,
     )
     service, _gate, background, handles = make_run_service(state)
-    token = service.start_run(inputs, plots=plots())
+    token = service.start_run(inputs, plots=make_plots())
     background.run_work()
     record = state.get_tab(tab_id).run.result
     metadata = state.get_tab(tab_id).run.metadata
@@ -304,7 +304,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
         experiment_tag="test/native",
     )
     service, _gate, background, handles = make_run_service(state)
-    token = service.start_run(inputs, plots=plots())
+    token = service.start_run(inputs, plots=make_plots())
     assert background.last_work is not None
     acquired = background.last_work()
     assert service.cancel_run()
@@ -331,7 +331,7 @@ def test_native_run_rejects_an_unpaired_result_without_publishing_evidence(
         experiment_tag="test/native",
     )
     service, _gate, background, handles = make_run_service(state)
-    token = service.start_run(inputs, plots=plots())
+    token = service.start_run(inputs, plots=make_plots())
     background.run_work()
     assert state.get_tab(tab_id).run.result is None
     assert state.get_tab(tab_id).run.metadata is None
@@ -363,7 +363,7 @@ def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
         snapshot=_run_snapshot(),
         experiment_tag=adapter.experiment_tag,
     )
-    token = service.start_run(inputs, plots=plots())
+    token = service.start_run(inputs, plots=make_plots())
     assert flux.events == unused.events == []
     background.run_work()
     assert flux.events == ["read", "write"]
@@ -387,7 +387,7 @@ def test_device_read_failure_rejects_run_before_core() -> None:
     service, gate, background, handles = make_run_service(
         state, devices={"flux": flux, "unused": unused}
     )
-    token = service.start_run(make_inputs(state, tab_id, adapter), plots=plots())
+    token = service.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
     background.run_work()
     assert state.get_tab(tab_id).run.result is None
     assert flux.events == unused.events == ["read"]
@@ -447,7 +447,7 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
             ),
             experiment_tag=adapter.experiment_tag,
         )
-        token = service.start_run(inputs, plots=plots())
+        token = service.start_run(inputs, plots=make_plots())
         session.context.set_alias_rows((AliasRow("flux_dev", "yoko2"),))
         background.run_work()
         outcome = handles.poll(token)
@@ -488,7 +488,7 @@ def test_gui_save_uses_fixed_run_device_snapshot(
             snapshot=session.metadata.snapshot,
             experiment_tag=adapter.experiment_tag,
         )
-        token = service.start_run(inputs, plots=plots())
+        token = service.start_run(inputs, plots=make_plots())
         background.run_work()
         outcome = handles.poll(token)
         assert outcome is not None and outcome.status == "finished"

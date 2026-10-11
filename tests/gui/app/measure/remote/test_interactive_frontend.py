@@ -29,7 +29,7 @@ from ._interactive_support import (
     interact,
     pointer,
     rpc,
-    start,
+    start_interactive,
     start_mounted,
 )
 
@@ -68,7 +68,7 @@ def mounted_fx(qapp, tmp_path):
 
 
 def test_live_frontend_preview_remote_commit_and_done_share_result(fx, qapp) -> None:
-    tab_id, token, plugin = start(fx)
+    tab_id, token, plugin = start_interactive(fx)
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
     session = active.session
@@ -584,3 +584,48 @@ def test_two_mounted_tabs_unmount_one_without_retiring_other(mounted_fx, qapp) -
                 == status
             )
     qapp.processEvents()
+
+
+def test_interactive_commands_follow_before_commit_but_reads_do_not(
+    mounted_fx, monkeypatch
+) -> None:
+    fx, window = mounted_fx
+    tab_id, token, _ = start_mounted(fx, window, "onetone/flux_dep")
+    active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
+    assert active is not None
+    follow = window.select_tab_pane
+    observed = []
+
+    def select(tab, pane):
+        observed.append(
+            (tab, pane, active.plugin.project_state(active.session.snapshot()))
+        )
+        follow(tab, pane)
+
+    monkeypatch.setattr(window, "select_tab_pane", select)
+    with open_client(fx.service.port) as sock:
+        original = interact(sock, tab_id)["result"]["state"]
+        invalid = interact(sock, tab_id, {"command": "unknown"})
+        assert invalid["ok"] is False
+        assert observed == []
+        changed = interact(
+            sock,
+            tab_id,
+            {
+                "command": "set_conjugate",
+                "args": {"enabled": not original["conjugate"]},
+            },
+        )
+        assert changed["ok"] is True
+        assert observed == [(tab_id, "analysis", original)]
+        assert changed["result"]["state"]["conjugate"] is not original["conjugate"]
+        done = interact(sock, tab_id, {"command": "done"})
+        assert done["ok"] is True
+        assert observed[-1] == (tab_id, "analysis", changed["result"]["state"])
+        assert len(observed) == 2
+        assert (
+            rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
+                "result"
+            ]["status"]
+            == "finished"
+        )

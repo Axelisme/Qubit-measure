@@ -25,23 +25,6 @@ from zcu_tools.gui.cfg.resource import (
 from ._reference_support import Catalog, entry, nested_waveform_resource
 
 
-@pytest.fixture
-def reference_resource() -> tuple[CfgResource, Catalog]:
-    shape = CfgSectionSpec(fields={"x": ScalarSpec("X", float)}, label="Shape")
-    schema = CfgSchema(
-        CfgSectionSpec(fields={"ref": ReferenceSpec("test", [shape], optional=True)}),
-        CfgSectionValue(
-            {"ref": ReferenceValue("first", CfgSectionValue({"x": DirectValue(1.0)}))}
-        ),
-    )
-    catalog = Catalog({"first": entry(1.0), "second": entry(2.0)})
-    resource = CfgResource(
-        lambda: schema,
-        resolution=catalog.snapshot,
-    )
-    return resource, catalog
-
-
 def test_ref_children_are_readonly(reference_resource) -> None:
     resource, _ = reference_resource
     before = resource.observe()

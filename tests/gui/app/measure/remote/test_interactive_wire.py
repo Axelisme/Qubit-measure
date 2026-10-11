@@ -15,13 +15,12 @@ from ._interactive_support import (
     button,
     interact,
     rpc,
-    start,
-    start_mounted,
+    start_interactive,
 )
 
 
 def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
-    tab_id, token, _plugin = start(fx)
+    tab_id, token, _plugin = start_interactive(fx)
     fx.service.render_view = None
     with open_client(fx.service.port) as sock:
         initial = interact(sock, tab_id)
@@ -77,7 +76,7 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
 def test_socket_done_receipt_skips_png_and_settles_original_operation(
     fx, monkeypatch
 ) -> None:
-    tab_id, token, _plugin = start(fx)
+    tab_id, token, _plugin = start_interactive(fx)
 
     def unavailable_renderer(_figure):
         raise RuntimeError("PNG renderer unavailable")
@@ -112,7 +111,7 @@ def test_socket_done_receipt_skips_png_and_settles_original_operation(
 
 
 def test_commands_after_gui_and_context_changes_need_no_seen_baseline(fx) -> None:
-    tab_id, token, plugin = start(fx)
+    tab_id, token, plugin = start_interactive(fx)
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
     plugin.execute_command(active.session, "set_conjugate", {"enabled": True})
@@ -136,7 +135,7 @@ def test_commands_after_gui_and_context_changes_need_no_seen_baseline(fx) -> Non
 
 
 def test_invalid_payload_preserves_active_session_until_done(fx) -> None:
-    tab_id, _token, _plugin = start(fx)
+    tab_id, _token, _plugin = start_interactive(fx)
     with open_client(fx.service.port) as sock:
         baseline = interact(sock, tab_id)["result"]["state"]
         bad = [
@@ -163,7 +162,7 @@ def test_invalid_payload_preserves_active_session_until_done(fx) -> None:
 
 
 def test_equal_line_command_rejects_without_changing_session_or_operation(fx) -> None:
-    tab_id, token, _plugin = start(fx)
+    tab_id, token, _plugin = start_interactive(fx)
     with open_client(fx.service.port) as sock:
         original = interact(sock, tab_id)["result"]["state"]
         reply = interact(
@@ -191,7 +190,7 @@ def test_auto_align_busy_failure_and_terminal_delivery_use_same_command(
     fx, qapp
 ) -> None:
     deferred = DeferredBackground()
-    tab_id, token, plugin = start(fx, background=deferred.run_background)
+    tab_id, token, plugin = start_interactive(fx, background=deferred.run_background)
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
     session = active.session
@@ -249,7 +248,7 @@ def test_auto_align_busy_failure_and_terminal_delivery_use_same_command(
 
 def test_cancel_during_remote_alignment_ignores_late_delivery(fx) -> None:
     deferred = DeferredBackground()
-    tab_id, token, _plugin = start(fx, background=deferred.run_background)
+    tab_id, token, _plugin = start_interactive(fx, background=deferred.run_background)
     with open_client(fx.service.port) as sock:
         assert interact(sock, tab_id)["ok"] is True
         assert interact(sock, tab_id, {"command": "auto_align"})["ok"] is True
@@ -267,54 +266,9 @@ def test_cancel_during_remote_alignment_ignores_late_delivery(fx) -> None:
         )
 
 
-def test_interactive_commands_follow_before_commit_but_reads_do_not(
-    mounted_fx, monkeypatch
-) -> None:
-    fx, window = mounted_fx
-    tab_id, token, _ = start_mounted(fx, window, "onetone/flux_dep")
-    active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
-    assert active is not None
-    follow = window.select_tab_pane
-    observed = []
-
-    def select(tab, pane):
-        observed.append(
-            (tab, pane, active.plugin.project_state(active.session.snapshot()))
-        )
-        follow(tab, pane)
-
-    monkeypatch.setattr(window, "select_tab_pane", select)
-    with open_client(fx.service.port) as sock:
-        original = interact(sock, tab_id)["result"]["state"]
-        invalid = interact(sock, tab_id, {"command": "unknown"})
-        assert invalid["ok"] is False
-        assert observed == []
-        changed = interact(
-            sock,
-            tab_id,
-            {
-                "command": "set_conjugate",
-                "args": {"enabled": not original["conjugate"]},
-            },
-        )
-        assert changed["ok"] is True
-        assert observed == [(tab_id, "analysis", original)]
-        assert changed["result"]["state"]["conjugate"] is not original["conjugate"]
-        done = interact(sock, tab_id, {"command": "done"})
-        assert done["ok"] is True
-        assert observed[-1] == (tab_id, "analysis", changed["result"]["state"])
-        assert len(observed) == 2
-        assert (
-            rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
-                "result"
-            ]["status"]
-            == "finished"
-        )
-
-
 def test_two_tabs_keep_independent_remote_sessions(fx) -> None:
-    first_id, first_token, _ = start(fx)
-    second_id, second_token, _ = start(fx)
+    first_id, first_token, _ = start_interactive(fx)
+    second_id, second_token, _ = start_interactive(fx)
     with open_client(fx.service.port) as sock:
         first = interact(sock, first_id)["result"]["state"]
         second = interact(sock, second_id)["result"]["state"]

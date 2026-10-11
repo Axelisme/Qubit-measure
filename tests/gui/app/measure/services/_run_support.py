@@ -68,7 +68,7 @@ def make_state(
     return state, tab_id, adapter
 
 
-def plots() -> Plots:
+def make_plots() -> Plots:
     return Plots(NonPresentingHost())
 
 

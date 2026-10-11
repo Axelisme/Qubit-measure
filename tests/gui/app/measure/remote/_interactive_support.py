@@ -138,7 +138,7 @@ def start_mounted(
     return tab_id, token, widget
 
 
-def start(fx, *, background=None):
+def start_interactive(fx, *, background=None):
     tab_id = fx.ctrl.new_tab("fake")
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
