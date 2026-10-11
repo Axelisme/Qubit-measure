@@ -219,6 +219,23 @@ class FluxoniumPredictor:
         )
         return np.asarray(sign * freqs_mhz[0], dtype=np.float64)
 
+    def predict_frequencies_mhz(
+        self,
+        values: NDArray[np.float64],
+        transitions: tuple[tuple[int, int], ...],
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return flux coordinates and MHz rows for an ordered batch of transitions."""
+        return self._engine.predict_frequencies_mhz(values, transitions, cutoff=40)
+
+    def predict_matrix_elements(
+        self,
+        values: NDArray[np.float64],
+        transitions: tuple[tuple[int, int], ...],
+        operator: MatrixOperator,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return magnitude rows, including transitions above level one."""
+        return self._engine.predict_matrix_elements(values, transitions, operator)
+
     def _predict_matrix_element(
         self,
         cur_value: float,
