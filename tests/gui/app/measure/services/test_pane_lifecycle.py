@@ -446,9 +446,26 @@ def _ge_capture(original: ParameterContext | None) -> ParameterContext:
     ).bind_aliases((AliasRow("qubit", "Q1"),), {})
 
 
-def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
-    native_session: NativeSaveSession,
-) -> None:
+@dataclass
+class _GEAnalysisPanes:
+    """Real adopted GE panes and their replacement operation seam.
+
+    state/tab_id locate the live tab. writeback previews and retires pane drafts.
+    primary_service/primary_bg admit and complete replacement fits.
+    fit_plots/post_plots are the original named collections, retained for exports.
+    """
+
+    state: State
+    tab_id: str
+    writeback: WritebackService
+    primary_service: AnalyzeService
+    primary_bg: _Bg
+    fit_plots: Plots
+    post_plots: Plots
+
+
+@pytest.fixture
+def ge_analysis_panes(native_session: NativeSaveSession):
     state, tab_id, ctx = native_session.state, "tab", native_session.state.session_env
     adapter = GEAdapter()
     state.get_tab(tab_id).adapter = adapter
@@ -473,17 +490,6 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     tab = state.get_tab(tab_id)
     primary = tab.analysis.result
     assert isinstance(primary, GEAnalyzeResult)
-    assert primary.initial_state == "excited"
-    assert tab.analysis.plots is fit_plots
-    assert tuple(fit_plots) == ("fit",)
-    primary_draft = tab.analysis.writeback_draft
-    assert isinstance(primary_draft, WritebackDraft)
-    assert {item.target_name for item in writeback.preview_draft(primary_draft)} == {
-        "$qubit.ext.readout_cal.fidelity",
-        "$qubit.ext.readout_cal.sigma",
-        "$qubit.ext.readout_cal.g_center",
-        "$qubit.ext.readout_cal.e_center",
-    }
     # The post operation must use the adopted primary, not the later form edit.
     params.initial_state = "ground"
     post_params = adapter.get_post_analyze_params(primary, ctx)
@@ -501,28 +507,67 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     post_service.start_post_analyze(tab_id, post_params, plots=post_plots)
     post_bg.on_done(post_bg.work())
 
+    try:
+        yield _GEAnalysisPanes(
+            state, tab_id, writeback, primary_service, primary_bg, fit_plots, post_plots
+        )
+    finally:
+        fit_plots.release()
+        post_plots.release()
+        current_draft = tab.analysis.writeback_draft
+        if isinstance(current_draft, WritebackDraft):
+            writeback.teardown_draft(current_draft)
+
+
+def test_ge_primary_publishes_excited_fit_and_calibration_writeback(
+    ge_analysis_panes: _GEAnalysisPanes,
+) -> None:
+    panes = ge_analysis_panes
+    tab = panes.state.get_tab(panes.tab_id)
+    primary = tab.analysis.result
+    assert isinstance(primary, GEAnalyzeResult)
+    assert primary.initial_state == "excited"
+    assert tab.analysis.plots is panes.fit_plots
+    assert tuple(panes.fit_plots) == ("fit",)
+    primary_draft = tab.analysis.writeback_draft
+    assert isinstance(primary_draft, WritebackDraft)
+    assert {
+        item.target_name for item in panes.writeback.preview_draft(primary_draft)
+    } == {
+        "$qubit.ext.readout_cal.fidelity",
+        "$qubit.ext.readout_cal.sigma",
+        "$qubit.ext.readout_cal.g_center",
+        "$qubit.ext.readout_cal.e_center",
+    }
+
+
+def test_ge_post_uses_adopted_fit_and_projects_separate_artifacts_and_writeback(
+    ge_analysis_panes: _GEAnalysisPanes,
+) -> None:
+    panes = ge_analysis_panes
+    tab = panes.state.get_tab(panes.tab_id)
     post = tab.post_analysis.result
     assert isinstance(post, GEPostAnalyzeResult)
     np.testing.assert_allclose(post.confusion, np.eye(3), atol=0.06)
-    assert tab.post_analysis.plots is post_plots
-    assert tuple(post_plots) == ("post",)
+    assert tab.post_analysis.plots is panes.post_plots
+    assert tuple(panes.post_plots) == ("post",)
     post_draft = tab.post_analysis.writeback_draft
     assert isinstance(post_draft, WritebackDraft)
-    assert {item.target_name for item in writeback.preview_draft(post_draft)} == {
+    assert {item.target_name for item in panes.writeback.preview_draft(post_draft)} == {
         "$qubit.ext.readout_cal.radius",
         "$qubit.ext.readout_cal.confusion_matrix",
     }
     snapshot = TabService(
-        state,
+        panes.state,
         MagicMock(),
-        cast(Any, writeback),
-        cfg_resources(state),
+        panes.writeback,
+        cfg_resources(panes.state),
         MagicMock(),
         MagicMock(),
-    ).get_snapshot(tab_id)
+    ).get_snapshot(panes.tab_id)
     assert snapshot.analysis is not None and snapshot.post_analysis is not None
-    assert snapshot.analysis.figures is fit_plots
-    assert snapshot.post_analysis.figures is post_plots
+    assert snapshot.analysis.figures is panes.fit_plots
+    assert snapshot.post_analysis.figures is panes.post_plots
     assert {
         member.key
         for section in snapshot.artifacts
@@ -535,25 +580,29 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
         ArtifactKey("post_analysis", "results", "analysis", "post_analysis"),
     }
 
-    new_fit = Plots(NonPresentingHost())
-    primary_service.start_analyze(
-        tab_id, GEAnalyzeParams(initial_state="excited"), plots=new_fit
-    )
-    primary_bg.on_done(primary_bg.work())
-    assert tab.post_analysis.result is None
-    assert tab.post_analysis.plots is None
-    old_fit, old_post = BytesIO(), BytesIO()
-    fit_plots["fit"].savefig(old_fit, format="png")
-    post_plots["post"].savefig(old_post, format="png")
-    assert old_fit.getvalue().startswith(b"\x89PNG")
-    assert old_post.getvalue().startswith(b"\x89PNG")
 
-    fit_plots.release()
-    post_plots.release()
-    new_fit.release()
-    current_draft = tab.analysis.writeback_draft
-    assert isinstance(current_draft, WritebackDraft)
-    writeback.teardown_draft(current_draft)
+def test_ge_primary_replacement_clears_post_but_retained_plots_still_export(
+    ge_analysis_panes: _GEAnalysisPanes,
+) -> None:
+    panes = ge_analysis_panes
+    tab = panes.state.get_tab(panes.tab_id)
+    new_fit = Plots(NonPresentingHost())
+    try:
+        panes.primary_service.start_analyze(
+            panes.tab_id, GEAnalyzeParams(initial_state="excited"), plots=new_fit
+        )
+        panes.primary_bg.on_done(panes.primary_bg.work())
+        assert tab.post_analysis.result is None
+        assert tab.post_analysis.plots is None
+        old_fit, old_post = BytesIO(), BytesIO()
+        panes.fit_plots["fit"].savefig(old_fit, format="png")
+        panes.post_plots["post"].savefig(old_post, format="png")
+        assert old_fit.getvalue().startswith(b"\x89PNG")
+        assert old_post.getvalue().startswith(b"\x89PNG")
+        current_draft = tab.analysis.writeback_draft
+        assert isinstance(current_draft, WritebackDraft)
+    finally:
+        new_fit.release()
 
 
 def test_failed_draft_build_preserves_previous_primary_and_post() -> None:
