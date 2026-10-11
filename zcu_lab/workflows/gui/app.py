@@ -9,7 +9,6 @@ from zcu_tools.gui.runtime import GuiAssembly, GuiRuntimeBehavior, GuiRuntimeSpe
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
-from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -18,6 +17,8 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from zcu_lab import ALIAS_PRESET
 
 from .window import T1WorkflowWindow
 
@@ -84,7 +85,7 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
             bind_assets=ArbWaveformDatabase.info_at,
             project_root=self._project_root,
             device_registry=self._devices,
-            alias_rows=(AliasRow("qubit", ""),),
+            alias_rows=ALIAS_PRESET,
         )
         self.window = T1WorkflowWindow(
             self.state,
