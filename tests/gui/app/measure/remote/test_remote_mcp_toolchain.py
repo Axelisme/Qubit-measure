@@ -788,21 +788,6 @@ def test_device_mutation_error_path_is_precondition_failed(fx):
         sock.close()
 
 
-def test_context_md_write_and_delete(fx):
-    md = fx.state.session_env.md
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "context.md_set_attr", {"key": "bias", "value": 0.25})
-        assert resp["ok"] is True
-        assert md.bias == 0.25
-
-        resp = call(sock, "context.md_del_attr", {"key": "bias"}, rid="2")
-        assert resp["ok"] is True
-        assert not hasattr(md, "bias")
-    finally:
-        sock.close()
-
-
 def test_context_ml_delete_delegates(fx):
     # ADR-0006: there is no raw-dict context.set_ml_* RPC anymore (ml entries are
     # built/edited via the editor session). Delete still delegates to the context

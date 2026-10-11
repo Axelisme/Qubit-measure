@@ -118,7 +118,7 @@ class JpaFluxAdapter(
         ),
         typical_writeback=(
             "Proposes the signal-maximizing JPA flux device value into "
-            "MetaDict 'best_jpa_flux' as a draft — it never writes it back "
+            "parameter context 'best_jpa_flux' as a draft — it never writes it back "
             "without your acceptance, never commands the device from the "
             "writeback, and never touches 'cur_jpa_A'."
         ),

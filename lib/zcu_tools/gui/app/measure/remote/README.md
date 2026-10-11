@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-10, named alias queries, cfg preview and Run acceptance
+**Last updated:** 2026-10-11, retired flat parameter-attribute RPCs
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -241,8 +241,9 @@ entry, saving a loaded Run uses its captured historical point, not the tab birth
 The wire surface is grouped by ownership:
 
 - `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布空 DRAFT，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
-- `context.*`：MetaDict / ModuleLibrary / active context operations through
-  `ContextControlPort`; role-catalog create/list stays on the app controller.
+- `context.*`：fixed parameter-context reads and point-local ModuleLibrary operations
+  through `ContextControlPort`; role-catalog create/list stays on the app controller.
+  Parameter writes use the typed point/context owner, not flat attribute RPCs.
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
 - `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc and installs a predictor if absent. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.

@@ -92,7 +92,7 @@ class DualToneFreqAdapter(
             "hardware in hard-sweep mode (both axes are QICK register sweeps)."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'reset_f1' / 'reset_f2' — "
+            "Reads from the parameter context (all optional): 'reset_f1' / 'reset_f2' — "
             "the two sideband reset frequencies centring each sweep axis "
             "(absent → centred on 0 MHz); 'reset_gain1' / 'reset_gain2' seed "
             "the two tested-reset pulse gains; 'q_f' / 'qub_ch' seed the "
@@ -105,7 +105,7 @@ class DualToneFreqAdapter(
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the two fitted sideband frequencies into MetaDict "
+            "Proposes the two fitted sideband frequencies into parameter context "
             "'reset_f1' and 'reset_f2'. No ModuleLibrary writeback — "
             "registering the calibrated 'reset_120' module is left to the final "
             "length step once frequency, gain and length are all dialled in."

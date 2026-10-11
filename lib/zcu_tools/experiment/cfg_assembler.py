@@ -46,7 +46,6 @@ from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFact
 from zcu_tools.utils import deepupdate
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.context import MetaDict
     from zcu_tools.resources.context.library import LibrarySnapshot
 
 T_ExpCfg = TypeVar("T_ExpCfg", bound=ExpCfgModel)
@@ -107,14 +106,12 @@ def _copy_value(value: ExperimentCfgValue) -> ExperimentCfgValue:
 class CfgEnv:
     """Caller-selected resources for Notebook cfg assembly.
 
-    md is the borrowed parameter mapping; assembly never evaluates it.
     ml is a fixed library snapshot with its captured asset capability.
     device_manager remains the caller's borrowed driver resource; assembly
     never reads or configures it. This container owns no resource lifetime
     and never refreshes ml.
     """
 
-    md: MetaDict
     ml: LibrarySnapshot
     device_manager: DeviceManager
 

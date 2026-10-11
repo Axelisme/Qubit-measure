@@ -74,7 +74,7 @@ class MistPowerAdapter(
         ),
         expects_md=(
             "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
             "defaults with 'singleshot/ge' writeback. The run classifies each "
             "shot using these values; missing or invalid cfg calibration fails "
             "before hardware. Optionally reads 'confusion_matrix' (readout correction) "

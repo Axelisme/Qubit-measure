@@ -91,7 +91,9 @@ class AdapterGuide:
     """
 
     behavior: str  # what this experiment measures and roughly how it runs
-    expects_md: str  # what it assumes is already in the MetaDict (intent level)
+    expects_md: (
+        str  # what it assumes is already in the parameter context (intent level)
+    )
     expects_ml: str  # what it assumes is in the ModuleLibrary
     typical_writeback: str  # what a completed run tends to propose writing back
     recommended: str  # recommended analysis settings + typical usage (when/why)

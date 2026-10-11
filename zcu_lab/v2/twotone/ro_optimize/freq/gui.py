@@ -71,7 +71,7 @@ class RoOptFreqAdapter(
             "qubit and a pi pulse are calibrated."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' — resonator "
+            "Reads from the parameter context (all optional): 'r_f' — resonator "
             "frequency, the sweep centre (~4000–8000 MHz); 'rf_w' — linewidth, "
             "setting the span as r_f ± 1.5*rf_w (~5–50 MHz; falls back to ±30 "
             "MHz when absent); 'res_ch' / 'ro_ch' — drive / ADC channels; "
@@ -85,10 +85,10 @@ class RoOptFreqAdapter(
             "'ro_waveform' when present. Optionally references a reset module."
         ),
         typical_writeback=(
-            "Proposes the SNR-maximizing readout frequency into MetaDict "
+            "Proposes the SNR-maximizing readout frequency into parameter context "
             "'best_ro_freq' (MHz). When a cfg snapshot with pulse readout is "
             "available and 'best_ro_freq' / 'best_ro_gain' / "
-            "'best_ro_length' are known from this result plus MetaDict, also "
+            "'best_ro_length' are known from this result plus parameter context, also "
             "proposes ModuleLibrary 'readout_dpm'."
         ),
         recommended=(

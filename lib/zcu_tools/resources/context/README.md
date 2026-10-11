@@ -1,8 +1,8 @@
 # `zcu_tools.resources.context` — named experiment work contexts
 
-**Last updated:** 2026-10-08，library 結構交易
+**Last updated:** 2026-10-11，刪除舊 context 實作
 
-本 package 管理實驗工作 scope 的參數資源。`MetaDict` 與 `ContextManager` 保留既有具名 context 的責任。`ModuleLibrary` 使用 point-local typed 文件，不再使用 flat modules／waveforms 或 SyncFile。
+本 package 管理 point-local `ModuleLibrary` 的 typed 文件。參數文件與工作點身分由 `resources.entry` 管理；session 的固定參數讀取由 `ContextService` 提供。
 
 ## Module library
 
@@ -17,16 +17,8 @@
 - 值與來源同檔提交。普通 replacement 記 manual 並清除 clone origin。明確來源沿 `entry.provenance` 驗證本條目 ledger 事件與附檔，不另設 producer。
 - `snapshot()` 只複製已發布記憶體。`refresh()` 顯式重載；`subscribe()` 在 publication 後通知。Handle 不自動監看、mtime sync 或建立缺失文件。
 
-舊 flat 文件必須由顯式 migration 產生新文件。Runtime 不提供 alias bridge。`ContextManager` 的舊 library 呼叫不能當作新 ModuleLibrary 的入口。Library read projection與MetaDict各有自己的snapshot／write owner，不提供雙store memory交換或readonly flat library façade。
+舊 flat 文件必須由顯式 migration 產生新文件。Runtime 不提供 alias bridge。Library 與參數文件各有自己的 snapshot／write owner，不提供雙 store memory 交換。
 
-## MetaDict
-
-`metadict.py` 保留既有 JSON-backed、dict-like 參數管理。普通屬性操作與批次 `update` 沿 SyncFile 同步；`snapshot` 只複製已發布記憶體，`clone` 保留檔案同步語意。
-
-MetaDict 驗證受保護名稱，避免 key 被 class attribute 遮蔽。Complex 與形似 legacy complex 的字串沿原序列化政策處理。`replace_contents` 是完整替換入口；`swap_contents` 只交換記憶體。它們不提供跨檔交易。
-
-## Context manager 與 cfg materialization
-
-`manager.py` 擁有既有具名 context 目錄、label 與 MetaDict 的組合，不讀儀器或建立 device snapshot。其 library 呼叫仍須改接 point-local owner。
+## Cfg materialization
 
 Experiment cfg materialization 屬於 `zcu_tools.experiment.cfg_assembler`，不是 ModuleLibrary 的責任。Caller 提供固定 library projection 與 device snapshot。GUI 的 schema／expression lowering 由 adapter owner 完成。Notebook 的顯式 `CfgEnv` 選定參數與 device manager，讀取失敗直接傳播。

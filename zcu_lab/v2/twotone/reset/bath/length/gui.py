@@ -65,7 +65,7 @@ class BathLengthAdapter(
             "freq/gain are found, to pick the shortest fully-resetting length."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'bathreset_freq' / "
+            "Reads from the parameter context (all optional): 'bathreset_freq' / "
             "'bathreset_gain' — the calibrated cavity frequency and gain "
             "driving the tested reset (so the cfg snapshot carries them "
             "forward); 'q_f' / 'qub_ch' / 'res_ch' seed the bath-reset and "
@@ -146,7 +146,7 @@ class BathLengthAdapter(
         self,
         req: WritebackRequest[BathLengthRunResult, BathLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
+        # D5: no scalar is fitted, so nothing is proposed back to the parameter context.
         # Gated per-experiment 'reset_bath' / 'reset_bath_e' proposals: emitted when
         # md carries the calibrated cavity freq/gain and the matching pi/2 phase.
         items: list[WritebackItem] = []

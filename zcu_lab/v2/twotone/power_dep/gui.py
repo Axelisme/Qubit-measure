@@ -45,7 +45,7 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
             "automated fit — read off the 2D map by eye."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'q_f' — qubit frequency, "
+            "Reads from the parameter context (all optional): 'q_f' — qubit frequency, "
             "centring the inner sweep (~2000–6000 MHz); 'qf_w' — qubit "
             "linewidth, half-span 1.5*qf_w (~1–50 MHz); 'qub_ch' — qubit-drive "
             "channel; 'r_f' — resonator frequency for the readout tone "

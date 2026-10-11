@@ -93,7 +93,7 @@ class BathFreqGainAdapter(
             "dumps the excitation into the cavity bath. Runs on real hardware."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' / 'rabi_f' — the "
+            "Reads from the parameter context (all optional): 'r_f' / 'rabi_f' — the "
             "resonator frequency and bath Rabi frequency centring the cavity "
             "freq sweep at 'r_f - rabi_f' (absent → a fixed span); 'q_f' / "
             "'qub_ch' / 'res_ch' seed the bath-reset tone drive defaults."
@@ -105,7 +105,7 @@ class BathFreqGainAdapter(
             "when present) — both disabled when no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the best cavity gain into MetaDict 'bathreset_gain' and "
+            "Proposes the best cavity gain into parameter context 'bathreset_gain' and "
             "frequency into 'bathreset_freq'. No ModuleLibrary writeback — these "
             "seed the final 'reset_bath' registration done after the length and "
             "phase steps (D2(a))."

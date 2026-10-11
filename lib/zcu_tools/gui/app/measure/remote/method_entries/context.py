@@ -109,37 +109,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "context.md_set_attr",
-        "context:h_context_md_set_attr",
-        MethodSpec(
-            5.0,
-            "Set one MetaDict attribute; receipt=true returns its actual "
-            "{before, after} from the owner turn.",
-            (
-                required_string("key", "MetaDict key"),
-                required_json("value", "JSON-safe value"),
-                ParamSpec(
-                    "receipt",
-                    JsonType.BOOLEAN,
-                    required=False,
-                    default=False,
-                    description="Return actual before/after values",
-                ),
-            ),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
-        "context.md_del_attr",
-        "context:h_context_md_del_attr",
-        MethodSpec(
-            5.0,
-            "Delete one MetaDict attribute",
-            (required_string("key", "MetaDict key"),),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
         "context.ml_del_module",
         "context:h_context_ml_del_module",
         MethodSpec(

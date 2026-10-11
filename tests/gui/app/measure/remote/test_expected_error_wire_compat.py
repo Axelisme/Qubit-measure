@@ -12,10 +12,6 @@ from zcu_tools.gui.app.measure.remote.handlers.arb_waveform import (
 from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     h_device_connect,
 )
-from zcu_tools.gui.app.measure.remote.handlers.context import (
-    h_context_md_del_attr,
-    h_context_md_set_attr,
-)
 from zcu_tools.gui.app.measure.remote.handlers.editor import h_editor_new
 from zcu_tools.gui.app.measure.remote.handlers.run_save import (
     h_tab_load_data,
@@ -135,13 +131,6 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     editor_ctrl.open_cfg_editor.side_effect = CfgEditorError("unknown module")
     editor_adapter = SimpleNamespace(ctrl=editor_ctrl)
 
-    context_control = MagicMock()
-    context_control.set_md_attr.side_effect = FailedPreconditionError("No context")
-    context_control.del_md_attr.side_effect = FailedPreconditionError(
-        "MetaDict has no attribute missing"
-    )
-    context_adapter = SimpleNamespace(context_control=context_control)
-
     device_control = MagicMock()
     device_control.start_connect_device.side_effect = FailedPreconditionError(
         "Device busy"
@@ -199,23 +188,6 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
                 {"item_kind": "module", "from_name": "missing"},
             ),
             (ErrorCode.INVALID_PARAMS, "unknown module", "", None),
-        ),
-        (
-            lambda: h_context_md_set_attr(
-                cast(Any, context_adapter), {"key": "x", "value": 1}
-            ),
-            (ErrorCode.PRECONDITION_FAILED, "No context", "", None),
-        ),
-        (
-            lambda: h_context_md_del_attr(
-                cast(Any, context_adapter), {"key": "missing"}
-            ),
-            (
-                ErrorCode.PRECONDITION_FAILED,
-                "MetaDict has no attribute missing",
-                "",
-                None,
-            ),
         ),
         (
             lambda: h_device_connect(

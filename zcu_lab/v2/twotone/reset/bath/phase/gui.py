@@ -61,7 +61,7 @@ class BathPhaseAdapter(
             "hardware. Run last, to fix the pi/2 phase of the reset module."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'bathreset_freq' / "
+            "Reads from the parameter context (all optional): 'bathreset_freq' / "
             "'bathreset_gain' — the calibrated cavity frequency and gain so the "
             "cfg snapshot carries the fully calibrated reset forward for "
             "registration; 'q_f' / 'qub_ch' / 'res_ch' seed the bath-reset "
@@ -74,7 +74,7 @@ class BathPhaseAdapter(
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the ground-reset phase into MetaDict "
+            "Proposes the ground-reset phase into parameter context "
             "'bathreset_max_phase' and the excited-reset phase into "
             "'bathreset_min_phase'. Also proposes two ModuleLibrary modules: "
             "'reset_bath' (the calibrated tested reset with pi/2 phase set to "

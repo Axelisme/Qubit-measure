@@ -42,14 +42,16 @@ from zcu_tools.gui.cfg import (
     DirectValue,
 )
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
+from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
 )
-from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from tests.gui._completion_helpers import (
     on_device_connected,
@@ -65,10 +67,24 @@ from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 # ---------------------------------------------------------------------------
 
 
+def _empty_parameters() -> ParameterContext:
+    return ParameterContext(
+        point=PointDocument(
+            format="zcu.parameter-container",
+            format_version="1.0",
+            general=PointGeneral(created_at="2026-10-11T00:00:00Z"),
+        ),
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ),
+        target=SavedPoint(entry_id="test-entry", point="ctx001"),
+        roles=None,
+    )
+
+
 def _make_ctx() -> SessionEnv:
     return SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
+        parameters=_empty_parameters(),
         soc=MagicMock(),  # simulate connected soc
         soccfg=MagicMock(),
         res_name="fake_res",
@@ -109,8 +125,6 @@ class ControllerFixture:
         if not self.registry.has("fake"):
             self.registry.register("fake", FakeAdapter)
         self.view = _make_view()
-        io_manager = IOManager()
-        io_manager._em = MagicMock()  # simulate a project being set up
         from zcu_tools.gui.event_bus import BaseEventBus
 
         self.bus = BaseEventBus()
@@ -119,7 +133,6 @@ class ControllerFixture:
         self.ctrl = Controller(
             state=self.state,
             registry=self.registry,
-            io_manager=io_manager,
             view=self.view,
             bus=self.bus,
             project_root=project_root,
@@ -149,7 +162,7 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
 
 def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
     cf.state.set_context(
-        dataclasses.replace(cf.state.session_env, md=MetaDict(), ml=ModuleLibrary())
+        dataclasses.replace(cf.state.session_env, parameters=_empty_parameters())
     )
     tab_id = cf.ctrl.new_tab("twotone/flux_dep")
     values = np.linspace(-5.0, 5.0, 60)
@@ -798,52 +811,6 @@ def test_get_adapter_guide_serves_complete_jpa_family(cf):
             "recommended",
         }
         assert all(guide[field] for field in guide)
-
-
-def test_new_context_with_bind_device_resolves_unit_and_value(cf):
-    # bind_device -> Controller reads unit (strict whitelist) + current value
-    # from the device, then hands them to ContextService. The agent never
-    # supplies a raw value/unit.
-    cf.ctrl._dev_svc.get_device_unit_strict = MagicMock(return_value="A")
-    cf.ctrl._dev_svc.get_device_value_for_new_context = MagicMock(return_value=0.005)
-    cf.ctrl._ctx_svc.new_context = MagicMock()
-
-    cf.ctrl.new_context(bind_device="flux", clone_from="src")
-
-    cf.ctrl._dev_svc.get_device_unit_strict.assert_called_once_with("flux")
-    cf.ctrl._dev_svc.get_device_value_for_new_context.assert_called_once_with("flux")
-    cf.ctrl._ctx_svc.new_context.assert_called_once_with(
-        value=0.005, unit="A", clone_from="src"
-    )
-
-
-def test_new_context_without_bind_device_is_unbound(cf):
-    # No device -> unit "none", no value, no device read.
-    cf.ctrl._dev_svc.get_device_unit_strict = MagicMock()
-    cf.ctrl._dev_svc.get_device_value_for_new_context = MagicMock()
-    cf.ctrl._ctx_svc.new_context = MagicMock()
-
-    cf.ctrl.new_context()
-
-    cf.ctrl._dev_svc.get_device_unit_strict.assert_not_called()
-    cf.ctrl._dev_svc.get_device_value_for_new_context.assert_not_called()
-    cf.ctrl._ctx_svc.new_context.assert_called_once_with(
-        value=None, unit="none", clone_from=None
-    )
-
-
-def test_new_context_unknown_bind_device_raises_before_creating(cf):
-    # Strict whitelist failure must propagate (Fast-Fail) and never reach
-    # ContextService.
-    cf.ctrl._dev_svc.get_device_unit_strict = MagicMock(
-        side_effect=RuntimeError("no such device")
-    )
-    cf.ctrl._ctx_svc.new_context = MagicMock()
-
-    with pytest.raises(RuntimeError):
-        cf.ctrl.new_context(bind_device="ghost")
-
-    cf.ctrl._ctx_svc.new_context.assert_not_called()
 
 
 def test_persist_then_restore_app_state(tmp_path):

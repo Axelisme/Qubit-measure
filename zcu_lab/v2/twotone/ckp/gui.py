@@ -94,7 +94,7 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
             "frequency. Runs on real hardware."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional, seeding fresh cfg defaults): "
+            "Reads from the parameter context (all optional, seeding fresh cfg defaults): "
             "'r_f' and 'rf_w' set the resonator sweep and pulse timing; 'q_f' sets "
             "the qubit-probe sweep; 'qub_ch' / 'qub_1_4_ch' / 'qub_4_5_ch' select "
             "the qubit drive channel; 'res_ch' / 'ro_ch' select readout channels; "
@@ -107,7 +107,7 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
             "Optionally references a calibrated reset module."
         ),
         typical_writeback=(
-            "Proposes fitted chi into MetaDict 'chi', fitted kappa into 'rf_w', "
+            "Proposes fitted chi into parameter context 'chi', fitted kappa into 'rf_w', "
             "and fitted readout frequency into 'readout_f'. No ModuleLibrary "
             "writeback."
         ),

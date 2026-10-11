@@ -76,7 +76,7 @@ class RoOptPowerAdapter(
             "step, typically after the readout frequency is set."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' / 'best_ro_freq' — "
+            "Reads from the parameter context (all optional): 'r_f' / 'best_ro_freq' — "
             "resonator / chosen readout frequency for the probe (~4000–8000 "
             "MHz); 'res_ch' / 'ro_ch' — drive / ADC channels; 'timeFly' — "
             "trigger-offset cable delay; 'q_f' / 'qub_ch' — qubit frequency / "
@@ -90,10 +90,10 @@ class RoOptPowerAdapter(
             "Optionally references a reset module."
         ),
         typical_writeback=(
-            "Proposes the SNR-maximizing readout gain into MetaDict "
+            "Proposes the SNR-maximizing readout gain into parameter context "
             "'best_ro_gain' (a.u.). When a cfg snapshot with pulse readout is "
             "available and 'best_ro_freq' / 'best_ro_gain' / "
-            "'best_ro_length' are known from this result plus MetaDict, also "
+            "'best_ro_length' are known from this result plus parameter context, also "
             "proposes ModuleLibrary 'readout_dpm'."
         ),
         recommended=(

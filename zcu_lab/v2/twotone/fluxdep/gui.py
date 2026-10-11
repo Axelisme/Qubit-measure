@@ -74,7 +74,7 @@ class FluxDepAdapter(
             "spectroscopy are already credible."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'q_f' — qubit frequency, "
+            "Reads from the parameter context (all optional): 'q_f' — qubit frequency, "
             "centring the inner sweep (~2000–6000 MHz); 'qf_w' — qubit "
             "linewidth, half-span ±qf_w (~1–50 MHz); 'qub_ch' — qubit-drive "
             "channel; 'r_f' — resonator frequency for the readout tone "
@@ -97,7 +97,7 @@ class FluxDepAdapter(
             "two lines on the 2D map to mark the half-flux and integer-flux "
             "sweet spots, then clicks Done. The result writes back 'flx_half', "
             "'flx_int' and 'flx_period' (= 2·|flx_int − flx_half|) to the "
-            "MetaDict as a preview. Picking is user/agent judgement from the "
+            "parameter context as a preview. Picking is user/agent judgement from the "
             "measured map; do not use this preview to replace the earlier "
             "onetone/flux_dep flux calibration unless the map is clearly "
             "trustworthy."

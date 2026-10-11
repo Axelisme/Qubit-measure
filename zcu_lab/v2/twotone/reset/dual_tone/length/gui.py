@@ -66,7 +66,7 @@ class DualToneLengthAdapter(
             "last, to pick the shortest length that fully resets the qubit."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'reset_f1' / 'reset_f2' "
+            "Reads from the parameter context (all optional): 'reset_f1' / 'reset_f2' "
             "and 'reset_gain1' / 'reset_gain2' — the calibrated sideband "
             "frequencies and gains driving the tested reset (so the cfg "
             "snapshot carries the fully calibrated reset); 'q_f' / 'qub_ch' "
@@ -153,7 +153,7 @@ class DualToneLengthAdapter(
         self,
         req: WritebackRequest[DualToneLengthRunResult, DualToneLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
+        # D5: no scalar is fitted, so nothing is proposed back to the parameter context.
         # Gated per-experiment 'reset_120' proposal: when md carries the calibrated
         # freqs + gains, register the calibrated two-pulse reset built from this
         # run's tested_reset template (md overwrites those fields).

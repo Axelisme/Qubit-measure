@@ -601,7 +601,7 @@ class ExpTabWidget(QWidget):
         guide = self._ctrl.get_adapter_guide(adapter_name)
         sections = [
             ("Behavior", guide.get("behavior", "")),
-            ("Expects (MetaDict)", guide.get("expects_md", "")),
+            ("Expects (parameter context)", guide.get("expects_md", "")),
             ("Expects (ModuleLibrary)", guide.get("expects_ml", "")),
             ("Typical writeback", guide.get("typical_writeback", "")),
             ("Recommended", guide.get("recommended", "")),

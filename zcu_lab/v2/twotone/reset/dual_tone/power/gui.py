@@ -74,7 +74,7 @@ class DualTonePowerAdapter(
             "gain pair that resets most completely. Runs on real hardware."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'reset_f1' / 'reset_f2' — "
+            "Reads from the parameter context (all optional): 'reset_f1' / 'reset_f2' — "
             "the two sideband frequencies held fixed on the tested reset; "
             "'q_f' / 'qub_ch' seed the tested-reset and init-pulse drive "
             "defaults."
@@ -86,7 +86,7 @@ class DualTonePowerAdapter(
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the two best gains into MetaDict 'reset_gain1' and "
+            "Proposes the two best gains into parameter context 'reset_gain1' and "
             "'reset_gain2'. No ModuleLibrary writeback — these seed the final "
             "'reset_120' registration done at the length step (D2(a))."
         ),

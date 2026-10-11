@@ -66,7 +66,7 @@ class SingleToneLengthAdapter(
             "found, to pick the shortest length that fully resets the qubit."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'reset_f' — the sideband "
+            "Reads from the parameter context (all optional): 'reset_f' — the sideband "
             "reset frequency (= r_f - q_f) driving the tested reset (fallback "
             "0 MHz); 'q_f' / 'qub_ch' seed the tested-reset and init-pulse "
             "drive defaults."
@@ -145,7 +145,7 @@ class SingleToneLengthAdapter(
         self,
         req: WritebackRequest[SingleToneLengthRunResult, SingleToneLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        # D5: no scalar is fitted, so nothing is proposed back to the MetaDict.
+        # D5: no scalar is fitted, so nothing is proposed back to the parameter context.
         # Gated per-experiment 'reset_10' proposal: when md carries the calibrated
         # sideband freq, register the calibrated single-pulse reset built from this
         # run's tested_reset template (md overwrites its freq).

@@ -74,7 +74,7 @@ class SingleToneFreqAdapter(
             "sideband at which the reset pulse dumps the excitation."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'reset_f' — the sideband "
+            "Reads from the parameter context (all optional): 'reset_f' — the sideband "
             "reset frequency (= r_f - q_f), the sweep centre; 'resetf_w' — its "
             "linewidth, setting the half-span as 1.5*resetf_w. Absent "
             "'resetf_w' → a fixed ±50 MHz span around 'reset_f'; absent "
@@ -88,7 +88,7 @@ class SingleToneFreqAdapter(
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the fitted sideband frequency into MetaDict 'reset_f' "
+            "Proposes the fitted sideband frequency into parameter context 'reset_f' "
             "and the fitted linewidth (FWHM) into 'resetf_w'. No ModuleLibrary "
             "writeback — registering the calibrated reset module is left to "
             "the user once both the frequency and the length are dialled in."

@@ -254,33 +254,6 @@ def h_context_ml_create_from_role(
     return {"created": name}
 
 
-def h_context_md_set_attr(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    key = str(params["key"])
-    value = params["value"]
-    ctx = adapter.context_control
-    receipt = params.get("receipt", False)
-    sentinel = object()
-    previous = ctx.get_current_md().get(key, sentinel) if receipt else sentinel
-    ctx.set_md_attr(key, value)
-    if not receipt:
-        return {}
-    current = ctx.get_current_md().get(key, sentinel)
-    return {
-        "before": None if previous is sentinel else context_wire_value(previous),
-        "after": context_wire_value(current),
-    }
-
-
-def h_context_md_del_attr(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    key = str(params["key"])
-    adapter.context_control.del_md_attr(key)
-    return {}
-
-
 def h_context_ml_del_module(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
