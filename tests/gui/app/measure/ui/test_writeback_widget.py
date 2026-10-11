@@ -44,6 +44,7 @@ from zcu_tools.gui.cfg.binding.fields import ScalarField
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv as ParameterSessionEnv
@@ -78,6 +79,8 @@ def waveform_writeback(tmp_path: Path):
         )
         context.install_entry(entry)
         control = ContextControlFacet(context=context)
+        entry.new_point("working")
+        control.use_point(PointUseRequest("working"))
         control.add_component("Q1", "fake/drive/a", {})
         target = control.read_context().target
         control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.1))

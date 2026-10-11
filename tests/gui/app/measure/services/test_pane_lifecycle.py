@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from io import BytesIO
 from typing import Any, cast
@@ -38,7 +39,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.entry import ArtifactKey
+from zcu_tools.resources.entry import ArtifactKey, JsonObject
 
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import (
@@ -86,7 +87,9 @@ class _Writeback:
         items: list[Any],
         *,
         parameters: ParameterContext | None,
+        experiment_name: str,
         run_id: str | None = None,
+        device_snapshot: Mapping[str, JsonObject] | None = None,
     ) -> _Draft:
         if self.fail_create:
             raise RuntimeError("draft creation failed")

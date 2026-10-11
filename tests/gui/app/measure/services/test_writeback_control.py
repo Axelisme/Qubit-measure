@@ -61,8 +61,13 @@ class RecordingWriteback:
     def __init__(self, log: CallLog) -> None:
         self._log = log
         self.items = [object()]
-        self.analysis_draft: MagicMock = MagicMock(is_active=True)
-        self.post_draft: MagicMock = MagicMock(is_active=True)
+        service = WritebackService(MagicMock(), MagicMock())
+        self.analysis_draft = service.create_draft(
+            [], parameters=None, experiment_name="test/analysis"
+        )
+        self.post_draft = service.create_draft(
+            [], parameters=None, experiment_name="test/post-analysis"
+        )
 
     def get_item_draft(self, draft: object, session_id: str) -> object:
         self._log.add("writeback", "get_item_draft", draft, session_id)

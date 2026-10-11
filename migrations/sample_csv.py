@@ -207,6 +207,7 @@ def convert_sample_csv(
                     run_id=_synthetic_key(path, number),
                     point=point,
                     source="manual",
+                    at=None,
                     dev_value=sample.dev_value,
                     dev_unit=sample.dev_unit,
                     **sample.fields,
