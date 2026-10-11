@@ -277,7 +277,8 @@ def test_remote_gates_existing_and_new_writable_dialogs(
         if close_via == "button":
             close.click()
         else:
-            assert current.close()
+            current.close()
+            assert not current.isVisible()
         assert name not in ui.window.list_open_dialogs()
         assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
         if opening == 0:
