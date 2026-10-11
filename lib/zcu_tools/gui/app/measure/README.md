@@ -85,6 +85,21 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
 關閉與取消見 [Operation ADR](../../../../../docs/adr/0066-operation-lifecycle.md)
 及 [operation draft](../../../../../docs/adr/draft/operation-lifecycle-boundaries.md)。
 
+## Qt control identity
+
+`Controller.control_identity` 是 holder／lock／online 的唯一 owner。MainWindow 的指示燈
+透過 `gui.widgets.control_indicator.ControlIndicator` 投影它，點擊直接委派 `toggle_local`。
+Remote 時只停用寫入區，不停用主 root、tab 檢視與 canvas。每次 domain interaction refresh
+同時套用 holder 和既有 busy/readiness 條件，不因背景事件自動收回。GUI 檢視 tab 不改 Remote
+holder 的 application active tab，關窗先顯示含 holder label 的確認，再沿既有 shutdown 流程。
+
+`gui.widgets.remote_edit_gate` 綁定 owner watch 與 Qt destruction。Setup、Aliases、Predictor、
+ArbWaveform 和巢狀 writeback dialogs 使用 write-only widget gate。DeviceDialog 與 Inspect 保留
+只讀瀏覽，分別套用自己的 read-only presentation gate。只有量測 Stop 和 device setup Stop
+在 Remote 時收回成 Local locked 並提交 cancellation；收回本身不取消 operation。
+Mounted `InteractiveFrontend.set_read_only(read_only=...)` 必須停用 plugin command controls 和
+pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 alignment busy gate。
+
 ## Package Boundaries
 
 - `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、

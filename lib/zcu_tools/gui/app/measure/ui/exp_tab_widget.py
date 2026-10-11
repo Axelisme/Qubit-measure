@@ -1079,6 +1079,7 @@ class ExpTabWidget(QWidget):
             )
         state = snapshot.interaction
         capabilities = snapshot.capabilities
+        writable = self._ctrl.control_identity.status().holder == "gui"
         local_busy = state.is_running or state.is_analyzing
         # Status-free action row (A5): no readiness text, only button enablement + tooltip.
         if state.is_running:
@@ -1098,7 +1099,8 @@ class ExpTabWidget(QWidget):
             self.run_btn.setObjectName("primaryButton")
             cfg_valid = self.cfg_form.is_valid()
             can_run = (
-                not local_busy
+                writable
+                and not local_busy
                 and not state.global_run_active
                 and state.has_active_context
                 and (not capabilities.requires_soc or state.has_soc)
@@ -1129,7 +1131,7 @@ class ExpTabWidget(QWidget):
             self.run_btn.style().polish(self.run_btn)  # type: ignore[attr-defined]
             self.run_btn.update()
 
-        idle = not local_busy
+        idle = writable and not local_busy
         self.cfg_form.set_editing_enabled(idle)
         self.reset_btn.setEnabled(idle)
 
@@ -1159,7 +1161,7 @@ class ExpTabWidget(QWidget):
                 f"render snapshot for tab {self.tab_id!r} has no save pane"
             )
         self._save_center.set_comment_text(snapshot.save.comment)
-        self._save_center.update_interaction(snapshot)
+        self._save_center.update_interaction(snapshot, writable=writable)
 
     def _bind_to_controller(self, actions: TabActions) -> None:
         tab_id = self.tab_id

@@ -445,7 +445,7 @@ def test_readonly_frontend_keeps_plot_viewing_but_blocks_buttons_and_line_edits(
     assert session.snapshot() == start
     assert not widget.preview_active
     assert not env.pending and not done and not cancelled
-    # An accepted background alignment does not restore write controls remotely.
+    # External publication does not restore write controls remotely.
     plugin.execute_command(session, "swap_lines", {})
     assert all(not b.isEnabled() for b in widget.findChildren(QPushButton))
     widget.set_read_only(read_only=False)
