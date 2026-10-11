@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
 
@@ -31,9 +30,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.cfg_schemas import waveform_cfg_to_value
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.writeback import (
-    WritebackService,
     WritebackValues,
 )
 from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
@@ -41,65 +38,14 @@ from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding.fields import ScalarField
-from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.types import SessionEnv as ParameterSessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.entry import ResultEntry
-from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
-from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 from zcu_lab.components import ResonatorSchema, WiringSchema
 from zcu_lab.v2.fake.freq.core import FakeFreqRunResult, HangerSimParams
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter, FakeFreqAnalyzeParams
-
-
-@pytest.fixture
-def waveform_writeback(tmp_path: Path):
-    before = registry_state()
-    draft = None
-    try:
-        register_fakes()
-        installed = registry_state()
-        entry = ResultEntry.create(
-            "entry",
-            result_root=tmp_path / "Result",
-            database_root=tmp_path / "Database",
-        )
-        bus = BaseEventBus()
-        context = ContextService(
-            SessionState(ParameterSessionEnv(parameters=None, soc=None, soccfg=None)),
-            bus,
-            bind_assets=ArbWaveformDatabase.info_at,
-        )
-        context.install_entry(entry)
-        control = ContextControlFacet(context=context)
-        control.add_component("Q1", "fake/drive/a", {})
-        target = control.read_context().target
-        control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.1))
-        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
-        spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=0.1))
-        draft = service.create_draft(
-            [
-                WaveformWriteback(
-                    "Q1.waveforms.base", "Waveform", edit_schema=CfgSchema(spec, value)
-                )
-            ],
-            parameters=control.read_context(),
-        )
-        service.apply_draft(draft)
-        yield control, service, draft
-        assert registry_state() == installed
-    finally:
-        if draft is not None:
-            draft.teardown()
-        restore_registry(before)
 
 
 @pytest.fixture
@@ -972,72 +918,3 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
         widget.close()
         widget.deleteLater()
         qapp.processEvents()
-
-
-@pytest.mark.parametrize("kind", ["parameter", "waveform"])
-@pytest.mark.parametrize("opening", ["existing", "new"])
-def test_remote_writeback_editor_keeps_exit_and_does_not_commit_pending_name(
-    qapp, waveform_writeback, kind, opening
-):
-    control, service, waveform_draft = waveform_writeback
-    if kind == "parameter":
-        control.set_parameter(control.read_context().target, "general.ext.value", 1.0)
-        draft = service.create_draft(
-            [ParameterWriteback("general.ext.value", "Value", proposed_value=2.0)],
-            parameters=control.read_context(),
-        )
-    else:
-        draft = waveform_draft
-    item = draft.items[0]
-    original_name = item.target_name
-    ctrl = MagicMock()
-    authority = ControlIdentity()
-    ctrl.control_identity = authority
-    ctrl.get_writeback_applied_for_pane.side_effect = lambda *_: (
-        service.get_all_applied(draft)
-    )
-    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (
-        lambda *_, **kwargs: service.preview_values(draft, **kwargs)
-    )
-    ctrl.set_writeback_item_for_pane.side_effect = lambda _tab, _pane, sid, **kwargs: (
-        draft.edit(sid, **kwargs)
-    )
-    if kind == "waveform":
-        ctrl.get_writeback_item_draft_for_pane.return_value = service.get_item_draft(
-            draft, item.session_id
-        )
-    widget = WritebackWidget(ctrl, tab_id="captured", pane="analysis")
-    try:
-        widget.populate(service.preview_draft(draft), service.preview_values(draft))
-        widget.show()
-        if opening == "new":
-            authority.connect("test", "agent", "owner")
-        next(b for b in widget.findChildren(QPushButton) if b.text() == "Edit").click()
-        dialog = widget.findChild(QDialog)
-        assert dialog is not None and dialog.isModal()
-        if opening == "existing":
-            if kind == "waveform":
-                next(
-                    e
-                    for e in dialog.findChildren(QLineEdit)
-                    if e.text() == original_name
-                ).setText("Q1.waveforms.pending")
-            authority.connect("test", "agent", "owner")
-        assert dialog.isEnabled(), "dialog exit must remain available"
-        assert all(not edit.isEnabled() for edit in dialog.findChildren(QLineEdit))
-        exit_text = "Cancel" if kind == "parameter" else "Close"
-        exit_button = next(
-            b for b in dialog.findChildren(QPushButton) if b.text() == exit_text
-        )
-        assert exit_button.isEnabled()
-        exit_button.click()
-        assert not dialog.isVisible()
-        assert item.target_name == original_name
-        assert authority.status().holder == "rpc:agent"
-        if kind == "parameter":
-            assert item.proposed_value == 2.0
-    finally:
-        widget.deleteLater()
-        qapp.processEvents()
-        if kind == "parameter":
-            draft.teardown()

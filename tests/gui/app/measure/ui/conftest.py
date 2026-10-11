@@ -2,12 +2,26 @@
 
 from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.cfg_model import ConstWaveformCfg
+from zcu_tools.gui.app.measure.adapter import WaveformWriteback
+from zcu_tools.gui.app.measure.cfg_schemas import waveform_cfg_to_value
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
+from zcu_tools.gui.app.measure.services.writeback import WritebackService
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv as ParameterSessionEnv
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
@@ -16,6 +30,7 @@ from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     native_save_session,
 )
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
 @pytest.fixture
@@ -55,3 +70,46 @@ def live_ui(
             ctrl.tab_control.close_tab(tab_id)
             window.deleteLater()
             qapp.processEvents()
+
+
+@pytest.fixture
+def waveform_writeback(tmp_path: Path):
+    before = registry_state()
+    draft = None
+    try:
+        register_fakes()
+        installed = registry_state()
+        entry = ResultEntry.create(
+            "entry",
+            result_root=tmp_path / "Result",
+            database_root=tmp_path / "Database",
+        )
+        bus = BaseEventBus()
+        context = ContextService(
+            SessionState(ParameterSessionEnv(parameters=None, soc=None, soccfg=None)),
+            bus,
+            bind_assets=ArbWaveformDatabase.info_at,
+        )
+        context.install_entry(entry)
+        control = ContextControlFacet(context=context)
+        control.add_component("Q1", "fake/drive/a", {})
+        target = control.read_context().target
+        control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.1))
+        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
+        service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
+        spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=0.1))
+        draft = service.create_draft(
+            [
+                WaveformWriteback(
+                    "Q1.waveforms.base", "Waveform", edit_schema=CfgSchema(spec, value)
+                )
+            ],
+            parameters=control.read_context(),
+        )
+        service.apply_draft(draft)
+        yield control, service, draft
+        assert registry_state() == installed
+    finally:
+        if draft is not None:
+            draft.teardown()
+        restore_registry(before)

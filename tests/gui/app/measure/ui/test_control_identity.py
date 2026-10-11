@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from qtpy.QtCore import QMetaObject, Qt, QTimer
+from qtpy.QtCore import QCoreApplication, QEvent, QMetaObject, Qt, QTimer
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
@@ -196,6 +196,7 @@ def control_ui(
         for tid in tuple(ctrl.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
         window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
 
 
