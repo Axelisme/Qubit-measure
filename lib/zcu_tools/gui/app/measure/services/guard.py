@@ -264,7 +264,8 @@ class GuardService:
         Raise GuardError on rejection; return None without mutation on success.
         This shared check does not select, apply or tear down a draft. The
         writeback owner requires a captured destination in the still-open entry
-        before nonempty writes. Selection admits the command but never replaces\n        its captured SavedPoint destination with the currently selected point.
+        before nonempty writes. Selection admits the command but never replaces
+        its captured SavedPoint destination with the currently selected point.
         """
         tab = self._require_tab(tab_id)
         if self._state.session_env.parameters is None:
