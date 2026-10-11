@@ -66,22 +66,22 @@ def save_capture(source: Completed[CaptureCfg, Capture], path: Path) -> None:
     save_run_data(
         path,
         ExperimentPayload(
-            {
+            variables={
                 DataVariable("data"): LabberPayload(
                     ("Signal", "a.u.", np.array([1 + 0j])),
                     [("Time", "s", np.array([0.0]))],
                 )
             },
-            LabberMetadata(),
-            "single",
+            metadata=LabberMetadata(),
+            representation="single",
         ),
         replace(native_metadata(), device_snapshot=source.result.snapshot),
         cfg=CfgSnapshot(values={}, cfg_type="Capture", schema_version="1.0"),
     )
 
 
-def sample_engine[P: BaseModel, R](
-    plan: P, root: Path, record: Callable[[int], R], *, seed: Calibrated
+def sample_engine[R](
+    plan: BaseModel, root: Path, record: Callable[[int], R], *, seed: Calibrated
 ) -> tuple[Engine[Calibrated], RunPaths, RecordingDevices]:
     """Commit two successful points and one rejected point with two env.run each."""
     devices = RecordingDevices()
@@ -101,7 +101,7 @@ def sample_engine[P: BaseModel, R](
         )
     )
 
-    def init(_env: InitEnv[Calibrated], _plan: P) -> int:
+    def init(_env: InitEnv[Calibrated], _plan: BaseModel) -> int:
         return 0
 
     @workflow("samples", plan=type(plan), tunables=SampleTunables, init=init)
@@ -128,6 +128,7 @@ def sample_engine[P: BaseModel, R](
         paths=paths,
         identity=RunIdentity("sample-run", native_metadata().provenance),
     )
-    engine.execute("sample-run")
+    status = engine.execute("sample-run")
+    assert status.lifecycle == "done", status.reason
     devices.drivers["flux"].set_value(777)
     return engine, paths, devices

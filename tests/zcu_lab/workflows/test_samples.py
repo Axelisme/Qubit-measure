@@ -22,8 +22,6 @@ from ._sim_inputs import Inputs, make_plan, seed_from_inputs
 def test_samples_use_committed_scalars_and_last_native_snapshot(
     inputs: Inputs, tmp_path: Path, kind: str
 ) -> None:
-    producer = getattr(export, f"export_{kind}_samples", None)
-    assert callable(producer), "Science must expose a pure samples artifact producer"
     from zcu_tools.experiment.workflows.exporting import SampleRun
 
     seed = seed_from_inputs(inputs)
@@ -42,7 +40,7 @@ def test_samples_use_committed_scalars_and_last_native_snapshot(
             ),
             seed=seed,
         )
-        rows = producer(
+        rows = export.export_t1_samples(
             SampleRun("sample-run", base, paths.data_root, engine.records("sample-run"))
         )
     else:
@@ -67,9 +65,18 @@ def test_samples_use_committed_scalars_and_last_native_snapshot(
             ),
             seed=seed,
         )
-        rows = producer(
-            SampleRun("sample-run", plan, paths.data_root, engine.records("sample-run"))
-        )
+        if kind == "t2echo":
+            rows = export.export_t2echo_samples(
+                SampleRun(
+                    "sample-run", plan, paths.data_root, engine.records("sample-run")
+                )
+            )
+        else:
+            rows = export.export_t2ramsey_samples(
+                SampleRun(
+                    "sample-run", plan, paths.data_root, engine.records("sample-run")
+                )
+            )
     assert [row.key for row in rows] == ["sample-run/0", "sample-run/1"]
     assert [{field.name: field.value for field in row.fields} for row in rows] == [
         {
@@ -92,10 +99,6 @@ def test_samples_use_committed_scalars_and_last_native_snapshot(
 def test_prevalidation_rejects_missing_snapshot_before_any_append(
     inputs: Inputs, tmp_path: Path
 ) -> None:
-    producer = getattr(export, "export_t1_samples", None)
-    assert callable(producer), (
-        "Science must validate all candidate rows before host writes"
-    )
     from zcu_tools.experiment.workflows.exporting import SampleRun
     from zcu_tools.gui.app.workflows.samples import append_samples
 
@@ -120,7 +123,9 @@ def test_prevalidation_rejects_missing_snapshot_before_any_append(
     )
     table = JsonlSampleTable(tmp_path / "history.jsonl")
     with pytest.raises(ValueError, match="snapshot"):
-        rows = producer(SampleRun("sample-run", plan, paths.data_root, records))
+        rows = export.export_t1_samples(
+            SampleRun("sample-run", plan, paths.data_root, records)
+        )
         append_samples("sample-run", rows=rows, table=table, point="captured")
     assert not table.path.exists()
 
@@ -146,8 +151,6 @@ class InterruptedTable(JsonlSampleTable):
 def test_partial_io_count_cause_and_retry_latest(
     inputs: Inputs, tmp_path: Path
 ) -> None:
-    producer = getattr(export, "export_t1_samples", None)
-    assert callable(producer), "Sample export must preserve partial append failures"
     from zcu_tools.experiment.workflows.exporting import SampleRun
     from zcu_tools.gui.app.workflows.samples import SampleExportError, append_samples
 
@@ -166,7 +169,7 @@ def test_partial_io_count_cause_and_retry_latest(
         ),
         seed=seed,
     )
-    rows = producer(
+    rows = export.export_t1_samples(
         SampleRun("sample-run", plan, paths.data_root, engine.records("sample-run"))
     )
     table = InterruptedTable(tmp_path / "history.jsonl")

@@ -1,6 +1,7 @@
 """Manual GUI/MCP exports retain accepted origin and native device evidence."""
 
 import pytest
+from pydantic import JsonValue
 from qtpy.QtWidgets import QLabel, QPushButton
 from zcu_tools.datafile import load_run_data
 from zcu_tools.device.fake import FakeDevice
@@ -15,6 +16,12 @@ from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._recording_transport import WindowTransport, WireRoute
+
+
+def numeric(value: JsonValue) -> float:
+    """Require a real sample scalar without relaxing the measurement assertions."""
+    assert not isinstance(value, bool) and isinstance(value, (int, float))
+    return float(value)
 
 
 def test_manual_export_keeps_accepted_origin_after_source_and_selection_change(
@@ -77,7 +84,11 @@ def test_manual_export_keeps_accepted_origin_after_source_and_selection_change(
         and row["dev_value"] != 777
         and row["dev_unit"] == "native"
     )
-    assert row["t1_us"] > 0 and row["t1_err_us"] >= 0 and row["freq_mhz"] > 0
+    assert (
+        numeric(row["t1_us"]) > 0
+        and numeric(row["t1_err_us"]) >= 0
+        and numeric(row["freq_mhz"]) > 0
+    )
     assert entry.ledger.events() == events
     before = len(mcp_transport.requests)
     reply = mcp_tools["workflows_workflow_export_samples"]["handler"](
