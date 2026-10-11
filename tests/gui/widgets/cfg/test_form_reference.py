@@ -139,6 +139,15 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
         draft.close()
 
 
+def reference_controls(form: CfgFormWidget) -> tuple[QComboBox, QPushButton]:
+    reference = form.findChild(ReferenceWidget)
+    assert reference is not None
+    combo = reference.findChild(QComboBox)
+    button = reference.findChild(QPushButton, "convertReferenceToInline")
+    assert combo is not None and button is not None
+    return combo, button
+
+
 def reference_frequency_line(form: CfgFormWidget) -> QLineEdit:
     editor = tree_widget(form).itemWidget(tree_item(form, "mod.ro_freq"), 1)
     assert editor is not None
@@ -176,10 +185,7 @@ def test_module_ref_convert_then_edit_survives_refresh_and_reselect(qapp):
     try:
         form.attach(draft)
         form.show()
-        reference = form.findChild(ReferenceWidget)
-        assert reference is not None
-        combo = reference.findChild(QComboBox)
-        assert combo is not None
+        combo, button = reference_controls(form)
         assert combo.currentText() == "Lib: my_pulse"
 
         tree_item(form, "mod").setExpanded(True)
@@ -188,8 +194,7 @@ def test_module_ref_convert_then_edit_survives_refresh_and_reselect(qapp):
         assert entry.isVisible()
         assert entry.text() == "7000.0"
         assert not entry.isEnabled()
-        button = reference.findChild(QPushButton, "convertReferenceToInline")
-        assert button is not None and button.isEnabled()
+        assert button.isEnabled()
         button.click()
         qapp.processEvents()
         entry = reference_frequency_line(form)
