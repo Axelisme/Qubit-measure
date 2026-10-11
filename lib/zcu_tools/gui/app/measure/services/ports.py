@@ -52,7 +52,6 @@ class CfgEditResult:
 
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.gui.app.measure.adapter import (
         AdapterCapabilities,
         WritebackItem,
@@ -68,6 +67,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.figures import FigureCollection
     from zcu_tools.plotting.plots import Plots
+    from zcu_tools.resources.entry.ledger_models import JsonObject
 
     from .persistence_types import AppPersistedState
     from .writeback import WritebackDraft

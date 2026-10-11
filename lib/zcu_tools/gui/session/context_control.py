@@ -103,7 +103,9 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def read_sample(self, target: ContextTarget, component: str, run_id: str) -> JsonObject | None:
+    def read_sample(
+        self, target: ContextTarget, component: str, run_id: str
+    ) -> JsonObject | None:
         """Read the latest entry sample for a run through the sample owner.
 
         No selection/publication changes occur. Target admission, unsafe names,
@@ -285,7 +287,9 @@ class ContextControlFacet(ContextControlPort):
         """Read a captured target using ContextControlPort's current-value policy."""
         return self._context.read_target(target, roles=roles)
 
-    def read_sample(self, target: ContextTarget, component: str, run_id: str) -> JsonObject | None:
+    def read_sample(
+        self, target: ContextTarget, component: str, run_id: str
+    ) -> JsonObject | None:
         """Use the context owner's entry JSONL read contract."""
         return self._context.read_sample(target, component, run_id)
 

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import logging
-from copy import deepcopy
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
-
-from zcu_tools.resources.entry.ledger_models import JsonObject
 
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, WritebackRequest
 from zcu_tools.gui.app.measure.events.completion import AnalyzeFailedPayload
@@ -18,6 +16,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.resources.entry.ledger_models import JsonObject
 
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 from .staged_analyze import _StagedAnalyzeService
@@ -128,7 +127,9 @@ class AnalyzeService(_StagedAnalyzeService):
             experiment_name=tab.run.metadata.experiment
             if tab.run.metadata is not None
             else tab.adapter_name,
-            device_snapshot=deepcopy(tab.run.metadata.device_snapshot) if tab.run.metadata is not None else None,
+            device_snapshot=deepcopy(tab.run.metadata.device_snapshot)
+            if tab.run.metadata is not None
+            else None,
             context=ctx,
             adapter=adapter,
             params=analyze_params_instance,
@@ -188,7 +189,9 @@ class AnalyzeService(_StagedAnalyzeService):
             experiment_name=tab.run.metadata.experiment
             if tab.run.metadata is not None
             else tab.adapter_name,
-            device_snapshot=deepcopy(tab.run.metadata.device_snapshot) if tab.run.metadata is not None else None,
+            device_snapshot=deepcopy(tab.run.metadata.device_snapshot)
+            if tab.run.metadata is not None
+            else None,
             context=ctx,
             adapter=tab.adapter,
             params=analyze_params_instance,

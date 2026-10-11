@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-11，device alias 固定 capture、caller-owned preset、SessionServices runner／progress 與 cached Info flux 單位
+**Last updated:** 2026-10-11，SavedPoint writeback、固定 Run device capture 與成功前綴 publication
 
 # gui/session/ — 量測 session core
 
@@ -9,7 +9,9 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 
 `ContextService` 私下持有 `ResultEntry` 與 point/library handles。開啟 entry 發布空的記憶體 DRAFT，選取或建立 point 後發布 ACTIVE。它先完成資源與 asset capability 準備，再替換 session binding。準備失敗保留原 binding；point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。
 
-三個 target setter 經 resources owner 驗證值與來源。DRAFT 只替換記憶體，SavedPoint 使用單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發一個 MD／ML fact，保留焦點與 binding ID。同 entry 的其他 point 可獨立寫入，不改目前投影；舊 capture 保持隔離。
+三個一般 target setter 經 resources owner 驗證值與來源。DRAFT 只替換記憶體，SavedPoint 使用單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發一個 MD／ML fact，保留焦點與 binding ID。同 entry 的其他 point 可獨立寫入，不改目前投影；舊 capture 保持隔離。
+
+`ContextService.apply_writeback` 是 accept 的單一入口，只對 SavedPoint 綁定資源並交共用 executor。非空 EntryDraft writeback 在 append 前以 failed precondition 拒絕，提示先選或建立工作點。它不寫記憶體、不自動建點。成功前綴依每項實際提交發布，後项失敗不撤回它。樣本 preview／receipt 經 sample owner 讀 entry JSONL，不維護 draft 樣本或延後 flush。
 
 ## Context、session environment 與 Run snapshot
 

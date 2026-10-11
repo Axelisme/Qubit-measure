@@ -32,9 +32,9 @@ from .points import PointView
 from .provenance import Provenance
 from .storage import PointStorageBinding, bind_sample_table
 
-
 if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary
+
 
 @dataclass(frozen=True)
 class ParameterWriteback:
@@ -55,11 +55,14 @@ class ModuleWriteback:
     """One concrete library key and persistent module Spec (not a raw mapping).
 
     path follows the library owner's module key contract, with roles already
-    resolved. value retains inline Specs and concrete child references.
+    resolved. value retains inline Specs and concrete child references. stderr
+    is unknown when None, otherwise a finite nonnegative working-unit uncertainty
+    attached to every accepted leaf source; no unit conversion occurs.
     """
 
     path: str
     value: ModuleSpec
+    stderr: float | None = None
 
 
 @dataclass(frozen=True)
@@ -67,11 +70,14 @@ class WaveformWriteback:
     """One concrete library waveform key and persistent Spec, never raw mapping.
 
     path follows the library owner's waveform key contract, with roles already
-    resolved. value retains inline Specs and concrete child references.
+    resolved. value retains inline Specs and concrete child references. stderr
+    is unknown when None, otherwise a finite nonnegative working-unit uncertainty
+    attached to every accepted leaf source; no unit conversion occurs.
     """
 
     path: str
     value: WaveformSpec
+    stderr: float | None = None
 
 
 @dataclass(frozen=True)
@@ -97,10 +103,10 @@ type WritebackItem = (
 class WritebackEvidence:
     """Caller-captured source facts shared by all writes in one acceptance.
 
-    kind is the experiment name for a run, or analysis kind for a cross-run
-    analysis; it is nonempty. origin identifies gui, notebook or mcp. run_id is
-    the captured run identity, or None for cross-run analysis. source optionally
-    references the analyzed event; None is ordinary single-run acceptance.
+    kind is the nonempty captured experiment name. origin identifies gui,
+    notebook or mcp. run_id is the captured acquisition identity, or None when
+    native acquisition evidence is unavailable. source is an optional ledger
+    reference copied into accepted; ordinary single-run acceptance uses None.
     """
 
     kind: str
@@ -115,11 +121,11 @@ def _require_named_spec(value: object) -> None:
 
 
 def _accepted_write(item: WritebackItem) -> AcceptedWrite:
+    if not isinstance(item, SampleWriteback) and item.stderr is not None:
+        stderr = TypeAdapter(float).validate_python(item.stderr, strict=True)
+        if not isfinite(stderr) or stderr < 0:
+            raise ValueError("stderr must be finite and non-negative, or None")
     if isinstance(item, ParameterWriteback):
-        if item.stderr is not None:
-            stderr = TypeAdapter(float).validate_python(item.stderr, strict=True)
-            if not isfinite(stderr) or stderr < 0:
-                raise ValueError("stderr must be finite and non-negative, or None")
         return AcceptedWrite.model_validate({"path": item.path, "value": item.value})
     if isinstance(item, SampleWriteback):
         return AcceptedWrite(path=item.component, value=item.value)
@@ -147,17 +153,17 @@ class WritebackApplyError(RuntimeError):
 
 
 class WritebackTarget(Protocol):
-    """Bound single-item write capabilities, persistent or memory-only.
+    """Bound single-item write capabilities for a saved point.
 
-    entry_id/ledger identify the owning entry. point is its saved label, or None
-    for a memory draft. Each setter commits and validates one item or raises
-    without installing it. Publication belongs to the context owner, not this
-    protocol or the executor. Sample metadata is already supplied in fields.
+    entry_id/ledger identify the owning entry; point is its saved label.
+    Each setter commits and validates one item or raises without installing it.
+    Publication belongs to the context owner, not this protocol or the executor.
+    append_sample receives producer fields separately from accepted metadata.
     """
 
     entry_id: str
     ledger: RecordsLedger
-    point: str | None
+    point: str
 
     def set_parameter(
         self, path: str, value: JsonValue, source: Provenance
@@ -166,7 +172,15 @@ class WritebackTarget(Protocol):
     def set_waveform(
         self, path: str, value: WaveformSpec, source: Provenance
     ) -> None: ...
-    def append_sample(self, component: str, fields: JsonObject, *, run_id: str, at: datetime, source: str) -> None: ...
+    def append_sample(
+        self,
+        component: str,
+        fields: JsonObject,
+        *,
+        run_id: str,
+        at: datetime,
+        source: str,
+    ) -> None: ...
 
 
 class PointWritebackTarget:
@@ -182,7 +196,7 @@ class PointWritebackTarget:
         self._storage = storage
         self.entry_id = str(storage.entry_id)
         self.ledger = storage.ledger
-        self.point: str | None = storage.point
+        self.point = storage.point
         self._library_handle: ModuleLibrary | None = None
 
     def set_parameter(self, path: str, value: JsonValue, source: Provenance) -> None:
@@ -196,7 +210,10 @@ class PointWritebackTarget:
 
         if self._library_handle is None:
             self._library_handle = ModuleLibrary(
-                self._storage.result_path / "points" / self._storage.point / "module_cfg.yaml",
+                self._storage.result_path
+                / "points"
+                / self._storage.point
+                / "module_cfg.yaml",
                 ledger=self._storage.result_path / "records" / "ledger.jsonl",
                 entry_id=self.entry_id,
             )
@@ -212,7 +229,15 @@ class PointWritebackTarget:
         with self._library().edit() as draft:
             draft.set_waveform(path, value, provenance=source)
 
-    def append_sample(self, component: str, fields: JsonObject, *, run_id: str, at: datetime, source: str) -> None:
+    def append_sample(
+        self,
+        component: str,
+        fields: JsonObject,
+        *,
+        run_id: str,
+        at: datetime,
+        source: str,
+    ) -> None:
         """Append producer fields with the executor's accepted identity/time/source."""
         bind_sample_table(self._storage.result_path, component).append(
             run_id=run_id, point=self.point, at=at, source=source, **fields
@@ -231,7 +256,7 @@ def apply_writeback(
     before this entry. Nonempty items, strict JSON/Spec values, finite nonnegative
     stderr, kind and sample run_id are validated before append. Target owners
     validate paths, schema, sources and transactions when each item is reached.
-    Samples receive run_id, nullable point, UTC at and accepted source; producer
+    Samples receive run_id, saved point, UTC at and accepted source; producer
     device fields are preserved, not inferred. Return the event ID on success.
 
     Ledger append failures propagate unchanged, with no writes. An item failure
@@ -266,15 +291,24 @@ def apply_writeback(
             kind=kind,
             run_id=evidence.run_id,
             at=event.at,
-            stderr=item.stderr if isinstance(item, ParameterWriteback) else None,
+            stderr=None if isinstance(item, SampleWriteback) else item.stderr,
         )
         try:
             if isinstance(item, SampleWriteback):
                 if evidence.run_id is None:
                     raise ValueError("sample writeback requires a run_id")
-                fields = {key: value for key, value in item.value.items() if key not in {"run_id", "point", "at", "source"}}
-                target.append_sample(item.component, fields, run_id=evidence.run_id,
-                                     at=datetime.fromisoformat(event.at), source=event.id)
+                fields = {
+                    key: value
+                    for key, value in item.value.items()
+                    if key not in {"run_id", "point", "at", "source"}
+                }
+                target.append_sample(
+                    item.component,
+                    fields,
+                    run_id=evidence.run_id,
+                    at=datetime.fromisoformat(event.at),
+                    source=event.id,
+                )
             elif isinstance(item, ParameterWriteback):
                 target.set_parameter(write.path, write.value, provenance)
             elif isinstance(item, ModuleWriteback):

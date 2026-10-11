@@ -769,7 +769,11 @@ class ExpTabWidget(QWidget):
             else {}
         )
         snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
-        reasons = snapshot.analysis.unavailable_reasons if snapshot.analysis is not None else ()
+        reasons = (
+            snapshot.analysis.unavailable_reasons
+            if snapshot.analysis is not None
+            else ()
+        )
         self.writeback_widget.populate(items, values, unavailable_reasons=reasons)
         self.writeback_section.setVisible(bool(items or reasons))
 
@@ -783,7 +787,11 @@ class ExpTabWidget(QWidget):
             else {}
         )
         snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
-        reasons = snapshot.post_analysis.unavailable_reasons if snapshot.post_analysis is not None else ()
+        reasons = (
+            snapshot.post_analysis.unavailable_reasons
+            if snapshot.post_analysis is not None
+            else ()
+        )
         self.post_writeback_widget.populate(items, values, unavailable_reasons=reasons)
         self.post_writeback_section.setVisible(bool(items or reasons))
 

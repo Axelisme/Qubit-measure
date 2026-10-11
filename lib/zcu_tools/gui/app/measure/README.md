@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-11，device 名稱預覽、caller-owned alias preset 與 session runner／progress
+**Last updated:** 2026-10-11，共用 SavedPoint writeback、樣本 proposal 與部分失敗
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -413,7 +413,12 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    convert values. Draft-local retarget refreshes the destination facts and unit.
    Module/waveform items show bounded change summaries without units and keep
    full cfg editing in `Edit`. Primary and post workflows own proposal timing;
-   the Writeback service remains stage-free.
+   the Writeback service remains stage-free. Sample proposals name a concrete
+   component and producer JSON fields. GUI adds dev_value/dev_unit from the
+   Run-fixed $flux_dev binding and device snapshot. Missing binding, device,
+   value or unit omits the sample with a public unavailable_reasons entry.
+   Preview and write receipts read the latest entry JSONL row for that run.
+   Only adapters whose Run does not change that device provide sample proposals.
 
    Primary FIT and interactive operations capture the source `RunMetadata.run_id`
    at start and pass it to the opaque draft. Post captures the Primary draft's
@@ -847,15 +852,15 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
 
 ## Adapter-Facing Rules
 
-- `ContextService` 擁有 md／ml 內容提交、`context` version bump 與變更事件。
-  Measure 的 `ContextWritePort` 從 cfg schema 產生 app-side lowering callbacks，
-  交給共用 service 在寫入時呼叫；`CfgEditorService` 只交未 lower 的 schema。
-  Writeback 選出的 md／ml entries 交給一次 `apply_ml_writes()`，每批至多
-  bump 一次、每種變更事件至多送一次。整批 lower／register 先在隔離候選
-  完成，後項可讀前項候選，但不能改 live md／ml。準備失敗保留舊內容與版本。
-  成功後一次套用內容、更新版本並通知，最後保存。保存失敗明確回報已套用
-  但未保存，不 rollback 或自動重試。寫入與 crash durability 是不同責任，
-  磁碟保存見 ADR-0063。
+- `ContextService.apply_writeback` owns fixed-target admission, resource binding
+  and publication. It accepts only SavedPoint. A nonempty EntryDraft writeback
+  fails before append and asks the caller to select or create a working point.
+  `WritebackService` lowers selected proposals to concrete resource items in
+  proposal order, not grouped by kind. The shared executor appends accepted,
+  commits each item and stops at the first failure. The context publishes each
+  successful prefix item. GUI marks that prefix applied and re-raises the original
+  cause, preserving its existing wire category. No cross-file rollback or retry
+  is provided. Persistence and crash durability remain separate, see ADR-0063.
 - `ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。`AdapterCapabilities`
   宣告 SoC 需求、analysis、post-analysis、load 的支援範圍；`requires_soc` 不代表
   SoC 已連線。Run guard 檢查 context、cfg、SoC 與 preflight；operation owner 另
@@ -882,8 +887,8 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
 - `WritebackService.create_draft()` accepts those candidates and returns an opaque,
   service-owned draft. Item-local cfg-editor sessions and their identities stay
   inside the service; draft creation cleans every session on failure, teardown is
-  idempotent, and `apply_draft()` sends selected entries through one
-  `ContextWritePort` batch. `WritebackWidget` is pane-bound and the Qt-only
+  idempotent, and `apply_draft()` sends ordered concrete items through the
+  context owner's shared writeback entry. `WritebackWidget` is pane-bound and the Qt-only
   `Controller`/`WritebackControl` pane-qualified forwarding (`*_for_pane` with
   `pane` in `analysis|post_analysis`) resolves the pane's opaque draft before
   calling the stage-agnostic service. Remote/MCP writeback operations use the same

@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-11, complete Info device setup RPC
+**Last updated:** 2026-10-11, sample writeback projections and complete Info setup
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -45,7 +45,12 @@ Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "a
 
 Parameter writeback previews and write receipts use `kind="parameter"`.
 Their draft-local IDs use `param-<n>`. Apply receipts list parameter paths in
-`written.parameter`.
+`written.parameter`. Sample previews and write receipts use `kind="sample"`,
+`sample-<n>` IDs and a concrete component as target. Apply lists components in
+`written.samples`; write receipts preserve complete latest JSONL rows in
+before/after, including accepted metadata. Preview exposes unavailable_reasons
+for omitted sample proposals. The existing preview/set/apply/write methods own
+these projections; no sample-specific RPC is added.
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
@@ -145,8 +150,8 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 94`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 126`: GUI process code revision. It is displayed, not compared.
+- `WIRE_VERSION = 95`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 127`: GUI process code revision. It is displayed, not compared.
 - `MCP_VERSION = 113`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.

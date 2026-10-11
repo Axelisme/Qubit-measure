@@ -5,14 +5,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 
-from zcu_tools.resources.entry.ledger_models import JsonObject
-
 from zcu_tools.gui.app.measure.adapter import PostAnalyzeRequest, PostWritebackRequest
 from zcu_tools.gui.app.measure.events.tab import TabInteractionFact
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.resources.entry.ledger_models import JsonObject
 
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 from .staged_analyze import _StagedAnalyzeService
@@ -128,7 +127,9 @@ class PostAnalyzeService(_StagedAnalyzeService):
             experiment_name=primary_draft.experiment_name
             if primary_draft is not None
             else tab.adapter_name,
-            device_snapshot=primary_draft.device_snapshot if primary_draft is not None else None,
+            device_snapshot=primary_draft.device_snapshot
+            if primary_draft is not None
+            else None,
             context=ctx,
             adapter=adapter,
             params=post_analyze_params_instance,

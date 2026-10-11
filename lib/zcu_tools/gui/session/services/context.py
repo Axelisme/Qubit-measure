@@ -110,8 +110,18 @@ class _ContextWritebackTarget:
     def set_waveform(self, path: str, value: WaveformSpec, source: Provenance) -> None:
         self._context.set_waveform(self._target, path, value, source=source)
 
-    def append_sample(self, component: str, fields: JsonObject, *, run_id: str, at: datetime, source: str) -> None:
-        self._entry.samples(component).append(run_id=run_id, point=self.point, at=at, source=source, **fields)
+    def append_sample(
+        self,
+        component: str,
+        fields: JsonObject,
+        *,
+        run_id: str,
+        at: datetime,
+        source: str,
+    ) -> None:
+        self._entry.samples(component).append(
+            run_id=run_id, point=self.point, at=at, source=source, **fields
+        )
 
 
 class ContextService:
@@ -479,7 +489,9 @@ class ContextService:
             storage=capture_point_storage(point),
         )
 
-    def read_sample(self, target: ContextTarget, component: str, run_id: str) -> JsonObject | None:
+    def read_sample(
+        self, target: ContextTarget, component: str, run_id: str
+    ) -> JsonObject | None:
         """Read one run's latest entry JSONL sample without changing selection.
 
         target validates the opened entry and existing selected-draft requirement;

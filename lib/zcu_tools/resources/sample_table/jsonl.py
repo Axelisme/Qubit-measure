@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
+    TypeAdapter,
     field_validator,
 )
 
@@ -113,7 +114,9 @@ class JsonlSampleTable:
         Absent history returns an empty frame. Invalid rows, including corrupt
         tails, raise ValueError with path/line; I/O failures propagate.
         """
-        return pd.DataFrame([row.model_dump(mode="json") for row in self._latest_records().values()])
+        return pd.DataFrame(
+            [row.model_dump(mode="json") for row in self._latest_records().values()]
+        )
 
     def latest(self, run_id: str) -> dict[str, JsonValue] | None:
         """Read one run's latest complete JSON row, or None if absent.
@@ -123,7 +126,8 @@ class JsonlSampleTable:
         including JSON timestamp, nullable point, source and producer fields.
         Missing history returns None; validation and I/O failures propagate.
         """
-        if not isinstance(run_id, str) or not run_id:
+        run_id = TypeAdapter(str).validate_python(run_id, strict=True)
+        if not run_id:
             raise ValueError("run_id must be nonempty")
         record = self._latest_records().get(run_id)
         return None if record is None else record.model_dump(mode="json")

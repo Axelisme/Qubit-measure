@@ -555,16 +555,24 @@ def test_library_writeback_rejects_invalid_uncertainty_before_acceptance(
     version = session.state.version.get("context")
     waveform = ConstWaveformCfg(length=0.1)
     item = (
-        writeback.ModuleWriteback("Q1.pulses.pi", PulseSpec(ch=0, nqz=1, freq=100.0,
-                                 gain=0.2, waveform=waveform), stderr=stderr)
+        writeback.ModuleWriteback(
+            "Q1.pulses.pi",
+            PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform=waveform),
+            stderr=stderr,
+        )
         if kind == "module"
         else writeback.WaveformWriteback("Q1.waveforms.base", waveform, stderr=stderr)
     )
     with pytest.raises(ValueError, match="stderr"):
-        session.control.apply_writeback(target, (item,),
-            evidence=writeback.WritebackEvidence(kind="test/uncertainty", origin="gui"))
+        session.control.apply_writeback(
+            target,
+            (item,),
+            evidence=writeback.WritebackEvidence(kind="test/uncertainty", origin="gui"),
+        )
     assert session.entry.ledger.events() == ()
-    assert session.control.read_context().library.document() == capture.library.document()
+    assert (
+        session.control.read_context().library.document() == capture.library.document()
+    )
     assert session.state.version.get("context") == version
 
 
