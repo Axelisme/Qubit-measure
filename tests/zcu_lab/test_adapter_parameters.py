@@ -197,10 +197,20 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
     assert isinstance(adapter, BaseAdapter)
     source = _source(calibrated=calibrated)
     first = source.bind_aliases(
-        (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")), {}
+        (
+            AliasRow("qubit", "Q1"),
+            AliasRow("resonator", "$qubit.resonator"),
+            AliasRow("flux_dev", "flux_yoko"),
+        ),
+        {},
     )
     second = source.bind_aliases(
-        (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator")), {}
+        (
+            AliasRow("qubit", "Q2"),
+            AliasRow("resonator", "$qubit.resonator"),
+            AliasRow("flux_dev", "flux_yoko"),
+        ),
+        {},
     )
     definition = type(adapter).cfg_definition()
     schema = definition.instantiate(SessionEnv(parameters=first, soc=None, soccfg=None))
@@ -312,7 +322,12 @@ def test_registered_role_adapter_lowers_one_template_on_fixed_captures(
         assert readout_ro["ro_ch"] == capture.lookup("$resonator.wiring.ro_ch").value
     # Later target selection does not alter the original source or the template.
     source.bind_aliases(
-        (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator")), {}
+        (
+            AliasRow("qubit", "Q2"),
+            AliasRow("resonator", "$qubit.resonator"),
+            AliasRow("flux_dev", "flux_yoko"),
+        ),
+        {},
     )
     assert schema_to_raw_dict(schema, first) == raw_first
     assert (
@@ -348,7 +363,12 @@ def test_registered_readout_frequency_sweep_uses_captured_probe_timing(
     capture = _source(
         calibrated=True, null_calibrations=null_calibrations
     ).bind_aliases(
-        (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator")), {}
+        (
+            AliasRow("qubit", "Q2"),
+            AliasRow("resonator", "$qubit.resonator"),
+            AliasRow("flux_dev", "flux_yoko"),
+        ),
+        {},
     )
     schema = adapter.make_default_cfg(
         SessionEnv(parameters=capture, soc=None, soccfg=None)
