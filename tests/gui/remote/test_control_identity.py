@@ -40,10 +40,6 @@ def reason(reply: RouteReply, expected: str) -> None:
 def control_rpc(tmp_path: Path) -> Iterator[RouteHarness]:
     harness = RouteHarness.create(str(tmp_path))
     try:
-        # Establish the new wire seam before using the new frontend owner API.
-        assert result(harness.request(raw_client(harness), "control.status")) == {
-            "holder": "gui", "locked": False, "online": True, "me": False
-        }
         yield harness
     finally:
         harness.close()
@@ -51,6 +47,9 @@ def control_rpc(tmp_path: Path) -> Iterator[RouteHarness]:
 
 def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_rpc):
     h = control_rpc
+    assert result(h.request(raw_client(h), "control.status")) == {
+        "holder": "gui", "locked": False, "online": True, "me": False
+    }
     link = raw_client(h)
     original = result(h.request(link, "project.info"))
     reply = h.request(link, "project.setup", chip_name="changed", qub_name="q")
@@ -66,6 +65,9 @@ def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_r
 
 def test_connect_defaults_fixed_identity_and_idempotency(control_rpc):
     h = control_rpc
+    assert result(h.request(raw_client(h), "control.status")) == {
+        "holder": "gui", "locked": False, "online": True, "me": False
+    }
     link = raw_client(h)
     remote = {"holder": "rpc:agent", "locked": False, "online": True, "me": True}
     assert result(h.request(link, "control.connect")) == remote
@@ -82,6 +84,9 @@ def test_connect_defaults_fixed_identity_and_idempotency(control_rpc):
 
 def test_online_holder_same_label_and_offline_takeover(control_rpc):
     h = control_rpc
+    assert result(h.request(raw_client(h), "control.status")) == {
+        "holder": "gui", "locked": False, "online": True, "me": False
+    }
     a, same, b = raw_client(h), raw_client(h), raw_client(h)
     result(h.request(a, "control.connect", label="A"))
     assert result(h.request(same, "control.connect", label="A"))["me"] is True
@@ -105,6 +110,9 @@ def test_online_holder_same_label_and_offline_takeover(control_rpc):
 
 def test_gui_lock_reclaim_unlock_and_watch_share_rpc_projection(control_rpc):
     h = control_rpc
+    assert result(h.request(raw_client(h), "control.status")) == {
+        "holder": "gui", "locked": False, "online": True, "me": False
+    }
     a, b = raw_client(h), raw_client(h)
     owner = h.ctrl.control_identity
     observed = []
@@ -127,6 +135,9 @@ def test_gui_lock_reclaim_unlock_and_watch_share_rpc_projection(control_rpc):
 
 def test_readonly_same_label_never_writes_or_acquires(control_rpc):
     h = control_rpc
+    assert result(h.request(raw_client(h), "control.status")) == {
+        "holder": "gui", "locked": False, "online": True, "me": False
+    }
     a, reader = raw_client(h), raw_client(h)
     result(h.request(a, "control.connect", label="same"))
     assert result(h.request(reader, "control.connect", label="same", mode="readonly"))["me"] is False
@@ -154,6 +165,9 @@ def test_queued_write_checks_current_holder_at_execution(tmp_path):
 
 def test_accepted_operation_survives_transfer_and_disconnect_new_holder_cancels(control_rpc):
     h = control_rpc
+    assert result(h.request(raw_client(h), "control.status")) == {
+        "holder": "gui", "locked": False, "online": True, "me": False
+    }
     handles = OperationHandles()
     token = 0
 
