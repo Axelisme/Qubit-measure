@@ -8,6 +8,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import set_frequency
+
 
 def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     session: RecipeSession,
@@ -48,25 +50,25 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         tab.disable_library("modules.init_pulse")
     else:
         tab.use_library("modules.init_pulse", init_pulse_ref)
-    tab.set_frequency(
+    set_frequency(
+        tab,
         "modules.readout",
         frequency_mhz,
-        calibration="resonator",
+        calibration="$resonator.freq",
         prefer_library=readout_ref is not None,
         required="frequency_mhz",
-        source="frequency_mhz",
     )
     tab.set(
         "modules.readout.ro_cfg.ro_length",
         readout_length_us,
-        source="readout_length_us",
+        source="explicit",
     )
     tab.set(
         "modules.readout.ro_cfg.trig_offset",
         trigger_offset_us,
-        source="trigger_offset_us",
+        source="explicit",
     )
-    tab.set("rounds", rounds, source="rounds")
+    tab.set("rounds", rounds, source="explicit")
     run, status = yield tab.run()
     if status == "cancelled":
         return

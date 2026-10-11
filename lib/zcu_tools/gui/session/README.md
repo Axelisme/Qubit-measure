@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，caller-owned alias preset
+**Last updated:** 2026-10-11，caller-owned alias preset、SessionServices runner／progress 與 cached Info flux 單位
 
 # gui/session/ — 量測 session core
 
@@ -107,7 +107,15 @@ introduced.
   value-lookup expected leaves攜帶typed category。`ValueLookupError` parent、`ProviderError`、
   SoC/device async terminal與registration failures保持unexpected，不因共同ancestry被降級
   （ADR-0068）。
-- **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ runtime-specific `BackgroundExecutor` 各自建；Qt composition 使用 `session/adapters/qt_background.py` 的 `BackgroundRunner`，headless composition 使用注入 `ManualOwnerScheduler` 的 `ThreadPoolBackgroundExecutor`。兩者都保留 shared-pool / dedicated-worker 語意，terminal callback 一律回 owner thread；具體 owner 可在 teardown 呼 `quiesce()` 等待 worker 與 terminal delivery。`tests/gui/session/test_headless_composition.py` 以subprocess阻擋Qt imports，穿過正式`build_session_services`與offline MockSoc success/cancel lifecycle，作為無`QApplication` composition的可執行邊界。`ProgressService`/`IOManager`/`QtProgressTransport`/`QtShutdownDriver` 是共用 session service/adapter。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`（只宣告 `submit`，`quiesce` 不進 port）/`ProgressHub`/`ProjectIOPort` port。
+- **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ runtime-specific `BackgroundExecutor` 各自建；Qt composition 使用 `session/adapters/qt_background.py` 的 `BackgroundRunner`，headless composition 使用注入 `ManualOwnerScheduler` 的 `ThreadPoolBackgroundExecutor`。兩者都保留 shared-pool / dedicated-worker 語意，terminal callback 一律回 owner thread；具體 owner 可在 teardown 呼 `quiesce()` 等待 worker 與 terminal delivery。
+  `SessionServices.runner: OperationRunner` 與 `SessionServices.progress: ProgressService`
+  保留 build 輸入的同一 instances。共用 session 的 operation caller 從這份 bundle
+  取用，不另傳 runner／progress。Composition root 仍建立基礎物件並注入 build。
+  Operation policy、exclusion 與 owner-thread 契約不變。
+  `tests/gui/session/test_headless_composition.py` 在同一程序穿過正式 build 與
+  offline MockSoc success/cancel lifecycle，驗證無 `QApplication` 的 owner-thread、
+  progress 與 exclusion 行為。`ProgressService`、`QtProgressTransport` 與
+  `QtShutdownDriver` 是共用 session service/adapter。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure `RUN`）用 wire 字串比較，故兩 enum 同一 gate。共享硬體互斥規則住在 `RunBlocksHardwareGate`，app-local gate 只保留 RUN kind 與 import boundary。
 - **app 繼承/實作**：measure `State(SessionState)`；Controller 暴露 `setup_control: SetupControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 facets。
 - **Inspect 元件樹**：`ComponentTreeWidget` 透過 context facet 讀取 point／setup 文件並提交元件與參數命令。`ContextService` 擁有驗證、記憶體 DRAFT 與資源交易，widget 不寫檔。Setup 範本編輯不改現有 point 或焦點。Measure Inspect 的 Parameters 使用元件樹；Modules 保留 app-owned cfg editor，dirty selection／close 仍須顯式 Apply、Discard 或 Cancel。Modules mutation caller 的新容器接線尚待整合。

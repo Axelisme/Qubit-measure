@@ -242,15 +242,17 @@ def build_app_services(
     )
     run = RunService(
         state,
-        runner,
+        session.runner,
         bus,
         handles,
         writeback,
         gate=operation_gate,
         devices=device.get_connected_devices,
     )
-    analyze = AnalyzeService(state, runner, bus, writeback, handles)
-    post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
+    analyze = AnalyzeService(state, session.runner, bus, writeback, handles)
+    post_analyze = PostAnalyzeService(
+        state, session.runner, bus, handles, writeback=writeback
+    )
     save = SaveService(state, bus, access=access)
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
@@ -278,7 +280,7 @@ def build_app_services(
     )
     operation_control = OperationControlFacet(
         handles=handles,
-        progress=progress,
+        progress=session.progress,
         run_analyze=run_analyze_control,
         device=session.device_control,
     )
@@ -308,7 +310,7 @@ def build_app_services(
         operation_control=operation_control,
         handles=handles,
         background=background,
-        progress=progress,
+        progress=session.progress,
         guard=guard,
         device=device,
         device_control=session.device_control,
