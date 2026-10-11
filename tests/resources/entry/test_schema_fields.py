@@ -7,7 +7,13 @@ from typing import Literal
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from zcu_tools.resources import entry
-from zcu_tools.resources.entry import ComponentSchema, UnknownKindError
+from zcu_tools.resources import entry as entry_api
+from zcu_tools.resources.entry import (
+    ComponentSchema,
+    ResultEntry,
+    UnknownKindError,
+    snapshot,
+)
 
 from .fakes import Profiled
 from .view_support import registered_model
@@ -158,3 +164,30 @@ def test_malformed_unit_metadata_is_rejected() -> None:
 def test_unknown_kind_raises_the_registry_error() -> None:
     with pytest.raises(UnknownKindError):
         entry.component_field_specs("test/never-registered")
+
+
+def test_reference_role_marks_top_level_text_fields_named_after_a_role() -> None:
+    specs = _by_segments("fake/drive/a")
+
+    # "sense" is a registered role without via; "source" names no role.
+    assert specs[("sense",)].reference_role == "sense"
+    assert specs[("source",)].reference_role is None
+    assert specs[("rate",)].reference_role is None
+    assert all(
+        spec.reference_role is None for key, spec in specs.items() if len(key) > 1
+    )
+
+
+def test_role_candidates_list_matching_components_in_document_order(
+    entry: ResultEntry,
+) -> None:
+    entry.setup.add_component("D2", kind="fake/drive/b")
+    entry.setup.add_component("S1", kind="fake/sensor")
+    entry.setup.add_component("D1", kind="fake/drive/a")
+    document = snapshot(entry.setup)
+
+    assert entry_api.role_candidates(document, "driver") == ("D2", "D1")
+    assert entry_api.role_candidates(document, "sense") == ("S1",)
+    assert entry_api.role_candidates(document, "coupler") == ()
+    with pytest.raises(ValueError, match="nope"):
+        entry_api.role_candidates(document, "nope")

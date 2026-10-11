@@ -647,3 +647,60 @@ def test_dialog_height_stays_within_the_screen_and_fields_scroll(
         assert button.isVisible()
         placed = QRect(button.mapTo(dialog, QPoint(0, 0)), button.size())
         assert dialog.rect().contains(placed)
+
+
+def _combo_items(combo: QComboBox) -> list[str]:
+    return [combo.itemText(i) for i in range(combo.count())]
+
+
+def _completions(editor: QLineEdit) -> set[str]:
+    completer = editor.completer()
+    assert completer is not None, "expected a component-name completer"
+    model = completer.model()
+    assert model is not None
+    return {str(model.index(row, 0).data()) for row in range(model.rowCount())}
+
+
+def test_role_reference_field_picks_a_matching_component(qapp, component_widget):
+    widget, control = component_widget
+    assert widget.add_component("S1", "fake/sensor", {})
+    assert widget.add_component("S2", "fake/sensor", {})
+    assert widget.add_component("D1", "fake/drive/a", {})
+
+    _double_click_value(qapp, widget, _row(widget, "D1", "sense"))
+    combo = _editor(widget, QComboBox)
+    assert _combo_items(combo) == ["", "S1", "S2"]
+    combo.setCurrentText("S2")
+    _press(qapp, combo, Qt.Key.Key_Return)
+
+    assert control.read_context().value("D1.sense") == "S2"
+
+
+def test_other_text_fields_complete_component_names(qapp, component_widget):
+    widget, _control = component_widget
+    assert widget.add_component("S1", "fake/sensor", {})
+    assert widget.add_component("D1", "fake/drive/a", {})
+
+    _double_click_value(qapp, widget, _row(widget, "D1", "source"))
+    editor = _editor(widget, QLineEdit)
+    assert _completions(editor) == {"S1", "D1"}
+    _press(qapp, editor, Qt.Key.Key_Escape)
+
+
+def test_dialog_role_reference_field_is_a_drop_down_of_matching_components(
+    qapp, component_widget
+):
+    widget, control = component_widget
+    control.new_point(PointCreateRequest("P1", "", CommandOrigin("gui")))
+    widget.refresh()
+    assert widget.add_component("S1", "fake/sensor", {})
+
+    dialog = _open_add_dialog(qapp, widget, "fake/drive/a")
+    sense = _child(dialog, QComboBox, "field:sense")
+    assert _combo_items(sense) == ["", "S1"]
+    assert _completions(_child(dialog, QLineEdit, "field:source")) == {"S1"}
+    _child(dialog, QLineEdit, "add_name").setText("D1")
+    _fill(dialog, "sense", "S1")
+    _submit(qapp, dialog)
+
+    assert control.read_context().value("D1.sense") == "S1"
