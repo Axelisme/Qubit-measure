@@ -9,17 +9,15 @@ from typing import ClassVar, Literal, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.linalg import eigh_tridiagonal
-from scipy.optimize import root_scalar
 
+from zcu_tools.simulate._calibration import calibrate_spectrum
 from zcu_tools.simulate.fluxonium.prediction import FluxAffineMap
-from zcu_tools.simulate.predictor import parameter_number
+from zcu_tools.simulate.predictor import CalibrationResult, parameter_number
 
 # Charge states n = -N..N at zero offset charge; converged far beyond the levels
 # a front end can request.
 _CHARGE_CUTOFF = 30
 MAX_LEVEL = 20
-_CALIBRATION_SCAN_POINTS = 401
 
 
 class TransmonParameterValues(TypedDict):
@@ -212,13 +210,12 @@ class TransmonPredictor:
 
     def calculate_bias(
         self, cur_value: float, cur_freq: float, transition: tuple[int, int] = (0, 1)
-    ) -> float:
-        """Return the candidate additive native bias nearest zero bias; never install it.
+    ) -> CalibrationResult:
+        """Invert the exact spectrum; see Predictor.calculate_bias for result policy.
 
-        Roots of the transition spectrum are found on one flux half period (the
-        spectrum is even and one-periodic in flux), then mirrored and shifted by
-        whole periods; the candidate with the smallest absolute bias wins.
-        ValueError reports a frequency the transition never reaches.
+        All branches participate in smallest-|bias| selection. An unreachable
+        target returns nearest actual MHz and clamped=true. Invalid inputs raise
+        ValueError, numerical failures propagate, and no parameters are changed.
         """
         _validate_transitions((transition,))
         if transition[0] >= transition[1]:
@@ -226,62 +223,31 @@ class TransmonPredictor:
         if not (isfinite(cur_value) and isfinite(cur_freq)):
             raise ValueError("cur_value and cur_freq must be finite")
 
-        scan = np.linspace(0.0, 0.5, _CALIBRATION_SCAN_POINTS)
-
-        def gap(flux: NDArray[np.float64]) -> NDArray[np.float64]:
-            levels = self._levels_ghz(flux, transition[1] + 1)
-            return (
-                levels[:, transition[1]] - levels[:, transition[0]]
-            ) * 1e3 - cur_freq
-
-        samples = gap(scan)
-        roots: list[float] = []
-        for index in np.flatnonzero(samples == 0.0):
-            roots.append(float(scan[index]))
-        for index in np.flatnonzero(samples[:-1] * samples[1:] < 0.0):
-            bracket = (float(scan[index]), float(scan[index + 1]))
-            solution = root_scalar(
-                lambda flux: float(gap(np.array([flux]))[0]),
-                bracket=bracket,
-                method="brentq",
-                xtol=1e-12,
-            )
-            roots.append(float(solution.root))
-        if not roots:
-            raise ValueError(
-                f"Transition {transition} never reaches {cur_freq} MHz with these parameters"
-            )
+        def frequencies(fluxs: NDArray[np.float64]) -> NDArray[np.float64]:
+            levels = self._levels_ghz(fluxs, transition[1] + 1)
+            return (levels[:, transition[1]] - levels[:, transition[0]]) * 1e3
 
         zero_bias_flux = FluxAffineMap(
             self.flux_half, self.flux_period, 0.0
         ).value_to_flux(cur_value)
-        candidates = [
-            sign * root + round(zero_bias_flux - sign * root)
-            for root in roots
-            for sign in (1.0, -1.0)
-        ]
-        flux = min(candidates, key=lambda candidate: abs(candidate - zero_bias_flux))
-        return (flux - zero_bias_flux) * self.flux_period
+        return calibrate_spectrum(
+            frequencies, zero_bias_flux, self.flux_period, cur_freq
+        )
 
     def _levels_ghz(
         self, fluxs: NDArray[np.float64], count: int
     ) -> NDArray[np.float64]:
         """Return the lowest ``count`` energies in GHz, shaped (N, count)."""
+        import scqubits as scq
+
         ej_max, ec, asymmetry = self.params
-        phase = np.pi * fluxs
-        ej = ej_max * np.sqrt(np.cos(phase) ** 2 + (asymmetry * np.sin(phase)) ** 2)
-        charges = np.arange(-_CHARGE_CUTOFF, _CHARGE_CUTOFF + 1, dtype=np.float64)
-        diagonal = 4.0 * ec * charges**2
+        qubit = scq.TunableTransmon(
+            EJmax=ej_max, EC=ec, d=asymmetry, ng=0.0, flux=0.0, ncut=_CHARGE_CUTOFF
+        )
         out = np.empty((fluxs.size, count), dtype=np.float64)
-        for index, energy in enumerate(ej):
-            off = np.full(charges.size - 1, -0.5 * energy)
-            out[index] = eigh_tridiagonal(
-                diagonal,
-                off,
-                eigvals_only=True,
-                select="i",
-                select_range=(0, count - 1),
-            )
+        for index, flux in enumerate(fluxs):
+            qubit.flux = float(flux)
+            out[index] = qubit.eigenvals(evals_count=count)
         return out
 
 

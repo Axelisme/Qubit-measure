@@ -120,7 +120,7 @@ def test_symmetric_squid_half_flux_is_free_rotor():
 def test_calibration_rejects_invalid_input_instead_of_clamping(
     calibration_case, value, frequency, transition
 ):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="finite|[Ll]evel|Transition"):
         calibration_case[0].build_predictor().calculate_bias(
             value, frequency, transition
         )

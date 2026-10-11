@@ -99,12 +99,13 @@ def h_predictor_predict(
 def h_predictor_calibrate(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Return native {flux_bias_before, flux_bias_after} for one complete source.
+    """Return {flux_bias_before, flux_bias_after, frequency_mhz, clamped}.
 
     device_value is the measured native setpoint, frequency_mhz the measured MHz
     frequency; from_level < to_level are nonnegative integers. Source/field
     failures are INVALID_PARAMS. No component, dialog, hardware or cache writes
-    occur. Numerical root failures follow the model's warning/fallback contract.
+    occur. The model selects smallest |bias|; unreachable targets clamp to the
+    nearest frequency. Numerical failures propagate without fallback.
     """
     inputs = _complete_params(adapter, params)
     value, frequency = params["device_value"], params["frequency_mhz"]
@@ -124,7 +125,12 @@ def h_predictor_calibrate(
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_params"
         ) from exc
-    return {"flux_bias_before": inputs.flux_bias, "flux_bias_after": result.flux_bias}
+    return {
+        "flux_bias_before": inputs.flux_bias,
+        "flux_bias_after": result.flux_bias,
+        "frequency_mhz": result.frequency_mhz,
+        "clamped": result.clamped,
+    }
 
 
 def h_predictor_info(

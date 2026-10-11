@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields
 from math import isfinite
@@ -8,10 +7,10 @@ from typing import ClassVar, Literal, TypedDict, overload
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.optimize import root_scalar
 
+from zcu_tools.simulate._calibration import calibrate_spectrum
 from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction, MatrixOperator
-from zcu_tools.simulate.predictor import parameter_number
+from zcu_tools.simulate.predictor import CalibrationResult, parameter_number
 
 
 class FluxoniumParameterValues(TypedDict):
@@ -223,85 +222,34 @@ class FluxoniumPredictor:
 
     def calculate_bias(
         self, cur_value: float, cur_freq: float, transition: tuple[int, int] = (0, 1)
-    ) -> float:
+    ) -> CalibrationResult:
+        """Invert the exact spectrum; see Predictor.calculate_bias for result policy.
+
+        Invalid finite inputs or non-increasing/integer levels raise ValueError.
+        Searches every branch, choosing smallest |bias| independent of current
+        bias. Unreachable targets return closest actual MHz with clamped=true.
+        No parameters change, and numerical failures propagate without fallback.
         """
-        Compute an additive native device-value bias from one measured MHz frequency.
-
-        This method finds a bias such that the predicted frequency matches cur_freq,
-        and among all equivalent solutions (periodic and mirror symmetry), returns
-        the one with the smallest |bias|.
-
-        Args:
-            cur_value (float): Current value.
-            cur_freq (float): Frequency in MHz.
-            transition (tuple[int, int]): transition between which level
-        Returns:
-            float: candidate native bias with minimum absolute value, not installed.
-
-        A failed or nonlocal root search warns with RuntimeWarning and uses the
-        current value as the fallback root. Numerical root failures also warn
-        and fall back; a returned bias alone does not prove a successful fit.
-        This query does not change any model parameters.
-        """
-
-        def freq_diff_func(value: float) -> float:
-            return self._predict_freq(value, transition) - cur_freq
-
-        # Step 1: Use root_scalar to find one valid fit_A
-        bracket = [
-            cur_value - 0.25 * self.flux_period,
-            cur_value + 0.25 * self.flux_period,
-        ]
-        fit_value = cur_value
-        try:
-            result = root_scalar(
-                freq_diff_func,
-                x0=cur_value,
-                x1=cur_value + 0.1 * self.flux_period,
-                method="secant",
-                xtol=1e-5 * self.flux_period,
-                maxiter=100,
+        frm, to = transition
+        if type(frm) is not int or type(to) is not int or frm < 0 or to <= frm:
+            raise ValueError(
+                "Calibration needs nonnegative integer from-level < to-level"
             )
-            if result.converged and bracket[0] <= result.root <= bracket[1]:
-                fit_value = result.root
-            else:
-                warnings.warn(
-                    "Bias calibration did not converge inside the local search window; "
-                    "using the current value as the fallback.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-        except Exception as exc:
-            warnings.warn(
-                "Bias calibration failed; using the current value as the fallback: "
-                f"{exc}",
-                RuntimeWarning,
-                stacklevel=2,
+        if not (isfinite(cur_value) and isfinite(cur_freq)):
+            raise ValueError("cur_value and cur_freq must be finite")
+
+        def frequencies(fluxs: NDArray[np.float64]) -> NDArray[np.float64]:
+            # Convert using this engine's affine; requested flux, not its current
+            # bias, determines the spectrum used for inversion.
+            values = np.array(
+                [self.flux_to_value(float(flux)) for flux in fluxs], dtype=np.float64
             )
+            return self._engine.predict_frequencies_mhz(values, (transition,))[1][0]
 
-        # Step 2: Compute initial bias and corresponding flux
-        bias0 = fit_value - cur_value + self.flux_bias
-        phi0 = (cur_value + bias0 - self.flux_half) / self.flux_period + 0.5
-
-        # Step 3: Enumerate equivalent flux candidates (periodic + mirror symmetry)
-        # Periodic equivalents shift phi0 by an integer n, giving phi0 + n.
-        # Mirror equivalents reflect phi0 and shift by n, giving 1 - phi0 + n.
-        N = 2  # number of periods to consider in each direction
-        candidate_fluxes = []
-        for n in range(-N, N + 1):
-            candidate_fluxes.append(phi0 + n)  # periodic equivalents
-            candidate_fluxes.append(1 - phi0 + n)  # mirror equivalents
-
-        # Step 4: Convert each candidate flux to candidate bias
-        # From value_to_flux: flux = (cur_value + bias - flux_half) / flux_period + 0.5
-        # Solve for bias: bias = (flux - 0.5) * flux_period + flux_half - cur_value
-        candidate_biases = [
-            (phi - 0.5) * self.flux_period + self.flux_half - cur_value
-            for phi in candidate_fluxes
-        ]
-
-        # Step 5: Pick the candidate with minimum |bias|
-        return min(candidate_biases, key=lambda b: abs(b))
+        zero_bias_flux = (cur_value - self.flux_half) / self.flux_period + 0.5
+        return calibrate_spectrum(
+            frequencies, zero_bias_flux, self.flux_period, cur_freq
+        )
 
     def update_bias(self, flux_bias: float) -> None:
         """Replace this instance's additive native bias; no source or clone is changed."""

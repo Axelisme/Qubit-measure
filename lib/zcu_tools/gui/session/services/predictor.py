@@ -19,6 +19,7 @@ from zcu_tools.resources.entry.views import ComponentView
 from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
+from zcu_tools.simulate.predictor import CalibrationResult as CalibrateFluxBiasResult
 from zcu_tools.simulate.predictor import MatrixPredictor, PredictorParams
 
 if TYPE_CHECKING:
@@ -36,13 +37,6 @@ class CalibrateFluxBiasRequest:
     value: float
     frequency_mhz: float
     transition: tuple[int, int] = (0, 1)
-
-
-@dataclass(frozen=True)
-class CalibrateFluxBiasResult:
-    """Candidate additive flux_bias in native device units; not installed anywhere."""
-
-    flux_bias: float
 
 
 @dataclass(frozen=True)
@@ -162,22 +156,20 @@ class PredictorService:
     def calibrate_flux_bias(
         self, params: PredictorParams, req: CalibrateFluxBiasRequest
     ) -> CalibrateFluxBiasResult:
-        """Return candidate native bias, never install or write it.
+        """Return the model's native bias, actual MHz and clamped status, without writes.
 
-        Missing/invalid params raise ValueError. Non-increasing/negative levels
-        raise InvalidInputError. Numerical root failures follow Predictor's
-        RuntimeWarning/fallback contract; a returned bias is not proof of a fit.
+        Missing/invalid params raise ValueError. Non-increasing/negative or
+        noninteger levels raise InvalidInputError. The model owns root selection
+        and clamping; numerical failures propagate. No caller recomputes the fit.
         """
         frm, to = req.transition
-        if frm < 0 or to < 0 or frm >= to:
+        if type(frm) is not int or type(to) is not int or frm < 0 or frm >= to:
             raise InvalidInputError(
                 f"Transition from-level must be < to-level and >= 0, got {req.transition}",
                 reason_code="invalid_transition",
             )
-        return CalibrateFluxBiasResult(
-            params.build_predictor().calculate_bias(
-                req.value, req.frequency_mhz, req.transition
-            )
+        return params.build_predictor().calculate_bias(
+            req.value, req.frequency_mhz, req.transition
         )
 
     def predict_freq_curve(

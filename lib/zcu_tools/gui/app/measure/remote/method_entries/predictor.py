@@ -55,14 +55,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "predictor:h_predictor_calibrate",
         MethodSpec(
             30.0,
-            "Compute native {flux_bias_before, flux_bias_after} from exactly one "
+            "Compute {flux_bias_before, flux_bias_after, frequency_mhz, clamped} from exactly one "
             "qubit or params source. Complete valid parameters are required; missing "
             "fields return INVALID_PARAMS/missing_predictor_params with data.missing. "
             "Source conflicts return invalid_predictor_source; malformed params or "
             "qubits return invalid_predictor_params or invalid_predictor_qubit. "
             "Only returns a candidate: never writes a component, dialog, file or "
-            "hardware. Numerical root failure warns and follows model fallback, "
-            "so a returned bias is not proof of a fit.",
+            "hardware. Selects smallest absolute native bias across all roots. "
+            "Unreachable targets return the nearest attainable frequency_mhz and "
+            "clamped=true, ties choose smallest absolute bias. Reachable targets "
+            "return clamped=false. Invalid inputs are rejected, not clamped.",
             _SOURCES
             + (
                 required_number(

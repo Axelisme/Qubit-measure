@@ -84,7 +84,11 @@ FluxoniumParams 是可未知的具名輸入。EJ／EC／EL 用 GHz，flux_half�
 - `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。scalar/array 都委派到 `FluxoniumPrediction.predict_frequencies_mhz` 的批次路徑，不保留共享 mutable `Fluxonium` instance；reverse transition 仍回傳帶符號頻差。
 - `predict_matrix_element(cur_value, transition, operator="n"|"phi")` — 回傳 `|⟨i|O|j⟩|`。scalar/array 都委派到 `FluxoniumPrediction.predict_matrix_elements`；facade 仍只支援含 level 0,1 的 transition，level≥2 以 `ValueError` fast-fail，高 level 支援屬功能擴充另案。
 - `calculate_bias(cur_value, cur_freq, transition)` —
-  在 `[cur_value ± 0.25·flux_period]` 本地窗口中以 `scipy.root_scalar(method="secant")` 找使預測頻率吻合的點,然後枚舉 **週期 + 鏡像對稱** 的所有等價 bias,回傳 `|bias|` 最小者。root find 失敗或落在窗口外時會 `RuntimeWarning`，並用目前值作 fallback。
+  以自身的精確頻譜反解，回 `simulate.predictor.CalibrationResult(flux_bias, frequency_mhz, clamped)`。
+  枚舉所有根與週期／鏡像等價 bias，選 `|bias|` 最小者，不依目前 bias 選根。
+  不可達目標回全域最近的實際頻率，clamped=true，同距選最小 `|bias|`。
+  可達時 clamped=false。無效輸入拒絕，數值失敗傳遞，不警告後保留原值。
+  共享 solver 的分支掃描、極值細化與容差見 [transmon 數值政策](../transmon/README.md#calibration)。
 - `update_bias(flux_bias)` — 就地更新 bias。
 - `clone()` — 返回同參數的新實例(不共享 `Fluxonium` state)。
 

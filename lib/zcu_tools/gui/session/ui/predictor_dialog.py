@@ -49,7 +49,7 @@ from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
-from zcu_tools.simulate.predictor import MatrixPredictor
+from zcu_tools.simulate.predictor import CalibrationResult, MatrixPredictor
 from zcu_tools.simulate.transmon import TransmonParams
 
 if TYPE_CHECKING:
@@ -674,8 +674,8 @@ class PredictorDialog(QDialog):
         """Compute candidate native bias and update only this dialog's bias field.
 
         Inputs are the measured native value, MHz frequency and increasing level
-        pair. Service validation errors propagate without edits; root failures
-        follow the model's RuntimeWarning/fallback semantics. No source is written.
+        pair. Displays actual MHz and clamped status from the model result.
+        Validation/numerical failures propagate without edits. No source is written.
         """
         from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
 
@@ -683,8 +683,7 @@ class PredictorDialog(QDialog):
             self.parameters(),
             CalibrateFluxBiasRequest(value, frequency_mhz, transition),
         )
-        self._flux_bias_spin.setValue(result.flux_bias)
-        self._sync_calibration_button()
+        self._display_calibration(result)
         return result.flux_bias
 
     def load_parameters(self, path: str) -> None:
@@ -1192,10 +1191,17 @@ class PredictorDialog(QDialog):
         except (PredictorLoadError, ValueError) as exc:
             self._set_status(str(exc), error=True)
             return
-        self._flux_bias_spin.setValue(result.flux_bias)
-        self._set_status(f"Calibrated flux_bias={result.flux_bias:.6g}", error=False)
-        self._sync_calibration_button()
+        self._display_calibration(result)
         logger.info("PredictorDialog: calibrated flux bias %r", req)
+
+    def _display_calibration(self, result: CalibrationResult) -> None:
+        self._flux_bias_spin.setValue(result.flux_bias)
+        self._set_status(
+            f"Calibrated flux_bias={result.flux_bias:.6g}; "
+            f"{result.frequency_mhz:.6g} MHz; clamped={str(result.clamped).lower()}",
+            error=False,
+        )
+        self._sync_calibration_button()
 
     def _update_value_columns(self) -> None:
         """Fill f / |n| / |phi| columns for every tracked transition at the marker.

@@ -37,7 +37,7 @@ class PredictorControlPort(Protocol):
     def calibrate_flux_bias(
         self, params: PredictorParams, req: CalibrateFluxBiasRequest
     ) -> CalibrateFluxBiasResult:
-        """Return candidate native bias only; see PredictorService.calibrate_flux_bias."""
+        """Return native bias, actual MHz and clamped status; see PredictorService.calibrate_flux_bias."""
         ...
 
     def predict_freq_curve(
@@ -70,7 +70,7 @@ class PredictorControlFacet:
     def calibrate_flux_bias(
         self, params: PredictorParams, req: CalibrateFluxBiasRequest
     ) -> CalibrateFluxBiasResult:
-        """Return candidate native bias only; see PredictorService.calibrate_flux_bias."""
+        """Return native bias, actual MHz and clamped status; see PredictorService.calibrate_flux_bias."""
         return self._predictor.calibrate_flux_bias(params, req)
 
     def predict_freq_curve(

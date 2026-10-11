@@ -3,11 +3,27 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from math import isfinite
 from typing import Literal, Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
+
+
+@dataclass(frozen=True)
+class CalibrationResult:
+    """Read-only spectrum inversion result, not installed in any model or source.
+
+    flux_bias is the additive native device correction with minimum absolute value.
+    frequency_mhz is the actual transition frequency at that bias. clamped is true
+    only for an unreachable target; then frequency_mhz is globally closest to it,
+    with equal-frequency choices resolved by smallest absolute bias.
+    """
+
+    flux_bias: float
+    frequency_mhz: float
+    clamped: bool
 
 
 class Predictor(Protocol):
@@ -70,16 +86,18 @@ class Predictor(Protocol):
 
     def calculate_bias(
         self, cur_value: float, cur_freq: float, transition: tuple[int, int] = (0, 1)
-    ) -> float:
-        """Return a candidate additive bias in native device units; never install it.
+    ) -> CalibrationResult:
+        """Invert the model spectrum; return bias, actual MHz and clamped status.
 
-        cur_value is the finite measured device value; cur_freq is the finite
-        measured MHz frequency. transition has nonnegative integer levels with
-        from < to. Fluxonium searches a local quarter-period window, then picks
-        the smallest absolute periodic/mirror-equivalent bias among nearby
-        periods. Failed/nonlocal root searches warn with RuntimeWarning and
-        use cur_value as the fallback root, not as proof of a successful fit.
-        Numerical failures during the root search also warn and fall back.
+        Finite measured native value and MHz frequency are required; transition
+        has nonnegative integer levels with from < to. All roots participate in
+        smallest-|bias| selection, irrespective of the model's current bias.
+        Unreachable targets return the global nearest frequency (clamped=true);
+        ties choose smallest |bias|. Reachable targets have clamped=false.
+        Invalid input raises ValueError; numerical failures propagate. No query
+        installs the result or changes any input. Frequency equality tolerance
+        is 1e-7 MHz; branch discovery uses a 401-point half-period sweep and
+        exact-spectrum root/extremum refinement, without assuming monotonicity.
         """
         ...
 
