@@ -42,16 +42,22 @@ def test_t1_adapter_keeps_actual_delay_rows_and_rejected_fit(
         variables[DataVariable("time")].z,
         [[0, 1e-6, 2e-6], [0, 3e-6, np.nan], [np.nan] * 3, [np.nan] * 3],
     )
-    np.testing.assert_array_equal(variables[DataVariable("t1")].z, [20e-6, np.nan, np.nan, np.nan])
+    np.testing.assert_array_equal(
+        variables[DataVariable("t1")].z, [20e-6, np.nan, np.nan, np.nan]
+    )
     assert [(a.name, a.unit) for a in variables[DataVariable("signal")].axes] == [
         ("Time Index", ""),
         ("Flux", "native"),
     ]
-    np.testing.assert_array_equal(variables[DataVariable("signal")].axes[0].values, [0, 1, 2])
+    np.testing.assert_array_equal(
+        variables[DataVariable("signal")].axes[0].values, [0, 1, 2]
+    )
     np.testing.assert_array_equal(
         variables[DataVariable("signal")].axes[1].values, [1, 1.1, 1.2, 1.3]
     )
-    assert [(a.name, a.unit) for a in variables[DataVariable("t1")].axes] == [("Flux", "native")]
+    assert [(a.name, a.unit) for a in variables[DataVariable("t1")].axes] == [
+        ("Flux", "native")
+    ]
     assert prepared.cfg.values == plan.model_dump(mode="json")
     assert (prepared.cfg.cfg_type, prepared.cfg.schema_version) == ("T1Plan", "1.0")
     with pytest.raises(ValueError, match="usable committed"):
@@ -123,7 +129,8 @@ def test_terminal_export_roundtrip_overwrite_new_labber_and_ledger(
         assert native.cfg.values == plan.model_dump(mode="json")
         assert native.metadata.device_snapshot is None
         np.testing.assert_array_equal(
-            native.payload.variables[DataVariable("t1")].z, [20e-6, np.nan, np.nan, np.nan]
+            native.payload.variables[DataVariable("t1")].z,
+            [20e-6, np.nan, np.nan, np.nan],
         )
         assert native.payload.variables[DataVariable("signal")].z.shape == (4, 3)
     assert (
@@ -202,7 +209,7 @@ def test_output_and_ledger_failures_retain_independent_successes(
                 assert load_run_data(out.path).metadata.finished_at is None
             else:
                 assert load_grouped_labber_data(str(out.path)).variables[
-                    "signal"
+                    DataVariable("signal")
                 ].z.shape == (4, 3)
         else:
             assert out.error
@@ -248,7 +255,9 @@ def test_export_admission_rejects_before_writes(
                 prepare=None
                 if state == "unsupported"
                 else partial(
-                    science.prepare_t1_fluxdep_export, plan=plan, data_root=paths.data_root
+                    science.prepare_t1_fluxdep_export,
+                    plan=plan,
+                    data_root=paths.data_root,
                 ),
                 layout=layout,
                 ledger=ledger,
@@ -313,7 +322,17 @@ def test_labber_allocation_failure_keeps_native_and_full_ledger_record(
     entry = ledger.get(event.id)
     assert entry.record is not None
     assert entry.record["outputs"] == [
-        {"format": "data_h5", "path": str(paths.data_root / "merged.h5"), "status": "saved", "error": None},
-        {"format": "labber", "path": None, "status": "failed", "error": report.outputs[1].error},
+        {
+            "format": "data_h5",
+            "path": str(paths.data_root / "merged.h5"),
+            "status": "saved",
+            "error": None,
+        },
+        {
+            "format": "labber",
+            "path": None,
+            "status": "failed",
+            "error": report.outputs[1].error,
+        },
     ]
     assert list(outside.iterdir()) == []
