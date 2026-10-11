@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，named aliases、Run admission 與 native Load 來源
+**Last updated:** 2026-10-11，session runner／progress 共用入口
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -255,6 +255,12 @@ pre-Qt plotting policy.
 ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
+
+Composition 建立 runner／progress 後交給 `build_session_services()`。
+Run、Analyze、PostAnalyze 從回傳的 `SessionServices.runner` 取用同一 lifecycle
+機制，operation control 與 app bundle 從 `SessionServices.progress` 取用同一
+progress owner。這個入口不改 operation policy、hardware exclusion、取消或
+owner-thread delivery，也不另建 infrastructure bundle。
 
 Measure composition 在一處宣告 session-memory alias 初值：qubit 留空，resonator
 保存 `$qubit.resonator`。ContextService 在第一份非空元件 snapshot 以 registry
