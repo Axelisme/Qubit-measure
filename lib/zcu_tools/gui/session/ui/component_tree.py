@@ -9,14 +9,13 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import yaml
-from pydantic import TypeAdapter
 from qtpy.QtCore import QAbstractItemModel, QModelIndex, Qt
-from qtpy.QtGui import QBrush, QColor, QKeySequence, QPalette, QShortcut
+from qtpy.QtGui import QBrush, QKeySequence, QPalette, QShortcut
 from qtpy.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
     QComboBox,
-    QFormLayout,
+    QCompleter,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -32,14 +31,22 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
+from zcu_tools.gui.session.ui.component_editing import (
+    field_choices,
+    parse_field_input,
+    set_red,
+    show_error,
+)
 from zcu_tools.resources.entry import (
+    FieldSpec,
     FieldValueKind,
     Provenance,
     component_field_specs,
-    component_registry,
     document_fields,
     document_meta,
     document_value,
+    role_candidates,
 )
 
 if TYPE_CHECKING:
@@ -63,16 +70,18 @@ class _EditTarget:
 
     component names the owning component and segments the field path inside
     it. value_kind selects the parsing rule for the submitted text. choices
-    are drop-down options; empty means a free-text editor. initial is the
-    editor's start text, "" for an unset field. write_depth is how many
-    leading segments the owner path addresses; the remaining segments nest
-    inside the written value because their ancestor is unset.
+    are drop-down options; empty means a free-text editor. completions are
+    component names a free-text editor offers while typing (empty for none).
+    initial is the editor's start text, "" for an unset field. write_depth is
+    how many leading segments the owner path addresses; the remaining
+    segments nest inside the written value because their ancestor is unset.
     """
 
     component: str
     segments: tuple[str, ...]
     value_kind: FieldValueKind
     choices: tuple[str, ...]
+    completions: tuple[str, ...]
     initial: str
     write_depth: int
 
@@ -86,9 +95,13 @@ class ComponentTreeWidget(QWidget):
     gray "(unset)" and nested models expand into child rows. Document data
     the schema does not declare follows the declared rows. Double-click or F2
     opens an in-place editor on an editable Value cell: Enter or focus loss
-    submits, Esc cancels. All writes use the owner; errors stay visible in
-    red below the tree without changing the rejected document. A
-    setup/current selector controls the editing destination.
+    submits, Esc cancels. Choice, boolean and role reference fields edit
+    through a drop-down (references list the document's components matching
+    the role); other text fields complete component names. All writes use the owner; errors stay visible in
+    red below the tree as "<field>: <message>", with the full owner text as
+    the tooltip, without changing the rejected document. A setup/current
+    selector controls the editing destination; "Add component…" opens an
+    AddComponentDialog for that destination.
     """
 
     def __init__(
@@ -97,34 +110,37 @@ class ComponentTreeWidget(QWidget):
         """Bind the owner-thread control and render its current document.
 
         Without an entry or parameter context the tree is empty, the owner's
-        message shows as a hint and Add is disabled. Creation chooses a
-        registered kind and collects required fields before Add. Field edits
+        message shows as a hint and "Add component…" is disabled. Field edits
         go through the source owner; setup mode edits only the entry template.
         """
         super().__init__(parent)
         self._control = control
-        self._field_inputs: dict[
-            str, tuple[QLineEdit, QLabel, bool, FieldValueKind]
-        ] = {}
         self._edit_targets: dict[_RowKey, _EditTarget] = {}
         self._expanded: dict[_RowKey, bool] = {}
         layout = QVBoxLayout(self)
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel("Destination:"))
         self._destination = QComboBox()
         self._destination.addItems(["Current point", "Setup template"])
         self._destination.currentIndexChanged.connect(self.refresh)
-        layout.addWidget(self._destination)
+        toolbar.addWidget(self._destination)
+        toolbar.addStretch(1)
+        self._add_btn = QPushButton("Add component…")
+        self._add_btn.setObjectName("component_add")
+        self._add_btn.clicked.connect(self.open_add_dialog)
+        toolbar.addWidget(self._add_btn)
+        layout.addLayout(toolbar)
         self._tree = self._build_tree()
         layout.addWidget(self._tree, stretch=1)
         self._error = QLabel()
         self._error.setObjectName("component_error")
         self._error.setWordWrap(True)
-        self._mark_red(self._error)
+        set_red(self._error, red=True)
         layout.addWidget(self._error)
         self._hint = QLabel()
         self._hint.setObjectName("component_hint")
         self._hint.setWordWrap(True)
         layout.addWidget(self._hint)
-        self._build_creation(layout)
         self.refresh()
 
     def refresh(self) -> None:
@@ -138,7 +154,7 @@ class ComponentTreeWidget(QWidget):
         selected = _row_key(current) if current is not None else None
         self._tree.clear()
         self._edit_targets.clear()
-        self._error.clear()
+        self._clear_error()
         self._add_btn.setEnabled(False)
         try:
             document = self._control.inspect_document(setup=self._is_setup())
@@ -167,23 +183,39 @@ class ComponentTreeWidget(QWidget):
             self._tree.setCurrentItem(items[selected])
         self._tree.resizeColumnToContents(_FIELD)
 
+    def open_add_dialog(self) -> AddComponentDialog:
+        """Open the Add component dialog for the current destination and return it.
+
+        The dialog is window-modal and opens without blocking (QDialog.open).
+        When it adds a component, the tree refreshes and selects the new
+        component's row. The dialog deletes itself after it closes.
+        """
+        dialog = AddComponentDialog(
+            self._control,
+            setup=self._is_setup(),
+            on_added=self._show_added,
+            parent=self,
+        )
+        dialog.finished.connect(dialog.deleteLater)
+        dialog.open()
+        return dialog
+
     def add_component(
         self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
     ) -> bool:
-        """Submit Add and refresh on success, returning True.
+        """Add a component through the owner without the dialog; True on success.
 
-        Recoverable validation/resource failures display red text in the
-        component_error QLabel and return False. Input fields stay available
-        for correction; no default or empty value hides the failure.
+        Success refreshes the tree and selects the new component. Recoverable
+        validation/resource failures display red text in the component_error
+        QLabel and return False; no default or empty value hides the failure.
         """
         try:
             self._control.add_component(name, kind, fields, setup=setup)
         except Exception as exc:
             logger.exception("Component addition failed")
-            self._error.setText(str(exc))
+            show_error(self._error, exc)
             return False
-        self._error.clear()
-        self.refresh()
+        self._show_added(name)
         return True
 
     def edit_parameter(
@@ -198,20 +230,26 @@ class ComponentTreeWidget(QWidget):
                 self._control.set_parameter(capture.target, path, value)
         except Exception as exc:
             logger.exception("Parameter edit failed")
-            self._error.setText(str(exc))
+            show_error(self._error, exc)
             return False
-        self._error.clear()
         self.refresh()
         return True
 
     def _is_setup(self) -> bool:
         return self._destination.currentIndex() == 1
 
-    @staticmethod
-    def _mark_red(label: QLabel) -> None:
-        palette = label.palette()
-        palette.setColor(QPalette.ColorRole.WindowText, QColor("red"))
-        label.setPalette(palette)
+    def _show_added(self, name: str) -> None:
+        self.refresh()
+        for index in range(self._tree.topLevelItemCount()):
+            root = self._tree.topLevelItem(index)
+            if root is not None and root.text(_FIELD) == name:
+                self._tree.setCurrentItem(root)
+                return
+        raise LookupError(f"Added component {name!r} is missing from the tree")
+
+    def _clear_error(self) -> None:
+        self._error.clear()
+        self._error.setToolTip("")
 
     def _show_hint(self, text: str) -> None:
         self._hint.setText(text)
@@ -284,7 +322,8 @@ class ComponentTreeWidget(QWidget):
                         component=name,
                         segments=spec.segments,
                         value_kind=spec.value_kind,
-                        choices=_editor_choices(spec.value_kind, spec.choices),
+                        choices=_edit_choices(document, spec),
+                        completions=_edit_completions(document, spec),
                         initial=_display(value) if present else "",
                         write_depth=_write_depth(component_value, spec.segments),
                     ),
@@ -333,6 +372,7 @@ class ComponentTreeWidget(QWidget):
                         segments=relative,
                         value_kind="text" if isinstance(field.value, str) else "yaml",
                         choices=(),
+                        completions=(),
                         initial=_display(field.value),
                         write_depth=len(relative),
                     ),
@@ -392,89 +432,15 @@ class ComponentTreeWidget(QWidget):
         if raw == target.initial:
             return  # Unchanged text, including an unset row left empty, writes nothing.
         try:
-            value: YamlValue = _parse_input(target.value_kind, raw)
-        except (ValueError, TypeError, yaml.YAMLError) as exc:
-            self._error.setText(str(exc))
+            value = parse_field_input(target.value_kind, raw)
+        except ValueError as exc:
+            show_error(self._error, exc, field=".".join(target.segments))
             return
         for key in reversed(target.segments[target.write_depth :]):
             nested: YamlMap = {key: value}
             value = nested
         path = ".".join((target.component, *target.segments[: target.write_depth]))
         self.edit_parameter(path, value, setup=self._is_setup())
-
-    # ------------------------------------------------------------------
-    # Component creation
-    # ------------------------------------------------------------------
-
-    def _build_creation(self, layout: QVBoxLayout) -> None:
-        row = QHBoxLayout()
-        row.addWidget(QLabel("New component:"))
-        self._name = QLineEdit()
-        self._name.setPlaceholderText("Name")
-        row.addWidget(self._name)
-        self._kind = QComboBox()
-        self._kind.addItems(list(component_registry.kinds()))
-        row.addWidget(self._kind)
-        self._add_btn = QPushButton("Add")
-        self._add_btn.setObjectName("component_add")
-        self._add_btn.clicked.connect(self._on_add)
-        row.addWidget(self._add_btn)
-        layout.addLayout(row)
-        self._fields = QFormLayout()
-        layout.addLayout(self._fields)
-        self._kind.currentTextChanged.connect(self._rebuild_fields)
-        self._rebuild_fields()
-
-    def _rebuild_fields(self) -> None:
-        while self._fields.rowCount():
-            self._fields.removeRow(0)
-        self._field_inputs.clear()
-        kind = self._kind.currentText()
-        if not kind:
-            return
-        for spec in component_field_specs(kind):
-            if len(spec.segments) != 1:
-                continue  # Nested fields are entered as part of their group's YAML.
-            key = spec.segments[0]
-            label = QLabel(f"{key}{' *' if spec.required else ''}")
-            edit = QLineEdit()
-            if spec.required:
-                self._mark_red(label)
-                edit.setPlaceholderText("Required")
-            else:
-                edit.setPlaceholderText("Optional (schema default)")
-            self._field_inputs[key] = (edit, label, spec.required, spec.value_kind)
-            edit.textChanged.connect(self._update_required_labels)
-            self._fields.addRow(label, edit)
-
-    def _update_required_labels(self) -> None:
-        for edit, label, required, _value_kind in self._field_inputs.values():
-            if required and not edit.text():
-                self._mark_red(label)
-            else:
-                label.setPalette(self.palette())
-
-    def _on_add(self) -> None:
-        fields: YamlMap = {}
-        missing = []
-        try:
-            for key, (edit, _label, required, value_kind) in self._field_inputs.items():
-                raw = edit.text()
-                if not raw:
-                    if required:
-                        missing.append(key)
-                    continue
-                fields[key] = _parse_input(value_kind, raw)
-        except (ValueError, TypeError, yaml.YAMLError) as exc:
-            self._error.setText(str(exc))
-            return
-        if missing:
-            self._error.setText(f"Required fields missing: {', '.join(missing)}")
-            self._update_required_labels()
-            return
-        self.add_component(
-            self._name.text(), self._kind.currentText(), fields, setup=self._is_setup()
-        )
 
 
 class _ValueDelegate(QStyledItemDelegate):
@@ -504,10 +470,14 @@ class _ValueDelegate(QStyledItemDelegate):
         if not target.choices:
             editor = QLineEdit(parent)
             editor.setText(target.initial)
+            if target.completions:
+                editor.setCompleter(QCompleter(list(target.completions), editor))
             return editor
         combo = QComboBox(parent)
         if not target.initial:
             combo.addItem("")  # Blank start option: leaving it selected writes nothing.
+        elif target.initial not in target.choices:
+            combo.addItem(target.initial)  # Keep a dangling reference selectable.
         combo.addItems(list(target.choices))
         combo.setCurrentText(target.initial)
         combo.activated.connect(lambda _row: self._finish(combo))
@@ -535,6 +505,24 @@ class _ValueDelegate(QStyledItemDelegate):
     def _finish(self, combo: QComboBox) -> None:
         self.commitData.emit(combo)
         self.closeEditor.emit(combo, QAbstractItemDelegate.EndEditHint.NoHint)
+
+
+def _edit_choices(
+    document: SetupDocument | PointDocument, spec: FieldSpec
+) -> tuple[str, ...]:
+    """Drop-down options: matching components for a role reference, else declared."""
+    if spec.reference_role is not None:
+        return role_candidates(document, spec.reference_role)
+    return field_choices(spec.value_kind, spec.choices)
+
+
+def _edit_completions(
+    document: SetupDocument | PointDocument, spec: FieldSpec
+) -> tuple[str, ...]:
+    """Component names for free-text fields that may name another component."""
+    if spec.value_kind != "text" or spec.reference_role is not None:
+        return ()
+    return tuple(document.components)
 
 
 def _row_key(item: QTreeWidgetItem) -> _RowKey:
@@ -579,21 +567,6 @@ def _write_depth(component: YamlValue, segments: tuple[str, ...]) -> int:
 def _addressable(key: _RowKey) -> bool:
     # Dotted owner paths cannot name empty keys or keys containing a dot.
     return all(part and "." not in part for part in key)
-
-
-def _editor_choices(
-    value_kind: FieldValueKind, choices: tuple[str, ...]
-) -> tuple[str, ...]:
-    if value_kind == "boolean":
-        return ("true", "false")
-    return choices
-
-
-def _parse_input(value_kind: FieldValueKind, raw: str) -> YamlValue:
-    """Text and choice fields keep the raw string; others parse as one YAML value."""
-    if value_kind in ("text", "choice"):
-        return raw
-    return TypeAdapter(YamlValue).validate_python(yaml.safe_load(raw), strict=True)
 
 
 def _display(value: YamlValue) -> str:
