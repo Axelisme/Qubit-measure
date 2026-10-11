@@ -125,6 +125,7 @@ def test_plan_panel_previews_native_plan_and_blocks_incomplete_text(
     template = make_plan(inputs)
     panel = T1PlanPanel(env)
     try:
+        panel.state.write({("flux_dev",): inline_input(inputs).data["flux_dev"]}, env)
         missing = panel.preview(template.snapshot)
         assert isinstance(missing, FormErrors)
         assert ("pi_length_us",) in missing.messages

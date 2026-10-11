@@ -109,6 +109,7 @@ def test_missing_or_dangling_x180_leaves_pi_required(
     data = inline_input(inputs).data
     del data["pi_length_us"]
     data.update(T1PlanForm.default_input(env).data)
+    data["flux_dev"] = inline_input(inputs).data["flux_dev"]
     result = FormState(FormInput(T1PlanForm, data)).result(env)
     assert isinstance(result, FormErrors)
     assert ("pi_length_us",) in result.messages
@@ -169,7 +170,9 @@ def test_form_setpoints_and_modules_reach_runtime_t1_cfg(
 
 def test_missing_selections_and_point_errors_remain_directed(inputs: Inputs) -> None:
     env = FormEnv()
-    missing = FormState(T1PlanForm.default_input(env)).result(env)
+    missing_data = T1PlanForm.default_input(env).data
+    del missing_data["flux_dev"]
+    missing = FormState(FormInput(T1PlanForm, missing_data)).result(env)
     assert isinstance(missing, FormErrors)
     assert {("flux_dev",), ("fluxes",), ("qub_pulse",), ("readout",)} <= set(
         missing.messages
