@@ -96,12 +96,8 @@ class DualToneLengthAdapter(
                 label="Tested Reset",
                 shape="two_pulse",
                 overrides={
-                    "pulse1_cfg.freq": path_seed(
-                        "$qubit.ext.reset_f1", fallback=0.0
-                    ),
-                    "pulse2_cfg.freq": path_seed(
-                        "$qubit.ext.reset_f2", fallback=0.0
-                    ),
+                    "pulse1_cfg.freq": path_seed("$qubit.ext.reset_f1", fallback=0.0),
+                    "pulse2_cfg.freq": path_seed("$qubit.ext.reset_f2", fallback=0.0),
                     "pulse1_cfg.gain": path_seed(
                         "$qubit.ext.reset_gain1", fallback=1.0
                     ),

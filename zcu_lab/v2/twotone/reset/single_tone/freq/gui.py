@@ -38,12 +38,8 @@ SingleToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 def _reset_freq_range(_ctx: SessionEnv) -> SweepValue:
     """Store the calibrated sideband frequency ± 1.5 FWHM in MHz."""
     return SweepValue(
-        start=EvalValue(
-            "$qubit.ext.reset_f - 1.5 * $qubit.ext.reset_fwhm"
-        ),
-        stop=EvalValue(
-            "$qubit.ext.reset_f + 1.5 * $qubit.ext.reset_fwhm"
-        ),
+        start=EvalValue("$qubit.ext.reset_f - 1.5 * $qubit.ext.reset_fwhm"),
+        stop=EvalValue("$qubit.ext.reset_f + 1.5 * $qubit.ext.reset_fwhm"),
         expts=201,
     )
 

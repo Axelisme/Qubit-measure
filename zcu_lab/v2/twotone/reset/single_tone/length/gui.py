@@ -98,9 +98,7 @@ class SingleToneLengthAdapter(
                 shape="pulse",
                 init=ModuleInit.INLINE,
                 overrides={
-                    "pulse_cfg.freq": path_seed(
-                        "$qubit.ext.reset_f", fallback=0.0
-                    )
+                    "pulse_cfg.freq": path_seed("$qubit.ext.reset_f", fallback=0.0)
                 },
             )
             .readout()

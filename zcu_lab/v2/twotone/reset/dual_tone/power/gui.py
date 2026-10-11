@@ -115,12 +115,8 @@ class DualTonePowerAdapter(
                 shape="two_pulse",
                 locked={"pulse1_cfg.gain": 0.0, "pulse2_cfg.gain": 0.0},
                 overrides={
-                    "pulse1_cfg.freq": path_seed(
-                        "$qubit.ext.reset_f1", fallback=0.0
-                    ),
-                    "pulse2_cfg.freq": path_seed(
-                        "$qubit.ext.reset_f2", fallback=0.0
-                    ),
+                    "pulse1_cfg.freq": path_seed("$qubit.ext.reset_f1", fallback=0.0),
+                    "pulse2_cfg.freq": path_seed("$qubit.ext.reset_f2", fallback=0.0),
                 },
             )
             .readout()
