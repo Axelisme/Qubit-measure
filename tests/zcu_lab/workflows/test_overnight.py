@@ -17,6 +17,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.program.v2 import SweepCfg
 
 from tests.experiment.workflows._engine_fakes import RecordingBar, RecordingDevices
 from zcu_lab import workflows
@@ -41,7 +42,8 @@ def test_overnight_commits_fixed_native_pairs_and_round_progress(
         readout=inputs.readout.modules.readout,
         snapshot=make_snapshot(),
     )
-    tun = workflows.OvernightTunables(reps=100, rounds=2)
+    # Echo's low contrast needs shot-noise averaging, as in native recovery tests.
+    tun = workflows.OvernightTunables(reps=2000, rounds=2)
     devices = RecordingDevices()
     driver = FakeDevice(fast_mode=True)
     devices.drivers["flux"] = driver
@@ -131,6 +133,8 @@ def assert_native_pair(
     assert t2_metadata.device_snapshot == t1_metadata.device_snapshot
     assert t1_metadata.snapshot == plan.snapshot
     assert t2_metadata.snapshot == plan.snapshot
+    assert t1.cfg is not None and t2.cfg is not None
+    assert isinstance(t1.cfg.sweep.length, SweepCfg)
     assert t1.cfg.reps == t2.cfg.reps == tun.reps
     assert t1.cfg.rounds == t2.cfg.rounds == tun.rounds
     assert t1.cfg.sweep.length.stop == 80.0
