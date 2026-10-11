@@ -121,9 +121,11 @@ class ContextControlPort(Protocol):
     ) -> str:
         """Accept at the fixed target through the context owner and shared loop.
 
-        SavedPoint parameter/library values persist; EntryDraft values stay in
-        memory. Both append samples to entry JSONL; draft samples use point=None. Successful prefix
-        writes publish before later failures. Item failure raises
+        Nonempty writes require SavedPoint. EntryDraft raises the existing
+        FailedPreconditionError(storage_unavailable), asking the caller to select
+        or create a working point before any event or value is written.
+        SavedPoint parameter/library values persist and samples append to entry
+        JSONL. Successful prefix writes publish before later failures. Item failure raises
         WritebackApplyError with accepted event_id, applied count and original
         cause. Target admission and ledger append errors propagate unchanged.
         No implicit point creation, saving, rollback or retry is provided.

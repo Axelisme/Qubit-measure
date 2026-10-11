@@ -92,14 +92,14 @@ class _ContextWritebackTarget:
     """Bind the context's target setters to the shared ordered execution loop."""
 
     def __init__(
-        self, context: ContextService, target: ContextTarget, entry: ResultEntry
+        self, context: ContextService, target: SavedPoint, entry: ResultEntry
     ) -> None:
         self._context = context
         self._target = target
         self._entry = entry
         self.entry_id = entry.entry_id
         self.ledger = entry.ledger
-        self.point = target.point if isinstance(target, SavedPoint) else None
+        self.point = target.point
 
     def set_parameter(self, path: str, value: JsonValue, source: Provenance) -> None:
         self._context.set_parameter(self._target, path, value, source=source)
@@ -498,12 +498,13 @@ class ContextService:
         *,
         evidence: WritebackEvidence,
     ) -> str:
-        """Accept ordered concrete writes at a fixed saved point or memory draft.
+        """Accept nonempty ordered concrete writes at a fixed SavedPoint.
 
-        Validate the opened entry and selected-draft requirement before append.
-        SavedPoint parameter/library setters commit files; EntryDraft values stay
-        in memory. Both append entry JSONL samples immediately; draft point is
-        None. Discarding a draft never removes its accepted samples.
+        Validate the opened entry and target before append. EntryDraft raises
+        FailedPreconditionError(storage_unavailable), requiring the caller to
+        select or create a working point. No event or value is written for it.
+        SavedPoint parameter/library setters commit files; samples append to
+        entry JSONL immediately with the captured point label.
         Each successful item installs and publishes its actual content prefix,
         even when a later item fails. Detached point writes never select it.
         Return the accepted ID on success. WritebackApplyError exposes event_id,
@@ -511,7 +512,14 @@ class ContextService:
         unchanged. No point creation, draft save, retry or rollback occurs.
         """
         self._owner.assert_owner()
+        if not items:
+            raise ValueError("writeback items must be nonempty")
         entry = self._require_write_target(target)
+        if not isinstance(target, SavedPoint):
+            raise FailedPreconditionError(
+                "Please select or create a working point before applying writeback",
+                reason_code="storage_unavailable",
+            )
         return apply_writeback(
             items,
             target=_ContextWritebackTarget(self, target, entry),
