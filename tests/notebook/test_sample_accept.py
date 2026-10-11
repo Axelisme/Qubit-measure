@@ -15,6 +15,8 @@ from zcu_tools.resources.entry import (
     ResultEntry,
 )
 
+from zcu_tools.resources.entry import writeback
+
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 
 
@@ -114,7 +116,7 @@ def test_sample_failure_keeps_prior_parameter_and_sample_and_stops(
     blocked = entry.result_path / "samples" / "blocked.jsonl"
     blocked.mkdir(parents=True)
     before = len(entry.ledger.events())
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(
             parameter={"general.description": "retained"},
             samples={
@@ -126,6 +128,9 @@ def test_sample_failure_keeps_prior_parameter_and_sample_and_stops(
     assert len(entry.ledger.events()) == before + 1
     event = entry.ledger.events()[-1]
     assert event.kind == "accepted"
+    assert caught.value.event_id == event.id
+    assert caught.value.applied == 2
+    assert isinstance(caught.value.__cause__, IsADirectoryError)
     point.refresh()
     assert point.description == "retained"
     assert entry.samples("Q1").read().iloc[0]["source"] == event.id
@@ -136,12 +141,16 @@ def test_parameter_failure_does_not_reach_samples(
     entry: ResultEntry, point: PointView, saved: SavedRun[SavingCfg, SavingResult]
 ) -> None:
     before = len(entry.ledger.events())
-    with pytest.raises(ValueError, match="description"):
+    with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(
             parameter={"general.description": 42}, samples={"Q1": {"t1_us": 20.09}}
         )
     assert len(entry.ledger.events()) == before + 1
     assert entry.ledger.events()[-1].kind == "accepted"
+    assert caught.value.event_id == entry.ledger.events()[-1].id
+    assert caught.value.applied == 0
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert "description" in str(caught.value.__cause__)
     point.refresh()
     assert point.description == "original"
     assert entry.samples("Q1").read().empty

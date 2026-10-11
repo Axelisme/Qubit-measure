@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import h5py
 import numpy as np
 import pytest
+from zcu_tools.resources.entry import writeback
 from zcu_tools.cfg_model import ConstWaveformCfg, DirectReadoutCfg, PulseSpec
 from zcu_tools.datafile import (
     AnalysisDocument,
@@ -627,7 +628,6 @@ def test_accept_writes_role_values_and_local_accepted_provenance(
     assert event.kind == "accepted"
     assert isinstance(event.payload, AcceptedPayload)
     assert event.payload.run_id == saved.run_id
-    assert event.payload.analysis_summary == {}
     assert [(write.path, write.value) for write in event.payload.writes] == [
         ("D1.rate", 1250.0),
         ("general.description", "accepted fit"),
@@ -665,7 +665,6 @@ def test_accept_preserves_json_containers_and_unknown_stderr(
     assert point.general.ext.optional is None
     event = ledger.get(event_id).event
     assert isinstance(event.payload, AcceptedPayload)
-    assert event.payload.analysis_summary == {}
     assert event.payload.writes[0].value == {"series": [1, 2], "optional": None}
     metadata = point.meta("general.ext.series")
     assert metadata is not None
@@ -734,7 +733,7 @@ def test_accept_schema_failure_keeps_event_and_prior_writes_and_stops(
     source = exp.run(SavingCfg())
     saved = exp.save_run(accept_point, source=source)
     before_source = accept_point.meta("D1.rate")
-    with pytest.raises(ValueError, match="rate"):
+    with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(
             parameter={
                 "general.description": "candidate",
@@ -748,6 +747,10 @@ def test_accept_schema_failure_keeps_event_and_prior_writes_and_stops(
     assert isinstance(event.payload, AcceptedPayload)
     assert event.payload.run_id == saved.run_id
     assert event.payload.writes[1].value == "not a number"
+    assert caught.value.event_id == event.id
+    assert caught.value.applied == 1
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert "rate" in str(caught.value.__cause__)
     accept_point.refresh()
     assert accept_point.description == "candidate"
     assert accept_point.D1.rate == 1000.0
@@ -787,9 +790,11 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
     source = exp.run(SavingCfg())
     saved = exp.save_run(bound, source=source)
     before_point = snapshot(bound)
-    with pytest.raises(RuntimeError, match="point validation rejected") as caught:
+    with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(parameter={"general.description": "candidate"})
-    assert caught.value is failure
+    assert caught.value.__cause__ is failure
+    assert caught.value.applied == 0
+    assert caught.value.event_id == ledger.events()[-1].id
     assert ledger.events()[-1].kind == "accepted"
     bound.refresh()
     assert bound.description == "save-time context"
@@ -851,7 +856,6 @@ def test_accept_writes_parameter_module_waveform_with_one_event(
     assert event.origin == "notebook"
     assert event.payload.run_id == saved.run_id
     assert event.payload.source is None
-    assert event.payload.analysis_summary == {}
     entry = ResultEntry.open(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
@@ -903,7 +907,7 @@ def test_accept_library_failure_keeps_prior_commits_and_stops(
     exp = experiment()
     saved = exp.save_run(accept_point, source=exp.run(SavingCfg()))
     before = len(ledger.events())
-    with pytest.raises(ValueError, match="Wrong module family"):
+    with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(
             parameter={"D1.rate": 1700.0},
             module={
@@ -923,6 +927,10 @@ def test_accept_library_failure_keeps_prior_commits_and_stops(
     )
     library = entry.module_library("sweet").snapshot()
     assert library.module_keys() == ("D1.pulses.good",)
+    assert caught.value.event_id == ledger.events()[-1].id
+    assert caught.value.applied == 2
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert "Wrong module family" in str(caught.value.__cause__)
     assert library.waveform_keys() == ()
     rate_meta = accept_point.meta("D1.rate")
     module_meta = library.meta("D1.pulses.good.gain")

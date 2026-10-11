@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     WaveformWriteback,
 )
-from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.ports import CfgEdit, CfgEditResult
 from zcu_tools.gui.app.measure.services.writeback import (
@@ -409,3 +409,43 @@ def test_apply_draft_records_accepted_before_selected_setter(session, monkeypatc
     current = control.read_context()
     assert current.value("general.ext.r_f") == 1.0
     assert not current.lookup("general.ext.skip").present
+
+
+def waveform_schema() -> CfgSchema:
+    spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=0.1).to_dict())
+    return CfgSchema(spec, value)
+
+
+def test_apply_shared_flow_keeps_gui_selection_edits_and_failure_prefix(session):
+    from zcu_tools.resources.entry import writeback
+
+    entry, control, _editor, service = session
+    draft = service.create_draft(
+        [
+            WaveformWriteback("Q1.waveforms.base", "waveform", edit_schema=waveform_schema()),
+            ParameterWriteback("general.ext.before", "parameter", proposed_value=1.0, stderr=0.3),
+            ParameterWriteback("general.description", "invalid", proposed_value=42),
+            ParameterWriteback("general.ext.after", "later", proposed_value=2.0),
+        ],
+        parameters=control.read_context(),
+        experiment_name="test/gui-fit",
+        run_id="run-fixed",
+    )
+    draft.edit("param-1", target_name="general.ext.tuned", proposed_value=3.0)
+    draft.edit("param-3", selected=False)
+    draft.edit("wf-1", edits=[{"path": "length", "value": 0.25}])
+    with pytest.raises(writeback.WritebackApplyError) as caught:
+        draft.apply()
+    assert caught.value.applied == 2
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert service.get_all_applied(draft) == {"wf-1": True, "param-1": True, "param-2": False, "param-3": False}
+    current = control.read_context()
+    assert current.value("general.ext.tuned") == 3.0
+    assert not current.lookup("general.ext.after").present
+    assert current.library.waveform_spec("Q1.waveforms.base") == ConstWaveformCfg(length=0.25)
+    meta = current.meta("general.ext.tuned")
+    assert meta is not None
+    assert (meta.kind, meta.run_id, meta.stderr, meta.source) == ("test/gui-fit", "run-fixed", 0.3, caught.value.event_id)
+    event = entry.ledger.get(caught.value.event_id).event
+    assert isinstance(event.payload, writeback.AcceptedPayload)
+    assert [write.path for write in event.payload.writes] == ["Q1.waveforms.base", "general.ext.tuned", "general.description"]
