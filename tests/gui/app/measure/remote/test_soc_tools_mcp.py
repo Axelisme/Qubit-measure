@@ -106,8 +106,6 @@ def test_simulation_initialize_binds_live_flux_and_reuses_gui_environment(
     soc = fx.state.session_env.soc
     assert isinstance(soc, MockQickSoc)
     assert soc.flux_source is not None
-    predictor = fx.state.session_env.predictor
-    assert predictor is not None
     assert invoke("status", {})["soc"] == {"connected": True, "mock": True}
     for value in (0.001, 0.002):
         snapshot = invoke(
@@ -141,7 +139,6 @@ def test_simulation_initialize_binds_live_flux_and_reuses_gui_environment(
     again = invoke("rpc_call", {"method": "simulation.initialize"})
     assert invoke("wait", {"op": again["handle"], "timeout": 3})["status"] == "finished"
     assert fx.state.session_env.soc is soc
-    assert fx.state.session_env.predictor is predictor
     assert soc.flux_source() == pytest.approx(0.002)
 
 

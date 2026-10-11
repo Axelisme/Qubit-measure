@@ -192,7 +192,6 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
             run_result=result,
             analyze_params=_default_analyze_params(adapter, result, ctx),
             parameters=ctx.parameters,
-            predictor=ctx.predictor,
         ),
         plots=analysis_plots,
     )

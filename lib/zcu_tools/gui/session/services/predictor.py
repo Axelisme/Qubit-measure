@@ -1,15 +1,12 @@
-"""PredictorService — FluxoniumPredictor loading and frequency prediction.
+"""Independent simulator queries and read-only component/file parameter prefill.
 
-Owns the ``session_env.predictor`` write seam (set_context + PredictorChangedPayload)
-and all synchronous prediction computation. This is pure computation: no Qt signals,
-no operation runner, no exclusion gate. Errors surface as PredictorLoadError /
-PredictorNotLoaded for the caller to translate.
+No installed model, dialog state, hardware access, context mutation or events.
+Each computation builds a fresh model from the explicit named parameters.
 """
 
 from __future__ import annotations
 
-import dataclasses
-import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -17,54 +14,29 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.gui.session.events import PredictorChangedPayload
+from zcu_tools.resources.entry.schema import ComponentSchema
+from zcu_tools.resources.entry.views import ComponentView
 from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
-from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
-from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+from zcu_tools.simulate.parameters import ModelParams
+from zcu_tools.simulate.predictor import CalibrationResult as CalibrateFluxBiasResult
+from zcu_tools.simulate.predictor import (
+    MatrixPredictor,
+    PredictorInputError,
+    PredictorParams,
+)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.session.state import SessionState
+    from zcu_tools.gui.session.context_control import ContextControlPort
 
-logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Typed requests
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class LoadPredictorRequest:
-    # path is Optional so the same request type can represent both the file-load
-    # path (a concrete params.json) and the in-memory install path (None — the
-    # predictor is built from typed params, no backing file). load_predictor
-    # itself still requires a concrete path; None is rejected fast there.
-    path: str | None
-    flux_bias: float
-
-
-@dataclass(frozen=True)
-class SetModelParamsRequest:
-    """Build a FluxoniumPredictor straight from typed model params (no file).
-
-    EJ/EC/EL are the Fluxonium energies in GHz; flux_half/flux_period are the
-    value->flux affine anchors (device-value units); flux_bias is the predictor
-    bias correction. Routes through install_predictor (the in-memory seam) so a
-    user/agent can plug in trial energies (e.g. EJ:EC:EL = 4:1:1) directly.
-    """
-
-    EJ: float
-    EC: float
-    EL: float
-    flux_half: float
-    flux_period: float
-    flux_bias: float = 0.0
+# The user package owns component field meanings. The framework only passes the
+# captured component; no factory metadata, write paths or schema guessing.
+ParamsFor = Callable[[ComponentSchema | ComponentView], ModelParams]
 
 
 @dataclass(frozen=True)
 class CalibrateFluxBiasRequest:
-    """Calibrate predictor flux_bias from one measured transition frequency."""
+    """Measured native device value, MHz frequency and increasing level pair."""
 
     value: float
     frequency_mhz: float
@@ -72,21 +44,16 @@ class CalibrateFluxBiasRequest:
 
 
 @dataclass(frozen=True)
-class CalibrateFluxBiasResult:
-    """Result returned after installing the calibrated predictor."""
-
-    flux_bias: float
-
-
-@dataclass(frozen=True)
 class PredictFreqRequest:
+    """Finite native device value and nonnegative integer (from, to) level pair."""
+
     value: float
     transition: tuple[int, int]
 
 
 @dataclass(frozen=True)
 class PredictCurveRequest:
-    """Request a batch of transition-frequency curves over a device-value grid."""
+    """Finite 1-D native values and nonempty ordered increasing/equal level pairs."""
 
     values: NDArray[np.float64]
     transitions: tuple[tuple[int, int], ...]
@@ -94,18 +61,21 @@ class PredictCurveRequest:
 
 @dataclass(frozen=True)
 class PredictCurveResult:
-    """Result of a batch curve computation."""
+    """Frequency curves; labels follow request transitions (e.g. 0→1).
+
+    values and fluxs are (n_values,) native device values and flux quanta.
+    freqs_mhz is (n_transitions, n_values), in MHz, in request row/column order.
+    """
 
     labels: tuple[str, ...]
     values: NDArray[np.float64]
     fluxs: NDArray[np.float64]
-    # shape: (n_transitions, n_values), frequencies in MHz
     freqs_mhz: NDArray[np.float64]
 
 
 @dataclass(frozen=True)
 class PredictMatrixCurveRequest:
-    """Request a batch of transition matrix-element magnitudes over a device-value grid."""
+    """Finite 1-D native values, ordered level pairs and charge n or phase phi."""
 
     values: NDArray[np.float64]
     transitions: tuple[tuple[int, int], ...]
@@ -114,308 +84,129 @@ class PredictMatrixCurveRequest:
 
 @dataclass(frozen=True)
 class PredictMatrixCurveResult:
-    """Result of a batch matrix-element curve computation."""
+    """Matrix curves with labels in transition order (e.g. 0→3).
+
+    values and fluxs are (n_values,) native values and flux quanta.
+    mags is (n_transitions, n_values) dimensionless absolute matrix elements.
+    """
 
     labels: tuple[str, ...]
     values: NDArray[np.float64]
     fluxs: NDArray[np.float64]
-    # shape: (n_transitions, n_values), dimensionless magnitudes |<i|op|j>|
     mags: NDArray[np.float64]
 
 
-# ---------------------------------------------------------------------------
-# Typed expected failures
-# ---------------------------------------------------------------------------
-
-
 class PredictorLoadError(FailedPreconditionError):
-    """Expected failure: predictor file could not be loaded / parsed."""
+    """Expected failure reading the legacy params.json prefill source."""
 
 
-class PredictorNotLoaded(FailedPreconditionError):
-    """Expected failure: a predictor operation needs a loaded model."""
+def read_fluxdep_fit_params(path: str) -> FluxoniumParams:
+    """Read fluxdep_fit from an existing params.json; never write the file.
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message, reason_code="predictor_not_loaded")
-
-
-# ---------------------------------------------------------------------------
-# Pure query: read fluxdep_fit model params from a params.json
-# ---------------------------------------------------------------------------
-
-
-def read_fluxdep_fit_params(path: str) -> SetModelParamsRequest:
-    """Read a params.json and return its fluxdep_fit model params.
-
-    Pure query (no state/bus) for the dialog's "Load -> fields" action: it parses
-    the file but does NOT install a predictor, so the user can tweak the populated
-    fields before applying. flux_bias defaults to 0.0 (the file's fluxdep_fit
-    carries no bias — that is a per-measurement correction). flux_int is read by
-    the fit but deliberately omitted here: it is alignment-only, not part of the
-    predictor's value<->flux affine.
-
-    Raises PredictorLoadError on any IO / missing-key problem.
+    Return GHz energies and native affine anchors. The legacy file has no bias,
+    so its documented prefill bias is 0.0. flux_int is alignment-only, not an
+    input to the simulator. I/O/missing-fit errors become PredictorLoadError.
     """
     try:
         model = QubitParams(path, readonly=True).require_fluxonium_model()
-    except (FileNotFoundError, OSError, QubitParamsError) as exc:
+    except (OSError, QubitParamsError) as exc:
         raise PredictorLoadError(f"Failed to read params file: {exc}") from exc
-    return SetModelParamsRequest(
-        EJ=model.EJ,
-        EC=model.EC,
-        EL=model.EL,
-        flux_half=model.flux_half,
-        flux_period=model.flux_period,
+    return FluxoniumParams(
+        model.EJ, model.EC, model.EL, model.flux_half, model.flux_period, 0.0
     )
 
 
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
-
-
 class PredictorService:
-    """Owns the session_env.predictor write seam and all prediction computation.
+    """Read-only computations, independent of dialog and session model state.
 
-    Pure class (not QObject): emits PredictorChangedPayload via the EventBus,
-    has no Qt signals. Predictor load and predict_freq are synchronous; they raise
-    PredictorLoadError / PredictorNotLoaded for user-facing problems.
+    context supplies a current point capture on its owner thread; params_for is
+    injected by app composition and owns component→named-input conversion.
+    Either may be None for standalone explicit-parameter queries. Every query
+    leaves parameters, components, files and session versions unchanged.
     """
 
     def __init__(
         self,
-        state: SessionState,
-        bus: BaseEventBus,
+        context: ContextControlPort | None = None,
+        params_for: ParamsFor | None = None,
     ) -> None:
-        self._state = state
-        self._bus = bus
-        self._predictor_path: str | None = None
+        self._context = context
+        self._params_for = params_for
 
-    # ------------------------------------------------------------------
-    # Queries
-    # ------------------------------------------------------------------
+    def params_for_qubit(self, qubit: str) -> ModelParams:
+        """Read named inputs for one concrete component at the current point.
 
-    def get_predictor(self) -> FluxoniumPredictor | None:
-        return self._state.session_env.predictor
-
-    def get_predictor_info(self) -> dict | None:
-        """Return metadata about the current predictor, or None if not loaded.
-
-        Keys: path, flux_bias, flux_half, flux_period, EJ, EC, EL.
-        Exposing flux_half / flux_period lets the dialog build the affine
-        conversions without importing FluxoniumPredictor; the EJ/EC/EL energies
-        (predictor.params is the (EJ, EC, EL) GHz tuple) let the dialog read the
-        active model back into its editable fields.
+        Names must be public Python identifiers (e.g. Q2), not aliases/paths.
+        PredictorInputError names invalid/unknown components or unsupported physics kinds.
+        Missing provider/context raises FailedPreconditionError. EMPTY/source
+        faults from ContextService propagate. Missing fields remain None.
+        No read refreshes a source, changes aliases or binds a dialog to a qubit.
         """
-        predictor = self._state.session_env.predictor
-        if predictor is None:
-            return None
-        ej, ec, el = predictor.params
-        return {
-            "path": self._predictor_path,
-            "flux_bias": predictor.flux_bias,
-            "flux_half": predictor.flux_half,
-            "flux_period": predictor.flux_period,
-            "EJ": ej,
-            "EC": ec,
-            "EL": el,
-        }
-
-    # ------------------------------------------------------------------
-    # Predictor management (sync)
-    # ------------------------------------------------------------------
-
-    def load_predictor(self, req: LoadPredictorRequest) -> None:
-        logger.info("load_predictor: path=%r flux_bias=%r", req.path, req.flux_bias)
-        # path is Optional on the request (shared with the in-memory install path),
-        # but the file-load path needs a concrete file — fail fast on None.
-        if req.path is None:
-            raise PredictorLoadError("load_predictor requires a file path, got None")
-        try:
-            predictor = FluxoniumPredictor.from_file(req.path, flux_bias=req.flux_bias)
-        except (FileNotFoundError, OSError, ValueError, KeyError) as exc:
-            raise PredictorLoadError(f"Failed to load predictor: {exc}") from exc
-        self._predictor_path = req.path
-        new_ctx = dataclasses.replace(self._state.session_env, predictor=predictor)
-        self._state.set_context(new_ctx)
-        self._bus.emit(PredictorChangedPayload())
-
-    def set_model_params(self, req: SetModelParamsRequest) -> None:
-        """Build a FluxoniumPredictor from typed model params and install it.
-
-        Routes through install_predictor (the in-memory seam) — NOT a file load —
-        so a user/agent can plug trial energies directly. flux_period must be
-        non-zero: the value<->flux affine divides by it (a zero period would make
-        the mapping singular), so reject it fast with a clear message.
-        """
-        logger.info(
-            "set_model_params: EJ=%r EC=%r EL=%r flux_half=%r flux_period=%r flux_bias=%r",
-            req.EJ,
-            req.EC,
-            req.EL,
-            req.flux_half,
-            req.flux_period,
-            req.flux_bias,
-        )
-        if req.flux_period == 0.0:
-            raise PredictorLoadError(
-                "flux_period must be non-zero (value<->flux affine)"
+        if not qubit.isidentifier() or qubit.startswith("_"):
+            raise PredictorInputError(f"Invalid concrete qubit name: {qubit}")
+        if self._context is None or self._params_for is None:
+            raise FailedPreconditionError(
+                "Component parameter prefill is not configured"
             )
-        predictor = FluxoniumPredictor(
-            (req.EJ, req.EC, req.EL),
-            req.flux_half,
-            req.flux_period,
-            req.flux_bias,
-        )
-        self.install_predictor(predictor)
+        document = self._context.read_context().document()
+        if qubit not in document.components:
+            raise PredictorInputError(f"Unknown qubit component: {qubit}")
+        return self._params_for(document.components[qubit])
 
-    def install_predictor(self, predictor: FluxoniumPredictor) -> None:
-        """Install a ready-made predictor object (no file load).
-
-        Used by the FLUX-AWARE-MOCK provisioner to install a predictor derived from
-        the mock soc's SimParams. Shares the same write seam as ``load_predictor``
-        (set_context + PredictorChangedPayload) so the View / MCP see it identically;
-        the predictor path is cleared because this predictor has no backing file.
-        """
-        logger.info("install_predictor: %s", type(predictor).__name__)
-        self._predictor_path = None
-        new_ctx = dataclasses.replace(self._state.session_env, predictor=predictor)
-        self._state.set_context(new_ctx)
-        self._bus.emit(PredictorChangedPayload())
-
-    def clear_predictor(self) -> None:
-        logger.info("clear_predictor")
-        self._predictor_path = None
-        new_ctx = dataclasses.replace(self._state.session_env, predictor=None)
-        self._state.set_context(new_ctx)
-        self._bus.emit(PredictorChangedPayload())
+    def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
+        """Return MHz for the explicit params/request; PredictorInputError rejects missing/invalid inputs."""
+        return params.build_predictor().predict_freq(req.value, req.transition)
 
     def calibrate_flux_bias(
-        self, req: CalibrateFluxBiasRequest
+        self, params: PredictorParams, req: CalibrateFluxBiasRequest
     ) -> CalibrateFluxBiasResult:
-        """Compute and install a flux-bias correction from one measured point."""
-        predictor = self._state.session_env.predictor
-        if predictor is None:
-            raise PredictorNotLoaded("No predictor loaded — load one first")
-        frm, to = req.transition
-        if frm < 0 or to < 0:
-            raise InvalidInputError(
-                f"Transition levels must be >= 0, got {req.transition}",
-                reason_code="invalid_transition",
-            )
-        if frm >= to:
-            raise InvalidInputError(
-                f"Transition from-level must be < to-level, got {req.transition}",
-                reason_code="invalid_transition",
-            )
+        """Return the model's native bias, actual MHz and clamped status, without writes.
 
-        flux_bias = float(
-            predictor.calculate_bias(
-                float(req.value), float(req.frequency_mhz), req.transition
-            )
-        )
-        calibrated = FluxoniumPredictor(
-            predictor.params,
-            predictor.flux_half,
-            predictor.flux_period,
-            flux_bias,
-        )
-        new_ctx = dataclasses.replace(self._state.session_env, predictor=calibrated)
-        self._state.set_context(new_ctx)
-        self._bus.emit(PredictorChangedPayload())
-        logger.info(
-            "calibrate_flux_bias: value=%r frequency_mhz=%r transition=%r flux_bias=%r",
-            req.value,
-            req.frequency_mhz,
-            req.transition,
-            flux_bias,
-        )
-        return CalibrateFluxBiasResult(flux_bias=flux_bias)
-
-    # ------------------------------------------------------------------
-    # Prediction computation (sync, pure)
-    # ------------------------------------------------------------------
-
-    def predict_freq(self, req: PredictFreqRequest) -> float:
-        predictor = self._state.session_env.predictor
-        if predictor is None:
-            raise PredictorNotLoaded("No predictor loaded — load one first")
-        return float(predictor.predict_freq(req.value, transition=req.transition))
-
-    def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
-        """Compute f_ij vs device-value curves for multiple transitions in one pass.
-
-        Uses FluxoniumPrediction so all transitions share a single diagonalisation
-        sweep — O(n_values) eigensolves rather than O(n_transitions * n_values).
-        The value→flux affine is owned by simulate.fluxonium.prediction.
+        Missing/invalid params raise PredictorInputError. Non-increasing/negative or
+        noninteger levels raise InvalidInputError. The model owns root selection
+        and clamping; numerical failures propagate. No caller recomputes the fit.
         """
-        predictor = self._state.session_env.predictor
-        if predictor is None:
-            raise PredictorNotLoaded("No predictor loaded — load one first")
-        if len(req.transitions) == 0:
-            raise ValueError("transitions must not be empty")
-        for frm, to in req.transitions:
-            if frm < 0 or to < 0:
-                raise ValueError(f"Transition levels must be >= 0, got ({frm}, {to})")
-            if to < frm:
-                raise ValueError(
-                    f"Transition to-level must be >= from-level, got ({frm}, {to})"
-                )
-
-        values = np.asarray(req.values, dtype=np.float64)
-        engine = _engine_from_predictor(predictor)
-        fluxs, freqs_mhz = engine.predict_frequencies_mhz(
-            values, req.transitions, cutoff=40
+        frm, to = req.transition
+        if type(frm) is not int or type(to) is not int or frm < 0 or frm >= to:
+            raise InvalidInputError(
+                f"Transition from-level must be < to-level and >= 0, got {req.transition}",
+                reason_code="invalid_transition",
+            )
+        return params.build_predictor().calculate_bias(
+            req.value, req.frequency_mhz, req.transition
         )
-        labels = [f"{frm}→{to}" for frm, to in req.transitions]
+
+    def predict_freq_curve(
+        self, params: PredictorParams, req: PredictCurveRequest
+    ) -> PredictCurveResult:
+        """Return labeled MHz curves using the neutral batch model contract.
+
+        Missing/invalid params or batch inputs raise PredictorInputError. Engine failures
+        propagate. Returned values are copied; the request arrays are not changed.
+        """
+        values = np.array(req.values, dtype=np.float64, copy=True)
+        fluxs, freqs = params.build_predictor().predict_frequencies_mhz(
+            values, req.transitions
+        )
         return PredictCurveResult(
-            labels=tuple(labels),
-            values=values,
-            fluxs=fluxs,
-            freqs_mhz=freqs_mhz,
+            tuple(f"{frm}→{to}" for frm, to in req.transitions), values, fluxs, freqs
         )
 
     def predict_matrix_element_curve(
-        self, req: PredictMatrixCurveRequest
+        self, params: PredictorParams, req: PredictMatrixCurveRequest
     ) -> PredictMatrixCurveResult:
-        """Compute |<i|op|j>| vs device-value curves for multiple transitions.
+        """Return labeled dimensionless magnitudes for n/phi, including high levels.
 
-        Uses FluxoniumPrediction so there is no per-level cap — unlike
-        FluxoniumPredictor.predict_matrix_element which hard-limits both levels to
-        <=1. The engine sets return_dim to max(level)+1 so higher transitions
-        (e.g. 0->3) work correctly.
+        PredictorInputError rejects missing/invalid inputs. A frequency-only model raises
+        FailedPreconditionError. Engine errors propagate; inputs are not changed.
         """
-        predictor = self._state.session_env.predictor
-        if predictor is None:
-            raise PredictorNotLoaded("No predictor loaded — load one first")
-        if len(req.transitions) == 0:
-            raise ValueError("transitions must not be empty")
-        for frm, to in req.transitions:
-            if frm < 0 or to < 0:
-                raise ValueError(f"Transition levels must be >= 0, got ({frm}, {to})")
-            if to < frm:
-                raise ValueError(
-                    f"Transition to-level must be >= from-level, got ({frm}, {to})"
-                )
-
-        values = np.asarray(req.values, dtype=np.float64)
-        engine = _engine_from_predictor(predictor)
-        fluxs, mags = engine.predict_matrix_elements(
+        model = params.build_predictor()
+        if not isinstance(model, MatrixPredictor):
+            raise FailedPreconditionError("This model does not provide matrix elements")
+        values = np.array(req.values, dtype=np.float64, copy=True)
+        fluxs, mags = model.predict_matrix_elements(
             values, req.transitions, req.operator
         )
-        labels = [f"{frm}→{to}" for frm, to in req.transitions]
         return PredictMatrixCurveResult(
-            labels=tuple(labels),
-            values=values,
-            fluxs=fluxs,
-            mags=mags,
+            tuple(f"{frm}→{to}" for frm, to in req.transitions), values, fluxs, mags
         )
-
-
-def _engine_from_predictor(predictor: FluxoniumPredictor) -> FluxoniumPrediction:
-    return FluxoniumPrediction(
-        predictor.params,
-        flux_half=predictor.flux_half,
-        flux_period=predictor.flux_period,
-        flux_bias=predictor.flux_bias,
-    )

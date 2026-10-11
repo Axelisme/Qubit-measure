@@ -114,7 +114,6 @@ def test_allxy_analysis_reports_fitted_errors(fit_ge: bool) -> None:
                 record,
                 AllXYAnalyzeParams(fit_ge=fit_ge),
                 parameters=None,
-                predictor=None,
             ),
             plots=plots,
         )

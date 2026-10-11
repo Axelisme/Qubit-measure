@@ -364,15 +364,8 @@ def test_entry_commands_without_entry_fail_explicitly(
 def test_install_entry_preserves_nonparameter_capabilities_without_selecting_point(
     tmp_path: Path,
 ) -> None:
-    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
-
-    predictor = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
     context = ContextService(
-        SessionState(
-            SessionEnv(parameters=None, soc=None, soccfg=None, predictor=predictor)
-        ),
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
         BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
         alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
@@ -386,7 +379,6 @@ def test_install_entry_preserves_nonparameter_capabilities_without_selecting_poi
     assert info.database_path == entry.database_path
     assert current.readiness is ContextReadiness.EMPTY
     assert current.soc is old.soc and current.values is old.values
-    assert current.predictor is predictor
     assert current.parameters is None
     assert not context.has_context()
     assert context.list_points() == ()

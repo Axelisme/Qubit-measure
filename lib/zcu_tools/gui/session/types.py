@@ -19,14 +19,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias
 
 from zcu_tools.gui.session.parameters import ParameterContext as ParameterContext
 from zcu_tools.gui.session.parameters import RoleBinding as RoleBinding
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueLookup
-
-if TYPE_CHECKING:
-    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 
 class SocProtocol(Protocol):
@@ -79,7 +76,7 @@ class SessionEnv:
     """Published parameters plus independent live session capabilities.
 
     parameters is None for EMPTY, otherwise a fixed capture without consumer
-    roles targeting SavedPoint. soc/soccfg and predictor remain
+    roles targeting SavedPoint. soc/soccfg remain
     live capabilities, not Run evidence. Names and paths are cached session
     metadata; active_label is empty before point selection. readiness gates
     ACTIVE-only Run/save. values reads the published value-source cache.
@@ -95,7 +92,6 @@ class SessionEnv:
     result_dir: str = ""
     database_path: str = ""
     active_label: str = ""
-    predictor: FluxoniumPredictor | None = None
     readiness: ContextReadiness = ContextReadiness.EMPTY
     values: ValueLookup = field(default_factory=EmptyValueLookup)
 

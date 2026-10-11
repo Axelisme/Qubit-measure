@@ -178,7 +178,6 @@ def test_zigzag_scan_analysis_reports_flattest_sweep_value(
                 _scan_record(0.5),
                 params,
                 parameters=None,
-                predictor=None,
             ),
             plots=plots,
         )

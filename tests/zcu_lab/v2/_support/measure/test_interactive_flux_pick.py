@@ -104,7 +104,6 @@ def _current_plugin(
                 run_result=result,
                 analyze_params=FluxPickParams(),
                 parameters=parameters,
-                predictor=None,
             ),
             force_magnitude=True,
             plots=plots,
@@ -115,7 +114,6 @@ def _current_plugin(
             run_result=RunRecord[FreqFluxCfg, FreqFluxResult](cfg=None, result=result),
             analyze_params=FluxPickParams(),
             parameters=parameters,
-            predictor=None,
         ),
         plots=plots,
     )
@@ -199,7 +197,6 @@ def _request(
         run_result=FreqFluxResult(values=devs, freqs=freqs, signals=signals),
         analyze_params=FluxPickParams(),
         parameters=parameters,
-        predictor=None,
     )
 
 
@@ -287,7 +284,6 @@ def test_both_adapters_seed_projection_and_publish_named_result_figure(
                 ),
                 analyze_params=FluxPickParams(),
                 parameters=parameters,
-                predictor=None,
             ),
             plots=plots,
         )
@@ -299,7 +295,6 @@ def test_both_adapters_seed_projection_and_publish_named_result_figure(
                 ),
                 analyze_params=FluxPickParams(),
                 parameters=parameters,
-                predictor=None,
             ),
             plots=plots,
         )
