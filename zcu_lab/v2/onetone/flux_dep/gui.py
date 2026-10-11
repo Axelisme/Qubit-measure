@@ -170,13 +170,6 @@ class OneToneFluxDepAdapter(
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
-            .choice(
-                "flux_unit",
-                label="Flux unit",
-                choices=("A", "V", "native"),
-                default="A",
-                tooltip="Working unit for the selected flux driver; no conversion.",
-            )
             .field(
                 "modules.readout",
                 spec=make_pulse_readout_module_spec()
@@ -188,6 +181,13 @@ class OneToneFluxDepAdapter(
                 "flux_dev",
                 label="Flux Device",
                 default=literal(EvalValue("$flux_dev")),
+            )
+            .choice(
+                "flux_unit",
+                label="Flux unit",
+                choices=("A", "V", "native"),
+                default="A",
+                tooltip="Working unit for the selected flux driver; no conversion.",
             )
             .relax_delay(1.0)
             .sweep(
