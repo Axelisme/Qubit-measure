@@ -31,13 +31,13 @@ def raw_client(harness: RouteHarness) -> ClientLink:
 
 
 def result(reply: RouteReply) -> dict[str, object]:
-    assert reply["ok"], reply
+    assert reply["ok"] is True, reply
     return reply["result"]
 
 
 def reason(reply: RouteReply, expected: str) -> None:
-    assert not reply["ok"], reply
-    assert reply["error"]["reason"] == expected
+    assert reply["ok"] is False, reply
+    assert reply["error"].get("reason") == expected
 
 
 @pytest.fixture

@@ -2,7 +2,11 @@
 
 import socket
 
+import pytest
+
 from ._helpers import recv_response, send
+
+pytestmark = pytest.mark.requires_loopback
 
 
 def test_measure_control_owner_projection_and_mixed_interact_permission(application):
