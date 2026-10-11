@@ -161,7 +161,13 @@ def h_point_new(
     explicitly replacing seed/clone metadata. clone_from is None or a same-entry
     label; None copies setup, never the unbound DRAFT.
     Return the SavedPoint destination. Malformed wire input is INVALID_PARAMS.
-    Owner no_entry/schema/source/I/O failures retain their classification.
+    Unsafe destination labels raise the owner's typed input error, projected by
+    shared dispatch as INVALID_PARAMS with reason point_label_invalid. Setup and
+    clone rejection precedes source reads/writes and preserves selection/files.
+    Existing destinations raise the owner's typed input error, projected as
+    INVALID_PARAMS with the original exists message and no structured data.
+    Collision rejection preserves selection/files for setup and clone alike.
+    Owner no_entry/schema/source/other I/O failures retain their classification.
     Created-but-uninstalled PointBindingError becomes CONTROLLER_ERROR with
     reason point_binding_failed and data entry_id/point/created=True. Keep the
     original cause and point; Use is recovery, never retry or delete New.
