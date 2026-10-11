@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from qtpy.QtWidgets import QWidget
 from zcu_tools.experiment.workflows import CommittedRecord
 from zcu_tools.experiment.workflows.artifacts import read_committed_records
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -77,6 +78,14 @@ class WorkflowFigureViews:
         if self.native is not None and self._cursor != len(records):
             self._cursor = len(records)
             draw_overnight_trend(self.native, records)
+            self._size_trend_canvas(self.native)
+
+    def _size_trend_canvas(self, plots: Plots) -> None:
+        canvas = plots["overnight_trend"].canvas
+        if not isinstance(canvas, QWidget):
+            raise RuntimeError("Presented overnight trend has no Qt canvas")
+        # Keep both axes readable when the forms consume the default layout.
+        canvas.setMinimumSize(640, 480)
 
     def finish_native(self) -> None:
         """Finish after producer return and final committed refresh, never on Pause."""
@@ -121,6 +130,7 @@ class WorkflowFigureViews:
         candidate = Plots(self._host)
         try:
             draw_overnight_trend(candidate, records)
+            self._size_trend_canvas(candidate)
             figures = candidate.finish()
         except Exception:
             try:
