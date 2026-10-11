@@ -1,8 +1,8 @@
 # Agent 離線遷移說明書
 
-**Last updated:** 2026-10-10，global flux 遷移至 general.ext
+**Last updated:** 2026-10-11，離線工具與 CLI 移至 root migrations
 
-此文件供執行舊 `result/`、Database 遷移，以及修改 component kind 的 agent 使用。入口是永久保留的 `tools/migrate_storage.py`。它不控制硬體，也不改正常 loader。`lib/zcu_tools/resources/storage_migration/README.md` 說明框架邊界，具體對照位於 `zcu_lab/storage_migration.py`。
+此文件供執行舊 `result/`、Database 遷移，以及修改 component kind 的 agent 使用。入口是 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行。它不控制硬體，也不改正常 loader。`migrations/storage_migration/README.md` 說明框架邊界，具體對照位於 `zcu_lab/storage_migration.py`。
 
 ## 執行前
 
@@ -19,7 +19,7 @@
 以下命令在 worktree 根目錄執行。將示例路徑換成已授權的絕對路徑。
 
 ```bash
-uv run --directory <worktree> --no-sync -- python tools/migrate_storage.py \
+uv run --directory <worktree> --no-sync -- python -m migrations.migrate_storage \
   --result-root /authorized/legacy/result \
   --database-root /authorized/Database \
   --results-root /authorized/results \
@@ -40,7 +40,7 @@ Dry-run 只讀來源，將 report 印到 stdout。它會以具體 cfg model 檢�
 
 需要補充歷史證據時，準備 JSON，再傳 `--run-evidence /authorized/task/evidence.json`。先用公開 `load_run_evidence(Path(...))` 檢查輸入。文件是 `zcu.migration-run-evidence`，`format_version` 為 `1.0`，`entries` 是逐檔證據陣列。同 major 未知欄位保留，較新 major 拒絕。
 
-每筆 evidence 的欄位與型別由 `LegacyRunEvidence`、`LegacySnapshotEvidence` 的 docstring 定義，從 `zcu_tools.resources.storage_migration` 匯入。至少核對以下資訊。
+每筆 evidence 的欄位與型別由 `LegacyRunEvidence`、`LegacySnapshotEvidence` 的 docstring 定義，從 `migrations.storage_migration` 匯入。至少核對以下資訊。
 
 | 欄位 | 核對來源 |
 | --- | --- |

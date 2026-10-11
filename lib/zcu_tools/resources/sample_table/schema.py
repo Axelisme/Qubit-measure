@@ -1,7 +1,7 @@
 """Flat SampleTable v2 coordinate contract: schema, validation, resolution, migration.
 
-``SampleTable`` (``table.py``) stays schema-free; producers and consumers that opt
-into the v2 contract share the coordinate names, affine ``SampleFluxFrame``,
+Producers and consumers that opt into the v2 contract share the coordinate
+names, affine ``SampleFluxFrame``,
 ``validate_sample_table_v2`` and ``resolve_sample_flux`` from this module. The
 explicit legacy-unit migration seam (``migrate_sample_table_v2`` with
 ``LegacySampleFluxFrame``) is the only supported path for legacy A/mA/V/mV tables;

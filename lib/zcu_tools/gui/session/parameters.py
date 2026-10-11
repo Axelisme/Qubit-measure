@@ -13,7 +13,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable, ResolvedAliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
-    SavedPoint,
 )
 from zcu_tools.resources.document_store import DocumentValue
 from zcu_tools.resources.entry import (
@@ -69,7 +68,7 @@ class ParameterContext:
     """An isolated working-unit point/library capture with an explicit target.
 
     Construction accepts validated point and library snapshots, a SavedPoint
-    or EntryDraft destination, and an optional fixed consumer RoleBinding.
+    destination, and an optional fixed consumer RoleBinding.
     Binding declarations may omit names for unbound roles. Their data reads
     raise RoleResolutionError naming the role; concrete paths remain readable.
     source_faults contains only point/module_cfg diagnostics, not setup faults.
@@ -101,7 +100,7 @@ class ParameterContext:
         Declared roles absent from names are unbound, not constructor failures.
         A setup diagnostic is outside this capture contract and raises
         ValueError. storage optionally retains a resource-owned saved-point
-        capability with matching target identity; omit it for drafts or synthetic
+        capability with matching target identity; omit it for synthetic
         captures. Mismatched storage origins also raise ValueError.
         roles.aliases optionally supplies fixed authored rows. When supplied,
         roles contributes consumer declarations; names are resolved lazily for $
@@ -112,9 +111,7 @@ class ParameterContext:
         if any(fault.document == "setup" for fault in source_faults):
             raise ValueError("Parameter captures accept only point/module_cfg faults")
         if storage is not None and (
-            not isinstance(target, SavedPoint)
-            or str(storage.entry_id) != target.entry_id
-            or storage.point != target.point
+            str(storage.entry_id) != target.entry_id or storage.point != target.point
         ):
             raise ValueError("Storage origin must match the saved-point target")
         self._point = point.model_copy(deep=True)
@@ -160,7 +157,7 @@ class ParameterContext:
 
     @property
     def target(self) -> ContextTarget:
-        """Return an independent persisted-point or entry-draft destination."""
+        """Return an independent saved-point destination."""
         return self._target.model_copy(deep=True)
 
     @property
@@ -209,7 +206,7 @@ class ParameterContext:
 
     @property
     def storage(self) -> PointStorageBinding | None:
-        """Return the fixed origin capability, or None for draft/unbound captures.
+        """Return the fixed origin capability, or None for synthetic unbound captures.
 
         Its roots, ledger and description belong to capture time. This projection
         adds this consumer's fixed role names without consulting session focus.
@@ -225,7 +222,7 @@ class ParameterContext:
     def capture_storage(self) -> PointStorageBinding:
         """Return storage at this capture's origin, never the current selection.
 
-        Necessary source faults raise ContextSourceUnavailableError. Drafts and
+        Necessary source faults raise ContextSourceUnavailableError. Synthetic
         captures without an origin capability raise FailedPreconditionError with
         reason_code storage_unavailable. This performs no I/O or ledger append.
         """

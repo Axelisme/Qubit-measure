@@ -13,7 +13,7 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     SweepValue,
 )
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueLookup
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -95,7 +95,7 @@ def make_context(
             if library is None
             else library
         ),
-        target=EntryDraft(entry_id="role-characterization"),
+        target=SavedPoint(entry_id="role-characterization", point="working"),
         roles=RoleBinding(
             focus=None,
             declarations={

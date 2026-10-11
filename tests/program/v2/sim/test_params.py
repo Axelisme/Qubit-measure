@@ -21,7 +21,7 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     SweepValue,
 )
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.expression import evaluate_numeric_expr
 from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
@@ -415,7 +415,9 @@ def guide_context() -> Generator[ParameterContext]:
             library=LibrarySnapshot(
                 ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
             ),
-            target=EntryDraft(entry_id="00000000-0000-0000-0000-000000000001"),
+            target=SavedPoint(
+                entry_id="00000000-0000-0000-0000-000000000001", point="working"
+            ),
             roles=RoleBinding("Q1", {"qubit": RoleSpec("qubit/*")}, {"qubit": "Q1"}),
         )
     finally:

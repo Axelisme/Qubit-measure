@@ -32,22 +32,7 @@ class SavedPoint(BaseModel):
     point: str
 
 
-class EntryDraft(BaseModel):
-    """The current memory-only draft belonging to an opened entry.
-
-    kind is the JSON discriminator, always entry_draft.
-    entry_id is the UUID string supplied by ResultEntry.entry_id.
-    Commands require that this entry is currently in DRAFT; the value does not
-    represent a saved point or carry a binding generation.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-
-    kind: Literal["entry_draft"] = "entry_draft"
-    entry_id: str
-
-
-ContextTarget: TypeAlias = SavedPoint | EntryDraft
+ContextTarget: TypeAlias = SavedPoint
 ContextSourceKind: TypeAlias = Literal["setup", "point", "module_cfg"]
 
 
@@ -135,7 +120,7 @@ class CommandOrigin:
 
 @dataclass(frozen=True)
 class PointCreateRequest:
-    """Create a point in the opened entry, independently of its memory DRAFT.
+    """Create and select a saved point in the opened entry.
 
     label must satisfy the entry owner's safe single path segment rule.
     Context new_point rejects an existing destination with InvalidInputError and

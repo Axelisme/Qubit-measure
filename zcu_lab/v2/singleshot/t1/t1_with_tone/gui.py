@@ -43,7 +43,7 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone.core import (
     T1WithToneResult,
 )
 
-# The numeric t1 is written to the t1_with_tone MetaDict key.
+# The numeric t1 is written to the t1_with_tone parameter context key.
 SsT1ToneRunResult: TypeAlias = RunRecord[T1WithToneCfg, T1WithToneResult]
 
 
@@ -75,12 +75,12 @@ class SsT1ToneAdapter(
             "and classifies each shot in-program against the |g>/|e> IQ-cluster "
             "centres. Plots the ground / excited / other populations versus "
             "delay time with dual-transition-rate fits for T1 and T1_b. The "
-            "fitted T1 value is written back to 't1_with_tone' in the MetaDict. "
+            "fitted T1 value is written back to 't1_with_tone' in the parameter context. "
             "Runs on real hardware."
         ),
         expects_md=(
             "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
             "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
             "calibration fails before hardware. "
             "Optionally reads 'confusion_matrix' to readout-correct populations "
@@ -98,7 +98,7 @@ class SsT1ToneAdapter(
         ),
         typical_writeback=(
             "Proposes the fitted T1 relaxation time under the probe tone into "
-            "MetaDict 't1_with_tone' (us)."
+            "parameter context 't1_with_tone' (us)."
         ),
         recommended=(
             "Set calibration cfg directly or seed it with 'singleshot/ge'. "

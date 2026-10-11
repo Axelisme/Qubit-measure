@@ -7,7 +7,7 @@ from pydantic import JsonValue
 from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormPath, FormState
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -40,8 +40,9 @@ def name_editor(
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
         ),
-        target=EntryDraft(entry_id="entry"),
+        target=SavedPoint(entry_id="entry", point="synthetic"),
         roles=None,
+        storage=None,
     ).bind_aliases((AliasRow("device", "yoko1"), AliasRow("unbound", "")), {})
     env = FormEnv(parameters=parameters)
     state = FormState(StringForm.default_input(env))

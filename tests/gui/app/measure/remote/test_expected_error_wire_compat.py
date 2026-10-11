@@ -39,7 +39,37 @@ from zcu_tools.gui.remote.errors import (
     remote_error_from_expected,
 )
 
+from ._point_application import PointApplication
+
 WireTuple = tuple[ErrorCode, str, str, dict | None]
+
+
+@pytest.mark.parametrize(
+    ("method", "params"),
+    [
+        ("context.ml_del_module", {"name": "Q1.pulses.seed"}),
+        ("context.ml_del_waveform", {"name": "Q1.waveforms.seed"}),
+        (
+            "context.ml_rename_module",
+            {"old": "Q1.pulses.seed", "new": "Q1.pulses.moved"},
+        ),
+        (
+            "context.ml_rename_waveform",
+            {"old": "Q1.waveforms.seed", "new": "Q1.waveforms.moved"},
+        ),
+    ],
+)
+def test_library_structure_empty_context_uses_owner_error_projection(
+    application: PointApplication, method: str, params: dict[str, str]
+) -> None:
+    reply = application.rpc(method, params)
+    assert reply["ok"] is False, reply
+    assert reply["error"] == {
+        "code": ErrorCode.PRECONDITION_FAILED,
+        "message": "Select or create a working point first",
+        "reason": "no_context",
+    }
+    assert application.controller.get_session_env().parameters is None
 
 
 class _ExpectedWithIncidentalData(InvalidInputError):

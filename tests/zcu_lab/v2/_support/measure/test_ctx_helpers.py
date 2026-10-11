@@ -11,7 +11,7 @@ from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    EntryDraft,
+    SavedPoint,
 )
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
@@ -71,7 +71,9 @@ def range_factory() -> Generator[RangeFactory]:
             library=LibrarySnapshot(
                 ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
             ),
-            target=EntryDraft(entry_id="00000000-0000-0000-0000-000000000001"),
+            target=SavedPoint(
+                entry_id="00000000-0000-0000-0000-000000000001", point="working"
+            ),
             roles=RoleBinding(
                 "Q1",
                 {

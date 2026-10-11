@@ -38,7 +38,7 @@ class ProjectionAdapter(FakeAdapter):
         raise AssertionError("This view contract must not start a Run")
 
 
-def test_existing_tab_tracks_empty_draft_and_active_source(
+def test_existing_tab_tracks_unselected_and_active_source(
     qapp, tmp_path, monkeypatch
 ) -> None:
     background = BackgroundRunner()
@@ -72,9 +72,9 @@ def test_existing_tab_tracks_empty_draft_and_active_source(
         ctrl.setup_control.new_entry(EntryRequest("entry"))
         interaction = ctrl.get_tab_snapshot(tab_id).interaction
         assert interaction is not None
-        assert interaction.has_context
+        assert not interaction.has_context
         assert not interaction.has_active_context
-        assert window.get_view_snapshot()["point_label"] == "Draft (in-memory)"
+        assert window.get_view_snapshot()["point_label"] == "No point selected"
         for label in ("first", "second"):
             ctrl.setup_control.new_point(
                 PointCreateRequest(label, "", CommandOrigin("gui"))

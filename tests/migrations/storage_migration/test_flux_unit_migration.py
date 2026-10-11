@@ -10,14 +10,14 @@ from zcu_tools.resources.entry import (
     document_value,
     snapshot,
 )
-from zcu_tools.resources.storage_migration import MigrationRequest, migrate_storage
 
-from tests.resources.entry.fakes import registry_state, restore_registry
-from tests.resources.storage_migration.fakes import (
+from migrations.storage_migration import MigrationRequest, migrate_storage
+from tests.migrations.storage_migration.fakes import (
     noop_validation,
     validate_cfg,
     write_meta,
 )
+from tests.resources.entry.fakes import registry_state, restore_registry
 from zcu_lab.components import JpaSchema, QubitSchema, ResonatorSchema
 from zcu_lab.storage_migration import build_mapping
 

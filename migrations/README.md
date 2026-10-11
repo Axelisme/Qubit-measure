@@ -2,6 +2,12 @@
 
 本目錄提供使用者明確執行的舊資料轉換。正常量測 runtime 不 import migrations。工具不操作硬體，也不替使用者選擇來源檔或推論單位。
 
+## Legacy result／Database → native storage
+
+`migrations.storage_migration` 擁有離線轉換、歷史 evidence 與可續跑 publication。Caller 明填 mapping 與 native 驗證，不接正常 runtime。`migrations.legacy_labber.load_legacy_labber_payload` 以明確 disk schema 讀取 single 或 marker-qualified grouped Labber，不猜 variable identity 或單位。
+
+CLI 以 `python -m migrations.migrate_storage` 執行。操作授權、dry-run、pending 與 resume 步驟見 [Agent 離線遷移說明書](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 與 native declarations 仍由 `zcu_lab` 擁有。`lib` 不 import 本目錄。
+
 ## Sample CSV → JSONL
 
 `migrations.sample_csv.convert_sample_csv` 接受一或多份 CSV、已開啟的 `ResultEntry` 與元件名，追加到該條目的 `samples/<component>.jsonl`。來源位元組不變。公開函式回傳 `MigrationReport`，列出追加列數、待判斷列及原因、輸出路徑。

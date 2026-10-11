@@ -151,7 +151,7 @@ class RoOptFreqGainAdapter(
             "together once you have a rough readout frequency."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' / 'best_ro_freq' — "
+            "Reads from the parameter context (all optional): 'r_f' / 'best_ro_freq' — "
             "resonator / chosen readout frequency centring the freq sweep "
             "(~4000–8000 MHz); 'rf_w' — linewidth, setting the freq half-span "
             "(~5–50 MHz); 'res_ch' / 'ro_ch' — drive / ADC channels; 'timeFly' "
@@ -166,10 +166,10 @@ class RoOptFreqGainAdapter(
         ),
         typical_writeback=(
             "Proposes the SNR-maximizing readout frequency and gain into "
-            "MetaDict 'best_ro_freq' (MHz) and 'best_ro_gain' (a.u.). When a "
+            "parameter context 'best_ro_freq' (MHz) and 'best_ro_gain' (a.u.). When a "
             "cfg snapshot with pulse readout is available and "
             "'best_ro_freq' / 'best_ro_gain' / 'best_ro_length' are known "
-            "from this result plus MetaDict, also proposes ModuleLibrary "
+            "from this result plus parameter context, also proposes ModuleLibrary "
             "'readout_dpm'."
         ),
         recommended=(

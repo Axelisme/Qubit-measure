@@ -16,7 +16,7 @@ from zcu_tools.gui.form import (
     FormState,
 )
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
@@ -63,8 +63,9 @@ def name_env() -> FormEnv:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
         ),
-        target=EntryDraft(entry_id="entry"),
+        target=SavedPoint(entry_id="entry", point="synthetic"),
         roles=None,
+        storage=None,
     ).bind_aliases((AliasRow("device", "yoko1"), AliasRow("unbound", "")), {})
     return FormEnv(parameters=context)
 

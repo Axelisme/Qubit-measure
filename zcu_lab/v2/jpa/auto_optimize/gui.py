@@ -103,7 +103,7 @@ class JpaAutoOptimizeAdapter(
         ),
         typical_writeback=(
             "Proposes the signal-maximizing flux device value, pump frequency "
-            "and pump power into three separate MetaDict drafts — "
+            "and pump power into three separate parameter context drafts — "
             "'best_jpa_flux', 'best_jpa_freq' (MHz) and 'best_jpa_power' "
             "(dBm) — so you can accept, cancel or retarget each one "
             "independently. Nothing is written without your acceptance, "

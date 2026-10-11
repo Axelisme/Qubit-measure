@@ -31,7 +31,11 @@ from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.runtime import GuiAssembly
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.resources.entry import (
@@ -347,6 +351,9 @@ def test_capture_failure_preserves_both_panels_and_local_input(
     edit.editingFinished.emit()
     before = knobs.state.input.data
     app.services.settings.open_entry(EntryRequest("sample"))
+    app.services.context.new_point(
+        PointCreateRequest("empty", "", CommandOrigin("gui"))
+    )
     with pytest.raises(RoleResolutionError, match="qubit"):
         app.window.prepare_forms()
     assert app.window.plan_panel is plan and app.window.tunables_panel is knobs

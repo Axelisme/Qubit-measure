@@ -11,7 +11,7 @@ import numpy as np
 from zcu_tools.gui.app.measure.services.ports import CfgEdit
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.context_types import LibraryChange, SavedPoint
 from zcu_tools.gui.session.value_lookup import ValueInfo
 
 from ._wire_values import context_wire_value
@@ -59,7 +59,7 @@ def h_context_labels(
 def h_context_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Return the published saved-point label, or None for EMPTY/DRAFT.
+    """Return the published saved-point label, or None before point selection.
 
     Reads only the cached parameter target. Component focus and tab role changes
     cannot change this session-level source identity. No refresh or I/O occurs.
@@ -252,3 +252,55 @@ def h_context_ml_create_from_role(
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {"created": name}
+
+
+def h_context_ml_del_module(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Delete concrete module params[name]; echo deleted, propagate owner errors."""
+    name = str(params["name"])
+    parameters = adapter.context_control.read_context()
+    adapter.ctrl.apply_library_change(
+        parameters, LibraryChange(kind="module", action="delete", path=name)
+    )
+    return {"deleted": name}
+
+
+def h_context_ml_rename_module(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Rename concrete module params[old/new]; echo renamed, propagate owner errors."""
+    old = str(params["old"])
+    new = str(params["new"])
+    parameters = adapter.context_control.read_context()
+    adapter.ctrl.apply_library_change(
+        parameters,
+        LibraryChange(kind="module", action="rename", path=old, new_path=new),
+    )
+    return {"renamed": new}
+
+
+def h_context_ml_rename_waveform(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Rename concrete waveform params[old/new]; echo renamed, propagate owner errors."""
+    old = str(params["old"])
+    new = str(params["new"])
+    parameters = adapter.context_control.read_context()
+    adapter.ctrl.apply_library_change(
+        parameters,
+        LibraryChange(kind="waveform", action="rename", path=old, new_path=new),
+    )
+    return {"renamed": new}
+
+
+def h_context_ml_del_waveform(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Delete concrete waveform params[name]; echo deleted, propagate owner errors."""
+    name = str(params["name"])
+    parameters = adapter.context_control.read_context()
+    adapter.ctrl.apply_library_change(
+        parameters, LibraryChange(kind="waveform", action="delete", path=name)
+    )
+    return {"deleted": name}

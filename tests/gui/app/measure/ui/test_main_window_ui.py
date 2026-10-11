@@ -100,7 +100,6 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     """
     ctrl.active_operation_count.return_value = 0
     ctrl.get_active_context_label.return_value = None
-    ctrl.has_draft_context.return_value = False
     ctrl.has_project.return_value = False
     ctrl.context_control.get_alias_rows.return_value = ()
     ctrl.get_session_env.return_value = SessionEnv(
@@ -484,7 +483,7 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
     assert tab.run_btn.toolTip() == "Config invalid: modules.readout: invalid"
 
 
-def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
+def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     snap = _snapshot(
@@ -508,7 +507,7 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     tab.update_interaction_state(snap)
 
     assert tab.run_btn.isEnabled() is False
-    assert tab.run_btn.toolTip() == "Select or create a file-backed context"
+    assert tab.run_btn.toolTip() == "Select or create a working point first"
     load = next(
         button
         for button in tab.findChildren(QPushButton)

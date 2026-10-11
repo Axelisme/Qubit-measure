@@ -22,7 +22,11 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    PointCreateRequest,
+    PointUseRequest,
+)
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -97,13 +101,15 @@ def _close(qapp, widget: QWidget) -> None:
 def component_widget(
     qapp, tmp_path: Path, owner: ContextService
 ) -> Generator[tuple[ComponentTreeWidget, ContextControlFacet]]:
-    owner.install_entry(
-        ResultEntry.create(
-            "entry",
-            result_root=tmp_path / "results",
-            database_root=tmp_path / "Database",
-        )
+    entry = ResultEntry.create(
+        "entry",
+        result_root=tmp_path / "results",
+        database_root=tmp_path / "Database",
     )
+    # Parameter writes need a selected saved point; start on one.
+    entry.new_point("working")
+    owner.install_entry(entry)
+    owner.use_point(PointUseRequest("working"))
     control = ContextControlFacet(context=owner)
     widget = ComponentTreeWidget(control)
     widget.resize(900, 700)

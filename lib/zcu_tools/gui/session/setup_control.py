@@ -56,11 +56,11 @@ class SetupControlPort(Protocol):
         ...
 
     def open_entry(self, request: EntryRequest) -> EntryInfo:
-        """Open through resources and publish DRAFT; errors preserve the binding."""
+        """Open through resources and leave point unselected; errors preserve the binding."""
         ...
 
     def new_entry(self, request: EntryRequest) -> EntryInfo:
-        """Create/publish DRAFT; post-creation failure retains the entry for Open."""
+        """Create an entry without selecting a point; installation failure retains it for Open."""
         ...
 
     def get_entry_info(self) -> EntryInfo | None:

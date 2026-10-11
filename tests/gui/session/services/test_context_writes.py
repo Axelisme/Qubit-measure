@@ -17,7 +17,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     ContextTarget,
-    EntryDraft,
     PointUseRequest,
     SavedPoint,
 )
@@ -147,24 +146,13 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
     assert events == []
 
 
-def test_read_target_draft_rejects_replaced_memory_context(session: _Session) -> None:
-    draft = session.control.read_context().target
-    session.control.set_parameter(draft, "general.ext.flux_value", 0.2)
-    assert session.control.read_target(draft).value("general.ext.flux_value") == 0.2
-    selected = _select(session, "a")
-    with pytest.raises(FailedPreconditionError) as error:
-        session.control.read_target(draft)
-    assert error.value.reason_code == "draft_not_selected"
-    assert session.control.read_context().target == selected
-
-
 def test_read_target_rejects_other_entries(session: _Session) -> None:
     target = SavedPoint(entry_id="other", point="a")
-    before = session.control.read_context()
+    before = session.state.session_env
     with pytest.raises(FailedPreconditionError) as error:
         session.control.read_target(target)
     assert error.value.reason_code == "entry_not_open"
-    assert session.control.read_context().document() == before.document()
+    assert session.state.session_env == before
 
 
 def test_read_target_missing_point_does_not_create_it(session: _Session) -> None:
@@ -204,12 +192,11 @@ def _persisted(entry: ResultEntry, target: SavedPoint, kind: Kind) -> YamlValue:
 
 
 @pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
 @pytest.mark.parametrize("explicit_source", [False, True], ids=["manual", "accepted"])
 def test_target_setters_preserve_source_and_old_capture(
-    session: _Session, kind: Kind, saved: bool, explicit_source: bool
+    session: _Session, kind: Kind, explicit_source: bool
 ) -> None:
-    target = _select(session, "a") if saved else session.control.read_context().target
+    target = _select(session, "a")
     capture = session.control.read_context()
     old_document = capture.document()
     old_library = capture.library.document()
@@ -228,12 +215,7 @@ def test_target_setters_preserve_source_and_old_capture(
     assert current.document().general.created_at == created_at
     assert capture.document() == old_document
     assert capture.library.document() == old_library
-    if saved:
-        assert isinstance(target, SavedPoint)
-        assert _persisted(session.entry, target, kind) == pytest.approx(0.2)
-    else:
-        assert session.entry.list_points() == []
-        assert list((session.entry.result_path / "points").iterdir()) == []
+    assert _persisted(session.entry, target, kind) == pytest.approx(0.2)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -263,49 +245,28 @@ def test_detached_saved_point_write_keeps_current_point_and_publication(
 
 
 @pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
 def test_cross_entry_target_rejected_before_any_write(
-    session: _Session, tmp_path: Path, kind: Kind, saved: bool
+    session: _Session, tmp_path: Path, kind: Kind
 ) -> None:
-    old_target = (
-        _select(session, "a") if saved else session.control.read_context().target
-    )
+    old_target = _select(session, "a")
     other = ResultEntry.create(
         "other", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
     )
     session.service.install_entry(other)
-    current = session.control.read_context()
+    current = session.state.session_env
     with pytest.raises(FailedPreconditionError) as error:
         _write(session.control, old_target, kind, 0.2)
     assert error.value.reason_code == "entry_not_open"
-    assert session.control.read_context().document() == current.document()
-    assert session.entry.list_points() == (["a"] if saved else [])
+    assert session.state.session_env == current
+    assert session.entry.list_points() == ["a"]
     assert other.list_points() == []
 
 
 @pytest.mark.parametrize("kind", KINDS)
-def test_saved_selection_rejects_old_draft_without_retargeting(
+def test_invalid_source_keeps_projection_and_version(
     session: _Session, kind: Kind
 ) -> None:
-    draft = session.control.read_context().target
-    assert isinstance(draft, EntryDraft)
     target = _select(session, "a")
-    capture = session.control.read_context()
-    with pytest.raises(FailedPreconditionError):
-        _write(session.control, draft, kind, 0.2)
-    assert session.control.read_context().target == target
-    assert session.control.read_context().document() == capture.document()
-    assert (
-        session.control.read_context().library.document() == capture.library.document()
-    )
-
-
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
-def test_invalid_source_keeps_projection_and_version(
-    session: _Session, kind: Kind, saved: bool
-) -> None:
-    target = _select(session, "a") if saved else session.control.read_context().target
     capture = session.control.read_context()
     version = session.state.version.get("context")
     bad = Provenance(str(uuid4()), "fit", None, AT, 0.01)
@@ -319,11 +280,8 @@ def test_invalid_source_keeps_projection_and_version(
     assert session.state.version.get("context") == version
 
 
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
-def test_invalid_parameter_schema_is_not_published(
-    session: _Session, saved: bool
-) -> None:
-    target = _select(session, "a") if saved else session.control.read_context().target
+def test_invalid_parameter_schema_is_not_published(session: _Session) -> None:
+    target = _select(session, "a")
     capture = session.control.read_context()
     with pytest.raises(ValidationError, match="created_at"):
         session.control.set_parameter(target, "general.created_at", "bad-time")
@@ -362,15 +320,11 @@ def test_current_write_notifies_after_installation_without_switching_binding(
     assert session.control.get_source_binding() == binding
 
 
-@pytest.mark.parametrize("selected", ["point", "draft"])
 def test_detached_description_write_updates_cache_without_changing_selected_source(
-    session: _Session, selected: Literal["point", "draft"]
+    session: _Session,
 ) -> None:
     first = _select(session, "a")
-    if selected == "point":
-        _select(session, "b")
-    else:
-        session.service.install_entry(session.entry)
+    _select(session, "b")
     before = session.control.read_context()
     version = session.state.version.get("context")
     binding = session.control.get_source_binding()
@@ -461,11 +415,12 @@ def test_missing_saved_point_is_not_created_by_setter(
     session: _Session,
     kind: Kind,
 ) -> None:
+    _select(session, "selected")
     target = SavedPoint(entry_id=session.entry.entry_id, point="missing")
     capture = session.control.read_context()
     with pytest.raises(FileNotFoundError):
         _write(session.control, target, kind, 0.2)
-    assert session.entry.list_points() == []
+    assert session.entry.list_points() == ["selected"]
     assert session.control.read_context().document() == capture.document()
     assert (
         session.control.read_context().library.document() == capture.library.document()
@@ -473,13 +428,11 @@ def test_missing_saved_point_is_not_created_by_setter(
 
 
 @pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
 def test_wrong_path_or_library_partition_keeps_publication(
     session: _Session,
     kind: Kind,
-    saved: bool,
 ) -> None:
-    target = _select(session, "a") if saved else session.control.read_context().target
+    target = _select(session, "a")
     capture = session.control.read_context()
     path = {
         "parameter": "unknown.field",
@@ -576,49 +529,11 @@ def test_library_writeback_rejects_invalid_uncertainty_before_acceptance(
     assert session.state.version.get("context") == version
 
 
-def test_selected_draft_writeback_requires_saved_point_without_side_effects(
+def test_shared_writeback_entry_uses_detached_saved_target(
     session: _Session,
 ) -> None:
     from zcu_tools.resources.entry import writeback
 
-    capture = session.control.read_context()
-    version = session.state.version.get("context")
-    events: list[object] = []
-    session.bus.subscribe(MdChangedPayload, events.append)
-    session.bus.subscribe(MlChangedPayload, events.append)
-    with pytest.raises(
-        FailedPreconditionError, match="select or create a working point"
-    ) as caught:
-        session.control.apply_writeback(
-            capture.target,
-            (
-                writeback.ParameterWriteback("general.description", "must not commit"),
-                writeback.WaveformWriteback(
-                    "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
-                ),
-                writeback.SampleWriteback("Q1", {"t1_us": 20.09}),
-            ),
-            evidence=writeback.WritebackEvidence(
-                kind="test/draft", origin="gui", run_id="run-1"
-            ),
-        )
-    assert caught.value.reason_code == "storage_unavailable"
-    assert session.entry.ledger.events() == ()
-    current = session.control.read_context()
-    assert current.document() == capture.document()
-    assert current.library.document() == capture.library.document()
-    assert session.entry.samples("Q1").read().empty
-    assert session.entry.list_points() == []
-    assert events == []
-    assert session.state.version.get("context") == version
-
-
-def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(
-    session: _Session,
-) -> None:
-    from zcu_tools.resources.entry import writeback
-
-    draft = session.control.read_context().target
     first = _select(session, "a")
     second = _select(session, "b")
     version = session.state.version.get("context")
@@ -629,11 +544,6 @@ def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(
     assert session.control.read_context().target == second
     assert session.state.version.get("context") == version
     assert session.entry.ledger.get(event_id).event.origin == "mcp"
-    before = session.entry.ledger.events()
-    with pytest.raises(FailedPreconditionError) as caught:
-        session.control.apply_writeback(draft, (item,), evidence=evidence)
-    assert caught.value.reason_code == "draft_not_selected"
-    assert session.entry.ledger.events() == before
 
 
 @pytest.mark.parametrize(

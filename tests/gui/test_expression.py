@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.format_version import YamlMap
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.expression import (
     ExpressionError,
     coerce_eval_result,
@@ -27,7 +27,7 @@ def _parameters(values: YamlMap) -> ParameterContext:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
         ),
-        target=EntryDraft(entry_id="entry"),
+        target=SavedPoint(entry_id="entry", point="working"),
         roles=None,
     )
 

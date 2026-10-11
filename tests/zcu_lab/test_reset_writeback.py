@@ -30,8 +30,8 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    EntryDraft,
     PointUseRequest,
+    SavedPoint,
 )
 from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -337,7 +337,7 @@ def _reset_capture() -> ParameterContext:
             components=components,
         ),
         library=library,
-        target=EntryDraft(entry_id="reset-contract"),
+        target=SavedPoint(entry_id="reset-contract", point="working"),
         roles=None,
     ).bind_aliases((AliasRow("qubit", "Q1"),), {})
 

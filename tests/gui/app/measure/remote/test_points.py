@@ -54,13 +54,12 @@ def test_list_empty_and_refresh_persisted_metadata(
     }
 
 
-def test_new_uses_setup_not_unbound_draft_and_clone_replaces_description(
+def test_new_uses_setup_and_clone_replaces_description(
     application: PointApplication,
 ) -> None:
     info = application.open_entry()
     context = application.controller.context_control
     context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
-    context.add_component("draft_only", "fake/drive/a", {"rate": 99.0})
     expected = {"kind": "saved_point", "entry_id": info.entry_id, "point": "seed"}
     assert (
         application.result(
@@ -71,7 +70,6 @@ def test_new_uses_setup_not_unbound_draft_and_clone_replaces_description(
     captured = context.read_context()
     assert captured.target == SavedPoint(entry_id=info.entry_id, point="seed")
     assert captured.lookup("Q1.rate").value == 10.0
-    assert "draft_only" not in captured.document().components
     context.set_parameter(captured.target, "Q1.rate", 20.0)
     assert application.result("point.new", new_params("clone", clone_from="seed")) == {
         "kind": "saved_point",

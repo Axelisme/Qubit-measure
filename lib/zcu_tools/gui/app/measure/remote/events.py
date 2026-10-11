@@ -2,7 +2,7 @@
 
 Each entry in :data:`EVENT_SERIALIZERS` maps a ``Payload`` *type* to a function
 producing the JSON-friendly ``payload`` dict that goes on the wire. Live
-Python references (``MetaDict``, ``ModuleLibrary``, ``SocHandle``,
+Python references (``parameter context``, ``ModuleLibrary``, ``SocHandle``,
 ``DeviceSetupSnapshot``, ``BaseDeviceInfo``, ``FluxoniumPredictor``) are
 **never** sent — instead the wire payload carries a ``requery`` hint
 listing the RPC method(s) the client should call to obtain current state. The
@@ -111,7 +111,7 @@ def _ser_device_setup_finished(payload: BasePayload) -> WirePayload:
 
 def _ser_context_switched(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, ContextSwitchedPayload)
-    # MetaDict / ModuleLibrary are live; let the client requery.
+    # parameter context / ModuleLibrary are live; let the client requery.
     del payload
     return {"requery": ["context.active"]}
 

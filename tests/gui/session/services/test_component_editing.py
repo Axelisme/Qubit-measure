@@ -48,11 +48,12 @@ def component_session(
         restore_registry(before)
 
 
-def test_add_draft_component_and_invalid_required_fields_are_atomic(component_session):
+def test_add_saved_component_and_invalid_required_fields_are_atomic(component_session):
     control, entry = component_session
+    control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
     control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     assert control.read_context().value("Q1.rate") == 4300.0
-    assert entry.list_points() == []
+    assert entry.list_points() == ["a"]
     with pytest.raises(ValidationError, match="reference"):
         control.add_component("Invalid", "test/required", {})
     assert "Invalid" not in control.inspect_document().components
@@ -60,6 +61,7 @@ def test_add_draft_component_and_invalid_required_fields_are_atomic(component_se
 
 def test_component_reference_is_an_ordinary_string(component_session):
     control, _ = component_session
+    control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
     control.add_component("Ref", "test/required", {"reference": "not-yet-created"})
     assert control.read_context().value("Ref.reference") == "not-yet-created"
     capture = control.read_context()

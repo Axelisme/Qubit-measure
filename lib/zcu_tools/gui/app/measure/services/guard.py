@@ -46,10 +46,10 @@ class RunInputs:
     the exact accepted publication with detached resolved values and provenance.
     RunService never re-reads these inputs from State or re-lowers a schema.
     snapshot fixes the current saved entry/point and every resolved alias at
-    admission, or None for drafts or adapters without native evidence. experiment_tag is
+    admission, or None for adapters without native evidence. experiment_tag is
     the adapter's persistence declaration tag, or None. Neither is recaptured
     after admission. storage retains the same saved-point persistence capability
-    used for snapshot, or None for drafts, unbound tabs, missing storage or an
+    used for snapshot, or None for unbound tabs, missing storage or an
     adapter without native evidence. With storage=None, Run remains usable but
     terminal does not append acquired and reports that omission in diagnostics;
     it must not claim a ledger record. With storage, terminal publishes the
@@ -259,14 +259,19 @@ class GuardService:
         logger.debug("check_analyze: tab_id=%r", tab_id)
 
     def check_writeback(self, tab_id: str) -> None:
-        """Require an existing tab and a Primary result, not a live context.
+        """Require a selected working point, an existing tab and a Primary result.
 
         Raise GuardError on rejection; return None without mutation on success.
         This shared check does not select, apply or tear down a draft. The
         writeback owner requires a captured destination in the still-open entry
-        before nonempty writes; this guard never substitutes current sources.
+        before nonempty writes. Selection admits the command but never replaces
+        its captured SavedPoint destination with the currently selected point.
         """
         tab = self._require_tab(tab_id)
+        if self._state.session_env.parameters is None:
+            raise GuardError(
+                "Select or create a working point first", reason_code="no_context"
+            )
         if not tab.has_analyze_result():
             raise GuardError(
                 "No analyze result available for writeback.",
