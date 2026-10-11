@@ -5,10 +5,9 @@ from __future__ import annotations
 import pytest
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.event_bus import EventMeta
-from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
-from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
+from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
 
 
 def _inputs(**overrides: object) -> dict[str, object]:
@@ -21,14 +20,6 @@ def _inputs(**overrides: object) -> dict[str, object]:
     }
     inputs.update(overrides)
     return inputs
-
-
-def _assert_stale(reply: RouteReply, key: str = "fit") -> None:
-    assert not reply["ok"]
-    assert "error" in reply
-    assert reply["error"]["code"] == "precondition_failed"
-    assert reply["error"].get("reason") == "stale_version"
-    assert reply["error"].get("data") == {"stale": [key]}
 
 
 def test_fit_replacement_clears_result_emits_agent_fact_and_does_not_start_search(
@@ -100,91 +91,6 @@ def test_fit_replacement_clears_result_emits_agent_fact_and_does_not_start_searc
         assert route_harness.ctrl.search.current is None
     finally:
         subscription.unsubscribe()
-
-
-@pytest.mark.parametrize(
-    "read_method",
-    [
-        "resources.versions",
-        "state.check",
-        "selection.pointcloud",
-        "selection.snapshot",
-        "project.info",
-        "spectrum.list",
-    ],
-)
-def test_non_fit_reads_do_not_unlock_fit(
-    route_harness: RouteHarness,
-    read_method: str,
-) -> None:
-    client = route_harness.client()
-    initial = route_harness.ctrl.state.fit
-    assert route_harness.request(client, read_method)["ok"]
-    _assert_stale(route_harness.request(client, "fit.set_params", **_inputs()))
-    assert route_harness.ctrl.state.fit is initial
-    assert route_harness.ctrl.state.version.get("fit") == 0
-
-
-def test_fit_guard_is_per_client_and_native_publication_requires_reread(
-    route_harness: RouteHarness,
-) -> None:
-    first, second = route_harness.client(), route_harness.client()
-    assert route_harness.request(first, "fit.result")["ok"]
-    _assert_stale(route_harness.request(second, "fit.set_params", **_inputs()))
-    assert route_harness.request(second, "fit.result")["ok"]
-    assert route_harness.request(first, "fit.set_params", **_inputs())["ok"]
-    assert route_harness.request(second, "resources.versions")["ok"]
-    _assert_stale(route_harness.request(second, "fit.set_params", **_inputs()))
-    assert route_harness.request(second, "fit.result")["ok"]
-    assert route_harness.request(second, "fit.set_params", **_inputs())["ok"]
-    _assert_stale(route_harness.request(first, "fit.set_params", **_inputs()))
-    assert route_harness.request(first, "fit.result")["ok"]
-
-    route_harness.ctrl.set_fit_params("GUI-db", (1, 2), (2, 3), (3, 4), {}, None, None)
-    _assert_stale(route_harness.request(first, "fit.set_params", **_inputs()))
-    assert route_harness.ctrl.state.fit.database_path == "GUI-db"
-    assert route_harness.request(first, "fit.result")["ok"]
-    assert route_harness.request(first, "fit.set_params", **_inputs())["ok"]
-    route_harness.disconnect(first)
-    fresh = route_harness.client()
-    _assert_stale(route_harness.request(fresh, "fit.set_params", **_inputs()))
-
-
-@pytest.mark.parametrize("baseline", ["matching", "stale", "unread"])
-def test_fit_self_write_refreshes_only_matching_observed_side_effects(
-    route_harness: RouteHarness,
-    baseline: str,
-) -> None:
-    client = route_harness.client()
-    assert route_harness.request(client, "fit.result")["ok"]
-    if baseline != "unread":
-        assert route_harness.request(client, "project.info")["ok"]
-    if baseline == "stale":
-        route_harness.ctrl.setup_project(
-            ProjectInfo(chip_name="external", qub_name="Q1")
-        )
-
-    # A native synchronous fact consumer publishes another resource in the
-    # same owner turn. Shared tracking, not this adapter, decides its baseline.
-    def publish_project(_payload: FitChangedPayload) -> None:
-        route_harness.ctrl.setup_project(
-            ProjectInfo(chip_name="side-effect", qub_name="Q1")
-        )
-
-    subscription = route_harness.ctrl.bus.subscribe(FitChangedPayload, publish_project)
-    try:
-        assert route_harness.request(client, "fit.set_params", **_inputs())["ok"]
-    finally:
-        subscription.unsubscribe()
-    reply = route_harness.request(
-        client, "project.setup", chip_name="next", qub_name="Q2"
-    )
-    if baseline == "matching":
-        assert reply["ok"]
-        assert route_harness.ctrl.state.project.chip_name == "next"
-    else:
-        _assert_stale(reply, "project")
-        assert route_harness.ctrl.state.project.chip_name == "side-effect"
 
 
 @pytest.mark.parametrize(

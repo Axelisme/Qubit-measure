@@ -123,85 +123,6 @@ def test_export_defaults_create_only_and_explicit_overwrite_replaces_output(
 
 
 @pytest.mark.parametrize(
-    ("method", "missing"),
-    [
-        ("export.spectrums", "project"),
-        ("export.spectrums", "collection"),
-        ("export.spectrums", "empty-leaf"),
-        ("fit.export_params", "project"),
-        ("fit.export_params", "collection"),
-        ("fit.export_params", "empty-leaf"),
-        ("fit.export_params", "fit"),
-    ],
-)
-def test_export_requires_complete_owner_inputs_on_each_connection(
-    route_harness: RouteHarness,
-    tmp_path: Path,
-    method: str,
-    missing: str,
-) -> None:
-    state = route_harness.ctrl.state
-    state.put_spectrum(_entry("empty", empty=True))
-    state.set_fit_result((5, 1, 0.5))
-    first, second = route_harness.client(), route_harness.client()
-    for client in (first, second):
-        if client is first or missing != "project":
-            assert route_harness.request(client, "project.info")["ok"]
-        if client is first or missing != "collection":
-            assert route_harness.request(client, "spectrum.list")["ok"]
-        if client is first or missing != "empty-leaf":
-            assert route_harness.request(client, "spectrum.snapshot", name="empty")[
-                "ok"
-            ]
-        if client is first or missing != "fit":
-            assert route_harness.request(client, "fit.result")["ok"]
-    output = tmp_path / "blocked" / "output"
-    params = {"filepath" if method == "export.spectrums" else "savepath": str(output)}
-    reply = route_harness.request(second, method, **params)
-    _assert_error(reply, "precondition_failed", "stale_version")
-    assert not output.parent.exists()
-    assert route_harness.request(first, method, **params)["ok"]
-
-
-@pytest.mark.parametrize("method", ["export.spectrums", "fit.export_params"])
-def test_export_stale_leaf_and_gui_fit_change_require_explicit_reread(
-    route_harness: RouteHarness,
-    tmp_path: Path,
-    method: str,
-) -> None:
-    state = route_harness.ctrl.state
-    state.put_spectrum(_entry("empty", empty=True))
-    state.put_spectrum(_entry("empty-neighbor"))
-    state.set_fit_result((5, 1, 0.5))
-    client = route_harness.client()
-    for read in ("project.info", "spectrum.list", "fit.result"):
-        assert route_harness.request(client, read)["ok"]
-    for name in state.spectrums:
-        assert route_harness.request(client, "spectrum.snapshot", name=name)["ok"]
-    state.put_spectrum(_entry("empty", empty=True))
-    output = tmp_path / "output"
-    params = {"filepath" if method == "export.spectrums" else "savepath": str(output)}
-    assert route_harness.request(client, "resources.versions")["ok"]
-    _assert_error(
-        route_harness.request(client, method, **params),
-        "precondition_failed",
-        "stale_version",
-    )
-    assert not output.exists()
-    assert route_harness.request(client, "spectrum.snapshot", name="empty")["ok"]
-    if method == "fit.export_params":
-        state.set_fit_result((6, 1, 0.5))
-        _assert_error(
-            route_harness.request(client, method, **params),
-            "precondition_failed",
-            "stale_version",
-        )
-        assert not output.exists()
-        assert route_harness.request(client, "fit.result")["ok"]
-    assert route_harness.request(client, method, **params)["ok"]
-
-
-@pytest.mark.parametrize(
     ("method", "reason", "with_fit"),
     [
         ("export.spectrums", "no_spectrums", False),
@@ -282,21 +203,6 @@ def test_params_export_merges_sections_and_uses_first_aligned_even_if_empty(
         assert fit.plot_transitions == {"transitions1": [[0, 1]], "r_f": 6.2}
         assert fit.timestamp is not None
     assert state.version.snapshot() == versions
-    # Export must not repair a different connection's absent observation.
-    other = route_harness.client()
-    _assert_error(
-        route_harness.request(
-            other,
-            "fit.set_params",
-            database_path="db",
-            EJb=[1, 2],
-            ECb=[2, 3],
-            ELb=[3, 4],
-            transitions={},
-        ),
-        "precondition_failed",
-        "stale_version",
-    )
 
 
 @pytest.mark.parametrize(

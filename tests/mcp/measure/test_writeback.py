@@ -204,7 +204,7 @@ def test_apply_writeback_skips_absent_or_empty_drafts(apply_writeback_client, pr
     )
 
 
-@pytest.mark.parametrize("reason", ["no_read", "stale_version"])
+@pytest.mark.parametrize("reason", ["result_superseded", "not_holder"])
 @pytest.mark.parametrize(
     "method,stage,expected_calls",
     [
@@ -242,9 +242,6 @@ def test_apply_writeback_stops_at_first_rpc_error_with_confirmed_progress(
     assert result["error"]["reason"] == reason
     assert result["error"]["message"] == (
         "GUI Error (precondition_failed): guard denied"
-        if reason == "no_read"
-        else "GUI Error (PRECONDITION_FAILED): a resource changed since your last read; "
-        "review then retry"
     )
     assert result["failed_stage_may_have_partial_writes"] is (
         method == "tab.writeback_write"

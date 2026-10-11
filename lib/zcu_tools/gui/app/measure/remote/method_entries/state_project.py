@@ -71,8 +71,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "and the successful GUI connection's address/port (null for mock). "
             "The structured 'cfg' (the full ~2 KB QICK config) is included only when "
             "include_cfg=true (default false), so the common case pays nothing for it. "
-            "Requires a connected SoC. Only include_cfg=true fully reveals the SoC "
-            "for a version guard; a summary does not. The SoC has no teardown "
+            "Requires a connected SoC. The SoC has no teardown "
             "(Pyro4-backed): there is no disconnect / reconnect / health-check "
             "tool (deferred, E3).",
             (
@@ -81,9 +80,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
             readonly=True,
-        ),
-        agent=AgentMethodPolicy(
-            reveals=("soc",), reveals_when_nonempty=("include_cfg",)
         ),
     ),
     method_entry(
