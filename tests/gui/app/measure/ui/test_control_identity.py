@@ -665,7 +665,7 @@ def test_load_file_return_rechecks_holder_without_replacing_result(
             )
             # The outer dialog remains cancellable when selection cannot commit.
             load = ui.window.findChild(RunLoadDialog)
-            if load is not None and load.isVisible():
+            if decision == "transfer" and load is not None and load.isVisible():
                 button(load, "Cancel").click()
 
     modal_action(
@@ -914,12 +914,12 @@ def test_shutdown_finishes_load_interaction_before_owner_teardown(
                 chooser, "accept", Qt.ConnectionType.DirectConnection
             )
 
-    interactions = [(RunLoadDialog, open_load)]
+    interactions: list[tuple[type[QDialog], Callable[[Any], None]]] = [
+        (RunLoadDialog, open_load)
+    ]
     if stage == "file-chooser":
         interactions.append((QFileDialog, return_late_choice))
-    modal_action(
-        qapp, lambda: ui.window.load_tab_data_dialog(tab_id), interactions
-    )
+    modal_action(qapp, lambda: ui.window.load_tab_data_dialog(tab_id), interactions)
     assert owner_finished == [True]
     assert finished == [(int(QDialog.DialogCode.Rejected), None, True)]
     after = ui.controller.get_tab_snapshot(tab_id).run
