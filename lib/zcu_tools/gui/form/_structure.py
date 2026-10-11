@@ -401,6 +401,16 @@ def _restore_field(
 ) -> JsonValue:
     tag = discriminator(info)
     child = selected(info, saved)
+    if child is None and tag is None and isinstance(saved, dict):
+        # Raw shape, not evaluation/Pydantic coercion, identifies an untagged
+        # branch only when exactly one declared model is compatible.
+        matches = tuple(
+            model
+            for model in model_types(info.annotation)
+            if _compatible_type(model, saved)
+        )
+        if len(matches) == 1:
+            child = matches[0]
     if isinstance(saved, dict) and tag is not None and tag not in saved:
         child = selected(info, current)
     if child is not None and isinstance(saved, dict):
