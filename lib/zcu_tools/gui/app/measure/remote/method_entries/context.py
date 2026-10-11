@@ -113,10 +113,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:h_context_ml_del_module",
         MethodSpec(
             5.0,
-            "Delete one ModuleLibrary module. Echoes {deleted: name}. LINKED cfg refs "
+            "Delete a point-local module at a concrete component.partition.name key "
+            "(partition is pulses/readout/reset); flat names and aliases are not accepted. "
+            "Echoes {deleted: name}. LINKED cfg refs "
             "keep the missing key and become invalid until it returns or is edited; "
             "MODIFIED refs retain their inline Custom value.",
-            (required_string("name", "Module name"),),
+            (required_string("name", "Concrete module key, e.g. Q1.pulses.pi"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -125,10 +127,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:h_context_ml_del_waveform",
         MethodSpec(
             5.0,
-            "Delete one ModuleLibrary waveform. Echoes {deleted: name}. LINKED cfg refs "
+            "Delete a point-local waveform at a concrete component.waveforms.name key; "
+            "flat names and aliases are not accepted. Echoes {deleted: name}. LINKED cfg refs "
             "keep the missing key and become invalid until it returns or is edited; "
             "MODIFIED refs retain their inline Custom value.",
-            (required_string("name", "Waveform name"),),
+            (
+                required_string(
+                    "name", "Concrete waveform key, e.g. Q1.waveforms.drive"
+                ),
+            ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -137,12 +144,18 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:h_context_ml_rename_module",
         MethodSpec(
             5.0,
-            "Rename a ModuleLibrary module old→new (clash fails fast). Echoes "
+            "Rename a point-local module using concrete component.partition.name keys "
+            "for old/new (partition is pulses/readout/reset); no flat names or aliases. "
+            "Clash fails fast. Echoes "
             "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
             "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
             (
-                required_string("old", "Current module name"),
-                required_string("new", "New module name"),
+                required_string(
+                    "old", "Current concrete module key, e.g. Q1.pulses.pi"
+                ),
+                required_string(
+                    "new", "New concrete module key, e.g. Q1.pulses.pi_half"
+                ),
             ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
@@ -152,12 +165,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:h_context_ml_rename_waveform",
         MethodSpec(
             5.0,
-            "Rename a ModuleLibrary waveform old→new (clash fails fast). Echoes "
+            "Rename a point-local waveform using concrete component.waveforms.name keys "
+            "for old/new; no flat names or aliases. Clash fails fast. Echoes "
             "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
             "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
             (
-                required_string("old", "Current waveform name"),
-                required_string("new", "New waveform name"),
+                required_string(
+                    "old", "Current concrete waveform key, e.g. Q1.waveforms.drive"
+                ),
+                required_string(
+                    "new", "New concrete waveform key, e.g. Q1.waveforms.drive_half"
+                ),
             ),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
