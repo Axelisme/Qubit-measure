@@ -543,6 +543,31 @@ def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
     assert session.entry.use_point("a").description == "retained"
 
 
+@pytest.mark.parametrize("kind", ["module", "waveform"])
+@pytest.mark.parametrize("stderr", [-0.1, float("inf")])
+def test_library_writeback_rejects_invalid_uncertainty_before_acceptance(
+    session: _Session, kind: str, stderr: float
+) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    target = _select(session, "a")
+    capture = session.control.read_context()
+    version = session.state.version.get("context")
+    waveform = ConstWaveformCfg(length=0.1)
+    item = (
+        writeback.ModuleWriteback("Q1.pulses.pi", PulseSpec(ch=0, nqz=1, freq=100.0,
+                                 gain=0.2, waveform=waveform), stderr=stderr)
+        if kind == "module"
+        else writeback.WaveformWriteback("Q1.waveforms.base", waveform, stderr=stderr)
+    )
+    with pytest.raises(ValueError, match="stderr"):
+        session.control.apply_writeback(target, (item,),
+            evidence=writeback.WritebackEvidence(kind="test/uncertainty", origin="gui"))
+    assert session.entry.ledger.events() == ()
+    assert session.control.read_context().library.document() == capture.library.document()
+    assert session.state.version.get("context") == version
+
+
 def test_selected_draft_writeback_requires_saved_point_without_side_effects(
     session: _Session,
 ) -> None:
