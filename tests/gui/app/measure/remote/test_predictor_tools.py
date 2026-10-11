@@ -1,9 +1,10 @@
-"""Read-only concrete-qubit predictor callers through the public controller/socket.
+"""Read-only simulator source and error contracts through RPC and MCP.
 
-Installed-model lifecycle cases are retired by D348; the full independent params
-wire alternative belongs to the subsequent MCP contract slice.
+Real context captures supply concrete qubits. Independent inputs never require
+an installed model, a point, hardware, a dialog or a dialog cache.
 """
 
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -16,93 +17,305 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
+    PointUseRequest,
 )
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.entry import component_registry
 
 import zcu_lab.components as components
 
-from ._helpers import call, open_client
+from ._helpers import call, mcp_client, open_client
+
+COMPLETE = {
+    "model": "fluxonium",
+    "EJ": 5.0,
+    "EC": 1.0,
+    "EL": 0.5,
+    "flux_half": 0.0,
+    "flux_period": 1.0,
+    "flux_bias": 0.0,
+}
+MISSING = ["EC", "EL", "flux_half", "flux_period", "flux_bias"]
 
 
-def test_qubit_queries_and_calibration_preserve_current_point(
-    qapp, tmp_path: Path
-) -> None:
+@pytest.fixture
+def simulator(qapp, tmp_path: Path):
     before_kinds = component_registry.kinds()
     added = "qubit/fluxonium" not in before_kinds
     if added:
         component_registry.register("qubit/fluxonium", components.QubitSchema)
-    installed = component_registry.kinds()
+    controller = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        Registry(),
+        None,
+        BaseEventBus(),
+        project_root=str(tmp_path),
+        params_for=components.params_for,
+    )
+    adapter = RemoteControlAdapter(
+        controller, ControlOptions(port=0), controller.owner_scheduler
+    )
+    adapter.start()
+    sock = open_client(adapter.port)
     try:
-        controller = Controller(
-            State(SessionEnv(parameters=None, soc=None, soccfg=None)),
-            Registry(),
-            None,
-            BaseEventBus(),
-            project_root=str(tmp_path),
-            params_for=components.params_for,
-        )
-        try:
-            controller.setup_control.new_entry(EntryRequest("queries"))
-            controller.context_control.add_component(
-                "Q1",
-                "qubit/fluxonium",
-                {
-                    "EJ": 5.0,
-                    "EC": 1.0,
-                    "EL": 0.5,
-                    "flux_half": 0.0,
-                    "flux_period": 1.0,
-                    "ext": {"flux_bias": 0.0},
-                },
-                setup=True,
-            )
-            controller.context_control.add_component(
-                "Q2", "qubit/fluxonium", {"EJ": 4.1}, setup=True
-            )
-            controller.setup_control.new_point(
-                PointCreateRequest("first", "", CommandOrigin("gui"))
-            )
-            before = controller.context_control.read_context().document()
-            adapter = RemoteControlAdapter(
-                controller, ControlOptions(port=0), controller.owner_scheduler
-            )
-            adapter.start()
-            sock = open_client(adapter.port)
-            try:
-                info = call(sock, "predictor.info", {"qubit": "Q2"})["result"]
-                assert info["params"]["EJ"] == 4.1
-                assert info["missing"] == [
-                    "EC",
-                    "EL",
-                    "flux_half",
-                    "flux_period",
-                    "flux_bias",
-                ]
-                freq = call(
-                    sock, "predictor.predict", {"qubit": "Q1", "device_value": 0.1}
-                )["result"]["freq_mhz"]
-                assert freq == pytest.approx(1707.3748654723192, abs=1e-7)
-                result = call(
-                    sock,
-                    "predictor.calibrate",
-                    {"qubit": "Q1", "device_value": 0.101, "frequency_mhz": freq},
-                )["result"]
-                assert result["flux_bias_after"] == pytest.approx(-0.001, abs=1e-4)
-                assert (
-                    call(sock, "predictor.info", {"qubit": "Q1"})["result"]["params"][
-                        "flux_bias"
-                    ]
-                    == 0.0
-                )
-                assert controller.context_control.read_context().document() == before
-            finally:
-                sock.close()
-                adapter.stop()
-        finally:
-            assert vars(controller)["_background_svc"].quiesce()
-        assert component_registry.kinds() == installed
+        yield controller, adapter, sock
     finally:
+        sock.close()
+        adapter.stop()
+        assert vars(controller)["_background_svc"].quiesce()
         if added:
             component_registry.unregister("qubit/fluxonium")
         assert component_registry.kinds() == before_kinds
+
+
+def prepare_point(controller: Controller) -> None:
+    """Publish two concrete components with different completeness at one point."""
+    controller.setup_control.new_entry(EntryRequest("queries"))
+    controller.context_control.add_component(
+        "Q1",
+        "qubit/fluxonium",
+        {
+            "EJ": 5.0,
+            "EC": 1.0,
+            "EL": 0.5,
+            "flux_half": 0.0,
+            "flux_period": 1.0,
+            "ext": {"flux_bias": 0.0},
+        },
+        setup=True,
+    )
+    controller.context_control.add_component(
+        "Q2", "qubit/fluxonium", {"EJ": 4.1}, setup=True
+    )
+    controller.setup_control.new_point(
+        PointCreateRequest("first", "", CommandOrigin("gui"))
+    )
+
+
+def test_qubit_queries_and_calibration_preserve_current_point(simulator) -> None:
+    controller, _, sock = simulator
+    prepare_point(controller)
+    before = controller.context_control.read_context().document()
+    info = call(sock, "predictor.info", {"qubit": "Q2"})["result"]
+    assert info["params"]["EJ"] == 4.1
+    assert info["missing"] == MISSING
+    freq = call(sock, "predictor.predict", {"qubit": "Q1", "device_value": 0.1})[
+        "result"
+    ]["freq_mhz"]
+    assert freq == pytest.approx(1707.3748654723192, abs=1e-7)
+    result = call(
+        sock,
+        "predictor.calibrate",
+        {
+            "qubit": "Q1",
+            "device_value": 0.101,
+            "frequency_mhz": freq,
+        },
+    )["result"]
+    assert result["flux_bias_after"] == pytest.approx(-0.001, abs=1e-4)
+    assert (
+        call(sock, "predictor.info", {"qubit": "Q1"})["result"]["params"]["flux_bias"]
+        == 0.0
+    )
+    assert controller.context_control.read_context().document() == before
+
+
+def test_direct_prediction_and_calibration_without_a_point(simulator) -> None:
+    _, _, sock = simulator
+    params = deepcopy(COMPLETE)
+    freq_reply = call(
+        sock, "predictor.predict", {"params": params, "device_value": 0.1}
+    )
+    assert freq_reply["ok"], freq_reply
+    assert freq_reply["result"]["freq_mhz"] == pytest.approx(
+        1707.3748654723192, abs=1e-7
+    )
+    result = call(
+        sock,
+        "predictor.calibrate",
+        {
+            "params": params,
+            "device_value": 0.101,
+            "frequency_mhz": freq_reply["result"]["freq_mhz"],
+        },
+    )
+    assert result["ok"], result
+    assert result["result"]["flux_bias_before"] == 0.0
+    assert result["result"]["flux_bias_after"] == pytest.approx(-0.001, abs=1e-4)
+    assert (
+        call(sock, "predictor.info", {"params": params})["result"]["params"][
+            "flux_bias"
+        ]
+        == 0.0
+    )
+    assert params == COMPLETE
+
+
+def test_info_reports_partial_direct_parameters(simulator) -> None:
+    _, _, sock = simulator
+    reply = call(sock, "predictor.info", {"params": {"model": "fluxonium", "EJ": 4.1}})
+    assert reply["ok"], reply
+    assert reply["result"] == {
+        "model": "fluxonium",
+        "params": {
+            "EJ": 4.1,
+            "EC": None,
+            "EL": None,
+            "flux_half": None,
+            "flux_period": None,
+            "flux_bias": None,
+        },
+        "missing": MISSING,
+    }
+
+
+@pytest.mark.parametrize(
+    "method", ["predictor.info", "predictor.predict", "predictor.calibrate"]
+)
+@pytest.mark.parametrize("source", [{}, {"qubit": "Q1", "params": COMPLETE}])
+def test_sources_are_exclusive_and_required(simulator, method, source) -> None:
+    _, _, sock = simulator
+    reply = call(sock, method, {**source, "device_value": 0.1, "frequency_mhz": 1707.0})
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert reply["error"]["reason"] == "invalid_predictor_source"
+    assert (
+        "qubit" in reply["error"]["message"] and "params" in reply["error"]["message"]
+    )
+
+
+@pytest.mark.parametrize("method", ["predictor.predict", "predictor.calibrate"])
+@pytest.mark.parametrize("source", ["qubit", "params"])
+def test_missing_fields_are_named_without_mutation(simulator, method, source) -> None:
+    controller, _, sock = simulator
+    prepare_point(controller)
+    before = controller.context_control.read_context().document()
+    inputs = (
+        {"qubit": "Q2"}
+        if source == "qubit"
+        else {"params": {"model": "fluxonium", "EJ": 4.1}}
+    )
+    reply = call(sock, method, {**inputs, "device_value": 0.1, "frequency_mhz": 1707.0})
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert reply["error"]["reason"] == "missing_predictor_params"
+    assert reply["error"]["data"]["missing"] == MISSING
+    assert all(name in reply["error"]["message"] for name in MISSING)
+    assert controller.context_control.read_context().document() == before
+
+
+@pytest.mark.parametrize("qubit", ["unknown", "Q1.EJ", "qubit", ""])
+def test_qubit_requires_a_concrete_component_name(simulator, qubit) -> None:
+    controller, _, sock = simulator
+    prepare_point(controller)
+    reply = call(sock, "predictor.info", {"qubit": qubit})
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert reply["error"]["reason"] == "invalid_predictor_qubit"
+
+
+@pytest.mark.parametrize(
+    "params,field",
+    [
+        ({"EJ": 5.0}, "model"),
+        ({"model": "unknown"}, "model"),
+        ({**COMPLETE, "EC": "1"}, "EC"),
+        ({**COMPLETE, "EL": True}, "EL"),
+        ({**COMPLETE, "flux_period": 0.0}, "flux_period"),
+        ({**COMPLETE, "EJ": -1.0}, "EJ"),
+        ({**COMPLETE, "unexpected": 1.0}, "unexpected"),
+    ],
+)
+def test_invalid_direct_parameters_have_a_named_error(simulator, params, field) -> None:
+    _, _, sock = simulator
+    reply = call(sock, "predictor.predict", {"params": params, "device_value": 0.1})
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert reply["error"]["reason"] == "invalid_predictor_params"
+    assert field in reply["error"]["message"]
+
+
+def test_queries_use_selected_point_not_setup_or_another_qubit(simulator) -> None:
+    controller, _, sock = simulator
+    prepare_point(controller)
+    first = controller.context_control.read_context()
+    controller.context_control.set_parameter(first.target, "Q1.ext.flux_bias", 0.02)
+    controller.setup_control.new_point(
+        PointCreateRequest("second", "", CommandOrigin("gui"))
+    )
+    controller.context_control.set_setup_parameter("Q1.ext.flux_bias", 0.04)
+    assert (
+        call(sock, "predictor.info", {"qubit": "Q1"})["result"]["params"]["flux_bias"]
+        == 0.0
+    )
+    controller.setup_control.use_point(PointUseRequest("first"))
+    before = controller.context_control.read_context().document()
+    assert (
+        call(sock, "predictor.info", {"qubit": "Q1"})["result"]["params"]["flux_bias"]
+        == 0.02
+    )
+    actual = call(sock, "predictor.predict", {"qubit": "Q1", "device_value": 0.1})[
+        "result"
+    ]
+    independent = call(
+        sock,
+        "predictor.predict",
+        {"params": {**COMPLETE, "flux_bias": 0.02}, "device_value": 0.1},
+    )
+    assert independent["ok"], independent
+    assert independent["result"] == actual
+    assert controller.context_control.read_context().document() == before
+
+
+def test_mcp_rpc_preserves_read_only_sources_and_named_errors(
+    simulator, tmp_path: Path, request
+) -> None:
+    controller, adapter, _ = simulator
+    prepare_point(controller)
+    before = controller.context_control.read_context().document()
+    bridge, invoke = mcp_client(adapter.port, tmp_path, request=request)
+    try:
+        invoke("connect", {"port": adapter.port})
+        direct = invoke(
+            "rpc_call",
+            {
+                "method": "predictor.predict",
+                "params": {"params": COMPLETE, "device_value": 0.1},
+            },
+        )
+        assert direct["freq_mhz"] == pytest.approx(1707.3748654723192, abs=1e-7)
+        assert (
+            invoke(
+                "rpc_call",
+                {
+                    "method": "predictor.predict",
+                    "params": {"qubit": "Q1", "device_value": 0.1},
+                },
+            )
+            == direct
+        )
+        calibrated = invoke(
+            "rpc_call",
+            {
+                "method": "predictor.calibrate",
+                "params": {
+                    "params": COMPLETE,
+                    "device_value": 0.101,
+                    "frequency_mhz": direct["freq_mhz"],
+                },
+            },
+        )
+        assert calibrated["flux_bias_after"] == pytest.approx(-0.001, abs=1e-4)
+        assert (
+            invoke("rpc_call", {"method": "predictor.info", "params": {"qubit": "Q2"}})[
+                "missing"
+            ]
+            == MISSING
+        )
+        with pytest.raises(GuiRpcError) as rejected:
+            invoke("rpc_call", {"method": "predictor.info", "params": {}})
+        assert rejected.value.reason == "invalid_predictor_source"
+        assert controller.context_control.read_context().document() == before
+    finally:
+        bridge.disconnect()
