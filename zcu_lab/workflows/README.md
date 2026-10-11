@@ -18,7 +18,7 @@
 
 `t2` 宣告 `T2echo_fluxdep` 與 `T2ramsey_fluxdep`。每個 flux 先校準，再用相同 waveform／gain 的 fitted pi 與 pi2 組 native cfg。Echo detune 為零，Ramsey 的必填 detune_ratio 除以 length_step 得到 native MHz detune。Lifetime 大於兩倍最大 delay，或 mean absolute fit error 大於 0.1 倍 fit peak-to-peak 時，提交缺值與原因，保留 raw acquisition。Calibration 與 relax timing 沿既有 guess，不加一次 T1 量測。
 
-`mist` 宣告 `MIST_fluxdep`，依 reset、校準後的 pi preparation、MIST disturbance pulse 與 readout 掃 gain。Gain start／stop／points 固定在 plan，run 中不改。Native `PowerDepCfg` 的 init_pulse／probe_pulse 分別承接 pi／MIST pulse，不省略 preparation。Record 只存 calibration、success 與 reason，raw IQ 留 native `mist/gain` 檔。Live trace 用舊 centred magnitude／spread projection，不推 threshold。
+`mist` 宣告 `MIST_fluxdep`，依 reset、校準後的 pi preparation、MIST disturbance pulse 與 readout 掃 gain。Gain start／stop／points 固定在 plan，run 中不改。Native `PowerDepCfg` 的 init_pulse／probe_pulse 分別承接 pi／MIST pulse，不省略 preparation。Record 只存 calibration、success 與 reason，raw IQ 留 native `mist/gain` 檔。Live trace 與 flux-gain map 用舊 centred magnitude／spread projection，不推 threshold。Map 的 sample centres 是 native 實際 gain 與有單位的 flux setpoints，不以 requested gain extent 或 flux index 代替。
 
 `overnight` declares a finite sequence of fixed-flux T1 then Hahn-echo pairs. Its independent `OvernightPlan` requires explicit flux/unit, outer_rounds >= 1, start_interval_s > 0, points >= 5, fixed calibrated drive/readout and historical snapshot. `OvernightTunables.reps/rounds` control acquisition averaging, not outer monitoring rounds. Guesses and sweep/relax factors fix timing; fit thresholds affect scalar acceptance only, with no calibration or feedback. The workflow does not read or produce context; any context value, including None, is valid.
 
