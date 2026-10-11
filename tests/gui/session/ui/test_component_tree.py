@@ -2,28 +2,37 @@
 
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import pytest
-from pydantic import ConfigDict
-from qtpy.QtCore import QEvent, QPoint, QPointF, Qt
+from pydantic import ConfigDict, ValidationError, create_model
+from qtpy.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from qtpy.QtGui import QKeyEvent, QMouseEvent
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QTreeWidget,
     QTreeWidgetItem,
     QWidget,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
-from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
+from zcu_tools.resources.entry import (
+    ComponentSchema,
+    ResultEntry,
+    component_registry,
+    document_value,
+)
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import (
@@ -45,6 +54,14 @@ class OpenComponent(ComponentSchema):
     rate: float | None = None
 
 
+# Forty optional fields: more rows than any test screen fits without scrolling.
+# create_model takes field definitions as untyped keyword arguments.
+_TALL_FIELDS: dict[str, Any] = {
+    f"value_{index:02d}": (float | None, None) for index in range(40)
+}
+TallComponent = create_model("TallComponent", __base__=ComponentSchema, **_TALL_FIELDS)
+
+
 def _service() -> ContextService:
     return ContextService(
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
@@ -62,6 +79,7 @@ def owner(qapp) -> Generator[ContextService]:
         component_registry.register("test/required", RequiredComponent)
         component_registry.register("test/profiled", Profiled)
         component_registry.register("test/open", OpenComponent)
+        component_registry.register("test/tall", TallComponent)
         installed = registry_state()
         yield _service()
         assert registry_state() == installed
@@ -394,3 +412,238 @@ def test_without_parameter_context_the_tree_clears_and_add_is_disabled(
         assert _row(widget, "T1", "label").text(VALUE) == "template"
     finally:
         _close(qapp, widget)
+
+
+def _count_rejection(count: object) -> ValidationError:
+    """The pydantic error the owner raises for a non-integer Profiled count."""
+    with pytest.raises(ValidationError) as caught:
+        Profiled.model_validate({"kind": "test/profiled", "label": "x", "count": count})
+    return caught.value
+
+
+def test_rejected_edit_error_names_the_field_with_full_text_in_tooltip(
+    qapp, component_widget
+):
+    widget, _control = component_widget
+    assert widget.add_component("P1", "test/profiled", {"label": "probe", "count": 3})
+
+    _edit_text(qapp, widget, _row(widget, "P1", "count"), "2.5", Qt.Key.Key_Return)
+
+    message = _count_rejection(2.5).errors()[0]["msg"]
+    error = _error(widget)
+    assert error.text() == f"count: {message}"
+    assert message in error.toolTip()
+    assert len(error.toolTip()) > len(error.text())
+
+
+# ----------------------------------------------------------------------
+# Add component dialog
+# ----------------------------------------------------------------------
+
+
+def _visible_dialogs(widget: ComponentTreeWidget) -> list[QDialog]:
+    return [dialog for dialog in widget.findChildren(QDialog) if dialog.isVisible()]
+
+
+def _open_add_dialog(qapp, widget: ComponentTreeWidget, kind: str) -> QDialog:
+    _add_button(widget).click()
+    qapp.processEvents()
+    dialogs = _visible_dialogs(widget)
+    assert len(dialogs) == 1, "Add component… opens exactly one visible dialog"
+    dialog = dialogs[0]
+    _child(dialog, QComboBox, "add_kind").setCurrentText(kind)
+    qapp.processEvents()
+    return dialog
+
+
+def _child[T: QWidget](parent: QWidget, widget_type: type[T], name: str) -> T:
+    child = parent.findChild(widget_type, name)
+    assert child is not None, f"no {widget_type.__name__} named {name!r}"
+    return child
+
+
+def _fill(dialog: QDialog, path: str, text: str) -> None:
+    field = dialog.findChild(QWidget, f"field:{path}")
+    if isinstance(field, QComboBox):
+        field.setCurrentText(text)
+    elif isinstance(field, QLineEdit):
+        field.setText(text)
+    else:
+        raise AssertionError(f"no input widget for field {path!r}")
+
+
+def _submit(qapp, dialog: QDialog) -> None:
+    _child(dialog, QPushButton, "add_submit").click()
+    qapp.processEvents()
+
+
+def _current_path(widget: ComponentTreeWidget) -> list[str]:
+    current = _tree(widget).currentItem()
+    path: list[str] = []
+    while current is not None:
+        path.insert(0, current.text(FIELD))
+        current = current.parent()
+    return path
+
+
+def test_add_button_opens_a_modal_dialog_naming_the_destination(qapp, component_widget):
+    widget, control = component_widget
+    control.new_point(PointCreateRequest("P1", "", CommandOrigin("gui")))
+    widget.refresh()
+
+    dialog = _open_add_dialog(qapp, widget, "test/profiled")
+    assert dialog.isModal()
+    current_text = _child(dialog, QLabel, "add_destination").text()
+    assert "P1" in current_text
+    _child(dialog, QPushButton, "add_cancel").click()
+    qapp.processEvents()
+    assert _visible_dialogs(widget) == []
+
+    destination = next(
+        combo
+        for combo in widget.findChildren(QComboBox)
+        if combo.findText("Setup template") >= 0
+    )
+    destination.setCurrentText("Setup template")
+    dialog = _open_add_dialog(qapp, widget, "test/profiled")
+    setup_text = _child(dialog, QLabel, "add_destination").text()
+    assert setup_text != current_text
+    assert "P1" not in setup_text
+    _child(dialog, QLineEdit, "add_name").setText("T1")
+    _fill(dialog, "label", "template")
+    _submit(qapp, dialog)
+
+    assert "T1" in control.inspect_document(setup=True).components
+    assert "T1" not in control.inspect_document().components
+
+
+def test_dialog_fields_follow_the_kind_schema_and_rebuild_on_kind_change(
+    qapp, component_widget
+):
+    widget, _control = component_widget
+    dialog = _open_add_dialog(qapp, widget, "test/profiled")
+
+    # Groups are header rows without an input; their leaves get inputs.
+    for group in ("routing", "routing.main", "routing.bias"):
+        _child(dialog, QLabel, f"label:{group}")
+        assert dialog.findChild(QWidget, f"field:{group}") is None
+    for leaf in ("label", "routing.main.ch", "routing.bias.ch", "rate", "tags"):
+        _child(dialog, QWidget, f"field:{leaf}")
+    assert dialog.findChild(QWidget, "field:kind") is None
+
+    mode = _child(dialog, QComboBox, "field:mode")
+    assert [mode.itemText(i) for i in range(mode.count())] == ["", "A", "V"]
+    enabled = _child(dialog, QComboBox, "field:enabled")
+    assert enabled.currentText() == ""
+    assert {enabled.itemText(i) for i in range(enabled.count())} == {
+        "",
+        "true",
+        "false",
+    }
+    assert _child(dialog, QLabel, "unit:rate").text() == "MHz"
+    assert "Sample rate." in _child(dialog, QLabel, "label:rate").toolTip()
+    assert "Channel index." in _child(dialog, QLabel, "label:routing.bias.ch").toolTip()
+    label_input = _child(dialog, QLineEdit, "field:label")
+    rate_input = _child(dialog, QLineEdit, "field:rate")
+    assert label_input.placeholderText() != rate_input.placeholderText()
+
+    _child(dialog, QComboBox, "add_kind").setCurrentText("test/required")
+    qapp.processEvents()
+    _child(dialog, QLineEdit, "field:reference")
+    assert dialog.findChild(QWidget, "field:label") is None
+    assert dialog.findChild(QWidget, "field:routing.main.ch") is None
+
+
+def test_dialog_submits_filled_fields_as_nested_mapping_and_selects_the_component(
+    qapp, component_widget
+):
+    widget, control = component_widget
+    dialog = _open_add_dialog(qapp, widget, "test/profiled")
+    _child(dialog, QLineEdit, "add_name").setText("P1")
+    _fill(dialog, "label", "probe")
+    _fill(dialog, "routing.bias.ch", "2")
+    _fill(dialog, "rate", "4300.5")
+    _fill(dialog, "mode", "V")
+    _fill(dialog, "enabled", "true")
+
+    _submit(qapp, dialog)
+
+    assert _visible_dialogs(widget) == []
+    component = document_value(control.inspect_document(), "P1")
+    assert isinstance(component, dict)
+    # Only filled fields are sent; the untouched routing.main group is absent.
+    assert component["routing"] == {"bias": {"ch": 2}}
+    assert component["rate"] == 4300.5
+    assert component["mode"] == "V"
+    assert component["enabled"] is True
+    assert "count" not in component
+    assert _current_path(widget) == ["P1"]
+    assert _row(widget, "P1", "routing", "bias", "ch").text(VALUE) == "2"
+
+
+def test_dialog_marks_missing_required_fields_and_does_not_submit(
+    qapp, component_widget
+):
+    widget, control = component_widget
+    dialog = _open_add_dialog(qapp, widget, "test/profiled")
+    name_label = _child(dialog, QLabel, "label:add_name")
+    required_label = _child(dialog, QLabel, "label:label")
+    assert _is_red(name_label) and _is_red(required_label)
+    assert not _is_red(_child(dialog, QLabel, "label:rate"))
+    _fill(dialog, "rate", "4300.5")
+
+    _submit(qapp, dialog)
+
+    assert _visible_dialogs(widget) == [dialog]
+    assert control.inspect_document().components == {}
+    assert "label" in _child(dialog, QLabel, "add_error").text()
+
+    _child(dialog, QLineEdit, "add_name").setText("P1")
+    _fill(dialog, "label", "probe")
+    assert not _is_red(name_label) and not _is_red(required_label)
+    _submit(qapp, dialog)
+    assert "P1" in control.inspect_document().components
+
+
+def test_owner_rejection_stays_in_the_dialog_with_input_kept(qapp, component_widget):
+    widget, control = component_widget
+    dialog = _open_add_dialog(qapp, widget, "test/profiled")
+    _child(dialog, QLineEdit, "add_name").setText("P1")
+    _fill(dialog, "label", "probe")
+    _fill(dialog, "count", "2.5")
+
+    _submit(qapp, dialog)
+
+    assert _visible_dialogs(widget) == [dialog]
+    assert "P1" not in control.inspect_document().components
+    message = _count_rejection(2.5).errors()[0]["msg"]
+    error = _child(dialog, QLabel, "add_error")
+    assert error.text() == f"count: {message}"
+    assert _is_red(error)
+    assert message in error.toolTip()
+    assert len(error.toolTip()) > len(error.text())
+    assert _child(dialog, QLineEdit, "add_name").text() == "P1"
+    assert _child(dialog, QLineEdit, "field:label").text() == "probe"
+    assert _child(dialog, QLineEdit, "field:count").text() == "2.5"
+    # The main tree's own error line stays clear: the failure belongs to Add.
+    assert _error(widget).text() == ""
+
+
+def test_dialog_height_stays_within_the_screen_and_fields_scroll(
+    qapp, component_widget
+):
+    widget, _control = component_widget
+    dialog = _open_add_dialog(qapp, widget, "test/tall")
+    screen = dialog.screen()
+    assert screen is not None
+    limit = 0.9 * screen.availableGeometry().height()
+
+    assert dialog.height() <= limit
+    scroll = _child(dialog, QScrollArea, "add_fields")
+    scrollbar = scroll.verticalScrollBar()
+    assert scrollbar is not None and scrollbar.maximum() > 0
+    for name in ("add_submit", "add_cancel"):
+        button = _child(dialog, QPushButton, name)
+        assert button.isVisible()
+        placed = QRect(button.mapTo(dialog, QPoint(0, 0)), button.size())
+        assert dialog.rect().contains(placed)
