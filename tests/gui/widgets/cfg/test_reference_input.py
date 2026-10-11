@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 import pytest
-from qtpy.QtWidgets import QApplication, QComboBox, QLabel
+from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QPushButton
 from zcu_tools.experiment.cfg_editing.catalog import PROGRAM_SHAPES, ProgramSpecPolicy
 from zcu_tools.gui.cfg import (
     CfgSchema,
@@ -95,7 +95,6 @@ def waveform_resource(
     return CfgResource(
         lambda: schema,
         resolution=catalog.snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
 
 
@@ -122,6 +121,10 @@ def attach_header(
         library_keys=reference_library_keys(node),
         valid=node.valid,
         submit=submit,
+    )
+
+    widget.set_convert_action(
+        lambda: editing.convert_reference_to_inline(revision, ("ref",))
     )
 
     def display(published: CfgObservation) -> None:
@@ -162,7 +165,7 @@ def test_qt_custom_waveform_selection_inherits_length_without_extra_submit(
     unsubscribe()
 
 
-def test_qt_library_revert_uses_relink_and_publication(widgets) -> None:
+def test_qt_convert_to_inline_uses_owner_publication(widgets) -> None:
     catalog = Catalog(
         {
             "saved": ResolvedReference(
@@ -180,20 +183,27 @@ def test_qt_library_revert_uses_relink_and_publication(widgets) -> None:
     resource = waveform_resource(catalog, linked=True)
     widget, unsubscribe = attach_header(resource)
     widgets.append(widget)
-    edited = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref", "length"), 3.0),)
-    )
+    button = widget.findChild(QPushButton, "convertReferenceToInline")
+    assert button is not None and button.isEnabled()
+    button.click()
+    converted = resource.observe()
+    assert converted.tree.children["ref"].mode == "inline"
+    assert resource.accept(converted.ref.revision).values["ref"] == {
+        "style": "gauss",
+        "length": 1.0,
+        "sigma": 0.2,
+    }
+    edited = resource.edit(converted.ref.revision, (CfgEdit(("ref", "length"), 3.0),))
     combo = widget.findChild(QComboBox)
     assert combo is not None
-    assert "Lib: saved (modified)" in (combo.itemText(i) for i in range(combo.count()))
-
-    combo.setCurrentIndex(combo.findText("Revert to Lib: saved"))
+    combo.setCurrentIndex(combo.findText("Lib: saved"))
 
     relinked = resource.observe()
     assert relinked.ref.revision == edited.ref.revision + 1
     selected = relinked.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
-    assert selected.chosen_key == "saved" and not selected.is_overridden
+    assert selected.chosen_key == "saved"
+    assert relinked.tree.children["ref"].mode == "ref"
     values = resource.accept(relinked.ref.revision).values["ref"]
     assert isinstance(values, dict) and values["length"] == 1.0
     unsubscribe()

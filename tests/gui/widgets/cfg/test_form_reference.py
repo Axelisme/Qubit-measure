@@ -139,7 +139,7 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
         draft.close()
 
 
-def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
+def test_module_ref_convert_then_edit_survives_refresh_and_reselect(qapp):
     lib_spec, lib_value = module_cfg_to_value(
         ModuleCfgFactory.from_raw(
             {
@@ -181,8 +181,18 @@ def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
         entry = editor.findChild(QLineEdit)
         assert entry is not None and entry.isVisible()
         assert entry.text() == "7000.0"
+        assert not entry.isEnabled()
+        from qtpy.QtWidgets import QPushButton
+
+        button = reference.findChild(QPushButton, "convertReferenceToInline")
+        assert button is not None and button.isEnabled()
+        button.click()
+        qapp.processEvents()
+        editor = tree_widget(form).itemWidget(tree_item(form, "mod.ro_freq"), 1)
+        assert editor is not None
+        entry = editor.findChild(QLineEdit)
+        assert entry is not None and entry.isEnabled()
         entry.setText("8000.0")
-        assert combo.currentText() == "Lib: my_pulse (modified)"
 
         _, updated_value = module_cfg_to_value(
             ModuleCfgFactory.from_raw(
@@ -201,19 +211,17 @@ def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
         draft.refresh_expressions()
         modified = form.read_values().fields["mod"]
         assert isinstance(modified, ReferenceValue)
-        assert modified.chosen_key == "my_pulse"
-        assert modified.is_overridden is True
+        assert modified.chosen_key == f"<Custom:{lib_spec.label}>"
         frequency = modified.value.fields["ro_freq"]
         assert isinstance(frequency, DirectValue) and frequency.value == 8000.0
-        assert combo.currentText() == "Lib: my_pulse (modified)"
+        assert combo.currentText() == lib_spec.label
 
-        revert_index = combo.findText("Revert to Lib: my_pulse")
+        revert_index = combo.findText("Lib: my_pulse")
         assert revert_index >= 0
         combo.setCurrentIndex(revert_index)
         reverted = form.read_values().fields["mod"]
         assert isinstance(reverted, ReferenceValue)
         assert reverted.chosen_key == "my_pulse"
-        assert reverted.is_overridden is False
         frequency = reverted.value.fields["ro_freq"]
         assert isinstance(frequency, DirectValue) and frequency.value == 7500.0
         assert combo.currentText() == "Lib: my_pulse"
