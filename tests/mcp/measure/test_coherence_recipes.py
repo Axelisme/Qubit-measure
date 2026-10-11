@@ -11,7 +11,8 @@ import pytest
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 
-from ._recipe_support import PNG, LookbackGui, scalar, section
+from ._recipe_actual_support import cfg_sweep, cfg_value
+from ._recipe_support import PNG, LookbackGui, publish_reference_locks, scalar, section
 from ._support import MeasureClient, full_execution_reply, make_client
 
 RAW_REPORT = SaveReport(
@@ -80,6 +81,7 @@ class CoherenceGui(LookbackGui):
         tree["modules"]["children"]["pi2_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
             "ref": pi2_ref,
             "error": None,
             "children": {"freq": scalar(6100.0)},
@@ -88,6 +90,7 @@ class CoherenceGui(LookbackGui):
             length={
                 "kind": "sweep",
                 "valid": True,
+                "readonly": False,
                 "inputs": {
                     key: scalar(value)["input"]
                     for key, value in {"start": 0.04, "stop": 60.0, "expts": 61}.items()
@@ -97,11 +100,13 @@ class CoherenceGui(LookbackGui):
         self.publication["tree"]["children"]["modules"]["children"]["pi_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
             "ref": pi_ref,
             "error": None,
             "children": {"freq": scalar(6100.0)},
         }
 
+        publish_reference_locks(self.publication["tree"])
         self.defaults = deepcopy(self.publication)
 
     def _edit(self, params):
@@ -235,10 +240,13 @@ def test_coherence_reuse_discards_old_overrides_and_keeps_gui_expressions(
             client, skip_writeback(client, client.call(recipe, {"reuse_tab_id": "t"}))
         ).data
         assert data["status"] == "finished", data
-        sweep = data["actual"]["fields"]["sweep.length"]
+        sweep = data["actual"]["delay"]
         assert sweep["value"]["stop"] == 37.0
-        assert sweep["input"]["stop"]["raw"] == "calibrated_decay"
-        assert sweep["input"]["stop"]["mode"] == "expression"
+        stop_input = gui.publication["tree"]["children"]["sweep"]["children"]["length"][
+            "inputs"
+        ]["stop"]
+        assert stop_input["raw"] == "calibrated_decay"
+        assert stop_input["mode"] == "expression"
         for slot, library in (
             ("pi_pulse", "Q1.pulses.pi"),
             ("pi2_pulse", "Q1.pulses.pi2"),
@@ -247,7 +255,7 @@ def test_coherence_reuse_discards_old_overrides_and_keeps_gui_expressions(
                 continue
             if recipe == "t1" and slot == "pi2_pulse":
                 continue
-            assert data["actual"]["fields"][f"modules.{slot}"] == {
+            assert data["actual"]["pi_ref" if slot == "pi_pulse" else "pi2_ref"] == {
                 "value": library,
                 "source": "gui_default",
             }
@@ -276,17 +284,11 @@ def test_coherence_explicit_readout_and_reset_use_library_without_rf(tmp_path, r
             ),
         ).data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["modules.readout"]["value"] == "R1.readout.readout"
-        assert fields["modules.reset"] == {
-            "value": "Q1.reset.reset",
-            "source": "explicit",
-        }
-        assert (
-            fields["modules.readout.pulse_cfg.freq"]["source"]
-            == "library:R1.readout.readout"
-        )
-        assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
+        fields = data["actual"]
+        assert cfg_value(gui.publication, "modules.readout") == "R1.readout.readout"
+        assert cfg_value(gui.publication, "modules.reset") == "Q1.reset.reset"
+        assert fields["readout_frequency_mhz"]["source"] == "library:R1.readout.readout"
+        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 5000.0
 
 
 @pytest.mark.parametrize(
@@ -431,31 +433,24 @@ def test_t2_runs_with_total_delay_and_unchanged_detune_units(tmp_path, recipe):
         )
         data = reply.data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["sweep.length"]["value"] == {
+        fields = data["actual"]
+        assert cfg_sweep(gui.publication, "sweep.length") == {
             "start": 0.04,
             "stop": 84.0,
             "expts": 43,
         }
-        assert fields["sweep.length"]["source"] == {
+        assert fields["delay"]["source"] == {
             "start": "gui_default",
-            "stop": "max_delay_us",
-            "expts": "points",
+            "stop": "explicit",
+            "expts": "explicit",
         }
-        assert fields["detune_ratio"]["source"] == "detune_ratio"
-        assert fields["reps"]["source"] == "reps"
-        assert fields["rounds"]["source"] == "rounds"
-        assert fields["detune_ratio"]["value"] == 0.37
-        assert fields["modules.pi2_pulse"]["value"] == "Q1.pulses.pi2"
+        assert cfg_value(gui.publication, "detune_ratio") == 0.37
+        assert cfg_value(gui.publication, "modules.pi2_pulse") == "Q1.pulses.pi2"
         if recipe == "t2echo":
-            assert fields["modules.pi_pulse"] == {
-                "value": "Q1.pulses.pi",
-                "source": "explicit",
-            }
-            assert fields["modules.pi2_pulse"]["source"] == "explicit"
-        assert fields["modules.reset"]["value"] is None
-        assert fields["reps"]["value"] == 7
-        assert fields["rounds"]["value"] == 5
+            assert cfg_value(gui.publication, "modules.pi_pulse") == "Q1.pulses.pi"
+        assert cfg_value(gui.publication, "modules.reset") is None
+        assert cfg_value(gui.publication, "reps") == 7
+        assert cfg_value(gui.publication, "rounds") == 5
         assert data["tab"] == "t"
         assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
@@ -481,10 +476,9 @@ def test_t2_number_delay_and_detune_publish_floats(tmp_path, recipe, number):
             ),
         ).data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["detune_ratio"]["value"] == 1.0
-        assert type(fields["detune_ratio"]["value"]) is float
-        sweep = fields["sweep.length"]["value"]
+        assert cfg_value(gui.publication, "detune_ratio") == 1.0
+        assert type(cfg_value(gui.publication, "detune_ratio")) is float
+        sweep = cfg_sweep(gui.publication, "sweep.length")
         assert sweep["stop"] == 1.0
         assert type(sweep["stop"]) is float
         assert sweep["expts"] == 3
@@ -689,21 +683,22 @@ def test_t1_selected_library_pulse_preserves_gui_delay_defaults(tmp_path, reuse_
             skip_writeback(client, client.call("t1", {"reuse_tab_id": reuse_tab_id})),
         ).data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["modules.pi_pulse"] == {
+        fields = data["actual"]
+        assert fields["pi_ref"] == {
             "value": "Q1.pulses.pi",
             "source": "gui_default",
         }
-        assert fields["sweep.length"]["value"] == {
+        assert cfg_sweep(gui.publication, "sweep.length") == {
             "start": 0.04,
             "stop": 60.0,
             "expts": 61,
         }
-        assert fields["sweep.length"]["source"]["stop"] == "gui_default"
-        assert (
-            fields["modules.readout.pulse_cfg.freq"]["input"]["raw"]
-            == "$resonator.freq"
-        )
+        assert fields["delay"]["source"]["stop"] == "gui_default"
+        assert fields["readout_frequency_mhz"]["source"] == "$resonator.freq"
+        frequency_input = gui.publication["tree"]["children"]["modules"]["children"][
+            "readout"
+        ]["children"]["pulse_cfg"]["children"]["freq"]["input"]
+        assert frequency_input["raw"] == "$resonator.freq"
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.reset_cfg") == (1 if reuse_tab_id else 0)
         assert methods.count("tab.new") == (0 if reuse_tab_id else 1)
@@ -763,7 +758,8 @@ def test_t1_rejects_invalid_inputs_before_preparing(tmp_path, arguments):
 
 @pytest.mark.parametrize("delay", [1, 1.0])
 def test_t1_number_inputs_publish_floats_and_keep_integer_counts(tmp_path, delay):
-    with recipe_client(tmp_path, CoherenceGui(pi_ref="Q1.pulses.pi")) as client:
+    gui = CoherenceGui(pi_ref="Q1.pulses.pi")
+    with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
             client,
             skip_writeback(
@@ -774,13 +770,13 @@ def test_t1_number_inputs_publish_floats_and_keep_integer_counts(tmp_path, delay
             ),
         ).data
         assert data["status"] == "finished", data
-        sweep = data["actual"]["fields"]["sweep.length"]["value"]
+        sweep = cfg_sweep(gui.publication, "sweep.length")
         assert sweep["stop"] == 1.0
         assert type(sweep["stop"]) is float
         assert sweep["expts"] == 3
         assert type(sweep["expts"]) is int
         for name, count in (("reps", 2), ("rounds", 1)):
-            value = data["actual"]["fields"][name]["value"]
+            value = cfg_value(gui.publication, name)
             assert value == count
             assert type(value) is int
         edits = [
@@ -829,18 +825,18 @@ def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
         )
         data = reply.data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["modules.pi_pulse"]["value"] == "Q1.pulses.pi"
-        assert fields["modules.reset"]["value"] is None
-        assert fields["modules.reset"]["source"] == "disabled"
-        assert fields["sweep.length"]["value"] == {
+        fields = data["actual"]
+        assert cfg_value(gui.publication, "modules.pi_pulse") == "Q1.pulses.pi"
+        assert cfg_value(gui.publication, "modules.reset") is None
+        assert fields["use_reset"]["source"] == "disabled"
+        assert cfg_sweep(gui.publication, "sweep.length") == {
             "start": 0.04,
             "stop": 80.0,
             "expts": 81,
         }
-        assert fields["reps"]["value"] == 13
-        assert fields["rounds"]["value"] == 9
-        assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5100.0
+        assert cfg_value(gui.publication, "reps") == 13
+        assert cfg_value(gui.publication, "rounds") == 9
+        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 5100.0
         assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
         before = len(client.transport.sent)
@@ -859,7 +855,7 @@ def test_t1_runs_once_with_calibrated_pi_and_explicit_delay(tmp_path):
             {"path": "summary.t1_err", "reason": "non_finite"}
         ]
         assert data["analysis"]["result"]["summary"]["t1"] == 42.0
-        assert summary["actual"]["parameters"]["delay"]["value"] == {
+        assert summary["actual"]["delay"]["value"] == {
             "start": 0.04,
             "stop": 80.0,
             "expts": 81,

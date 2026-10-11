@@ -23,12 +23,13 @@ from zcu_tools.gui.widgets.remote_edit_gate import bind_control_enabled
 
 
 class AliasDialog(QDialog):
-    """Edit authored alias rows without resolving links or touching files.
+    """Edit authored alias rows and explicitly confirm through the session owner.
 
     Construct on the control's owner thread. The table starts with
     control.get_alias_rows(); initial read failures propagate. Add, Remove and
     cell edits change only this dialog's draft. Apply submits all rows through
-    control.set_alias_rows(), stays open, and shows invalid-input errors inline
+    control.apply_alias_rows(), which saves to the opened entry or remains
+    memory-only in EMPTY. Apply stays open and shows input/storage errors inline
     without changing the installed table or discarding edits. Cancel or closing
     discards unapplied edits; an earlier successful Apply is not undone.
     Optional control_identity gates content and Apply, never Cancel or closing.
@@ -119,8 +120,8 @@ class AliasDialog(QDialog):
                 raise RuntimeError("Alias editor row is missing a cell")
             rows.append(AliasRow(alias=alias.text(), value=value.text()))
         try:
-            self._control.set_alias_rows(tuple(rows))
-        except InvalidInputError as error:
+            self._control.apply_alias_rows(tuple(rows))
+        except (InvalidInputError, OSError) as error:
             self._error.setText(str(error))
             return
         self._error.clear()

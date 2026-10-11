@@ -1,6 +1,6 @@
 """New-tab loading through the public GUI socket contract."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
@@ -13,8 +13,9 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.cfg import DirectValue
 from zcu_tools.gui.cfg.resource import CfgResource
-from zcu_tools.gui.session.types import ContextReadiness
+from zcu_tools.gui.session.context_types import EntryRequest
 
+from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._reload_fakes import OldAdapter
 
 from ._helpers import Fixture, call, open_client, reset_inbox
@@ -36,19 +37,19 @@ class FileAdapter(OldAdapter):
         load_data=True, analysis=AnalysisMode.NONE
     )
 
-    def load(self, req: LoadDataRequest) -> RunRecord[LoadedCfg, LoadedResult]:
+    def load(self, req: LoadDataRequest):
         if req.data_path == "bad.h5":
             raise ValueError("wrong experiment")
         cfg = None if req.data_path == "no-cfg.h5" else LoadedCfg()
-        return RunRecord(cfg=cfg, result=LoadedResult(req.data_path))
+        return RunRecord(
+            cfg=cfg, result=LoadedResult(req.data_path)
+        ), historical_metadata()
 
 
 @pytest.fixture
 def app(qapp):
     fx = Fixture(empty_project=True)
-    fx.state.set_context(
-        replace(fx.state.session_env, readiness=ContextReadiness.DRAFT)
-    )
+    fx.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
     fx.registry.register("file", FileAdapter)
     fx.start()
     sock = open_client(fx.service.port)
@@ -64,7 +65,7 @@ def app(qapp):
     "path, backfill, knob",
     [("saved.h5", "applied", 42), ("no-cfg.h5", "not_applied", 7)],
 )
-def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
+def test_open_file_loads_without_soc_with_result_and_cfg_backfill(
     app, path, backfill, knob
 ):
     fx, sock = app
@@ -85,10 +86,9 @@ def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
         "knob"
     ] == DirectValue(knob)
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
-    assert snapshot["artifacts"][0]["status"] == "not_saved"
-    assert snapshot["artifacts"][0]["last_saved_path"] is None
-    assert snapshot["artifacts"][0]["is_saveable"] is True
-    assert call(sock, "tab.load_data", {"tab_id": tab, "data_path": path})["ok"] is True
+    assert snapshot["run_id"] is None
+    assert snapshot["result_state"]["available"] is True
+    assert snapshot["result_state"]["source_path"] == path
 
 
 def test_open_file_backfill_failure_retains_loaded_result(app, monkeypatch):

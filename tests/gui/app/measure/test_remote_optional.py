@@ -112,7 +112,11 @@ def test_non_tab_editor_does_not_publish_into_tab_state(
     original = ctrl.get_tab_snapshot(tab_id).cfg_schema
     key = f"tab:{tab_id}:cfg"
     before = ctrl.resources_versions()[key]
-    editor_id, _ = ctrl.open_seeded_cfg_editor(original, owner_key="writeback-test")
+    editor_id, _ = ctrl.open_seeded_cfg_editor(
+        original,
+        parameters=ctrl.get_session_env().parameters,
+        owner_key="writeback-test",
+    )
     try:
         ctrl.cfg_editor_set_field(editor_id, "gain", 0.75)
         assert ctrl.get_tab_snapshot(tab_id).cfg_schema == original

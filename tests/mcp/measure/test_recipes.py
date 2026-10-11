@@ -12,6 +12,7 @@ from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from ._recipe_actual_support import cfg_value
 from ._recipe_support import PNG, LookbackGui, recipe_client
 from ._support import full_execution_reply, make_client
 
@@ -101,13 +102,13 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
         initial = replies[0].data
         assert initial["status"] == "running"
         execution = initial["execution"]
-        initial["actual"]["fields"].clear()
+        initial["actual"].clear()
         before = len(client.transport.sent)
         status = client.call("status", {"execution": execution, "detail": "full"})
         waiting = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 0})
         )
-        assert status["actual"]["fields"]
+        assert status["actual"]
         assert waiting.data["execution"] == execution
         assert waiting.data["status"] == "running"
         assert len(client.transport.sent) == before
@@ -433,10 +434,10 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("save_succeeds", [True, False])
-def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
-    tmp_path, monkeypatch, save_succeeds
-):
+@pytest.fixture(params=[True, False], ids=["saved", "incomplete"])
+def admitted_raw_save(tmp_path, monkeypatch, request):
+    """Hold a real recipe at its admitted raw-save transport until released."""
+    save_succeeds = request.param
     gui = LookbackGui()
     expected_report = asdict(RAW_REPORT)
     if not save_succeeds:
@@ -466,41 +467,62 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
             client, client.call("lookback", {"frequency_mhz": 6020.0})
         )
         assert saving.wait(1)
-        execution = initial.data["execution"]
-        with pytest.raises(GuiRpcError) as rejected:
-            client.call("finish_early", {"execution": execution})
-        assert rejected.value.reason == "not_running"
-        cancelled = client.call("cancel", {"execution": execution})
-        assert cancelled.data["gui_cancel"]["status"] == "not_needed"
-        assert cancelled.data["cancel_requested"]
-        during_save = client.call("status", {"execution": execution, "detail": "full"})
-        assert during_save["raw_save"] is None
-        saving_summary = client.call("status", {"execution": execution})
-        assert saving_summary["steps"]["raw_save"] is None
-        assert saving_summary["artifacts"] == {}
-        release_save.set()
-        final = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+        yield (
+            client,
+            initial.data["execution"],
+            expected_report,
+            release_save,
+            save_succeeds,
         )
-        assert not final.is_error  # Successful query, even when execution failed.
-        assert final.data["status"] == "cancelled"
-        assert final.data["raw_save"] == expected_report
-        assert final.data["error"] is None
-        summary = client.call("status", {"execution": execution})
-        assert summary["status"] == final.data["status"]
-        assert not summary["cancel_requested"]
-        assert summary["steps"]["raw_save"]["status"] == (
-            "saved" if save_succeeds else "incomplete"
-        )
-        assert summary["artifacts"]["raw"] == expected_report["artifacts"]["raw"]
-        assert summary["error"] == final.data["error"]
-        methods = [method for method, _ in client.transport.sent]
-        assert methods.count("tab.save_data") == 1
-        assert "operation.cancel" not in methods
-        assert "tab.analyze" not in methods
     finally:
         release_save.set()
         client.context.session.close()
+
+
+def test_lookback_cancel_during_raw_save_has_no_report_until_save_completes(
+    admitted_raw_save,
+):
+    client, execution, _report, _release_save, _save_succeeds = admitted_raw_save
+    with pytest.raises(GuiRpcError) as rejected:
+        client.call("finish_early", {"execution": execution})
+    assert rejected.value.reason == "not_running"
+    cancelled = client.call("cancel", {"execution": execution})
+    assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+    assert cancelled.data["cancel_requested"]
+    during_save = client.call("status", {"execution": execution, "detail": "full"})
+    assert during_save["raw_save"] is None
+    saving_summary = client.call("status", {"execution": execution})
+    assert saving_summary["steps"]["raw_save"] is None
+    assert saving_summary["artifacts"] == {}
+
+
+def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
+    admitted_raw_save,
+):
+    client, execution, expected_report, release_save, save_succeeds = admitted_raw_save
+    cancelled = client.call("cancel", {"execution": execution})
+    assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+    assert cancelled.data["cancel_requested"]
+    release_save.set()
+    final = full_execution_reply(
+        client, client.call("wait", {"execution": execution, "timeout": 2})
+    )
+    assert not final.is_error  # Successful query, even when execution failed.
+    assert final.data["status"] == "cancelled"
+    assert final.data["raw_save"] == expected_report
+    assert final.data["error"] is None
+    summary = client.call("status", {"execution": execution})
+    assert summary["status"] == final.data["status"]
+    assert not summary["cancel_requested"]
+    assert summary["steps"]["raw_save"]["status"] == (
+        "saved" if save_succeeds else "incomplete"
+    )
+    assert summary["artifacts"]["raw"] == expected_report["artifacts"]["raw"]
+    assert summary["error"] == final.data["error"]
+    methods = [method for method, _ in client.transport.sent]
+    assert methods.count("tab.save_data") == 1
+    assert "operation.cancel" not in methods
+    assert "tab.analyze" not in methods
 
 
 @pytest.mark.parametrize("outcome", ["cancelled", "failed"])
@@ -1008,8 +1030,6 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         ]
         assert reply.images[0].data == PNG
         assert data["elapsed_s"] >= 0
-        actual = data["actual"]
-        fields = actual["fields"]
         for path, value in {
             "modules.readout.pulse_cfg.freq": 6020.0,
             "modules.readout.ro_cfg.ro_freq": 6020.0,
@@ -1017,8 +1037,8 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
             "modules.readout.ro_cfg.trig_offset": expected[1],
             "rounds": 7,
         }.items():
-            assert fields[path]["value"] == value
-            assert type(fields[path]["value"]) is type(value)
+            assert cfg_value(gui.publication, path) == value
+            assert type(cfg_value(gui.publication, path)) is type(value)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.reset_cfg") == int(reuse)
@@ -1128,19 +1148,24 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
         )
         assert answered.data["status"] == "finished"
         assert not answered.data["writeback"]["receipts"]
-        fields = reply.data["actual"]["fields"]
+        fields = reply.data["actual"]
         expected_pulse = 6100.0 if source == "library" else 6500.0
         expected_adc = 6500.0 if source == "r_f" else 6110.0
-        assert fields["modules.readout.pulse_cfg.freq"]["value"] == expected_pulse
-        assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == expected_adc
-        assert fields["modules.readout.pulse_cfg.freq"]["source"] == (
+        assert (
+            cfg_value(gui.publication, "modules.readout.pulse_cfg.freq")
+            == expected_pulse
+        )
+        assert (
+            cfg_value(gui.publication, "modules.readout.ro_cfg.ro_freq") == expected_adc
+        )
+        assert fields["frequency_mhz"]["source"] == (
             "library:R1.readout.calibrated"
             if source == "library"
             else "$resonator.freq"
         )
-        assert fields["modules.readout.ro_cfg.ro_length"]["value"] == 2.0
-        assert fields["modules.readout.ro_cfg.trig_offset"]["value"] == 0.1
-        assert fields["rounds"]["value"] == 3
+        assert cfg_value(gui.publication, "modules.readout.ro_cfg.ro_length") == 2.0
+        assert cfg_value(gui.publication, "modules.readout.ro_cfg.trig_offset") == 0.1
+        assert cfg_value(gui.publication, "rounds") == 3
 
 
 @pytest.mark.parametrize(

@@ -433,7 +433,10 @@ def test_edit_error_identifies_failed_path_and_index_without_committing(live_tab
 def test_library_editor_batch_retains_its_independent_prefix_contract(live_tab):
     fixture, _ = live_tab
     schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
-    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(schema, gc=False)
+    parameters = fixture.ctrl.read_context()
+    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
+        schema, parameters=parameters, gc=False
+    )
     sock = open_client(fixture.service.port)
     try:
         result = call(
@@ -478,7 +481,10 @@ def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
 
     fixture, _ = live_tab
     schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
-    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(schema, gc=False)
+    parameters = fixture.ctrl.read_context()
+    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
+        schema, parameters=parameters, gc=False
+    )
 
     def reject(*_args):
         if failure == "unavailable":

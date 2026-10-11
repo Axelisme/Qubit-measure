@@ -41,8 +41,7 @@ def round_zcu_time(
 
     if isinstance(us, (Number, float)):
         return _convert_time(float(us))
-    else:
-        return np.vectorize(_convert_time)(us)
+    return np.vectorize(_convert_time)(us)
 
 
 def round_zcu_freq(
@@ -71,8 +70,7 @@ def round_zcu_freq(
 
     if isinstance(freq, (Number, float)):
         return _convert_freq(float(freq))
-    else:
-        return np.vectorize(_convert_freq)(freq)
+    return np.vectorize(_convert_freq)(freq)
 
 
 def _convert_frequency_param(
@@ -142,8 +140,7 @@ def round_zcu_phase(
 
     if isinstance(phase, (Number, float)):
         return _convert_phase(float(phase))
-    else:
-        return np.vectorize(_convert_phase)(phase)
+    return np.vectorize(_convert_phase)(phase)
 
 
 def round_zcu_gain(
@@ -157,8 +154,7 @@ def round_zcu_gain(
 
     if isinstance(gain, (Number, float)):
         return _convert_gain(float(gain))
-    else:
-        return np.vectorize(_convert_gain)(gain)
+    return np.vectorize(_convert_gain)(gain)
 
 
 def apply_round(
@@ -176,8 +172,7 @@ def apply_round(
 
     if round_fn := ROUND_FN_MAP.get(round_type):
         return round_fn(val, **round_info)
-    else:
-        raise ValueError(f"Invalid round type: {round_type}")
+    raise ValueError(f"Invalid round type: {round_type}")
 
 
 def _format_zero_step_error(
@@ -274,10 +269,9 @@ def sweep2array(
         return round_sweep.start + np.linspace(
             0, round_sweep.stop - round_sweep.start, round_sweep.expts
         )
-    elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):
+    if isinstance(sweep, (list, np.ndarray)):
         if not allow_array:
             raise ValueError(f"Custom sweep is not allowed: {sweep}")
         sweep_array = np.asarray(sweep, dtype=np.float64)
         return apply_round(sweep_array, round_type, round_info)
-    else:
-        raise ValueError(f"Invalid sweep format: {sweep}")
+    raise ValueError(f"Invalid sweep format: {sweep}")

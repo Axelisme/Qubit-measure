@@ -1,8 +1,10 @@
 # zcu_lab
 
-**Last updated:** 2026-10-10，recipe target 的具名 alias 覆寫
+**Last updated:** 2026-10-12，固定 recipe summary capture 與 ref-free Run
 
 `zcu_lab` 擁有具體實驗與其前端附件。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。組合根取得定義，再顯式注入框架。
+
+`zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow caller 在正式 pull 後重用同一來源。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
 
 `definitions.register_all` 接受 caller 的 measure Registry。Startup 可用 `templates` 傳入 TemplateCatalog，並用 `components` 傳入框架共用的 ComponentRegistry。Reload 省略這兩個參數，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
 
@@ -13,6 +15,18 @@
 `storage_migration.build_mapping` 擁有舊 key、waveforms/modules envelope 裡的 module 候選與 R1/Q1/J1 profile。Kind 由 caller 明確指定，數字維持工作單位。舊 `flux_unit` 對應 `general.ext.flux_unit`，`cur_A` 對應 `general.ext.flux_value`。缺 flux 單位只 pending，不從舊 key 名稱推測單位。`migration_experiments` 明列 core 的 native declarations，以歷史 source_tag 與 cfg_type 配對 generic schema、concrete cfg validation 與 typed reader，另明示 canonical native_tag；Callback 重用 datafile 的完整 cfg 格式規則，再驗證隔離副本，不把派生欄位或 normalized model 回填歷史快照。不建構實驗 instance、不註冊或做動態 discovery。常駐 CLI 在 `tools/migrate_storage.py`，正常 runtime 不使用 legacy fallback。
 
 `recipes.RECIPES` 明列使用者的 generator definitions。每個 recipe 模組同時擁有流程、手寫 input_schema 與 summary declarations。MCP 組合根把清單注入 framework，import 不執行量測或註冊。Recipes 保留 target 參數，明確以 `aliases={"qubit": target}` 交給 generic `RecipeSession.open_tab`。Target 省略時不覆寫。GUI adapters 不宣告 parameter roles，cfg 與 Run 直接讀固定的全域 alias 表。
+
+五個 Measure flux adapters 使用 deferred `$flux_dev` 初值：`onetone/flux_dep` 與
+`twotone/fluxdep` 的 `dev.flux_dev`，以及 `jpa/auto_optimize`、`jpa/flux_onetone`
+與 `jpa/flux` 的 `dev.jpa_flux_dev`。顯式 caller cfg 保留，不使用靜態 device 名稱 fallback，
+也不改 core 的 required dev／flux_unit。名稱不要求出現在 point 的元件表。
+Cfg editor 顯示名稱預覽，缺列或未綁定時指名 Invalid。Run 沿固定 capture 保存
+當次名稱，後續 Analyze／WB／Save 不重新解析目前表。裝置存在性由實際使用的 owner 檢查。
+
+Framework 的 `RecipeTab` 只提供通用 cfg 操作、expression／library／field 讀取與 cached device snapshot。
+`recipes.helpers` 使用這些公開介面，擁有 frequency／flux 的來源順序、校準範圍與 device unit policy。明填 frequency 優先，其次是有效 library leaf，再讀 caller 指定的 calibration。`FrequencySweepCalibration` 明列 frequency／linewidth 路徑與 full-span 倍率。三個 resonator spectrum 的預設倍率為 freq 3、power 3、flux 2，點數沿 GUI 的 301／201／101。Helper 讀目前數值，集中算 span 與 numeric start／stop。無效 linewidth 在 sweep edit／Run 前拒絕，不從 raw expression 抽倍率。Twotone 的 center_mhz／span_mhz／points 與 flux survey 的 flux_range／flux_points 必填且不能為 null。Flux helper 只比 snapshot unit，成功後寫 cfg 的 device identity 與獨立 flux_unit。它不換算 native 座標，也不連裝置。
+
+Recipe 宣告摘要欄位，框架只捕捉其 value／source／unit。回覆 actual 用摘要名稱作平面 key，只列 recipe 代填值。整項 sweep 的來源全為 explicit 才省略，mixed sweep 保留完整值。全部明填時回 {}。Run 使用當前 cfg acceptance，不保存 cfg_ref 或 publication／input 副本。
 
 [`v2`](v2/README.md) 是實驗的使用者 namespace。每個實驗的 core 與可選 GUI、notebook 附件放在同一資料夾。Core 不依賴 GUI。
 

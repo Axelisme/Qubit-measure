@@ -91,7 +91,7 @@ def evaluate_numeric_expr(expr: str, parameters: ParameterContext | None) -> flo
     ExpressionError. Numeric source, grammar and real-domain failures raise.
     """
     value = evaluate_scalar_expr(expr, parameters)
-    if isinstance(value, complex):
+    if isinstance(value, (complex, str)):
         raise ExpressionError("Expression must resolve to a real number")
     try:
         return float(value)
@@ -101,8 +101,14 @@ def evaluate_numeric_expr(expr: str, parameters: ParameterContext | None) -> flo
         ) from exc
 
 
-def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scalar:
-    """Evaluate finite arithmetic using $alias.path or concrete/general paths.
+def evaluate_scalar_expr(
+    expr: str, parameters: ParameterContext | None
+) -> Scalar | str:
+    """Evaluate arithmetic paths or a standalone $alias name string.
+
+    A standalone $alias returns its fixed resolved component/device name.
+    Names cannot enter arithmetic, functions or interpolation. Name reads need
+    a context and reject missing/unbound aliases with an alias-naming error.
 
     None permits pure calculation only; parameter/library references raise
     ExpressionError. Resolve paths through ParameterContext, never the live
@@ -113,6 +119,8 @@ def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scal
     Invalid grammar, missing/non-numeric paths and arithmetic failures raise.
     """
     tree = _parse_expression(expr)
+    if isinstance(tree.body, ast.Name) and tree.body.id.startswith("$"):
+        return _read_alias_name(tree.body.id, parameters)
     paths: dict[str, Scalar] = {}
     resolve_path = _parameter_reader(parameters)
 
@@ -156,6 +164,19 @@ def evaluate_scalar_expr(expr: str, parameters: ParameterContext | None) -> Scal
     except InvalidExpression as exc:
         raise ExpressionError(str(exc)) from exc
     return _number(result, "Expression result")
+
+
+def _read_alias_name(alias: str, parameters: ParameterContext | None) -> str:
+    """Translate name-read errors at the expression boundary, not source faults."""
+    if parameters is None:
+        raise ExpressionError(f"Alias {alias!r} requires a context")
+    try:
+        name = parameters.value(alias)
+    except (ValueError, InvalidInputError) as exc:
+        raise ExpressionError(f"Invalid alias {alias!r}: {exc}") from exc
+    if not isinstance(name, str):
+        raise ExpressionError(f"Alias {alias!r} must resolve to a name")
+    return name
 
 
 def validate_scalar_expr(expr: str) -> None:
@@ -216,7 +237,7 @@ def _parse_expression(expr: str) -> ast.Expression:
 
 
 def _alias_syntax(expr: str) -> tuple[str, dict[tuple[int, int], str]]:
-    """Translate only lexical $alias.path roots; AST handles arithmetic."""
+    """Translate lexical $alias roots; AST handles paths and arithmetic."""
     lines = expr.splitlines(keepends=True)
     offsets = [0]
     for line in lines:
@@ -230,17 +251,25 @@ def _alias_syntax(expr: str) -> tuple[str, dict[tuple[int, int], str]]:
     for index, token in enumerate(tokens):
         if token.string != "$" or token.type not in (tokenize.OP, tokenize.ERRORTOKEN):
             continue
-        following = tokens[index + 1 : index + 4]
+        following = tokens[index + 1 : index + 2]
         if (
-            len(following) != 3
+            not following
             or following[0].type != tokenize.NAME
             or following[0].start != token.end
-            or following[1].string != "."
-            or following[1].start != following[0].end
-            or following[2].type != tokenize.NAME
-            or following[2].start != following[1].end
         ):
-            raise ExpressionError("Alias references require adjacent $alias.path")
+            raise ExpressionError("Alias references require adjacent $alias")
+        dotted = tokens[index + 2 : index + 4]
+        if (
+            dotted
+            and dotted[0].string == "."
+            and (
+                len(dotted) != 2
+                or dotted[0].start != following[0].end
+                or dotted[1].type != tokenize.NAME
+                or dotted[1].start != dotted[0].end
+            )
+        ):
+            raise ExpressionError("Alias paths require adjacent $alias.path")
         line, column = token.start
         byte_column = len(lines[line - 1][:column].encode("utf-8"))
         aliases[line, byte_column] = "$" + following[0].string

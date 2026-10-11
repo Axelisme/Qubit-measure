@@ -9,16 +9,14 @@ surfaced as a RemoteError(PRECONDITION_FAILED) on the remote path.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
+from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.services.guard import GuardError
-from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
@@ -26,40 +24,26 @@ from zcu_tools.gui.remote.errors import (
     remote_error_from_expected,
 )
 from zcu_tools.gui.remote.param_spec import validate_params
-from zcu_tools.gui.session.services.io_manager import IOManager
-
-from zcu_lab.definitions import register_all
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 
 
 def _make_controller(readiness: ContextReadiness) -> Controller:
-    ctx = SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
-        soc=MagicMock(),
-        soccfg=MagicMock(),
-        result_dir="/tmp/zcu_result",
-        active_label="ctx001" if readiness is ContextReadiness.ACTIVE else "",
-        readiness=readiness,
+    from ._helpers import Fixture
+
+    fixture = Fixture(empty_project=True)
+    fixture.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
+    if readiness is ContextReadiness.ACTIVE:
+        fixture.ctrl.setup_control.new_point(
+            PointCreateRequest("ctx001", "", CommandOrigin("gui"))
+        )
+    fixture.state.set_context(
+        replace(fixture.state.session_env, soc=MagicMock(), soccfg=MagicMock())
     )
-    state = State(ctx)
-    registry = Registry()
-    register_all(registry)
-    if not registry.has("fake"):
-        registry.register("fake", FakeAdapter)
-    view = MagicMock()
-    view.make_run_container = MagicMock(return_value=None)
-    io_manager = IOManager()
-    io_manager._em = MagicMock()
-    bus = EventBus()
-    bus.emit = MagicMock()  # type: ignore[method-assign]
-    return Controller(
-        state=state,
-        registry=registry,
-        io_manager=io_manager,
-        view=view,
-        bus=bus,
-    )
+    return fixture.ctrl
 
 
 def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
@@ -111,22 +95,6 @@ def test_run_start_draft_context_symmetry(qapp):
     assert "active file-backed context" in excinfo.value.message
 
 
-def test_save_data_draft_context_symmetry(qapp):
-    ctrl = _make_controller(ContextReadiness.DRAFT)
-    tab_id = ctrl.new_tab("fake")
-
-    with pytest.raises(GuardError, match="active file-backed context"):
-        ctrl.save_data(tab_id, "/tmp/data.h5")
-
-    with pytest.raises(RemoteError) as excinfo:
-        _dispatch(
-            ctrl, "tab.save_data", {"tab_id": tab_id, "data_path": "/tmp/data.h5"}
-        )
-    assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
-    # DRAFT context fails the readiness guard before the run-result check.
-    assert excinfo.value.reason == "no_active_context"
-
-
 def test_analyze_without_run_result_symmetry(qapp):
     """ACTIVE context but no run result: both paths reject on the same guard."""
     ctrl = _make_controller(ContextReadiness.ACTIVE)
@@ -150,17 +118,6 @@ def test_save_no_run_result_carries_reason(qapp):
     tab_id = ctrl.new_tab("fake")
 
     with pytest.raises(RemoteError) as excinfo:
-        _dispatch(ctrl, "tab.save_data", {"tab_id": tab_id, "data_path": "/tmp/d.h5"})
+        _dispatch(ctrl, "tab.save_data", {"tab_id": tab_id})
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
     assert excinfo.value.reason == "no_run_result"
-
-
-def test_run_permit_issued_for_active_valid_context(qapp):
-    """Sanity: with ACTIVE context + valid cfg, the guard issues a RunPermit
-    rather than raising. (We assert permit issuance instead of spawning a real
-    run worker, which would race teardown in a headless test.)"""
-    ctrl = _make_controller(ContextReadiness.ACTIVE)
-    tab_id = ctrl.new_tab("fake")
-
-    permit = ctrl._guard_svc.acquire_run_permit(tab_id)
-    assert permit.tab_id == tab_id

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,

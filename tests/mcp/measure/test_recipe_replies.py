@@ -8,8 +8,70 @@ import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.measure import tools_recipes
 
+from ._recipe_actual_support import cfg_value
 from ._recipe_support import PNG, LookbackGui, recipe_client
 from ._support import full_execution_reply, make_client
+
+
+@pytest.mark.parametrize(
+    "arguments,expected",
+    [
+        (
+            {
+                "frequency_mhz": 6020.0,
+                "readout_length_us": 2.5,
+                "trigger_offset_us": 0.2,
+                "rounds": 7,
+                "readout_ref": "readout",
+                "use_reset": "reset",
+                "init_pulse_ref": "init",
+            },
+            {},
+        ),
+        (
+            {
+                "readout_ref": "readout",
+                "use_reset": "reset",
+                "init_pulse_ref": "init",
+                "readout_length_us": 2.5,
+                "trigger_offset_us": 0.2,
+            },
+            {
+                "frequency_mhz": {
+                    "value": 6120.0,
+                    "source": "$resonator.freq",
+                    "unit": "MHz",
+                },
+                "ro_frequency_mhz": {
+                    "value": 6120.0,
+                    "source": "$resonator.freq",
+                    "unit": "MHz",
+                },
+                "rounds": {"value": 3, "source": "gui_default"},
+            },
+        ),
+    ],
+    ids=["all-explicit", "calibration-and-default"],
+)
+def test_actual_projection_is_fixed_flat_and_shared_by_every_reply(
+    tmp_path, arguments, expected
+):
+    gui = LookbackGui()
+    gui.md["$resonator.freq"] = 6120.0
+    with recipe_client(tmp_path, gui) as client:
+        initial = client.call("lookback", arguments)
+        assert initial.data["status"] == "awaiting_answer", initial.data
+        key = initial.data["execution"]
+        before = list(client.transport.sent)
+        gui.md["$resonator.freq"] = 6300.0
+        for reply in (
+            initial.data,
+            client.call("status", {"execution": key}),
+            client.call("wait", {"execution": key, "timeout": 0}).data,
+            client.call("status", {"execution": key, "detail": "full"}),
+        ):
+            assert reply["actual"] == expected
+        assert client.transport.sent == before
 
 
 @pytest.mark.parametrize("outcome", ["awaiting_answer", "missing", "failed"])
@@ -431,16 +493,10 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         full = client.call("status", {"execution": execution, "detail": "full"})
         assert summary["execution"] == full["execution"] == execution
         assert summary["run_id"] == full["raw_save"]["run_id"] == "run-a"
-        assert summary["actual"]["parameters"]["frequency_mhz"] == {
-            "value": 6020.0,
-            "source": "frequency_mhz",
-            "unit": "MHz",
-        }
-        assert summary["actual"]["parameters"]["rounds"] == {
-            "value": 7,
-            "source": "rounds",
-        }
-        assert summary["actual"]["modules"]["reset"] == {
+        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 6020.0
+        assert cfg_value(gui.publication, "rounds") == 7
+        assert summary["actual"] == full["actual"]
+        assert summary["actual"]["use_reset"] == {
             "value": None,
             "source": "disabled",
         }
@@ -545,13 +601,8 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["reason"] == "incompatible_wire"
         assert reply.data["error"]["phase"] == phase
-        assert reply.data["actual"]["fields"]["modules.readout.pulse_cfg.freq"] == {
-            "value": 6020.0,
-            "input": gui.publication["tree"]["children"]["modules"]["children"][
-                "readout"
-            ]["children"]["pulse_cfg"]["children"]["freq"]["input"],
-            "source": "frequency_mhz",
-        }
+        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 6020.0
+        assert reply.data["actual"]["rounds"] == {"value": 3, "source": "gui_default"}
         if wire_op == 93:
             assert reply.data["raw_save"]["run_id"] == "run-a"
             assert (
@@ -564,85 +615,6 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
         assert methods.count("tab.save_data") == (0 if wire_op == 71 else 1)
         assert methods.count("tab.analyze") == (1 if wire_op == 93 else 0)
         assert "tab.get_analyze_result" not in methods
-
-
-def test_run_capture_keeps_calibrated_raw_input_after_live_cfg_changes(tmp_path):
-    gui = LookbackGui()
-    gui.md["$resonator.freq"] = 6120.0
-
-    def respond(method, params):
-        response = gui(method, params)
-        if method == "tab.run_start":
-            gui.md["$resonator.freq"] = 7000.0
-            readout = gui.publication["tree"]["children"]["modules"]["children"][
-                "readout"
-            ]
-            state = readout["children"]["pulse_cfg"]["children"]["freq"]["input"]
-            state.update(raw="another_source", resolved=7000.0)
-        return response
-
-    with recipe_client(tmp_path, respond) as client:
-        completed = client.call("lookback", {})
-        assert completed.data["status"] == "awaiting_answer", completed.data
-        before = len(client.transport.sent)
-        full = client.call(
-            "status", {"execution": completed.data["execution"], "detail": "full"}
-        )
-        frequency = full["actual"]["fields"]["modules.readout.pulse_cfg.freq"]
-        assert frequency["value"] == 6120.0
-        assert frequency["source"] == "$resonator.freq"
-        assert frequency["input"]["raw"] == "$resonator.freq"
-        assert frequency["input"]["mode"] == "expression"
-        assert frequency["input"]["resolved"] == 6120.0
-        assert (
-            full["actual"]["publication"]["tree"]["children"]["modules"]["children"][
-                "readout"
-            ]["children"]["pulse_cfg"]["children"]["freq"]["input"]
-            == (frequency["input"])
-        )
-        assert len(client.transport.sent) == before
-
-
-def test_full_query_keeps_the_publication_used_before_run(tmp_path):
-    gui = LookbackGui()
-    gui.publication["source_basis"] = [{"label": "sample", "revision": 3}]
-    captured: dict[str, Any] = {}
-
-    def respond(method, params):
-        response = gui(method, params)
-        if method == "tab.run_start":
-            captured.update(deepcopy(gui.publication))
-            gui.publication["source_basis"][0]["revision"] = 99
-            gui.publication["tree"]["children"]["rounds"] = {
-                "kind": "scalar",
-                "input": {"resolved": 999},
-            }
-        return response
-
-    with recipe_client(tmp_path, respond) as client:
-        completed = client.call("lookback", {"frequency_mhz": 6020.0, "rounds": 7})
-        assert completed.data["status"] == "awaiting_answer", completed.data
-        execution = completed.data["execution"]
-        before = len(client.transport.sent)
-        full = client.call("status", {"execution": execution, "detail": "full"})
-        assert full["actual"]["publication"] == captured
-        assert full["actual"]["source_basis"] == [{"label": "sample", "revision": 3}]
-        assert full["actual"]["fields"]["rounds"]["value"] == 7
-        assert full["actual"]["fields"]["rounds"]["source"] == "rounds"
-        assert (
-            full["actual"]["publication"]["tree"]["children"]["rounds"]["input"][
-                "resolved"
-            ]
-            == 7
-        )
-        full["actual"]["publication"]["tree"]["children"].clear()
-        full["actual"]["fields"]["rounds"]["value"] = -1
-        full["actual"]["source_basis"].clear()
-        repeated = client.call("status", {"execution": execution, "detail": "full"})
-        assert repeated["actual"]["publication"] == captured
-        assert repeated["actual"]["fields"]["rounds"]["value"] == 7
-        assert repeated["actual"]["source_basis"] == captured["source_basis"]
-        assert len(client.transport.sent) == before
 
 
 @pytest.mark.parametrize(

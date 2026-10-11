@@ -148,19 +148,13 @@ def test_invalid_typed_request_rejected(fx):
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
 
-        # wrong type for chip_name
+        # wrong type for native entry name
         _send(
             sock,
             {
                 "id": "2",
-                "method": "project.apply",
-                "params": {
-                    "chip_name": 42,
-                    "qub_name": "Q1",
-                    "res_name": "R1",
-                    "result_dir": "/tmp/r",
-                    "database_path": "/tmp/db",
-                },
+                "method": "entry.new",
+                "params": {"name": 42},
             },
         )
         resp = _recv_response(sock)
@@ -384,12 +378,5 @@ def test_run_start_then_running_tab_then_finishes(fx):
         # tab.snapshot always returns {tabs: [...]} (a single tab_id → a one-element list).
         tab_snapshot = snap["result"]["tabs"][0]
         assert tab_snapshot["interaction"]["has_run_result"] is True
-        assert set(tab_snapshot["save_paths"]) == {
-            "data_path",
-            "analysis_images",
-            "post_analysis_images",
-        }
-        assert tab_snapshot["save_paths"]["analysis_images"] == {}
-        assert tab_snapshot["save_paths"]["post_analysis_images"] == {}
     finally:
         sock.close()

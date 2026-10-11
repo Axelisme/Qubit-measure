@@ -186,10 +186,7 @@ def _analyze_unroll(
     else:
         k_timing = min(math.ceil(loop_overhead / slack), ctx.config.max_unroll_factor)
 
-    if body_size > 0:
-        k_budget = ctx.pmem_budget // body_size
-    else:
-        k_budget = k_timing
+    k_budget = ctx.pmem_budget // body_size if body_size > 0 else k_timing
 
     return UnrollAnalysis(
         scheduled_ticks=scheduled_ticks,
@@ -261,7 +258,9 @@ class UnrollLoopPass(AbsIRTreePass):
             return None
 
         if n is not None:
-            return self._unroll_constant(node, n, is_runtime_exact, loop_overhead, ctx)
+            return self._unroll_constant(
+                node, n, loop_overhead, ctx, is_runtime_exact=is_runtime_exact
+            )
 
         # Register-driven (no exact hint) → jump-table dispatch.
         return self._maybe_build_jump_table(node, loop_overhead, ctx)
@@ -270,9 +269,10 @@ class UnrollLoopPass(AbsIRTreePass):
         self,
         node: IRLoop,
         n: int,
-        is_runtime_exact: bool,
         loop_overhead: int,
         ctx: PipeLineContext,
+        *,
+        is_runtime_exact: bool,
     ) -> IRNode | None:
         """Handle loops with a known (compile-time or exact-hint) iteration count."""
         analysis = _analyze_unroll(node.body.insts, loop_overhead, ctx)
@@ -433,18 +433,10 @@ class UnrollLoopPass(AbsIRTreePass):
 
         return BlockNode(insts=result)
 
-    def _maybe_build_jump_table(
+    def _jump_table_factor(
         self, node: IRLoop, loop_overhead: int, ctx: PipeLineContext
-    ) -> BlockNode | None:
-        """Try to build a jump-table BlockNode for a register-driven loop.
-
-        Returns a BlockNode containing:
-          [prologue BasicBlockNodes] + IRDispatch + [k body BlockNodes] +
-          [back-edge BasicBlockNodes] + [exit BasicBlockNode]
-
-        Returns None when any precondition fails (k <= 1, body_words == 0, etc.)
-        so the caller falls back to no-unroll.
-        """
+    ) -> int | None:
+        """Choose a feasible power-of-two factor and log rejected preconditions."""
         body_insts = node.body.insts
         analysis = _analyze_unroll(body_insts, loop_overhead, ctx)
         body_size = analysis.body_size
@@ -496,7 +488,6 @@ class UnrollLoopPass(AbsIRTreePass):
             )
             return None
 
-        pmem_size = ctx.config.pmem_capacity
         logger.debug(
             "UnrollLoopPass: build jump-table loop name=%s n_reg=%s "
             "k_raw=%s k_pow2=%s body_words=%s",
@@ -506,6 +497,26 @@ class UnrollLoopPass(AbsIRTreePass):
             k,
             body_size,
         )
+
+        return k
+
+    def _maybe_build_jump_table(
+        self, node: IRLoop, loop_overhead: int, ctx: PipeLineContext
+    ) -> BlockNode | None:
+        """Try to build a jump-table BlockNode for a register-driven loop.
+
+        Returns a BlockNode containing:
+          [prologue BasicBlockNodes] + IRDispatch + [k body BlockNodes] +
+          [back-edge BasicBlockNodes] + [exit BasicBlockNode]
+
+        Returns None when any precondition fails (k <= 1, body_words == 0, etc.)
+        so the caller falls back to no-unroll.
+        """
+        k = self._jump_table_factor(node, loop_overhead, ctx)
+        if k is None:
+            return None
+        body_insts = node.body.insts
+        pmem_size = ctx.config.pmem_capacity
 
         assert isinstance(node.n, Register)
         i = node.counter_reg

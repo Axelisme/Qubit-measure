@@ -204,7 +204,9 @@ def test_main_window_follow_selects_subpane_on_already_selected_tab(
     window.deleteLater()
 
 
-def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget):
+def test_no_analysis_capability_constructs_only_run_data_and_guide(
+    qapp, exp_tab_widget
+):
     ctrl = make_ctrl()
     snap_none = make_snapshot(
         "tab-1", analysis=AnalysisMode.NONE, post=False, load=False
@@ -247,6 +249,12 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     with pytest.raises(RuntimeError, match="capability mismatch"):
         tab_none.attach(bad_snap, MagicMock())
 
+    assert center_none.load_button.isHidden()
+    tab_none.detach()
+
+
+def test_fit_capability_constructs_analysis_between_run_and_data(qapp, exp_tab_widget):
+    ctrl = make_ctrl()
     snap_analysis = make_snapshot(
         "tab-2", analysis=AnalysisMode.FIT, post=False, load=True
     )
@@ -275,6 +283,12 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
         tab_analysis.get_post_container()
 
+    assert not center_analysis.load_button.isHidden()
+    tab_analysis.detach()
+
+
+def test_post_capability_constructs_post_analysis_after_analysis(qapp, exp_tab_widget):
+    ctrl = make_ctrl()
     snap_both = make_snapshot("tab-3", analysis=AnalysisMode.FIT, post=True, load=True)
     assert snap_both.capabilities is not None
     tab_both = exp_tab_widget("tab-3", ctrl, snap_both.capabilities)
@@ -286,11 +300,6 @@ def test_visible_subtabs_follow_capabilities_in_fixed_order(qapp, exp_tab_widget
     assert hasattr(tab_both, "analyze_form")
     assert hasattr(tab_both, "post_analyze_form")
 
-    assert center_none.load_button.isHidden()
-    assert not center_analysis.load_button.isHidden()
-
-    tab_none.detach()
-    tab_analysis.detach()
     tab_both.detach()
 
 

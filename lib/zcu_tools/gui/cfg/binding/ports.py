@@ -8,7 +8,13 @@ from ..model import CfgSectionValue
 
 
 class ExpressionEvaluator(Protocol):
-    def __call__(self, expression: str) -> int | float | complex: ...
+    """Evaluate authored text against fixed sources; failures propagate.
+
+    Return finite numeric scalars or name strings. Field owners enforce the
+    target type; a string must never be coerced into a numeric scalar.
+    """
+
+    def __call__(self, expression: str) -> int | float | complex | str: ...
 
 
 class OptionProvider(Protocol):

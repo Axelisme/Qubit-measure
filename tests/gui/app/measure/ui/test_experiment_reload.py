@@ -24,7 +24,6 @@ from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.services.io_manager import IOManager
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
@@ -51,7 +50,11 @@ def window_app(qapp) -> Iterator[WindowApp]:
     registry.register("demo", OldAdapter)
     loader = Loader()
     ctrl = Controller(
-        state, registry, IOManager(), None, BaseEventBus(), catalog_loader=loader
+        state=state,
+        registry=registry,
+        view=None,
+        bus=BaseEventBus(),
+        catalog_loader=loader,
     )
     dialogs = RecordingDialogPresenter()
     window = MainWindow(ctrl, dialog_presenter=dialogs)

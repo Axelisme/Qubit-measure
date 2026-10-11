@@ -87,7 +87,7 @@ class MeasureCfgBindings:
         }
         captures = deepcopy(dict(captured_values))
 
-        def evaluate(expression: str) -> int | float | complex:
+        def evaluate(expression: str) -> int | float | complex | str:
             return evaluate_scalar_expr(expression, parameters)
 
         def provide_options(source_id: str) -> Sequence[object]:
@@ -167,7 +167,12 @@ class MeasureCfgBindings:
             references=_SnapshotReferences(parameters),
         )
 
-    def evaluate_expression(self, expression: str) -> int | float | complex:
+    def evaluate_expression(self, expression: str) -> int | float | complex | str:
+        """Evaluate authored arithmetic or $alias using a fresh fixed capture.
+
+        Return a numeric scalar or resolved name string. Alias/source/grammar
+        failures propagate; no device availability check or cached fallback runs.
+        """
         return evaluate_scalar_expr(expression, self._host.read_context())
 
     def provide_options(self, source_id: str) -> Sequence[object]:

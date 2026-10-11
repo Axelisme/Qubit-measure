@@ -2,21 +2,18 @@
  "bath_reset": {
   "blank/empty": {
    "ref": "<Custom:Bath Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/bath"
     },
     "cavity_tone_cfg": {
      "ref": "<Custom:Pulse>",
-     "ov": false,
      "v": {
       "type": {
        "D": "pulse"
       },
       "waveform": {
        "ref": "<Custom:Const>",
-       "ov": false,
        "v": {
         "style": {
          "D": "const"
@@ -56,14 +53,12 @@
     },
     "qubit_tone_cfg": {
      "ref": "<Custom:Pulse>",
-     "ov": false,
      "v": {
       "type": {
        "D": "pulse"
       },
       "waveform": {
        "ref": "<Custom:Const>",
-       "ov": false,
        "v": {
         "style": {
          "D": "const"
@@ -103,14 +98,12 @@
     },
     "pi2_cfg": {
      "ref": "<Custom:Pulse>",
-     "ov": false,
      "v": {
       "type": {
        "D": "pulse"
       },
       "waveform": {
        "ref": "<Custom:Const>",
-       "ov": false,
        "v": {
         "style": {
          "D": "const"
@@ -152,21 +145,18 @@
   },
   "blank/pop": {
    "ref": "<Custom:Bath Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/bath"
     },
     "cavity_tone_cfg": {
      "ref": "<Custom:Pulse>",
-     "ov": false,
      "v": {
       "type": {
        "D": "pulse"
       },
       "waveform": {
        "ref": "<Custom:Const>",
-       "ov": false,
        "v": {
         "style": {
          "D": "const"
@@ -206,14 +196,12 @@
     },
     "qubit_tone_cfg": {
      "ref": "<Custom:Pulse>",
-     "ov": false,
      "v": {
       "type": {
        "D": "pulse"
       },
       "waveform": {
        "ref": "<Custom:Const>",
-       "ov": false,
        "v": {
         "style": {
          "D": "const"
@@ -253,14 +241,12 @@
     },
     "pi2_cfg": {
      "ref": "<Custom:Pulse>",
-     "ov": false,
      "v": {
       "type": {
        "D": "pulse"
       },
       "waveform": {
        "ref": "<Custom:Const>",
-       "ov": false,
        "v": {
         "style": {
          "D": "const"
@@ -304,7 +290,6 @@
  "direct_readout": {
   "blank/empty": {
    "ref": "<Custom:Direct Readout>",
-   "ov": false,
    "v": {
     "type": {
      "D": "readout/direct"
@@ -331,7 +316,6 @@
   },
   "blank/pop": {
    "ref": "<Custom:Direct Readout>",
-   "ov": false,
    "v": {
     "type": {
      "D": "readout/direct"
@@ -360,7 +344,6 @@
  "none_reset": {
   "blank/empty": {
    "ref": "<Custom:None Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/none"
@@ -369,7 +352,6 @@
   },
   "blank/pop": {
    "ref": "<Custom:None Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/none"
@@ -380,14 +362,12 @@
  "pi2_pulse": {
   "blank/empty": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -427,14 +407,12 @@
   },
   "ref/empty/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -475,14 +453,12 @@
   "ref/empty/opt=True": null,
   "blank/pop": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -522,14 +498,12 @@
   },
   "ref/pop/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -572,14 +546,12 @@
  "pi_pulse": {
   "blank/empty": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -619,14 +591,12 @@
   },
   "ref/empty/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -667,14 +637,12 @@
   "ref/empty/opt=True": null,
   "blank/pop": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -714,14 +682,12 @@
   },
   "ref/pop/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -764,14 +730,12 @@
  "qub_probe": {
   "blank/empty": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -811,14 +775,12 @@
   },
   "ref/empty/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -859,14 +821,12 @@
   "ref/empty/opt=True": null,
   "blank/pop": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -906,14 +866,12 @@
   },
   "ref/pop/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -956,7 +914,6 @@
  "qub_waveform": {
   "blank/empty": {
    "ref": "<Custom:Cosine>",
-   "ov": false,
    "v": {
     "style": {
      "D": "cosine"
@@ -968,7 +925,6 @@
   },
   "blank/pop": {
    "ref": "<Custom:Cosine>",
-   "ov": false,
    "v": {
     "style": {
      "D": "cosine"
@@ -982,14 +938,12 @@
  "rabi_pulse": {
   "blank/empty": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -1029,14 +983,12 @@
   },
   "ref/empty/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -1077,14 +1029,12 @@
   "ref/empty/opt=True": null,
   "blank/pop": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -1124,14 +1074,12 @@
   },
   "ref/pop/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -1174,7 +1122,6 @@
  "readout": {
   "blank/empty": {
    "ref": "<Custom:Pulse Readout>",
-   "ov": false,
    "v": {
     "type": {
      "D": "readout/pulse"
@@ -1185,7 +1132,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -1249,7 +1195,6 @@
   },
   "ref/empty/opt=False": {
    "ref": "<Custom:Pulse Readout>",
-   "ov": false,
    "v": {
     "type": {
      "D": "readout/pulse"
@@ -1260,7 +1205,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -1325,7 +1269,6 @@
   "ref/empty/opt=True": null,
   "blank/pop": {
    "ref": "<Custom:Pulse Readout>",
-   "ov": false,
    "v": {
     "type": {
      "D": "readout/pulse"
@@ -1336,7 +1279,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -1400,7 +1342,6 @@
   },
   "ref/pop/opt=False": {
    "ref": "<Custom:Pulse Readout>",
-   "ov": false,
    "v": {
     "type": {
      "D": "readout/pulse"
@@ -1411,7 +1352,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -1478,7 +1418,6 @@
  "readout_dpm": {
   "blank/empty": {
    "ref": "<Custom:Pulse Readout>",
-   "ov": false,
    "v": {
     "type": {
      "D": "readout/pulse"
@@ -1489,7 +1428,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -1556,7 +1494,6 @@
   },
   "blank/pop": {
    "ref": "<Custom:Pulse Readout>",
-   "ov": false,
    "v": {
     "type": {
      "D": "readout/pulse"
@@ -1567,7 +1504,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -1636,14 +1572,12 @@
  "res_probe": {
   "blank/empty": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -1683,14 +1617,12 @@
   },
   "ref/empty/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -1731,14 +1663,12 @@
   "ref/empty/opt=True": null,
   "blank/pop": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -1778,14 +1708,12 @@
   },
   "ref/pop/opt=False": {
    "ref": "<Custom:Pulse>",
-   "ov": false,
    "v": {
     "type": {
      "D": "pulse"
     },
     "waveform": {
      "ref": "<Custom:Const>",
-     "ov": false,
      "v": {
       "style": {
        "D": "const"
@@ -1828,7 +1756,6 @@
  "res_waveform": {
   "blank/empty": {
    "ref": "<Custom:Const>",
-   "ov": false,
    "v": {
     "style": {
      "D": "const"
@@ -1840,7 +1767,6 @@
   },
   "blank/pop": {
    "ref": "<Custom:Const>",
-   "ov": false,
    "v": {
     "style": {
      "D": "const"
@@ -1854,7 +1780,6 @@
  "reset": {
   "blank/empty": {
    "ref": "<Custom:Pulse Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/pulse"
@@ -1865,7 +1790,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -1906,7 +1830,6 @@
   },
   "ref/empty/opt=False": {
    "ref": "<Custom:Pulse Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/pulse"
@@ -1917,7 +1840,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -1959,7 +1881,6 @@
   "ref/empty/opt=True": null,
   "blank/pop": {
    "ref": "<Custom:Pulse Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/pulse"
@@ -1970,7 +1891,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -2011,7 +1931,6 @@
   },
   "ref/pop/opt=False": {
    "ref": "<Custom:Pulse Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/pulse"
@@ -2022,7 +1941,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -2066,7 +1984,6 @@
  "two_pulse_reset": {
   "blank/empty": {
    "ref": "<Custom:Two-Pulse Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/two_pulse"
@@ -2077,7 +1994,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -2120,7 +2036,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -2161,7 +2076,6 @@
   },
   "blank/pop": {
    "ref": "<Custom:Two-Pulse Reset>",
-   "ov": false,
    "v": {
     "type": {
      "D": "reset/two_pulse"
@@ -2172,7 +2086,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"
@@ -2215,7 +2128,6 @@
      },
      "waveform": {
       "ref": "<Custom:Const>",
-      "ov": false,
       "v": {
        "style": {
         "D": "const"

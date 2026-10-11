@@ -4,63 +4,32 @@ status: accepted
 
 # 0050 — Canonical cfg binding paths
 
-> 現行定位：binding grammar 仍有效；batch 成功前綴是現況，不代表已落實核准的 atomic edit batch。目標見 [Cfg draft](draft/cfg-editing-boundaries.md)，跨 owner 分工見 [[0065]]。
+## 脈絡
 
-## Context
+Cfg mutation 和 listing 若各自判斷 field subtype，scalar types、reference keys、sweep edges 和 suggestions 就會分歧。`gui.cfg.binding` 擁有獨立 draft 的 target grammar。Measure tab 使用 cfg resource 的 string-array paths 與 atomic edit，不使用 draft batch 的成功前綴契約，見 [[0065]]。
 
-Cfg mutation and listing previously used a second field-subtype grammar in the
-measure remote adapter. The authorities drifted on scalar types, reference
-keys, sweep aliases, suggestions, and batch path diffs.
+## 決策
 
-## Decision
+Binding 以 nominal `SettableTarget` 共用 listing、resolve、setting、validation、suggestions 與 migration hints。每個列出的 path 都能解析成相同 kind、value type、current value、choices 和 `affects_path_shape`。未列出的 alias 不執行。
 
-`gui.cfg.binding` owns nominal `SettableTarget` objects and one traversal for
-listing, resolving, setting, validation, suggestions, and migration hints.
-Every listed path resolves to the same kind, value type, current value, choices,
-and `affects_path_shape` metadata; no unlisted alias executes.
+Scalar 使用 dotted leaf。Sweep 直接以 `start|stop|expts|step` 結尾，centered sweep 使用 `center|span|expts|step`。Reference key 使用 `.ref`，children 直接下鑽。舊 `.sweep.*` 和 `.value.*` 拼法在 mutation 前拒絕，並提供已核對的 replacement。Target tree 建立時拒絕無法表示或保留的 field key。
 
-Canonical scalar paths are dotted leaves. Sweep paths end directly in
-`start|stop|expts|step`, centered sweeps in `center|span|expts|step`, reference
-keys in `.ref`, and reference children descend directly. Removed `.sweep.*` and
-`.value.*` spellings fail before mutation and report a verified replacement.
-Unrepresentable or reserved field keys fail when the target tree is built.
+Qt sweep widgets 使用 leaf targets。Agent 可在 sweep parent 使用 nominal aggregate target，交付完整 sweep object。兩者共用 SweepEditor／CenteredSweepEditor 的驗證與正規化，remote 不複製 subtype grammar。
 
-These leaf sweep paths remain the GUI widget contract. Agent edits use a nominal
-aggregate target at the sweep parent path and provide the complete sweep object.
-Both entry points mutate the same binding model through SweepEditor or
-CenteredSweepEditor validation and normalization. Remote code does not duplicate
-field subtype grammar; an aggregate edit validates its inputs before committing.
+`gui.cfg` 擁有 custom-reference-key make／parse／query helpers。Binding 正規化可接受的 bare labels，內部 tag 只用於 persistence，不依賴 session policy。`ValueRef` 在 app seam 解析且只用於 scalar target。
 
-`gui.cfg` owns strict custom-reference-key make/parse/query helpers. Binding
-normalizes allowed bare labels; tags remain internal persistence representation.
-Binding never imports measure session policy. `ValueRef` resolves at the app
-service seam and only for scalar targets. Remote code projects targets to flat
-mutation listings and path-change replies.
+Binding path 指向 cfg 欄位，不是參數容器路徑。欄位中的 `$alias` 名稱、`$alias.path` expression 或 module slot 由固定 ParameterContext 解析；library key 使用具體元件路徑。Alias table 與具體參數路徑的權責見 [[0037]]／[[0067]]，不在 binding grammar 推論。
 
-Complete cfg reads use the separate nominal `CfgDraft.observe()` contract.
-`CfgNodeObservation` includes locked literals, cached options, active reference
-children, validity, and value carriers with raw/resolved/error state. Binding
-owns field traversal and returns detached data without resolving sources. A
-settable listing or persistence encoding cannot substitute for this observation.
-The remote adapter serializes these data nodes and applies prefix read policy;
-it does not import field/editor classes or reconstruct their validation rules.
-Only a successful full read without a prefix parameter reveals the whole cfg
-revision. Unknown objects and nonfinite values fail serialization rather than
-becoming display strings. Prefixes and bare versions never certify a full read.
+## 完整觀察與 batch
 
-Cfg edit batches are ordered, fail-fast, and non-atomic. Resolution remains
-sequential so a reference switch can expose the next path. Only a shape target
-materializes path sets, once before the first shape edit and once after success.
-The sorted response is the final net diff, so A→B→A is empty. Failure preserves
-successful prefix edits, re-raises the original typed failure, and performs no
-after diff. Per-edit version bumps and [[0068]] lazy subscriber payloads remain;
-this decision does not implement snapshot coalescing.
+完整 cfg 讀取使用 `CfgDraft.observe()`。`CfgNodeObservation` 包含 locked literals、cached options、active reference children、validity，以及 raw／resolved／error value carriers。Binding 回傳 detached data，不重新解析來源。Settable listing 和 persistence encoding 都不能代替完整 observation。
 
-## Consequences
+Remote 將 observation 序列化並套 prefix read policy，不 import field/editor classes 重建規則。Prefix 只選取回覆的子樹，不授權 mutation。Unknown objects 和 nonfinite values 使序列化失敗，不轉成 display string。部分投影不代替完整內容。
 
-- Binding list and resolve acceptance sets cannot drift.
-- Remote consumers depend on a deep nominal contract, not field classes.
-- Agents copy listing paths verbatim and receive actionable legacy hints.
-- Batch listing cost is independent of edit count unless shape changes.
+獨立 draft batch 依序執行，首錯停止，不具原子性。Reference switch 可以先暴露下一個 path。Shape edit 才計算 path sets，在第一筆 shape edit 前和成功後各計算一次。回覆是排序後的最終 net diff，A→B→A 為空。失敗保留成功前綴，傳遞原 typed error，不做 after diff。每筆成功 edit 的 owner 更新與 [[0068]] 的 subscriber 投影保持原契約。
 
-This extends [[0008]], [[0045]], and [[0046]]; the remote boundary is [[0068]].
+## 後果
+
+Listing 和 resolution 共用一份 grammar。Agent 直接複製 listing paths，舊拼法得到可定位的提示。獨立 draft 的成功前綴不代表 tab resource 的 atomic batch，也不代表 Apply 的跨檔原子性。
+
+本篇延續 [[0008]]、[[0045]]、[[0046]] 的局部契約；跨 owner 分工見 [[0065]]，remote 邊界見 [[0068]]。

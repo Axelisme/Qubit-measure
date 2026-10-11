@@ -67,6 +67,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
+    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
@@ -242,7 +243,19 @@ class Controller(SessionControllerMixin):
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
+        *,
+        alias_preset: tuple[AliasRow, ...] = (),
     ) -> None:
+        """Compose services for state/registry with an optional view and adapters.
+
+        ``alias_preset`` is the ordered caller-owned initial alias table, empty
+        when omitted. Softlinks and empty bindings stay authored. The session
+        uses the role registry's unique focus candidate once for the primary
+        empty row on the first nonempty component snapshot; later point changes
+        do not reset rows. Explicit table edits disable that initialization.
+        Invalid syntax, duplicates or forward links raise
+        InvalidInputError(alias_invalid). No device or cache is used to bind rows.
+        """
         self.control_identity = ControlIdentity()
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
@@ -299,6 +312,7 @@ class Controller(SessionControllerMixin):
             owner_scheduler=owner_scheduler,
             project_root=self._project_root,
             catalog_loader=catalog_loader,
+            alias_preset=alias_preset,
         )
         self._services = services
         self._operation_gate = services.operation_gate

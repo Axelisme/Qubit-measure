@@ -114,7 +114,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
                     .declare_sweep("freq", step.cfg.sweep.freq)
                     .build_and_acquire()
                 )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return CheckResult(outputs=outputs, freqs=freqs, signals=signals)
 

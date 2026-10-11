@@ -15,7 +15,12 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.cfg import ReferenceSpec, ReferenceValue, make_custom_reference_key
+from zcu_tools.gui.cfg import (
+    ReferenceSpec,
+    ReferenceValue,
+    is_custom_reference_key,
+    make_custom_reference_key,
+)
 from zcu_tools.gui.cfg.binding import ReferenceField
 
 from ..registry import FieldRenderContext
@@ -134,6 +139,11 @@ class ReferenceInputWidget(QWidget):
         self._combo.setMinimumWidth(20)
         self._combo.currentIndexChanged.connect(self._on_combo_changed)
         header.addWidget(self._combo, stretch=1)
+        self._convert = QPushButton("Convert to inline")
+        self._convert.setObjectName("convertReferenceToInline")
+        self._convert_action: Callable[[], object] | None = None
+        self._convert.clicked.connect(self._on_convert)
+        header.addWidget(self._convert)
         layout.addLayout(header)
         self._missing_ref_hint = QLabel()
         self._missing_ref_hint.setObjectName("missingRefHint")
@@ -153,9 +163,24 @@ class ReferenceInputWidget(QWidget):
         self._value = value
         self._library_keys = library_keys
         self._valid = valid
+        self._convert.setEnabled(
+            valid
+            and value is not None
+            and not is_custom_reference_key(value.chosen_key)
+            and self._convert_action is not None
+        )
         display_reference_combo(self._combo, self._spec, value, library_keys)
         display_missing_hint(self._missing_ref_hint, value)
         display_reference_validity(self._combo, valid=valid)
+
+    def set_convert_action(self, action: Callable[[], object]) -> None:
+        """Bind an owner conversion command; ignore its result, enable only for valid refs."""
+        self._convert_action = action
+        self.display(self._value, library_keys=self._library_keys, valid=self._valid)
+
+    def _on_convert(self) -> None:
+        if self._convert_action is not None:
+            self._convert_action()
 
     def _on_combo_changed(self, index: int) -> None:
         choice = selected_reference(self._combo.itemData(index))
@@ -191,6 +216,7 @@ class ReferenceWidget(ReferenceInputWidget):
             valid=field.is_valid(),
             submit=self._write_input,
         )
+        self.set_convert_action(field.convert_reference_to_inline)
         field.on_change.connect(self._on_model_changed)
         field.on_validity_changed.connect(self._on_validity_changed)
 

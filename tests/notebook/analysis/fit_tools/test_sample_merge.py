@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import pytest
 import zcu_tools.notebook.analysis.fit_tools.sample_merge as sample_merge
+from numpy.typing import NDArray
 from zcu_tools.notebook.analysis.fit_tools import (
     FluxFrame,
     SampleSource,
@@ -30,13 +33,13 @@ from zcu_tools.resources.sample_table import (
 def _target_frame(
     *,
     label: str = "target",
-    dev_unit: str = "A",
+    dev_unit: Literal["A", "V"] = "A",
     flux_int: float = -11.1,
     flux_period: float = 24.5,
 ) -> FluxFrame:
     return FluxFrame(
         params=(3.5, 1.0, 0.6),
-        dev_unit=dev_unit,  # type: ignore[arg-type]
+        dev_unit=dev_unit,
         flux_int=flux_int,
         flux_period=flux_period,
         label=label,
@@ -51,7 +54,7 @@ def _write_v2_csv(
     flux: np.ndarray | None = None,
     flux_int: np.ndarray | float | None = None,
     flux_period: np.ndarray | float | None = None,
-    measurements: dict[str, list[object]] | None = None,
+    measurements: Mapping[str, Sequence[object] | NDArray[np.float64]] | None = None,
 ) -> Path:
     frame: dict[str, object] = {
         DEV_VALUE_COLUMN: list(dev_values),

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 from zcu_tools.experiment.cfg_editing import (
     PROGRAM_SHAPES,
@@ -221,15 +219,18 @@ def test_program_module_missing_defaults_are_complete(discriminator: str) -> Non
     if discriminator == "pulse":
         assert value.fields["ch"] == DirectValue(0)
         assert value.fields["freq"] == DirectValue(None)
-        waveform = cast(ReferenceValue, value.fields["waveform"])
+        waveform = value.fields["waveform"]
+        assert isinstance(waveform, ReferenceValue)
         assert parse_custom_reference_key(waveform.chosen_key) == "Const"
         assert waveform.value.fields["length"] == DirectValue(0.0)
     elif discriminator == "readout/direct":
         assert value.fields["ro_ch"] == DirectValue(0)
         assert value.fields["ro_freq"] == DirectValue(None)
     elif discriminator == "readout/pulse":
-        pulse = cast(CfgSectionValue, value.fields["pulse_cfg"])
-        readout = cast(CfgSectionValue, value.fields["ro_cfg"])
+        pulse = value.fields["pulse_cfg"]
+        readout = value.fields["ro_cfg"]
+        assert isinstance(pulse, CfgSectionValue)
+        assert isinstance(readout, CfgSectionValue)
         assert pulse.fields["freq"] == DirectValue(0.0)
         assert readout.fields["ro_freq"] == DirectValue(0.0)
 
@@ -246,7 +247,8 @@ def test_program_waveform_missing_defaults_are_complete(style: str) -> None:
         if isinstance(node_spec, ScalarSpec):
             assert value.fields[key] == DirectValue(None)
     if style == "flat_top":
-        raise_waveform = cast(ReferenceValue, value.fields["raise_waveform"])
+        raise_waveform = value.fields["raise_waveform"]
+        assert isinstance(raise_waveform, ReferenceValue)
         assert parse_custom_reference_key(raise_waveform.chosen_key) == "Cosine"
         assert raise_waveform.value.fields["length"] == DirectValue(0.0)
 
@@ -300,7 +302,8 @@ def test_single_allowed_reference_missing_discriminator_uses_allowed_shape() -> 
         _POLICY,
     )
 
-    cavity = cast(ReferenceValue, value.fields["cavity_tone_cfg"])
+    cavity = value.fields["cavity_tone_cfg"]
+    assert isinstance(cavity, ReferenceValue)
     assert cavity.value.fields["type"] == DirectValue("pulse")
     assert cavity.value.fields["freq"] == DirectValue(6000.0)
 

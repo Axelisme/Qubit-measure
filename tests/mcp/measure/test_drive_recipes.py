@@ -11,7 +11,8 @@ import pytest
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 
-from ._recipe_support import PNG, LookbackGui, scalar, section
+from ._recipe_actual_support import cfg_sweep, cfg_value
+from ._recipe_support import PNG, LookbackGui, publish_reference_locks, scalar, section
 from ._support import MeasureClient, full_execution_reply, make_client
 
 RAW_REPORT = SaveReport(
@@ -77,16 +78,21 @@ class TimeRabiGui(LookbackGui):
             length={
                 "kind": "sweep",
                 "valid": True,
+                "readonly": False,
                 "inputs": {
                     key: scalar(value)["input"]
                     for key, value in {"start": 0.04, "stop": 0.8, "expts": 61}.items()
                 },
             }
         )
-        tree["modules"]["children"]["readout"]["ref"] = "<Custom:Pulse Readout>"
+        tree["modules"]["children"]["readout"].update(
+            ref="<Custom:Pulse Readout>", mode="inline"
+        )
         tree["modules"]["children"]["qub_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
+            "mode": "inline",
             "ref": "<Custom:Pulse>",
             "error": None,
             "children": {
@@ -210,15 +216,16 @@ class DriveGui(TimeRabiGui):
             "fwhm_err": 0.2,
         }
         self.library_modules["R1.readout.direct"] = {"type": "readout/direct"}
-        self.publication["tree"]["children"]["modules"]["children"]["readout"][
-            "ref"
-        ] = "<Custom:Pulse Readout>"
+        self.publication["tree"]["children"]["modules"]["children"]["readout"].update(
+            ref="<Custom:Pulse Readout>", mode="inline"
+        )
         self.publication["tree"]["children"].update(
             reps=scalar(17),
             sweep=section(
                 freq={
                     "kind": "sweep",
                     "valid": True,
+                    "readonly": False,
                     "inputs": {
                         key: scalar(value)["input"]
                         for key, value in {
@@ -233,6 +240,8 @@ class DriveGui(TimeRabiGui):
         self.publication["tree"]["children"]["modules"]["children"]["qub_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
+            "mode": None,
             "ref": None,
             "error": None,
             "children": {
@@ -286,6 +295,7 @@ class DriveGui(TimeRabiGui):
                     "readout"
                 ]
                 readout["children"] = {"ro_freq": scalar(7100.0)}
+                publish_reference_locks(readout)
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "tab.new":
@@ -302,7 +312,8 @@ class DriveGui(TimeRabiGui):
 def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
     tmp_path, number
 ):
-    with recipe_client(tmp_path, TimeRabiGui({"$resonator.freq": 7200.0})) as client:
+    gui = TimeRabiGui({"$resonator.freq": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
             client,
             skip_writeback(
@@ -319,11 +330,11 @@ def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
             ),
         ).data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
+        fields = data["actual"]
         for path in ("modules.qub_pulse.freq", "modules.qub_pulse.gain"):
-            assert fields[path]["value"] == 1.0
-            assert type(fields[path]["value"]) is float
-        sweep = fields["sweep.length"]["value"]
+            assert cfg_value(gui.publication, path) == 1.0
+            assert type(cfg_value(gui.publication, path)) is float
+        sweep = cfg_sweep(gui.publication, "sweep.length")
         assert sweep["stop"] == 1.0
         assert type(sweep["stop"]) is float
         assert sweep["expts"] == 3
@@ -341,11 +352,10 @@ def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
             assert by_path[path] == 1.0
             assert type(by_path[path]) is float
         assert type(by_path["sweep", "length"]["stop"]) is float
-        assert fields["modules.qub_pulse.gain"]["source"] == "gain"
-        assert fields["sweep.length"]["source"] == {
+        assert fields["length_sweep"]["source"] == {
             "start": "gui_default",
-            "stop": "max_length_us",
-            "expts": "points",
+            "stop": "explicit",
+            "expts": "explicit",
         }
 
 
@@ -371,18 +381,17 @@ def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tm
         )
         data = reply.data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["modules.qub_pulse.freq"]["value"] == 6150.0
-        assert fields["modules.qub_pulse.freq"]["source"] == "frequency_mhz"
-        assert fields["modules.qub_pulse.gain"]["value"] == 0.21
-        assert fields["sweep.length"]["value"] == {
+        fields = data["actual"]
+        assert cfg_value(gui.publication, "modules.qub_pulse.freq") == 6150.0
+        assert cfg_value(gui.publication, "modules.qub_pulse.gain") == 0.21
+        assert cfg_sweep(gui.publication, "sweep.length") == {
             "start": 0.04,
             "stop": 1.5,
             "expts": 71,
         }
-        assert fields["reps"]["value"] == 13
-        assert fields["rounds"]["value"] == 9
-        assert fields["modules.reset"]["source"] == "disabled"
+        assert cfg_value(gui.publication, "reps") == 13
+        assert cfg_value(gui.publication, "rounds") == 9
+        assert fields["use_reset"]["source"] == "disabled"
         assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"]
@@ -404,6 +413,7 @@ class AmplitudeRabiGui(TimeRabiGui):
             gain={
                 "kind": "sweep",
                 "valid": True,
+                "readonly": False,
                 "inputs": {
                     key: scalar(value)["input"]
                     for key, value in {"start": -0.2, "stop": 0.7, "expts": 43}.items()
@@ -433,9 +443,8 @@ class AmplitudeRabiGui(TimeRabiGui):
 def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
     tmp_path, number
 ):
-    with recipe_client(
-        tmp_path, AmplitudeRabiGui({"$resonator.freq": 7200.0})
-    ) as client:
+    gui = AmplitudeRabiGui({"$resonator.freq": 7200.0})
+    with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
             client,
             skip_writeback(
@@ -454,18 +463,17 @@ def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
             ),
         ).data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
         for path in ("modules.qub_pulse.freq", "modules.qub_pulse.waveform.length"):
-            assert fields[path]["value"] == 1.0
-            assert type(fields[path]["value"]) is float
-        sweep = fields["sweep.gain"]["value"]
+            assert cfg_value(gui.publication, path) == 1.0
+            assert type(cfg_value(gui.publication, path)) is float
+        sweep = cfg_sweep(gui.publication, "sweep.gain")
         assert sweep == {"start": 0.0, "stop": 1.0, "expts": 3}
         assert type(sweep["start"]) is float
         assert type(sweep["stop"]) is float
         assert type(sweep["expts"]) is int
         for name, count in (("reps", 2), ("rounds", 1)):
-            assert fields[name]["value"] == count
-            assert type(fields[name]["value"]) is int
+            assert cfg_value(gui.publication, name) == count
+            assert type(cfg_value(gui.publication, name)) is int
         edits = [
             edit
             for method, params in client.transport.sent
@@ -476,14 +484,6 @@ def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
         assert len(edits) == 1
         assert type(edits[0]["value"]["start"]) is float
         assert type(edits[0]["value"]["stop"]) is float
-        assert fields["sweep.gain"]["source"] == {
-            "start": "gain_range",
-            "stop": "gain_range",
-            "expts": "points",
-        }
-        assert (
-            fields["modules.qub_pulse.waveform.length"]["source"] == "pulse_length_us"
-        )
 
 
 def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
@@ -508,17 +508,17 @@ def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
         )
         data = reply.data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["modules.qub_pulse.freq"]["value"] == 6150.0
-        assert fields["modules.qub_pulse.waveform.length"]["value"] == 0.23
-        assert fields["sweep.gain"]["value"] == {
+        fields = data["actual"]
+        assert cfg_value(gui.publication, "modules.qub_pulse.freq") == 6150.0
+        assert cfg_value(gui.publication, "modules.qub_pulse.waveform.length") == 0.23
+        assert cfg_sweep(gui.publication, "sweep.gain") == {
             "start": -0.1,
             "stop": 0.5,
             "expts": 29,
         }
-        assert fields["reps"]["value"] == 13
-        assert fields["rounds"]["value"] == 9
-        assert fields["modules.reset"]["source"] == "disabled"
+        assert cfg_value(gui.publication, "reps") == 13
+        assert cfg_value(gui.publication, "rounds") == 9
+        assert fields["use_reset"]["source"] == "disabled"
         assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"]
@@ -553,37 +553,61 @@ def test_rabi_frequency_precedence_preserves_gui_defaults(
         drive["children"]["freq"] = scalar(
             6280.0 if source != "invalid_library" else None
         )
+        publish_reference_locks(drive)
     if source == "explicit":
         arguments["frequency_mhz"] = 6150.0
     with recipe_client(tmp_path, gui) as client:
         data = full_execution_reply(
-            client, skip_writeback(client, client.call(recipe, arguments))
+            client,
+            skip_writeback(
+                client,
+                client.call(
+                    recipe,
+                    (
+                        {
+                            "center_mhz": 6100.0,
+                            "span_mhz": 20.0,
+                            "points": 41,
+                            **arguments,
+                        }
+                        if recipe == "twotone_spectrum"
+                        else arguments
+                    ),
+                ),
+            ),
         ).data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        frequency = fields["modules.qub_pulse.freq"]
-        assert frequency["value"] == {"explicit": 6150.0, "library": 6280.0}.get(
+        fields = data["actual"]
+        frequency_value = cfg_value(gui.publication, "modules.qub_pulse.freq")
+        assert frequency_value == {"explicit": 6150.0, "library": 6280.0}.get(
             source, 6300.0
         )
-        assert frequency["source"] == {
-            "explicit": "frequency_mhz",
-            "library": "library:Q1.pulses.drive",
-        }.get(source, "$qubit.freq")
-        assert fields[f"sweep.{sweep}"]["value"] == expected
-        assert fields[f"sweep.{sweep}"]["source"] == {
+        if source != "explicit":
+            assert fields["frequency_mhz"]["source"] == {
+                "library": "library:Q1.pulses.drive",
+            }.get(source, "$qubit.freq")
+        assert cfg_sweep(gui.publication, f"sweep.{sweep}") == expected
+        assert fields["length_sweep" if sweep == "length" else "gain_sweep"][
+            "source"
+        ] == {
             "start": "gui_default",
             "stop": "gui_default",
             "expts": "gui_default",
         }
-        assert fields["reps"]["value"] == 19
-        assert fields["rounds"]["value"] == 3
+        assert cfg_value(gui.publication, "reps") == 19
+        assert cfg_value(gui.publication, "rounds") == 3
         scalar_path = (
             "modules.qub_pulse.gain"
             if recipe == "time_rabi"
             else "modules.qub_pulse.waveform.length"
         )
-        assert fields[scalar_path]["value"] == (0.14 if recipe == "time_rabi" else 1.0)
-        assert fields[scalar_path]["source"] == "gui_default"
+        assert cfg_value(gui.publication, scalar_path) == (
+            0.14 if recipe == "time_rabi" else 1.0
+        )
+        assert (
+            fields["gain" if recipe == "time_rabi" else "pulse_length_us"]["source"]
+            == "gui_default"
+        )
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.reset_cfg") == 1
         assert "tab.new" not in methods
@@ -641,7 +665,14 @@ def test_rabi_invalid_explicit_values_fail_before_preparing(
 ):
     gui = gui_type()
     with recipe_client(tmp_path, gui) as client:
-        data = client.call(recipe, arguments).data
+        data = client.call(
+            recipe,
+            (
+                {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 41, **arguments}
+                if recipe == "twotone_spectrum"
+                else arguments
+            ),
+        ).data
         assert data["status"] == "failed", data
         assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not gui.ran
@@ -676,11 +707,11 @@ def test_rabi_valid_library_sources_work_without_metadata_and_enable_explicit_re
             ),
         ).data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["modules.qub_pulse.freq"]["value"] == 6280.0
-        assert fields["modules.qub_pulse.freq"]["source"] == "library:Q1.pulses.drive"
-        assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
-        assert fields["modules.reset"]["value"] == "Q1.reset.reset"
+        fields = data["actual"]
+        assert cfg_value(gui.publication, "modules.qub_pulse.freq") == 6280.0
+        assert fields["frequency_mhz"]["source"] == "library:Q1.pulses.drive"
+        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 5000.0
+        assert cfg_value(gui.publication, "modules.reset") == "Q1.reset.reset"
 
 
 @pytest.mark.parametrize(
@@ -727,7 +758,14 @@ def test_drive_primary_handoff_waits_for_question_before_actual_write(
         interactive=interactive,
     )
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(recipe, {})
+        reply = client.call(
+            recipe,
+            (
+                {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 31}
+                if recipe == "twotone_spectrum"
+                else {}
+            ),
+        )
         execution = reply.data["execution"]
         if interactive:
             assert reply.data["status"] == "interactive", reply.data
@@ -785,7 +823,17 @@ def test_drive_cancelled_run_stops_before_raw_save(tmp_path, recipe, gui_type):
             "ok": True,
             "result": {"reason": "completed", "status": "cancelled"},
         }
-        reply = full_execution_reply(client, client.call(recipe, {}))
+        reply = full_execution_reply(
+            client,
+            client.call(
+                recipe,
+                (
+                    {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 31}
+                    if recipe == "twotone_spectrum"
+                    else {}
+                ),
+            ),
+        )
         assert reply.data["status"] == "cancelled", reply.data
         assert reply.data["run_outcome"]["status"] == "cancelled"
         assert reply.data["tab"] == "t"
@@ -811,7 +859,14 @@ def test_drive_cancelled_question_retains_preview_without_writing(
         {"$qubit.freq": 6300.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
     )
     with recipe_client(tmp_path, gui) as client:
-        question = client.call(recipe, {})
+        question = client.call(
+            recipe,
+            (
+                {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 31}
+                if recipe == "twotone_spectrum"
+                else {}
+            ),
+        )
         assert question.data["status"] == "awaiting_answer", question.data
         execution = question.data["execution"]
         before = list(client.transport.sent)
@@ -862,13 +917,44 @@ def test_rabi_invalid_arguments_fail_before_gui_binding(
 ):
     gui = gui_type({"$qubit.freq": 6300.0, "$resonator.freq": 7200.0})
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call(recipe, arguments)
+        reply = client.call(
+            recipe,
+            (
+                {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 41, **arguments}
+                if recipe == "twotone_spectrum"
+                else arguments
+            ),
+        )
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["phase"] == "preparing"
         before = list(client.transport.sent)
         status = client.call("status", {"execution": reply.data["execution"]})
         assert status["status"] == "failed"
         assert client.transport.sent == before
+
+
+@pytest.mark.parametrize("parameter", ["center_mhz", "span_mhz", "points"])
+@pytest.mark.parametrize("null", [False, True], ids=["missing", "null"])
+def test_twotone_requires_explicit_range_and_count_before_gui_work(
+    tmp_path, parameter, null
+):
+    gui = DriveGui(
+        {"$qubit.freq": 6100.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
+    )
+    arguments: dict[str, object] = {
+        "center_mhz": 6100.0,
+        "span_mhz": 20.0,
+        "points": 31,
+    }
+    if null:
+        arguments[parameter] = None
+    else:
+        del arguments[parameter]
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("twotone_spectrum", arguments)
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["error"]["phase"] == "preparing"
+        assert not any(method.startswith("tab.") for method, _ in client.transport.sent)
 
 
 @pytest.mark.parametrize("readout_ref", [None, "calibrated", "direct"])
@@ -885,41 +971,50 @@ def test_twotone_runs_once_with_gui_sweep_and_preserved_readout(tmp_path, readou
                 client.call(
                     "twotone_spectrum",
                     {
-                        # Decorator labels are scenarios, not wire references.
-                        "readout_ref": {
-                            "calibrated": "R1.readout.calibrated",
-                            "direct": "R1.readout.direct",
-                        }.get(readout_ref)
-                        if readout_ref is not None
-                        else None,
-                        "gain": 0.18,
-                        "pulse_length_us": 3.0,
-                        "points": 31,
-                        "reps": 23,
-                        "rounds": 7,
+                        "center_mhz": 6100.0,
+                        "span_mhz": 20.0,
+                        "points": 41,
+                        **{
+                            # Decorator labels are scenarios, not wire references.
+                            "readout_ref": {
+                                "calibrated": "R1.readout.calibrated",
+                                "direct": "R1.readout.direct",
+                            }.get(readout_ref)
+                            if readout_ref is not None
+                            else None,
+                            "gain": 0.18,
+                            "pulse_length_us": 3.0,
+                            "points": 31,
+                            "reps": 23,
+                            "rounds": 7,
+                        },
                     },
                 ),
             ),
         )
         data = reply.data
         assert data["status"] == "finished", data
-        fields = data["actual"]["fields"]
-        assert fields["sweep.freq"]["value"] == {
+        fields = data["actual"]
+        assert cfg_sweep(gui.publication, "sweep.freq") == {
             "start": 6090.0,
             "stop": 6110.0,
             "expts": 31,
         }
-        assert fields["modules.qub_pulse.gain"]["value"] == 0.18
-        assert fields["modules.qub_pulse.waveform.length"]["value"] == 3.0
-        assert fields["reps"]["value"] == 23
-        assert fields["rounds"]["value"] == 7
-        assert fields["modules.reset"]["source"] == "disabled"
+        assert cfg_value(gui.publication, "modules.qub_pulse.gain") == 0.18
+        assert cfg_value(gui.publication, "modules.qub_pulse.waveform.length") == 3.0
+        assert cfg_value(gui.publication, "reps") == 23
+        assert cfg_value(gui.publication, "rounds") == 7
+        assert fields["use_reset"]["source"] == "disabled"
         if readout_ref == "direct":
-            assert fields["modules.readout.ro_freq"]["value"] == 7100.0
+            assert cfg_value(gui.publication, "modules.readout.ro_freq") == 7100.0
         else:
             expected = 5000.0 if readout_ref else 7200.0
-            assert fields["modules.readout.pulse_cfg.freq"]["value"] == expected
-            assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == expected
+            assert (
+                cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == expected
+            )
+            assert (
+                cfg_value(gui.publication, "modules.readout.ro_cfg.ro_freq") == expected
+            )
         assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"]
@@ -958,7 +1053,13 @@ def test_twotone_rejects_invalid_explicit_values_before_preparation(
     gui = DriveGui()
     client = make_client(tmp_path, gui)
     try:
-        reply = full_execution_reply(client, client.call("twotone_spectrum", arguments))
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "twotone_spectrum",
+                {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 41, **arguments},
+            ),
+        )
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["phase"] == "preparing"
         assert not gui.ran
@@ -970,57 +1071,18 @@ def test_twotone_requires_calibrated_readout_instead_of_inline_template(tmp_path
     gui = DriveGui({"$qubit.freq": 6100.0, "$qubit.kappa": 4.0})
     client = make_client(tmp_path, gui)
     try:
-        reply = full_execution_reply(client, client.call("twotone_spectrum", {}))
+        reply = full_execution_reply(
+            client,
+            client.call(
+                "twotone_spectrum",
+                {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 41, **{}},
+            ),
+        )
         assert reply.data["status"] == "needs_parameters", reply.data
         assert {item["parameter"] for item in reply.data["missing"]} == {"readout_ref"}
         assert not gui.ran
     finally:
         client.context.session.close()
-
-
-@pytest.mark.parametrize("reuse_tab_id", [None, "t"])
-def test_twotone_reports_all_missing_frequency_sources_without_running(
-    tmp_path, reuse_tab_id
-):
-    gui = DriveGui()
-    client = make_client(tmp_path, gui)
-    try:
-        reply = full_execution_reply(
-            client, client.call("twotone_spectrum", {"reuse_tab_id": reuse_tab_id})
-        )
-        methods = [method for method, _ in client.transport.sent]
-        assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
-        assert ("tab.new" in methods) is (reuse_tab_id is None)
-        assert reply.data["status"] == "needs_parameters", reply.data
-        assert {item["parameter"] for item in reply.data["missing"]} == {
-            "center_mhz",
-            "span_mhz",
-            "readout_ref",
-        }
-        assert not gui.ran
-    finally:
-        client.context.session.close()
-
-
-@pytest.mark.parametrize("span_mhz", [None, 80.0])
-def test_twotone_explicit_center_removes_missing_calibration_dependency(
-    tmp_path, span_mhz
-):
-    gui = DriveGui({"$qubit.kappa": 4.0, "$resonator.freq": 7200.0})
-    with recipe_client(tmp_path, gui) as client:
-        reply = full_execution_reply(
-            client,
-            skip_writeback(
-                client,
-                client.call(
-                    "twotone_spectrum", {"center_mhz": 6300.0, "span_mhz": span_mhz}
-                ),
-            ),
-        )
-        assert reply.data["status"] == "finished", reply.data
-        fields = reply.data["actual"]["fields"]
-        assert fields["center_mhz"]["value"] == 6300.0
-        assert fields["span_mhz"]["value"] == (20.0 if span_mhz is None else 80.0)
 
 
 def test_twotone_preserves_valid_library_leaf_and_fills_missing_leaf(tmp_path):
@@ -1030,19 +1092,26 @@ def test_twotone_preserves_valid_library_leaf_and_fills_missing_leaf(tmp_path):
     readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
     readout["ref"] = "R1.readout.calibrated"
     readout["children"]["ro_cfg"]["children"]["ro_freq"] = scalar(None)
+    publish_reference_locks(readout)
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
-            client, skip_writeback(client, client.call("twotone_spectrum", {}))
+            client,
+            skip_writeback(
+                client,
+                client.call(
+                    "twotone_spectrum",
+                    {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 41, **{}},
+                ),
+            ),
         )
         assert reply.data["status"] == "finished", reply.data
-        fields = reply.data["actual"]["fields"]
-        assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
+        fields = reply.data["actual"]
+        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 5000.0
         assert (
-            fields["modules.readout.pulse_cfg.freq"]["source"]
-            == "library:R1.readout.calibrated"
+            fields["readout_frequency_mhz"]["source"] == "library:R1.readout.calibrated"
         )
-        assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == 7200.0
-        assert fields["modules.readout.ro_cfg.ro_freq"]["source"] == "$resonator.freq"
+        assert cfg_value(gui.publication, "modules.readout.ro_cfg.ro_freq") == 7200.0
+        assert fields["ro_frequency_mhz"]["source"] == "$resonator.freq"
 
 
 @pytest.mark.parametrize("parameter", ["readout_ref", "drive_ref", "use_reset"])
@@ -1062,7 +1131,16 @@ def test_twotone_invalid_reference_stops_without_fallback(tmp_path, parameter):
 
     with recipe_client(tmp_path, respond) as client:
         reply = full_execution_reply(
-            client, client.call("twotone_spectrum", {parameter: "unknown"})
+            client,
+            client.call(
+                "twotone_spectrum",
+                {
+                    "center_mhz": 6100.0,
+                    "span_mhz": 20.0,
+                    "points": 41,
+                    **{parameter: "unknown"},
+                },
+            ),
         )
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["reason"] == "invalid_cfg"
@@ -1091,32 +1169,39 @@ def test_twotone_reuse_applies_explicit_drive_and_reset_once(tmp_path):
                 client.call(
                     "twotone_spectrum",
                     {
-                        "reuse_tab_id": "t",
-                        "drive_ref": "Q1.pulses.drive",
-                        "use_reset": "Q1.reset.reset",
+                        "center_mhz": 6100.0,
+                        "span_mhz": 20.0,
+                        "points": 41,
+                        **{
+                            "reuse_tab_id": "t",
+                            "drive_ref": "Q1.pulses.drive",
+                            "use_reset": "Q1.reset.reset",
+                        },
                     },
                 ),
             ),
         )
         assert reply.data["status"] == "finished", reply.data
-        fields = reply.data["actual"]["fields"]
-        assert fields["modules.qub_pulse"] == {
-            "value": "Q1.pulses.drive",
-            "source": "explicit",
-        }
-        assert fields["modules.reset"] == {
-            "value": "Q1.reset.reset",
-            "source": "explicit",
-        }
+        fields = reply.data["actual"]
+        assert cfg_value(gui.publication, "modules.qub_pulse") == "Q1.pulses.drive"
+        assert cfg_value(gui.publication, "modules.reset") == "Q1.reset.reset"
         for field, value in (
             ("modules.qub_pulse.gain", 0.12),
             ("modules.qub_pulse.waveform.length", 2.0),
             ("reps", 17),
             ("rounds", 3),
         ):
-            assert fields[field]["value"] == value
-            assert fields[field]["source"] == "gui_default"
-        assert fields["sweep.freq"]["value"]["expts"] == 41
+            assert cfg_value(gui.publication, field) == value
+            assert (
+                fields[
+                    {
+                        "modules.qub_pulse.gain": "gain",
+                        "modules.qub_pulse.waveform.length": "pulse_length_us",
+                    }.get(field, field)
+                ]["source"]
+                == "gui_default"
+            )
+        assert cfg_sweep(gui.publication, "sweep.freq")["expts"] == 41
         methods = [method for method, _ in client.transport.sent]
         assert "tab.new" not in methods
         assert methods.count("tab.reset_cfg") == 1
@@ -1134,36 +1219,36 @@ def test_twotone_number_inputs_preserve_mhz_us_and_source_labels(tmp_path, numbe
                 client.call(
                     "twotone_spectrum",
                     {
-                        "center_mhz": number(6100),
-                        "span_mhz": number(20),
-                        "gain": number(1),
-                        "pulse_length_us": number(2),
-                        "points": 31,
-                        "reps": 23,
-                        "rounds": 7,
+                        "center_mhz": 6100.0,
+                        "span_mhz": 20.0,
+                        "points": 41,
+                        **{
+                            "center_mhz": number(6100),
+                            "span_mhz": number(20),
+                            "gain": number(1),
+                            "pulse_length_us": number(2),
+                            "points": 31,
+                            "reps": 23,
+                            "rounds": 7,
+                        },
                     },
                 ),
             ),
         )
-        fields = reply.data["actual"]["fields"]
-        for field, value, source in (
-            ("center_mhz", 6100.0, "explicit"),
-            ("span_mhz", 20.0, "explicit"),
-            ("modules.qub_pulse.gain", 1.0, "gain"),
-            ("modules.qub_pulse.waveform.length", 2.0, "pulse_length_us"),
+        for field, value in (
+            ("modules.qub_pulse.gain", 1.0),
+            ("modules.qub_pulse.waveform.length", 2.0),
         ):
-            assert fields[field]["value"] == value
-            assert isinstance(fields[field]["value"], float)
-            assert fields[field]["source"] == source
-        assert fields["sweep.freq"]["value"] == {
+            assert cfg_value(gui.publication, field) == value
+            assert isinstance(cfg_value(gui.publication, field), float)
+        assert cfg_sweep(gui.publication, "sweep.freq") == {
             "start": 6090.0,
             "stop": 6110.0,
             "expts": 31,
         }
         for field, value in (("reps", 23), ("rounds", 7)):
-            assert fields[field]["value"] == value
-            assert isinstance(fields[field]["value"], int)
-            assert fields[field]["source"] == field
+            assert cfg_value(gui.publication, field) == value
+            assert isinstance(cfg_value(gui.publication, field), int)
         assert reply.data["raw_save"] == asdict(RAW_REPORT)
         assert reply.data["analysis"]["result"]["summary"] == gui.fit_summary
 
@@ -1193,7 +1278,16 @@ def test_twotone_reuse_failure_stops_without_retry_or_replacement(tmp_path, fail
                 snapshot["tabs"][0]["adapter_name"] = "other"
             client.transport.replies["tab.snapshot"] = {"ok": True, "result": snapshot}
         reply = full_execution_reply(
-            client, client.call("twotone_spectrum", {"reuse_tab_id": "t"})
+            client,
+            client.call(
+                "twotone_spectrum",
+                {
+                    "center_mhz": 6100.0,
+                    "span_mhz": 20.0,
+                    "points": 41,
+                    **{"reuse_tab_id": "t"},
+                },
+            ),
         )
         assert reply.is_error
         assert reply.data["tab"] == "t"

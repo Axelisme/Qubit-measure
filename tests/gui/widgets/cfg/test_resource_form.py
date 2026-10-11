@@ -11,6 +11,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QPushButton,
     QTreeWidget,
     QWidget,
 )
@@ -156,6 +157,37 @@ def choose_input_mode(line: QLineEdit, action_text: str) -> None:
         ),
     )
     assert chosen == [action_text]
+
+
+def test_ref_contents_disabled_until_convert_button(
+    form: ResourceCfgFormWidget, qapp: QApplication
+) -> None:
+    shape = PROGRAM_SHAPES.waveform("gauss").make_spec(ProgramSpecPolicy())
+    owner = resource(
+        CfgSchema(
+            CfgSectionSpec(
+                fields={
+                    "ref": ReferenceSpec("waveform", [shape], discriminator="style")
+                }
+            ),
+            CfgSectionValue({"ref": ReferenceValue("saved", CfgSectionValue())}),
+        ),
+        OneGaussCatalog(),
+    )
+    form.attach(owner)
+    line = scalar_line(form, "ref.length")
+    assert not line.isEnabled()
+    button = form.findChild(QPushButton, "convertReferenceToInline")
+    assert button is not None and button.isEnabled()
+    button.click()
+    qapp.processEvents()
+    assert scalar_line(form, "ref.length").isEnabled()
+    assert owner.observe().tree.children["ref"].mode == "inline"
+    assert owner.accept().values["ref"] == {
+        "style": "gauss",
+        "length": 1.0,
+        "sigma": 0.2,
+    }
 
 
 def test_scalar_input_publishes_each_keystroke(form: ResourceCfgFormWidget) -> None:
@@ -563,6 +595,11 @@ class RejectingEditor:
 
     def select_custom_reference(self, path: CfgPath, label: str) -> CfgObservation:
         raise FailedPreconditionError("rejected")
+
+    def convert_reference_to_inline(
+        self, path: CfgPath
+    ) -> CfgObservation:
+        return self.owner.convert_reference_to_inline(path)
 
     def reset(self) -> CfgObservation:
         raise FailedPreconditionError("rejected")
