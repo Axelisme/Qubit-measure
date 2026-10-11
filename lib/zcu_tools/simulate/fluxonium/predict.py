@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterable
+from dataclasses import dataclass, fields
+from math import isfinite
 from typing import overload
 
 import numpy as np
@@ -11,9 +13,61 @@ from scipy.optimize import root_scalar
 from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction, MatrixOperator
 
 
-class FluxoniumPredictor:
+@dataclass(frozen=True)
+class FluxoniumParams:
+    """Independent fluxonium model inputs; None means unknown, never a default.
+
+    EJ, EC and EL are positive finite Josephson, charging and inductive energies
+    in GHz. flux_half is the zero-bias half-flux device value; flux_period is
+    the finite nonzero device-value change per flux quantum (either sign).
+    flux_bias is the finite additive correction to the device value. All three
+    affine inputs use the source's native device units. Instances are immutable;
+    creating or completing one never changes its component or file source.
     """
-    Provide some methods to predict hyper-parameters of fluxonium measurement.
+
+    EJ: float | None = None
+    EC: float | None = None
+    EL: float | None = None
+    flux_half: float | None = None
+    flux_period: float | None = None
+    flux_bias: float | None = None
+
+    def missing(self) -> tuple[str, ...]:
+        """Return unknown field names in declaration order, without side effects."""
+        return tuple(field.name for field in fields(self) if getattr(self, field.name) is None)
+
+    def build_predictor(self) -> FluxoniumPredictor:
+        """Build a fresh MHz-query model, without modifying these parameters.
+
+        ValueError names missing fields, nonfinite inputs, nonpositive energies
+        or a zero period. No physical or affine value is filled implicitly.
+        """
+        missing = self.missing()
+        if missing:
+            raise ValueError("Missing parameters: " + ", ".join(missing))
+        ej, ec, el = self.EJ, self.EC, self.EL
+        half, period, bias = self.flux_half, self.flux_period, self.flux_bias
+        # Explicit narrowing also keeps the runtime contract valid under python -O.
+        if ej is None or ec is None or el is None or half is None or period is None or bias is None:
+            raise ValueError("Missing parameters")
+        for name, value in (("EJ", ej), ("EC", ec), ("EL", el), ("flux_half", half), ("flux_period", period), ("flux_bias", bias)):
+            if not isfinite(value):
+                raise ValueError(f"{name} must be finite")
+            if name in ("EJ", "EC", "EL") and value <= 0:
+                raise ValueError(f"{name} must be positive")
+        if period == 0:
+            raise ValueError("flux_period must be nonzero")
+        return FluxoniumPredictor((ej, ec, el), half, period, bias)
+
+
+class FluxoniumPredictor:
+    """Fluxonium queries with GHz energies and native device-value affine inputs.
+
+    params is (EJ, EC, EL); flux_half is the zero-bias half-flux value,
+    flux_period is the nonzero signed device-value period and flux_bias is an
+    additive device-value correction. Queries do not mutate the model. Legacy
+    setters/update_bias change only this instance; clone builds an independent one.
+    Frequencies are MHz and matrix magnitudes are dimensionless.
     """
 
     def __init__(
