@@ -68,6 +68,16 @@ def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_r
         reason(h.request(link, method), "readonly_connection")
 
 
+def test_holder_writes_without_reading_business_state(control_rpc):
+    h = control_rpc
+    link = raw_client(h)
+    assert result(h.request(link, "control.connect", label="writer"))["me"] is True
+    result(h.request(link, "project.setup", chip_name="new-chip", qub_name="new-qubit"))
+    project = result(h.request(link, "project.info"))
+    assert project["chip_name"] == "new-chip"
+    assert project["qub_name"] == "new-qubit"
+
+
 def test_connect_defaults_fixed_identity_and_idempotency(control_rpc):
     h = control_rpc
     assert result(h.request(raw_client(h), "control.status")) == {
