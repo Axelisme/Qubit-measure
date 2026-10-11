@@ -179,6 +179,20 @@ def _assert_mcp_interactive_discovery(
     return read
 
 
+def _wait_for_mcp_interactive_completion(
+    call: Callable[[str, dict[str, Any]], dict[str, Any]],
+    receipt: dict[str, Any],
+    committed_state: dict[str, Any],
+) -> dict[str, Any]:
+    assert receipt["interaction"]["state"] == committed_state
+    # Done's bounded first wait may end before downstream capture/save.
+    # Join that same completion owner, not merely its GUI operation.
+    completion = call("wait", {"execution": receipt["execution"]})
+    assert completion["execution"] == receipt["execution"]
+    assert completion["interaction"] == receipt["interaction"]
+    return completion
+
+
 @pytest.mark.parametrize("terminal", ["done", "cancel"])
 def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
     mounted_fx, tmp_path, terminal, request
@@ -227,7 +241,9 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
             result = call(
                 "tab_interact", {"tab": tab_id, "payload": {"command": "done"}}
             )
-            assert result["interaction"]["state"] == changed["state"]
+            result = _wait_for_mcp_interactive_completion(
+                call, result, changed["state"]
+            )
             assert result["status"] == "finished", result
             assert result["run_id"] == source.run_id
             assert result["op"] == op

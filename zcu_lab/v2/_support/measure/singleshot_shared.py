@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.cfg import EvalValue, ScalarValue, SweepValue
 
@@ -59,9 +60,11 @@ def read_ge_centers(
 ) -> tuple[complex, complex, float]:
     """Read required canonical GE center/radius calibration from the Run capture.
 
-    Centers accept real numbers or complex strings from the parameter document.
-    Missing capture or calibration raises RuntimeError naming the canonical path.
-    Invalid aliases and unavailable sources propagate without fallback.
+    Centers accept real numbers, complex strings or the shared complex scalar
+    encoding from the parameter document. Missing capture, missing calibration
+    or invalid scalar encodings raise RuntimeError naming the canonical path.
+    Invalid complex strings raise ValueError. Invalid aliases and unavailable
+    sources propagate without fallback. The capture retains its raw YAML values.
     """
     g_center = _require_complex(parameters, "$qubit.ext.readout_cal.g_center")
     e_center = _require_complex(parameters, "$qubit.ext.readout_cal.e_center")
@@ -107,6 +110,13 @@ def _require_complex(parameters: ParameterContext | None, path: str) -> complex:
         )
     if isinstance(value, (int, float, str)) and not isinstance(value, bool):
         return complex(value)
+    if isinstance(value, dict):
+        try:
+            return decode_complex(value)
+        except (ValueError, OverflowError) as exc:
+            raise RuntimeError(
+                f"Parameter calibration is not a complex value: {path}"
+            ) from exc
     raise RuntimeError(f"Parameter calibration is not a complex value: {path}")
 
 
