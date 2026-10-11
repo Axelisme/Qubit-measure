@@ -184,27 +184,20 @@ def test_one_off_acceptance_resolves_linked_reference_without_rebinding(
 
 
 @pytest.mark.parametrize("reversed_keys", [False, True])
-def test_relink_then_children_is_independent_of_key_order(
+def test_ref_and_children_payload_is_rejected_atomically(
     reference_resource, reversed_keys: bool
 ) -> None:
     resource, _ = reference_resource
     pairs = [("__ref", "second"), ("x", 7.0)]
     payload = dict(reversed(pairs) if reversed_keys else pairs)
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref",), payload),)
-    )
-    value = changed.tree.children["ref"].value
-    assert isinstance(value, ReferenceValue)
-    assert value.chosen_key == "second"
-    assert value.is_overridden
-    assert resource.accept(changed.ref.revision).values["ref"] == {"x": 7.0}
-    relinked = resource.edit(
-        changed.ref.revision, (CfgEdit(("ref", "__ref"), "second"),)
-    )
-    assert resource.accept(relinked.ref.revision).values["ref"] == {"x": 2.0}
-    relinked_value = relinked.tree.children["ref"].value
-    assert isinstance(relinked_value, ReferenceValue)
-    assert not relinked_value.is_overridden
+    before = resource.observe()
+    with pytest.raises(CfgInputError) as rejected:
+        resource.edit(
+            before.ref.revision,
+            (CfgEdit(("ref", "__ref"), "second"), CfgEdit(("ref",), payload)),
+        )
+    assert rejected.value.reason is CfgInputReason.INVALID_VALUE
+    assert resource.observe() == before
 
 
 @pytest.mark.parametrize(
@@ -233,7 +226,7 @@ def test_disabled_reference_can_be_relinked(reference_resource) -> None:
     assert resource.accept(enabled.ref.revision).values["ref"] == {"x": 2.0}
 
 
-def test_complete_override_recovers_without_resolving_failed_old_key(
+def test_complete_inline_replacement_recovers_without_resolving_failed_old_key(
     reference_resource,
 ) -> None:
     resource, catalog = reference_resource
@@ -247,14 +240,15 @@ def test_complete_override_recovers_without_resolving_failed_old_key(
     assert "first" not in catalog.lookups
 
 
-def test_partial_override_cannot_recover_by_using_failed_key_cache(
+def test_ref_partial_edit_cannot_recover_by_using_failed_key_cache(
     reference_resource,
 ) -> None:
     resource, catalog = reference_resource
     catalog.failed_keys = frozenset({"first"})
     unavailable = resource.refresh(resource.observe().ref.revision)
-    with pytest.raises(RuntimeError, match="reference resolver defect"):
+    with pytest.raises(CfgInputError) as rejected:
         resource.edit(unavailable.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
+    assert rejected.value.reason is CfgInputReason.READONLY
     assert resource.observe() == unavailable
 
 
@@ -270,13 +264,25 @@ def test_linked_refresh_uses_new_catalog_value(reference_resource) -> None:
 
 @pytest.mark.parametrize(
     "edit",
-    [CfgEdit(("ref", "x"), 1.0), CfgEdit(("ref",), {"x": 1.0}), CfgEdit(("ref",), {})],
+    [CfgEdit(("ref", "x"), 1.0), CfgEdit(("ref",), {})],
 )
-def test_same_value_content_write_detaches_from_source(
+def test_ref_content_write_rejects_leaf_and_empty_aggregate(
     reference_resource, edit: CfgEdit
 ) -> None:
+    resource, _ = reference_resource
+    before = resource.observe()
+    with pytest.raises(CfgInputError) as rejected:
+        resource.edit(before.ref.revision, (edit,))
+    assert rejected.value.reason is CfgInputReason.READONLY
+    assert resource.observe() == before
+
+
+def test_complete_same_value_payload_selects_inline(reference_resource) -> None:
     resource, catalog = reference_resource
-    changed = resource.edit(resource.observe().ref.revision, (edit,))
+    changed = resource.edit(
+        resource.observe().ref.revision, (CfgEdit(("ref",), {"x": 1.0}),)
+    )
+    assert changed.tree.children["ref"].mode == "inline"
     catalog.entries["first"] = entry(20.0)
     catalog.lookups.clear()
     refreshed = resource.refresh(changed.ref.revision)
@@ -284,11 +290,12 @@ def test_same_value_content_write_detaches_from_source(
     assert "first" not in catalog.lookups
 
 
-def test_override_no_longer_resolves_original_key(reference_resource) -> None:
+def test_inline_conversion_no_longer_resolves_original_key(reference_resource) -> None:
     resource, catalog = reference_resource
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref", "x"), 7.0),)
+    converted = resource.convert_reference_to_inline(
+        resource.observe().ref.revision, ("ref",)
     )
+    changed = resource.edit(converted.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
     del catalog.entries["first"]
     catalog.lookups.clear()
     refreshed = resource.refresh(changed.ref.revision)
@@ -305,7 +312,7 @@ def test_override_no_longer_resolves_original_key(reference_resource) -> None:
 
 
 @pytest.mark.parametrize("written", [1.0, 7.0])
-def test_nested_edit_detaches_only_ancestors_and_keeps_sibling_link(
+def test_nested_ref_ancestor_rejects_child_edit(
     written: float,
 ) -> None:
     leaf = CfgSectionSpec(fields={"x": ScalarSpec("X", float)}, label="Shape")
@@ -334,22 +341,14 @@ def test_nested_edit_detaches_only_ancestors_and_keeps_sibling_link(
         lambda: schema,
         resolution=catalog.snapshot,
     )
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("parent", "left", "x"), written),)
-    )
-    del catalog.entries["parent"]
-    del catalog.entries["left"]
-    catalog.entries["right"] = entry(20.0)
-    catalog.lookups.clear()
-    refreshed = resource.refresh(changed.ref.revision)
-    assert refreshed.status is CfgStatus.VALID
-    assert resource.accept(refreshed.ref.revision).values == {
-        "parent": {"left": {"x": written}, "right": {"x": 20.0}}
-    }
-    assert set(catalog.lookups) == {"right"}
+    before = resource.observe()
+    with pytest.raises(CfgInputError) as rejected:
+        resource.edit(before.ref.revision, (CfgEdit(("parent", "left", "x"), written),))
+    assert rejected.value.reason is CfgInputReason.READONLY
+    assert resource.observe() == before
 
 
-def test_later_edit_uses_shape_selected_by_earlier_relink() -> None:
+def test_later_edit_uses_shape_selected_by_earlier_inline_replacement() -> None:
     first = CfgSectionSpec(
         fields={"type": LiteralSpec("first"), "x": ScalarSpec("X", float)},
         label="First",
@@ -382,7 +381,7 @@ def test_later_edit_uses_shape_selected_by_earlier_relink() -> None:
     )
     changed = resource.edit(
         resource.observe().ref.revision,
-        (CfgEdit(("ref", "__ref"), "second"), CfgEdit(("ref", "y"), 8.0)),
+        (CfgEdit(("ref",), {"type": "second", "y": 2.0}), CfgEdit(("ref", "y"), 8.0)),
     )
     assert resource.accept(changed.ref.revision).values == {
         "ref": {"type": "second", "y": 8.0}
@@ -629,7 +628,7 @@ def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
     assert isinstance(published, dict) and published["length"] == 1.6
     nested = selected.value.fields["raise_waveform"]
     assert isinstance(nested, ReferenceValue)
-    assert nested.chosen_key == "rise" and not nested.is_overridden
+    assert nested.chosen_key == "rise"
     assert "parent" not in catalog.lookups
     rise = deepcopy(catalog.entries["rise"].value)
     assert isinstance(rise, CfgSectionValue)
@@ -644,33 +643,24 @@ def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
     assert "parent" not in catalog.lookups
 
 
-def test_select_custom_nested_waveform_detaches_only_edited_layers() -> None:
-    resource, catalog = _nested_waveform_resource()
+def test_select_custom_nested_waveform_rejects_ref_ancestor() -> None:
+    resource, _ = _nested_waveform_resource()
     current = resource.observe()
-
-    changed = resource.select_custom_reference(
-        current.ref.revision, ("ref", "raise_waveform"), "DRAG"
-    )
-
-    parent = changed.tree.children["ref"].value
-    assert isinstance(parent, ReferenceValue) and parent.is_overridden
-    nested = parent.value.fields["raise_waveform"]
-    assert isinstance(nested, ReferenceValue)
-    assert nested.chosen_key == "<Custom:DRAG>"
-    assert nested.value.fields["length"] == DirectValue(0.4)
-    assert nested.value.fields["sigma"] == DirectValue(0.1)
-    catalog.failed_keys = frozenset({"parent", "rise"})
-    catalog.lookups.clear()
-    refreshed = resource.refresh(changed.ref.revision)
-    assert refreshed.status is CfgStatus.VALID
-    assert catalog.lookups == []
+    with pytest.raises(CfgInputError) as rejected:
+        resource.select_custom_reference(
+            current.ref.revision, ("ref", "raise_waveform"), "DRAG"
+        )
+    assert rejected.value.reason is CfgInputReason.READONLY
+    assert resource.observe() == current
 
 
-def test_select_custom_preserves_nested_override_without_old_source() -> None:
+def test_select_custom_preserves_nested_inline_without_old_source() -> None:
     resource, catalog = _nested_waveform_resource()
+    converted = resource.convert_reference_to_inline(
+        resource.observe().ref.revision, ("ref",)
+    )
     edited = resource.edit(
-        resource.observe().ref.revision,
-        (CfgEdit(("ref", "raise_waveform", "length"), 0.6),),
+        converted.ref.revision, (CfgEdit(("ref", "raise_waveform", "length"), 0.6),)
     )
     catalog.failed_keys = frozenset({"parent", "rise"})
     catalog.lookups.clear()
@@ -683,7 +673,7 @@ def test_select_custom_preserves_nested_override_without_old_source() -> None:
     assert isinstance(selected, ReferenceValue)
     nested = selected.value.fields["raise_waveform"]
     assert isinstance(nested, ReferenceValue)
-    assert nested.chosen_key == "rise" and nested.is_overridden
+    assert nested.chosen_key == "<Custom:Gauss>"
     assert catalog.lookups == []
     values = resource.accept(switched.ref.revision).values["ref"]
     assert isinstance(values, dict)
@@ -844,7 +834,7 @@ def test_shape_switch_preserves_expression_and_nested_link_input(
     assert number.expr == "dynamic"
     assert isinstance(child, ReferenceValue)
     assert child.chosen_key == "child"
-    assert not child.is_overridden
+    assert child.chosen_key == "rise"
 
 
 @pytest.mark.parametrize("unavailable", ["disabled", "missing"])
@@ -968,9 +958,8 @@ def test_missing_reference_diagnostic_survives_valid_cached_children(
             ),
             KeyError,
         ),
-        (ReferenceValue("linked", CfgSectionValue(), is_overridden=True), RuntimeError),
     ],
-    ids=["linked-bad-type", "linked-extra-field", "modified-empty"],
+    ids=["linked-bad-type", "linked-extra-field"],
 )
 def test_only_unresolved_linked_empty_payload_defers_shape_selection(
     reference: ReferenceValue, error: type[Exception]
@@ -1042,7 +1031,7 @@ def test_complete_input_never_fabricates_readonly_values(payload) -> None:
     assert resource.observe() == before
 
 
-def test_override_shape_uses_declared_discriminator_not_other_literals() -> None:
+def test_inline_shape_uses_declared_discriminator_not_other_literals() -> None:
     first = CfgSectionSpec(
         fields={
             "decoration": LiteralSpec("red"),
@@ -1068,11 +1057,10 @@ def test_override_shape_uses_declared_discriminator_not_other_literals() -> None
         CfgSectionValue(
             {
                 "ref": ReferenceValue(
-                    "unavailable",
+                    "<Custom:Second>",
                     CfgSectionValue(
                         {"variant": DirectValue("two"), "y": DirectValue(4.0)}
                     ),
-                    is_overridden=True,
                 )
             }
         ),
