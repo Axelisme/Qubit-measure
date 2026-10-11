@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-11, native context methods and optional cfg read ref
+**Last updated:** 2026-10-11, typed unsafe point label rejection
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -126,8 +126,8 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 92`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 124`: GUI process code revision. It is displayed, not compared.
+- `WIRE_VERSION = 93`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 125`: GUI process code revision. It is displayed, not compared.
 - `MCP_VERSION = 112`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
@@ -241,6 +241,16 @@ entry, saving a loaded Run uses its captured historical point, not the tab birth
 The wire surface is grouped by ownership:
 
 - `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布空 DRAFT，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
+- `point.list/new/use`：saved points in the opened entry. `point.new` rejects unsafe
+  destination labels before source reads or writes, for setup seeds and clones
+  alike. Empty strings fail the existing required-string wire validation with
+  `invalid_params` and message `'label' must be non-empty`. Direct context calls
+  reject them with typed `InvalidInputError`. The entry owner's single path
+  segment rule is authoritative for context validation. Shared dispatch projects
+  the typed input failure for other unsafe labels as `invalid_params`, with reason
+  `point_label_invalid` and no structured data. Rejection preserves selection,
+  files, ledger and versions. Duplicate destinations, missing sources and other
+  resource failures retain their existing classification.
 - `context.*`：published parameter capture, snapshot and point-label queries through
   `ContextControlPort`. Library editing and template create/list use the app controller;
   `editor.*` provides independent library-entry drafts.

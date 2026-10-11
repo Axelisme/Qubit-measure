@@ -44,7 +44,7 @@ from zcu_tools.resources.context.library import (
     ModuleLibrary,
     ModuleLibraryDocument,
 )
-from zcu_tools.resources.entry import snapshot, source_path
+from zcu_tools.resources.entry import snapshot, source_path, validate_path_segment
 from zcu_tools.resources.entry.roles import role_registry
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
@@ -217,12 +217,21 @@ class ContextService:
         """Create from setup or a same-entry clone, then install ACTIVE.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
-        and origin unchanged to ResultEntry.new_point; never copy DRAFT. Resource errors
+        and origin unchanged to ResultEntry.new_point; never copy DRAFT. An unsafe
+        label raises InvalidInputError(point_label_invalid) before source reads or
+        writes, preserving binding, files, ledger and versions. Label safety follows
+        the entry owner's single path component rule. Other resource errors
         propagate. Post-creation binding failure raises PointBindingError from
         its cause, retaining the point and old binding without retry/deletion.
         """
         self._owner.assert_owner()
         entry = self._require_open_entry()
+        try:
+            validate_path_segment(request.label, field="label")
+        except ValueError as exc:
+            raise InvalidInputError(
+                str(exc), reason_code="point_label_invalid"
+            ) from exc
         clone = (
             entry.use_point(request.clone_from)
             if request.clone_from is not None

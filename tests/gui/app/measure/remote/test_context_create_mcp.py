@@ -123,9 +123,12 @@ def test_unsafe_point_label_returns_invalid_params_without_side_effects(
         failed = call(sock, "point.new", {"label": label, "clone_from": clone})
         assert failed["ok"] is False
         assert failed["error"]["code"] == "invalid_params"
-        assert failed["error"]["reason"] == "point_label_invalid"
-        assert "single path component" in failed["error"]["message"]
-        assert failed["error"]["data"] is None
+        if label == "":
+            assert failed["error"]["message"] == "'label' must be non-empty"
+        else:
+            assert failed["error"]["reason"] == "point_label_invalid"
+            assert "single path component" in failed["error"]["message"]
+        assert failed["error"].get("data") is None
         assert call(sock, "context.snapshot", {})["result"] == before
         assert call(sock, "point.list", {})["result"]["points"] == [
             {"label": "source", "description": "retained"}

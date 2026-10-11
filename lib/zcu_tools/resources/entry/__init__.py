@@ -1,5 +1,6 @@
 """Explicit-root parameter containers, independent of legacy context services."""
 
+from ._path_segments import validate_path_segment
 from .errors import (
     MissingReferenceError,
     RenameRecoveryError,

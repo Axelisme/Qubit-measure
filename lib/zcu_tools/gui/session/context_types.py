@@ -137,7 +137,9 @@ class CommandOrigin:
 class PointCreateRequest:
     """Create a point in the opened entry, independently of its memory DRAFT.
 
-    label is a safe single path segment in the currently opened entry.
+    label must satisfy the entry owner's safe single path segment rule.
+    Context new_point rejects an unsafe label with InvalidInputError before any
+    source reads or writes, including when clone_from is supplied.
     description replaces the seed/clone description, including empty text.
     origin attributes the resource command. clone_from is a same-entry label;
     None copies setup components and uses an empty library.
