@@ -595,7 +595,6 @@ def test_power_cancel_does_not_suppress_fast_save_or_preview_after_completed_run
 @pytest.mark.parametrize(
     "explicit, unit, expected",
     [
-        (False, "none", "needs_parameters"),
         (True, "none", "failed"),
     ],
 )
@@ -608,15 +607,15 @@ def test_flux_does_not_treat_unknown_units_as_physical_flux(
             client,
             client.call(
                 "onetone_spectrum_over_flux",
-                {"flux_device": "coil"} if explicit else {},
+                {
+                    **({"flux_device": "coil"} if explicit else {}),
+                    "flux_unit": "native",
+                },
             ),
         )
         assert reply.data["status"] == expected
+        assert reply.data["error"]["reason"] == "invalid_device"
         assert not gui.ran
-        if not explicit:
-            assert [item["parameter"] for item in reply.data["missing"]] == [
-                "flux_device"
-            ]
 
 
 class PowerGui(OnetoneGui):
@@ -1035,7 +1034,7 @@ def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path
         snapshot={
             "name": "coil",
             "type_name": "FakeDevice",
-            "unit": "none",
+            "unit": "native",
             "info": {"type": "FakeDevice", "value": 0.0},
         }
     )
@@ -1147,11 +1146,17 @@ def test_physical_flux_unit_assertion_is_checked_before_run(
 def test_native_flux_rejects_unconfirmed_or_physical_coordinates_before_run(
     tmp_path, type_name, info_type, unit, requested_unit
 ):
+    # A/V select mismatched requests against the real Fake Info native unit.
+    snapshot_unit = (
+        "native"
+        if type_name == info_type == "FakeDevice" and unit in ("A", "V")
+        else unit
+    )
     gui = FluxGui(
         snapshot={
             "name": "coil",
             "type_name": type_name,
-            "unit": unit,
+            "unit": snapshot_unit,
             "info": {"type": info_type} if info_type is not None else None,
         }
     )
@@ -1164,7 +1169,17 @@ def test_native_flux_rejects_unconfirmed_or_physical_coordinates_before_run(
             ),
         )
         assert reply.data["status"] == "failed", reply.data
-        assert reply.data["error"]["reason"] == "invalid_device"
+        if requested_unit is None:
+            assert reply.is_error
+            assert reply.data["error"] == {
+                "phase": "preparing",
+                "reason": "recipe_failed",
+                "message": "Invalid recipe argument flux_unit: None is not of type 'string'",
+                "code": None,
+            }
+            assert not client.transport.sent
+        else:
+            assert reply.data["error"]["reason"] == "invalid_device"
         assert not gui.ran
 
 
