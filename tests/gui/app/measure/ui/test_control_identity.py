@@ -13,6 +13,7 @@ import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QMetaObject, Qt, QTimer
 from qtpy.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QFileDialog,
     QInputDialog,
@@ -23,6 +24,7 @@ from qtpy.QtWidgets import (
     QTableWidget,
     QTabWidget,
     QTreeWidget,
+    QWidget,
 )
 from zcu_tools.cfg_model import waveform_spec_from_raw
 from zcu_tools.datafile import RunMetadata
@@ -57,10 +59,14 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
     PointUseRequest,
 )
+from zcu_tools.gui.session.events import MdChangedPayload
+from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
+from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.resources.entry import document_value
 from zcu_tools.resources.qubit_params import FluxDepFit, QubitParams
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
@@ -1000,3 +1006,105 @@ def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, q
     ui.controller.context_control.use_point(PointUseRequest("point"))
     assert not ui.controller.has_ml_entry("waveform", "Q1.waveforms.pulse")
     assert inspect.close()
+
+
+def add_control[T: QWidget](dialog: AddComponentDialog, kind: type[T], name: str) -> T:
+    """Locate one declared public Add dialog control by its object name."""
+    control = dialog.findChild(kind, name)
+    if control is None:
+        raise LookupError(f"Add dialog lacks {name!r}")
+    return control
+
+
+def open_resonator_add(tree: ComponentTreeWidget, name: str) -> AddComponentDialog:
+    """Open the real tree's public Add dialog with a valid resonator candidate."""
+    dialog = tree.open_add_dialog()
+    add_control(dialog, QComboBox, "add_kind").setCurrentText("resonator")
+    add_control(dialog, QLineEdit, "add_name").setText(name)
+    add_control(dialog, QLineEdit, "field:freq").setText("6500")
+    return dialog
+
+
+@pytest.mark.parametrize("opening", ["existing", "new"])
+@pytest.mark.parametrize("close_via", ["cancel", "close"])
+def test_inspect_add_remote_gates_fields_and_submit_and_retires_on_close(
+    control_ui: ControlUi, opening: str, close_via: str
+) -> None:
+    ui = control_ui
+    ui.window.open_dialog(DialogName.INSPECT)
+    inspect = ui.window.findChild(InspectDialog)
+    if inspect is None:
+        raise LookupError("Inspect did not open")
+    tree = inspect.findChild(ComponentTreeWidget)
+    if tree is None:
+        raise LookupError("Inspect lacks its component tree")
+    baseline = ui.controller.context_control.inspect_document()
+    if opening == "new":
+        ui.connect()
+    dialog = open_resonator_add(tree, "remote-candidate")
+    controls = dialog.findChildren(QLineEdit) + dialog.findChildren(QComboBox)
+    assert controls
+    if opening == "existing":
+        assert all(control.isEnabled() for control in controls)
+        assert add_control(dialog, QPushButton, "add_submit").isEnabled()
+        ui.connect()
+    remote_flags = tuple(control.isEnabled() for control in controls)
+    submit_enabled = add_control(dialog, QPushButton, "add_submit").isEnabled()
+    assert dialog.isModal() and dialog.isEnabled()
+    cancel = add_control(dialog, QPushButton, "add_cancel")
+    assert cancel.isEnabled()
+    if close_via == "cancel":
+        cancel.click()
+    else:
+        assert dialog.close()
+    assert not dialog.isVisible()
+    assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+    assert ui.controller.context_control.inspect_document() == baseline
+    # Finished is this one-shot dialog's retirement, before queued Qt deletion.
+    ui.controller.control_identity.reclaim_local()
+    assert tuple(control.isEnabled() for control in controls) == remote_flags
+    assert remote_flags == (False,) * len(controls)
+    assert submit_enabled is False
+
+
+def test_inspect_add_late_submit_after_transfer_has_no_owner_effects(
+    control_ui: ControlUi, qapp: QApplication
+) -> None:
+    ui = control_ui
+    ui.window.open_dialog(DialogName.INSPECT)
+    inspect = ui.window.findChild(InspectDialog)
+    if inspect is None:
+        raise LookupError("Inspect did not open")
+    tree = inspect.findChild(ComponentTreeWidget)
+    if tree is None:
+        raise LookupError("Inspect lacks its component tree")
+    local = open_resonator_add(tree, "local-resonator")
+    add_control(local, QPushButton, "add_submit").click()
+    assert (
+        document_value(
+            ui.controller.context_control.inspect_document(), "local-resonator.freq"
+        )
+        == 6500.0
+    )
+    late = open_resonator_add(tree, "late-resonator")
+    submit = add_control(late, QPushButton, "add_submit")
+    baseline = ui.controller.context_control.inspect_document()
+    changes: list[MdChangedPayload] = []
+    subscription = ui.controller.get_bus().subscribe(MdChangedPayload, changes.append)
+    delivered: list[bool] = []
+
+    def deliver_queued_submit() -> None:
+        # A previously admitted Qt signal can arrive even after disabling Add.
+        submit.clicked.emit()
+        delivered.append(True)
+
+    try:
+        ui.connect()
+        QTimer.singleShot(0, deliver_queued_submit)
+        qapp.processEvents()
+        assert delivered == [True]
+        assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+        assert ui.controller.context_control.inspect_document() == baseline
+        assert changes == []
+    finally:
+        subscription.unsubscribe()
