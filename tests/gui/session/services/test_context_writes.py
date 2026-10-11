@@ -494,13 +494,12 @@ def test_wrong_path_or_library_partition_keeps_publication(
     )
 
 
-@pytest.mark.parametrize("saved", [False, True], ids=["memory-draft", "saved-point"])
 def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
-    session: _Session, saved: bool
+    session: _Session,
 ) -> None:
     from zcu_tools.resources.entry import writeback
 
-    target = _select(session, "a") if saved else session.control.read_context().target
+    target = _select(session, "a")
     events: list[object] = []
     session.bus.subscribe(MdChangedPayload, events.append)
     session.bus.subscribe(MlChangedPayload, events.append)
@@ -541,11 +540,38 @@ def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
     )
     assert [type(item) for item in events] == [MlChangedPayload, MdChangedPayload]
     assert session.state.version.get("context") == before + 2
-    if saved:
-        assert session.entry.use_point("a").description == "retained"
-    else:
-        assert session.entry.list_points() == []
-        assert not tuple((session.entry.result_path / "points").rglob("*.yaml"))
+    assert session.entry.use_point("a").description == "retained"
+
+
+def test_selected_draft_writeback_requires_saved_point_without_side_effects(
+    session: _Session,
+) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    capture = session.control.read_context()
+    version = session.state.version.get("context")
+    events: list[object] = []
+    session.bus.subscribe(MdChangedPayload, events.append)
+    session.bus.subscribe(MlChangedPayload, events.append)
+    with pytest.raises(FailedPreconditionError, match="select or create a working point") as caught:
+        session.control.apply_writeback(
+            capture.target,
+            (
+                writeback.ParameterWriteback("general.description", "must not commit"),
+                writeback.WaveformWriteback("Q1.waveforms.base", ConstWaveformCfg(length=0.1)),
+                writeback.SampleWriteback("Q1", {"t1_us": 20.09}),
+            ),
+            evidence=writeback.WritebackEvidence(kind="test/draft", origin="gui", run_id="run-1"),
+        )
+    assert caught.value.reason_code == "storage_unavailable"
+    assert session.entry.ledger.events() == ()
+    current = session.control.read_context()
+    assert current.document() == capture.document()
+    assert current.library.document() == capture.library.document()
+    assert session.entry.samples("Q1").read().empty
+    assert session.entry.list_points() == []
+    assert events == []
+    assert session.state.version.get("context") == version
 
 
 def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(
@@ -571,11 +597,10 @@ def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(
     assert session.entry.ledger.events() == before
 
 
-@pytest.mark.parametrize("saved", [False, True], ids=["draft-sample", "saved-sample"])
-def test_entry_samples_persist_immediately_and_survive_draft_discard(session: _Session, saved: bool) -> None:
+def test_saved_point_samples_persist_and_replace_latest_run_row(session: _Session) -> None:
     from zcu_tools.resources.entry import writeback
 
-    target = _select(session, "a") if saved else session.control.read_context().target
+    target = _select(session, "a")
     event_id = session.control.apply_writeback(target, (
         writeback.SampleWriteback("Q1", {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native"}),
         writeback.ParameterWriteback("general.description", "draft value"),
@@ -584,23 +609,16 @@ def test_entry_samples_persist_immediately_and_survive_draft_discard(session: _S
     row = session.entry.samples("Q1").read().iloc[0].to_dict()
     assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
     expected = {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native", "run_id": "run-1",
-                "point": "a" if saved else None, "at": row["at"], "source": event_id}
+                "point": "a", "at": row["at"], "source": event_id}
     assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
     assert session.control.read_sample(target, "Q1", "run-1") == expected
     assert session.control.read_sample(target, "Q1", "missing") is None
-    if not saved:
-        assert session.entry.list_points() == []
-        session.service.install_entry(session.entry)
-        current = session.control.read_context()
-        assert not current.lookup("general.description").present
-        assert session.control.read_sample(current.target, "Q1", "run-1") == expected
-        assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
     second_id = session.control.apply_writeback(session.control.read_context().target,
         (writeback.SampleWriteback("Q1", {"t1_us": 31.7}),),
         evidence=writeback.WritebackEvidence(kind="test/sample", origin="gui", run_id="run-1"))
     second_row = session.entry.samples("Q1").read().iloc[0].to_dict()
     assert datetime.fromisoformat(second_row["at"]) == datetime.fromisoformat(session.entry.ledger.get(second_id).event.at)
     assert session.control.read_sample(session.control.read_context().target, "Q1", "run-1") == {
-        "t1_us": 31.7, "run_id": "run-1", "point": "a" if saved else None,
+        "t1_us": 31.7, "run_id": "run-1", "point": "a",
         "at": second_row["at"], "source": second_id,
     }
