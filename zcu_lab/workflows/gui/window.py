@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
-from functools import partial
 from threading import get_ident
 from typing import TYPE_CHECKING, Literal
 
@@ -20,7 +18,7 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
+from zcu_tools.datafile import RunSnapshot
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
@@ -29,7 +27,6 @@ from zcu_tools.experiment.workflows import (
     Actor,
     EnginePorts,
     FluxdepExportReport,
-    FluxdepExportSnapshot,
     InvalidRunState,
     RunIdentity,
     RunPaths,
@@ -38,7 +35,6 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
-from zcu_tools.gui.app.workflows.exporting import FluxdepExportBinding
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
 from zcu_tools.gui.catalog_loader import CatalogReloadError, SourceCatalogLoader
@@ -65,16 +61,14 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import (
     Origin,
-    PointStorageBinding,
     RoleResolutionError,
-    WorkflowRoots,
     new_run_id,
 )
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from ..calibration import Calibrated
 from ._form_io import _inspect_form_input, _prepare_start_form
-from .catalog import WorkflowCatalog, build_catalog
+from .catalog import WorkflowCatalog, _build_export_binding, build_catalog
 from .persistence import WorkflowInputRestoreReport, WorkflowInputSnapshot
 from .remote import FormInspectionReply, T1RemoteControlAdapter
 from .tuning_panel import T1TuningPanel
@@ -85,35 +79,6 @@ if TYPE_CHECKING:
     from .tunables import T1TunablesForm
 
 logger = logging.getLogger(__name__)
-
-
-def _build_export_binding(
-    plan: T1Plan,
-    storage: PointStorageBinding,
-    run_id: str,
-    provenance: SoftwareProvenance,
-    roots: WorkflowRoots,
-    catalog: WorkflowCatalog,
-) -> FluxdepExportBinding | None:
-    """Detach the native plan and bind Start's exact entry storage once."""
-    if catalog.prepare_export is None:
-        return None
-    identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
-    paths = RunPaths(metadata_root=roots.result, data_root=roots.database)
-    fixed_plan = type(plan).model_validate_json(
-        plan.model_dump_json(),
-        by_name=True,
-        by_alias=False,
-    )
-    return FluxdepExportBinding(
-        FluxdepExportSnapshot(
-            identity, paths, fixed_plan.snapshot, datetime.now(UTC), None
-        ),
-        partial(catalog.prepare_export, plan=fixed_plan, data_root=paths.data_root),
-        storage.result_path,
-        storage.database_path,
-        storage.ledger,
-    )
 
 
 class T1WorkflowWindow(QWidget):
@@ -903,7 +868,9 @@ class T1WorkflowWindow(QWidget):
             and binding is not None
             and binding.engine is not None
         ):
-            self.tuning_panel = T1TuningPanel(controller, self)
+            self.tuning_panel = T1TuningPanel(
+                controller, self, panel_factory=self._catalog.knobs_panel
+            )
             self._layout.addWidget(self.tuning_panel)
         if self.tuning_panel is not None:
             self.tuning_panel.setEnabled(

@@ -1,16 +1,32 @@
-"""Fixed typed attachment builder; imports reloadable declarations at call time."""
+"""Current typed attachments and Start's science callback binding.
+
+Imports reloadable declarations at call time. Binding captures Start's detached
+plan/root and storage for the Controller, without retaining any run/live resource
+in this module or catalog, and without orchestrating writers.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from qtpy.QtWidgets import QWidget
-from zcu_tools.experiment.workflows import CommittedRecord, PreparedFluxdepExport
+from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.experiment.workflows import (
+    CommittedRecord,
+    FluxdepExportSnapshot,
+    PreparedFluxdepExport,
+    RunIdentity,
+    RunPaths,
+)
 from zcu_tools.experiment.workflows.declaration import WorkflowRegistry, WorkflowStep
+from zcu_tools.gui.app.workflows.exporting import FluxdepExportBinding
 from zcu_tools.gui.form import FormEnv
+from zcu_tools.resources.entry import PointStorageBinding, WorkflowRoots
 
 if TYPE_CHECKING:
     from ..calibration import Calibrated
@@ -99,4 +115,39 @@ def build_catalog() -> WorkflowCatalog:
         knobs_panel=T1TunablesPanel,
         seed=_calibrated_seed,
         prepare_export=prepare_t1_fluxdep_export,
+    )
+
+
+def _build_export_binding(
+    plan: T1Plan,
+    storage: PointStorageBinding,
+    run_id: str,
+    provenance: SoftwareProvenance,
+    roots: WorkflowRoots,
+    catalog: WorkflowCatalog,
+) -> FluxdepExportBinding | None:
+    """Detach native plan and bind this Start's catalog callback and exact storage.
+
+    None prepare_export leaves export unsupported. Fix identity/paths/UTC start
+    time and historical snapshot without writes or source/hardware reads. Native
+    validation errors propagate; Controller owns the returned run binding. Later
+    reload/draft changes cannot rebind this callback's plan/root or ledger.
+    """
+    if catalog.prepare_export is None:
+        return None
+    identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
+    paths = RunPaths(metadata_root=roots.result, data_root=roots.database)
+    fixed_plan = type(plan).model_validate_json(
+        plan.model_dump_json(),
+        by_name=True,
+        by_alias=False,
+    )
+    return FluxdepExportBinding(
+        FluxdepExportSnapshot(
+            identity, paths, fixed_plan.snapshot, datetime.now(UTC), None
+        ),
+        partial(catalog.prepare_export, plan=fixed_plan, data_root=paths.data_root),
+        storage.result_path,
+        storage.database_path,
+        storage.ledger,
     )

@@ -38,12 +38,16 @@ class T1TuningPanel(QWidget):
         self,
         controller: WorkflowController[T1TunablesForm, Calibrated],
         parent: QWidget | None = None,
+        *,
+        panel_factory: type[T1TunablesPanel] = T1TunablesPanel,
     ) -> None:
         """Present controller's accepted Host on the QApplication/GUI thread.
 
         Missing/pending binding raises RuntimeError. The panel retains this run
         target; replacement makes its commands stale before any draft write.
-        Source/editor errors propagate. parent controls Qt lifetime.
+        panel_factory is this Start's current catalog knobs attachment, with the
+        supplied unique state/env/parent constructor contract. Omission preserves
+        standalone T1 embedding. Source/editor errors propagate. parent controls Qt lifetime.
         """
         super().__init__(parent)
         binding = controller.binding
@@ -51,7 +55,7 @@ class T1TuningPanel(QWidget):
             raise RuntimeError("Tuning requires an accepted Controller binding")
         self._controller = controller
         self.host = binding
-        self.panel = T1TunablesPanel(self.host.state, self.host.env, self)
+        self.panel = panel_factory(self.host.state, self.host.env, self)
         self._message = QLabel(self)
         self._message.setObjectName("workflow.tuning.message")
         apply_button = QPushButton("Apply", self)
