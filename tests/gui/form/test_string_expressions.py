@@ -65,7 +65,7 @@ def name_env() -> FormEnv:
         ),
         target=EntryDraft(entry_id="entry"),
         roles=None,
-    ).bind_aliases((AliasRow("device", "yoko1"), AliasRow("unbound", None)), {})
+    ).bind_aliases((AliasRow("device", "yoko1"), AliasRow("unbound", "")), {})
     return FormEnv(parameters=context)
 
 

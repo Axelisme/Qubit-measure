@@ -42,7 +42,7 @@ def name_editor(
         ),
         target=EntryDraft(entry_id="entry"),
         roles=None,
-    ).bind_aliases((AliasRow("device", "yoko1"), AliasRow("unbound", None)), {})
+    ).bind_aliases((AliasRow("device", "yoko1"), AliasRow("unbound", "")), {})
     env = FormEnv(parameters=parameters)
     state = FormState(StringForm.default_input(env))
     editor = FormEditor(state, env)
