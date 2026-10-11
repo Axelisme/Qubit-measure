@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_EMPTY_TEXT = "— No figure"
+_EMPTY_TEXT = "No figure yet"
 _UNAVAILABLE_TEXT = "— Preview unavailable"
 
 # Responsive mosaic — viewport-driven breakpoint (S1).
@@ -137,7 +137,8 @@ class _PreviewCard(QWidget):
         empty_layout = QVBoxLayout(empty_page)
         empty_layout.setContentsMargins(8, 12, 8, 12)
         empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label = QLabel(f"{display_name} — {_EMPTY_TEXT}\n(no figure yet)")
+        # The card header already names the source, so the placeholder does not.
+        self._empty_label = QLabel(_EMPTY_TEXT)
         self._empty_label.setObjectName(f"previewEmpty_{source_key}")
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setWordWrap(True)

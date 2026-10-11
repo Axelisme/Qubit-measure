@@ -526,6 +526,9 @@ class ScalarInputWidget(QWidget):
 
         if isinstance(value, EvalValue):
             inp = QLineEdit(value.expr)
+            # Narrow fields cut long expressions; the tooltip always shows the text.
+            inp.setToolTip(value.expr)
+            inp.textChanged.connect(inp.setToolTip)
             self._input = inp
             inp.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
             inp.setEnabled(self._spec.editable)

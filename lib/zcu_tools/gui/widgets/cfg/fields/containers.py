@@ -148,6 +148,8 @@ class ReferenceInputWidget(QWidget):
         self._missing_ref_hint = QLabel()
         self._missing_ref_hint.setObjectName("missingRefHint")
         self._missing_ref_hint.setStyleSheet("color: #b00020; font-size: 11px;")
+        # Wrap within the form instead of being clipped at its right edge.
+        self._missing_ref_hint.setWordWrap(True)
         self._missing_ref_hint.setVisible(False)
         layout.addWidget(self._missing_ref_hint)
         self.display(value, library_keys=library_keys, valid=valid)

@@ -298,6 +298,7 @@ def test_missing_library_hint_follows_publication_without_resubmit(widgets) -> N
     assert combo.currentText() == "Missing: saved"
     assert hint.isVisibleTo(widget)
     assert "saved" in hint.text()
+    assert hint.wordWrap()
     assert "red" in combo.styleSheet()
     button = widget.findChild(QPushButton, "convertReferenceToInline")
     assert button is not None

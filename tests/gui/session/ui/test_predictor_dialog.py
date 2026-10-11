@@ -1439,3 +1439,40 @@ def test_predictor_dialog_predict_curve_error_shown_in_status(qapp):
     dialog = PredictorDialog(ctrl)
 
     assert "oops" in dialog._status_label.text()
+
+
+def test_predictor_params_row_keeps_full_control_height(qapp):
+    from qtpy.QtWidgets import QLineEdit
+
+    dialog = PredictorDialog(_make_ctrl(has_predictor=False))
+    dialog.show()
+    qapp.processEvents()
+    try:
+        edit = next(
+            e
+            for e in dialog.findChildren(QLineEdit)
+            if "params.json" in e.placeholderText()
+        )
+        row = [edit] + [
+            b
+            for b in dialog.findChildren(QPushButton)
+            if b.text() in ("Load", "Browse")
+        ]
+        assert len(row) == 3
+        for widget in row:
+            assert widget.height() >= widget.sizeHint().height()
+    finally:
+        dialog.close()
+
+
+def test_predictor_status_color_follows_state(qapp):
+    from qtpy.QtWidgets import QLabel
+
+    dialog = PredictorDialog(_make_ctrl(has_predictor=False))
+    status = dialog.findChild(QLabel, "predictor_status")
+    assert status is not None
+    assert "gray" in status.styleSheet()
+    loaded = PredictorDialog(_make_ctrl(has_predictor=True))
+    loaded_status = loaded.findChild(QLabel, "predictor_status")
+    assert loaded_status is not None
+    assert "green" in loaded_status.styleSheet()

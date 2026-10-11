@@ -309,7 +309,19 @@ class DeviceDialog(QDialog):
         self._list = QListWidget()
         self._list.currentRowChanged.connect(self._on_selection_changed)
         left_layout.addWidget(QLabel("Registered Devices:"))
+        self._empty_hint = QLabel("No devices registered")
+        self._empty_hint.setObjectName("devices_empty_hint")
+        self._empty_hint.setStyleSheet("color: gray;")
+        left_layout.addWidget(self._empty_hint)
         left_layout.addWidget(self._list, stretch=1)
+        # Drop acts on the selected list row, so it sits directly under the list.
+        self._drop_btn = QPushButton("Drop")
+        self._drop_btn.setStyleSheet("color: red;")
+        self._drop_btn.clicked.connect(self._on_forget_clicked)
+        drop_row = QHBoxLayout()
+        drop_row.addWidget(self._drop_btn)
+        drop_row.addStretch()
+        left_layout.addLayout(drop_row)
 
         # Add device form
         self._add_box = QGroupBox("Register New Device")
@@ -356,9 +368,6 @@ class DeviceDialog(QDialog):
 
         # Bottom buttons for right side
         btn_row = QHBoxLayout()
-        self._drop_btn = QPushButton("Drop")
-        self._drop_btn.setStyleSheet("color: red;")
-        self._drop_btn.clicked.connect(self._on_forget_clicked)
         self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.clicked.connect(self._on_refresh_clicked)
         self._apply_btn = QPushButton("Apply Changes")
@@ -367,7 +376,6 @@ class DeviceDialog(QDialog):
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
 
-        btn_row.addWidget(self._drop_btn)
         btn_row.addStretch()
         btn_row.addWidget(self._refresh_btn)
         btn_row.addWidget(self._apply_btn)
@@ -506,6 +514,7 @@ class DeviceDialog(QDialog):
                 item.setForeground(QColor("gray"))
             item.setData(Qt.ItemDataRole.UserRole, entry.name)  # type: ignore[attr-defined]
             self._list.addItem(item)
+        self._empty_hint.setVisible(self._list.count() == 0)
 
         target = select_name if select_name is not None else current_name
         if target is not None:
