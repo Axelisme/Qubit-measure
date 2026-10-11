@@ -139,3 +139,90 @@ def assert_native_pair(
     assert t1.cfg.rounds == t2.cfg.rounds == tun.rounds
     assert t1.cfg.sweep.length.stop == 80.0
     assert t2.cfg.sweep.length.stop == 40.0
+
+
+def start_overnight(
+    inputs: Inputs,
+    root: Path,
+    devices: RecordingDevices,
+    *,
+    interval: float = 0.25,
+) -> Engine[None]:
+    """Start three real native pairs with fixed cfg and injected device timing."""
+    engine = Engine[None](
+        EnginePorts(
+            Plots(NonPresentingHost()),
+            RecordingBar,
+            UtcClock(),
+            soc=inputs.soc,
+            soccfg=inputs.soccfg,
+            devices=devices,
+        )
+    )
+    engine.start(
+        workflows.overnight,
+        plan=workflows.OvernightPlan(
+            flux_dev="flux",
+            flux_unit="native",
+            flux=inputs.flux_value,
+            outer_rounds=3,
+            start_interval_s=interval,
+            points=21,
+            qub_pulse=inputs.t1.modules.pi_pulse,
+            readout=inputs.readout.modules.readout,
+            snapshot=make_snapshot(),
+        ),
+        tunables=workflows.OvernightTunables(reps=2000, rounds=2),
+        paths=RunPaths(root / "metadata", root / "data"),
+        identity=RunIdentity(
+            "overnight",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
+    )
+    return engine
+
+
+def pair_time(record: CommittedRecord, field: str) -> datetime:
+    """Read one declared aware UTC pair timestamp through the committed record."""
+    value = record.encoded_record.value
+    assert isinstance(value, dict)
+    encoded = value[field]
+    assert isinstance(encoded, str)
+    return datetime.fromisoformat(encoded)
+
+
+@pytest.mark.uses_wall_clock
+def test_overrun_restarts_interval_from_actual_start_without_catchup(
+    inputs: Inputs,
+    tmp_path: Path,
+) -> None:
+    from zcu_tools.experiment.stop_signal import StopSignal
+
+    devices = RecordingDevices()
+    engine = start_overnight(inputs, tmp_path, devices)
+
+    def overrun_first_pair(signal: StopSignal) -> None:
+        if len(devices.values) == 1:
+            signal.event.wait(0.6)
+
+    devices.on_set = overrun_first_pair
+    status = engine.execute("overnight")
+    assert status.lifecycle == "done", status.reason
+    first, second, third = engine.records("overnight")
+    assert (
+        pair_time(second, "actual_start") - pair_time(first, "actual_start")
+    ).total_seconds() >= 0.6
+    # A fixed original-start grid would immediately run the third pair to catch up.
+    assert (
+        pair_time(third, "actual_start") - pair_time(second, "actual_start")
+    ).total_seconds() >= 0.25
+    assert (
+        pair_time(third, "scheduled_start") - pair_time(second, "actual_start")
+    ).total_seconds() >= 0.25
