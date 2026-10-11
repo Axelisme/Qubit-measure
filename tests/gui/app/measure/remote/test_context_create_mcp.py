@@ -68,11 +68,74 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         assert "ghost" in unknown["error"]["message"]
         duplicate = call(sock, "point.new", {"label": "copy", "clone_from": None})
         assert duplicate["ok"] is False
-        assert duplicate["error"]["code"] == "invalid_params"
+        assert duplicate["error"]["code"] == "controller_error"
         assert "exist" in duplicate["error"]["message"]
         assert selection(invoke)["active"] == "base"
     finally:
         bridge.disconnect()
+        sock.close()
+        fx.stop()
+
+
+@pytest.mark.uses_wall_clock
+@pytest.mark.parametrize("clone", [None, "source"])
+@pytest.mark.parametrize(
+    "label",
+    [
+        "../escape",
+        "",
+        ".",
+        "..",
+        "nested/point",
+        r"nested\point",
+        "\x00",
+        "C:point",
+        "/absolute",
+    ],
+    ids=[
+        "escape",
+        "empty",
+        "dot",
+        "parent",
+        "posix",
+        "windows",
+        "nul",
+        "drive",
+        "absolute",
+    ],
+)
+def test_unsafe_point_label_returns_invalid_params_without_side_effects(
+    qapp, tmp_path: Path, label: str, clone: str | None
+) -> None:
+    fx = Fixture(project_root=str(tmp_path), empty_project=True)
+    fx.start()
+    sock = open_client(fx.service.port)
+    try:
+        info = call(sock, "entry.new", {"name": "q"})["result"]
+        call(sock, "point.new", {"label": "source", "description": "retained"})
+        before = call(sock, "context.snapshot", {})["result"]
+        roots = [Path(info["result_path"]).parent, Path(info["database_path"]).parent]
+        files = {
+            path: path.read_bytes() if path.is_file() else None
+            for root in roots
+            for path in root.rglob("*")
+        }
+        failed = call(sock, "point.new", {"label": label, "clone_from": clone})
+        assert failed["ok"] is False
+        assert failed["error"]["code"] == "invalid_params"
+        assert failed["error"]["reason"] == "point_label_invalid"
+        assert "single path component" in failed["error"]["message"]
+        assert failed["error"]["data"] is None
+        assert call(sock, "context.snapshot", {})["result"] == before
+        assert call(sock, "point.list", {})["result"]["points"] == [
+            {"label": "source", "description": "retained"}
+        ]
+        assert {
+            path: path.read_bytes() if path.is_file() else None
+            for root in roots
+            for path in root.rglob("*")
+        } == files
+    finally:
         sock.close()
         fx.stop()
 
