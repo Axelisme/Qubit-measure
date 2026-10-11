@@ -113,21 +113,17 @@ def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
         assert tab is not None
         assert not tab.writeback_widget.isEnabled()
         assert tab.writeback_widget.toolTip().strip()
-        error = editor.findChild(QLabel, "component_error")
-        assert error is not None
-        assert not error.isHidden()
-        assert error.text().strip()
+        # Without a point the tree shows the owner's next step as a hint.
+        hint = editor.findChild(QLabel, "component_hint")
+        assert hint is not None
+        assert not hint.isHidden()
+        assert hint.text().strip()
         add = next(
             button
             for button in editor.findChildren(QPushButton)
-            if button.text() == "Add"
+            if button.text().startswith("Add component")
         )
-        set_field = next(
-            button
-            for button in editor.findChildren(QPushButton)
-            if button.text() == "Set field"
-        )
-        assert not add.isEnabled() and not set_field.isEnabled()
+        assert not add.isEnabled()
         assert not editor.edit_parameter("general.ext.flux_value", 1.0)
         application.result("point.new", {"label": "selected"})
         editor.refresh()

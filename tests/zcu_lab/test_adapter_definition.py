@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from unittest.mock import MagicMock
 
@@ -20,9 +20,15 @@ from zcu_tools.gui.app.measure.cfg_binding import (
     MeasureCfgBindings,
 )
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.cfg import CfgSectionSpec, EvalValue, SweepValue
+from zcu_tools.gui.cfg import CfgSectionSpec, EvalValue, LiteralSpec, SweepValue
 from zcu_tools.gui.cfg.binding.observation import CfgNodeObservation
-from zcu_tools.gui.cfg.resource import CfgEdit, CfgResource, CfgStatus
+from zcu_tools.gui.cfg.binding.ports import ResolvedReference
+from zcu_tools.gui.cfg.resource import (
+    CfgEdit,
+    CfgResolution,
+    CfgResource,
+    CfgStatus,
+)
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -145,6 +151,55 @@ def test_registered_flux_form_edits_unit_without_device_observations(name: str) 
             assert accepted.values.get("dev") == dev
         invalid = resource.edit(observed.ref.revision, (CfgEdit(("flux_unit",), "mA"),))
         assert invalid.status is CfgStatus.INVALID
+    finally:
+        resource.revoke()
+
+
+class _EmptyCatalog:
+    def keys(self, kind: str, allowed_labels: frozenset[str]) -> Sequence[str]:
+        return ()
+
+    def resolve(self, kind: str, key: str) -> ResolvedReference | None:
+        return None
+
+
+def _empty_resolution() -> CfgResolution:
+    return CfgResolution(
+        (),
+        lambda expression: 0.0,
+        lambda source_id: (),
+        _EmptyCatalog(),
+        lambda name: 0.0,
+        lambda expression: None,
+    )
+
+
+def _form_rows(
+    node: CfgNodeObservation, path: tuple[str, ...] = ()
+) -> Iterator[tuple[str, ...]]:
+    """Yield editable node paths in the depth-first order the cfg form renders."""
+    for key, child in node.children.items():
+        if isinstance(child.spec, LiteralSpec):
+            continue
+        child_path = (*path, key)
+        yield child_path
+        yield from _form_rows(child, child_path)
+
+
+@pytest.mark.parametrize("name", _flux_adapter_names())
+def test_registered_flux_form_lists_unit_right_after_flux_device(name: str) -> None:
+    adapter = _registry().create(name)
+    assert isinstance(adapter, BaseAdapter)
+    resource = CfgResource(
+        defaults=lambda: adapter.make_default_cfg(_ctx(rich=False)),
+        resolution=_empty_resolution,
+    )
+    try:
+        rows = list(_form_rows(resource.observe().tree))
+        flux_device = next(
+            row for row in rows if row in {("dev", "flux_dev"), ("dev", "jpa_flux_dev")}
+        )
+        assert rows[rows.index(flux_device) + 1] == ("flux_unit",)
     finally:
         resource.revoke()
 

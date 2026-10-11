@@ -191,6 +191,10 @@ class ContextControlPort(Protocol):
         """Read cached entry identity/paths, or None without an entry."""
         ...
 
+    def current_point_label(self) -> str | None:
+        """Read the selected saved point label, or None when none is selected; no I/O."""
+        ...
+
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         """Read cached point descriptions; True refreshes via the owner."""
         ...
@@ -360,6 +364,11 @@ class ContextControlFacet(ContextControlPort):
 
     def get_entry_info(self) -> EntryInfo | None:
         return self._context.get_entry_info()
+
+    def current_point_label(self) -> str | None:
+        # Published parameters exist only while a saved point is selected.
+        parameters = self._context.get_session_env().parameters
+        return None if parameters is None else parameters.target.point
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         return self._context.list_points(refresh=refresh)

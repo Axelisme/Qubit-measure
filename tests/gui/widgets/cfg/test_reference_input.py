@@ -209,6 +209,43 @@ def test_qt_convert_to_inline_uses_owner_publication(widgets) -> None:
     unsubscribe()
 
 
+def test_convert_button_is_shown_only_in_ref_mode(widgets) -> None:
+    catalog = Catalog(
+        {
+            "saved": ResolvedReference(
+                "Gauss",
+                CfgSectionValue(
+                    {
+                        "style": DirectValue("gauss"),
+                        "length": DirectValue(1.0),
+                        "sigma": DirectValue(0.2),
+                    }
+                ),
+            )
+        }
+    )
+    resource = waveform_resource(catalog)
+    widget, unsubscribe = attach_header(resource)
+    widgets.append(widget)
+    button = widget.findChild(QPushButton, "convertReferenceToInline")
+    combo = widget.findChild(QComboBox)
+    assert button is not None and combo is not None
+    assert resource.observe().tree.children["ref"].mode == "inline"
+    assert not button.isVisibleTo(widget)
+
+    combo.setCurrentIndex(combo.findText("Lib: saved"))
+
+    assert resource.observe().tree.children["ref"].mode == "ref"
+    assert button.isVisibleTo(widget)
+    assert button.isEnabled()
+
+    button.click()
+
+    assert resource.observe().tree.children["ref"].mode == "inline"
+    assert not button.isVisibleTo(widget)
+    unsubscribe()
+
+
 def test_qt_optional_none_then_custom_starts_complete_choice(widgets) -> None:
     resource = waveform_resource(Catalog(), optional=True)
     widget, unsubscribe = attach_header(resource)
@@ -261,5 +298,9 @@ def test_missing_library_hint_follows_publication_without_resubmit(widgets) -> N
     assert combo.currentText() == "Missing: saved"
     assert hint.isVisibleTo(widget)
     assert "saved" in hint.text()
+    assert hint.wordWrap()
     assert "red" in combo.styleSheet()
+    button = widget.findChild(QPushButton, "convertReferenceToInline")
+    assert button is not None
+    assert button.isVisibleTo(widget) and not button.isEnabled()
     unsubscribe()
