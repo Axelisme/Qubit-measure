@@ -18,7 +18,7 @@ status: accepted
 
 GUI app 的 orchestrator 按使用者 placement 的相對順序執行，不依 dependency 隱式拓撲重排。它依宣告解析當點的輸入，建立 `RunEnv`、建立短命 Node、驗證並合併對外的 `Patch`；Builder 是無 run state 的定義與工廠。每次 run 的 Result、Tools、feedback 與 InfoStore 留在各自的 run owner。純計算 provider 也使用依賴與輸出契約，不必偽裝為硬體量測。acquire、fit 接受度、缺值後的實驗選擇及 predictor 校正不歸通用 orchestrator 判斷。
 
-Resolver 支援 `Need.NOW`（只接受當點）及 `Need.LATEST`（允許前點），module dependency 還可宣告 library fallback。Required input 無合格來源時記錄 skip 原因；Node 執行失敗不等於 dependency skip。Run setup 目前另行前置 `PredictorBuilder`；dependency 的共同預設與未使用 predictor 的預載不符合已核准的逐項明示目標，現況與轉正條件見 [dependency draft](retired/autofluxdep-explicit-dependencies.md)。不得把現有預設推廣成新 Node 的政策。
+Resolver 支援 `Need.NOW`（只接受當點）及 `Need.LATEST`（允許前點），module dependency 還可宣告 library fallback。Required input 無合格來源時記錄 skip 原因；Node 執行失敗不等於 dependency skip。舊 Run setup 前置 `PredictorBuilder` 及 dependency 共同預設的替代提案保留在 [退役設計記錄](retired/autofluxdep-explicit-dependencies.md)，不是待實作目標，不移入具名 workflows 契約。
 
 ## 設定與回饋
 

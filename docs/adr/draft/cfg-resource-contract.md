@@ -4,16 +4,16 @@
 
 ## 問題
 
-Controller 的轉送入口讓 caller 必須知道 editor identity、binding grammar 與 app service 的關係。GUI 與 remote 若各自判斷哪些欄位可寫，就會維護兩套驗證。逐筆修改 live cfg 也使 batch 失敗留下成功前綴，caller 無法以一份版本明確表達修改與執行依據。
+Controller 的轉送入口讓 caller 必須知道 editor identity、binding grammar 與 app service 的關係。GUI 與 remote 若各自判斷哪些欄位可寫，就會維護兩套驗證。逐筆修改 live cfg 也使 batch 失敗留下成功前綴，caller 無法取得一次完整提交的結果。
 
 目標是讓 caller 取得一個綁定資源的 editing handle。Cfg owner 隱藏 path 驗證、候選準備、解析與 publication；Controller 不再逐項代理這些命令。
 
 ## 領域詞彙
 
-- Cfg resource 是有 identity、revision 與固定 definition 的可編輯資源。Tab owner 建立及撤銷資源；cfg subtab 只是它的一個 view。
-- Cfg observation 是同一 revision 的 input、解析結果、狀態、diagnostics 與 source basis。它不是 live mutable tree。
+- Cfg resource 是有固定 definition 與 owner lifetime 的可編輯資源。Tab owner 建立及撤銷資源；cfg subtab 只是它的一個 view。
+- Cfg observation 是同次 publication 的 input 投影、解析結果、狀態、diagnostics 與 source basis。它不是 live mutable tree。
 - Source basis 是解析使用的本地來源版本集合，不是硬體即時讀取憑證。
-- Accepted config 是指定 Valid revision 的固定 values 與 provenance。它不是可回讀來源的 editor，也不代表已取得 hardware lease。
+- Accepted config 是 Valid acceptance 的固定 values 與 provenance。它不是可回讀來源的 editor，也不代表已取得 hardware lease。
 - Capture 是寫入時固定 expression 中被 $ 標記的引用。未標記引用仍依原 expression 規則更新。
 
 ## 決策
@@ -22,7 +22,7 @@ Controller 的轉送入口讓 caller 必須知道 editor identity、binding gram
 
 `gui.cfg` 擁有 input、path、edit、observation 及錯誤型別。App resource owner 持有 lifetime，並提供來源與操作禁令。Qt 和 remote 共用 editing handle 的 observe、watch、edit、reset、refresh。Run owner 另外取得 accept 能力，不讓 frontend 先凍結值再提交給 Run。
 
-Watch 一致交付初始 observation 與後續 publication。所有回傳值與 caller 傳入內容均隔離 mutable alias。View detach 不撤銷資源；close 後舊 identity 失效，重建同名 tab 也不能讓舊請求命中新資源。
+Watch 一致交付初始 observation 與後續 publication。所有回傳值與 caller 傳入內容均隔離 mutable alias。View detach 不撤銷資源；close 後舊 handle 撤銷，重建同名 tab 也不能讓舊請求命中新資源。
 
 ### 可寫節點取代 caller grammar
 
@@ -34,17 +34,17 @@ Whole subtree 是局部輸入覆寫，省略欄位保留。領域原本允許的
 
 ### Custom reference 的 best-effort 繼承
 
-切換至 Custom 時，`CfgEditing.select_custom_reference(expected_revision, path, label)` 明確表達選擇意圖。共用 cfg owner 以該 revision 已發布的內容先依新 definition 建立完整候選，並 best-effort 繼承相容的既有輸入，再一次解析、驗證與發布。從 Library 解除連結不須重新解析被解除的舊 key。這保留切換 waveform 後不用重填 length 的操作方式，不讓 Qt 擁有第二套繼承規則，也不把 nested linkage／override 編碼為普通 edit 的資料欄位。
+切換至 Custom 時，`CfgEditing.select_custom_reference(path, label)` 明確表達選擇意圖。共用 cfg owner 以目前已發布的內容先依新 definition 建立完整候選，並 best-effort 繼承相容的既有輸入，再一次解析、驗證與發布。從 Library 解除連結不須重新解析被解除的舊 key。這保留切換 waveform 後不用重填 length 的操作方式，不讓 Qt 擁有第二套繼承規則，也不把 nested linkage／override 編碼為普通 edit 的資料欄位。
 
 同名、同型別欄位可繼承。不相容或新增的欄位使用新型別初始值；新型別沒有的欄位捨棄。style 等固定欄位一律使用新 definition。不猜欄位名稱、不做單位或自動型別轉換，也不新增每型別歷史 cache。例如 Gauss → Arb → Gauss 不保證找回原 length，因為 Arb 沒有此欄位。
 
 Expression 保留輸入式，由新候選正常解析，不直接信任舊解析結果。繼承後未通過值驗證時發布 Invalid，不偷偷替換成另一個值。同型別由 Library 改成 Custom 保留目前內容，只解除本層 linkage；nested reference 與 expression 保留自己的依賴。候選與舊值隔離 mutable alias，nested reference 的 linkage／override 資訊不能在複製時遺失。
 
-明確的選擇命令與接收普通 edit 是兩個責任。Custom 選擇使用與 edit 相同的 revision、mutation block 和通知重入防護。普通 edit 仍拒絕不完整的跨型別輸入，MCP 不因 GUI 的切換便利性而獲得隱含繼承或補值。準備或提交的非預期故障仍保留舊 publication，best-effort 不是吞掉任意例外的許可。不為這項功能建立通用 migration framework。
+明確的選擇命令與接收普通 edit 是兩個責任。Custom 選擇使用與 edit 相同的 mutation block 和通知重入防護。普通 edit 仍拒絕不完整的跨型別輸入，MCP 不因 GUI 的切換便利性而獲得隱含繼承或補值。準備或提交的非預期故障仍保留舊 publication，best-effort 不是吞掉任意例外的許可。不為這項功能建立通用 migration framework。
 
 ### 同步候選與一次發布
 
-Cfg resolver 只消費本地已發布來源，不做外部 I/O、不輪詢硬體、不處理 GUI events。Edit 在未發布候選上依序處理全部意圖，全部可接受才發布一次。成功同值命令也推進 revision。沒有成功前綴，沒有 Pending 或背景解析 completion。
+Cfg resolver 只消費本地已發布來源，不做外部 I/O、不輪詢硬體、不處理 GUI events。Edit 在未發布候選上依序處理全部意圖，全部可接受才發布一次。成功同值命令也發布結果。沒有成功前綴，沒有 Pending 或背景解析 completion。
 
 Cfg owner 以獨立 input tree 為權威。先修改輸入，再解析修改完成後仍存在的內容；不先重建會自動求值的舊 field tree。完整 override 不依賴被取代的舊 source key，舊 expression 即將被取代時不求值。Partial reference write 或 range step 計算若需要現有內容，才依同一固定 source basis 取得必要資料。Binding 可以承擔最終解析，但不能藉 constructor／setter 同時控制 input mutation。
 
@@ -66,19 +66,19 @@ Capture 必須在當次完成。含 capture 的 expression 若無法解析完整
 
 不新增 __once 或 capture 持久型別。括號不是 provenance 標記，精確浮點 spelling 也不是產品保證。Editing wire codec 與既有保存格式分工，不藉此全面改寫 memento。
 
-### 明確版本與錯誤
+### 當前 inputs 與錯誤
 
-Remote 完整讀取回 `{cfg_id, revision}`。Id 為不透明字串，revision 為十進位字串。Edit 與 Run 必須帶這份依據，不隱含預讀、refresh、換版或 retry。只有 cfg guard 改用 explicit reference，auth 與非 cfg 資源 guards 不變。
+Remote 完整讀取回 status、tree、source_basis 與 diagnostics。Edit、reset、refresh、Custom 選擇、accept 與 preview 不收 cfg ref 或 expected revision，直接作用於目前 inputs。控制身份限制命令入口，見 [ADR-0070](../0070-control-identity.md)。Authentication、domain busy、通知重入與硬體 guards 保留，不隱含預讀、refresh 或 retry。
 
-非法 path、codec、mode 或 readonly 寫入屬 invalid input。Stale、撤銷、busy、通知重入與 capture 來源不可用屬 failed precondition。合法 incomplete input 是成功 publication，不是拒絕命令。非預期故障保留 cause／traceback，不降級為輸入問題。
+非法 path、codec、mode 或 readonly 節點寫入屬 invalid input。撤銷、busy、通知重入與 capture 來源不可用屬 failed precondition。合法 incomplete input 是成功 publication，不是拒絕命令。非 holder 的命令在 domain effects 前拒絕；非預期故障保留 cause／traceback，不降級為輸入問題。
 
-Run 在同一有序接受點檢查版本與 app 條件、取得固定 values、登記 operation 及同 tab 編輯禁令。後續硬體啟動失敗由 operation 回報。Timeout 或 reply encoding failure 不表示命令未提交。
+普通 accept 只接受目前 Valid publication。Run owner 可提供固定的一次性 resolution，從目前 inputs 準備 Valid 候選，不發布、不通知、不改 inputs。接受點檢查 app 條件、取得深層隔離的固定 values 與 source basis、登記 operation 及同 tab 編輯禁令。後續硬體啟動失敗由 operation 回報。Timeout 或 reply encoding failure 不表示命令未提交。
 
 ## 第一條接線與遷移範圍
 
-Measure 的 `tab.get_cfg`／`tab.edit_cfg` 經 composition 注入的 tab cfg lookup 取得 resource-bound handle，直接 observe／edit，再投影完整 observation。不經 Controller cfg setter 或 editor_id 中轉。Lookup 只對應 identity，不複製 editing commands。
+Measure 的 `tab.get_cfg`／`tab.edit_cfg` 經 composition 注入的 tab cfg lookup 取得 resource-bound handle，直接 observe／edit，再投影完整 observation。不經 Controller cfg setter 或 editor_id 中轉。Lookup 只對應 tab 資源，不複製 editing commands。
 
-Measure tab writer 使用同一資源，沒有舊 `tab.set_cfg` alias、Controller cfg setter 或 live schema 鏡像。公開 read/edit、Run、lifetime、Qt 及 MCP 使用相同 identity／revision 契約。Run 明示 ref，接受固定 values 與 source basis；Qt detach 不撤銷資源。
+Measure tab writer 使用同一資源，沒有舊 `tab.set_cfg` alias、Controller cfg setter 或 live schema 鏡像。公開 read/edit、Run、lifetime、Qt 及 MCP 使用同一資源。Run 接受 Valid cfg 的固定 values 與 source basis；Qt detach 不撤銷資源。
 
 Library editor／writeback 不因原 service 也服務 tab 就改成 tab 契約。這些獨立 draft 保留各自的 grammar 及提交用途。其他 app 與 measure 其餘 Controller 領域的需求仍保留，不能由這個 slice 推定完整 app 可部署。
 
@@ -90,11 +90,11 @@ Input-first 將輸入意圖與解析副作用分開，代價是 node writer 不�
 
 單一 cfg authority 讓 UI 和 remote 得到相同結果，代價是不能讓舊 mutable binding 與新 owner 同時寫入。遷移必須交代所有 writer，而不是只替換 remote handler。
 
-Explicit revision 讓跨連線 caller 可以明確指定依據，代價是 caller 必須處理 Stale 並自行決定是否重送。這不提供 exactly-once，也不取消其他資源的 guard。
+單一 holder 避免不同控制身份同時送命令，cfg 不再要求版本比對。它不保證 holder 已讀最新資料，也不提供 exactly-once。Source basis 保留解析 provenance，不是編輯門檻。
 
 ## 轉正條件
 
-透過公開 cfg interface 驗證 batch 原子性、版本、Invalid／Unavailable、watch 順序、通知隔離、alias 隔離及固定 accept。Custom 切換另驗證 waveform 共同欄位繼承、新型別固定值、不相容欄位的初始值、expression 保留與重新解析、nested reference 狀態，以及失敗不改舊 publication。透過 source publication 驗證多 cfg 一致性。透過真實 request/reply 驗證讀寫同一 authority、版本衝突與錯誤映射。
+透過公開 cfg interface 驗證 batch 原子性、Invalid／Unavailable、watch 順序、通知隔離、alias 隔離及固定 accept。Custom 切換另驗證 waveform 共同欄位繼承、新型別固定值、不相容欄位的初始值、expression 保留與重新解析、nested reference 狀態，以及失敗不改舊 publication。透過 source publication 驗證多 cfg 一致性。透過真實 request/reply 驗證讀寫同一 authority、holder 拒絕與錯誤映射。
 
 Run、Qt 與 MCP 完成各自接線後，在共同 tree 驗證同一資源及固定執行資料。Owner、型別重複、私有存取、resolver 外部依賴與 method 宣告用直接 review。重構涉及的型別／lint 負面指標作 best-effort 清理，剩餘問題列明原因；不豁免必要契約或關閉規則。
 

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.cfg` — 共用設定機制
 
-**Last updated:** 2026-10-09 — One-off cfg acceptance and preview
+**Last updated:** 2026-10-11, current-input commands and fixed acceptance
 
 此 Qt-free package 擁有 Spec／Value、`CfgSchema`、完整 value tree、codec、paired assembler、binding 與 generic finished-cfg lowering。Spec 是靜態欄位契約，Value 保存可變編輯內容。`LiteralSpec` 的鎖定值由 Spec 定義；assembler 對齊 value，renderer 不另建鎖定權威。Spec 的 fluent 覆寫回傳新 frozen spec；value 的 `with_*` 是可變操作。Role defaults 與 deferred seed 由實驗 adapter 擁有，不由 structural `make_default_value` 猜測業務預設。
 
@@ -21,7 +21,9 @@ App 的 Load owning flow 可要求完整 Valid 候選，拒絕不改 input 或 p
 
 Cfg 命令直接作用於目前 inputs，不收 expected revision。Watch 推送最新 observation，
 revoke 撤銷舊 handle。普通 acceptance 只接受 Valid publication；Run 取得深層隔離的
-固定 values 和 source basis，後續編輯不改變已接受的執行資料。
+固定 values 和 source basis，後續編輯不改變已接受的執行資料。SourceRevision 保存解析
+provenance，不是 cfg 編輯或 Run 的版本門檻。App 的控制身份限制命令入口，
+不由這個 generic package 決定 holder，見 [ADR-0070](../../../../docs/adr/0070-control-identity.md)。
 
 既有 `binding.CfgDraft` 仍提供可編輯 field tree，提供 snapshot、valid、refresh 與 nominal `SettableTarget`。scalar 使用 dotted leaf，sweep 使用直接 edge，reference key 使用 `.ref`，子欄位直接下鑽。列舉和解析共用 grammar；不受理未列出的舊 `.sweep.*`／`.value.*` alias。Reference refresh 透過 caller 提供的 catalog。Linked empty section 可等待 catalog 提供 shape，不拿 fallback tree 填資料。缺少來源時保持 Invalid，未知 shape 不建立子欄位；已知 shape 沿既有 missing 規則處理。`ReferenceValue.error` 投影為 reference 節點的公開 diagnostic，不因保留子欄位而消失。停用 optional 的裸 None 維持停用，refresh 不重掛 default。Linked value 跟隨當次 catalog snapshot；override 保留自身內容與 shape，不再解析原 key。Override 內的 nested linked reference 仍更新，明確 relink 才恢復這層的來源依賴。`ReferenceSpec.discriminator` 由 domain builder 明確宣告，指向每個 allowed shape 的唯一 literal 值；generic cfg 不從 literal 欄位排列推測辨識規則。Measure tab 的 input round trip、publication 與固定 acceptance 使用 resource 路徑。Library conversion、selected Apply 及其他 app 的 caller 收斂仍見 [待實作設計](../../../../docs/adr/draft/cfg-editing-boundaries.md)。
 

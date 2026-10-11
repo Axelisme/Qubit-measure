@@ -1,10 +1,13 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-11, connection identity and structured control errors
+**Last updated:** 2026-10-11, holder admission and structured control errors
 
 Fluxdep MCP forwards the GUI's declared analysis methods over one shared bridge.
-The GUI owns published-resource observations, interactive identities and search
-operations. MCP does not maintain another guard or operation registry.
+The GUI owns control authority, interactive identities and search operations.
+Business calls require holder unless explicitly readonly. Reads return current
+projections, not per-connection mutation baselines. MCP does not maintain another
+authority or operation registry. Domain validity, busy and owner-lifetime checks
+remain independent. See [ADR-0070](../../../../docs/adr/0070-control-identity.md).
 
 `assembly.py` combines generated pipeline/control tools with Fluxdep lifecycle
 initialization. `fluxdep_connect(label="agent", mode="owner")` initializes fixed

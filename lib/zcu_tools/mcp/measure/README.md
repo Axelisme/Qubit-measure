@@ -1,8 +1,8 @@
-**Last updated:** 2026-10-11, MCP connection identity and control diagnostics
+**Last updated:** 2026-10-11, holder admission and ref-free cfg
 
 # `zcu_tools/mcp/measure/`
 
-Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。GUI core 不 import MCP。GUI `RemoteMethodEntry` 擁有 wire schema、exposure、guard、read-reveal、寫入後觀察刷新與 operation policy。MCP 每次連線讀取 live `rpc.catalog`，不複製 policy 表，也不依 catalog 動態建立 tools。
+Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。GUI core 不 import MCP。GUI `RemoteMethodEntry` 擁有 wire schema、exposure、readonly 與 operation policy。MCP 每次連線讀取 live `rpc.catalog`，不複製 policy 表，也不依 catalog 動態建立 tools。
 
 ## 固定工具與 RPC
 
@@ -14,7 +14,7 @@ Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。G
 
 `device_set_value(name, value, unit)` 先讀裝置 snapshot，只送 value 更新，再等待和核對 actual native value。它不更改 output、mode 或 rampstep。實體 unit 必須與 snapshot 相同。FakeDevice unit=none 只接受明確的 native，不換算工作座標。
 
-兩個 mutation 工具保留 pre_read、start、wait、post_read、requested、before/after、native operation 及 verification。step completed 只表示該步成功。等待逾時不取消 operation，snapshot 有目標值也不代表 operation 完成。Start receipt 不確定時保留 unknown，明確 stale 拒絕時停止。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
+兩個 mutation 工具保留 pre_read、start、wait、post_read、requested、before/after、native operation 及 verification。step completed 只表示該步成功。等待逾時不取消 operation，snapshot 有目標值也不代表 operation 完成。Start receipt 不確定時保留 unknown，明確 admission 拒絕時停止。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
 
 ## 日常與細部操作
 
@@ -48,7 +48,7 @@ Recipe 以 yield 提出 completed capture 的寫回候選。`answer(recipe, deci
 
 `tab_analyze` 在既有資料上啟動 Primary 或 Post 分析。Execution 捕捉結果、實際參數、失效內容、完整 analysis artifact 的 Save report、當次 image content 及 writeback 候選。互動分析立即交接 tab、op、狀態、可用命令與圖像。
 
-Analysis completion 等原 GUI operation 完成，同步保存完整 analysis artifact，再以原 opaque operation 讀一次 writeback preview。沒有圖像也讀候選。Interactive handoff 不 capture，`done` 加入原 completion，完成後才 capture 定案 draft。屬於 recipe 的 done 等待該 recipe 的下一個結果／提問，不回另一個 analysis execution；standalone 保持原路徑。Recipe 分析由自己的 worker 完成同一份 capture，不另建等待 worker，也不另讀候選。Full 的 writeback 為 null 表示尚未取得；has_draft=false／items=[] 才是已確認空 draft。Read 失敗以 writeback_read error 回報，保留已知 result、當次 Save report 及可用 image content。來源 superseded 不改讀新 pane，不 retry，也不刷新 guard。Recipe wait 在 done 後等待本地 completion 的交接，不再提早交付舊 interactive handoff。
+Analysis completion 等原 GUI operation 完成，同步保存完整 analysis artifact，再以原 opaque operation 讀一次 writeback preview。沒有圖像也讀候選。Interactive handoff 不 capture，`done` 加入原 completion，完成後才 capture 定案 draft。屬於 recipe 的 done 等待該 recipe 的下一個結果／提問，不回另一個 analysis execution；standalone 保持原路徑。Recipe 分析由自己的 worker 完成同一份 capture，不另建等待 worker，也不另讀候選。Full 的 writeback 為 null 表示尚未取得；has_draft=false／items=[] 才是已確認空 draft。Read 失敗以 writeback_read error 回報，保留已知 result、當次 Save report 及可用 image content。來源 superseded 不改讀新 pane，不 retry，也不重新授權。Recipe wait 在 done 後等待本地 completion 的交接，不再提早交付舊 interactive handoff。
 
 GUI 的分析投影把非有限 summary 數字換成 null，以 `invalid` 記錄欄位路徑與原因。
 Execution 保存同一份投影，recipe、`status(execution)` 與 `wait(execution)` 不重新推導原因。
@@ -59,11 +59,11 @@ Framework 原樣傳遞 native analysis summary 與 invalid 路徑，不特別解
 
 Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的 scalar value_key，完全相同的 name/error_key/unit 宣告可合併。Present key 的宣告衝突直接 ValueError，不猜實驗身分，不新增 tab.snapshot 讀取。每個 pane 保留完整原生 summary 與 invalid；scalar estimates 不抽掉 summary 的欄位，framework 不投影 quality。
 
-`tab_interact` 省略 payload 時讀 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。`done` 接住原 analysis operation，然後加入其 execution 的完成讀取與保存。此 method 不加 seen guard，較晚的 owner-loop commit 生效。沒有來源鎖或自動重試。
+`tab_interact` 省略 payload 時讀 committed state、commands、info、preview_active 與 figure，不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。`done` 接住原 analysis operation，然後加入其 execution 的完成讀取與保存。此 method 的純讀與 command 都要求 holder，已接受的 owner-loop commit 依序生效。沒有來源鎖或自動重試。
 
 Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post scalar estimates、原生 summary 與 invalid、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 取已捕捉 Save report 的原 Run 身分，全部輸出失敗也保留同一 ID。沒有捕捉到 report 時才為 null。各 output 的 status/error 表示保存結果。這與 readonly tab snapshot 的 confirmed run_id 不同，後者在尚無持久輸出成功時仍為 null。Execution ID 仍是 session-local。
 
-`status(execution, detail="full")` 保留該 execution 已捕捉的 native 資料，包括完整 cfg publication、raw expressions、source_basis、analysis results 與 writeback proposals。查詢不新增 RPC 或 guard 觀察。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
+`status(execution, detail="full")` 保留該 execution 已捕捉的 native 資料，包括完整 cfg publication、raw expressions、source_basis、analysis results 與 writeback proposals。查詢不新增 RPC 或授權。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
 
 當次工具回覆可附記憶體中的 MCP image content，不落地 session 暫存 PNG。之後要看圖，用 `tab.get_figure` 取得 GUI 當下圖像，不保證是先前回覆的圖。`status` 不附圖片，也不重新擷取圖像。
 
@@ -71,7 +71,7 @@ Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一
 
 `apply_writeback(tab, items=None)` 按 preview 的穩定 `target_name` 選擇當前候選。省略 items 或傳 null 寫全部，空陣列寫零項。它不看 GUI 勾選，也不回答 recipe。工具先讀 Primary 與既有 Post 的當前 preview，再檢查未知、重複及跨 stage 同名；全部檢查通過後才用當前 session ID 寫入。寫入順序是 Primary 再 Post，首錯停止，不 retry 或 rollback。收據只列 GUI-confirmed completed，並保留 skipped、failed stage、not_started 及失敗 stage 的不確定性。
 
-摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。Destination 摘要只列 context/project 身分，native context readiness 保留在 full。Preview 與摘要都不刷新 guard。Caller 寫入前仍須明確觀察 tab／context，核對提案與當前目的地。候選內容的調整使用 `tab.writeback_*` RPC。
+摘要列出每個候選的 target、proposal 與 current，full 保留勾選旗標。Destination 摘要只列 context/project 身分，native context readiness 保留在 full。Preview 與摘要不授權寫入。Caller 寫入前核對提案與當前目的地，GUI 仍在 dispatch 檢查 holder。候選內容的調整使用 `tab.writeback_*` RPC。
 
 ## 連線與觀察
 
@@ -83,17 +83,17 @@ Control token 留在 session 供重新握手；顯式切換 port 不沿用前一
 
 Session 將 GUI operation ID 映射為 opaque integer handle。明確重連或 EOF 後清除 catalog 與舊 handle 對應。GUI 可重用 wire ID，MCP session 不重用已外露 handle。GUI-origin operation 經 `status` 使用同一映射。每次 wire 操作前先確認連線，再解析 handle；不向新 GUI 重送舊 ID。
 
-GUI owner 維護每連線的 seen。成功完整讀取才建立觀察，部分 getter、失敗、逾時或回覆編碼失敗都不建立。版本零也不能替代未曾讀取。自寫只推進先前 seen 等於寫入前版本的資源，不把未看過的連帶變更加入 seen。MCP 不保存第二份版本表，不送 expected_versions，也不以隱藏讀取解鎖一般 mutation。
+GUI 在 owner dispatch 檢查目前 holder，不維護每連線 seen baseline。MCP 不保存第二份 authority 或版本表，也不以隱藏讀取解鎖 mutation。只讀 method 可由 observer 使用，`tab.interact` 的純讀與 command 都要求 holder。控制身份與 domain readiness、busy、source-bound operation 及 authentication 分別檢查，見 [ADR-0070](../../../../docs/adr/0070-control-identity.md)。
 
-接手既有或重啟後的 GUI 時，按操作需要明確讀 `tab.snapshot(tab_id)`、`soc.info(include_cfg=true)`、`context.snapshot` 與 `device.snapshot`。Context 完整讀取可能包含大型敏感資料，不可序列化時會失敗而不刷新觀察。`status`、摘要與裸 `resources.versions` 都不替代完整讀取。
+接手既有或重啟後的 GUI 時，按操作需要讀 tab、SoC、context 與 device snapshots，核對實際狀態，不是建立寫入許可。Context 可能包含大型敏感資料，不可序列化時完整讀取失敗。摘要與 resource counters 不代替內容。
 
-Cfg 使用 `tab.get_cfg` 的 publication。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 ref。Edit/reset 作用於目前 inputs，Run 接受當下 Valid cfg 並固定執行值。Cfg admission 與 tab、SoC、device 的 guards 分開。`tab.open_file` 需要先觀察 context；成功的新 tab receipt 只認證存在性，後續資源仍需明確讀取。
+Cfg 使用 `tab.get_cfg` 的 publication。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 ref。Edit/reset 作用於目前 inputs，Run 接受當下 Valid cfg 或明示 aliases 的固定一次性解析，並隔離執行值與 source provenance。後續編輯不改已接受 Run，轉移或斷線也不取消它；新 holder 可取消，observer 可 wait。
 
-Stale、斷線或 timeout 都不自動重送。它們不證明 mutation 沒有副作用；先讀現況，再由 caller 決定下一步。
+Admission 拒絕、斷線或 timeout 都不自動重送。傳輸失敗不證明 mutation 沒有副作用；先讀現況，再由 caller 決定下一步。
 
 ## 傳輸與關閉
 
-Shared SocketTransport 以 shared framing 限制每個 frame 為 8 MiB UTF-8 bytes，不含換行，不分批。超大 request 在送出前拒絕，連線仍可用。超大 response 關閉連線並回 `message_too_large`，不能假定 mutation 未執行。重新連線會重載 catalog，GUI seen 從空集合開始。
+Shared SocketTransport 以 shared framing 限制每個 frame 為 8 MiB UTF-8 bytes，不含換行，不分批。超大 request 在送出前拒絕，連線仍可用。超大 response 關閉連線並回 `message_too_large`，不能假定 mutation 未執行。重新連線會初始化身份並重載 catalog，舊 handle 不跨連線使用。
 
 `tab_close` 與 RPC `app.shutdown` 都由 GUI 在同次 owner dispatch 檢查 active operations 及 unsaved artifacts。`discard_unsaved` 不能略過 busy。Shutdown 回覆的 `shutting_down` 與 PID 表示已接受正常關閉要求，不保證程序已退出；RPC 不等 process exit、不強制終止。
 
@@ -101,4 +101,4 @@ MCP server 結束時斷線並加入其 workers。它不關閉 GUI，也不保證
 
 ## 驗證
 
-`tests/mcp/measure/` 經 public tools/session 與 recording transport 驗證 recipe、分析、catalog、連線、guard 與 operation。GUI remote/service 測試驗證 socket 與 GUI-origin 路徑。離線選集只用 fake/mock，不啟動真儀器；fixture 與測試歸屬見 `tests/README.md`。
+`tests/mcp/measure/` 經 public tools/session 與 recording transport 驗證 recipe、分析、catalog、連線、holder admission 與 operation。GUI remote/service 測試驗證 socket 與 GUI-origin 路徑。離線選集只用 fake/mock，不啟動真儀器；fixture 與測試歸屬見 `tests/README.md`。

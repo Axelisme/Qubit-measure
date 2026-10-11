@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-06. Published fit inputs in GUI controls
+**Last updated:** 2026-10-11, single-holder remote and modal editing gates
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -184,44 +184,38 @@ Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 d
 
 ### Remote RPC 與 MCP
 
-`RemoteControlAdapter` 注入 app 的 methods、event serializers、resource versions 與 observation policies。
-`RemoteControlServiceBase` 擁有 route、owner marshal、每條連線的 seen map 與 guard。
-`NdjsonRpcEndpoint` 擁有 socket、framing、authentication 與回覆交付。App 不複製這些機制。
+`RemoteControlAdapter` 注入 app methods、event serializers 與 application control identity。
+共用 remote 擁有 route、owner marshal 與 holder admission，endpoint 擁有 socket、
+framing、authentication 與回覆交付。Read 不建立 seen baseline，寫入預設要求 holder；
+readonly method 才允許 observer。詳見 [remote README](remote/README.md) 與 ADR-0070。
 
-完整 `project.info`、`spectrum.list`、`fit.result` 分別揭露 project、集合及 fit。
-`selection.pointcloud`、`state.check` 與 `resources.versions` 不建立完整 observation。
-`project.setup` 必須先讀 project，使用 Controller 與原生 ProjectInfo paths。成功 self-write
-只推進同連線已讀且相符的版本，其他連線與 GUI 修改後仍須明示重讀。
-Spectrum snapshot 回完整 calibration／published points 與 raw axes extents，不輸出 complex signal matrix。
-合法的 absent name 回 absence 並建立 version 0 observation。Leaf guard 不展開 name 內的 literal star。
-Remove、reset 與 active selection 共用原生 Controller owners；同名重建會使舊 observation stale。
-Selection snapshot 回完整 published mask 與 normalized min_distance，不讀 live Session。
-Raw load 與 processed restore 必須先完整讀 project、集合與全部 live spectra，包含零點譜。
-All-source guard 也保留已觀察的 retired leaf，必須讀 absence 才能重新載入。
-載入沿原生 basename replacement、inheritance／transpose 與 processed completion。
-成功只推進既有且相符的 observation，新譜的 receipt 不取代完整 snapshot。
-Processed publication 失敗保留已發布前綴，不 rollback，也不刷新 observation。
-Fit replacement 經 Controller 清掉舊結果，不啟動搜尋。Nested JSON parser 只處理 type／shape／finite，
-bounds 與 transition 的領域語意留在 search kernel。Spectrum export 預設 create-only，明示 overwrite 才替換。
-Params export 沿原生 merge，保留獨立 sections，取第一張 aligned spectrum 的 calibration，包含零點譜。
-Export 不改 State 或建立 observation；原生失敗保留成功前綴，不 cleanup／rollback。
-Search 使用同一 app owner token，status 可找 GUI 或 agent 的最新 activity。Await 在 IO thread
-等待，不碰 State／seen；timeout 不取消，cancel receipt 不代表 cancelled outcome。
-Async terminal 不刷新 fit observation，成功後須明示讀 fit.result。Unknown／evicted token 明示拒絕。
-六個原有 read projections 保持原值。
+Project、spectrum、selection 與 fit reads 提供目前 owner projections。
+Spectrum snapshot 包含 calibration、published points 與 raw axes extents，不輸出 complex
+signal matrix。Selection snapshot 提供 published mask 與 normalized min_distance，
+不讀 live Session。Remove、reset 與 active selection 共用 Controller owners。
+Raw load／processed restore 保留 basename replacement、inheritance／transpose 與 completion
+契約，publication 失敗保留已發布前綴，不 rollback。
+Fit replacement 清掉舊結果，不啟動搜尋。JSON parser 驗 type／shape／finite，
+bounds 與 transition 語意留在 search kernel。
 
-Interactive open 必須先讀來源，picker name 必須已為 active。Read 只 inspect，不開輸入、
-不切畫面，也不建立 published-resource observation。Command 帶 owner-lifetime context_id，
-先核對身份與 target，再呼叫同一 plugin Actions／Session Undo／app publication。
-每次回覆使用同一 committed snapshot 投影數值與獨立 Agg PNG。TwoTone 的 mask-cell count
-與 detected-point count 分開；selection 保留完整 input mask 與 downsample 後的 kept count。
-Finish／cancel 的 receipt 保留退休 identity，即使同步 GUI callback 已開下一份 context。
-Apply 不關閉有效 joint input。Publication 或 rendering 失敗不宣稱 rollback。
-PNG 使用 shared renderer，不採用 Qt canvas，也不保存為產物。
+Spectrum export 預設 create-only，明示 overwrite 才替換。Params export 沿原生 merge，
+保留 sections，取第一張 aligned spectrum 的 calibration，包含零點譜。
+Export 不改 State；失敗保留成功前綴，不 cleanup／rollback。
+Search 使用同一 app owner token，status 可找 GUI 或 agent 的最新 activity。
+Await 在 IO thread 等待，不碰 State；timeout 不取消，cancel receipt 不代表 cancelled outcome。
+Unknown／evicted token 明示拒絕，結果由 fit.result 讀取。
 
-MCP entrypoint 使用共用 `McpBridge`，工具從 method specs 生成。完整控制工具的 workflow
-與圖像驗收尚未完成。MCP 不訂閱業務 event-push，不維護第二份 seen map。
-RPC clients 可自行訂閱 EventBus facts。Agent 不關閉使用者的 GUI。
+Interactive open 由 app 檢查來源與 active target。Read 只 inspect，不開輸入或切畫面。
+Command 帶 owner-lifetime context_id，核對身份與 target 後呼叫同一 plugin Actions、
+Session Undo 與 app publication。回覆使用同一 committed snapshot 投影數值與 Agg PNG。
+TwoTone mask-cell count 與 detected-point count 分開；selection 保留 input mask 與
+downsample 後 kept count。Finish／cancel receipt 保留退休 identity，即使 GUI 已開下一份
+context。Apply 不關閉有效 joint input；publication／rendering 失敗不宣稱 rollback。
+PNG 不使用 Qt canvas，也不保存為產物。
+
+MCP entrypoint 使用共用 bridge，pipeline tools 從 declarations 生成，control tools 轉送同一
+authority。MCP 不訂閱業務 event-push，不維護另一套 holder 或 operation registry。
+RPC clients 可訂閱 EventBus facts。Agent 不關閉使用者的 GUI。
 
 ### Qt 控制身份與編輯停用
 
