@@ -9,11 +9,13 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeResult,
     PostWritebackRequest,
+    SampleWriteback,
     WritebackRequest,
 )
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.resources.entry.ledger_models import AcceptedPayload, JsonObject
 
 from tests.zcu_lab._writeback_support import WritebackSession
 from tests.zcu_lab._writeback_support import writeback_registry as _registry
@@ -263,7 +265,7 @@ def test_recipe_writeback_keeps_run_component_after_environment_change(
             }
         )
     assert {
-        item.target_name for item in proposals
+        item.target_name for item in proposals if not isinstance(item, SampleWriteback)
     } == scalars.keys() | calibration.modules.keys()
     draft = session.service.create_draft(
         proposals, parameters=captured, experiment_name="test/writeback"
@@ -293,5 +295,91 @@ def test_recipe_writeback_keeps_run_component_after_environment_change(
         assert not any(
             key.startswith(("Q2.", "R2.")) for key in current.library.module_keys()
         )
+    finally:
+        draft.teardown()
+
+
+@pytest.mark.parametrize(
+    ("name", "fields", "unit"),
+    [
+        ("twotone/t1", {"t1_us": 12.0, "t1_err_us": 0.2}, "A"),
+        ("twotone/t2ramsey", {"t2r_us": 10.0, "t2r_err_us": 0.1}, "V"),
+        ("twotone/t2echo", {"t2e_us": 15.0, "t2e_err_us": 0.2}, "native"),
+        ("twotone/freq", {"freq_mhz": 4300.0, "freq_err_mhz": 0.1}, "A"),
+    ],
+    ids=["t1", "t2ramsey", "t2echo", "freq"],
+)
+def test_fixed_bias_adapter_accepts_sample_from_run_capture(
+    session: WritebackSession, name: str, fields: JsonObject, unit: str
+) -> None:
+    adapter = _registry().create(name)
+    calibration = _calibration(name)
+    session.control.set_alias_rows(
+        (
+            AliasRow("qubit", "Q1"),
+            AliasRow("resonator", "$qubit.resonator"),
+            AliasRow("flux_dev", "run_bias"),
+        )
+    )
+    captured = session.control.read_context()
+    run_env = SessionEnv(parameters=captured, soc=None, soccfg=None, qub_name="Q2")
+    # A later selection and alias edit must not redirect the sample or its bias.
+    session.control.use_point(PointUseRequest("later-point"))
+    session.control.set_alias_rows(
+        (AliasRow("qubit", "Q2"), AliasRow("flux_dev", "later_bias"))
+    )
+    proposals = adapter.get_writeback_items(
+        WritebackRequest(calibration.source, calibration.analysis, run_env)
+    )
+    samples = [item for item in proposals if isinstance(item, SampleWriteback)]
+    assert len(samples) == 1, f"{name} must offer its fitted sample"
+    assert samples[0].target_name == "Q1"
+    assert samples[0].proposed_value == fields
+
+    snapshot: dict[str, JsonObject] = {
+        "run_bias": {"value": 0.00125, "value_unit": unit},
+        "later_bias": {"value": 9.0, "value_unit": "native"},
+    }
+    draft = session.service.create_draft(
+        proposals,
+        parameters=captured,
+        experiment_name=name,
+        run_id="run-sample",
+        device_snapshot=snapshot,
+    )
+    try:
+        # The draft owns its Run snapshot, not the caller's mutable mapping.
+        snapshot["run_bias"]["value"] = 7.0
+        assert draft.unavailable_reasons == ()
+        for item in draft.items:
+            draft.edit(item.session_id, selected=isinstance(item, SampleWriteback))
+        receipt = draft.apply()
+        assert receipt["written"]["samples"] == ["Q1"]
+        assert receipt["written"]["parameter"] == []
+        event = session.entry.ledger.events()[-1]
+        assert isinstance(event.payload, AcceptedPayload)
+        assert event.kind == "accepted"
+        assert event.payload.run_id == "run-sample"
+        assert [write.path for write in event.payload.writes] == ["Q1"]
+        assert event.payload.writes[0].value == fields | {
+            "dev_value": 0.00125,
+            "dev_unit": unit,
+        }
+        row = session.entry.samples("Q1").latest("run-sample")
+        assert row is not None
+        assert row == fields | {
+            "dev_value": 0.00125,
+            "dev_unit": unit,
+            "run_id": "run-sample",
+            "point": "run-point",
+            "source": event.id,
+            "at": event.at,
+        }
+        sample_path = session.entry.result_path / "samples" / "Q1.jsonl"
+        assert sample_path.is_file()
+        assert len(sample_path.read_text(encoding="utf-8").splitlines()) == 1
+        assert session.entry.samples("Q2").latest("run-sample") is None
+        assert session.control.read_context().value("$qubit") == "Q2"
+        assert session.control.read_target(captured.target).value("Q1.freq") is None
     finally:
         draft.teardown()
