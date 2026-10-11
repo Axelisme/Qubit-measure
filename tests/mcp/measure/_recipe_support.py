@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
 
+from zcu_tools.gui.cfg.reference_key import is_custom_reference_key
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
@@ -48,6 +49,37 @@ def scalar(value: object) -> dict[str, Any]:
 
 def section(**children: dict[str, Any]) -> dict[str, Any]:
     return {"kind": "section", "valid": True, "readonly": False, "children": children}
+
+
+def publish_reference_locks(node: object, *, readonly: bool = False) -> None:
+    """Publish ref modes and propagate source locks without clearing static locks.
+
+    These recording trees select library sources; they do not simulate conversion
+    back to inline. Existing leaf locks remain intact when a source is selected.
+    """
+    if not isinstance(node, dict):
+        raise TypeError("Recording cfg nodes must be mappings")
+    locked = node.get("readonly")
+    if not isinstance(locked, bool):
+        raise TypeError("Recording cfg nodes must declare readonly")
+    child_readonly = readonly or locked or node.get("kind") == "literal"
+    node["readonly"] = child_readonly
+    if node.get("kind") == "reference":
+        reference = node.get("ref")
+        if reference is not None and not isinstance(reference, str):
+            raise TypeError("Recording references must be strings or None")
+        mode = (
+            ("inline" if is_custom_reference_key(reference) else "ref")
+            if reference is not None
+            else None
+        )
+        node["mode"] = mode
+        child_readonly = child_readonly or mode == "ref"
+    children = node.get("children", {})
+    if not isinstance(children, dict):
+        raise TypeError("Recording cfg children must be mappings")
+    for child in children.values():
+        publish_reference_locks(child, readonly=child_readonly)
 
 
 class LookbackGui:
@@ -182,6 +214,7 @@ class LookbackGui:
                 node = node["children"][part]
             if node["kind"] == "reference":
                 node["ref"] = edit["value"]["__ref"]
+                publish_reference_locks(node)
             else:
                 value = edit["value"]
                 if isinstance(value, dict) and "__expr" in value:
