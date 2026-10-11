@@ -434,10 +434,10 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("save_succeeds", [True, False])
-def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
-    tmp_path, monkeypatch, save_succeeds
-):
+@pytest.fixture(params=[True, False], ids=["saved", "incomplete"])
+def admitted_raw_save(tmp_path, monkeypatch, request):
+    """Hold a real recipe at its admitted raw-save transport until released."""
+    save_succeeds = request.param
     gui = LookbackGui()
     expected_report = asdict(RAW_REPORT)
     if not save_succeeds:
@@ -467,41 +467,62 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
             client, client.call("lookback", {"frequency_mhz": 6020.0})
         )
         assert saving.wait(1)
-        execution = initial.data["execution"]
-        with pytest.raises(GuiRpcError) as rejected:
-            client.call("finish_early", {"execution": execution})
-        assert rejected.value.reason == "not_running"
-        cancelled = client.call("cancel", {"execution": execution})
-        assert cancelled.data["gui_cancel"]["status"] == "not_needed"
-        assert cancelled.data["cancel_requested"]
-        during_save = client.call("status", {"execution": execution, "detail": "full"})
-        assert during_save["raw_save"] is None
-        saving_summary = client.call("status", {"execution": execution})
-        assert saving_summary["steps"]["raw_save"] is None
-        assert saving_summary["artifacts"] == {}
-        release_save.set()
-        final = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+        yield (
+            client,
+            initial.data["execution"],
+            expected_report,
+            release_save,
+            save_succeeds,
         )
-        assert not final.is_error  # Successful query, even when execution failed.
-        assert final.data["status"] == "cancelled"
-        assert final.data["raw_save"] == expected_report
-        assert final.data["error"] is None
-        summary = client.call("status", {"execution": execution})
-        assert summary["status"] == final.data["status"]
-        assert not summary["cancel_requested"]
-        assert summary["steps"]["raw_save"]["status"] == (
-            "saved" if save_succeeds else "incomplete"
-        )
-        assert summary["artifacts"]["raw"] == expected_report["artifacts"]["raw"]
-        assert summary["error"] == final.data["error"]
-        methods = [method for method, _ in client.transport.sent]
-        assert methods.count("tab.save_data") == 1
-        assert "operation.cancel" not in methods
-        assert "tab.analyze" not in methods
     finally:
         release_save.set()
         client.context.session.close()
+
+
+def test_lookback_cancel_during_raw_save_has_no_report_until_save_completes(
+    admitted_raw_save,
+):
+    client, execution, _report, _release_save, _save_succeeds = admitted_raw_save
+    with pytest.raises(GuiRpcError) as rejected:
+        client.call("finish_early", {"execution": execution})
+    assert rejected.value.reason == "not_running"
+    cancelled = client.call("cancel", {"execution": execution})
+    assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+    assert cancelled.data["cancel_requested"]
+    during_save = client.call("status", {"execution": execution, "detail": "full"})
+    assert during_save["raw_save"] is None
+    saving_summary = client.call("status", {"execution": execution})
+    assert saving_summary["steps"]["raw_save"] is None
+    assert saving_summary["artifacts"] == {}
+
+
+def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
+    admitted_raw_save,
+):
+    client, execution, expected_report, release_save, save_succeeds = admitted_raw_save
+    cancelled = client.call("cancel", {"execution": execution})
+    assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+    assert cancelled.data["cancel_requested"]
+    release_save.set()
+    final = full_execution_reply(
+        client, client.call("wait", {"execution": execution, "timeout": 2})
+    )
+    assert not final.is_error  # Successful query, even when execution failed.
+    assert final.data["status"] == "cancelled"
+    assert final.data["raw_save"] == expected_report
+    assert final.data["error"] is None
+    summary = client.call("status", {"execution": execution})
+    assert summary["status"] == final.data["status"]
+    assert not summary["cancel_requested"]
+    assert summary["steps"]["raw_save"]["status"] == (
+        "saved" if save_succeeds else "incomplete"
+    )
+    assert summary["artifacts"]["raw"] == expected_report["artifacts"]["raw"]
+    assert summary["error"] == final.data["error"]
+    methods = [method for method, _ in client.transport.sent]
+    assert methods.count("tab.save_data") == 1
+    assert "operation.cancel" not in methods
+    assert "tab.analyze" not in methods
 
 
 @pytest.mark.parametrize("outcome", ["cancelled", "failed"])

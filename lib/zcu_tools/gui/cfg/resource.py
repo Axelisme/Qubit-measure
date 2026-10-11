@@ -706,15 +706,20 @@ class CfgResource:
             prepared.append((resource, candidate, observation))
         for resource, candidate, observation in prepared:
             resource._install_refresh(candidate, observation)
-        for resource in members:
+        CfgResource._notify_group(members)
+        return tuple(deepcopy(observation) for _, _, observation in prepared)
+
+    @staticmethod
+    def _notify_group(resources: Sequence[CfgResource]) -> None:
+        """Block mutations across the whole group until all notifications finish."""
+        for resource in resources:
             resource._notifying += 1
         try:
-            for resource in members:
+            for resource in resources:
                 resource._notify()
         finally:
-            for resource in members:
+            for resource in resources:
                 resource._notifying -= 1
-        return tuple(deepcopy(observation) for _, _, observation in prepared)
 
 
 def _validate_path(path: object) -> None:
