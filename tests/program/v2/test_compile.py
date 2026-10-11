@@ -7,6 +7,8 @@ _initialize / _body / compile pipeline.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import pytest
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.ir import base as ir_base
@@ -33,14 +35,19 @@ def _make_prog(
     return ModularProgramV2(soccfg, cfg, modules=modules or [], sweep=sweep)
 
 
-def _addr_inc(inst: dict) -> int:
+def _addr_inc(inst: Mapping[str, object]) -> int:
     return 2 if inst.get("CMD") == "WAIT" else 1
 
 
 def _expected_p_addr(prog: ModularProgramV2) -> int:
     if not prog.prog_list:
         return 0
-    return max(inst["P_ADDR"] + _addr_inc(inst) for inst in prog.prog_list)
+    end_addrs = []
+    for inst in prog.prog_list:
+        p_addr = inst["P_ADDR"]
+        assert isinstance(p_addr, int)
+        end_addrs.append(p_addr + _addr_inc(inst))
+    return max(end_addrs)
 
 
 def _expected_line(prog: ModularProgramV2) -> int:

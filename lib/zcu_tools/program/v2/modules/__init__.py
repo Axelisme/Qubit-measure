@@ -10,7 +10,7 @@ from zcu_tools.cfg_model import CfgValidationContext
 from zcu_tools.cfg_model import ModuleCfg as CoreModuleCfg
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.context import ModuleLibrary
+    from zcu_tools.resources.context import LibrarySnapshot
 
 from .base import AbsModuleCfg, Module, resolve_module_ref
 from .computed_pulse import ComputedPulse
@@ -117,15 +117,17 @@ class ModuleCfgFactory:
         cls,
         raw: str | dict[str, Any] | AbsModuleCfg,
         *,
-        ml: ModuleLibrary | None = None,
+        ml: LibrarySnapshot | None = None,
     ) -> ModuleCfg:
         if isinstance(raw, str):
             if ml is None:
                 raise ValueError(
                     f"Got module name '{raw}' but ModuleLibrary is not provided"
                 )
-            raw = ml.get_module(raw)
-        return TypeAdapter(ModuleCfg).validate_python(raw, context=dict(ml=ml))
+            resolved_raw = ml.get_module(raw)
+        else:
+            resolved_raw = raw
+        return TypeAdapter(ModuleCfg).validate_python(resolved_raw, context=dict(ml=ml))
 
 
 def _pulse_from_core(
