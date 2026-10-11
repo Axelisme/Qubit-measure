@@ -101,17 +101,17 @@ def test_missing_file_resets_caller_preset_and_first_point_initialization(
 
 
 @pytest.mark.parametrize(
-    "body,version",
+    "body,version,expected_error",
     [
-        ("[]", "1.0"),
-        ("\n  driver: null", "1.0"),
-        ("\n  driver: 7", "1.0"),
-        ("\n  driver: $sense.rate\n  sense: R1", "1.0"),
-        ("{}", "2.0"),
+        ("[]", "1.0", ValueError),
+        ("\n  driver: null", "1.0", ValueError),
+        ("\n  driver: 7", "1.0", ValueError),
+        ("\n  driver: $sense.rate\n  sense: R1", "1.0", InvalidInputError),
+        ("{}", "2.0", ValueError),
     ],
 )
 def test_bad_file_preserves_old_binding_and_aliases(
-    tmp_path: Path, body: str, version: str
+    tmp_path: Path, body: str, version: str, expected_error: type[Exception]
 ) -> None:
     context = service()
     first = entry_at(tmp_path, "one")
@@ -121,8 +121,10 @@ def test_bad_file_preserves_old_binding_and_aliases(
     rows = context.get_alias_rows()
     second = entry_at(tmp_path, "two")
     write_table(second, body, version=version)
-    with pytest.raises(ValueError):
+    with pytest.raises(expected_error) as failure:
         context.install_entry(second)
+    if isinstance(failure.value, InvalidInputError):
+        assert failure.value.reason_code == "alias_invalid"
     assert context.get_source_binding() == binding
     assert context.get_alias_rows() == rows
     info = context.get_entry_info()
