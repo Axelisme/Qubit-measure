@@ -1,6 +1,6 @@
 # workflows/gui — Workflow form attachments
 
-**Last updated:** 2026-10-13, live and reopened overnight trends
+**Last updated:** 2026-10-12, live and reopened overnight trends
 
 這個 package 擁有具體 workflow 的表單、明寫的 to_cfg 與 Qt panel attachment，不實作通用 editor 或 Engine。Native workflow definitions 不依賴這些 GUI attachments。
 
@@ -20,6 +20,8 @@ RPC `workflow.export_fluxdep` 必填 run_id，回 native/Labber outputs 與 ledg
 
 `T1WorkflowWindow.open_overnight_trend(metadata_root)` 只在 Qt owner 與 idle admission 通過後讀取指定 metadata directory 的 journal。它不讀 GUI draft、裝置或 native files，不建立 run、operation 或 RPC target。按鈕 objectName 是 `workflow.trend.open`，圖名是 `overnight_trend`。Live poll 與 terminal delivery 使用 Engine.records，重開使用 artifact owner 的 committed reader；兩者共用同一 scalar 投影與繪圖函式，最後提交也在 finish 前更新。
 
+`gui.layout.build_workflow_layout` 一次建立既有控制項與原 vertical layout，回傳具名 `WorkflowControls`。Carrier 只保留 Window 消費的 Qt controls，不存 domain state，也不接 callback。全部 signal wiring 與 admission policy 留在 Window。Layout 與 Window 都是 fixed source，修改需 restart。
+
 `gui.figures` 的 app-private presentation owner 持有 native Plots、單一 offline Plots 與 committed cursor。Native RPC 不讀 offline 圖。失敗候選清理後保留先前離線 view；成功後才替換。Pause 保留 native 圖，terminal 才 finish，成功 Start 與 close 釋放 offline presentation。這個 owner 與 Window 都是 fixed source，修改需 restart；繪圖時解析目前可 reload 的 science 函式，不把舊 callable 當永久權威。
 
 Records／具名圖 RPC 讀同一 Window 的 native run。Records 直接投影 Engine 已提交的 records，保留 commit cursor 與 captured revision，不從圖反推數值。圖名與 PNG 由 Window 持有的 Plots 提供，PNG 沿 shared renderer 在 Qt owner 產生；status-only 不渲染。Pending acceptance 明確失敗，terminal 圖保留至新 Start 或 close；close 成功釋放後不再提供舊圖。MCP forwarding 已接同一 GUI RPC。
@@ -34,7 +36,7 @@ workflow.form 讀同一 Window 的 plan／knobs schema、input、普通求值 le
 
 `WorkflowForms` owns selected Start panels and inactive per-name RAM parsed drafts. Selection stores the outgoing draft and builds both incoming panels in the fixed capture before switching attachments. Prepare replaces selected defaults in a new capture. MCP partial Start still uses call-local defaults plus its batch, not GUI draft. Controller remains the sole owner of run input, tunables revision and accepted Host binding. New Start/preview/form RPC use the current attachment. Start binds its detached native plan/root to its current exporter; existing run export bindings never follow selection or reload. Overnight has no fluxdep exporter.
 
-App 使用 `SourceCatalogLoader` 監控 zcu_tools/zcu_lab。Reload scope 是 zcu_lab.workflows；app/window/figures/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 接縫固定，其餘 framework、components 與實驗 source 固定。`reload_source()` 僅在 owner thread 呼叫；pending/running/paused 在 prepare/import 前拒絕。Successful reload builds both replacement panels before publication, retains compatible parsed drafts, resets bases and reports dropped paths. A still-declared selection stays selected. A removed or renamed selection changes to the new catalog's first/default attachment, synchronizes the single selector and shows both old and new names in the run message. Explicit unknown Start/select still raises; there is no rename guessing or old callable fallback. Reload never rebuilds session/services/controller/hardware or reads the journal.未標 tag 的 inline union 由 shared FormState 唯一結構相容規則還原，不由 Window 補資料。
+App 使用 `SourceCatalogLoader` 監控 zcu_tools/zcu_lab。Reload scope 是 zcu_lab.workflows；app/window/figures/layout/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 接縫固定，其餘 framework、components 與實驗 source 固定。`reload_source()` 僅在 owner thread 呼叫；pending/running/paused 在 prepare/import 前拒絕。Successful reload builds both replacement panels before publication, retains compatible parsed drafts, resets bases and reports dropped paths. A still-declared selection stays selected. A removed or renamed selection changes to the new catalog's first/default attachment, synchronizes the single selector and shows both old and new names in the run message. Explicit unknown Start/select still raises; there is no rename guessing or old callable fallback. Reload never rebuilds session/services/controller/hardware or reads the journal.未標 tag 的 inline union 由 shared FormState 唯一結構相容規則還原，不由 Window 補資料。
 
 Import 或 panel replacement 失敗保留原 panels 與 RAM parsed draft，但 Start 不可用，直到 retry 成功。Fixed source 改變要求重啟。Bounded import 可能已有副作用，不宣稱 rollback，也不以舊 catalog fallback 啟動。Reload source 動作只提供功能，不處理 UIUX 美化。
 

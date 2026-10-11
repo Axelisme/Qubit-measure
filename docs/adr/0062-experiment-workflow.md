@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-13，committed 趨勢圖唯讀重開
+**Last updated:** 2026-10-12，committed 趨勢圖唯讀重開
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 

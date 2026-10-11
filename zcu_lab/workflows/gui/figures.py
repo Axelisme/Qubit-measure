@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 
-from qtpy.QtWidgets import QFileDialog, QPushButton, QWidget
 from zcu_tools.experiment.workflows import CommittedRecord
 from zcu_tools.experiment.workflows.artifacts import read_committed_records
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -20,8 +18,7 @@ logger = logging.getLogger(__name__)
 class WorkflowFigureViews:
     """Own native and independent offline presentations on one explicit host.
 
-    App-local implementation, not a package-exported run owner. open_button is
-    the sole directory-opening QPushButton; Window owns its enabled policy/slot.
+    App-local implementation, not a package-exported run owner.
     native is the attached run's actual Plots or None before install/after release.
     _offline is one finished read-only view, never an RPC/native target. _cursor
     is the last attempted native commit count, reset with each new native Plots.
@@ -33,18 +30,13 @@ class WorkflowFigureViews:
     so bounded science reload does not freeze an old projection callable.
     """
 
-    def __init__(
-        self, host: PlotHost, parent: QWidget, open_clicked: Callable[[], None]
-    ) -> None:
-        """Build on the Qt owner with QApplication, an explicit host and QWidget parent.
+    def __init__(self, host: PlotHost) -> None:
+        """Borrow the existing explicit PlotHost on its initialized Qt owner.
 
-        open_clicked is the Window's sole opening slot, not an I/O callback here.
         Caller keeps this owner through producer drain and releases on close.
+        No controls, callbacks or native operation authority are acquired.
         """
         self._host = host
-        self.open_button = QPushButton("Open overnight trend…", parent)
-        self.open_button.setObjectName("workflow.trend.open")
-        self.open_button.clicked.connect(open_clicked)
         self.native: Plots | None = None
         self._offline: Plots | None = None
         self._cursor: int | None = None
@@ -71,13 +63,6 @@ class WorkflowFigureViews:
             self.native.release()
             self.native = None
         self._cursor = None
-
-    def choose_metadata_root(self) -> Path | None:
-        """Choose a metadata directory on Qt owner; cancel returns None without I/O."""
-        directory = QFileDialog.getExistingDirectory(
-            self.open_button, "Select workflow metadata directory"
-        )
-        return Path(directory) if directory else None
 
     def refresh_native(self, records: tuple[CommittedRecord, ...]) -> None:
         """Draw an admitted overnight run's complete committed tuple once per cursor.

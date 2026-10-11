@@ -124,6 +124,7 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
                     "app",
                     "window",
                     "figures",
+                    "layout",
                     "remote",
                     "remote_methods",
                     "catalog",

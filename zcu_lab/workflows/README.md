@@ -1,6 +1,6 @@
 # `zcu_lab.workflows` — 使用者 workflow
 
-**Last updated:** 2026-10-13, committed overnight scalar trends
+**Last updated:** 2026-10-12, committed overnight scalar trends
 
 本 package 擁有具體 workflow 的校準、cfg 組裝、分析、record 與 state。通用迭代、取消、提交與保存路徑由 `zcu_tools.experiment.workflows` 負責。宿主建立 catalog，再明確注入框架；import 不啟動 run。宣告只列 name、plan、tunables、init。T1 在步驟開頭檢查 soc／devices／context，v0 檢查 devices／context，缺少時明確失敗。這是定義者的選擇，不是框架的 admission 保證；硬體操作仍經 effect。
 
