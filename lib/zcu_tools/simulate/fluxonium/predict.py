@@ -1,16 +1,32 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields
 from math import isfinite
-from typing import overload
+from typing import TypedDict, overload
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import root_scalar
 
 from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction, MatrixOperator
+
+
+class FluxoniumParameterValues(TypedDict):
+    """Named parameter projection; None denotes an unknown value.
+
+    EJ/EC/EL are energies in GHz. flux_half is the zero-bias half-flux value,
+    flux_period is the signed device-value change per quantum, and flux_bias
+    is the additive device-value correction. All affine values use native units.
+    """
+
+    EJ: float | None
+    EC: float | None
+    EL: float | None
+    flux_half: float | None
+    flux_period: float | None
+    flux_bias: float | None
 
 
 @dataclass(frozen=True)
@@ -31,6 +47,38 @@ class FluxoniumParams:
     flux_half: float | None = None
     flux_period: float | None = None
     flux_bias: float | None = None
+
+    @classmethod
+    def from_mapping(cls, values: Mapping[str, object]) -> FluxoniumParams:
+        """Decode named parameters in the class's GHz/native units, without defaults.
+
+        Omitted/null fields remain unknown. ValueError names unknown keys,
+        nonnumeric/bool or nonfinite values. Physical constraints are checked
+        by build_predictor, so partial inputs can still be inspected/edited.
+        The source mapping is never changed.
+        """
+        unknown = values.keys() - {field.name for field in fields(cls)}
+        if unknown:
+            raise ValueError("Unknown parameters: " + ", ".join(sorted(unknown)))
+        return cls(
+            EJ=_parameter_number(values, "EJ"),
+            EC=_parameter_number(values, "EC"),
+            EL=_parameter_number(values, "EL"),
+            flux_half=_parameter_number(values, "flux_half"),
+            flux_period=_parameter_number(values, "flux_period"),
+            flux_bias=_parameter_number(values, "flux_bias"),
+        )
+
+    def to_dict(self) -> FluxoniumParameterValues:
+        """Return a detached named GHz/native projection, retaining unknown fields."""
+        return FluxoniumParameterValues(
+            EJ=self.EJ,
+            EC=self.EC,
+            EL=self.EL,
+            flux_half=self.flux_half,
+            flux_period=self.flux_period,
+            flux_bias=self.flux_bias,
+        )
 
     def missing(self) -> tuple[str, ...]:
         """Return unknown field names in declaration order, without side effects."""
@@ -74,6 +122,21 @@ class FluxoniumParams:
         if period == 0:
             raise ValueError("flux_period must be nonzero")
         return FluxoniumPredictor((ej, ec, el), half, period, bias)
+
+
+def _parameter_number(values: Mapping[str, object], name: str) -> float | None:
+    value = values.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number or null")
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be finite") from exc
+    if not isfinite(number):
+        raise ValueError(f"{name} must be finite")
+    return number
 
 
 class FluxoniumPredictor:

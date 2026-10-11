@@ -72,7 +72,7 @@ Prediction policy 由本模組擁有。GUI/session/notebook adapter 使用 engin
 
 ### `predict.py` — `FluxoniumParams` 與 `FluxoniumPredictor`
 
-FluxoniumParams 是可未知的具名輸入。EJ／EC／EL 用 GHz，flux_half／flux_period／flux_bias 用 native device units。missing() 列缺項；build_predictor() 只接受完整且有效的輸入，每次建立独立 model，不寫來源。
+FluxoniumParams 是可未知的具名輸入。EJ／EC／EL 用 GHz，flux_half／flux_period／flux_bias 用 native device units。missing() 列缺項；build_predictor() 只接受完整且有效的輸入，每次建立独立 model，不寫來源。from_mapping() 解析具名數值，省略或 null 保持未知，拒絕未知欄位、bool、非數字及非有限值。to_dict() 回具名的 detached FluxoniumParameterValues，保留 None。Wire adapters 使用這兩個公開介面，不自行推斷參數內部形狀。
 
 應用層預測器,連接實驗電流/電壓值與理論模型。
 
