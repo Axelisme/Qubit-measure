@@ -12,6 +12,7 @@ from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDo
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan
+from zcu_lab.components import QubitSchema
 from zcu_lab.workflows.gui.panel import T1PlanPanel, T1TunablesPanel
 from zcu_lab.workflows.gui.plan import T1PlanForm
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
@@ -154,10 +155,17 @@ def test_plan_panel_resolves_default_device_alias_in_fixed_preview(
 ) -> None:
     parameters = environment(30.0).parameters
     assert parameters is not None
+    point = parameters.document()
+    point.components["Q1"] = QubitSchema(
+        kind="qubit/test", flux_source="offline_device"
+    )
+    parameters = ParameterContext(
+        point=point, library=parameters.library, target=parameters.target, roles=None
+    )
     rows = (
-        (AliasRow("source", "offline-device"), AliasRow("flux_dev", "$source"))
+        (AliasRow("qubit", "Q1"), AliasRow("flux_dev", "$qubit.flux_source"))
         if softlink
-        else (AliasRow("flux_dev", "offline-device"),)
+        else (AliasRow("flux_dev", "offline_device"),)
     )
     captured = parameters.bind_aliases(rows, {})
     env = FormEnv(parameters=captured)
@@ -172,13 +180,15 @@ def test_plan_panel_resolves_default_device_alias_in_fixed_preview(
         panel.editor.refresh(env)
         preview = panel.preview(make_plan(inputs).snapshot)
         assert isinstance(preview, T1Plan), preview
-        assert preview.flux_dev == "offline-device"  # Not in any device catalog.
+        assert preview.flux_dev == "offline_device"  # Not in any device catalog.
         assert panel.state.input.data["flux_dev"] == {"expr": "$flux_dev"}
         shown = panel.editor.findChild(QLabel, "form.value.flux_dev")
-        assert shown is not None and "offline-device" in shown.text()
-        parameters.bind_aliases((AliasRow("flux_dev", "later-device"),), {})
+        assert shown is not None and "offline_device" in shown.text()
+        later = parameters.bind_aliases((AliasRow("flux_dev", "later_device"),), {})
+        changed = panel.state.result(FormEnv(parameters=later))
+        assert isinstance(changed, T1PlanForm) and changed.flux_dev == "later_device"
         again = panel.preview(make_plan(inputs).snapshot)
-        assert isinstance(again, T1Plan) and again.flux_dev == "offline-device"
+        assert isinstance(again, T1Plan) and again.flux_dev == "offline_device"
     finally:
         panel.close()
         panel.deleteLater()

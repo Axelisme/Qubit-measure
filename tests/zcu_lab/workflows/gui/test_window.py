@@ -2947,7 +2947,7 @@ def test_window_tunables_journal_failure_reraises_the_original_cause(
 
 
 @pytest.mark.parametrize("starter", ["gui", "mcp"])
-@pytest.mark.parametrize("device", ["flux", "offline-device"])
+@pytest.mark.parametrize("device", ["flux", "offline_device"])
 def test_default_device_alias_start_and_native_save_use_the_run_capture(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     inputs: Inputs,
@@ -2958,12 +2958,9 @@ def test_default_device_alias_start_and_native_save_use_the_run_capture(
 ) -> None:
     window, harness, entry = run_attachment
     context = harness.services.context
+    context.set_parameter(context.read_context().target, "Q1.flux_source", device)
     context.set_alias_rows(
-        (
-            AliasRow("qubit", "Q1"),
-            AliasRow("source", device),
-            AliasRow("flux_dev", "$source"),
-        )
+        (AliasRow("qubit", "Q1"), AliasRow("flux_dev", "$qubit.flux_source"))
     )
     window.prepare_forms()
     plan = [e for e in _start_plan_batch(inputs) if e["path"] != ["flux_dev"]]
@@ -2999,19 +2996,18 @@ def test_default_device_alias_start_and_native_save_use_the_run_capture(
     # No membership check at Start, even for an unknown device name.
     assert isinstance(token, int), token
     assert window.plan_panel.state.input.data["flux_dev"] == {"expr": "$flux_dev"}
+    context.set_parameter(
+        context.read_context().target, "Q1.flux_source", "later_device"
+    )
     context.set_alias_rows(
-        (
-            AliasRow("qubit", "Q1"),
-            AliasRow("source", "later-device"),
-            AliasRow("flux_dev", "$source"),
-        )
+        (AliasRow("qubit", "Q1"), AliasRow("flux_dev", "later_device"))
     )
     harness.complete_segment()
     status = window.controller.status()
     assert status is not None
     engine = window.controller.engine
     assert engine is not None
-    if device == "offline-device":
+    if device == "offline_device":
         assert status.lifecycle == "failed" and device in str(status.reason)
         assert engine.records(run_id) == ()
         return
@@ -3027,11 +3023,7 @@ def test_default_device_alias_start_and_native_save_use_the_run_capture(
     spec = T1Exp().persistence_spec()
     native, metadata = load_run_with_metadata(source, spec=spec)
     assert native.cfg is not None and native.cfg.dev.flux_dev == "flux"
-    assert metadata.snapshot.roles == {
-        "qubit": "Q1",
-        "source": "flux",
-        "flux_dev": "flux",
-    }
+    assert metadata.snapshot.roles == {"qubit": "Q1", "flux_dev": "flux"}
     # Save again after the live alias edit; neither form input nor history refreshes.
     destination = tmp_path / "saved-again.h5"
     save_run(native, destination, spec=spec, metadata=metadata)
