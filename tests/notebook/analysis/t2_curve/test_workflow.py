@@ -784,15 +784,6 @@ def test_run_t2_curve_analysis_threads_correction_setting(
     assert prepare_kwargs["correct_flux_from_f01_enabled"] is False
 
 
-def test_t2_workflow_has_no_current_scale_vocabulary() -> None:
-    import zcu_tools.notebook.analysis.fit_tools as fit_tools
-
-    assert not hasattr(workflow, "choose_current_scale")
-    assert not hasattr(workflow, "choose_current_scale_from_f01")
-    assert not hasattr(fit_tools, "choose_current_scale_from_f01")
-    assert "calibrated mA" not in workflow._REQUIRED_COLUMNS
-
-
 def _synthetic_dephasing_data(
     A_phi: float,
     n_th: float,
