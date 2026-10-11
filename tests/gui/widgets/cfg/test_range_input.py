@@ -73,7 +73,7 @@ def editor(qapp: QApplication, request) -> Iterator[RangeEditor]:
         lambda: schema,
         resolution=lambda: CfgResolution(
             (),
-            lambda expression: {"offset": 3.0}[expression],
+            lambda expression: {"offset": 3.0, "offset * 2": 6.0}[expression],
             lambda source_id: (),
             NoReferences(),
             lambda _: 0,
