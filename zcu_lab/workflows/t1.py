@@ -230,11 +230,11 @@ def t1_fluxdep(
     yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
     cal = yield from calibrate(
         env,
-        plan.qub_pulse,
-        plan.readout,
-        tun.cal,
-        flux,
-        state.cal,
+        qub_pulse=plan.qub_pulse,
+        readout=plan.readout,
+        tun=tun.cal,
+        flux=flux,
+        carry=state.cal,
         t1_estimate_us=(state.t1_by_flux[-1][1] if state.t1_by_flux else tun.guess_us),
         savers=CalibrationSavers(
             partial(save_frequency, snapshot=plan.snapshot),

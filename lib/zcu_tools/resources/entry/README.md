@@ -1,10 +1,16 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-10，容器版本與元件 model 的驗證分界
+**Last updated:** 2026-10-11，entry-authored alias table persistence
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
 `create` 建立 setup、points、records 與同名 Database 條目目錄。任一目的地已存在就拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 要求完整的新格式條目，不猜測 legacy 格式。
+
+## 條目 alias 表
+
+`ResultEntry.load_aliases` 與 `save_aliases` 使用具名 `EntryAliases`，保存 entry 的 authored 有序表。`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。Mapping 保留空字串、原始 `$` link 與順序。空 mapping 是明確空表，只有檔案不存在才回 `None`。格式、結構與非字串值錯誤直接回報，不退回 preset。
+
+Resources 只保存與驗證資料表示。Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。這不是 point、setup、ledger 或 memento，也不提供跨檔交易、multiwriter merge 或掉電恢復。
 
 ## 文件與 seed
 
@@ -84,12 +90,17 @@ List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。
 
 ## 角色與失敗
 
+以下是 Notebook `PointView.resolve` 的角色契約。GUI 使用 ContextService 的
+同一張元件／device alias 表，Dialog Apply 才保存 entry，普通 set 只改 memory。
+公開 `read_context` 不要求 GUI consumer roles 或 kind 檢查。Tab 不固定角色或環境，
+Run 記錄當次固定 names。Notebook 不讀 aliases.yaml，MCP temporary overrides 不寫它。
+
 `PointView.resolve` 只使用 bound point 的快照。Sequence 取 role registry 的 RoleSpec，Mapping 可覆寫 kind pattern 與 via。未傳角色表時使用 caller 設定的有序 shorthand，沒有設定就報錯。
 
-解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色；RoleRegistry.default_focus 集中選取符合 focus kind patterns 的唯一候選，roles resolver 與 session focus 共用它。
+解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色；RoleRegistry.default_focus 集中選取符合 focus kind patterns 的唯一候選，Notebook roles resolver 與 GUI primary alias 的首次初始化共用唯一候選判定，但 GUI 不使用這套 focus／via 推論角色。
 
 Explicit 的 None 明確不綁該角色，不改用焦點或 via；讀取時指名 RoleResolutionError。省略 explicit key 才允許自動推論。自動推論缺引用或多個候選時省略該角色；via 的來源角色未綁時也省略衍生角色。未知角色、多餘 explicit、明確指定不存在的元件、實際 dangling 引用或 kind 不符仍以 RoleResolutionError 回報。RoleView 保留同次宣告，讀取已宣告未綁角色（包括 hasattr）時指名 RoleResolutionError；未知 attribute 仍為 AttributeError。RoleResolutionError 是 ValueError，工具不能把未綁角色視為不存在的 attribute。RoleView 固定解析當下的名稱映射與 owning point 來源，元件值仍跟隨 PointView，回傳映射不可修改。來源由 PointView.resolve 捕捉；存檔 caller 只交給 capture_point_storage 驗證，不比較 callback 或讀 private binding。
 
 `rename_entry` 移動兩個目錄，不改檔案內容。第二次移動失敗時復原第一次。復原也失敗時，RenameRecoveryError 回報兩個路徑與原始 I/O 原因，不承諾跨檔掉電保證。
 
-Entry／point 提供隔離的 publication 與 read binding。ResultEntry.list_names 只列含 setup.yaml 的直屬目錄，不解析文件或尋找 legacy 參數。ContextService、Notebook runtime、完整 GUI／MCP 參數操作、Ledger producer 與 accept／writeback 仍由後續切片接線。
+Entry／point 提供隔離的 publication 與 read binding。ResultEntry.list_names 只列含 setup.yaml 的直屬目錄，不解析文件或尋找 legacy 參數。ContextService、Notebook 與 GUI／MCP 消費這些能力；acquired、saved 和 accepted 的 producer 各由前端 acquisition、共用 saver 與接受結果的 owner 負責，entry 不代做流程編排。

@@ -96,7 +96,7 @@ class _BaseFloquetBranchAnalysis:
             avg_times = np.array([0.0])
 
         fstates_t_n = [
-            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])  # type: ignore
+            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])
             for fbasis in tqdm(
                 fbasis_n, desc="Computing time dependent states", disable=not progress
             )

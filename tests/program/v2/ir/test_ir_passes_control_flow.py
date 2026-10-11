@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import pytest
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
@@ -25,6 +26,7 @@ from zcu_tools.program.v2.ir.operands import (
     AluOp,
     Immediate,
     Register,
+    SideWrite,
     SrcKeyword,
 )
 from zcu_tools.program.v2.ir.passes.control_flow import (
@@ -35,6 +37,7 @@ from zcu_tools.program.v2.ir.passes.control_flow import (
 )
 from zcu_tools.program.v2.ir.passes.dataflow import DeadWriteEliminationPass
 from zcu_tools.program.v2.ir.pipeline import (
+    ChunkList,
     PipeLineConfig,
     PipeLineContext,
 )
@@ -450,3 +453,41 @@ def test_branch_elim_no_next_block_keeps_jump():
     # Branch must be preserved
     assert bb.branch is not None
     assert isinstance(bb.branch, JumpInst)
+
+
+@pytest.mark.parametrize(
+    "jump",
+    [
+        pytest.param(
+            JumpInst(
+                label=LabelRef(Label("next")),
+                op=AluExpr(Register("r0"), AluOp.ADD, Immediate(1)),
+            ),
+            id="alu",
+        ),
+        pytest.param(
+            JumpInst(
+                label=LabelRef(Label("next")),
+                wr=SideWrite(Register("r1"), "op"),
+            ),
+            id="write",
+        ),
+        pytest.param(JumpInst(label=LabelRef("NEXT")), id="pseudo"),
+    ],
+)
+def test_branch_elim_preserves_effectful_or_pseudo_jump(jump: JumpInst):
+    block = BasicBlockNode(insts=[NopInst()], branch=jump)
+    next_block = BasicBlockNode(
+        labels=[LabelInst(name=Label("next"))], insts=[NopInst()]
+    )
+    chunks: ChunkList = [block, next_block]
+    original_dict = jump.to_dict()
+    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
+
+    out, changed = BranchEliminationPass().process(chunks, ctx)
+
+    assert changed is False
+    assert out == [block, next_block]
+    assert isinstance(block.branch, JumpInst)
+    assert block.branch == jump
+    assert block.branch.to_dict() == original_dict

@@ -463,11 +463,70 @@ def test_user_catalog_reloads_without_replacing_framework_identity(
     assert domain.Experiment().token() is fixed.TOKEN
 
 
+def _notebook_modules() -> dict[str, ModuleType]:
+    return {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "zcu_tools.notebook" or name.startswith("zcu_tools.notebook.")
+    }
+
+
+def _discard_new_notebook_modules(original: dict[str, ModuleType]) -> None:
+    for name, module in _notebook_modules().items():
+        if name not in original:
+            del sys.modules[name]
+            parent_name, _, leaf = name.rpartition(".")
+            parent = sys.modules.get(parent_name)
+            if isinstance(parent, ModuleType) and getattr(parent, leaf, None) is module:
+                delattr(parent, leaf)
+
+
+@pytest.fixture
+def notebook_namespace_guard(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Restore this fixture's notebook imports and name any identity polluter."""
+    original_notebook_modules = _notebook_modules()
+    # Importing the namespace can add child attributes to already loaded parents.
+    original_namespace_links: list[tuple[ModuleType, str, bool, object]] = []
+    for name in (
+        "zcu_tools.notebook",
+        "zcu_tools.notebook.analysis",
+        "zcu_tools.notebook.analysis.mist",
+    ):
+        parent_name, _, leaf = name.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        if isinstance(parent, ModuleType):
+            original_namespace_links.append(
+                (parent, leaf, leaf in vars(parent), vars(parent).get(leaf))
+            )
+    try:
+        yield
+    finally:
+        _discard_new_notebook_modules(original_notebook_modules)
+        for parent, leaf, existed, value in original_namespace_links:
+            if existed:
+                setattr(parent, leaf, value)
+            elif leaf in vars(parent):
+                delattr(parent, leaf)
+        importlib.invalidate_caches()
+        assert _notebook_modules() == original_notebook_modules, (
+            f"{request.node.nodeid} changed existing notebook module identities"
+        )
+        for parent, leaf, existed, value in original_namespace_links:
+            assert (leaf in vars(parent)) == existed, request.node.nodeid
+            if existed:
+                assert vars(parent)[leaf] is value, request.node.nodeid
+
+
 @pytest.fixture
 def leaf_catalog(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    notebook_namespace_guard: None,
 ) -> Iterator[CatalogFixture]:
     """Use a core/gui leaf, fixed shared types and startup-only roles."""
+    import_timing = getattr(request, "param", None)
+    # The control never explicitly imports mist, unlike both capture timings.
     root = tmp_path / "loader_leaf"
     files = {
         "__init__.py": "",
@@ -504,11 +563,15 @@ def leaf_catalog(
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(content), encoding="utf-8")
+    if import_timing == "reload_owned_namespace":
+        (root / "v2/family/demo/__init__.py").unlink()
     monkeypatch.syspath_prepend(str(tmp_path))
     try:
         original = importlib.import_module("loader_leaf.v2.family.demo.core")
         importlib.import_module("loader_leaf.roles")
         importlib.import_module("loader_leaf.definitions")
+        if import_timing == "before_capture":
+            importlib.import_module("zcu_tools.notebook.analysis.mist")
         loader = SourceExperimentCatalogLoader(
             sources=(
                 SourcePackage("zcu_tools", Path(zcu_tools.__file__).parent),
@@ -518,6 +581,8 @@ def leaf_catalog(
             preserved_modules=("loader_leaf.v2._support", "loader_leaf.roles"),
             catalog_module="loader_leaf.definitions",
         )
+        if import_timing == "after_capture":
+            importlib.import_module("zcu_tools.notebook.analysis.mist")
         yield CatalogFixture(root, loader, original)
     finally:
         for name in tuple(sys.modules):
@@ -526,6 +591,16 @@ def leaf_catalog(
         importlib.invalidate_caches()
 
 
+@pytest.mark.parametrize(
+    "leaf_catalog",
+    [
+        "never_explicit_import",
+        "before_capture",
+        "after_capture",
+        "reload_owned_namespace",
+    ],
+    indirect=True,
+)
 def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types(
     leaf_catalog: CatalogFixture,
 ) -> None:
@@ -541,7 +616,14 @@ def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types
                 return "v2"
         """,
     )
-    registry = leaf_catalog.reload()
+    try:
+        plan = leaf_catalog.loader.prepare()
+    except CatalogReloadError as exc:
+        pytest.fail(f"Preflight rejected an unchanged fixed framework: {exc}")
+    try:
+        registry = leaf_catalog.loader.load(plan)
+    except CatalogReloadError as exc:
+        pytest.fail(f"Reload rejected existing source packages: {exc}")
     adapter = registry.create("demo")
     core = importlib.import_module("loader_leaf.v2.family.demo.core")
     assert adapter.guide().behavior == "v2"

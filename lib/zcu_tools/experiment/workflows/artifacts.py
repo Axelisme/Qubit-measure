@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from copy import deepcopy
@@ -14,7 +15,7 @@ from threading import RLock
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import JsonValue, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from .journal import (
     IterationResult,
@@ -22,6 +23,10 @@ from .journal import (
     JournalPayload,
     RunMetadata,
     RunStarted,
+    StepCommitted,
+    StepDiscarded,
+    StepFailed,
+    StepFinished,
 )
 from .models import (
     CommittedRecord,
@@ -60,6 +65,25 @@ class RunManifest:
     format_version: Literal[1] = field(default=1, init=False)
 
 
+@dataclass(frozen=True)
+class _IterationInputs:
+    """Detached input summary captured before user code can mutate tunables.
+
+    identity/workflow/plan retain the run's startup values. tunables contains
+    this call's complete ordinary JSON values. started retains the journal
+    invocation identity; its directory is omitted from the input JSON summary.
+    No workflow state or experiment cfg/results are retained here.
+    """
+
+    identity: RunIdentity
+    workflow: str
+    plan: JsonValue
+    tunables: JsonValue
+    started: IterationStarted
+
+
+_logger = logging.getLogger(__name__)
+_inputs_adapter = TypeAdapter(_IterationInputs)
 _payload_adapter = TypeAdapter(JournalPayload)
 _manifest_adapter = TypeAdapter(RunManifest)
 _json_adapter = TypeAdapter(JsonValue)
@@ -255,6 +279,58 @@ class RunArtifacts:
             writer.flush()
         temporary.replace(self._paths.metadata_root / "manifest.json")
 
+    def capture_record(
+        self, started: IterationStarted, tunables: BaseModel
+    ) -> _IterationInputs | None:
+        """Capture this invocation's inputs without writing a pending document.
+
+        Called before workflow code receives its tunables. JSON projection
+        failures are logged and disable only this invocation's summary.
+        """
+        try:
+            values = _json_adapter.validate_python(
+                tunables.model_dump(mode="json", by_alias=False, warnings="error")
+            )
+            return _IterationInputs(
+                self._manifest.identity,
+                self._manifest.workflow,
+                self._manifest.plan,
+                values,
+                started,
+            )
+        except Exception:
+            _logger.exception("Cannot capture workflow iteration record inputs")
+            return None
+
+    def save_record(
+        self,
+        iteration: IterationArtifacts,
+        inputs: _IterationInputs | None,
+        result: StepCommitted | StepFinished | StepDiscarded | StepFailed,
+    ) -> None:
+        """Save a summary only after the Engine has journaled its result.
+
+        The journal remains the sole commit authority. Summary serialization
+        and I/O failures are logged and isolated from state and lifecycle.
+        """
+        if inputs is None:
+            return
+        try:
+            payload = _json_object(inputs, _inputs_adapter)
+            started = _json_object(inputs.started, _payload_adapter)
+            del started["iteration_dir"]
+            payload.update(
+                format="zcu-workflow-iteration",
+                format_version=1,
+                started=started,
+                result=_json_object(result, _payload_adapter),
+            )
+            iteration.save_record(payload)
+        except Exception:
+            _logger.exception(
+                "Cannot save workflow iteration record for %s", iteration.iteration_dir
+            )
+
     def new_iteration(self, call_seq: int) -> IterationArtifacts:
         """Create iter/<call_seq>/runs and files and return its publication seam.
 
@@ -308,6 +384,22 @@ class IterationArtifacts:
         published before a later cleanup error are retained and listed.
         """
         return tuple(self._run_files[number] for number in sorted(self._run_files))
+
+    def save_record(self, payload: dict[str, JsonValue]) -> None:
+        """Atomically publish a finished invocation's JSON summary.
+
+        payload is the Engine-owned input/result envelope, not workflow state.
+        Write and close a unique same-directory temporary before replace.
+        Errors propagate to RunArtifacts' best-effort isolation; temporary
+        files remain for diagnosis, and no retry or checkpoint is provided.
+        """
+        line = _json_line(payload)
+        temporary = self._root / f".record-{uuid4().hex}.tmp.json"
+        with temporary.open("x", encoding="utf-8", newline="\n") as writer:
+            if writer.write(line) != len(line):
+                raise OSError("Iteration record write was incomplete")
+            writer.flush()
+        temporary.replace(self._root / "record.json")
 
     def save[Cfg, Result](
         self,

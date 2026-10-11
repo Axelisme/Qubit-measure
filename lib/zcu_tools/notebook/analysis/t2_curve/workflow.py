@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal, cast
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -402,17 +402,17 @@ def calibrate_t2_flux(
     )
     t2e_values = _float_column(samples_df, "T2e (us)")
     t2e_mask = np.isfinite(t2e_values)
-    t2e_df = cast(pd.DataFrame, samples_df.loc[t2e_mask].copy())
+    t2e_df = samples_df.loc[t2e_mask].copy()
     if "T2r (us)" in samples_df.columns:
         t2r_values = _float_column(samples_df, "T2r (us)")
         t2r_mask = np.isfinite(t2r_values)
-        t2r_df = cast(pd.DataFrame, samples_df.loc[t2r_mask].copy())
+        t2r_df = samples_df.loc[t2r_mask].copy()
     else:
         t2r_mask = np.zeros(len(samples_df), dtype=bool)
         t2r_df = samples_df.iloc[0:0].copy()
 
     freq_mask = np.isfinite(_float_column(samples_df, "Freq (MHz)"))
-    freq_rows = cast(pd.DataFrame, samples_df.loc[freq_mask].copy())
+    freq_rows = samples_df.loc[freq_mask].copy()
     source_counts = {
         source: sum(1 for item in resolution.sources if item == source)
         for source in ("explicit", "row-frame", "fallback-frame")
@@ -684,13 +684,8 @@ def analyze_photon_shot_noise_limit(
     n_stderr = _optional_float(fit_result.stderr.n_th)
     finite_pointwise = _finite_positive(pointwise_n_th)
     n_upper = float(np.nanmax(finite_pointwise))
-    context = data.calibration.context
     thermal = _thermal_estimate(
-        data.sample,
-        data.fit,
-        params=context.params,
-        bare_rf=context.bare_rf,
-        g=context.g,
+        data,
         kappa_over_2pi_mhz=readout_kappa_over_2pi_mhz,
     )
     thermal_limit_table = make_thermal_limit_table(
@@ -1291,15 +1286,10 @@ def run_t2_curve_analysis(
     figure_paths: dict[str, str] = {}
     if config.save_figures or config.show_figures:
         figure_paths = _save_standard_figures(
-            context,
-            data,
             flux_probe,
             photon_probe,
             channel_analysis,
-            save_figures=config.save_figures,
-            show_figures=config.show_figures,
-            thermal_n_th_range=config.thermal_n_th_range,
-            thermal_n_th_count=config.thermal_n_th_count,
+            config=config,
         )
     result = collect_t2_curve_result(
         context=context,
@@ -1432,7 +1422,7 @@ def _prepare_window_data(
     )
     order = np.argsort(resolved.aligned_fluxs[resolved.in_window])
 
-    def take(values_arr: NDArray[np.float64]) -> NDArray[np.float64]:
+    def take[T: np.generic](values_arr: NDArray[T]) -> NDArray[T]:
         return np.asarray(values_arr)[resolved.in_window][order]
 
     f01_observed = _float_column(samples_df, "Freq (MHz)")[valid_t2e]
@@ -1634,15 +1624,7 @@ def _coverage_row(
     )
     return _coverage_columns(
         label,
-        raw_fluxs=resolved.raw_fluxs,
-        corrected_fluxs=resolved.corrected_fluxs,
-        aligned_fluxs=resolved.aligned_fluxs,
-        shifts=resolved.shifts,
-        in_window=resolved.in_window,
-        f01_measured=resolved.f01_measured,
-        correction_applied=resolved.f01_correction_applied,
-        correction_skipped_reason=resolved.correction_skipped_reason,
-        flux_sources=resolved.flux_sources,
+        resolved,
         model_f01_finite=np.isfinite(
             predict_f01_mhz(calibration.context.params, resolved.aligned_fluxs)
         ),
@@ -1654,35 +1636,34 @@ def _coverage_row_from_diagnostics(
 ) -> dict[str, object]:
     if len(diagnostics.raw_fluxs) == 0:
         return _empty_coverage_row(label)
-    return _coverage_columns(
-        label,
+    resolved = _ResolvedFrame(
         raw_fluxs=diagnostics.raw_fluxs,
         corrected_fluxs=diagnostics.corrected_fluxs,
         aligned_fluxs=diagnostics.aligned_fluxs,
         shifts=diagnostics.integer_shifts,
         in_window=diagnostics.in_window,
         f01_measured=diagnostics.f01_measured,
-        correction_applied=diagnostics.correction_applied,
+        f01_correction_applied=diagnostics.correction_applied,
         correction_skipped_reason=diagnostics.correction_skipped_reason,
         flux_sources=diagnostics.flux_sources,
-        model_f01_finite=np.isfinite(diagnostics.f01_model_mhz),
     )
+    return _coverage_columns(label, resolved, np.isfinite(diagnostics.f01_model_mhz))
 
 
 def _coverage_columns(
     label: str,
-    *,
-    raw_fluxs: NDArray[np.float64],
-    corrected_fluxs: NDArray[np.float64],
-    aligned_fluxs: NDArray[np.float64],
-    shifts: NDArray[np.float64],
-    in_window: NDArray[np.bool_],
-    f01_measured: NDArray[np.bool_],
-    correction_applied: NDArray[np.bool_],
-    correction_skipped_reason: tuple[str, ...],
-    flux_sources: tuple[str, ...],
+    resolved: _ResolvedFrame,
     model_f01_finite: NDArray[np.bool_],
 ) -> dict[str, object]:
+    raw_fluxs = resolved.raw_fluxs
+    corrected_fluxs = resolved.corrected_fluxs
+    aligned_fluxs = resolved.aligned_fluxs
+    shifts = resolved.shifts
+    in_window = resolved.in_window
+    f01_measured = resolved.f01_measured
+    correction_applied = resolved.f01_correction_applied
+    correction_skipped_reason = resolved.correction_skipped_reason
+    flux_sources = resolved.flux_sources
     shifts_in_window = shifts[in_window]
     source_counts = {
         source: sum(1 for item in flux_sources if item == source)
@@ -1806,7 +1787,7 @@ def _half_preview_table(
         ]
         if column in frame.columns
     ]
-    preview = cast(pd.DataFrame, frame.loc[:, preview_columns].copy())
+    preview = frame.loc[:, preview_columns].copy()
     preview["raw flux"] = resolved.raw_fluxs
     preview["f01-corrected flux"] = resolved.corrected_fluxs
     preview["aligned flux"] = resolved.aligned_fluxs
@@ -1818,18 +1799,17 @@ def _half_preview_table(
         & (resolved.aligned_fluxs <= analysis_flux_range[1])
         & np.isclose(resolved.aligned_fluxs, 0.5)
     )
-    return cast(pd.DataFrame, preview.loc[in_half].copy())
+    return preview.loc[in_half].copy()
 
 
 def _thermal_estimate(
-    sample: T2CurveData,
-    fit: T2CurveData,
+    data: T2DephasingAnalysis,
     *,
-    params: tuple[float, float, float],
-    bare_rf: float,
-    g: float,
     kappa_over_2pi_mhz: float,
 ) -> T2CurveThermalEstimate:
+    sample, fit = data.sample, data.fit
+    context = data.calibration.context
+    params, bare_rf, g = context.params, context.bare_rf, context.g
     half_sample_idx = int(np.nanargmin(np.abs(sample.fluxs - 0.5)))
     half_flux = float(sample.fluxs[half_sample_idx])
     half_T1_us = float(sample.T1_us[half_sample_idx])
@@ -2073,13 +2053,32 @@ def _error_fill_summary(result: ErrorResolutionResult | None) -> str:
 
 def _diagnostic_rows(
     prefix: str,
-    *,
-    sources: Sequence[str],
-    f01_measured: NDArray[np.bool_],
-    correction_skipped_reason: Sequence[str],
-    integer_shifts: NDArray[np.float64],
-    model_f01_finite: NDArray[np.bool_],
+    data: T2WindowData | T2RowDiagnostics,
 ) -> list[tuple[str, str]]:
+    """Summarize the selected window rows, preserving provenance and shift order."""
+    if isinstance(data, T2WindowData):
+        sources = data.flux_sources
+        f01_measured = data.f01_measured
+        correction_skipped_reason = data.correction_skipped_reason
+        integer_shifts = data.integer_shifts
+        model_f01_finite = np.isfinite(data.f01_mhz) & ~data.f01_measured
+    else:
+        in_window = data.in_window
+        sources = tuple(
+            source
+            for source, keep in zip(data.flux_sources, in_window, strict=True)
+            if keep
+        )
+        f01_measured = data.f01_measured[in_window]
+        correction_skipped_reason = tuple(
+            reason
+            for reason, keep in zip(
+                data.correction_skipped_reason, in_window, strict=True
+            )
+            if keep
+        )
+        integer_shifts = data.integer_shifts[in_window]
+        model_f01_finite = np.isfinite(data.f01_model_mhz[in_window])
     source_counts = {
         source: sum(1 for item in sources if item == source)
         for source in ("explicit", "row-frame", "fallback-frame")
@@ -2139,16 +2138,7 @@ def _dephasing_summary_table(
         ("sample rows", str(len(sample.T2e_us))),
         ("fit rows", str(len(fit.T2e_us))),
     ]
-    rows.extend(
-        _diagnostic_rows(
-            "",
-            sources=window.flux_sources,
-            f01_measured=window.f01_measured,
-            correction_skipped_reason=window.correction_skipped_reason,
-            integer_shifts=window.integer_shifts,
-            model_f01_finite=np.isfinite(window.f01_mhz) & ~window.f01_measured,
-        )
-    )
+    rows.extend(_diagnostic_rows("", window))
     if len(t2r_diagnostics.raw_fluxs) > 0:
         in_window = t2r_diagnostics.in_window
         rows.append(
@@ -2157,30 +2147,7 @@ def _dephasing_summary_table(
                 f"{int(np.count_nonzero(in_window))}/{len(t2r_diagnostics.raw_fluxs)}",
             )
         )
-        rows.extend(
-            _diagnostic_rows(
-                "T2r",
-                sources=tuple(
-                    source
-                    for source, keep in zip(
-                        t2r_diagnostics.flux_sources, in_window, strict=True
-                    )
-                    if keep
-                ),
-                f01_measured=t2r_diagnostics.f01_measured[in_window],
-                correction_skipped_reason=tuple(
-                    reason
-                    for reason, keep in zip(
-                        t2r_diagnostics.correction_skipped_reason,
-                        in_window,
-                        strict=True,
-                    )
-                    if keep
-                ),
-                integer_shifts=t2r_diagnostics.integer_shifts[in_window],
-                model_f01_finite=np.isfinite(t2r_diagnostics.f01_model_mhz[in_window]),
-            )
-        )
+        rows.extend(_diagnostic_rows("T2r", t2r_diagnostics))
     rows.extend(
         [
             (
@@ -2207,17 +2174,14 @@ def _stage_table(stage: str, table: pd.DataFrame) -> pd.DataFrame:
 
 
 def _save_standard_figures(
-    context: T2CurveContext,
-    data: T2DephasingAnalysis,
     flux_probe: T2FluxNoiseProbe,
     photon_probe: T2PhotonShotNoiseProbe,
     channel_analysis: T2ChannelAnalysis,
     *,
-    save_figures: bool,
-    show_figures: bool,
-    thermal_n_th_range: tuple[float, float],
-    thermal_n_th_count: int,
+    config: T2CurveAnalysisConfig,
 ) -> dict[str, str]:
+    data = channel_analysis.combined_fit.data
+    context = data.calibration.context
     figures = {
         "flux_calibration": (
             plot_t2_flux_calibration(data)[0],
@@ -2233,8 +2197,8 @@ def _save_standard_figures(
         "photon_shot_noise_probe": (
             plot_photon_shot_noise_probe(
                 photon_probe,
-                n_th_range=thermal_n_th_range,
-                n_th_count=thermal_n_th_count,
+                n_th_range=config.thermal_n_th_range,
+                n_th_count=config.thermal_n_th_count,
             )[0],
             "T2e_thermal_photon_limit.png",
             None,
@@ -2253,10 +2217,10 @@ def _save_standard_figures(
     paths: dict[str, str] = {}
     for name, (fig, filename, bbox_inches) in figures.items():
         path = os.path.join(context.image_dir, filename)
-        if save_figures:
+        if config.save_figures:
             fig.savefig(path, dpi=160, bbox_inches=bbox_inches)
             paths[name] = path
-        if show_figures:
+        if config.show_figures:
             plt.show()
         plt.close(fig)
     return paths

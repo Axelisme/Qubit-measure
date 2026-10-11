@@ -30,7 +30,8 @@ from zcu_tools.gui.remote.errors import RemoteError, remote_error_from_expected
 
 CFG_OBSERVATION_DESCRIPTION = (
     "Returns {tree}, a complete cached cfg observation including locked fields. "
-    "Nodes carry kind/path/label/valid; section/reference children are named nodes. "
+    "Nodes carry kind/path/label/valid/readonly; section/reference children are named nodes. "
+    "References expose mode inline/ref or null when disabled; ref descendants are readonly. "
     "Scalar/literal input and sweep inputs carry mode/raw/resolved/error/validation_error. "
     "Complex values use {__complex__: [real, imag]}. Scalar choices and reference "
     "ref/resolved_label/error/choices describe the displayed model, without resolving sources. "
@@ -119,6 +120,7 @@ def _project(
         "path": list(path) if isinstance(path, tuple) else path,
         "label": spec.label,
         "valid": node.valid,
+        "readonly": node.readonly,
     }
     if isinstance(spec, (CfgSectionSpec, ReferenceSpec)):
         result["children"] = {
@@ -171,7 +173,7 @@ def _reference(node: CfgNodeObservation, spec: ReferenceSpec) -> dict[str, objec
         "ref": value.chosen_key if value is not None else None,
         "resolved_label": value.resolved_label if value is not None else None,
         "error": value.error if value is not None else None,
-        "is_overridden": value.is_overridden if value is not None else False,
+        "mode": node.mode,
     }
 
 

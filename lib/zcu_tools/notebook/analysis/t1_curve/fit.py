@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal, cast
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -349,7 +349,9 @@ def _validate_bounds(
     bounds: FitBounds | None,
     active_names: tuple[ParameterName, ...],
 ) -> tuple[dict[ParameterName, float], dict[ParameterName, float]]:
-    merged = dict(_DEFAULT_BOUNDS)
+    merged: dict[str, tuple[float, float]] = {
+        name: limits for name, limits in _DEFAULT_BOUNDS.items()
+    }
     if bounds is not None:
         unknown = set(bounds) - set(_PARAMETER_NAMES)
         if unknown:
@@ -359,8 +361,7 @@ def _validate_bounds(
             raise ValueError(
                 f"bounds contain inactive parameter(s): {sorted(inactive)}"
             )
-        for raw_name, (raw_lower, raw_upper) in bounds.items():
-            name = cast(ParameterName, raw_name)
+        for name, (raw_lower, raw_upper) in bounds.items():
             if raw_lower is None:
                 if name != "Temp":
                     raise ValueError("only Temp lower bound can be None")

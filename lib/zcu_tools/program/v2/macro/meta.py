@@ -27,7 +27,7 @@ class MetaMacro(Macro):
     ) -> None:
         super().__init__(type=type, name=name, info=info or {}, regs=regs or {})
 
-    def translate(self, prog: IRCompileMixin):  # type: ignore[override]
+    def translate(self, prog: IRCompileMixin):
         resolved_info = dict(self.info)
         for key, reg_name in self.regs.items():
             resolved_info[key] = prog._get_reg(reg_name)

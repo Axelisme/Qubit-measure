@@ -87,6 +87,7 @@ class SweepGui(TargetGui):
         self.publication["tree"]["children"]["sweep"] = {
             "kind": "sweep",
             "valid": True,
+            "readonly": False,
             "inputs": inputs,
         }
         self.resolved: dict[str, float] = {}

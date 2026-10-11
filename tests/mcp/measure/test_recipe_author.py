@@ -16,6 +16,27 @@ from ._recipe_field_support import SweepGui as _SweepGui
 from ._recipe_support import LookbackGui, recipe_client
 
 
+@pytest.mark.parametrize("mode", ["inline", "ref"])
+def test_author_reads_owner_reference_mode_and_child_readonly(tmp_path, mode):
+    gui = LookbackGui()
+    reference = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
+    reference.update(
+        mode=mode,
+        readonly=False,
+        ref="Q1.readout.seed" if mode == "ref" else "<Custom:Readout>",
+    )
+    frequency = reference["children"]["ro_cfg"]["children"]["ro_freq"]
+    frequency["readonly"] = mode == "ref"
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        state = tab.read_field("modules.readout")
+        assert state.mode == mode
+        assert not state.readonly
+        assert tab.read_field("modules.readout.ro_cfg.ro_freq").readonly == (
+            mode == "ref"
+        )
+
+
 def test_author_edits_preserve_defaults_and_use_each_returned_cfg_ref(tmp_path):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:

@@ -99,7 +99,7 @@ def _make_service(
     bg = _FakeBg(fail_submit=fail_submit)
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
-    runner = OperationRunner(MagicMock(), handles, progress, bg, bus)  # type: ignore[arg-type]
+    runner = OperationRunner(MagicMock(), handles, progress, bg, bus)
     writeback = writeback if writeback is not None else MagicMock()
     writeback.create_draft.return_value = None
     svc = PostAnalyzeService(state, runner, bus, handles, writeback)

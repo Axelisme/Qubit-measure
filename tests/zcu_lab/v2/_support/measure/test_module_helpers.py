@@ -5,12 +5,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
 
-from typing import cast
-
 from zcu_tools.cfg_model import module_spec_from_raw
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionValue,
+    DirectValue,
     ReferenceValue,
 )
 from zcu_tools.gui.session.aliases import AliasRow
@@ -31,27 +30,26 @@ def test_schema_from_module_returns_none_for_none():
 
 
 def _pulse_readout(*, freq: float = 6000.0) -> PulseReadoutCfg:
-    return cast(
-        PulseReadoutCfg,
-        ModuleCfgFactory.from_raw(
-            {
-                "type": "readout/pulse",
-                "pulse_cfg": {
-                    "waveform": {"style": "const", "length": 1.0},
-                    "ch": 1,
-                    "nqz": 2,
-                    "freq": freq,
-                    "gain": 0.2,
-                },
-                "ro_cfg": {
-                    "ro_ch": 2,
-                    "ro_freq": freq,
-                    "ro_length": 1.0,
-                    "trig_offset": 0.5,
-                },
+    cfg = ModuleCfgFactory.from_raw(
+        {
+            "type": "readout/pulse",
+            "pulse_cfg": {
+                "waveform": {"style": "const", "length": 1.0},
+                "ch": 1,
+                "nqz": 2,
+                "freq": freq,
+                "gain": 0.2,
             },
-        ),
+            "ro_cfg": {
+                "ro_ch": 2,
+                "ro_freq": freq,
+                "ro_length": 1.0,
+                "trig_offset": 0.5,
+            },
+        },
     )
+    assert isinstance(cfg, PulseReadoutCfg)
+    return cfg
 
 
 def test_schema_from_module_converts_proposed_readout_faithfully():
@@ -71,7 +69,9 @@ def test_schema_from_module_converts_proposed_readout_faithfully():
     assert isinstance(schema, CfgSchema)
     pulse_cfg = schema.value.fields["pulse_cfg"]
     assert isinstance(pulse_cfg, CfgSectionValue)
-    assert pulse_cfg.fields["freq"].value == 6150.0  # type: ignore[union-attr]
+    freq = pulse_cfg.fields["freq"]
+    assert isinstance(freq, DirectValue)
+    assert freq.value == 6150.0
 
 
 def test_schema_from_module_converts_proposed_waveform_faithfully():
@@ -83,7 +83,8 @@ def test_schema_from_module_converts_proposed_waveform_faithfully():
 
     assert isinstance(schema, CfgSchema)
     length = schema.value.fields["length"]
-    assert length.value == 4.5  # type: ignore[union-attr]
+    assert isinstance(length, DirectValue)
+    assert length.value == 4.5
 
 
 def _make_ctx(library: LibrarySnapshot | None = None) -> SessionEnv:

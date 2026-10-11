@@ -60,7 +60,8 @@ def calc_max_length(
     warnings.warn(
         f"Detected overlap between {param2str(length1)} and {param2str(length2)}; "
         "using the maximum length for calculation. "
-        "Note: this approach may not always be correct; it is only correct for some loop iterations and may be inaccurate for others."
+        "Note: this approach may not always be correct; it is only correct for some loop iterations and may be inaccurate for others.",
+        stacklevel=1,
     )
 
     if isinstance(length1, QickParam):
@@ -123,7 +124,8 @@ def merge_max_length(*args: float | QickParam) -> float | QickParam:
     warnings.warn(
         f"Detected multiple overlapping lengths: {[param2str(m) for m in merge_list]}. "
         "Using the maximum length among them for calculation. "
-        "Note: this approach may not always be correct; it is only correct for some loop iterations and may be inaccurate for others."
+        "Note: this approach may not always be correct; it is only correct for some loop iterations and may be inaccurate for others.",
+        stacklevel=1,
     )
 
     merge_list = [m.maxval() if isinstance(m, QickParam) else m for m in merge_list]

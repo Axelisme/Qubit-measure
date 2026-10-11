@@ -79,10 +79,10 @@ class EvalNumericField(QWidget):
         self._spin = TrimDoubleSpinBox()
         self._spin.setRange(minimum, maximum)
         self._spin.setDecimals(decimals)
-        self._spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
+        self._spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)
         layout.addWidget(self._spin, stretch=1)
-        self._spin.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)  # type: ignore[attr-defined]
-        self._spin.customContextMenuRequested.connect(  # type: ignore[attr-defined]
+        self._spin.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._spin.customContextMenuRequested.connect(
             lambda pos: self._show_context_menu(self._spin, self._spin.mapToGlobal(pos))
         )
 
@@ -93,19 +93,15 @@ class EvalNumericField(QWidget):
         self._ghost = QLabel()
         self._ghost.setVisible(False)
         layout.addWidget(self._ghost)
-        self._line_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)  # type: ignore[attr-defined]
-        self._line_edit.customContextMenuRequested.connect(  # type: ignore[attr-defined]
+        self._line_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._line_edit.customContextMenuRequested.connect(
             lambda pos: self._show_context_menu(
                 self._line_edit, self._line_edit.mapToGlobal(pos)
             )
         )
-        self._spin.valueChanged.connect(  # type: ignore[attr-defined]
-            lambda _value: self.raw_changed.emit()
-        )
-        self._line_edit.textChanged.connect(self._sync_ghost)  # type: ignore[attr-defined]
-        self._line_edit.textChanged.connect(  # type: ignore[attr-defined]
-            lambda _text: self.raw_changed.emit()
-        )
+        self._spin.valueChanged.connect(lambda _value: self.raw_changed.emit())
+        self._line_edit.textChanged.connect(self._sync_ghost)
+        self._line_edit.textChanged.connect(lambda _text: self.raw_changed.emit())
 
     def load_direct(self, value: float) -> None:
         """Load a direct float value.

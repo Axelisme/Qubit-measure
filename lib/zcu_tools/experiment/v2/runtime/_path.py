@@ -45,11 +45,21 @@ def set_target(target: Any, value: Any) -> None:
         raise ValueError(f"Expected Mapping, list, or NDArray, got {type(target)}")
 
 
+def _indexed_array_value(array: NDArray[Any], index: tuple[Any, ...]) -> object:
+    """Return the NumPy item, which may be an array view, copy, or scalar.
+
+    NumPy indexing stubs infer an ndarray even for scalar integer indices.
+    This boundary preserves the actual result for runtime shape discrimination.
+    NumPy indexing failures propagate unchanged.
+    """
+    return array[index]
+
+
 def writable_view(array: NDArray[Any], index: tuple[Any, ...]) -> NDArray[Any]:
     if not index:
         return array
 
-    direct = array[index]
+    direct = _indexed_array_value(array, index)
     if isinstance(direct, np.ndarray):
         if not np.shares_memory(direct, array):
             raise ValueError("NDArray path indexing must select a writable view")

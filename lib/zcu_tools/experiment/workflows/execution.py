@@ -203,15 +203,18 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             self._call_revision = captured.revision
             self._run_no = 0
             self._iteration = None
+            self._iteration_inputs = None
             iteration = self._artifacts.new_iteration(self._call_seq)
             self._iteration = iteration
-            self._artifacts.append(
-                IterationStarted(
-                    self._call_seq,
-                    self._commit_seq,
-                    captured.revision,
-                    iteration.iteration_dir,
-                )
+            started = IterationStarted(
+                self._call_seq,
+                self._commit_seq,
+                captured.revision,
+                iteration.iteration_dir,
+            )
+            self._artifacts.append(started)
+            self._iteration_inputs = self._artifacts.capture_record(
+                started, captured.model
             )
         env = WorkflowEnv(
             self._started_at, self._ports, iteration.files_dir, self._displays
@@ -243,16 +246,16 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                     raise self._pending_error
                 lifecycle = "done" if isinstance(outcome, Done) else "aborted"
                 reason = None if isinstance(outcome, Done) else outcome.reason
-                self._artifacts.append(
-                    StepFinished(
-                        self._current_iteration()[1],
-                        self._call_revision,
-                        iteration.iteration_dir,
-                        iteration.run_files,
-                        lifecycle,
-                        reason,
-                    )
+                finished = StepFinished(
+                    self._current_iteration()[1],
+                    self._call_revision,
+                    iteration.iteration_dir,
+                    iteration.run_files,
+                    lifecycle,
+                    reason,
                 )
+                self._artifacts.append(finished)
+                self._artifacts.save_record(iteration, self._iteration_inputs, finished)
                 self._end(lifecycle, reason)
 
     def _close_step(self, generator: Step[S, R]) -> None:
@@ -296,6 +299,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             self._state = state
             self._commit_seq += 1
             self._records.append(committed)
+            self._artifacts.save_record(iteration, self._iteration_inputs, committed)
             self._iteration = None
 
     def _current_iteration(self) -> tuple[IterationArtifacts, int]:
@@ -309,14 +313,16 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 raise self._pending_error
             if self._iteration is not None:
                 iteration, call_seq = self._current_iteration()
-                self._artifacts.append(
-                    StepDiscarded(
-                        call_seq,
-                        self._call_revision,
-                        iteration.iteration_dir,
-                        iteration.run_files,
-                        "stop" if self._lifecycle == "stopping" else "pause",
-                    )
+                discarded = StepDiscarded(
+                    call_seq,
+                    self._call_revision,
+                    iteration.iteration_dir,
+                    iteration.run_files,
+                    "stop" if self._lifecycle == "stopping" else "pause",
+                )
+                self._artifacts.append(discarded)
+                self._artifacts.save_record(
+                    iteration, self._iteration_inputs, discarded
                 )
                 self._iteration = None
 
@@ -582,14 +588,16 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             try:
                 if self._iteration is not None:
                     iteration, call_seq = self._current_iteration()
-                    self._artifacts.append(
-                        StepFailed(
-                            call_seq,
-                            self._call_revision,
-                            iteration.iteration_dir,
-                            iteration.run_files,
-                            describe_error(error),
-                        )
+                    failed = StepFailed(
+                        call_seq,
+                        self._call_revision,
+                        iteration.iteration_dir,
+                        iteration.run_files,
+                        describe_error(error),
+                    )
+                    self._artifacts.append(failed)
+                    self._artifacts.save_record(
+                        iteration, self._iteration_inputs, failed
                     )
                 self._artifacts.append(
                     RunEnded("failed", self._reason, self._call_seq, self._commit_seq)

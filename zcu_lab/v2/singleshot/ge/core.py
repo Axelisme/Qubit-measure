@@ -340,7 +340,7 @@ class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
                     step.set_stop()
                     break
                 signals_buffer[step].set(raw_shots_to_signal(program))
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return GE_Result(
             signals=signals,

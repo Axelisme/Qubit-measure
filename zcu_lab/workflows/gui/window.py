@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
+from functools import partial
 from math import isfinite
 from typing import Literal
-from uuid import uuid4
 
 from pydantic import JsonValue
 from pydantic_core import PydanticCustomError
@@ -20,7 +21,7 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from zcu_tools.datafile import RunSnapshot
+from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
@@ -28,6 +29,8 @@ from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Actor,
     EnginePorts,
+    FluxdepExportReport,
+    FluxdepExportSnapshot,
     InvalidRunState,
     RunIdentity,
     RunPaths,
@@ -36,6 +39,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
+from zcu_tools.gui.app.workflows.exporting import FluxdepExportBinding
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
 from zcu_tools.gui.cfg.codec import encode_complex
@@ -64,10 +68,17 @@ from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
-from zcu_tools.resources.entry import RoleResolutionError
+from zcu_tools.resources.entry import (
+    Origin,
+    PointStorageBinding,
+    RoleResolutionError,
+    WorkflowRoots,
+    new_run_id,
+)
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from ..calibration import Calibrated
+from ..export import prepare_t1_fluxdep_export
 from ..t1 import T1Plan, t1_fluxdep
 from .panel import T1PlanPanel, T1TunablesPanel
 from .persistence import WorkflowInputRestoreReport, WorkflowInputSnapshot
@@ -116,10 +127,8 @@ def _prepare_start_form[F: FormModel](
 def _encode_form_value(value: FormValue) -> JsonValue:
     """Project ordinary display leaves; scalar complex format belongs to codec."""
     if isinstance(value, complex):
-        encoded: dict[str, JsonValue] = {
-            key: list[JsonValue](parts) for key, parts in encode_complex(value).items()
-        }
-        return encoded
+        encoded = encode_complex(value)
+        return {"__complex__": list[JsonValue](encoded["__complex__"])}
     if isinstance(value, (list, tuple)):
         return [_encode_form_value(item) for item in value]
     if isinstance(value, dict):
@@ -181,6 +190,32 @@ def _calibrated_seed(plan: T1Plan, pi_length_us: float) -> Calibrated:
     ):
         raise ValueError("T1 initial calibration requires scalar module frequency/gain")
     return Calibrated(frequency, pi_length_us, readout.freq, readout.gain)
+
+
+def _build_export_binding(
+    plan: T1Plan,
+    storage: PointStorageBinding,
+    run_id: str,
+    provenance: SoftwareProvenance,
+    roots: WorkflowRoots,
+) -> FluxdepExportBinding:
+    """Detach the native plan and bind Start's exact entry storage once."""
+    identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
+    paths = RunPaths(metadata_root=roots.result, data_root=roots.database)
+    fixed_plan = T1Plan.model_validate_json(
+        plan.model_dump_json(),
+        by_name=True,
+        by_alias=False,
+    )
+    return FluxdepExportBinding(
+        FluxdepExportSnapshot(
+            identity, paths, fixed_plan.snapshot, datetime.now(UTC), None
+        ),
+        partial(prepare_t1_fluxdep_export, plan=fixed_plan, data_root=paths.data_root),
+        storage.result_path,
+        storage.database_path,
+        storage.ledger,
+    )
 
 
 class T1WorkflowWindow(QWidget):
@@ -254,6 +289,7 @@ class T1WorkflowWindow(QWidget):
         )
         self._message = QLabel(self)
         self._message.setObjectName("workflow.run.message")
+        self._message.setWordWrap(True)
         self._start_button = QPushButton("Start", self)
         self._start_button.setObjectName("workflow.run.start")
         self._start_button.clicked.connect(self._start_clicked)
@@ -268,6 +304,10 @@ class T1WorkflowWindow(QWidget):
         stop_button = QPushButton("Stop", self)
         stop_button.setObjectName("workflow.run.stop")
         stop_button.clicked.connect(self._stop_clicked)
+        self._export_button = QPushButton("Export merged/Labber", self)
+        self._export_button.setObjectName("workflow.run.export_fluxdep")
+        self._export_button.setEnabled(False)
+        self._export_button.clicked.connect(self._export_clicked)
 
         stack = QStackedWidget(self)
         placeholder = QLabel("Workflow plots", stack)
@@ -282,6 +322,7 @@ class T1WorkflowWindow(QWidget):
             self._pause_button,
             self._resume_button,
             stop_button,
+            self._export_button,
             self._message,
             stack,
         ):
@@ -577,10 +618,10 @@ class T1WorkflowWindow(QWidget):
                 ports=ports,
                 binding=binding,
                 identity=RunIdentity(
-                    run_id,
-                    provenance,
-                    str(storage.entry_id),
-                    storage.point,
+                    run_id, provenance, str(storage.entry_id), storage.point
+                ),
+                export_binding=_build_export_binding(
+                    plan, storage, run_id, provenance, roots
                 ),
             )
         except Exception:
@@ -596,6 +637,7 @@ class T1WorkflowWindow(QWidget):
         self.plan_panel.setEnabled(False)
         self.tunables_panel.setEnabled(False)
         self._start_button.setEnabled(False)
+        self._export_button.setEnabled(False)
         self._message.setText("Startup pending")
         self._poll.start()
         return token
@@ -748,6 +790,40 @@ class T1WorkflowWindow(QWidget):
                     )
             raise
 
+    def export_fluxdep(
+        self, run_id: str, *, origin: Origin = "gui"
+    ) -> FluxdepExportReport:
+        """Explicitly export the targeted terminal run and display all attempts.
+
+        Call on this Window's Qt owner. This is the GUI action and RPC's common
+        public entry, using the Controller's fixed Start plan/storage/provenance.
+        It never reads current drafts or devices. Target/pending/unsupported and
+        nonterminal errors propagate before writes. The returned report contains
+        native then Labber path/status/error and a separate ledger_error; a null
+        Labber path means allocation failed. Writer/ledger failures are displayed
+        without changing the run outcome, canonical records or prior successes.
+        """
+        report = self.controller.export_fluxdep(run_id, origin=origin)
+        lines = [
+            f"{out.format}: {out.status}, {out.path if out.path is not None else 'unallocated'}"
+            + (f", {out.error}" if out.error else "")
+            for out in report.outputs
+        ]
+        if report.ledger_error is not None:
+            lines.append(f"Ledger: {report.ledger_error}")
+        self._message.setText("\n".join(lines))
+        return report
+
+    def _export_clicked(self) -> None:
+        run_id = self.controller.run_id
+        if run_id is None:
+            return
+        try:
+            self.export_fluxdep(run_id)
+        except Exception as error:
+            self._message.setText(str(error))
+            logger.exception("Workflow export action failed")
+
     def pause(self, run_id: str) -> RunStatus:
         """Request Pause of the explicit native target, retaining plan and plots.
 
@@ -782,7 +858,11 @@ class T1WorkflowWindow(QWidget):
         controller = self.controller
         status = controller.status()
         if status is None:
+            self._export_button.setEnabled(False)
             return
+        self._export_button.setEnabled(
+            status.lifecycle in {"done", "stopped", "failed", "aborted"}
+        )
         self._message.setText(status.lifecycle)
         self._pause_button.setEnabled(
             controller.operation_id is not None and status.lifecycle == "running"
@@ -862,7 +942,7 @@ class T1WorkflowWindow(QWidget):
 
     def _start_clicked(self) -> None:
         try:
-            result = self.start(uuid4().hex)
+            result = self.start(new_run_id())
         except Exception as error:
             logger.exception("T1 workflow Start failed")
             self._message.setText(str(error))
