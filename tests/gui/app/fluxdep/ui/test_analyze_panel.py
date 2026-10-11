@@ -292,6 +292,7 @@ def test_filter_skips_completed_empty_spectra(qapp, spectrum_hdf5, usable):
             assert result.selected.all() and result.selected.size == 2
     finally:
         w.quiesce()
+        w.dispose()
         w.deleteLater()
         qapp.processEvents()
 
@@ -331,6 +332,7 @@ def test_activate_attaches_selector_when_points_exist(qapp):
         assert selector.get_result().selected.all()
     finally:
         w.quiesce()
+        w.dispose()
         ctrl.interactive.dispose()
         w.deleteLater()
         qapp.processEvents()
