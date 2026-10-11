@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
@@ -189,13 +190,15 @@ def choose_during_takeover(ctrl, path, activate, *, takeover=True, cancel=False)
 
 
 @pytest.mark.parametrize("owner", ["load", "export", "result", "database", "search"])
-def test_chooser_return_after_takeover_does_not_edit_owner(window, tmp_path, owner):
+def test_chooser_return_after_takeover_does_not_edit_owner(
+    window, tmp_path, spectrum_hdf5, owner
+):
     view, ctrl = window
     target = tmp_path / "chosen.hdf5"
     if owner in ("result", "database"):
         target = tmp_path
     elif owner != "export":
-        target.touch()
+        target = Path(spectrum_hdf5[0])
     if owner == "search":
         button(view, "Analyze…").click()
         panel = view.findChild(AnalyzePanelWidget)
@@ -294,14 +297,14 @@ def test_load_invalid_ok_survives_release_and_reclaim(window):
 @pytest.mark.parametrize("owner", ["load", "export", "result", "database", "search"])
 @pytest.mark.parametrize("cancel", [False, True])
 def test_local_chooser_preserves_path_and_cancel_contract(
-    window, tmp_path, owner, cancel
+    window, tmp_path, spectrum_hdf5, owner, cancel
 ):
     view, ctrl = window
     target = tmp_path / "chosen.hdf5"
     if owner in ("result", "database"):
         target = tmp_path
     elif owner != "export":
-        target.touch()
+        target = Path(spectrum_hdf5[0])
     if owner == "search":
         button(view, "Analyze…").click()
         panel = view.findChild(AnalyzePanelWidget)
