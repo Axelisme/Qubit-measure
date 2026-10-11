@@ -18,7 +18,7 @@ from zcu_tools.gui.form import (
     RangeInput,
     field_error,
 )
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
@@ -179,8 +179,9 @@ def environment(
                     format_version="1.0",
                 )
             ),
-            target=EntryDraft(entry_id="entry"),
+            target=SavedPoint(entry_id="entry", point="synthetic"),
             roles=None,
+            storage=None,
         )
     )
 
