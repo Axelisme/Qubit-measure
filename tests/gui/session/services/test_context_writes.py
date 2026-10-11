@@ -184,7 +184,6 @@ def _source(entry: ResultEntry) -> Provenance:
             origin="gui",
             payload=AcceptedPayload(
                 writes=(AcceptedWrite(path="general.ext.flux_value", value=0.2),),
-                
             ),
         )
     )
@@ -509,12 +508,16 @@ def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
         session.control.apply_writeback(
             target,
             (
-                writeback.WaveformWriteback("Q1.waveforms.base", ConstWaveformCfg(length=0.1)),
+                writeback.WaveformWriteback(
+                    "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
+                ),
                 writeback.ParameterWriteback("general.description", "retained", 0.2),
                 writeback.ParameterWriteback("general.description", 42),
                 writeback.ParameterWriteback("general.ext.later", 3.0),
             ),
-            evidence=writeback.WritebackEvidence(kind="test/ordered", origin="gui", run_id="run-1"),
+            evidence=writeback.WritebackEvidence(
+                kind="test/ordered", origin="gui", run_id="run-1"
+            ),
         )
     error = caught.value
     assert error.applied == 2
@@ -524,10 +527,17 @@ def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
     current = session.control.read_target(target)
     assert current.value("general.description") == "retained"
     assert not current.lookup("general.ext.later").present
-    assert current.library.waveform_spec("Q1.waveforms.base") == ConstWaveformCfg(length=0.1)
+    assert current.library.waveform_spec("Q1.waveforms.base") == ConstWaveformCfg(
+        length=0.1
+    )
     meta = current.meta("general.description")
     assert meta is not None
-    assert (meta.source, meta.kind, meta.run_id, meta.stderr) == (error.event_id, "test/ordered", "run-1", 0.2)
+    assert (meta.source, meta.kind, meta.run_id, meta.stderr) == (
+        error.event_id,
+        "test/ordered",
+        "run-1",
+        0.2,
+    )
     assert [type(item) for item in events] == [MlChangedPayload, MdChangedPayload]
     assert session.state.version.get("context") == before + 2
     if saved:
@@ -537,7 +547,9 @@ def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
         assert not tuple((session.entry.result_path / "points").rglob("*.yaml"))
 
 
-def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(session: _Session) -> None:
+def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(
+    session: _Session,
+) -> None:
     from zcu_tools.resources.entry import writeback
 
     draft = session.control.read_context().target
@@ -556,3 +568,34 @@ def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(ses
         session.control.apply_writeback(draft, (item,), evidence=evidence)
     assert caught.value.reason_code == "draft_not_selected"
     assert session.entry.ledger.events() == before
+
+
+@pytest.mark.parametrize("saved", [False, True], ids=["draft-sample", "saved-sample"])
+def test_entry_samples_persist_immediately_and_survive_draft_discard(session: _Session, saved: bool) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    target = _select(session, "a") if saved else session.control.read_context().target
+    event_id = session.control.apply_writeback(target, (
+        writeback.SampleWriteback("Q1", {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native"}),
+        writeback.ParameterWriteback("general.description", "draft value"),
+    ), evidence=writeback.WritebackEvidence(kind="test/sample", origin="gui", run_id="run-1"))
+    event = session.entry.ledger.get(event_id).event
+    expected = {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native", "run_id": "run-1",
+                "point": "a" if saved else None, "at": event.at, "source": event_id}
+    assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
+    assert session.control.read_sample(target, "Q1", "run-1") == expected
+    assert session.control.read_sample(target, "Q1", "missing") is None
+    if not saved:
+        assert session.entry.list_points() == []
+        session.service.install_entry(session.entry)
+        current = session.control.read_context()
+        assert not current.lookup("general.description").present
+        assert session.control.read_sample(current.target, "Q1", "run-1") == expected
+        assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
+    second_id = session.control.apply_writeback(session.control.read_context().target,
+        (writeback.SampleWriteback("Q1", {"t1_us": 31.7}),),
+        evidence=writeback.WritebackEvidence(kind="test/sample", origin="gui", run_id="run-1"))
+    assert session.control.read_sample(session.control.read_context().target, "Q1", "run-1") == {
+        "t1_us": 31.7, "run_id": "run-1", "point": "a" if saved else None,
+        "at": session.entry.ledger.get(second_id).event.at, "source": second_id,
+    }
