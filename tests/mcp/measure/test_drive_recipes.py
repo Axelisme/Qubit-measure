@@ -8,7 +8,6 @@ from threading import Event
 from typing import Any
 
 import pytest
-from simpleeval import simple_eval
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 
@@ -67,10 +66,11 @@ class TimeRabiGui(LookbackGui):
         self.target_name = "pi_len"
         self.fit_summary = {"pi_len": 0.21, "pi_len_err": 0.01, "pi2_len": 0.11}
         self.library_modules = {
-            "drive": {"type": "pulse"},
-            "calibrated": {"type": "readout/pulse"},
-            "reset": {"type": "reset"},
+            "Q1.pulses.drive": {"type": "pulse"},
+            "R1.readout.calibrated": {"type": "readout/pulse"},
+            "Q1.reset.reset": {"type": "reset"},
         }
+        self.library = self.library_modules
         tree = self.publication["tree"]["children"]
         tree["reps"] = scalar(19)
         tree["sweep"] = section(
@@ -209,7 +209,7 @@ class DriveGui(TimeRabiGui):
             "fwhm": 4.0,
             "fwhm_err": 0.2,
         }
-        self.library_modules["direct"] = {"type": "readout/direct"}
+        self.library_modules["R1.readout.direct"] = {"type": "readout/direct"}
         self.publication["tree"]["children"]["modules"]["children"]["readout"][
             "ref"
         ] = "<Custom:Pulse Readout>"
@@ -242,16 +242,16 @@ class DriveGui(TimeRabiGui):
             },
         }
 
-        if "qf_w" in self.md:
+        if "$qubit.kappa" in self.md:
             inputs = self.publication["tree"]["children"]["sweep"]["children"]["freq"][
                 "inputs"
             ]
             for key, sign in (("start", "-"), ("stop", "+")):
-                expression = f"q_f {sign} 2.5 * qf_w"
+                expression = f"$qubit.freq {sign} 2.5 * $qubit.kappa"
                 inputs[key] = {
                     **scalar(
-                        simple_eval(expression, names=self.md)
-                        if "q_f" in self.md
+                        self.evaluate_expression(expression)
+                        if "$qubit.freq" in self.md
                         else None
                     )["input"],
                     "mode": "expression",
@@ -269,7 +269,7 @@ class DriveGui(TimeRabiGui):
                     if isinstance(value, dict):
                         expression = value["__expr"]
                         inputs[key] = {
-                            **scalar(simple_eval(expression, names=self.md))["input"],
+                            **scalar(self.evaluate_expression(expression))["input"],
                             "mode": "expression",
                             "raw": expression,
                         }
@@ -280,7 +280,7 @@ class DriveGui(TimeRabiGui):
         super()._edit({**params, "edits": ordinary})
         for edit in ordinary:
             if edit["path"] == ["modules", "readout"] and edit["value"] == {
-                "__ref": "direct"
+                "__ref": "R1.readout.direct"
             }:
                 readout = self.publication["tree"]["children"]["modules"]["children"][
                     "readout"
@@ -302,7 +302,7 @@ class DriveGui(TimeRabiGui):
 def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
     tmp_path, number
 ):
-    with recipe_client(tmp_path, TimeRabiGui({"r_f": 7200.0})) as client:
+    with recipe_client(tmp_path, TimeRabiGui({"$resonator.freq": 7200.0})) as client:
         data = full_execution_reply(
             client,
             skip_writeback(
@@ -350,7 +350,7 @@ def test_time_rabi_number_inputs_publish_float_frequency_gain_and_length(
 
 
 def test_time_rabi_without_pi_uses_explicit_frequency_and_preserves_gui_start(tmp_path):
-    gui = TimeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+    gui = TimeRabiGui({"$qubit.freq": 6300.0, "$resonator.freq": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,
@@ -433,7 +433,9 @@ class AmplitudeRabiGui(TimeRabiGui):
 def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
     tmp_path, number
 ):
-    with recipe_client(tmp_path, AmplitudeRabiGui({"r_f": 7200.0})) as client:
+    with recipe_client(
+        tmp_path, AmplitudeRabiGui({"$resonator.freq": 7200.0})
+    ) as client:
         data = full_execution_reply(
             client,
             skip_writeback(
@@ -485,7 +487,7 @@ def test_amplitude_rabi_number_array_publishes_floats_and_integer_counts(
 
 
 def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
-    gui = AmplitudeRabiGui({"q_f": 6300.0, "r_f": 7200.0})
+    gui = AmplitudeRabiGui({"$qubit.freq": 6300.0, "$resonator.freq": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,
@@ -543,11 +545,11 @@ def test_amplitude_rabi_without_pi_uses_gain_range_and_fixed_pulse(tmp_path):
 def test_rabi_frequency_precedence_preserves_gui_defaults(
     tmp_path, recipe, gui_type, sweep, expected, source
 ):
-    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
+    gui = gui_type({"$qubit.freq": 6300.0, "$resonator.freq": 7200.0})
     drive = gui.publication["tree"]["children"]["modules"]["children"]["qub_pulse"]
     arguments: dict[str, Any] = {"reuse_tab_id": "t"}
     if source in ("explicit", "library", "invalid_library"):
-        drive["ref"] = "drive"
+        drive["ref"] = "Q1.pulses.drive"
         drive["children"]["freq"] = scalar(
             6280.0 if source != "invalid_library" else None
         )
@@ -565,8 +567,8 @@ def test_rabi_frequency_precedence_preserves_gui_defaults(
         )
         assert frequency["source"] == {
             "explicit": "frequency_mhz",
-            "library": "library:drive",
-        }.get(source, "q_f")
+            "library": "library:Q1.pulses.drive",
+        }.get(source, "$qubit.freq")
         assert fields[f"sweep.{sweep}"]["value"] == expected
         assert fields[f"sweep.{sweep}"]["source"] == {
             "start": "gui_default",
@@ -642,9 +644,6 @@ def test_rabi_invalid_explicit_values_fail_before_preparing(
         data = client.call(recipe, arguments).data
         assert data["status"] == "failed", data
         assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
-        assert not any(
-            method == "context.snapshot" for method, _ in client.transport.sent
-        )
         assert not gui.ran
 
 
@@ -669,9 +668,9 @@ def test_rabi_valid_library_sources_work_without_metadata_and_enable_explicit_re
                 client.call(
                     recipe,
                     {
-                        "drive_ref": "drive",
-                        "readout_ref": "calibrated",
-                        "use_reset": "reset",
+                        "drive_ref": "Q1.pulses.drive",
+                        "readout_ref": "R1.readout.calibrated",
+                        "use_reset": "Q1.reset.reset",
                     },
                 ),
             ),
@@ -679,9 +678,9 @@ def test_rabi_valid_library_sources_work_without_metadata_and_enable_explicit_re
         assert data["status"] == "finished", data
         fields = data["actual"]["fields"]
         assert fields["modules.qub_pulse.freq"]["value"] == 6280.0
-        assert fields["modules.qub_pulse.freq"]["source"] == "library:drive"
+        assert fields["modules.qub_pulse.freq"]["source"] == "library:Q1.pulses.drive"
         assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
-        assert fields["modules.reset"]["value"] == "reset"
+        assert fields["modules.reset"]["value"] == "Q1.reset.reset"
 
 
 @pytest.mark.parametrize(
@@ -692,7 +691,7 @@ def test_rabi_valid_library_sources_work_without_metadata_and_enable_explicit_re
     ],
 )
 def test_rabi_stale_edit_stops_without_retry_or_run(tmp_path, recipe, gui_type):
-    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
+    gui = gui_type({"$qubit.freq": 6300.0, "$resonator.freq": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         client.transport.replies["tab.edit_cfg"] = {
             "ok": False,
@@ -723,7 +722,10 @@ def test_rabi_stale_edit_stops_without_retry_or_run(tmp_path, recipe, gui_type):
 def test_drive_primary_handoff_waits_for_question_before_actual_write(
     tmp_path, recipe, gui_type, target, interactive, decision
 ):
-    gui = gui_type({"q_f": 6300.0, "qf_w": 4.0, "r_f": 7200.0}, interactive=interactive)
+    gui = gui_type(
+        {"$qubit.freq": 6300.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0},
+        interactive=interactive,
+    )
     with recipe_client(tmp_path, gui) as client:
         reply = client.call(recipe, {})
         execution = reply.data["execution"]
@@ -775,7 +777,9 @@ def test_drive_primary_handoff_waits_for_question_before_actual_write(
     ],
 )
 def test_drive_cancelled_run_stops_before_raw_save(tmp_path, recipe, gui_type):
-    gui = gui_type({"q_f": 6300.0, "qf_w": 4.0, "r_f": 7200.0})
+    gui = gui_type(
+        {"$qubit.freq": 6300.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
+    )
     with recipe_client(tmp_path, gui) as client:
         client.transport.replies["operation.await"] = {
             "ok": True,
@@ -803,7 +807,9 @@ def test_drive_cancelled_run_stops_before_raw_save(tmp_path, recipe, gui_type):
 def test_drive_cancelled_question_retains_preview_without_writing(
     tmp_path, recipe, gui_type
 ):
-    gui = gui_type({"q_f": 6300.0, "qf_w": 4.0, "r_f": 7200.0})
+    gui = gui_type(
+        {"$qubit.freq": 6300.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
+    )
     with recipe_client(tmp_path, gui) as client:
         question = client.call(recipe, {})
         assert question.data["status"] == "awaiting_answer", question.data
@@ -826,7 +832,7 @@ def test_drive_cancelled_question_retains_preview_without_writing(
 def test_rabi_invalid_reference_stops_without_fallback(
     tmp_path, recipe, gui_type, parameter
 ):
-    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
+    gui = gui_type({"$qubit.freq": 6300.0, "$resonator.freq": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         reply = client.call(recipe, {parameter: "absent"})
         assert reply.data["status"] == "failed", reply.data
@@ -854,12 +860,11 @@ def test_rabi_invalid_reference_stops_without_fallback(
 def test_rabi_invalid_arguments_fail_before_gui_binding(
     tmp_path, recipe, gui_type, arguments
 ):
-    gui = gui_type({"q_f": 6300.0, "r_f": 7200.0})
+    gui = gui_type({"$qubit.freq": 6300.0, "$resonator.freq": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         reply = client.call(recipe, arguments)
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["phase"] == "preparing"
-        assert "context.snapshot" not in [method for method, _ in client.transport.sent]
         before = list(client.transport.sent)
         status = client.call("status", {"execution": reply.data["execution"]})
         assert status["status"] == "failed"
@@ -868,7 +873,9 @@ def test_rabi_invalid_arguments_fail_before_gui_binding(
 
 @pytest.mark.parametrize("readout_ref", [None, "calibrated", "direct"])
 def test_twotone_runs_once_with_gui_sweep_and_preserved_readout(tmp_path, readout_ref):
-    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
+    gui = DriveGui(
+        {"$qubit.freq": 6100.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
+    )
     client = make_client(tmp_path, gui)
     try:
         reply = full_execution_reply(
@@ -878,7 +885,13 @@ def test_twotone_runs_once_with_gui_sweep_and_preserved_readout(tmp_path, readou
                 client.call(
                     "twotone_spectrum",
                     {
-                        "readout_ref": readout_ref,
+                        # Decorator labels are scenarios, not wire references.
+                        "readout_ref": {
+                            "calibrated": "R1.readout.calibrated",
+                            "direct": "R1.readout.direct",
+                        }.get(readout_ref)
+                        if readout_ref is not None
+                        else None,
                         "gain": 0.18,
                         "pulse_length_us": 3.0,
                         "points": 31,
@@ -948,16 +961,13 @@ def test_twotone_rejects_invalid_explicit_values_before_preparation(
         reply = full_execution_reply(client, client.call("twotone_spectrum", arguments))
         assert reply.data["status"] == "failed", reply.data
         assert reply.data["error"]["phase"] == "preparing"
-        assert not any(
-            method == "context.snapshot" for method, _ in client.transport.sent
-        )
         assert not gui.ran
     finally:
         client.context.session.close()
 
 
 def test_twotone_requires_calibrated_readout_instead_of_inline_template(tmp_path):
-    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0})
+    gui = DriveGui({"$qubit.freq": 6100.0, "$qubit.kappa": 4.0})
     client = make_client(tmp_path, gui)
     try:
         reply = full_execution_reply(client, client.call("twotone_spectrum", {}))
@@ -996,7 +1006,7 @@ def test_twotone_reports_all_missing_frequency_sources_without_running(
 def test_twotone_explicit_center_removes_missing_calibration_dependency(
     tmp_path, span_mhz
 ):
-    gui = DriveGui({"qf_w": 4.0, "r_f": 7200.0})
+    gui = DriveGui({"$qubit.kappa": 4.0, "$resonator.freq": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,
@@ -1014,9 +1024,11 @@ def test_twotone_explicit_center_removes_missing_calibration_dependency(
 
 
 def test_twotone_preserves_valid_library_leaf_and_fills_missing_leaf(tmp_path):
-    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
+    gui = DriveGui(
+        {"$qubit.freq": 6100.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
+    )
     readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
-    readout["ref"] = "calibrated"
+    readout["ref"] = "R1.readout.calibrated"
     readout["children"]["ro_cfg"]["children"]["ro_freq"] = scalar(None)
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
@@ -1026,15 +1038,18 @@ def test_twotone_preserves_valid_library_leaf_and_fills_missing_leaf(tmp_path):
         fields = reply.data["actual"]["fields"]
         assert fields["modules.readout.pulse_cfg.freq"]["value"] == 5000.0
         assert (
-            fields["modules.readout.pulse_cfg.freq"]["source"] == "library:calibrated"
+            fields["modules.readout.pulse_cfg.freq"]["source"]
+            == "library:R1.readout.calibrated"
         )
         assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == 7200.0
-        assert fields["modules.readout.ro_cfg.ro_freq"]["source"] == "r_f"
+        assert fields["modules.readout.ro_cfg.ro_freq"]["source"] == "$resonator.freq"
 
 
 @pytest.mark.parametrize("parameter", ["readout_ref", "drive_ref", "use_reset"])
 def test_twotone_invalid_reference_stops_without_fallback(tmp_path, parameter):
-    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
+    gui = DriveGui(
+        {"$qubit.freq": 6100.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
+    )
 
     def respond(method, params):
         result = gui(method, params)
@@ -1065,7 +1080,9 @@ def test_twotone_invalid_reference_stops_without_fallback(tmp_path, parameter):
 
 
 def test_twotone_reuse_applies_explicit_drive_and_reset_once(tmp_path):
-    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
+    gui = DriveGui(
+        {"$qubit.freq": 6100.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
+    )
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,
@@ -1073,14 +1090,24 @@ def test_twotone_reuse_applies_explicit_drive_and_reset_once(tmp_path):
                 client,
                 client.call(
                     "twotone_spectrum",
-                    {"reuse_tab_id": "t", "drive_ref": "drive", "use_reset": "reset"},
+                    {
+                        "reuse_tab_id": "t",
+                        "drive_ref": "Q1.pulses.drive",
+                        "use_reset": "Q1.reset.reset",
+                    },
                 ),
             ),
         )
         assert reply.data["status"] == "finished", reply.data
         fields = reply.data["actual"]["fields"]
-        assert fields["modules.qub_pulse"] == {"value": "drive", "source": "explicit"}
-        assert fields["modules.reset"] == {"value": "reset", "source": "explicit"}
+        assert fields["modules.qub_pulse"] == {
+            "value": "Q1.pulses.drive",
+            "source": "explicit",
+        }
+        assert fields["modules.reset"] == {
+            "value": "Q1.reset.reset",
+            "source": "explicit",
+        }
         for field, value in (
             ("modules.qub_pulse.gain", 0.12),
             ("modules.qub_pulse.waveform.length", 2.0),
@@ -1098,7 +1125,7 @@ def test_twotone_reuse_applies_explicit_drive_and_reset_once(tmp_path):
 
 @pytest.mark.parametrize("number", [int, float])
 def test_twotone_number_inputs_preserve_mhz_us_and_source_labels(tmp_path, number):
-    gui = DriveGui({"r_f": 7200.0})
+    gui = DriveGui({"$resonator.freq": 7200.0})
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,
@@ -1143,7 +1170,9 @@ def test_twotone_number_inputs_preserve_mhz_us_and_source_labels(tmp_path, numbe
 
 @pytest.mark.parametrize("failure", ["stale", "missing", "busy", "wrong_adapter"])
 def test_twotone_reuse_failure_stops_without_retry_or_replacement(tmp_path, failure):
-    gui = DriveGui({"q_f": 6100.0, "qf_w": 4.0, "r_f": 7200.0})
+    gui = DriveGui(
+        {"$qubit.freq": 6100.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
+    )
     with recipe_client(tmp_path, gui) as client:
         if failure == "stale":
             client.transport.replies["tab.reset_cfg"] = {

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-05，實驗定義搬遷
+**Last updated:** 2026-10-11，reset scalar 與 Run-tested finisher
 
 # Measure GUI contracts
 
@@ -40,8 +40,20 @@ OneTone FluxDep 用具名 2D `measurement` liveplot。互動 Done 從 committed 
 TwoTone AmpRabi／LenRabi 的 run 回傳 RunRecord，FIT 以 explicit source 與 typed options 分析，結果包含 scalar 與 core fit_quality，`fit` 圖交給 Plots。Gain／length／Rabi frequency 的 scalar writeback 不依賴 cfg；校準 pulse module writeback 只從該 source.cfg 複製 qub_pulse，缺 cfg 時略過 module items。
 T2Echo／T2Ramsey 在 build_exp_cfg 將 detune_ratio 降為 cfg.detune，run 配對 cfg／Result，FIT 回傳 scalar 與 core fit_quality，並發布具名 fit。Ramsey q_f writeback 必須具有來源 cfg、實際 detune 與已提交的 fringe fit；canonical load 缺實際 detune 時只提供 t2r。
 CKP 的 run 配對 cfg 與純 Result 為 RunRecord，兩張 measurement 熱圖分別呈現 ground／excited。FIT 只提交 chi／kappa／res_freq scalar與具名 fit 圖，保留 chi／rf_w／readout_f writeback。
-Bath reset 的 FreqGain／Length／Phase adapter 將同次 cfg／Result 配成 RunRecord，FIT 使用 explicit source 與本次 Plots，僅提交 scalar 或空數值結果。三者的 reset_bath／reset_bath_e module writeback 使用來源 cfg，缺 cfg 時略過；md 欄位與 phase gating 不變。
-Single／dual-tone reset 的五個 adapters 將同次 cfg／Result 配成 RunRecord，FIT 僅提交 scalar 或空結果，圖交本次 Plots。Dual Freq 的 GUI hard-sweep policy 在 build_exp_cfg 寫入 cfg.method，不由 run kwargs 隱藏。reset_10／reset_120 module writeback 使用來源 cfg，缺 cfg 時略過，既有 md gating 保留。
+八個 reset adapters 將同次 cfg／Result 配成 RunRecord，FIT 使用 explicit source 與本次 Plots。
+SingleToneFreq、DualToneFreq、DualTonePower、BathFreqGain 與 BathPhase 將本次分析純量
+依原順序寫到 `$qubit.ext.*`。七個 default readers 從固定 capture 的 ext 建立 tested_reset
+或 sweep，missing/null/invalid 沿既有 lowering 失敗。BathFreqGain 保留 resonator/rabi seed。
+SingleToneFreq 只換本次 tested_reset 的 frequency，DualTonePower 只換兩 gain，BathPhase
+獨立複製兩 variant，只換 max/ground 與 min/excited phase。其他完整 schema 欄位保留，
+不以 ext 或舊 library module 覆蓋實測 cfg，也不加缺 ext gate。
+三個 finisher 提出 `$qubit.reset.reset_10`、`reset_120` 或 `reset_bath`/`reset_bath_e`
+固定 roots，以及可選的 `$qubit.module.reset` row。Slot 值是同份 capture 解析的具體 root，
+bath 預設 ground。Cfg 或 capture 為 None 時只保留純量，source/alias/materialization
+錯誤仍傳播。三個 length adapter 無 fit，返回空 proposal collection，不提 cfg-only module。
+DualToneFreq 與 BathFreqGain 不提 module。逐列 Apply 與 ledger 失敗政策由 framework owner
+維持，不加聯動或跨檔交易。Dual Freq 的 GUI hard-sweep policy 仍在 build_exp_cfg 寫入
+cfg.method，不由 run kwargs 隱藏。
 Singleshot Amp／Len Rabi、Check、ResetCheck、AC Stark 的 run 回傳 RunRecord，FIT 使用 explicit source／typed options／Plots，不在 GUI 數值結果保存 Figure。Rabi 保留完整 numeric fit 供共同 calibration writeback 判斷；ResetCheck 只投影 populations summary，不推導 reset fidelity。Check 的 GE centers 與 AC Stark 的 chi／kappa 仍由分析當次 md 讀取，再交 core options。
 Singleshot T1／Tone／Tone sweep adapters 直接組裝含 uniform 的 typed cfg，將同次 cfg／Result 配成 RunRecord。FIT 向本次 Plots 發布 fit 圖；Tone 保留 t1_with_tone writeback，其餘兩者只提交空數值結果。Correction／photon-axis 參數仍從分析當次 md 讀取。
 Singleshot MIST Freq／Power／FreqPower adapters 將本次校準 cfg 與純 Result 配成 RunRecord。FIT 使用 explicit source 與 typed options，只提交空數值結果，fit 圖另交 Plots。Confusion matrix 仍讀分析當次 md；只有 Power 使用 ac_stark_coeff／log_scale，FreqPower 不轉交無作用的參數。
