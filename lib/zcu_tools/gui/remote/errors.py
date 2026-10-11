@@ -48,7 +48,7 @@ class RemoteError(Exception):
         message: str,
         *,
         reason: str = "",
-        data: dict | None = None,
+        data: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -75,7 +75,7 @@ class ErrorEnvelope:
     code: str
     message: str
     reason: str = ""
-    data: dict | None = None
+    data: dict[str, object] | None = None
 
     @classmethod
     def from_remote_error(cls, exc: RemoteError) -> ErrorEnvelope:
@@ -86,7 +86,7 @@ class ErrorEnvelope:
             data=exc.data,
         )
 
-    def to_wire(self) -> dict:
+    def to_wire(self) -> dict[str, object]:
         wire: dict[str, object] = {"code": self.code, "message": self.message}
         if self.reason:
             wire["reason"] = self.reason

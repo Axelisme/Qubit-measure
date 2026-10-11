@@ -256,8 +256,16 @@ def test_named_panes_project_paths_and_retire_original_collections(
         state, MagicMock(), MagicMock(), cfg_resources(state), MagicMock(), MagicMock()
     )
     snapshot = tabs.get_snapshot(tab_id)
-    assert snapshot.analysis is not None and snapshot.analysis.figures is replacement
-    assert snapshot.post_analysis is not None and snapshot.post_analysis.figures is post
+    assert (
+        snapshot.analysis is not None
+        and snapshot.analysis.figures is not None
+        and snapshot.analysis.figures is replacement
+    )
+    assert (
+        snapshot.post_analysis is not None
+        and snapshot.post_analysis.figures is not None
+        and snapshot.post_analysis.figures is post
+    )
     assert snapshot.analysis.figures["fit"] is first
     assert snapshot.analysis.figures["diagnostic"] is second
     assert snapshot.post_analysis.figures["fit"] is post_figure
