@@ -1,7 +1,8 @@
 """Read-only predictor queries using explicit parameters or concrete qubits.
 
-The session installation/load/clear tests are retired by D348. Numerical query
-and file-prefill contracts remain here; physics goldens belong to simulate.
+Queries take their source from each request, so they do not require a
+session-installed predictor. Numerical query and file-prefill contracts remain
+here; physics goldens belong to simulate.
 """
 
 from collections.abc import Generator
