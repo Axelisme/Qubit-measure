@@ -259,7 +259,9 @@ class InspectDialog(InspectDialogBase):
 
     def _build_md_tab(self) -> QWidget:
         """Use the session component-tree editor for measure parameters."""
-        self._component_tree = ComponentTreeWidget(self._ctrl)
+        self._component_tree = ComponentTreeWidget(
+            self._ctrl, control_identity=self._app_ctrl.control_identity
+        )
         return self._component_tree
 
     def _build_extra_toolbar_buttons(self, toolbar: QHBoxLayout) -> None:

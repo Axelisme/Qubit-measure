@@ -33,6 +33,10 @@ from zcu_tools.gui.session.ui.component_editing import (
     set_red,
     show_error,
 )
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    bind_control_enabled,
+    dispose_control_watches,
+)
 from zcu_tools.resources.entry import (
     FieldSpec,
     component_field_specs,
@@ -40,6 +44,7 @@ from zcu_tools.resources.entry import (
 )
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.control_identity import ControlIdentity
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
 
@@ -99,6 +104,7 @@ class AddComponentDialog(QDialog):
         setup: bool,
         on_added: Callable[[str], None],
         parent: QWidget | None = None,
+        control_identity: ControlIdentity | None = None,
     ) -> None:
         """Build the form for the first registered kind; do not show it yet.
 
@@ -106,10 +112,17 @@ class AddComponentDialog(QDialog):
         current point. on_added receives the new component's name after the
         owner accepted it, before the dialog closes. The destination text
         reads control.current_point_label() once, here; callers open a new
-        dialog per Add.
+        dialog per Add. control_identity=None means this app has no control
+        authority; it adds no identity gate and preserves domain validation.
+        An authority gates Name, Kind, fields and Add while leaving modal
+        Cancel/Close and errors usable. Submission reads its current status
+        before writing. Finished retires these inputs, even after Local reclaim.
         """
         super().__init__(parent)
         self._control = control
+        self._control_identity = control_identity
+        self._retired = False
+        self.finished.connect(self.dispose_control_watches)
         self._setup = setup
         self._on_added = on_added
         self._rows: list[_FieldRow] = []
@@ -122,6 +135,10 @@ class AddComponentDialog(QDialog):
         destination.setWordWrap(True)
         layout.addWidget(destination)
 
+        content = QWidget(self)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(content, stretch=1)
         identity = QFormLayout()
         self._name_label = QLabel("Name *")
         self._name_label.setObjectName("label:add_name")
@@ -134,13 +151,14 @@ class AddComponentDialog(QDialog):
         self._kind.setObjectName("add_kind")
         self._kind.addItems(list(component_registry.kinds()))
         identity.addRow("Kind", self._kind)
-        layout.addLayout(identity)
+        content_layout.addLayout(identity)
 
         self._scroll = QScrollArea()
         self._scroll.setObjectName("add_fields")
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        layout.addWidget(self._scroll, stretch=1)
+        content_layout.addWidget(self._scroll, stretch=1)
+        bind_control_enabled(content, control_identity, retirement_dialog=self)
 
         self._error = QLabel()
         self._error.setObjectName("add_error")
@@ -157,6 +175,16 @@ class AddComponentDialog(QDialog):
         self._kind.currentTextChanged.connect(self._rebuild_fields)
         self._rebuild_fields()
 
+    def dispose_control_watches(self) -> None:
+        """Retire inputs and authority projections before final Qt destruction."""
+        self._retired = True
+        dispose_control_watches(self)
+
+    def deleteLater(self) -> None:
+        """Retire inputs and watches before direct owner-thread Qt deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
+
     def _build_buttons(self) -> QDialogButtonBox:
         buttons = QDialogButtonBox()
         add = QPushButton("Add")
@@ -164,6 +192,7 @@ class AddComponentDialog(QDialog):
         add.setDefault(True)
         add.clicked.connect(self._on_add)
         buttons.addButton(add, QDialogButtonBox.ButtonRole.AcceptRole)
+        bind_control_enabled(add, self._control_identity, retirement_dialog=self)
         cancel = QPushButton("Cancel")
         cancel.setObjectName("add_cancel")
         cancel.clicked.connect(self.reject)
@@ -298,6 +327,9 @@ class AddComponentDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_add(self) -> None:
+        # Submits delivered after close belong to retired inputs.
+        if self._retired:
+            return
         self._update_required()
         missing = [
             row.path
@@ -323,6 +355,11 @@ class AddComponentDialog(QDialog):
                 return
             _insert(fields, row.spec.segments, value)
         name = self._name.text()
+        if (
+            self._control_identity is not None
+            and self._control_identity.status().holder != "gui"
+        ):
+            return
         try:
             self._control.add_component(
                 name, self._kind.currentText(), fields, setup=self._setup

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12，holder admission、EMPTY entry metadata、SavedPoint writeback 與獨立 predictor
+**Last updated:** 2026-10-12，Inspect Add authority／input retirement、EMPTY entry metadata、SavedPoint writeback 與獨立 predictor
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -104,6 +104,9 @@ Shared dialog 的 optional `control_identity` 指向同一 application owner；�
 Inspect Apply／Delete、tab close 或 reload。Inspect Delete 先固定 `ParameterContext`，再以
 `Controller.apply_library_change` 刪除該 target；不因確認期間 context switch 改寫新 point。
 DeviceDialog 與 Inspect 保留只讀瀏覽，分別套用自己的 read-only presentation gate。
+Inspect 將同一 application authority 交給 component tree 與單次 Add dialog。
+Remote 停用 Add 的欄位及提交，Cancel／Close 保持可用。Finished 退休輸入與 watches，
+之後送達的 submit 不因 Local 收回而重新寫入。
 只有量測 Stop 和 device setup Stop
 在 Remote 時收回成 Local locked 並提交 cancellation；收回本身不取消 operation。
 Mounted `InteractiveFrontend.set_read_only(read_only=...)` 必須停用 plugin command controls 和
