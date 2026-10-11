@@ -12,7 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
+from zcu_tools.cfg_model import waveform_spec_from_raw
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import (
@@ -24,9 +25,11 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
-from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.program.v2 import WaveformCfgFactory
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 
 pytestmark = pytest.mark.requires_loopback
 
@@ -101,7 +104,9 @@ class Client:
         return result
 
     def open_editor(self) -> str:
-        result = self.result("editor.new", item_kind="waveform", from_name="seed")
+        result = self.result(
+            "editor.new", item_kind="waveform", from_name="Q1.waveforms.seed"
+        )
         editor_id = result["editor_id"]
         assert isinstance(editor_id, str)
         return editor_id
@@ -121,27 +126,21 @@ class Client:
 class Connections:
     def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self.scheduler = ManualOwnerScheduler()
-        self.library = ModuleLibrary()
-        self.library.waveforms["seed"] = WaveformCfgFactory.from_raw(
-            {"style": "const", "length": 0.1}
-        )
-        context = SessionEnv(
-            md=MetaDict(),
-            ml=self.library,
-            soc=None,
-            soccfg=None,
-            result_dir=str(tmp_path),
-            database_path=str(tmp_path / "database"),
-            active_label="test",
-            readiness=ContextReadiness.ACTIVE,
-        )
         self.controller = Controller(
-            State(context),
-            Registry(),
-            IOManager(),
-            None,
-            BaseEventBus(),
+            state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+            registry=Registry(),
+            view=None,
+            bus=BaseEventBus(),
             project_root=str(tmp_path),
+        )
+        self.controller.setup_control.new_entry(EntryRequest("test"))
+        target = self.controller.setup_control.new_point(
+            PointCreateRequest("test", "", CommandOrigin("gui"))
+        )
+        self.controller.context_control.set_waveform(
+            target,
+            "Q1.waveforms.seed",
+            waveform_spec_from_raw({"style": "const", "length": 0.1}),
         )
         self.reclaimed: list[tuple[list[str], int]] = []
         discard = self.controller.discard_cfg_editors
@@ -218,13 +217,14 @@ def test_successful_terminal_is_not_reclaimed_again(
     if terminal == "editor.commit":
         a.result("editor.get", editor_id=finished)
         a.result("context.snapshot")
-        params["name"] = "saved"
+        params["name"] = "Q1.waveforms.saved"
     a.result(terminal, **params)
     observer.assert_missing(finished)
     if terminal == "editor.commit":
-        assert (
-            connections.library.waveforms["saved"]
-            == connections.library.waveforms["seed"]
+        assert connections.controller.read_context().library.waveform_spec(
+            "Q1.waveforms.saved"
+        ) == connections.controller.read_context().library.waveform_spec(
+            "Q1.waveforms.seed"
         )
     a.close()
     connections.wait(lambda: bool(connections.reclaimed))

@@ -16,9 +16,9 @@ from dataclasses import replace
 from functools import partial
 from io import BytesIO
 from pathlib import Path
+from tempfile import mkdtemp
 from typing import Any, cast
 from unittest.mock import MagicMock
-from uuid import uuid4
 
 import pytest
 from PIL import Image
@@ -55,23 +55,19 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from zcu_lab.definitions import register_all
+from zcu_lab.definitions import ALIAS_PRESET, register_all
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
 def _context_root() -> Path:
-    # Standalone helpers have no pytest tmp_path; keep their files lane-owned.
-    root = (
-        Path(__file__).resolve().parents[5] / ".pytest-tmp" / f"context-{uuid4().hex}"
-    )
-    root.mkdir(parents=True)
-    return root
+    # Standalone helpers follow the runtime's lane-owned TMPDIR.
+    return Path(mkdtemp(prefix="context-"))
 
 
 def make_ctx() -> SessionEnv:
     """Return an ACTIVE fixed capture backed by a real entry, point and ledger.
 
-    Resource files live under this checkout's .pytest-tmp until lane cleanup.
+    Resource files live under the runtime's TMPDIR until lane cleanup.
     The SoC handles are synthetic and never connect to hardware.
     """
     root = _context_root()
@@ -151,6 +147,14 @@ def make_view() -> MagicMock:
     return view
 
 
+class FixtureController(Controller):
+    """Expose deterministic worker teardown to the shared Qt/socket fixtures."""
+
+    def quiesce(self) -> bool:
+        """Join workers and flush owner deliveries before fixture destruction."""
+        return self._background_svc.quiesce()
+
+
 class Fixture:
     """Holds strong refs to Controller + service to survive GC mid-test."""
 
@@ -172,7 +176,8 @@ class Fixture:
         self.view = None if headless else make_view()
         self.bus = EventBus()
         fixture_root = str(_context_root()) if project_root is None else project_root
-        self.ctrl = Controller(
+        self.ctrl = FixtureController(
+            alias_preset=ALIAS_PRESET,
             state=self.state,
             registry=self.registry,
             view=self.view,
@@ -211,13 +216,12 @@ class Fixture:
         resources = cast(TabCfgResources, self.ctrl.cfg_resources)
         from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 
-        parameters = self.ctrl.read_context()
         cfg = resources.create(
             tab_id,
             lambda: schema,
             initial=schema,
             resolution=lambda: MeasureCfgBindings(self.ctrl).snapshot_from_state(
-                self.state, captured_values={}, parameters=parameters
+                self.state, captured_values={}, parameters=self.ctrl.read_context()
             ),
         )
         self.state.add_tab(
@@ -235,6 +239,7 @@ class Fixture:
 
     def stop(self) -> None:
         self.service.stop()
+        self.ctrl.quiesce()
 
 
 class FakeTransport:

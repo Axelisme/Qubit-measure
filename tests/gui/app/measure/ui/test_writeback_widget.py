@@ -27,6 +27,7 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
     SessionEnv,
     WaveformWriteback,
+    WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.cfg_schemas import waveform_cfg_to_value
@@ -41,17 +42,19 @@ from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding.fields import ScalarField
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv as ParameterSessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
-from zcu_lab.v2.fake.freq.core import FakeFreqRunResult
+from zcu_lab.components import ResonatorSchema, WiringSchema
+from zcu_lab.v2.fake.freq.core import FakeFreqRunResult, HangerSimParams
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter, FakeFreqAnalyzeParams
 
 
@@ -126,12 +129,33 @@ def _waveform_length_field(service, draft, item_id: str) -> ScalarField:
 
 
 def _make_ctx() -> SessionEnv:
-    return SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
-        soc=None,
-        soccfg=None,
-    )
+    simulation = HangerSimParams()
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(
+                kind="resonator",
+                freq=simulation.freq,
+                kappa=simulation.freq / simulation.Ql,
+                wiring=WiringSchema(ch=0, ro_ch=0),
+                ext={"time_of_fly": 0.0},
+            )
+        }
+    ).bind_aliases((AliasRow("resonator", "R1"),), {})
+    return SessionEnv(parameters=parameters, soc=None, soccfg=None)
+
+
+def _parameter_values(items: list[WritebackItem]) -> dict[str, WritebackValues]:
+    values: dict[str, WritebackValues] = {}
+    for item in items:
+        if not isinstance(item, ParameterWriteback):
+            raise TypeError("This widget fixture supplies parameter proposals")
+        values[item.session_id] = WritebackValues(
+            actual_path=item.target_name,
+            current=None,
+            proposed=item.proposed_value,
+            unit=None,
+        )
+    return values
 
 
 def _default_analyze_params(
@@ -148,8 +172,8 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
 
     run_plots = Plots(NonPresentingHost())
     result = adapter.run(
-        RunRequest(soc=ctx.soc, soccfg=ctx.soccfg),
-        schema_to_raw_dict(schema, ctx.md, ctx.ml),
+        RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, cfg_context=None),
+        dict(schema_to_raw_dict(schema, ctx.parameters)),
         context=RunContext(
             ctx.soc, ctx.soccfg, run_plots, devices={}, cancel_signal=StopSignal()
         ),
@@ -161,8 +185,7 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
         AnalyzeRequest(
             run_result=result,
             analyze_params=_default_analyze_params(adapter, result, ctx),
-            md=ctx.md,
-            ml=ctx.ml,
+            parameters=ctx.parameters,
             predictor=ctx.predictor,
         ),
         plots=analysis_plots,
@@ -180,7 +203,7 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
         item.session_id = f"id-{i}"
 
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
-    widget.populate(items)
+    widget.populate(items, _parameter_values(items))
     selected = [it for it in items if it.selected]
     edit_buttons = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
 
@@ -203,7 +226,7 @@ def test_writeback_widget_non_scalar_item_is_read_only(qapp):
     nonscalar.session_id = "param-2"
 
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
-    widget.populate([scalar, nonscalar])
+    widget.populate([scalar, nonscalar], _parameter_values([scalar, nonscalar]))
 
     edit_buttons = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
     # Only the scalar item gets an Edit button; the matrix is read-only.
@@ -222,9 +245,9 @@ def test_writeback_widget_projects_draft_owned_applied_state(qapp):
     ctrl.get_writeback_applied_for_pane.return_value = {"param-1": False}
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
 
-    widget.populate([item])
+    widget.populate([item], _parameter_values([item]))
 
-    checkbox = widget._checks["param-1"]
+    checkbox = widget.findChildren(QCheckBox)[0]
     assert checkbox.text() == "r_f*"
     assert checkbox.font().bold()
     assert any(
@@ -232,8 +255,9 @@ def test_writeback_widget_projects_draft_owned_applied_state(qapp):
     )
 
     ctrl.get_writeback_applied_for_pane.return_value = {"param-1": True}
-    widget.populate([item])
-    checkbox = widget._checks["param-1"]
+    widget.populate([item], _parameter_values([item]))
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    checkbox = widget.findChildren(QCheckBox)[0]
     assert checkbox.text() == "r_f"
     assert not checkbox.font().bold()
 
@@ -246,7 +270,72 @@ def test_writeback_widget_does_not_hide_applied_projection_failures(qapp):
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
 
     with pytest.raises(RuntimeError, match="projection failed"):
-        widget.populate([item])
+        widget.populate([item], _parameter_values([item]))
+
+
+def _assert_ledger_panel(widget: WritebackWidget) -> None:
+    # shared backgrounds / continuous borders — observed via palette and geometry
+    panel = widget.findChild(QFrame, "writebackPanel")
+    assert panel is not None
+    rows = panel.findChildren(QFrame, "writebackRow")
+    panel_layout = panel.layout()
+    if panel_layout is None:
+        raise RuntimeError("Writeback panel has no Qt layout")
+    assert panel.objectName() == "writebackPanel"
+    # rendered white background shared between panel and rows (palette)
+    panel_bg = panel.palette().color(panel.backgroundRole()).name().lower()
+    assert panel_bg == "#ffffff", f"panel bg {panel_bg}"
+    assert rows, "no rows rendered"
+    first_bg = rows[0].palette().color(rows[0].backgroundRole()).name().lower()
+    assert first_bg == "#ffffff", f"row bg {first_bg}"
+    assert panel_bg == first_bg
+    # container has no extra spacing, rows stack continuously with 1px border gap
+    assert panel_layout.spacing() == 0
+    cm = panel_layout.contentsMargins()
+    assert cm.left() == 0 and cm.top() == 0 and cm.right() == 0 and cm.bottom() == 0
+    if len(rows) > 1:
+        # second row directly follows first (allow 1px border)
+        assert abs(rows[1].geometry().top() - (rows[0].geometry().bottom() + 1)) <= 1
+    # row internal margins per spec 8,4,8,4
+    lay0 = rows[0].layout()
+    assert lay0 is not None
+    lm = lay0.contentsMargins()
+    assert lm.left() == 8 and lm.top() == 4 and lm.right() == 8 and lm.bottom() == 4
+    # rendered-image border checks — bounded deterministic sampling of
+    # visible outer panel border and adjacent-row divider (palette alone
+    # would hide a missing stylesheet border).
+    panel_grab = panel.grab()
+    img = panel_grab.toImage()
+    w = panel.width()
+    h = panel.height()
+    # offscreen QT_QPA_PLATFORM=offscreen has devicePixelRatio 1.0; scale if hidpi
+    dpr = panel_grab.devicePixelRatio()
+    scale = int(dpr) if dpr != 1 else 1
+    outer_expected = "#d7dde7"
+    divider_expected = "#e8ecf2"
+    # outer border — top-center and left-mid avoid rounded corners
+    assert (
+        img.pixelColor((w // 2) * scale, 0 * scale).name().lower() == outer_expected
+    ), f"outer top border {img.pixelColor((w // 2) * scale, 0).name().lower()}"
+    assert img.pixelColor(0 * scale, (h // 2) * scale).name().lower() == outer_expected
+    # adjacent-row divider — horizontal 1px line at row boundary
+    assert len(rows) >= 2
+    y_div = rows[1].pos().y() - 1
+    assert 0 <= y_div < h, f"divider y {y_div} out of {h}"
+    assert (
+        img.pixelColor((w // 2) * scale, y_div * scale).name().lower()
+        == divider_expected
+    )
+    assert (
+        img.pixelColor((w // 4) * scale, y_div * scale).name().lower()
+        == divider_expected
+    )
+    # sanity: interior pixels are white, not border
+    assert img.pixelColor((w // 2) * scale, 1 * scale).name().lower() == "#ffffff"
+    assert (
+        img.pixelColor((w // 2) * scale, (y_div + 1) * scale).name().lower()
+        == "#ffffff"
+    )
 
 
 def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
@@ -263,7 +352,7 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
     nonscalar.session_id = "param-2"
     widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
     widget.resize(600, 400)
-    widget.populate([scalar, nonscalar])
+    widget.populate([scalar, nonscalar], _parameter_values([scalar, nonscalar]))
     widget.show()
     qapp.processEvents()
     try:
@@ -284,31 +373,7 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
             ):
                 assert lbl.alignment() & Qt.AlignmentFlag.AlignHCenter
                 assert lbl.alignment() & Qt.AlignmentFlag.AlignVCenter
-        # shared backgrounds / continuous borders — observed via palette and geometry
-        panel = widget._rows_container
-        rows = widget._rows
-        assert panel.objectName() == "writebackPanel"
-        # rendered white background shared between panel and rows (palette)
-        panel_bg = panel.palette().color(panel.backgroundRole()).name().lower()
-        assert panel_bg == "#ffffff", f"panel bg {panel_bg}"
-        assert rows, "no rows rendered"
-        first_bg = rows[0].palette().color(rows[0].backgroundRole()).name().lower()
-        assert first_bg == "#ffffff", f"row bg {first_bg}"
-        assert panel_bg == first_bg
-        # container has no extra spacing, rows stack continuously with 1px border gap
-        assert widget._rows_layout.spacing() == 0
-        cm = widget._rows_layout.contentsMargins()
-        assert cm.left() == 0 and cm.top() == 0 and cm.right() == 0 and cm.bottom() == 0
-        if len(rows) > 1:
-            # second row directly follows first (allow 1px border)
-            assert (
-                abs(rows[1].geometry().top() - (rows[0].geometry().bottom() + 1)) <= 1
-            )
-        # row internal margins per spec 8,4,8,4
-        lay0 = rows[0].layout()
-        assert lay0 is not None
-        lm = lay0.contentsMargins()
-        assert lm.left() == 8 and lm.top() == 4 and lm.right() == 8 and lm.bottom() == 4
+        _assert_ledger_panel(widget)
         # identical Edit/Copy geometry
         edit_btns = [b for b in widget.findChildren(QPushButton) if b.text() == "Edit"]
         copy_btns = [b for b in widget.findChildren(QPushButton) if b.text() == "Copy"]
@@ -316,45 +381,38 @@ def test_writeback_compact_ledger_target_only_centered_and_equal_actions(qapp):
         for b in edit_btns + copy_btns:
             assert b.width() == 56 and b.height() == 26
             assert b.size().width() == 56 and b.size().height() == 26
-        # rendered-image border checks — bounded deterministic sampling of
-        # visible outer panel border and adjacent-row divider (palette alone
-        # would hide a missing stylesheet border).
-        panel_grab = panel.grab()  # type: ignore[attr-defined]
-        img = panel_grab.toImage()
-        w = panel.width()
-        h = panel.height()
-        # offscreen QT_QPA_PLATFORM=offscreen has devicePixelRatio 1.0; scale if hidpi
-        dpr = panel_grab.devicePixelRatio()  # type: ignore[attr-defined]
-        scale = int(dpr) if dpr != 1 else 1  # type: ignore[arg-type]
-        outer_expected = "#d7dde7"
-        divider_expected = "#e8ecf2"
-        # outer border — top-center and left-mid avoid rounded corners
-        assert (
-            img.pixelColor((w // 2) * scale, 0 * scale).name().lower() == outer_expected
-        ), f"outer top border {img.pixelColor((w // 2) * scale, 0).name().lower()}"
-        assert (
-            img.pixelColor(0 * scale, (h // 2) * scale).name().lower() == outer_expected
-        )
-        # adjacent-row divider — horizontal 1px line at row boundary
-        assert len(rows) >= 2
-        y_div = rows[1].pos().y() - 1
-        assert 0 <= y_div < h, f"divider y {y_div} out of {h}"
-        assert (
-            img.pixelColor((w // 2) * scale, y_div * scale).name().lower()
-            == divider_expected
-        )
-        assert (
-            img.pixelColor((w // 4) * scale, y_div * scale).name().lower()
-            == divider_expected
-        )
-        # sanity: interior pixels are white, not border
-        assert img.pixelColor((w // 2) * scale, 1 * scale).name().lower() == "#ffffff"
-        assert (
-            img.pixelColor((w // 2) * scale, (y_div + 1) * scale).name().lower()
-            == "#ffffff"
-        )
     finally:
         widget.close()
+
+
+def _assert_long_value_bounded(qapp, reference: WritebackWidget) -> None:
+    # long value cannot widen ledger
+    long_val = list(range(200))
+    w2 = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+    long_item = ParameterWriteback(
+        target_name="long_list", description="d", proposed_value=long_val
+    )
+    long_item.session_id = "param-1"
+    w2.resize(600, 400)
+    w2.populate([long_item], _parameter_values([long_item]))
+    w2.show()
+    qapp.processEvents()
+    try:
+        prop2 = next(
+            label
+            for label in w2.findChildren(QLabel)
+            if "writebackProposed" in label.objectName()
+        )
+        assert prop2.text() == "list[200]"
+        # size hint remains bounded
+        assert w2.sizeHint().width() < reference.sizeHint().width() + 200
+        assert w2.findChildren(QTableWidget) == []
+        # No nested writeback scroll — long value does not create inner scroll
+        assert w2.findChild(QScrollArea, "writebackScroll") is None
+        # No horizontal overflow: panel width bounded
+        assert w2.findChild(QFrame, "writebackPanel").width() <= w2.width() + 4
+    finally:
+        w2.close()
 
 
 def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qapp):
@@ -370,7 +428,14 @@ def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qap
     )
     item.session_id = "param-1"
     widget.resize(600, 400)
-    widget.populate([item])
+    widget.populate(
+        [item],
+        {
+            item.session_id: WritebackValues(
+                actual_path=item.target_name, current=matrix, proposed=matrix, unit=None
+            )
+        },
+    )
     widget.show()
     qapp.processEvents()
     try:
@@ -380,9 +445,9 @@ def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qap
 
         # Proposed keeps its bounded heading and adds the readable matrix view.
         prop = next(
-            l
-            for l in widget.findChildren(QLabel)
-            if "writebackProposed" in l.objectName()
+            label
+            for label in widget.findChildren(QLabel)
+            if "writebackProposed" in label.objectName()
         )
         assert prop.text() == "3 \u00d7 3 matrix"
         tables = widget.findChildren(QTableWidget)
@@ -403,34 +468,7 @@ def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qap
         cb_clip = QApplication.clipboard()
         assert cb_clip is not None
         assert cb_clip.text() == json.dumps(matrix)
-        # long value cannot widen ledger
-        long_val = list(range(200))
-        w2 = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
-        long_item = ParameterWriteback(
-            target_name="long_list", description="d", proposed_value=long_val
-        )
-        long_item.session_id = "param-1"
-        w2.resize(600, 400)
-        w2.populate([long_item])
-        w2.show()
-        qapp.processEvents()
-        try:
-            prop2 = next(
-                l
-                for l in w2.findChildren(QLabel)
-                if "writebackProposed" in l.objectName()
-            )
-            assert prop2.text() == "list[200]"
-            # size hint remains bounded
-            assert w2.sizeHint().width() < widget.sizeHint().width() + 200
-            assert w2.findChildren(QTableWidget) == []
-            # No nested writeback scroll — long value does not create inner scroll
-            assert w2.findChild(QScrollArea, "writebackScroll") is None
-            assert not hasattr(w2, "_scroll")
-            # No horizontal overflow: panel width bounded
-            assert w2._rows_container.width() <= w2.width() + 4
-        finally:
-            w2.close()
+        _assert_long_value_bounded(qapp, widget)
     finally:
         widget.close()
 

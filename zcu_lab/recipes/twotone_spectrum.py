@@ -12,6 +12,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import FrequencySweepCalibration, set_frequency, set_frequency_sweep
+
 
 def _validate_inputs(
     references: tuple[tuple[str, str | None], ...],
@@ -40,11 +42,11 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     readout_ref: str | None = None,
     drive_ref: str | None = None,
     use_reset: str | None = None,
-    center_mhz: float | None = None,
-    span_mhz: float | None = None,
+    center_mhz: float,
+    span_mhz: float,
     gain: float | None = None,
     pulse_length_us: float | None = None,
-    points: int | None = None,
+    points: int,
     reps: int | None = None,
     rounds: int | None = None,
 ) -> RecipeGenerator:
@@ -56,10 +58,10 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     session is driver-supplied. reuse_tab_id resets that idle twotone/freq tab.
     readout_ref/drive_ref select library modules; None retains the GUI selection.
     Readout prefers usable library frequencies, then resonator calibration.
-    None disables reset; use_reset selects its library module. center_mhz uses
-    qubit calibration when omitted. span_mhz must be positive and defaults to
-    the GUI's calibrated linewidth expression. gain is native pulse amplitude;
-    pulse_length_us is the fixed pulse length in us. points is at least 2;
+    None disables reset; use_reset selects its library module. center_mhz and
+    positive span_mhz are required finite MHz values; points is a required
+    integer >=2. The helper writes numeric center +/- span/2 endpoints.
+    gain is native pulse amplitude; pulse_length_us is the fixed length in us;
     reps/rounds are integer counts. Other omitted values retain GUI defaults.
     The driver rejects invalid schema/scalar inputs before calling this author.
     Blank references and invalid span/points fail before preparing. Missing
@@ -85,7 +87,11 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
         points,
     )
 
-    tab = session.open_tab("twotone/freq", target=target, reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "twotone/freq",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     if use_reset is None:
         tab.disable_library("modules.reset")
     else:
@@ -96,9 +102,10 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     # Preserve the complete missing-source list rather than failing on its first item.
     missing: list[MissingParameter] = []
     try:
-        tab.set_frequency_sweep(
+        set_frequency_sweep(
+            tab,
             "sweep.freq",
-            calibration="qubit",
+            calibration=FrequencySweepCalibration("$qubit.freq", "$qubit.kappa", 3.0),
             center_mhz=center_mhz,
             span_mhz=span_mhz,
             expts=points,
@@ -106,20 +113,21 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
     try:
-        tab.set_frequency(
-            "modules.readout", calibration="resonator", required="readout_ref"
+        set_frequency(
+            tab,
+            "modules.readout",
+            calibration="$resonator.freq",
+            required="readout_ref",
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
-    tab.set("modules.qub_pulse.gain", gain, source="gain")
-    tab.set(
-        "modules.qub_pulse.waveform.length", pulse_length_us, source="pulse_length_us"
-    )
-    tab.set("reps", reps, source="reps")
-    tab.set("rounds", rounds, source="rounds")
+    tab.set("modules.qub_pulse.gain", gain, source="explicit")
+    tab.set("modules.qub_pulse.waveform.length", pulse_length_us, source="explicit")
+    tab.set("reps", reps, source="explicit")
+    tab.set("rounds", rounds, source="explicit")
 
     run, status = yield tab.run()
     if status == "cancelled":
@@ -142,7 +150,11 @@ DEFINITION = RecipeDefinition(
     input_schema={
         "type": "object",
         "additionalProperties": False,
+        "required": ["center_mhz", "span_mhz", "points"],
         "properties": {
+            "center_mhz": {"type": "number"},
+            "span_mhz": {"type": "number"},
+            "points": {"type": "integer"},
             "target": {"type": ["string", "null"], "minLength": 1},
             **{
                 name: {"type": ["string", "null"], "minLength": 1}
@@ -150,12 +162,9 @@ DEFINITION = RecipeDefinition(
             },
             **{
                 name: {"type": ["number", "null"]}
-                for name in ("center_mhz", "span_mhz", "gain", "pulse_length_us")
+                for name in ("gain", "pulse_length_us")
             },
-            **{
-                name: {"type": ["integer", "null"]}
-                for name in ("points", "reps", "rounds")
-            },
+            **{name: {"type": ["integer", "null"]} for name in ("reps", "rounds")},
         },
     },
     run=twotone_spectrum,
@@ -172,8 +181,6 @@ DEFINITION = RecipeDefinition(
         SummaryParameter("pulse_length_us", "modules.qub_pulse.waveform.length", "us"),
         SummaryParameter("gain", "modules.qub_pulse.gain"),
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("center_mhz", "center_mhz", "MHz"),
-        SummaryParameter("span_mhz", "span_mhz", "MHz"),
         SummaryParameter("drive_ref", "modules.qub_pulse"),
     ),
     summary_estimates=(

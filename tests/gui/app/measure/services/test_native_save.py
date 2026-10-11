@@ -68,7 +68,6 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     ResultEntry,
-    RoleSpec,
     SavedPayload,
     SaveLayout,
 )
@@ -85,19 +84,17 @@ from tests.gui.app.measure._native_save_support import (
     declare_panes,
     native_save_session,
 )
+from tests.gui.app.measure.remote._helpers import FixtureController
 from tests.resources.entry.fakes import (
     register_fakes,
     registry_state,
     restore_registry,
 )
+from zcu_lab.definitions import ALIAS_PRESET
 
 
 class RoleSavingAdapter(SavingAdapter):
     """Use the existing offline saving backend with a declared driver alias."""
-
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the driver alias consumed by this offline experiment."""
-        return {"driver": RoleSpec("fake/drive/*")}
 
 
 @pytest.fixture
@@ -135,7 +132,7 @@ def _acquire_to_terminal(
     cfg = session.state.get_tab("tab").cfg
     inputs = GuardService(
         session.state,
-        captured_parameters=session.context.read_alias_context,
+        captured_parameters=session.capture_parameters,
         cfg_resolution=lambda parameters: MeasureCfgBindings(
             MagicMock()
         ).snapshot_from_state(session.state, captured_values={}, parameters=parameters),
@@ -233,6 +230,7 @@ def role_application(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
     services = build_app_services(
+        alias_preset=ALIAS_PRESET,
         state=state,
         bus=bus,
         registry=registry,
@@ -272,7 +270,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     state, services, bus = role_application
     tab_id = services.tab.new_tab("role_saving")
     tab = state.get_tab(tab_id)
-    birth = services.context.read_alias_context(tab.adapter.parameter_roles())
+    birth = services.context.read_context()
     assert birth is not None
     birth_storage = birth.capture_storage()
     services.setup_control.new_entry(EntryRequest("acquisition"))
@@ -300,7 +298,10 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     subscription = bus.subscribe(RunFinishedPayload, terminal)
     try:
         services.run_analyze_control.start_run(
-            tab_id, tab.cfg.observe().ref, origin=origin, target=target
+            tab_id,
+            tab.cfg.observe().ref,
+            origin=origin,
+            aliases=None if target is None else {"driver": target},
         )
         timer.start(5000)
         if not finished:
@@ -630,6 +631,25 @@ def test_save_events_observe_committed_state_and_complete_report(
         assert payload.data_path == str(native.output.path)
     assert len(session.artifact_completions if batch else session.completions) == 1
     assert (session.completions if batch else session.artifact_completions) == []
+
+
+@pytest.fixture
+def role_controller(
+    tmp_path: Path, qapp: QApplication
+) -> Generator[tuple[State, Controller, BaseEventBus]]:
+    """Compose the real diagnostic owner without hardware or mutable registries."""
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    registry = Registry()
+    registry.register("role_saving", RoleSavingAdapter)
+    controller = FixtureController(
+        state=state, registry=registry, view=None, bus=bus, project_root=str(tmp_path)
+    )
+    try:
+        yield state, controller, bus
+    finally:
+        assert controller.quiesce()
+        qapp.processEvents()
 
 
 @pytest.mark.parametrize("batch", [False, True])

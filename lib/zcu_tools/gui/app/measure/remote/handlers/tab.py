@@ -172,7 +172,7 @@ class TabParameterRead(TypedDict):
     values maps requested logical paths to YAML values. Absent leaves are
     omitted; explicit null is retained. modules maps each requested reference
     to its existing canonical library root, or None for custom/missing roots.
-    Both use current point/library/aliases, with optional temporary target.
+    Both use current point/library/aliases, with optional temporary aliases.
     Neither mapping refreshes the live context or operation guards.
     """
 
@@ -202,7 +202,8 @@ def h_tab_parameter_read(
 
     tab_id is an existing GUI tab. paths and module_refs are arrays of non-empty
     strings, with $alias.path distinct from concrete component paths. Optional
-    target overrides this read's first declared alias without changing globals.
+    aliases maps alias names to concrete components without changing globals.
+    None and {} mean no override.
     Query only these requested data.
     Missing leaves and explicit null follow TabParameterRead. Module lookup uses
     the parameter owner's role/slot resolution and library membership. Unknown
@@ -216,8 +217,8 @@ def h_tab_parameter_read(
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     paths = _parameter_query_strings(params, "paths")
     module_refs = _parameter_query_strings(params, "module_refs")
-    target = _temporary_target(params)
-    parameters = adapter.tab_control.capture_parameters(tab_id, target=target)
+    aliases = temporary_aliases(params)
+    parameters = adapter.tab_control.capture_parameters(tab_id, aliases=aliases)
     if parameters is None:
         if paths or module_refs:
             raise RemoteError(
@@ -245,40 +246,62 @@ def h_tab_parameter_read(
     return {"values": values, "modules": modules}
 
 
-def _temporary_target(params: Mapping[str, object]) -> str | None:
-    target = params.get("target")
-    if target is not None and (not isinstance(target, str) or not target.strip()):
+def temporary_aliases(params: Mapping[str, object]) -> dict[str, str] | None:
+    """Decode optional named component overrides; None and {} mean no override.
+
+    Reject malformed objects or empty/non-string keys and values with
+    invalid_aliases. Identifier and source errors belong to the context owner.
+    """
+    raw = params.get("aliases")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
-            "target must be a non-empty component name",
-            reason="invalid_target",
+            "aliases must be an object",
+            reason="invalid_aliases",
         )
-    return target
+    aliases: dict[str, str] = {}
+    for alias, component in raw.items():
+        if (
+            not isinstance(alias, str)
+            or not alias.strip()
+            or not isinstance(component, str)
+            or not component.strip()
+        ):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "aliases must map non-empty names to components",
+                reason="invalid_aliases",
+            )
+        aliases[alias] = component
+    return aliases or None
 
 
 def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Read cached cfg, or preview target at the mandatory expected CfgRef.
+    """Read cached cfg, or preview named aliases at the mandatory expected CfgRef.
 
-    target is a non-empty component name for the first declared alias. Temporary
-    preview returns the same observation shape/ref without publication or Run.
-    Missing expected, malformed target, stale refs and source failures reject.
+    aliases maps alias names to concrete components. None and {} read cached
+    cfg without requiring expected. Nonempty aliases returns the same observation
+    shape/ref without publication or Run. Missing expected, malformed aliases,
+    stale refs and source failures reject.
     Ordinary reads do not query sources or refresh observation guards.
     """
     from ..cfg_observation import build_resource_observation, cfg_error_to_remote
 
-    target = _temporary_target(params)
+    aliases = temporary_aliases(params)
     tab_id = str(params["tab_id"])
-    if target is None:
+    if not aliases:
         return build_resource_observation(adapter.cfg_lookup(tab_id).observe())
     if "expected" not in params:
         raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "target preview requires expected cfg_ref"
+            ErrorCode.INVALID_PARAMS, "aliases preview requires expected cfg_ref"
         )
     try:
         observation = adapter.tab_control.preview_cfg(
-            tab_id, decode_ref(params["expected"]), target=target
+            tab_id, decode_ref(params["expected"]), aliases=aliases
         )
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc

@@ -12,10 +12,10 @@ from typing import Literal
 from zcu_tools.datafile import VariableSchema
 from zcu_tools.resources.storage_migration import KeyRule, MigrationMapping, ModuleRule
 
-# Reviewed decisions: D120-D129, D133-D134. Changes to any rules, seeds,
+# Reviewed decisions: D120-D129, D133-D134, D337/D342. Changes to any rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
-_KIND_REVISIONS = {"qubit/fluxonium": "1.4", "qubit/transmon": "1.5"}
+_KIND_REVISIONS = {"qubit/fluxonium": "1.6", "qubit/transmon": "1.7"}
 
 _VALUE_PATHS = (
     ("r_f", "R1.freq"),
@@ -45,7 +45,16 @@ _VALUE_PATHS = (
     ("ge_s", "Q1.ext.readout_cal.sigma"),
     ("confusion_matrix", "Q1.ext.readout_cal.confusion_matrix"),
     ("fid", "Q1.ext.readout_cal.fidelity"),
+    ("reset_f", "Q1.ext.reset_f"),
     ("resetf_w", "Q1.ext.reset_fwhm"),
+    ("reset_f1", "Q1.ext.reset_f1"),
+    ("reset_f2", "Q1.ext.reset_f2"),
+    ("reset_gain1", "Q1.ext.reset_gain1"),
+    ("reset_gain2", "Q1.ext.reset_gain2"),
+    ("bathreset_freq", "Q1.ext.reset_bath_freq"),
+    ("bathreset_gain", "Q1.ext.reset_bath_gain"),
+    ("bathreset_max_phase", "Q1.ext.reset_bath_max_phase"),
+    ("bathreset_min_phase", "Q1.ext.reset_bath_min_phase"),
     ("best_jpa_freq", "J1.pump_freq"),
     ("best_jpa_power", "J1.pump_power"),
     ("flux_unit", "general.ext.flux_unit"),
@@ -75,23 +84,6 @@ _MODULE_KEY_PATHS = (
     ("pi_len", "qubit.module.x180.waveform.length", "D122"),
     ("pi2_gain", "qubit.module.x90.gain", "D122"),
     ("pi2_len", "qubit.module.x90.waveform.length", "D122"),
-    ("reset_f", "qubit.module.sideband.pulse_cfg.freq", "D125"),
-    ("reset_f1", "qubit.module.dual_tone.pulse1_cfg.freq", "D125"),
-    ("reset_gain1", "qubit.module.dual_tone.pulse1_cfg.gain", "D125"),
-    ("reset_f2", "qubit.module.dual_tone.pulse2_cfg.freq", "D125"),
-    ("reset_gain2", "qubit.module.dual_tone.pulse2_cfg.gain", "D125"),
-    (
-        "bathreset_freq",
-        "qubit.module.bath_g.cavity_tone_cfg.freq",
-        "D125: also qubit.module.bath_e.cavity_tone_cfg.freq; split cfg in 4a",
-    ),
-    (
-        "bathreset_gain",
-        "qubit.module.bath_g.cavity_tone_cfg.gain",
-        "D125: also qubit.module.bath_e.cavity_tone_cfg.gain; split cfg in 4a",
-    ),
-    ("bathreset_max_phase", "qubit.module.bath_g.pi2_cfg.phase", "D125"),
-    ("bathreset_min_phase", "qubit.module.bath_e.pi2_cfg.phase", "D125"),
 )
 
 _REMOVED = (
@@ -107,8 +99,8 @@ _REMOVED = (
 )
 
 # Candidates follow existing role_table Lib priority, not source YAML order.
-# Each legacy name keeps its own destination. Bath cannot choose g/e solely
-# from a flat name: the report leaves its D125 split to the 4a cfg owner.
+# Each legacy reset name keeps its fixed root without guessing module.reset.
+# D337/D342 use ext scalars for calibration, not per-scheme module slots.
 _MODULE_NAMES = (
     ("qub_probe", "Q1.pulses.qub_probe", "Q1.module.probe"),
     ("res_probe", "R1.pulses.res_probe", "R1.module.probe"),
@@ -121,10 +113,11 @@ _MODULE_NAMES = (
     ("readout", "R1.readout.readout", "Q1.module.readout"),
     ("res_readout", "R1.readout.res_readout", "Q1.module.readout"),
     ("readout_direct", "R1.readout.readout_direct", None),
-    ("reset_10", "Q1.reset.reset_10", "Q1.module.sideband"),
-    ("reset_120", "Q1.reset.reset_120", "Q1.module.dual_tone"),
+    ("reset_10", "Q1.reset.reset_10", None),
+    ("reset_120", "Q1.reset.reset_120", None),
     ("reset_none", "Q1.reset.reset_none", None),
     ("reset_bath", "Q1.reset.reset_bath", None),
+    ("reset_bath_e", "Q1.reset.reset_bath_e", None),
 )
 
 
@@ -215,8 +208,8 @@ def build_mapping(
                 old_name=name,
                 target_path=target,
                 reference_path=reference,
-                reason="D156: named legacy candidate; D125 bath split deferred"
-                if name == "reset_bath"
+                reason="D337/D342: fixed reset root; downstream selection unchanged"
+                if name in ("reset_10", "reset_120", "reset_bath", "reset_bath_e")
                 else "D156: named legacy candidate",
             )
             for name, target, reference in _MODULE_NAMES

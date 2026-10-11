@@ -77,8 +77,9 @@ class ParameterContext:
     remain readable on an unavailable capture. Data reads and alias-derived
     names then raise ContextSourceUnavailableError.
     Optional aliases retain authored ordered rows from one environment capture.
-    $alias.path reads expand those rows lazily against this fixed point. Consumer
-    declarations constrain kinds but do not infer bindings from via or focus.
+    $alias reads return a name string, without requiring component or device
+    catalog membership. $alias.path expands rows against this fixed point.
+    Consumer declarations constrain kinds but do not infer via/focus bindings.
     Reads do not refresh, read YAML, or consult current selection. Library
     materialization may use its captured waveform asset capability.
     """
@@ -95,7 +96,8 @@ class ParameterContext:
     ) -> None:
         """Detach input data and retain the immutable library projection.
 
-        RoleResolutionError reports missing/wrong-kind explicitly bound destinations.
+        RoleResolutionError reports missing or wrong-kind destinations for
+        declared component consumers. Undeclared names may identify devices.
         Declared roles absent from names are unbound, not constructor failures.
         A setup diagnostic is outside this capture contract and raises
         ValueError. storage optionally retains a resource-owned saved-point
@@ -131,6 +133,18 @@ class ParameterContext:
             and self._roles is not None
             and not self._source_faults
         ):
+            for role, name in self._roles.names.items():
+                if (
+                    role in self._roles.declarations
+                    and name not in self._point.components
+                ):
+                    spec = self._roles.declarations.get(role)
+                    raise RoleResolutionError(
+                        role,
+                        self._roles.focus,
+                        None if spec is None else spec.kind,
+                        f"Captured target {name!r} is missing or has the wrong kind",
+                    )
             for role, spec in self._roles.declarations.items():
                 if role not in self._roles.names:
                     continue
@@ -296,7 +310,8 @@ class ParameterContext:
     def resolve_path(self, path: str) -> str:
         """Expand a fixed $ alias or captured role, preserving the path suffix.
 
-        $alias.path uses authored rows or fixed resolved names, never concrete-
+        $alias returns its resolved name; $alias.path expands its prefix.
+        Both use authored rows or fixed resolved names, never concrete-
         prefix inference. Missing,
         unbound and wrong-kind aliases raise RoleResolutionError. Bare concrete
         paths remain independent of $ alias names, including name collisions.
@@ -309,8 +324,8 @@ class ParameterContext:
         self._ensure_readable()
         if path.startswith("$"):
             alias, separator, suffix = path[1:].partition(".")
-            if not alias or not separator or not suffix:
-                raise ValueError(f"Expected $alias.path: {path!r}")
+            if not alias or (separator and not suffix):
+                raise ValueError(f"Expected $alias or $alias.path: {path!r}")
             spec = (
                 self._roles.declarations.get(alias) if self._roles is not None else None
             )
@@ -327,6 +342,8 @@ class ParameterContext:
                         "Alias is not bound",
                     )
                 name = self._roles.names[alias]
+            if not separator:
+                return name
             return resolve_path(self._point, f"{name}.{suffix}", roles={})
         if self._aliases is None and self._roles is not None:
             prefix = path.split(".", 1)[0]
@@ -390,14 +407,15 @@ class ParameterContext:
         return None
 
     def lookup(self, path: str) -> DocumentValue:
-        """Read a point/library value, distinguishing absent from explicit null.
+        """Read a fixed name or point/library value, preserving explicit null.
 
-        Uses the fixed roles and routes library suffixes through their owner.
-        Missing requested data returns present=False. Invalid syntax,
-        unknown namespaces, dangling slots, and materialization/asset errors
-        propagate rather than becoming missing.
+        $alias returns a name string without catalog validation. Field paths use
+        their point/library owner. Missing data returns present=False; syntax,
+        namespace, source, dangling slot and materialization errors propagate.
         """
         resolved = self.resolve_path(path)
+        if path.startswith("$") and "." not in path:
+            return DocumentValue(True, resolved)
         library_path = self._library_path(resolved)
         if library_path is not None:
             return self._library.lookup(library_path)
@@ -416,9 +434,12 @@ class ParameterContext:
         Missing leaves return present=False; explicit null is present=True.
         Library partitions and module-slot namespaces, including their roots,
         raise InvalidInputError with reason_code parameter_path_not_readable.
-        Other syntax, namespace, and source errors propagate unchanged.
+        $alias returns its fixed name. Other syntax, namespace and source errors
+        propagate unchanged.
         """
         resolved = self.resolve_path(path)
+        if path.startswith("$") and "." not in path:
+            return DocumentValue(True, resolved)
         parts = resolved.split(".")
         if (
             len(parts) > 1

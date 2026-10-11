@@ -116,7 +116,7 @@ def test_registered_flux_form_edits_unit_without_device_observations(name: str) 
                 AliasRow("resonator", "$qubit.resonator"),
                 AliasRow("jpa", "$resonator.amplifier"),
             ),
-            adapter.parameter_roles(),
+            {},
         ),
     )
     host = MagicMock(spec=MeasureCfgBindingHost)
@@ -269,8 +269,7 @@ def _specified_defaults() -> list[str]:
     return [
         name
         for name in registry.list_names()
-        if "jpa" in registry.create(name).parameter_roles()
-        or name == "singleshot/ac_stark"
+        if name.startswith("jpa/") or name == "singleshot/ac_stark"
     ]
 
 
@@ -346,7 +345,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
         )
         environment = replace(
             environment,
-            parameters=parameters.bind_aliases(rows, adapter.parameter_roles()),
+            parameters=parameters.bind_aliases(rows, {}),
         )
         calibrated = resource.refresh(missing.ref.revision)
         assert calibrated.status is CfgStatus.VALID, calibrated.diagnostics
@@ -367,7 +366,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
             library=parameters.library,
             target=parameters.target,
             roles=None,
-        ).bind_aliases(rows, adapter.parameter_roles())
+        ).bind_aliases(rows, {})
         environment = replace(environment, parameters=updated_parameters)
         updated = resource.refresh(calibrated.ref.revision)
         assert updated.status is CfgStatus.VALID, updated.diagnostics
@@ -382,7 +381,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
                     AliasRow("resonator", "$qubit.resonator"),
                     AliasRow("jpa", "$resonator.amplifier"),
                 ),
-                adapter.parameter_roles(),
+                {},
             ),
         )
         unbound = resource.refresh(updated.ref.revision)
@@ -407,7 +406,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
                 library=parameters.library,
                 target=parameters.target,
                 roles=None,
-            ).bind_aliases(rows, adapter.parameter_roles()),
+            ).bind_aliases(rows, {}),
         )
         uncalibrated = resource.refresh(rebound.ref.revision)
         assert uncalibrated.status is CfgStatus.INVALID

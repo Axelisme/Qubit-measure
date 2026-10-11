@@ -29,13 +29,12 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import custom
+from zcu_lab.v2._support.measure.seeds import custom, literal
 from zcu_lab.v2.jpa.flux.core import FluxCfg, FluxExp, FluxResult
 
 JpaFluxRunResult: TypeAlias = RunRecord[FluxCfg, FluxResult]
@@ -131,14 +130,6 @@ class JpaFluxAdapter(
         ),
     )
 
-    def parameter_roles(self) -> dict[str, RoleSpec]:
-        """Declare consumer kinds; bindings come only from the global alias table."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-            "jpa": RoleSpec("amplifier/jpa"),
-        }
-
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
@@ -157,7 +148,7 @@ class JpaFluxAdapter(
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
-                default="",
+                default=literal(EvalValue("$flux_dev")),
                 required=False,
             )
             .sweep(

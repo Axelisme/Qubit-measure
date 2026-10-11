@@ -22,14 +22,14 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.resources.entry import RoleSpec
+from zcu_tools.gui.cfg import EvalValue
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import custom, res_freq_range
+from zcu_lab.v2._support.measure.seeds import custom, literal, res_freq_range
 from zcu_lab.v2.jpa.flux.gui import jpa_flux_sweep_seed
 from zcu_lab.v2.jpa.flux_onetone.core import (
     OneToneFluxCfg,
@@ -96,14 +96,6 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
         ),
     )
 
-    def parameter_roles(self) -> dict[str, RoleSpec]:
-        """Declare consumer kinds; bindings come only from the global alias table."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-            "jpa": RoleSpec("amplifier/jpa"),
-        }
-
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
@@ -128,7 +120,7 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
-                default="",
+                default=literal(EvalValue("$flux_dev")),
                 required=False,
             )
             .sweep(

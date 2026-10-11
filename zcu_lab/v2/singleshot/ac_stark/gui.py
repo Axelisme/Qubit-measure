@@ -26,7 +26,6 @@ from zcu_tools.gui.cfg import (
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
@@ -149,10 +148,6 @@ class SsAcStarkAdapter(
             "onset and the probe frequency around the qubit line."
         ),
     )
-
-    def parameter_roles(self) -> dict[str, RoleSpec]:
-        """Declare qubit/resonator kinds without inferring alias destinations."""
-        return {"qubit": RoleSpec("qubit/*"), "resonator": RoleSpec("resonator")}
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

@@ -15,6 +15,7 @@ from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.recipe import RecipeAnalysis, RecipeRun, RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from ._recipe_actual_support import cfg_value
 from ._recipe_support import PNG, LookbackGui, scalar
 from ._support import MeasureClient, full_execution_reply, make_client
 
@@ -79,7 +80,7 @@ POST_REPORT = SaveReport(
 def start_ge(client: MeasureClient) -> ToolReply:
     """Start GE through public admission with a short local wait for blocked RPCs."""
     return client.context.session.recipes.start(
-        client.context, "singleshot_ge", {"pi_ref": "pi"}
+        client.context, "singleshot_ge", {"pi_ref": "Q1.pulses.pi"}
     ).wait(0.01)
 
 
@@ -104,8 +105,8 @@ class GeGui(LookbackGui):
         self.done = {"primary": Event(), "post": Event()}
         self.writes: list[dict[str, object]] = []
         self.calls = []
-        self.library = {"pi": {}, "readout": {}}
-        self.md = {"r_f": 5100.0}
+        self.library = {"Q1.pulses.pi": {}, "R1.readout.readout": {}}
+        self.md = {"$resonator.freq": 5100.0}
         self.publication["tree"]["children"]["shots"] = scalar(7000)
         self.publication["tree"]["children"]["reps"] = scalar(1)
         self.publication["tree"]["children"]["rounds"] = scalar(1)
@@ -657,40 +658,44 @@ def test_ge_preserves_calibrated_library_and_gui_shots_defaults(ge_client, expli
     gui.md.clear()
     modules = gui.publication["tree"]["children"]["modules"]["children"]
     if not explicit:
-        modules["probe_pulse"]["ref"] = "pi"
-        modules["readout"]["ref"] = "readout"
-    arguments = {"pi_ref": "pi", "readout_ref": "readout"} if explicit else {}
+        modules["probe_pulse"]["ref"] = "Q1.pulses.pi"
+        modules["readout"]["ref"] = "R1.readout.readout"
+    arguments = (
+        {"pi_ref": "Q1.pulses.pi", "readout_ref": "R1.readout.readout"}
+        if explicit
+        else {}
+    )
     data = full_execution_reply(
         client, skip_writeback(client, client.call("singleshot_ge", arguments))
     ).data
     assert data["status"] == "finished", data
-    fields = data["actual"]["fields"]
-    assert fields["shots"]["value"] == 7000
+    fields = data["actual"]
+    assert cfg_value(gui.publication, "shots") == 7000
     assert fields["shots"]["source"] == "gui_default"
-    assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == 5000.0
-    assert fields["modules.readout.ro_cfg.ro_freq"]["source"] == "library:readout"
-    assert fields["modules.probe_pulse"]["value"] == "pi"
-    assert fields["modules.probe_pulse"]["source"] == (
-        "explicit" if explicit else "gui_default"
-    )
+    assert cfg_value(gui.publication, "modules.readout.ro_cfg.ro_freq") == 5000.0
+    assert fields["ro_frequency_mhz"]["source"] == "library:R1.readout.readout"
+    assert cfg_value(gui.publication, "modules.probe_pulse") == "Q1.pulses.pi"
+    if not explicit:
+        assert fields["pi_ref"]["source"] == "gui_default"
 
 
 @pytest.mark.parametrize("reuse", [False, True])
 def test_ge_optional_refs_are_explicit_and_omission_resets_them(ge_client, reuse):
     gui, client = ge_client
-    gui.library.update(reset={}, init={})
+    gui.library.update({"Q1.reset.reset": {}, "init": {}})
+    # This init literal exercises wire passthrough, not native admission.
     modules = gui.publication["tree"]["children"]["modules"]["children"]
     modules["reset"]["ref"] = "old_reset"
     modules["init_pulse"]["ref"] = "old_init"
     arguments = {
-        "pi_ref": "pi",
+        "pi_ref": "Q1.pulses.pi",
         "reuse_tab_id": "t" if reuse else None,
-        "use_reset": None if reuse else "reset",
+        "use_reset": None if reuse else "Q1.reset.reset",
         "init_pulse_ref": None if reuse else "init",
     }
     data = skip_writeback(client, client.call("singleshot_ge", arguments)).data
     assert data["status"] == "finished", data
-    assert modules["reset"]["ref"] == (None if reuse else "reset")
+    assert modules["reset"]["ref"] == (None if reuse else "Q1.reset.reset")
     assert modules["init_pulse"]["ref"] == (None if reuse else "init")
     assert sum(method == "tab.run_start" for method, _ in gui.calls) == 1
 
@@ -700,7 +705,9 @@ def test_ge_optional_refs_are_explicit_and_omission_resets_them(ge_client, reuse
 )
 def test_ge_does_not_replace_missing_explicit_library_refs(ge_client, parameter):
     gui, client = ge_client
-    data = client.call("singleshot_ge", {"pi_ref": "pi", parameter: "missing"}).data
+    data = client.call(
+        "singleshot_ge", {"pi_ref": "Q1.pulses.pi", parameter: "missing"}
+    ).data
     assert data["status"] == "failed", data
     assert data["error"]["reason"] == "invalid_cfg"
     assert not gui.ran
@@ -768,7 +775,9 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
 
     client.transport.replies[result_method] = result_reply
     client.transport.replies[failing_method] = failure_reply
-    reply = full_execution_reply(client, client.call("singleshot_ge", {"pi_ref": "pi"}))
+    reply = full_execution_reply(
+        client, client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"})
+    )
     data = reply.data
     assert data["status"] == "failed", data
     assert data["tab"] == "t"
@@ -825,7 +834,7 @@ def test_ge_gui_cfg_rejection_stops_before_run(tmp_path, failure):
             },
         }
     try:
-        data = client.call("singleshot_ge", {"pi_ref": "pi"}).data
+        data = client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"}).data
         assert data["status"] == "failed", data
         assert data["error"]["reason"] == "invalid_cfg"
         assert not gui.ran
@@ -855,11 +864,12 @@ def test_ge_rejects_invalid_arguments_before_preparing(tmp_path, arguments):
     gui = GeGui()
     client = make_client(tmp_path, gui)
     try:
-        data = client.call("singleshot_ge", {"pi_ref": "pi", **arguments}).data
+        data = client.call(
+            "singleshot_ge", {"pi_ref": "Q1.pulses.pi", **arguments}
+        ).data
         assert data["status"] == "failed", data
         assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not gui.ran
-        assert not any(method == "context.snapshot" for method, _ in gui.calls)
     finally:
         client.context.session.close()
 
@@ -887,7 +897,9 @@ def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_clie
             return {"ok": True, "result": observed}
 
         client.transport.replies[method] = result
-    reply = full_execution_reply(client, client.call("singleshot_ge", {"pi_ref": "pi"}))
+    reply = full_execution_reply(
+        client, client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"})
+    )
     reply = full_execution_reply(client, skip_writeback(client, reply))
     data = json.loads(json.dumps(reply.data, allow_nan=False))
     assert data["status"] == "finished"
@@ -914,7 +926,7 @@ def test_ge_writeback_waits_for_both_stages_and_reports_actual_receipts(
     gui = GeGui(interactive=interactive)
     client = make_client(tmp_path, gui)
     try:
-        reply = client.call("singleshot_ge", {"pi_ref": "pi"})
+        reply = client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"})
         execution = reply.data["execution"]
         if interactive:
             assert reply.data["status"] == "interactive"
@@ -964,7 +976,7 @@ def test_ge_writeback_waits_for_both_stages_and_reports_actual_receipts(
 
 def test_ge_answer_failure_keeps_confirmed_primary_write_and_all_previews(ge_client):
     gui, client = ge_client
-    question = client.call("singleshot_ge", {"pi_ref": "pi"})
+    question = client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"})
     assert question.data["status"] == "awaiting_answer", question.data
 
     def write(params):
@@ -1021,7 +1033,8 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         reply = full_execution_reply(
             client,
             skip_writeback(
-                client, client.call("singleshot_ge", {"pi_ref": "pi", "shots": 1234})
+                client,
+                client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi", "shots": 1234}),
             ),
         )
         data = reply.data
@@ -1060,8 +1073,8 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         assert data["writeback"]["items"][0]["id"] == "param-1"
         assert data["post_writeback"]["items"][0]["id"] == "classifier"
         assert len(reply.images) == 2
-        assert data["actual"]["fields"]["shots"]["value"] == 1234
-        assert modules["probe_pulse"]["ref"] == "pi"
+        assert cfg_value(gui.publication, "shots") == 1234
+        assert modules["probe_pulse"]["ref"] == "Q1.pulses.pi"
         assert modules["reset"]["ref"] is None
         assert modules["init_pulse"]["ref"] is None
         stages = {

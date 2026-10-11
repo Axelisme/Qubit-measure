@@ -82,7 +82,7 @@ def test_default_analysis_params_retain_result_source(
         MagicMock(),
         cfg_resources(state),
         cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-        captured_parameters=lambda _roles, _target: state.session_env.parameters,
+        captured_parameters=lambda _aliases: state.session_env.parameters,
     )
     preparation = service.prepare_result_analysis("tab")
     assert preparation.has_params and preparation.error is None

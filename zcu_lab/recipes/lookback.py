@@ -8,6 +8,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import set_frequency
+
 
 def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     session: RecipeSession,
@@ -34,7 +36,11 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     invalid cfg/native failures throw at their author step. Cancel returns without
     later saves/analyses/writes; finish_early saves usable partial Run data.
     """
-    tab = session.open_tab("lookback", target=target, reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "lookback",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     tab.use_library("modules.readout", readout_ref)
     if use_reset is None:
         tab.disable_library("modules.reset")
@@ -44,25 +50,25 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         tab.disable_library("modules.init_pulse")
     else:
         tab.use_library("modules.init_pulse", init_pulse_ref)
-    tab.set_frequency(
+    set_frequency(
+        tab,
         "modules.readout",
         frequency_mhz,
-        calibration="resonator",
+        calibration="$resonator.freq",
         prefer_library=readout_ref is not None,
         required="frequency_mhz",
-        source="frequency_mhz",
     )
     tab.set(
         "modules.readout.ro_cfg.ro_length",
         readout_length_us,
-        source="readout_length_us",
+        source="explicit",
     )
     tab.set(
         "modules.readout.ro_cfg.trig_offset",
         trigger_offset_us,
-        source="trigger_offset_us",
+        source="explicit",
     )
-    tab.set("rounds", rounds, source="rounds")
+    tab.set("rounds", rounds, source="explicit")
     run, status = yield tab.run()
     if status == "cancelled":
         return

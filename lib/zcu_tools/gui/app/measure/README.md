@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，Run device snapshot 與 alias-aware template capture
+**Last updated:** 2026-10-11，device 名稱預覽、caller-owned alias preset 與 session runner／progress
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -258,13 +258,26 @@ ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
 
-Measure composition 在一處宣告 session-memory alias 初值：qubit 留空，resonator
-保存 `$qubit.resonator`。ContextService 在第一份非空元件 snapshot 以 registry
-的唯一候選填 qubit，不硬編 component kind。之後切 point 不重設表。
-公開 `read_context(aliases=None)` 固定目前全表，不要求 consumer 宣告或 kind 檢查。
-Template create 已使用這條接縫。既有 adapter caller 仍經 declaration-based
-`read_alias_context`，整批遷移尚未完成。Shared
-`session.ui.alias_dialog.AliasDialog` 編輯全域表，tab 不顯示角色列。
+Composition 建立 runner／progress 後交給 `build_session_services()`。
+Run、Analyze、PostAnalyze 從回傳的 `SessionServices.runner` 取用同一 lifecycle
+機制。Operation control 與 app bundle 從 `SessionServices.progress` 取用同一
+progress owner。這個入口不改 operation policy、hardware exclusion、取消或
+owner-thread delivery，也不另建 infrastructure bundle。
+
+Measure launcher 從使用者套件的 `ALIAS_PRESET` 取得唯一的有序初值表，以
+`alias_preset` 經 `MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 session。
+框架不宣告領域初值。獨立 caller 可提供自己的 rows，省略或空 tuple 都建立空表。
+ContextService 保留 authored softlinks 與空列，在第一份非空元件 snapshot 以
+role registry 的唯一 focus 候選填 primary 空列。每次開 entry 有 `aliases.yaml` 就載入；無檔才重設 preset，重新啟用
+primary 初始化。已保存的空表與空列不自填。切 point 不重讀檔或換表，明確
+提交表後不再初始化，直到下次開 entry。Preset 的 flux_dev 空列不猜裝置，也不從 cache 填值。
+參數捕捉經 `read_context(aliases=...)` 固定當次 point、library、storage 與有序表。
+GUI adapter 不宣告角色，捕捉不從 GUI focus 或 adapter 的 via 推論 alias。
+Shared `session.ui.alias_dialog.AliasDialog` 是 Measure 與 workflows 的同一 owner。
+Dialog Apply 先驗整表，再由 entry owner 原子保存，成功才安裝 memory 並發布 event。
+EMPTY 時只改 memory。失敗保留舊表、舊檔與 draft，dialog 保持開啟可 retry。
+Apply 不關閉 dialog，Cancel 不撤回已 Apply 的內容。`set_alias_rows` 仍只改 memory。
+Tab 不顯示角色列，也不持有自己的 alias 表。
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
@@ -509,11 +522,12 @@ Viewport-driven mosaic reflow (gallery's own width vs two-minimum-width-cards
 threshold) is presentation-only and never moves figure ownership, adds a second
 canvas, or changes ADR-0067 reactions. No competing state owner is introduced.
 
-## Tab Lifecycle And Ordering
+## Tab lifecycle and ordering
 
-Tab 保存實驗類型與 cfg 輸入，不保存建立時的 point、library、storage 或角色綁定。
-全域 alias dialog 是編輯對應的入口，tab 不顯示角色列。Cfg refresh 與下一次
-Run 使用目前來源；已發布的 Run、Analyze、WB 和 artifact 保留各自的固定來源。
+Tab 不保存另一張 alias 表或 tab birth 環境。Cfg refresh／reset 與下一次 Run
+使用當次全域表的固定 capture。非空 caller `aliases` 只覆寫該次 preview／Run，
+不保存到 tab 或全域表。已有 Run／Analyze／WB／artifact 保留原結果來源，
+不因目前 alias 改綁而重新解析。
 
 New tabs are pure GUI configuration surfaces: creating one builds the adapter's
 default cfg from the current context but does not start hardware work. The toolbar
@@ -557,14 +571,25 @@ renders each publication after submitting an input change:
 
 Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
 remains valid. Run admission captures the current global `ParameterContext`, not tab birth sources.
-A single-use target resolves the same inputs against its temporary capture without
-changing the tab publication or global aliases. Recipe source queries also capture
-current globals through TabService. Targeted preview requires the original full
-CfgRef and returns a temporary observation without replacing it or publishing.
+Nonempty caller-owned `aliases` maps alias names to concrete names and
+resolves the same inputs against its temporary capture. It changes neither tab
+publication nor global rows. Omission, None and {} use cached acceptance.
+Recipe parameter/library queries and cfg preview use the same named overrides.
+Temporary preview requires the original full CfgRef and returns an observation
+without replacing it or publishing. Adapters do not declare parameter roles.
+EMPTY app captures without overrides retain deferred None; nonempty overrides
+reject no_context. Native Load takes Save storage from that one Load-time capture
+and reads historical fixed names without expanding current alias links.
 `schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
 fixed ParameterContext, not the currently selected point or global aliases. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
+
+String cfg 的 `$flux_dev` 保留 authored expression。Preview、refresh 與 Run
+使用各自固定的 alias capture，顯示例如 `= "yoko1"`。未綁或缺列發布 Invalid
+並指名 alias；無 context 或來源故障不沿用舊名稱。Alias 與 preview 不查 device
+可用性，實際使用名稱時由實驗 device owner 報錯。RunMetadata 與 data.h5 保存
+當次的 `flux_dev → yoko1`；Analyze、WB 與 Save 不重新讀取目前 alias 表。
 
 generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
 `zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter提供固定
