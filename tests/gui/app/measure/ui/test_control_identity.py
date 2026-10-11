@@ -63,6 +63,7 @@ from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.resources.qubit_params import FluxDepFit, QubitParams
 from zcu_tools.resources.waveform_assets import FormulaRecipe
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._load_support import historical_metadata
@@ -291,6 +292,12 @@ def test_remote_gates_existing_and_new_writable_dialogs(
     existing = ui.window.findChild(dialog_type)
     assert existing is not None and existing.isEnabled()
     assert existing.isModal()
+    predictor_flags = None
+    if isinstance(existing, PredictorDialog):
+        predictor_flags = [
+            field.isEnabled() for field in existing.findChildren(QLineEdit)
+        ]
+        assert any(predictor_flags), "The Local trial must expose an editable field"
     ui.connect()
     for opening in range(2):
         current = next(d for d in ui.window.findChildren(dialog_type) if d.isVisible())
@@ -321,7 +328,13 @@ def test_remote_gates_existing_and_new_writable_dialogs(
     ui.window.open_dialog(name)
     local = next(d for d in ui.window.findChildren(dialog_type) if d.isVisible())
     assert local.isEnabled()
-    assert all(field.isEnabled() for field in local.findChildren(QLineEdit))
+    if isinstance(local, PredictorDialog):
+        assert local is existing, "Persistent reopen must retain the trial view"
+        assert [
+            field.isEnabled() for field in local.findChildren(QLineEdit)
+        ] == predictor_flags
+    else:
+        assert all(field.isEnabled() for field in local.findChildren(QLineEdit))
     button(local, close_text).click()
 
 
@@ -513,7 +526,8 @@ def test_predictor_file_return_rechecks_holder_and_preserves_path(
     ui.window.open_dialog(DialogName.PREDICTOR)
     predictor = ui.window.findChild(PredictorDialog)
     assert predictor is not None
-    before = ui.controller.predictor_control.get_predictor_info()
+    before = predictor.parameters()
+    before_path = predictor.capture_state().params_path_text
 
     def choose(dialog: QFileDialog) -> None:
         dialog.selectFile(str(path))
@@ -529,14 +543,15 @@ def test_predictor_file_return_rechecks_holder_and_preserves_path(
     modal_action(
         qapp, lambda: button(predictor, "Browse").click(), [(QFileDialog, choose)]
     )
-    after = ui.controller.predictor_control.get_predictor_info()
+    after = predictor.parameters()
     if decision == "local":
-        assert after is not None and after["EJ"] == 5.0
+        assert isinstance(after, FluxoniumParams) and after.EJ == 5.0
         assert any(
             edit.text() == str(path) for edit in predictor.findChildren(QLineEdit)
         )
     else:
         assert after == before
+        assert predictor.capture_state().params_path_text == before_path
     button(predictor, "Close").click()
 
 
