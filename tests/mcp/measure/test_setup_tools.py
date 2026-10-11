@@ -617,6 +617,15 @@ def test_setup_workflows_use_real_gui_coordinator_and_device_owner(
         qapp.processEvents()
 
 
+def test_simulation_ready_uses_soc_and_device_even_without_predictor(setup_client):
+    client, _gui = setup_client
+    client.transport.replies["predictor.info"] = {"ok": True, "result": {"loaded": False}}
+    result = client.call("simulation_initialize", {})
+    assert not result.is_error
+    assert result.data["status"] == "finished"
+    assert result.data["verification"]["ready"] is True
+
+
 def test_native_finished_is_retained_when_mock_verification_fails(setup_client):
     client, _ = setup_client
     client.transport.replies["soc.info"] = {
