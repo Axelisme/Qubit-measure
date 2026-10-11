@@ -530,7 +530,7 @@ def native_delete_inspector(
     )
     ctrl.setup_control.new_entry(EntryRequest("entry"))
     entry = ResultEntry.open(
-        "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
+        "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
     entry.new_point("point")
     with entry.module_library("point").edit() as draft:
