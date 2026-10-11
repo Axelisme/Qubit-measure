@@ -3,6 +3,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -580,8 +581,10 @@ def test_entry_samples_persist_immediately_and_survive_draft_discard(session: _S
         writeback.ParameterWriteback("general.description", "draft value"),
     ), evidence=writeback.WritebackEvidence(kind="test/sample", origin="gui", run_id="run-1"))
     event = session.entry.ledger.get(event_id).event
+    row = session.entry.samples("Q1").read().iloc[0].to_dict()
+    assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
     expected = {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native", "run_id": "run-1",
-                "point": "a" if saved else None, "at": event.at, "source": event_id}
+                "point": "a" if saved else None, "at": row["at"], "source": event_id}
     assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
     assert session.control.read_sample(target, "Q1", "run-1") == expected
     assert session.control.read_sample(target, "Q1", "missing") is None
@@ -595,7 +598,9 @@ def test_entry_samples_persist_immediately_and_survive_draft_discard(session: _S
     second_id = session.control.apply_writeback(session.control.read_context().target,
         (writeback.SampleWriteback("Q1", {"t1_us": 31.7}),),
         evidence=writeback.WritebackEvidence(kind="test/sample", origin="gui", run_id="run-1"))
+    second_row = session.entry.samples("Q1").read().iloc[0].to_dict()
+    assert datetime.fromisoformat(second_row["at"]) == datetime.fromisoformat(session.entry.ledger.get(second_id).event.at)
     assert session.control.read_sample(session.control.read_context().target, "Q1", "run-1") == {
         "t1_us": 31.7, "run_id": "run-1", "point": "a" if saved else None,
-        "at": session.entry.ledger.get(second_id).event.at, "source": second_id,
+        "at": second_row["at"], "source": second_id,
     }

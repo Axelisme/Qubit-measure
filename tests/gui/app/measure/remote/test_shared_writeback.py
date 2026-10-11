@@ -1,6 +1,7 @@
 """Sample proposals and original cause projection through existing wire methods."""
 
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -141,7 +142,8 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(tmp_path: Pa
     assert entry.use_point("a").description is None
     row = entry.samples("Q1").read().iloc[0].to_dict()
     event = entry.ledger.events()[-1]
-    assert row == expected | {"run_id": "run-fixed", "point": "a", "at": event.at, "source": event.id}
+    assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
+    assert row == expected | {"run_id": "run-fixed", "point": "a", "at": row["at"], "source": event.id}
     assert context.read_context().target.point == "b"
     assert service.get_all_applied(draft) == {"param-1": False, "sample-1": True}
     assert dispatch_handler(harness, "tab.writeback_preview", params)["items"][1]["current"] == row
