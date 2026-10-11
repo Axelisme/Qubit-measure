@@ -199,6 +199,10 @@ class LinePickerWidget(InteractiveMplWidget):
         state = self._context.session.snapshot()
         return state.flux_half, state.flux_int
 
+    def cancel_pointer_preview(self) -> None:
+        """Discard an unfinished Local drag when another holder takes control."""
+        self.cancel_preview()
+
     def cancel_preview(self) -> None:
         """Restore the latest snapshot on focus loss, hide or Escape."""
         self._show_committed()
@@ -224,7 +228,7 @@ class LinePickerWidget(InteractiveMplWidget):
 
     def _dispatch_release(self, event: object) -> None:
         # The base filters outside-axes releases, but those must discard gestures.
-        if isinstance(event, MouseEvent):
+        if self._editable and isinstance(event, MouseEvent):
             self.on_release(event)
 
     def eventFilter(self, a0: QtCore.QObject | None, a1: QtCore.QEvent | None) -> bool:

@@ -182,6 +182,11 @@ class FindPointsWidget(InteractiveMplWidget):
             return None
         return deepcopy(self._view)
 
+    def cancel_pointer_preview(self) -> None:
+        """Discard a Local stroke without submitting it to the shared Session."""
+        self._vertices.clear()
+        self._render_pointer()
+
     def on_press(self, event: MouseEvent) -> None:
         """Start a left-button pointer preview without committing selection."""
         if event.button != MouseButton.LEFT or not self._input_open():

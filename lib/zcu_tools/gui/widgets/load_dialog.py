@@ -40,6 +40,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.datafile import load_labber_data
+from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class LoadDataDialog(QDialog):
         self._file_placeholder = file_placeholder
         self._browse_caption = browse_caption
         self._no_preview_text = no_preview_text
+        self._edit_gate: RemoteEditGate | None = None
         self._filepath = ""
         self._transpose = False
         self._start_dir = start_dir
@@ -80,6 +82,10 @@ class LoadDataDialog(QDialog):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
+        self._content = QWidget()
+        content = QVBoxLayout(self._content)
+        content.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(self._content)
 
         # File row.
         file_row = QHBoxLayout()
@@ -91,7 +97,7 @@ class LoadDataDialog(QDialog):
         file_row.addWidget(QLabel("File:"))
         file_row.addWidget(self._file_edit, stretch=1)
         file_row.addWidget(browse)
-        root.addLayout(file_row)
+        content.addLayout(file_row)
 
         # Option row — the shared transpose toggle plus the subclass's extras. The
         # button is created here (wired to the shared state) but placed by the
@@ -101,7 +107,7 @@ class LoadDataDialog(QDialog):
         self._transpose_btn.toggled.connect(self._on_transpose_toggled)
         opt_row = QHBoxLayout()
         self._build_options(opt_row)
-        root.addLayout(opt_row)
+        content.addLayout(opt_row)
 
         # Preview canvas.
         self._figure = Figure(figsize=(5, 3))
@@ -111,15 +117,28 @@ class LoadDataDialog(QDialog):
         self._render_preview()
 
         # OK / Cancel.
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        self._ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self._write_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        self._ok_button = self._write_buttons.button(QDialogButtonBox.StandardButton.Ok)
         if self._ok_button is not None:
             self._ok_button.setEnabled(False)  # no file chosen yet
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        self._write_buttons.accepted.connect(self.accept)
+        cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        cancel.rejected.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(self._write_buttons)
+        buttons.addWidget(cancel)
+        root.addLayout(buttons)
+
+    def bind_edit_gate(self, gate: RemoteEditGate) -> None:
+        """Gate fields and OK through the view's authority owner, leaving Cancel live.
+
+        Bind once before opening. The caller retains/disposes the gate; dialog
+        destruction detaches its containers. File validity remains a child gate.
+        """
+        self._edit_gate = gate
+        gate.bind(self._content)
+        gate.bind(self._write_buttons)
 
     def _build_options(self, opt_row: QHBoxLayout) -> None:
         """Populate the option row. Subclasses add ``self._transpose_btn`` (and any
@@ -135,7 +154,9 @@ class LoadDataDialog(QDialog):
             self._start_dir,
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
         )
-        if not filepath:
+        if not filepath or (
+            self._edit_gate is not None and not self._edit_gate.local_editing
+        ):
             return
         self._filepath = filepath
         self._file_edit.setText(filepath)

@@ -21,6 +21,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.app.fluxdep.services.export import default_export_path
+from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
 
 
 class ExportSpectrumsDialog(QDialog):
@@ -34,6 +35,7 @@ class ExportSpectrumsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Export spectrums.hdf5")
         self.resize(560, 130)
+        self._edit_gate: RemoteEditGate | None = None
         self._build_ui(default_export_path(result_dir))
 
     def _build_ui(self, default_path: str) -> None:
@@ -45,21 +47,36 @@ class ExportSpectrumsDialog(QDialog):
             )
         )
 
-        path_row = QHBoxLayout()
+        self._content = QWidget()
+        path_row = QHBoxLayout(self._content)
+        path_row.setContentsMargins(0, 0, 0, 0)
         path_row.addWidget(QLabel("Path:"))
         self._path_edit = QLineEdit(default_path)
         path_row.addWidget(self._path_edit, stretch=1)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._on_browse)
         path_row.addWidget(browse)
-        root.addLayout(path_row)
+        root.addWidget(self._content)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        self._write_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        self._write_buttons.accepted.connect(self.accept)
+        cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        cancel.rejected.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(self._write_buttons)
+        buttons.addWidget(cancel)
+        root.addLayout(buttons)
+
+    def bind_edit_gate(self, gate: RemoteEditGate) -> None:
+        """Gate fields and OK through the view's authority owner, leaving Cancel live.
+
+        Bind once before opening. The caller retains/disposes the gate; dialog
+        destruction detaches its containers. Ungated callers behave unchanged.
+        """
+        self._edit_gate = gate
+        gate.bind(self._content)
+        gate.bind(self._write_buttons)
 
     def _on_browse(self) -> None:
         filepath, _ = QFileDialog.getSaveFileName(
@@ -68,7 +85,7 @@ class ExportSpectrumsDialog(QDialog):
             self._path_edit.text(),
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
         )
-        if filepath:
+        if filepath and (self._edit_gate is None or self._edit_gate.local_editing):
             self._path_edit.setText(filepath)
 
     def export_path(self) -> str | None:

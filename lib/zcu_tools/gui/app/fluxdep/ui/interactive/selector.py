@@ -162,6 +162,11 @@ class SelectorWidget(InteractiveMplWidget):
             self._context.plugin.inputs, self._context.session.snapshot()
         )
 
+    def cancel_pointer_preview(self) -> None:
+        """Discard a Local stroke without submitting it to the shared Session."""
+        self._vertices.clear()
+        self._render_pointer()
+
     def on_press(self, event: MouseEvent) -> None:
         """Begin a left-button gesture in plot axes, capturing committed tool."""
         if not self._input_open() or event.button != MouseButton.LEFT:
