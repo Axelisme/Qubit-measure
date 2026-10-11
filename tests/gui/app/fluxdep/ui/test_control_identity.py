@@ -25,6 +25,7 @@ from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
@@ -76,8 +77,16 @@ def test_indicator_projects_online_offline_reclaim_lock_and_unlock(window):
 def test_remote_blocks_spectrum_writes_but_keeps_result_canvas_available(window):
     view, ctrl = window
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    for text in ("Project…", "Add…", "Remove", "Restore", "Export", "Analyze…",
-                 "Re-pick lines", "Re-select points"):
+    for text in (
+        "Project…",
+        "Add…",
+        "Remove",
+        "Restore",
+        "Export",
+        "Analyze…",
+        "Re-pick lines",
+        "Re-select points",
+    ):
         assert not button(view, text).isEnabled(), text
     spectra = view.findChild(QListWidget)
     assert spectra is not None and not spectra.isEnabled()
@@ -118,7 +127,9 @@ def test_remote_filter_switch_cannot_cancel_until_reclaim(window):
     assert tabs is not None
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     assert not tabs.tabBar().isEnabled()
-    assert not button(panel, "Apply").isEnabled()
+    selector = panel.findChild(SelectorWidget)
+    assert selector is not None
+    assert not button(selector, "Apply").isEnabled()
     assert ctrl.interactive.inspect() == active
     indicator(view).click()
     assert tabs.tabBar().isEnabled()
@@ -138,8 +149,11 @@ def test_agent_mounts_new_remote_picker_without_enabling_controls_or_pointer(win
     before = context.session.snapshot()
     picker.canvas.draw()
     axes = picker.figure.axes[0]
-    for kind, x in (("button_press_event", before.flux_half),
-                    ("motion_notify_event", 0.2), ("button_release_event", 0.2)):
+    for kind, x in (
+        ("button_press_event", before.flux_half),
+        ("motion_notify_event", 0.2),
+        ("button_release_event", 0.2),
+    ):
         px, py = axes.transData.transform((x, sum(axes.get_ylim()) / 2))
         event = MouseEvent(kind, picker.canvas, px, py, button=MouseButton.LEFT)
         picker.canvas.callbacks.process(kind, event)
@@ -161,9 +175,11 @@ class DeferredSearch:
 
     def complete_cancel(self):
         assert self.work is not None and self.error is not None
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            with pytest.raises(SearchCancelled) as caught:
-                pool.submit(self.work).result()
+        with (
+            ThreadPoolExecutor(max_workers=1) as pool,
+            pytest.raises(SearchCancelled) as caught,
+        ):
+            pool.submit(self.work).result()
         self.error(caught.value)
 
 
@@ -178,8 +194,15 @@ def pending_window(qapp, cross_controller, tmp_path):
     )
     path = tmp_path / "db.h5"
     path.touch()
-    ctrl.set_fit_params(str(path), (2, 15), (0.2, 2), (0.1, 2),
-                        TransitionDict({"transitions": [(0, 1)]}), None, None)
+    ctrl.set_fit_params(
+        str(path),
+        (2, 15),
+        (0.2, 2),
+        (0.1, 2),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
     view = MainWindow(ctrl)
     view.show()
     button(view, "Analyze…").click()
@@ -203,15 +226,17 @@ def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_wind
     assert cancel.isEnabled()
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     assert not cancel.isEnabled()
-    form = next(g for g in panel.findChildren(QGroupBox)
-                if g.title() == "Search parameters")
+    form = next(
+        g for g in panel.findChildren(QGroupBox) if g.title() == "Search parameters"
+    )
     assert not form.isEnabled()
     tabs = panel.findChild(QTabWidget)
     assert tabs is not None and tabs.tabBar().isTabEnabled(2)
     tabs.setCurrentIndex(2)
     assert panel.current_tab == "show"
-    assert next(g for g in panel.findChildren(QGroupBox)
-                if g.title() == "Display").isEnabled()
+    assert next(
+        g for g in panel.findChildren(QGroupBox) if g.title() == "Display"
+    ).isEnabled()
     cancel.click()
     assert ctrl.search.outcome(token) is None
     assert ctrl.control_identity.status().holder == "rpc:flux-agent"
@@ -229,12 +254,19 @@ def answer_close(answer, seen):
         box = QApplication.activeModalWidget()
         assert isinstance(box, QMessageBox)
         seen.append(box.text())
-        choice = QMessageBox.StandardButton.Yes if answer else QMessageBox.StandardButton.No
-        box.done(int(choice))
+        choice = (
+            QMessageBox.StandardButton.Yes if answer else QMessageBox.StandardButton.No
+        )
+        response_button = box.button(choice)
+        assert response_button is not None
+        response_button.click()
+
     QTimer.singleShot(0, respond)
 
 
-def test_remote_close_decline_has_no_lifecycle_effect_accept_waits_for_search(pending_window):
+def test_remote_close_decline_has_no_lifecycle_effect_accept_waits_for_search(
+    pending_window,
+):
     view, ctrl, panel, background, token = pending_window
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     seen = []
