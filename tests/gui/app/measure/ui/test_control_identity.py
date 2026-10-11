@@ -10,15 +10,21 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from qtpy.QtCore import QMetaObject, Qt, QTimer
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
+    QFileDialog,
+    QInputDialog,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
+    QTableWidget,
     QTabWidget,
     QTreeWidget,
 )
+from zcu_tools.cfg_model import waveform_spec_from_raw
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -31,8 +37,14 @@ from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapte
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.caretaker import create_persistence_caretaker
 from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
+from zcu_tools.gui.app.measure.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
+from zcu_tools.gui.app.measure.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
+from zcu_tools.gui.cfg import DirectValue
+from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.context_types import (
@@ -44,10 +56,13 @@ from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.resources.qubit_params import FluxDepFit, QubitParams
+from zcu_tools.resources.waveform_assets import FormulaRecipe
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.app.measure._reload_fakes import OldAdapter
+from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
+from tests.gui.app.measure.ui.test_load_cfg_backfill import LoadAdapter
 
 pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
 
@@ -106,9 +121,14 @@ def button(widget, text: str) -> QPushButton:
 
 
 @pytest.fixture
-def control_ui(qapp: QApplication, tmp_path: Path) -> Iterator[ControlUi]:
+def control_ui(
+    qapp: QApplication, tmp_path: Path, request: pytest.FixtureRequest
+) -> Iterator[ControlUi]:
     registry = Registry()
     registry.register("stoppable", StoppableAdapter)
+    registry.register("loadable", LoadAdapter)
+    loader = Loader()
+    loader.candidate.register("stoppable", StoppableAdapter)
     ctrl = UiController(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry,
@@ -116,6 +136,8 @@ def control_ui(qapp: QApplication, tmp_path: Path) -> Iterator[ControlUi]:
         BaseEventBus(),
         owner_scheduler=QtOwnerScheduler(),
         project_root=str(tmp_path),
+        catalog_loader=loader,
+        template_catalog=TemplateCatalog(),
     )
     ctrl.attach_caretaker(
         create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
@@ -123,7 +145,10 @@ def control_ui(qapp: QApplication, tmp_path: Path) -> Iterator[ControlUi]:
     ctrl.setup_control.new_entry(EntryRequest("control"))
     ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(
+        ctrl,
+        dialog_presenter=None if getattr(request, "param", None) == "qt" else dialogs,
+    )
     ctrl.add_view(window)
     tab_id = ctrl.new_tab("stoppable")
     remote = RemoteControlAdapter(
@@ -220,27 +245,54 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
 
 
 @pytest.mark.parametrize(
-    "name, dialog_type",
+    "name, dialog_type, close_text",
     [
-        (DialogName.SETUP, SetupDialog),
-        (DialogName.ALIASES, AliasDialog),
-        (DialogName.PREDICTOR, PredictorDialog),
+        (DialogName.SETUP, SetupDialog, "Close"),
+        (DialogName.ALIASES, AliasDialog, "Cancel"),
+        (DialogName.PREDICTOR, PredictorDialog, "Close"),
+        (DialogName.ARB_WAVEFORM, ArbWaveformDialog, "Close"),
     ],
 )
-def test_remote_gates_existing_and_new_writable_dialogs(control_ui, name, dialog_type):
+@pytest.mark.parametrize("close_via", ["button", "window"])
+def test_remote_gates_existing_and_new_writable_dialogs(
+    control_ui, qapp, name, dialog_type, close_text, close_via
+):
     ui = control_ui
     ui.window.open_dialog(name)
     existing = ui.window.findChild(dialog_type)
     assert existing is not None and existing.isEnabled()
+    assert existing.isModal()
     ui.connect()
-    assert not existing.isEnabled()
-    ui.window.close_dialog(name)
-    ui.window.open_dialog(name)
-    current = next(d for d in ui.window.findChildren(dialog_type) if d.isVisible())
-    assert not current.isEnabled()
-    ui.controller.control_identity.reclaim_local()
-    assert current.isEnabled()
+    for opening in range(2):
+        current = next(d for d in ui.window.findChildren(dialog_type) if d.isVisible())
+        assert current.isEnabled(), "Remote must leave modal Cancel/Close available"
+        assert current.isModal()
+        fields = current.findChildren(QLineEdit)
+        tables = current.findChildren(QTableWidget)
+        assert fields or tables
+        assert all(not field.isEnabled() for field in fields)
+        assert all(not table.isEnabled() for table in tables)
+        close = button(current, close_text)
+        assert close.isEnabled()
+        if close_via == "button":
+            close.click()
+        else:
+            assert current.close()
+        assert name not in ui.window.list_open_dialogs()
+        assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+        if opening == 0:
+            qapp.processEvents()
+            ui.window.open_dialog(name)
+    indicator = ui.window.findChild(QPushButton, "control_indicator")
+    assert indicator is not None and indicator.isEnabled()
+    indicator.click()
+    assert ui.controller.control_identity.status().holder == "gui"
     assert ui.controller.control_identity.status().locked
+    ui.window.open_dialog(name)
+    local = next(d for d in ui.window.findChildren(dialog_type) if d.isVisible())
+    assert local.isEnabled()
+    assert all(field.isEnabled() for field in local.findChildren(QLineEdit))
+    button(local, close_text).click()
 
 
 def test_remote_measurement_stop_reclaims_and_cancels(control_ui, qapp):
@@ -327,3 +379,431 @@ def test_remote_close_requires_holder_label_confirmation(control_ui):
     assert ui.dialogs.calls[-1].default is False
     assert ui.window.isVisible()
     assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+
+
+def modal_action(
+    qapp: QApplication,
+    action: Callable[[], object],
+    interactions: list[tuple[type[QDialog], Callable[[Any], None]]],
+) -> None:
+    """Deliver real nested modal decisions, with bounded cleanup on test failure."""
+    pending = iter(interactions)
+    errors: list[Exception] = []
+    visited: list[type[QDialog]] = []
+    timer = QTimer()
+    timer.setSingleShot(True)
+
+    def abort() -> None:
+        errors.append(AssertionError("modal interaction timed out"))
+        for widget in qapp.topLevelWidgets():
+            if isinstance(widget, QDialog) and widget.isVisible():
+                widget.reject()
+
+    def schedule() -> None:
+        item = next(pending, None)
+        if item is None:
+            return
+        expected, interact = item
+
+        def deliver() -> None:
+            dialog = qapp.activeModalWidget()
+            try:
+                assert isinstance(dialog, expected), (expected, dialog)
+                visited.append(expected)
+                schedule()
+                interact(dialog)
+            except Exception as exc:
+                errors.append(exc)
+                if isinstance(dialog, QDialog):
+                    dialog.reject()
+
+        QTimer.singleShot(0, deliver)
+
+    timer.timeout.connect(abort)
+    timer.start(2000)
+    schedule()
+    try:
+        action()
+        wait_until(qapp, lambda: bool(errors) or len(visited) == len(interactions))
+        qapp.processEvents()
+    finally:
+        timer.stop()
+    if errors:
+        raise errors[0]
+    assert len(visited) == len(interactions)
+
+
+@pytest.mark.parametrize("decision", ["transfer", "local", "cancel"])
+def test_setup_text_return_rechecks_holder_without_creating_entry(
+    control_ui, qapp, decision
+):
+    ui = control_ui
+    ui.window.open_dialog(DialogName.SETUP)
+    setup = ui.window.findChild(SetupDialog)
+    assert setup is not None
+    before = ui.controller.setup_control.get_entry_info()
+
+    def choose(dialog: QInputDialog) -> None:
+        dialog.setTextValue("new-entry")
+        if decision == "transfer":
+            ui.connect()
+        if decision == "cancel":
+            dialog.reject()
+        else:
+            dialog.accept()
+
+    modal_action(
+        qapp, lambda: button(setup, "New entry…").click(), [(QInputDialog, choose)]
+    )
+    entries = ui.controller.setup_control.list_entries(refresh=True)
+    if decision == "local":
+        assert "new-entry" in entries
+        info = ui.controller.setup_control.get_entry_info()
+        assert info is not None and info.name == "new-entry"
+    else:
+        assert "new-entry" not in entries
+        assert ui.controller.setup_control.get_entry_info() == before
+    if decision == "transfer":
+        assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+    button(setup, "Close").click()
+
+
+@pytest.mark.parametrize("decision", ["transfer", "local", "cancel"])
+def test_predictor_file_return_rechecks_holder_and_preserves_path(
+    control_ui, qapp, tmp_path, decision
+):
+    ui = control_ui
+    path = tmp_path / "params.json"
+    QubitParams(str(path)).set_fluxdep_fit(FluxDepFit(5.0, 1.0, 0.5, 0.0, 1.0, 1.0))
+    ui.window.open_dialog(DialogName.PREDICTOR)
+    predictor = ui.window.findChild(PredictorDialog)
+    assert predictor is not None
+    before = ui.controller.predictor_control.get_predictor_info()
+
+    def choose(dialog: QFileDialog) -> None:
+        dialog.selectFile(str(path))
+        if decision == "transfer":
+            ui.connect()
+        if decision == "cancel":
+            dialog.reject()
+        else:
+            QMetaObject.invokeMethod(
+                dialog, "accept", Qt.ConnectionType.DirectConnection
+            )
+
+    modal_action(
+        qapp, lambda: button(predictor, "Browse").click(), [(QFileDialog, choose)]
+    )
+    after = ui.controller.predictor_control.get_predictor_info()
+    if decision == "local":
+        assert after is not None and after["EJ"] == 5.0
+        assert any(
+            edit.text() == str(path) for edit in predictor.findChildren(QLineEdit)
+        )
+    else:
+        assert after == before
+    button(predictor, "Close").click()
+
+
+@pytest.mark.parametrize("operation", ["rename", "delete", "overwrite"])
+@pytest.mark.parametrize("decision", ["transfer", "local", "cancel"])
+def test_waveform_modal_return_rechecks_holder(control_ui, qapp, operation, decision):
+    ui = control_ui
+    recipe = FormulaRecipe.from_raw(
+        {"segments": [{"duration": 1.0, "formula": "1"}], "normalize": "peak"}
+    )
+    ui.controller.arb_waveforms.set_formula("existing", recipe, overwrite=False)
+    ui.window.open_dialog(DialogName.ARB_WAVEFORM)
+    dialog = ui.window.findChild(ArbWaveformDialog)
+    assert dialog is not None
+    table = next(t for t in dialog.findChildren(QTableWidget) if t.columnCount() == 3)
+    if operation == "overwrite":
+        next(edit for edit in dialog.findChildren(QLineEdit)).setText("existing")
+    else:
+        table.selectRow(0)
+
+    def choose(prompt: QDialog) -> None:
+        if decision == "transfer":
+            ui.connect()
+        if isinstance(prompt, QInputDialog):
+            prompt.setTextValue("renamed")
+            if decision == "cancel":
+                prompt.reject()
+            else:
+                prompt.accept()
+        else:
+            assert isinstance(prompt, QMessageBox)
+            selected = prompt.button(
+                QMessageBox.StandardButton.No
+                if decision == "cancel"
+                else QMessageBox.StandardButton.Yes
+            )
+            assert selected is not None and selected.isEnabled(), (
+                "modal decision must remain usable after transfer"
+            )
+            selected.click()
+
+    text = {"rename": "Rename", "delete": "Delete", "overwrite": "Save"}[operation]
+    kind = QInputDialog if operation == "rename" else QMessageBox
+    modal_action(qapp, lambda: button(dialog, text).click(), [(kind, choose)])
+    keys = ui.controller.arb_waveforms.list_data_keys()
+    if decision == "local" and operation == "rename":
+        assert keys == ["renamed"]
+    elif decision == "local" and operation == "delete":
+        assert keys == []
+    else:
+        assert keys == ["existing"]
+        data = ui.controller.arb_waveforms.load_data("existing")
+        if decision == "local":
+            assert data.recipe != recipe
+        else:
+            assert data.recipe == recipe
+    button(dialog, "Close").click()
+
+
+@pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
+@pytest.mark.parametrize("decision", ["transfer", "local", "cancel"])
+def test_reset_confirmation_rechecks_holder(control_ui, qapp, decision):
+    ui = control_ui
+    resource = ui.controller.cfg_resources.lookup(ui.tab_id)
+    resource.edit((CfgEdit(("knob",), 99),))
+
+    def choose(prompt: QMessageBox) -> None:
+        if decision == "transfer":
+            ui.connect()
+        selected = prompt.button(
+            QMessageBox.StandardButton.No
+            if decision == "cancel"
+            else QMessageBox.StandardButton.Yes
+        )
+        assert selected is not None and selected.isEnabled(), (
+            "modal decision must remain usable after transfer"
+        )
+        selected.click()
+
+    modal_action(qapp, ui.tab.reset_btn.click, [(QMessageBox, choose)])
+    assert resource.snapshot_inputs().value.fields["knob"] == DirectValue(
+        7 if decision == "local" else 99
+    )
+
+
+@pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
+def test_reload_confirmation_return_does_not_rebuild_after_transfer(control_ui, qapp):
+    ui = control_ui
+    before = ui.controller.list_tab_ids()
+
+    def choose(prompt: QMessageBox) -> None:
+        ui.connect()
+        selected = next(
+            b for b in prompt.buttons() if b.text() == "Discard Results and Reload"
+        )
+        selected.click()
+
+    modal_action(qapp, ui.window.reload_experiments, [(QMessageBox, choose)])
+    assert ui.controller.list_tab_ids() == before
+    assert ui.window.has_tab_widget(ui.tab_id)
+
+
+@pytest.mark.parametrize("decision", ["transfer", "local", "cancel"])
+def test_load_file_return_rechecks_holder_without_replacing_result(
+    control_ui, qapp, tmp_path, decision
+):
+    ui = control_ui
+    tab_id = ui.controller.new_tab("loadable")
+    path = tmp_path / "selected.h5"
+    path.touch()
+    ui.controller.load_tab_result(tab_id, "original.hdf5")
+    before = ui.controller.get_tab_snapshot(tab_id).run
+    assert before is not None
+
+    def open_file(dialog: RunLoadDialog) -> None:
+        assert dialog.isModal()
+        button(dialog, "File…").click()
+
+    def choose(dialog: QFileDialog) -> None:
+        dialog.selectFile(str(path))
+        if decision == "transfer":
+            ui.connect()
+        if decision == "cancel":
+            dialog.reject()
+            load = ui.window.findChild(RunLoadDialog)
+            assert load is not None
+            button(load, "Cancel").click()
+        else:
+            QMetaObject.invokeMethod(
+                dialog, "accept", Qt.ConnectionType.DirectConnection
+            )
+            # The outer dialog remains cancellable when selection cannot commit.
+            load = ui.window.findChild(RunLoadDialog)
+            if load is not None and load.isVisible():
+                button(load, "Cancel").click()
+
+    modal_action(
+        qapp,
+        lambda: ui.window.load_tab_data_dialog(tab_id),
+        [(RunLoadDialog, open_file), (QFileDialog, choose)],
+    )
+    after = ui.controller.get_tab_snapshot(tab_id).run
+    assert after is not None
+    if decision == "local":
+        assert after.source_path == str(path)
+        assert after.result is not before.result
+    else:
+        assert after.source_path == before.source_path
+        assert after.result is before.result
+
+
+@pytest.mark.parametrize("decision", ["transfer", "local", "cancel"])
+def test_inspect_delete_confirmation_uses_live_owner_and_rechecks_holder(
+    control_ui, qapp, decision
+):
+    ui = control_ui
+    capture = ui.controller.context_control.read_context()
+    ui.controller.context_control.set_waveform(
+        capture.target,
+        "Q1.waveforms.pulse",
+        waveform_spec_from_raw({"style": "const", "length": 1.0}),
+    )
+    ui.window.open_dialog(DialogName.INSPECT)
+    inspect = ui.window.findChild(InspectDialog)
+    assert inspect is not None
+    tabs = inspect.findChild(QTabWidget)
+    assert tabs is not None
+    tabs.setCurrentIndex(1)
+    tree = next(
+        t
+        for t in inspect.findChildren(QTreeWidget)
+        if t.objectName() != "component_tree"
+    )
+    group = tree.topLevelItem(0)
+    assert group is not None
+    tree.setCurrentItem(group.child(0))
+
+    failures: list[str] = []
+
+    def dismiss_failure() -> None:
+        prompt = qapp.activeModalWidget()
+        if isinstance(prompt, QMessageBox) and prompt.windowTitle() == "Delete failed":
+            failures.append(prompt.text())
+            prompt.accept()
+
+    def choose(prompt: QMessageBox) -> None:
+        if decision == "transfer":
+            ui.connect()
+        selected = prompt.button(
+            QMessageBox.StandardButton.No
+            if decision == "cancel"
+            else QMessageBox.StandardButton.Yes
+        )
+        assert selected is not None and selected.isEnabled(), (
+            "modal decision must remain usable after transfer"
+        )
+        QTimer.singleShot(0, dismiss_failure)
+        selected.click()
+
+    modal_action(
+        qapp, lambda: button(inspect, "Delete").click(), [(QMessageBox, choose)]
+    )
+    assert failures == [], "legal deletion must use the current library owner"
+    assert ui.controller.has_ml_entry("waveform", "Q1.waveforms.pulse") is (
+        decision != "local"
+    )
+    assert inspect.close()
+
+
+@pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
+@pytest.mark.parametrize("decision", ["transfer", "local", "cancel"])
+def test_unsaved_tab_close_confirmation_rechecks_holder(control_ui, qapp, decision):
+    ui = control_ui
+    tab_id = ui.controller.new_tab("loadable")
+    ui.controller.load_tab_result(tab_id, "unsaved.hdf5")
+    tabs = next(
+        t
+        for t in ui.window.findChildren(QTabWidget)
+        if t.indexOf(ui.window.findChild(ExpTabWidget)) >= 0
+    )
+    tab = next(w for w in ui.window.findChildren(ExpTabWidget) if w.tab_id == tab_id)
+    index = tabs.indexOf(tab)
+    assert index >= 0
+
+    def choose(prompt: QMessageBox) -> None:
+        if decision == "transfer":
+            ui.connect()
+        text = "Cancel" if decision == "cancel" else "Discard and Close"
+        next(b for b in prompt.buttons() if b.text() == text).click()
+
+    modal_action(
+        qapp, lambda: tabs.tabCloseRequested.emit(index), [(QMessageBox, choose)]
+    )
+    assert ui.controller.has_tab(tab_id) is (decision != "local")
+
+
+@pytest.mark.parametrize("decision", ["transfer", "local", "cancel"])
+def test_inspect_dirty_save_return_rechecks_holder(control_ui, qapp, decision):
+    ui = control_ui
+    capture = ui.controller.context_control.read_context()
+    ui.controller.context_control.set_waveform(
+        capture.target,
+        "Q1.waveforms.pulse",
+        waveform_spec_from_raw({"style": "const", "length": 1.0}),
+    )
+    ui.window.open_dialog(DialogName.INSPECT)
+    inspect = ui.window.findChild(InspectDialog)
+    assert inspect is not None
+    tree = next(
+        t
+        for t in inspect.findChildren(QTreeWidget)
+        if t.objectName() != "component_tree"
+    )
+    group = tree.topLevelItem(0)
+    assert group is not None
+    tree.setCurrentItem(group.child(0))
+    name = next(
+        e for e in inspect.findChildren(QLineEdit) if e.text() == "Q1.waveforms.pulse"
+    )
+    name.setText("Q1.waveforms.renamed")
+
+    def choose(prompt: QMessageBox) -> None:
+        if decision == "transfer":
+            ui.connect()
+        selected = prompt.button(
+            QMessageBox.StandardButton.Cancel
+            if decision == "cancel"
+            else QMessageBox.StandardButton.Save
+        )
+        assert selected is not None and selected.isEnabled()
+        selected.click()
+
+    modal_action(qapp, inspect.close, [(QMessageBox, choose)])
+    assert ui.controller.has_ml_entry("waveform", "Q1.waveforms.pulse") is (
+        decision != "local"
+    )
+    assert ui.controller.has_ml_entry("waveform", "Q1.waveforms.renamed") is (
+        decision == "local"
+    )
+    if DialogName.INSPECT in ui.window.list_open_dialogs():
+        name.setText("Q1.waveforms.pulse")
+        assert inspect.close()
+
+
+def test_remote_gates_open_template_content_but_keeps_cancel(control_ui):
+    ui = control_ui
+    ui.window.open_dialog(DialogName.INSPECT)
+    inspect = ui.window.findChild(InspectDialog)
+    assert inspect is not None
+    button(inspect, "New").click()
+    create = next(
+        d
+        for d in inspect.findChildren(QDialog)
+        if d.windowTitle() == "Create ModuleLibrary entry"
+    )
+    assert create.isModal()
+    ui.connect()
+    assert create.isEnabled()
+    assert all(not field.isEnabled() for field in create.findChildren(QLineEdit))
+    assert not button(create, "Create").isEnabled()
+    assert button(create, "Cancel").isEnabled()
+    button(create, "Cancel").click()
+    assert not create.isVisible()
+    assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+    assert inspect.close()
