@@ -10,6 +10,7 @@ from zcu_tools.datafile import SoftwareProvenance, load_run_data
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import Engine, EnginePorts, RunIdentity, RunPaths
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.experiment.workflows._engine_fakes import ManualClock, RecordingBar, RecordingDevices
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoExp
@@ -22,8 +23,6 @@ from ._sim_inputs import Inputs, make_plan, make_snapshot, seed_from_inputs
 
 def start_t2(inputs: Inputs, root: Path, kind: Literal["echo", "ramsey"], *, sweep_factor: float = 5.0) -> tuple[Engine[Calibrated], RecordingDevices, Plots]:
     """Run each shipped T2 declaration on independent simulator ports."""
-    name = "t2echo_fluxdep" if kind == "echo" else "t2ramsey_fluxdep"
-    assert hasattr(workflows, name), "Native T2 fluxdep must acquire and commit points"
     plan = workflows.T2Plan.model_validate(make_plan(inputs).model_dump(mode="python"))
     cal = CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125)
     devices, plots = RecordingDevices(), Plots(NonPresentingHost())
@@ -68,7 +67,8 @@ def test_t2_fluxdep_commits_two_native_points_with_fitted_pi2(inputs: Inputs, tm
             assert ramsey.cfg is not None
             drive = ramsey.cfg.modules.pi2_pulse
             assert ramsey.cfg.detune == pytest.approx(0.1 / ramsey.cfg.sweep.length.step)
-        assert drive.waveform.get_length() == pytest.approx(calibration["pi2_length_us"])
+        assert isinstance(drive.waveform, ConstWaveformCfg)
+        assert drive.waveform.length == pytest.approx(calibration["pi2_length_us"])
         assert drive.waveform.style == make_plan(inputs).qub_pulse.waveform.style
         assert drive.gain == make_plan(inputs).qub_pulse.gain
         assert metadata.run_id != "workflow"
