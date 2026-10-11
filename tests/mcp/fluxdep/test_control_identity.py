@@ -1,5 +1,6 @@
 """MCP identity tools composed with the real Fluxdep application dispatch."""
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -165,3 +166,40 @@ def test_other_online_holder_surfaces_native_control_held(control_server):
         invoke(server, "control_acquire")
     assert caught.value.reason == "control_held"
     assert caught.value.data == {"holder": "rpc:agent", "locked": False, "online": True}
+
+
+@pytest.mark.parametrize(
+    "reason", ["not_holder", "control_locked", "control_held", "readonly_connection"]
+)
+def test_stdio_projects_real_control_rejections_without_losing_holder_data(
+    control_server, reason
+):
+    from tests.mcp._stdio_support import invoke_stdio
+
+    server, harness, bridge = control_server
+    mode = "owner"
+    holder = "gui"
+    locked = reason == "control_locked"
+    method = "control_acquire"
+    if locked:
+        harness.ctrl.control_identity.reclaim_local()
+    elif reason == "control_held":
+        harness.client()
+        holder = "rpc:agent"
+    else:
+        mode = "readonly"
+    invoke(server, "connect", label="reader", mode=mode)
+    if reason == "not_holder":
+        method = "project_setup"
+    arguments = (
+        {"chip_name": "changed", "qub_name": "q"} if reason == "not_holder" else {}
+    )
+    reply = invoke_stdio(
+        server.bridge.config, server.tools, "fluxdep_" + method, arguments
+    )
+    assert reply["result"]["isError"] is True
+    assert reply["result"]["content"][0]["text"].startswith("{"), reply
+    error = json.loads(reply["result"]["content"][0]["text"])["error"]
+    assert error["code"] == "precondition_failed"
+    assert error["reason"] == reason
+    assert error["data"] == {"holder": holder, "locked": locked, "online": True}

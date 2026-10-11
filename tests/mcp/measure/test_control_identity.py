@@ -1,5 +1,6 @@
 """Identity initialization and native control diagnostics at public MCP seams."""
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -187,3 +188,28 @@ def test_control_errors_retain_native_code_reason_and_holder_data(
     assert getattr(caught.value, "data", None) == error["data"]
     assert caught.value.code == error["code"]
     assert caught.value.reason == reason
+
+
+@pytest.mark.parametrize(
+    "reason", ["not_holder", "control_locked", "control_held", "readonly_connection"]
+)
+def test_stdio_preserves_control_error_envelope(identity_client, reason):
+    from tests.mcp._stdio_support import invoke_stdio
+
+    client = identity_client
+    projection = {"holder": "gui", "locked": True, "online": True, "me": False}
+    client.transport.replies["control.connect"] = {"ok": True, "result": projection}
+    client.call("connect", {"mode": "readonly"})
+    error = {
+        "code": "precondition_failed",
+        "message": "native diagnostic",
+        "reason": reason,
+        "data": {"holder": "gui", "locked": True, "online": True},
+    }
+    client.transport.replies["control.acquire"] = {"ok": False, "error": error}
+    reply = invoke_stdio(
+        client.context.config, client.tools, "rpc_call", {"method": "control.acquire"}
+    )
+    assert reply["result"]["isError"] is True
+    assert reply["result"]["content"][0]["text"].startswith("{"), reply
+    assert json.loads(reply["result"]["content"][0]["text"]) == {"error": error}
