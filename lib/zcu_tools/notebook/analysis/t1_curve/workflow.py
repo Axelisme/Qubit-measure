@@ -1779,7 +1779,7 @@ def _prepare_t1_data(
     )
     order = np.argsort(aligned_fluxs[in_window])
 
-    def take(values_arr: NDArray[np.float64]) -> NDArray[np.float64]:
+    def take[ScalarT: np.generic](values_arr: NDArray[ScalarT]) -> NDArray[ScalarT]:
         return np.asarray(values_arr)[in_window][order]
 
     aligned_taken = take(aligned_fluxs)
