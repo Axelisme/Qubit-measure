@@ -7,11 +7,11 @@ from typing import Literal
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from zcu_tools.resources import entry
-from zcu_tools.resources import entry as entry_api
 from zcu_tools.resources.entry import (
     ComponentSchema,
     ResultEntry,
     UnknownKindError,
+    role_candidates,
     snapshot,
 )
 
@@ -186,8 +186,8 @@ def test_role_candidates_list_matching_components_in_document_order(
     entry.setup.add_component("D1", kind="fake/drive/a")
     document = snapshot(entry.setup)
 
-    assert entry_api.role_candidates(document, "driver") == ("D2", "D1")
-    assert entry_api.role_candidates(document, "sense") == ("S1",)
-    assert entry_api.role_candidates(document, "coupler") == ()
+    assert role_candidates(document, "driver") == ("D2", "D1")
+    assert role_candidates(document, "sense") == ("S1",)
+    assert role_candidates(document, "coupler") == ()
     with pytest.raises(ValueError, match="nope"):
-        entry_api.role_candidates(document, "nope")
+        role_candidates(document, "nope")

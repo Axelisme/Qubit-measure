@@ -45,6 +45,7 @@ from .schema import (
     SetupGeneral,
     validate_component_name,
 )
+from .schema_fields import declared_unit
 
 if TYPE_CHECKING:
     from .points import PointView
@@ -311,13 +312,7 @@ def document_unit(document: SetupDocument | PointDocument, path: str) -> str | N
         if field is None:
             return None
         if index == len(parts) - 1:
-            metadata = field.json_schema_extra
-            if not isinstance(metadata, dict) or "unit" not in metadata:
-                return None
-            unit = metadata["unit"]
-            if not isinstance(unit, str) or not unit:
-                raise ValueError(f"{path!r}: unit must be a nonempty string")
-            return unit
+            return declared_unit(field, path)
         node = model_field_value(node, part)
     return None
 

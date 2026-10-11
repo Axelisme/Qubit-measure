@@ -172,9 +172,15 @@ class SetupDialog(QDialog):
         entry_actions.addWidget(open_entry_btn)
         entry_form.addRow("", entry_actions)
         self._result_path = _ElidedPathLabel("result_path")
-        entry_form.addRow("Result:", self._path_row(self._result_path))
+        self._result_open = self._open_folder_button(self._result_path)
+        entry_form.addRow(
+            "Result:", self._path_row(self._result_path, self._result_open)
+        )
         self._database_path = _ElidedPathLabel("database_path")
-        entry_form.addRow("Database:", self._path_row(self._database_path))
+        self._database_open = self._open_folder_button(self._database_path)
+        entry_form.addRow(
+            "Database:", self._path_row(self._database_path, self._database_open)
+        )
         left_layout.addWidget(entry_group)
 
         # context list
@@ -411,6 +417,7 @@ class SetupDialog(QDialog):
         except FileNotFoundError as exc:
             # A missing result root is the normal first-run state, not a failure.
             root = exc.filename if exc.filename is not None else "the result root"
+            self._entry_combo.clear()
             self._set_project_hint(f"No result entries yet. New entry… creates {root}")
             return
         except Exception as exc:
@@ -427,25 +434,25 @@ class SetupDialog(QDialog):
         if idx >= 0:
             self._entry_combo.setCurrentIndex(idx)
 
-    def _path_row(self, label: _ElidedPathLabel) -> QHBoxLayout:
+    def _open_folder_button(self, label: _ElidedPathLabel) -> QPushButton:
+        """Return a disabled Open folder button that opens label's full path."""
+        button = QPushButton("Open folder")
+        button.setEnabled(False)
+        button.clicked.connect(lambda checked=False: self._open_folder(label.path()))
+        return button
+
+    @staticmethod
+    def _path_row(label: _ElidedPathLabel, button: QPushButton) -> QHBoxLayout:
         row = QHBoxLayout()
         row.addWidget(label, stretch=1)
-        open_btn = QPushButton("Open folder")
-        open_btn.setEnabled(False)
-        open_btn.clicked.connect(lambda checked=False: self._open_folder(label.path()))
-        label.setBuddy(open_btn)
-        row.addWidget(open_btn)
+        row.addWidget(button)
         return row
 
     def _show_entry_paths(self, info: EntryInfo) -> None:
-        for label, path in (
-            (self._result_path, info.result_path),
-            (self._database_path, info.database_path),
-        ):
-            label.set_path(str(path))
-            buddy = label.buddy()
-            if buddy is not None:
-                buddy.setEnabled(True)
+        self._result_path.set_path(str(info.result_path))
+        self._database_path.set_path(str(info.database_path))
+        self._result_open.setEnabled(True)
+        self._database_open.setEnabled(True)
 
     def _open_folder(self, path: str) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
@@ -592,9 +599,7 @@ class SetupDialog(QDialog):
         if current is None:
             self._selected_description.setText("")
             return
-        description = self._point_descriptions.get(
-            current.data(Qt.ItemDataRole.UserRole), ""
-        )
+        description = self._point_descriptions[current.data(Qt.ItemDataRole.UserRole)]
         if description:
             self._selected_description.setText(f"Description: {description}")
             self._selected_description.setStyleSheet("")

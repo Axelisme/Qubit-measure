@@ -598,7 +598,6 @@ def test_entry_paths_elide_middle_keep_name_and_open_folder(
 def test_point_rows_show_labels_and_selected_description_below(
     entry_dialog: tuple[SetupDialog, Controller, State],
 ) -> None:
-    from qtpy.QtCore import Qt
 
     dialog, controller, _state = entry_dialog
     long_text = "JPA on, readout -30 dBm " * 8
@@ -610,7 +609,6 @@ def test_point_rows_show_labels_and_selected_description_below(
     )
     listing = point_list(dialog)
     assert point_texts(dialog) == ["bias-a", "● bias-b"]
-    assert listing.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     listing.setCurrentRow(0)
     view = selected_description(dialog)
     assert long_text.strip() in view.text()

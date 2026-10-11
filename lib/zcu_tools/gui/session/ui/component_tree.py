@@ -33,20 +33,20 @@ from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
 from zcu_tools.gui.session.ui.component_editing import (
-    field_choices,
+    edit_choices,
+    edit_completions,
+    field_tooltip,
     parse_field_input,
     set_red,
     show_error,
 )
 from zcu_tools.resources.entry import (
-    FieldSpec,
     FieldValueKind,
     Provenance,
     component_field_specs,
     document_fields,
     document_meta,
     document_value,
-    role_candidates,
 )
 
 if TYPE_CHECKING:
@@ -301,10 +301,7 @@ class ComponentTreeWidget(QWidget):
             )
             items[key] = item
             path = ".".join(key)
-            tooltip = (
-                path if spec.description is None else f"{spec.description}\n{path}"
-            )
-            item.setToolTip(_FIELD, tooltip)
+            item.setToolTip(_FIELD, field_tooltip(spec, path))
             if spec.value_kind == "group":
                 default_expanded[key] = present
                 if not present:
@@ -322,8 +319,8 @@ class ComponentTreeWidget(QWidget):
                         component=name,
                         segments=spec.segments,
                         value_kind=spec.value_kind,
-                        choices=_edit_choices(document, spec),
-                        completions=_edit_completions(document, spec),
+                        choices=edit_choices(document, spec),
+                        completions=edit_completions(document, spec),
                         initial=_display(value) if present else "",
                         write_depth=_write_depth(component_value, spec.segments),
                     ),
@@ -505,24 +502,6 @@ class _ValueDelegate(QStyledItemDelegate):
     def _finish(self, combo: QComboBox) -> None:
         self.commitData.emit(combo)
         self.closeEditor.emit(combo, QAbstractItemDelegate.EndEditHint.NoHint)
-
-
-def _edit_choices(
-    document: SetupDocument | PointDocument, spec: FieldSpec
-) -> tuple[str, ...]:
-    """Drop-down options: matching components for a role reference, else declared."""
-    if spec.reference_role is not None:
-        return role_candidates(document, spec.reference_role)
-    return field_choices(spec.value_kind, spec.choices)
-
-
-def _edit_completions(
-    document: SetupDocument | PointDocument, spec: FieldSpec
-) -> tuple[str, ...]:
-    """Component names for free-text fields that may name another component."""
-    if spec.value_kind != "text" or spec.reference_role is not None:
-        return ()
-    return tuple(document.components)
 
 
 def _row_key(item: QTreeWidgetItem) -> _RowKey:

@@ -59,6 +59,11 @@ class FieldSpec:
     description: str | None
     reference_role: str | None
 
+    @property
+    def path(self) -> str:
+        """Return segments joined by dots, for example "wiring.flux.ch"."""
+        return ".".join(self.segments)
+
 
 def component_field_specs(kind: str) -> tuple[FieldSpec, ...]:
     """Project the registered model of kind into specs in declaration order.
@@ -116,7 +121,7 @@ def _project(
             value_kind=value_kind,
             required=field.is_required(),
             choices=_choices(annotation) if value_kind == "choice" else (),
-            unit=_unit(field, segments),
+            unit=declared_unit(field, ".".join(segments)),
             description=field.description,
             reference_role=_reference_role(prefix, segments[-1], value_kind),
         )
@@ -180,12 +185,17 @@ def _choices(annotation: object) -> tuple[str, ...]:
     return tuple(str(value) for value in get_args(annotation))
 
 
-def _unit(field: FieldInfo, segments: tuple[str, ...]) -> str | None:
-    # Same metadata rule as document_unit: a nonempty json_schema_extra label.
+def declared_unit(field: FieldInfo, path: str) -> str | None:
+    """Return a field's json_schema_extra["unit"] label, or None when undeclared.
+
+    path only names the field in errors. A unit that is not a nonempty string
+    raises ValueError. This is the one unit rule for the projection and for
+    document_unit; no value is read and no conversion happens.
+    """
     metadata = field.json_schema_extra
     if not isinstance(metadata, dict) or "unit" not in metadata:
         return None
     unit = metadata["unit"]
     if not isinstance(unit, str) or not unit:
-        raise ValueError(f"{'.'.join(segments)!r}: unit must be a nonempty string")
+        raise ValueError(f"{path!r}: unit must be a nonempty string")
     return unit

@@ -8,13 +8,18 @@ display changes here.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import yaml
 from pydantic import TypeAdapter, ValidationError
 from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import QLabel
 
 from zcu_tools.format_version import YamlValue
-from zcu_tools.resources.entry import FieldValueKind
+from zcu_tools.resources.entry import FieldSpec, FieldValueKind, role_candidates
+
+if TYPE_CHECKING:
+    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
 
 
 def parse_field_input(value_kind: FieldValueKind, raw: str) -> YamlValue:
@@ -55,6 +60,37 @@ def field_choices(
     if value_kind == "boolean":
         return ("true", "false")
     return choices
+
+
+def edit_choices(
+    document: SetupDocument | PointDocument, spec: FieldSpec
+) -> tuple[str, ...]:
+    """Return a field's drop-down options, or () for a free-text editor.
+
+    A role reference (spec.reference_role) offers document's components whose
+    kind matches the role, in document order; other fields use field_choices.
+    """
+    if spec.reference_role is not None:
+        return role_candidates(document, spec.reference_role)
+    return field_choices(spec.value_kind, spec.choices)
+
+
+def edit_completions(
+    document: SetupDocument | PointDocument, spec: FieldSpec
+) -> tuple[str, ...]:
+    """Return component names a free-text "text" field completes, else ().
+
+    Role references use a drop-down instead (see edit_choices), so they get
+    no completions; the editor still accepts any text.
+    """
+    if spec.value_kind != "text" or spec.reference_role is not None:
+        return ()
+    return tuple(document.components)
+
+
+def field_tooltip(spec: FieldSpec, path: str) -> str:
+    """Return the description (when declared) above the field's path."""
+    return path if spec.description is None else f"{spec.description}\n{path}"
 
 
 def error_summary(exc: BaseException) -> str:

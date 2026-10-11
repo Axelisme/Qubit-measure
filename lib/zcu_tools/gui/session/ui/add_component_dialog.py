@@ -26,7 +26,9 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.session.ui.component_editing import (
-    field_choices,
+    edit_choices,
+    edit_completions,
+    field_tooltip,
     parse_field_input,
     set_red,
     show_error,
@@ -35,7 +37,6 @@ from zcu_tools.resources.entry import (
     FieldSpec,
     component_field_specs,
     component_registry,
-    role_candidates,
 )
 
 if TYPE_CHECKING:
@@ -178,7 +179,8 @@ class AddComponentDialog(QDialog):
             return "Adds to: setup template"
         label = self._control.current_point_label()
         if label is None:
-            return "Adds to: current point (unsaved draft)"
+            # The tree disables Add without a saved point, so this is a caller bug.
+            raise RuntimeError("Adding to the current point requires a selected point")
         return f"Adds to: current point {label}"
 
     # ------------------------------------------------------------------
@@ -198,9 +200,9 @@ class AddComponentDialog(QDialog):
         document = self._control.inspect_document(setup=self._setup)
         for row, spec in enumerate(specs):
             label = QLabel(spec.segments[-1])
-            label.setObjectName(f"label:{'.'.join(spec.segments)}")
+            label.setObjectName(f"label:{spec.path}")
             label.setIndent(_INDENT_PX * (len(spec.segments) - 1))
-            label.setToolTip(_tooltip(spec))
+            label.setToolTip(field_tooltip(spec, spec.path))
             if spec.value_kind == "group":
                 font = label.font()
                 font.setBold(True)
@@ -210,7 +212,7 @@ class AddComponentDialog(QDialog):
                 continue
             editor = self._editor(spec, document)
             unit = QLabel(spec.unit or "")
-            unit.setObjectName(f"unit:{'.'.join(spec.segments)}")
+            unit.setObjectName(f"unit:{spec.path}")
             grid.addWidget(label, row, 0)
             grid.addWidget(editor, row, 1)
             grid.addWidget(unit, row, 2)
@@ -225,11 +227,7 @@ class AddComponentDialog(QDialog):
     def _editor(
         self, spec: FieldSpec, document: SetupDocument | PointDocument
     ) -> QLineEdit | QComboBox:
-        path = ".".join(spec.segments)
-        if spec.reference_role is not None:
-            choices = role_candidates(document, spec.reference_role)
-        else:
-            choices = field_choices(spec.value_kind, spec.choices)
+        choices = edit_choices(document, spec)
         editor: QLineEdit | QComboBox
         if choices:
             editor = QComboBox()
@@ -239,11 +237,11 @@ class AddComponentDialog(QDialog):
         else:
             editor = QLineEdit()
             editor.textChanged.connect(self._update_required)
-            if spec.value_kind == "text" and document.components:
-                names = list(document.components)
-                editor.setCompleter(QCompleter(names, editor))
-        editor.setObjectName(f"field:{path}")
-        editor.setToolTip(_tooltip(spec))
+            completions = edit_completions(document, spec)
+            if completions:
+                editor.setCompleter(QCompleter(list(completions), editor))
+        editor.setObjectName(f"field:{spec.path}")
+        editor.setToolTip(field_tooltip(spec, spec.path))
         return editor
 
     def _required_now(self, spec: FieldSpec) -> bool:
@@ -347,8 +345,3 @@ def _insert(fields: YamlMap, segments: tuple[str, ...], value: YamlValue) -> Non
             raise TypeError(f"{'.'.join(segments)}: ancestor {segment!r} is a value")
         node = nested
     node[segments[-1]] = value
-
-
-def _tooltip(spec: FieldSpec) -> str:
-    path = ".".join(spec.segments)
-    return path if spec.description is None else f"{spec.description}\n{path}"
