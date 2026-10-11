@@ -185,24 +185,30 @@ def run_stdio_loop(
     *,
     hooks: StdioLoopHooks | None = None,
     server_version: str = "1.0.0",
+    input_stream: TextIO | None = None,
+    output_stream: TextIO | None = None,
 ) -> None:
     """Run the MCP stdio JSON-RPC loop until stdin closes.
 
     ``server_version`` is the ``serverInfo.version`` reported on ``initialize``.
+    input_stream/output_stream optionally supply caller-owned text streams; the
+    loop does not close them. Defaults use process stdin/stdout.
 
     A ``RuntimeError`` carrying a ``reason`` attribute (set from the GUI wire error
     envelope) has its tag appended to the tool-error text, so an agent can branch
     on the machine-readable reason without parsing the prose.
     """
     hooks = hooks or StdioLoopHooks()
-    _use_utf8(sys.stdout)
-    _use_utf8(sys.stdin)
+    input_stream = sys.stdin if input_stream is None else input_stream
+    output_stream = sys.stdout if output_stream is None else output_stream
+    _use_utf8(output_stream)
+    _use_utf8(input_stream)
     if hooks.on_start is not None:
         hooks.on_start()
 
     while True:
         try:
-            line = sys.stdin.readline()
+            line = input_stream.readline()
             if not line:
                 if hooks.on_cleanup is not None:
                     hooks.on_cleanup()
@@ -214,8 +220,8 @@ def run_stdio_loop(
                 json.loads(line), config, tools, hooks, server_version
             )
             if resp is not None:
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+                output_stream.write(json.dumps(resp) + "\n")
+                output_stream.flush()
         except Exception as e:  # noqa: BLE001 — loop isolation keeps the server alive
             if hooks.on_error is not None:
                 hooks.on_error("MCP loop exception")

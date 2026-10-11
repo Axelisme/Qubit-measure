@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
+from zcu_tools.mcp.core.control import ControlConnection
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.tools_operation import status
 
@@ -22,8 +23,15 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
     token = arguments.get("token")
     if token is not None and (not isinstance(token, str) or not token):
         raise ValueError("token must be a non-empty string")
+    # Validate supplied values before network work; omitted values retain identity.
+    ControlConnection(arguments.get("label", "agent"), arguments.get("mode", "owner"))
     connection = ctx.session.connect_to_gui(
-        port=port, launch=launch, clean=clean, token=token
+        port=port,
+        launch=launch,
+        clean=clean,
+        token=token,
+        label=arguments.get("label"),
+        mode=arguments.get("mode"),
     )
     return {**connection, "status": status(ctx, {})}
 
@@ -41,6 +49,12 @@ CONNECT_TOOL: dict[str, Any] = {
                 "default": "never",
             },
             "clean": {"type": "boolean", "default": False},
+            "label": {"type": "string", "minLength": 1, "default": "agent"},
+            "mode": {
+                "type": "string",
+                "enum": ["owner", "readonly"],
+                "default": "owner",
+            },
             "token": {
                 "type": "string",
                 "minLength": 1,
