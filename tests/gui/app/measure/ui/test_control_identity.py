@@ -1139,3 +1139,46 @@ def test_inspect_add_late_submit_after_transfer_has_no_owner_effects(
         assert changes == []
     finally:
         subscription.unsubscribe()
+
+
+@pytest.mark.parametrize("close_via", ["cancel", "close"])
+def test_inspect_add_retired_submit_after_local_reclaim_has_no_owner_effects(
+    control_ui: ControlUi, qapp: QApplication, close_via: str
+) -> None:
+    ui = control_ui
+    ui.window.open_dialog(DialogName.INSPECT)
+    inspect = ui.window.findChild(InspectDialog)
+    if inspect is None:
+        raise LookupError("Inspect did not open")
+    tree = inspect.findChild(ComponentTreeWidget)
+    if tree is None:
+        raise LookupError("Inspect lacks its component tree")
+    dialog = open_resonator_add(tree, "retired_resonator")
+    submit = add_control(dialog, QPushButton, "add_submit")
+    baseline = ui.controller.context_control.inspect_document()
+    changes: list[MdChangedPayload] = []
+    subscription = ui.controller.get_bus().subscribe(MdChangedPayload, changes.append)
+    delivered: list[bool] = []
+
+    def deliver_queued_submit() -> None:
+        submit.clicked.emit()
+        delivered.append(True)
+
+    try:
+        ui.connect()
+        QTimer.singleShot(0, deliver_queued_submit)
+        if close_via == "cancel":
+            add_control(dialog, QPushButton, "add_cancel").click()
+        else:
+            assert dialog.close()
+        assert not dialog.isVisible()
+        assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+        ui.controller.control_identity.reclaim_local()
+        qapp.processEvents()
+        assert delivered == [True]
+        assert ui.controller.control_identity.status().holder == "gui"
+        assert ui.controller.control_identity.status().locked
+        assert ui.controller.context_control.inspect_document() == baseline
+        assert changes == []
+    finally:
+        subscription.unsubscribe()
