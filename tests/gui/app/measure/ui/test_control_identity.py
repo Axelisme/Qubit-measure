@@ -1045,8 +1045,7 @@ def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, q
 def add_control[T: QWidget](dialog: AddComponentDialog, kind: type[T], name: str) -> T:
     """Locate one declared public Add dialog control by its object name."""
     control = dialog.findChild(kind, name)
-    if control is None:
-        raise LookupError(f"Add dialog lacks {name!r}")
+    assert control is not None, f"Add dialog lacks {name!r}"
     return control
 
 
@@ -1067,11 +1066,9 @@ def test_inspect_add_remote_gates_fields_and_submit_and_retires_on_close(
     ui = control_ui
     ui.window.open_dialog(DialogName.INSPECT)
     inspect = ui.window.findChild(InspectDialog)
-    if inspect is None:
-        raise LookupError("Inspect did not open")
+    assert inspect is not None, "Inspect did not open"
     tree = inspect.findChild(ComponentTreeWidget)
-    if tree is None:
-        raise LookupError("Inspect lacks its component tree")
+    assert tree is not None, "Inspect lacks its component tree"
     baseline = ui.controller.context_control.inspect_document()
     if opening == "new":
         ui.connect()
@@ -1107,11 +1104,9 @@ def test_inspect_add_late_submit_after_transfer_has_no_owner_effects(
     ui = control_ui
     ui.window.open_dialog(DialogName.INSPECT)
     inspect = ui.window.findChild(InspectDialog)
-    if inspect is None:
-        raise LookupError("Inspect did not open")
+    assert inspect is not None, "Inspect did not open"
     tree = inspect.findChild(ComponentTreeWidget)
-    if tree is None:
-        raise LookupError("Inspect lacks its component tree")
+    assert tree is not None, "Inspect lacks its component tree"
     local = open_resonator_add(tree, "local_resonator")
     add_control(local, QPushButton, "add_submit").click()
     assert (
@@ -1151,11 +1146,9 @@ def test_inspect_add_retired_submit_after_local_reclaim_has_no_owner_effects(
     ui = control_ui
     ui.window.open_dialog(DialogName.INSPECT)
     inspect = ui.window.findChild(InspectDialog)
-    if inspect is None:
-        raise LookupError("Inspect did not open")
+    assert inspect is not None, "Inspect did not open"
     tree = inspect.findChild(ComponentTreeWidget)
-    if tree is None:
-        raise LookupError("Inspect lacks its component tree")
+    assert tree is not None, "Inspect lacks its component tree"
     dialog = open_resonator_add(tree, "retired_resonator")
     submit = add_control(dialog, QPushButton, "add_submit")
     baseline = ui.controller.context_control.inspect_document()
