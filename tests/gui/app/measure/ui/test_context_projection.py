@@ -129,7 +129,20 @@ def test_empty_tab_area_shows_next_step_hint_until_a_tab_opens(
         ctrl.setup_control.new_entry(EntryRequest("entry"))
         qapp.processEvents()
         assert hint.isVisibleTo(window)
-        assert hint.text() and hint.text() != without_entry
+        without_point = hint.text()
+        assert without_point and without_point != without_entry
+        ctrl.setup_control.new_point(
+            PointCreateRequest("first", "", CommandOrigin("gui"))
+        )
+        qapp.processEvents()
+        with_point = hint.text()
+        assert with_point and with_point not in (without_entry, without_point)
+        ctrl.setup_control.open_entry(EntryRequest("entry"))
+        qapp.processEvents()
+        assert hint.text() == without_point
+        ctrl.setup_control.use_point(PointUseRequest("first"))
+        qapp.processEvents()
+        assert hint.text() == with_point
         tab_id = ctrl.tab_control.new_tab("fake")
         qapp.processEvents()
         assert tabs.isVisibleTo(window) and not hint.isVisibleTo(window)
