@@ -21,7 +21,7 @@ from zcu_tools.gui.form import FormModel
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
+from zcu_lab.workflows.gui import figures as figures_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
@@ -257,7 +257,7 @@ def assert_figure_render_failure(
     def failed_render(_figure: Figure) -> bytes:
         raise RuntimeError("Renderer failed")
 
-    monkeypatch.setattr(window_module, "render_figure_png", failed_render)
+    monkeypatch.setattr(figures_module, "render_figure_png", failed_render)
     failed = rpc("workflow.figure", {"run_id": "reader", "name": "live"})
     error = failed["error"]
     assert failed["ok"] is False and isinstance(error, dict)

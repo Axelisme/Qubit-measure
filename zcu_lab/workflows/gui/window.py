@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from threading import get_ident
 from typing import TYPE_CHECKING, Literal
 
@@ -11,14 +12,7 @@ from pydantic import JsonValue
 from qick import QickConfig
 from qtpy.QtCore import QSignalBlocker, QTimer
 from qtpy.QtGui import QCloseEvent
-from qtpy.QtWidgets import (
-    QComboBox,
-    QLabel,
-    QPushButton,
-    QStackedWidget,
-    QVBoxLayout,
-    QWidget,
-)
+from qtpy.QtWidgets import QFileDialog, QWidget
 from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.acquisition import capture_software_provenance
@@ -48,7 +42,6 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
-from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.gui.session.persistence import PersistenceError
@@ -57,6 +50,7 @@ from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import (
@@ -68,7 +62,9 @@ from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from ._form_io import inspect_form_input, prepare_start_form
 from .catalog import WorkflowCatalog, build_catalog
+from .figures import WorkflowFigureViews
 from .forms import WorkflowForms
+from .layout import build_workflow_layout
 from .persistence import WorkflowInputRestoreReport, WorkflowInputSnapshot
 from .remote import FormInspectionReply, T1RemoteControlAdapter
 from .tuning_panel import T1TuningPanel
@@ -130,7 +126,6 @@ class T1WorkflowWindow(QWidget):
             services.runner, "t1-workflow", on_finished=self._finished
         )
         self.tuning_panel: T1TuningPanel[FormModel, Calibrated] | None = None
-        self._plots: Plots | None = None
 
         env = (
             self._capture_env(self._services.device.capture_native_device_info())
@@ -138,57 +133,36 @@ class T1WorkflowWindow(QWidget):
             else FormEnv()
         )
         self._forms = WorkflowForms(current, env, self)
-        self._init_selector(current)
-        self._message = QLabel(self)
-        self._message.setObjectName("workflow.run.message")
-        self._message.setWordWrap(True)
-        self._start_button = QPushButton("Start", self)
-        self._start_button.setObjectName("workflow.run.start")
-        self._start_button.clicked.connect(self._start_clicked)
-        self._pause_button = QPushButton("Pause", self)
-        self._pause_button.setObjectName("workflow.run.pause")
-        self._pause_button.setEnabled(False)
-        self._pause_button.clicked.connect(self._pause_clicked)
-        self._resume_button = QPushButton("Resume", self)
-        self._resume_button.setObjectName("workflow.run.resume")
-        self._resume_button.setEnabled(False)
-        self._resume_button.clicked.connect(self._resume_clicked)
-        stop_button = QPushButton("Stop", self)
-        stop_button.setObjectName("workflow.run.stop")
-        stop_button.clicked.connect(self._stop_clicked)
-        self._export_button = QPushButton("Export merged/Labber", self)
-        self._export_button.setObjectName("workflow.run.export_fluxdep")
-        self._export_button.setEnabled(False)
-        self._export_button.clicked.connect(self._export_clicked)
-
-        stack = QStackedWidget(self)
-        placeholder = QLabel("Workflow plots", stack)
-        stack.addWidget(placeholder)
-        self._plot_host = QtPlotHost(FigureContainer(stack, placeholder), owner)
-        self._layout = QVBoxLayout(self)
-        self._init_source_controls()
-        for widget in (
-            self._selector,
-            self.plan_panel,
-            self.tunables_panel,
-            self._start_button,
-            self._pause_button,
-            self._resume_button,
-            stop_button,
-            self._export_button,
-            self._message,
-            stack,
+        self._controls = build_workflow_layout(
+            self, self.plan_panel, self.tunables_panel
+        )
+        self._controls.selector.addItems(list(current.names))
+        self._controls.selector.currentTextChanged.connect(self._selection_changed)
+        for button, slot in (
+            (self._controls.start, self._start_clicked),
+            (self._controls.pause, self._pause_clicked),
+            (self._controls.resume, self._resume_clicked),
+            (self._controls.stop, self._stop_clicked),
+            (self._controls.export, self._export_clicked),
+            (self._controls.open_trend, self._open_trend_clicked),
+            (self._controls.setup, self.open_setup),
+            (self._controls.aliases, self._aliases_clicked),
+            (self._controls.prepare, self._use_source_clicked),
+            (self._controls.reload, self._reload_clicked),
         ):
-            self._layout.addWidget(widget)
+            button.clicked.connect(slot)
+        self._controls.reload.setEnabled(self._loader is not None)
+        self._plot_host = QtPlotHost(
+            FigureContainer(self._controls.plot_stack, self._controls.plot_placeholder),
+            owner,
+        )
+        self._figure_views = WorkflowFigureViews(self._plot_host)
+        self.setup_dialog = SetupDialog(self._services.setup_control, self)
+        self.setup_dialog.finished.connect(self._sync_source_status)
+        self._sync_source_status()
         self._poll = QTimer(self)
         self._poll.setInterval(50)
         self._poll.timeout.connect(self._refresh_run)
-
-    def _init_selector(self, catalog: WorkflowCatalog) -> None:
-        self._selector = QComboBox(self)
-        self._selector.setObjectName("workflow.select")
-        self._selector.addItems(list(catalog.names))
-        self._selector.currentTextChanged.connect(self._selection_changed)
 
     setup_dialog: SetupDialog
 
@@ -203,40 +177,12 @@ class T1WorkflowWindow(QWidget):
         self.setup_dialog.raise_()
         self.setup_dialog.activateWindow()
 
-    def _init_source_controls(self) -> None:
-        self.setup_dialog = SetupDialog(self._services.setup_control, self)
-        self.setup_dialog.finished.connect(self._sync_source_status)
-        setup_button = QPushButton("Setup", self)
-        setup_button.setObjectName("workflow.source.setup")
-        setup_button.clicked.connect(self.open_setup)
-        aliases_button = QPushButton("Aliases", self)
-        aliases_button.setObjectName("workflow.source.aliases")
-        aliases_button.clicked.connect(self._aliases_clicked)
-        self._source_status = QLabel(self)
-        self._source_status.setObjectName("workflow.source.status")
-        use_button = QPushButton("Prepare forms", self)
-        use_button.setObjectName("workflow.source.use")
-        use_button.clicked.connect(self._use_source_clicked)
-        self._reload_button = QPushButton("Reload source", self)
-        self._reload_button.setObjectName("workflow.source.reload")
-        self._reload_button.setEnabled(self._loader is not None)
-        self._reload_button.clicked.connect(self._reload_clicked)
-        for widget in (
-            setup_button,
-            aliases_button,
-            self._source_status,
-            use_button,
-            self._reload_button,
-        ):
-            self._layout.addWidget(widget)
-        self._sync_source_status()
-
     def _aliases_clicked(self) -> None:
         try:
             dialog = AliasDialog(self._services.context_control, self)
         except Exception as error:
             logger.exception("T1 workflow alias editor could not open")
-            self._message.setText(str(error))
+            self._controls.message.setText(str(error))
             return
         dialog.finished.connect(self._sync_source_status)
         dialog.finished.connect(dialog.deleteLater)
@@ -248,18 +194,18 @@ class T1WorkflowWindow(QWidget):
             source = parameters.resolve_path("$qubit.kind")
         except FailedPreconditionError:
             # EMPTY is expected at fresh app startup; status must not block it.
-            self._source_status.setText("Qubit: no context")
+            self._controls.source_status.setText("Qubit: no context")
         except (RoleResolutionError, ContextSourceUnavailableError) as error:
-            self._source_status.setText(f"Qubit unavailable: {error}")
+            self._controls.source_status.setText(f"Qubit unavailable: {error}")
         else:
-            self._source_status.setText(f"Qubit: {source}")
+            self._controls.source_status.setText(f"Qubit: {source}")
 
     def _use_source_clicked(self) -> None:
         try:
             self.prepare_forms()
         except Exception as error:
             logger.exception("T1 workflow source capture failed")
-            self._message.setText(str(error))
+            self._controls.message.setText(str(error))
 
     def prepare_forms(self) -> None:
         """Replace both Start drafts and bases with current captured defaults.
@@ -321,10 +267,10 @@ class T1WorkflowWindow(QWidget):
         self._sync_selector()
 
     def _sync_selector(self) -> None:
-        with QSignalBlocker(self._selector):
-            self._selector.clear()
-            self._selector.addItems(list(self._forms.catalog.names))
-            self._selector.setCurrentText(self.workflow_name)
+        with QSignalBlocker(self._controls.selector):
+            self._controls.selector.clear()
+            self._controls.selector.addItems(list(self._forms.catalog.names))
+            self._controls.selector.setCurrentText(self.workflow_name)
 
     def _selection_changed(self, name: str) -> None:
         try:
@@ -332,13 +278,13 @@ class T1WorkflowWindow(QWidget):
         except Exception as exc:
             self._sync_selector()
             logger.exception("Workflow selection failed")
-            self._message.setText(str(exc))
+            self._controls.message.setText(str(exc))
 
     def _publish_panels(
         self, old_plan: WorkflowPlanPanel, old_tunables: WorkflowFormPanel[FormModel]
     ) -> None:
-        self._layout.replaceWidget(old_plan, self.plan_panel)
-        self._layout.replaceWidget(old_tunables, self.tunables_panel)
+        self._controls.layout.replaceWidget(old_plan, self.plan_panel)
+        self._controls.layout.replaceWidget(old_tunables, self.tunables_panel)
         for panel in (old_plan, old_tunables):
             panel.close()
             panel.deleteLater()
@@ -390,21 +336,21 @@ class T1WorkflowWindow(QWidget):
                 else CatalogReloadError(f"Workflow catalog replacement failed: {exc}")
             )
             self._catalog_error = error
-            self._start_button.setEnabled(False)
-            self._reload_button.setEnabled(not error.restart_required)
-            self._message.setText(str(error))
+            self._controls.start.setEnabled(False)
+            self._controls.reload.setEnabled(not error.restart_required)
+            self._controls.message.setText(str(error))
             if error is exc:
                 raise
             raise error from exc
         self._publish_panels(*old)
         self._sync_selector()
         self._catalog_error = None
-        self._start_button.setEnabled(True)
+        self._controls.start.setEnabled(True)
         self.show_input_restore_message(report)
         if old_name != self.workflow_name:
             notice = f"Reload could not find {old_name}; selected {self.workflow_name}."
-            details = self._message.text()
-            self._message.setText(f"{notice} {details}" if details else notice)
+            details = self._controls.message.text()
+            self._controls.message.setText(f"{notice} {details}" if details else notice)
         return report
 
     def _reload_clicked(self) -> None:
@@ -412,7 +358,7 @@ class T1WorkflowWindow(QWidget):
             self.reload_source()
         except Exception as exc:
             logger.exception("Workflow source reload failed")
-            self._message.setText(str(exc))
+            self._controls.message.setText(str(exc))
 
     def capture_persisted_state(self) -> WorkflowInputSnapshot:
         """Capture parsed plan/knobs input on the owner thread, without I/O.
@@ -466,7 +412,7 @@ class T1WorkflowWindow(QWidget):
                 f"Discarded {form}: {'.'.join(str(part) for part in path)}"
                 for path in paths
             )
-        self._message.setText("; ".join(messages))
+        self._controls.message.setText("; ".join(messages))
 
     def _capture_env(self, devices: Mapping[str, DeviceInfo]) -> FormEnv:
         context = self._services.context
@@ -578,11 +524,9 @@ class T1WorkflowWindow(QWidget):
         )
         identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
         export_binding = prepared.bind_export(storage, identity, roots)
-        if self._plots is not None:
-            self._plots.release()
         # Install presentation before synchronous admission listeners can reenter.
         self._close_tuning_panel()
-        self._plots = plots
+        self._figure_views.install_native(plots)
         try:
             token = prepared.submit(
                 self.controller,
@@ -593,10 +537,10 @@ class T1WorkflowWindow(QWidget):
                 export_binding,
             )
         except Exception:
-            plots.finish(present=False)
-            plots.release()
-            self._plots = None
+            self._figure_views.start_failed()
             raise
+        self._figure_views.start_succeeded()
+        self._controls.open_trend.setEnabled(False)
         self.plan_panel.state.reset(submitted_plan)
         self.tunables_panel.state.reset(accepted_input)
         for editor in (self.plan_panel.editor, self.tunables_panel.editor):
@@ -604,10 +548,10 @@ class T1WorkflowWindow(QWidget):
             editor.discard_local_text()
         self.plan_panel.setEnabled(False)
         self.tunables_panel.setEnabled(False)
-        self._selector.setEnabled(False)
-        self._start_button.setEnabled(False)
-        self._export_button.setEnabled(False)
-        self._message.setText("Startup pending")
+        self._controls.selector.setEnabled(False)
+        self._controls.start.setEnabled(False)
+        self._controls.export.setEnabled(False)
+        self._controls.message.setText("Startup pending")
         self._forms_for_run = True
         self._poll.start()
         return token
@@ -701,43 +645,56 @@ class T1WorkflowWindow(QWidget):
         return inspect_form_input(state.input, env, batch, local, revision)
 
     def figure_names(self, run_id: str) -> tuple[str, ...]:
-        """List names from this run's Plots without rendering; call on Qt owner.
+        """List attached native run_id's figure names on the Qt owner, without rendering.
 
-        run_id must be the attached native identity. RunMismatch rejects absent
-        or stale targets first. Pending acceptance raises RuntimeError. Released
-        plots raise FailedPreconditionError(no_plots), never an empty success.
-        An accepted run without registered figures returns (). Terminal figures
-        stay readable until a new Start or close. No control/input/save effects.
+        Wrong/absent target raises RunMismatch; pending raises RuntimeError;
+        released plots raise FailedPreconditionError(no_plots). Accepted empty
+        plots return (). Terminal figures remain until Start/close, without effects.
         """
         controller = self.controller
         controller.require_run_id(run_id)
         if controller.engine is None:
             raise RuntimeError("Figures require an accepted run")
-        plots = self._plots
-        if plots is None:
-            raise FailedPreconditionError(
-                "Run plots have been released", reason_code="no_plots"
-            )
-        return tuple(plots)
+        return self._figure_views.native_names()
 
     def figure_png(self, run_id: str, name: str) -> bytes:
-        """Render the named current Figure as PNG at 640 x 480 on the Qt owner.
+        """Render native run_id's exact name at 640 x 480 on the Qt owner.
 
-        run_id follows figure_names target/acceptance/lifetime requirements.
-        name must be an exact registered name; unknown names raise KeyError.
-        Use the existing shared renderer; no saving, cache, canvas replacement or
-        artist-derived records. Renderer failures propagate without retry.
+        figure_names target/acceptance/lifetime errors apply; unknown name raises
+        KeyError. Shared rendering errors propagate, without retry/cache/save,
+        canvas replacement or artist-derived records. Offline views are excluded.
         """
         controller = self.controller
         controller.require_run_id(run_id)
         if controller.engine is None:
             raise RuntimeError("Figures require an accepted run")
-        plots = self._plots
-        if plots is None:
-            raise FailedPreconditionError(
-                "Run plots have been released", reason_code="no_plots"
-            )
-        return render_figure_png(plots[name])
+        return self._figure_views.native_png(name)
+
+    def open_overnight_trend(self, metadata_root: Path) -> NamedFigures:
+        """Open metadata_root/journal.jsonl as a read-only overnight named Figure mapping.
+
+        Qt owner and idle admission precede I/O; pending/active/paused runs reject.
+        Source/draw errors propagate without replacing the previous offline view;
+        draw is not transactional. Native Engine/RPC targets remain unchanged.
+        The offline view has no run/operation/RPC binding. Its presentation is
+        finished, then released at replacement/Start/close; returned Figures survive.
+        """
+        if get_ident() != self._thread:
+            raise RuntimeError("Trend opening requires the Window owner thread")
+        self._ensure_idle()
+        return self._figure_views.open(metadata_root)
+
+    def _open_trend_clicked(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self, "Select workflow metadata directory"
+        )
+        if not directory:
+            return
+        try:
+            self.open_overnight_trend(Path(directory))
+        except Exception as error:
+            logger.exception("Overnight trend opening failed")
+            self._controls.message.setText(str(error))
 
     def apply_tunables(
         self,
@@ -804,7 +761,7 @@ class T1WorkflowWindow(QWidget):
         ]
         if report.ledger_error is not None:
             lines.append(f"Ledger: {report.ledger_error}")
-        self._message.setText("\n".join(lines))
+        self._controls.message.setText("\n".join(lines))
         return report
 
     def _export_clicked(self) -> None:
@@ -814,7 +771,7 @@ class T1WorkflowWindow(QWidget):
         try:
             self.export_fluxdep(run_id)
         except Exception as error:
-            self._message.setText(str(error))
+            self._controls.message.setText(str(error))
             logger.exception("Workflow export action failed")
 
     def pause(self, run_id: str) -> RunStatus:
@@ -850,17 +807,32 @@ class T1WorkflowWindow(QWidget):
     def _refresh_run(self) -> None:
         controller = self.controller
         status = controller.status()
+        self._controls.open_trend.setEnabled(
+            not controller.has_pending_segment
+            and controller.operation_id is None
+            and (
+                status is None
+                or status.lifecycle in {"done", "stopped", "failed", "aborted"}
+            )
+        )
         if status is None:
-            self._export_button.setEnabled(False)
+            self._controls.export.setEnabled(False)
             return
-        self._export_button.setEnabled(
+        self._controls.export.setEnabled(
             status.lifecycle in {"done", "stopped", "failed", "aborted"}
         )
-        self._message.setText(status.lifecycle)
-        self._pause_button.setEnabled(
+        self._controls.message.setText(status.lifecycle)
+        engine = controller.engine
+        if status.workflow == "overnight" and engine is not None:
+            try:
+                self._figure_views.refresh_native(engine.records(status.run_id))
+            except Exception as error:
+                logger.exception("Committed overnight trend rendering failed")
+                self._controls.message.setText(str(error))
+        self._controls.pause.setEnabled(
             controller.operation_id is not None and status.lifecycle == "running"
         )
-        self._resume_button.setEnabled(
+        self._controls.resume.setEnabled(
             not controller.has_pending_segment and status.lifecycle == "paused"
         )
         binding = controller.binding
@@ -873,7 +845,7 @@ class T1WorkflowWindow(QWidget):
             self.tuning_panel = T1TuningPanel(
                 controller, self, panel_factory=self._forms.attachment.knobs_panel
             )
-            self._layout.addWidget(self.tuning_panel)
+            self._controls.layout.addWidget(self.tuning_panel)
         if self.tuning_panel is not None:
             self.tuning_panel.setEnabled(
                 status.lifecycle in {"running", "pausing", "paused"}
@@ -886,8 +858,8 @@ class T1WorkflowWindow(QWidget):
         View errors belong to logging, not the native operation outcome.
         """
         self._refresh_run()
-        self._pause_button.setEnabled(False)
-        self._resume_button.setEnabled(
+        self._controls.pause.setEnabled(False)
+        self._controls.resume.setEnabled(
             error is None and status is not None and status.lifecycle == "paused"
         )
         if error is None and status is not None and status.lifecycle == "paused":
@@ -897,14 +869,13 @@ class T1WorkflowWindow(QWidget):
         self._poll.stop()
         self.plan_panel.setEnabled(True)
         self.tunables_panel.setEnabled(True)
-        self._selector.setEnabled(True)
-        self._start_button.setEnabled(True)
+        self._controls.selector.setEnabled(True)
+        self._controls.start.setEnabled(True)
         if error is not None:
-            self._message.setText(str(error))
+            self._controls.message.setText(str(error))
         elif status is None:
-            self._message.setText("Stopped before startup")
-        if self._plots is not None:
-            self._plots.finish()
+            self._controls.message.setText("Stopped before startup")
+        self._figure_views.finish_native()
 
     def _pause_clicked(self) -> None:
         run_id = self.controller.run_id
@@ -914,7 +885,7 @@ class T1WorkflowWindow(QWidget):
             self.pause(run_id)
         except Exception as error:
             logger.exception("T1 workflow Pause failed")
-            self._message.setText(str(error))
+            self._controls.message.setText(str(error))
 
     def _resume_clicked(self) -> None:
         run_id = self.controller.run_id
@@ -924,7 +895,7 @@ class T1WorkflowWindow(QWidget):
             self.resume(run_id)
         except Exception as error:
             logger.exception("T1 workflow Resume failed")
-            self._message.setText(str(error))
+            self._controls.message.setText(str(error))
 
     def _stop_clicked(self) -> None:
         # Qt clicked(bool) is not a run target; use the Controller's native ID.
@@ -935,17 +906,17 @@ class T1WorkflowWindow(QWidget):
             self.stop(run_id)
         except Exception as error:
             logger.exception("T1 workflow Stop failed")
-            self._message.setText(str(error))
+            self._controls.message.setText(str(error))
 
     def _start_clicked(self) -> None:
         try:
             result = self.start(new_run_id())
         except Exception as error:
             logger.exception("T1 workflow Start failed")
-            self._message.setText(str(error))
+            self._controls.message.setText(str(error))
             return
         if isinstance(result, FormErrors):
-            self._message.setText("; ".join(result.messages.values()))
+            self._controls.message.setText("; ".join(result.messages.values()))
 
     def _shutdown_on_close(self, event: QCloseEvent | None) -> bool:
         """Isolate composition shutdown failure and reject the Qt close attempt."""
@@ -954,7 +925,7 @@ class T1WorkflowWindow(QWidget):
                 self._on_close()
         except Exception as error:
             logger.exception("T1 workflow session shutdown failed")
-            self._message.setText(str(error))
+            self._controls.message.setText(str(error))
             if event is not None:
                 event.ignore()
             return False
@@ -969,7 +940,7 @@ class T1WorkflowWindow(QWidget):
                     self.stop(run_id)
                 except Exception as error:
                     logger.exception("T1 workflow Stop on close failed")
-                    self._message.setText(str(error))
+                    self._controls.message.setText(str(error))
                     if a0 is not None:
                         a0.ignore()
                     return
@@ -982,7 +953,7 @@ class T1WorkflowWindow(QWidget):
                 self.stop(run_id)
             except Exception as error:
                 logger.exception("T1 workflow Stop on close failed")
-                self._message.setText(str(error))
+                self._controls.message.setText(str(error))
                 if a0 is not None:
                     a0.ignore()
                 return
@@ -990,9 +961,7 @@ class T1WorkflowWindow(QWidget):
             return
         self.setup_dialog.close()
         self._poll.stop()
-        if self._plots is not None:
-            self._plots.release()
-            self._plots = None
+        self._figure_views.release()
         self.plan_panel.editor.detach()
         self.tunables_panel.editor.detach()
         if self.tuning_panel is not None:

@@ -21,7 +21,7 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
+from zcu_lab.workflows.gui import figures as figures_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
@@ -189,7 +189,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
     ending: str,
 ) -> None:
     window, harness, _entry = attachment
-    renderer = window_module.render_figure_png
+    renderer = figures_module.render_figure_png
     owner_id = get_ident()
     renders: list[int] = []
     figures: list[Figure] = []
@@ -200,7 +200,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
         figures.append(figure)
         return renderer(figure)
 
-    monkeypatch.setattr(window_module, "render_figure_png", render)
+    monkeypatch.setattr(figures_module, "render_figure_png", render)
 
     install_reader_plot_workflow(window, catalog_source)
     assert isinstance(window.start("reader"), int)
@@ -229,7 +229,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
 
     assert_figure_render_failure(window, rpc, monkeypatch)
     assert harness.gate.snapshot()
-    monkeypatch.setattr(window_module, "render_figure_png", render)
+    monkeypatch.setattr(figures_module, "render_figure_png", render)
     assert rpc("workflow." + ending, {"run_id": "reader"})["ok"] is True
     if ending == "resume":
         harness.complete_segment()
@@ -255,7 +255,7 @@ def test_rpc_empty_figures_and_stale_run_do_not_render(
         renders.append(figure)
         raise AssertionError("Read must not render")
 
-    monkeypatch.setattr(window_module, "render_figure_png", reject_render)
+    monkeypatch.setattr(figures_module, "render_figure_png", reject_render)
     assert rpc("workflow.figures", {"run_id": "tuning"})["result"] == {
         "run_id": "tuning",
         "names": [],

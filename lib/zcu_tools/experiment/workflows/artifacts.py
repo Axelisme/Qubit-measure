@@ -12,21 +12,30 @@ from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from re import fullmatch
 from threading import RLock
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+
+from zcu_tools.device import BaseDeviceInfo
 
 from .journal import (
+    ExperimentFailed,
     IterationResult,
     IterationStarted,
     JournalPayload,
+    Paused,
+    PauseRequested,
+    Resumed,
+    RunEnded,
     RunMetadata,
     RunStarted,
     StepCommitted,
     StepDiscarded,
     StepFailed,
     StepFinished,
+    StopRequested,
+    TunablesChanged,
 )
 from .models import (
     CommittedRecord,
@@ -87,6 +96,115 @@ _inputs_adapter = TypeAdapter(_IterationInputs)
 _payload_adapter = TypeAdapter(JournalPayload)
 _manifest_adapter = TypeAdapter(RunManifest)
 _json_adapter = TypeAdapter(JsonValue)
+
+
+class _RecordedDeviceInfo(BaseDeviceInfo):
+    """Validate base identity and opaque subtype JSON, never driver settings.
+
+    SerializeAsAny writes every selected Info subclass field. Readback cannot
+    reconstruct that driver type from an old run or apply its current limits.
+    Base identity validation remains with BaseDeviceInfo; extras are JSON only.
+    """
+
+    model_config = ConfigDict(extra="allow")
+    __pydantic_extra__: dict[str, JsonValue] = Field(init=False)
+
+
+class _RecordedDeviceSetup(BaseModel):
+    """Read-side projection of the existing device_setup event, not a command."""
+
+    name: str
+    cfg: _RecordedDeviceInfo
+    kind: Literal["device_setup"]
+
+
+# Expand the existing union here: Pydantic tags on a named PEP 695 alias
+# dispatch back to the whole alias and can accept another event's fields.
+_read_payload_adapter = TypeAdapter(
+    Annotated[
+        RunStarted
+        | IterationStarted
+        | ExperimentFailed
+        | _RecordedDeviceSetup
+        | StepCommitted
+        | StepFinished
+        | StepDiscarded
+        | StepFailed
+        | TunablesChanged
+        | PauseRequested
+        | Paused
+        | Resumed
+        | StopRequested
+        | RunEnded,
+        Field(discriminator="kind"),
+    ]
+)
+
+
+class _JournalEnvelope(BaseModel):
+    """The existing writer envelope, validated independently of its payload."""
+
+    format_version: Literal[1]
+    seq: int = Field(gt=0)
+    run_id: str = Field(min_length=1)
+    time: datetime
+
+
+def read_committed_records(metadata_root: Path) -> tuple[CommittedRecord, ...]:
+    """Read one run's journal.jsonl as detached journal-authoritative commits.
+
+    metadata_root is the Engine-allocated metadata directory, not data_root.
+    Only newline-terminated UTF-8 JSON lines count; an unterminated final line
+    is ignored, never promoted to a commit. Complete corrupt lines, unsupported
+    versions, noncontiguous sequence/commit numbers, changed run identity,
+    invalid typed payloads or external paths raise ValueError. Missing/unreadable
+    files propagate OSError. A journal must contain its complete run_started
+    identity; a valid run with zero commits returns ().
+    This read-only snapshot uses the writer's schema; it does not read manifest,
+    record.json or native files, recover state, create an Engine or resume a run.
+    """
+    records: list[CommittedRecord] = []
+    run_id: str | None = None
+    with (metadata_root / "journal.jsonl").open("rb") as reader:
+        for seq, line in enumerate(reader, start=1):
+            if not line.endswith(b"\n"):
+                break
+            envelope = _JournalEnvelope.model_validate_json(line)
+            _check_utc(envelope.time)
+            if envelope.seq != seq:
+                raise ValueError("Journal sequence is not contiguous")
+            event = _read_payload_adapter.validate_json(line)
+            if not isinstance(event, _RecordedDeviceSetup):
+                _check_event_paths(event)
+            if seq == 1:
+                if not isinstance(event, RunStarted):
+                    raise ValueError("Journal must start with run_started")
+                run_id = event.identity.run_id
+                _check_utc(event.started_at)
+            elif isinstance(event, RunStarted):
+                raise ValueError("Journal contains a second run_started")
+            if envelope.run_id != run_id:
+                raise ValueError("Journal run identity changed")
+            if isinstance(event, StepCommitted):
+                if (
+                    event.commit_seq != len(records) + 1
+                    or event.call_seq < 1
+                    or event.revision < 0
+                ):
+                    raise ValueError("Invalid journal commit cursor")
+                records.append(
+                    CommittedRecord(
+                        event.commit_seq,
+                        event.call_seq,
+                        event.revision,
+                        event.encoded_record,
+                        event.iteration_dir,
+                        event.run_files,
+                    )
+                )
+    if run_id is None:
+        raise ValueError("Journal has no complete run_started identity")
+    return tuple(records)
 
 
 def _json_object[T](value: T, adapter: TypeAdapter[T]) -> dict[str, JsonValue]:

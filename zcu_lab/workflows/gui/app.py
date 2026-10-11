@@ -123,6 +123,8 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
                 for name in (
                     "app",
                     "window",
+                    "figures",
+                    "layout",
                     "remote",
                     "remote_methods",
                     "catalog",

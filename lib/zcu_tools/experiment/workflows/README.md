@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-12，iteration 摘要與純匯出型別
+**Last updated:** 2026-10-12，唯讀 committed journal 投影
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -24,7 +24,7 @@ Package 內的保存 seam 集中 typed journal、manifest、iteration 路徑與�
 
 每個已結束 invocation 在 `iter/<至少六位 call_seq>/record.json` 保存輸入與結果摘要。格式為 `zcu-workflow-iteration`，版本為 1，包含 identity、workflow、完整 plan、本次 capture 的完整普通 tunables、started 與 result。Started 保存 call_seq、commit_seq、revision、kind。Result 沿用 journal 的 StepCommitted／Finished／Discarded／Failed 欄位，run_files 相對於該 iteration。摘要不保存 state，也不複製 runs/*.h5 的 cfg 或量測結果；EncodedRecord 沿用 json／repr／null 規則。
 
-Engine 在結果 journal append 與 flush 成功後，以同目錄 temporary 加 replace 原子保存摘要。執行中的 invocation 沒有 record.json，不先建 pending 檔。摘要序列化或 I/O 失敗只記 log，不改變提交、state publication、後續 step 或 run 終態。Journal 仍是 commit 唯一權威；record.json 不是 checkpoint，不支援 crash resume，也不新增 public reader。
+Engine 在結果 journal append 與 flush 成功後，以同目錄 temporary 加 replace 原子保存摘要。執行中的 invocation 沒有 record.json，不先建 pending 檔。摘要序列化或 I/O 失敗只記 log，不改變提交、state publication、後續 step 或 run 終態。Journal 仍是 commit 唯一權威；record.json 不是 checkpoint，不支援 crash resume。`artifacts.read_committed_records(metadata_root)` 從指定 run 的 journal.jsonl 回傳 detached `CommittedRecord` tuple，供趨勢圖重開。Reader 驗證既有 event schema、envelope、run identity、連續 seq/commit cursor 與相對路徑。最後未以換行結束的片段不算 commit，完整壞行報錯；合法零 commit 回空 tuple，缺檔或壞來源不冒充空資料。Reader 不讀 manifest、record.json、native files，不建 Engine、不恢復 state。Device setup 的完整 subtype JSON 只驗 base identity 與 JSON 結構，不重建 driver Info 或重驗硬體 limits。
 
 RunIdentity 持有宿主傳入的 native SoftwareProvenance。Manifest 與 run_started journal 在 provenance 底下保存同一份資訊，unknown 保留 None，不以預設 False 或字串代替。
 

@@ -305,3 +305,14 @@ source_modules =
     zcu_lab.v2.**.core
 forbidden_modules =
     zcu_tools.gui
+
+# Committed scalar projection and drawing stay independent of frontend admission.
+[importlinter:contract:trend-science-no-frontends]
+name = Overnight trend science does not depend on frontend owners
+type = forbidden
+source_modules =
+    zcu_lab.workflows.trend
+forbidden_modules =
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
