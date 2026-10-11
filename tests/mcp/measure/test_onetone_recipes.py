@@ -254,7 +254,7 @@ def test_flux_requires_device_and_unit_before_gui_preparation(tmp_path, argument
     [
         ("YOKOGS200", "A", "A"),
         ("YOKOGS200", "V", "V"),
-        ("FakeDevice", "none", "native"),
+        ("FakeDevice", "native", "native"),
     ],
 )
 def test_flux_explicit_assertion_preserves_coordinates_and_unit(

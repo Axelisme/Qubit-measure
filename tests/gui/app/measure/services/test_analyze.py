@@ -57,6 +57,7 @@ from zcu_tools.resources.entry.schema import PointDocument
 
 from tests.gui._completion_helpers import on_analyze_failed
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     native_save_session,
@@ -85,6 +86,21 @@ def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSe
 
 def _plots() -> Plots:
     return Plots(NonPresentingHost())
+
+
+def _flux_parameters(original: ParameterContext | None = None) -> ParameterContext:
+    qubit = QubitSchema(kind="qubit/fluxonium", flux_half=-0.2, flux_int=0.3)
+    if original is None:
+        parameters = parameter_capture({"Q1": qubit})
+    else:
+        parameters = ParameterContext(
+            point=original.document().model_copy(update={"components": {"Q1": qubit}}),
+            library=original.library,
+            target=original.target,
+            roles=None,
+            storage=original.storage,
+        )
+    return parameters.bind_aliases((AliasRow("qubit", "Q1"),), {})
 
 
 def _make_state(tab_id: str = "tab1") -> State:
@@ -292,7 +308,7 @@ def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(
         metadata=replace(
             native_session.metadata, experiment=T1Exp().persistence_spec().tag
         ),
-        parameters=tab.parameters,
+        parameters=tab.run.parameters,
     )
     handles = OperationHandles()
     service, bg = _make_service(state, EventBus(), handles=handles)
@@ -348,7 +364,12 @@ def _start_onetone_plugin(
     assert isinstance(adapter, OneToneFluxDepAdapter)
     ctx = state.session_env
     plugin = adapter.make_interactive_plugin(
-        AnalyzeRequest(source, FluxPickParams(), ctx.parameters, ctx.predictor),
+        AnalyzeRequest(
+            source,
+            FluxPickParams(),
+            state.get_tab(tab_id).run.parameters,
+            ctx.predictor,
+        ),
         plots=plots,
     )
     service, _bg = _make_service(
@@ -384,11 +405,9 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
         metadata=replace(
             native_session.metadata, experiment=FluxDepExp().persistence_spec().tag
         ),
-        parameters=tab.parameters,
+        parameters=_flux_parameters(tab.run.parameters),
     )
-    ctx = state.session_env
-    ctx.md.flx_half = -0.2
-    ctx.md.flx_int = 0.3
+    state.set_context(replace(state.session_env, parameters=tab.run.parameters))
     plots = _plots()
     handles = OperationHandles()
     writeback = MagicMock()
@@ -411,9 +430,9 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
     assert pane.result.flx_period == pytest.approx(1.0)
     writeback_items = writeback.create_draft.call_args.args[0]
     assert {item.target_name: item.proposed_value for item in writeback_items} == {
-        "flx_half": committed.flux_half,
-        "flx_int": committed.flux_int,
-        "flx_period": pane.result.flx_period,
+        "$qubit.flux_half": committed.flux_half,
+        "$qubit.flux_int": committed.flux_int,
+        "$qubit.flux_period": pane.result.flx_period,
     }
     assert pane.plots is plots
     assert tuple(plots) == ("pick",)
@@ -499,9 +518,10 @@ def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane
     old_figure, _ = previous_plots.subplots("old")
     previous_plots.finish()
     state.update_tab_analyze("tab1", previous, previous_plots)
-    ctx = state.session_env
-    ctx.md.flx_half = -0.2
-    ctx.md.flx_int = 0.3
+    parameters = _flux_parameters()
+    state.update_tab_result("tab1", source, parameters=parameters)
+    state.set_context(replace(state.session_env, parameters=parameters))
+    state.update_tab_analyze("tab1", previous, previous_plots)
     plots = _plots()
 
     def fail_kernel(
@@ -632,7 +652,9 @@ def test_on_analyze_finished_emits_interaction_event(qapp):
 def test_framework_session_drives_committed_result_and_one_terminal_operation(qapp):
     state = _make_state()
     captured = make_parameters({"rate": 1.0})
-    state.get_tab("tab1").parameters = captured
+    state.update_tab_result(
+        "tab1", state.get_tab("tab1").run.result, parameters=captured
+    )
     state.set_context(
         replace(state.session_env, parameters=make_parameters({"rate": 2.0}))
     )
