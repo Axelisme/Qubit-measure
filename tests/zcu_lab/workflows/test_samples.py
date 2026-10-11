@@ -133,6 +133,10 @@ def test_prevalidation_rejects_missing_snapshot_before_any_append(
 class InterruptedTable(JsonlSampleTable):
     """Break the actual filesystem after one public append; retain its prefix."""
 
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.interrupted = False
+
     def append(
         self,
         *,
@@ -143,7 +147,8 @@ class InterruptedTable(JsonlSampleTable):
         **fields: JsonValue,
     ) -> None:
         super().append(run_id=run_id, point=point, source=source, at=at, **fields)
-        if not self.path.with_suffix(".prefix").exists():
+        if not self.interrupted:
+            self.interrupted = True
             self.path.rename(self.path.with_suffix(".prefix"))
             self.path.mkdir()
 
