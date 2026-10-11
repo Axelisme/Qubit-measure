@@ -3491,3 +3491,37 @@ def test_terminal_export_action_and_mcp_share_native_paths_and_ledger(
         window.resize(900, 1000)
         window.ensurePolished()
         assert window.grab().save(screenshot)
+
+
+def test_gui_start_action_creates_identity_accepted_by_native_export(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+) -> None:
+    """The ordinary Start button must not create a native-incompatible run ID."""
+    from zcu_tools.datafile import load_run_data
+
+    window, harness, entry = attachment
+    window.plan_panel.state.write(
+        {("fluxes", "kind"): "list", ("fluxes", "values"): [1.0]}, FormEnv()
+    )
+    window.tunables_panel.state.reset(
+        FormInput(
+            T1TunablesForm,
+            {"cal": {"span_mhz": 2.0, "rabi_start_factor": 0.125}, "rounds": 2},
+        )
+    )
+    start = window.findChild(QPushButton, "workflow.run.start")
+    assert start is not None
+    start.click()
+    harness.complete_segment()
+    run_id = window.controller.run_id
+    assert run_id is not None
+    export = window.findChild(QPushButton, "workflow.run.export_fluxdep")
+    assert export is not None and export.isEnabled()
+    export.click()
+    message = window.findChild(QLabel, "workflow.run.message")
+    assert message is not None and "data_h5: saved" in message.text()
+    native = load_run_data(entry.database_path / "workflows" / run_id / "merged.h5")
+    assert native.metadata.run_id == run_id
+    assert native.metadata.snapshot.point == "source"
+    status = window.controller.status()
+    assert status is not None and status.lifecycle == "done"
