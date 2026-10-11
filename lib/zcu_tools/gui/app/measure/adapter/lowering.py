@@ -59,8 +59,7 @@ def _make_reference_resolver(parameters: ParameterContext) -> ReferenceResolver:
 def validate_schema(schema: CfgSchema, parameters: ParameterContext | None) -> None:
     """Validate authored cfg input against a fixed role-aware capture.
 
-    parameters=None supplies no reference resolver. Linked, non-overridden
-    empty payloads may await resolution; other references require a valid
+    parameters=None supplies no reference resolver. Linked empty payloads may await resolution; other references require a valid
     shape. Malformed input and resolver failures propagate. Static validation
     alone does not authorize Run or replace finished-cfg lowering.
     """
