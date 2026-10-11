@@ -139,7 +139,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
                     **(acquire_kwargs or {}),
                 )
             )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return PowerResult(gains, signals)
 

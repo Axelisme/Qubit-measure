@@ -13,6 +13,7 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 from ._helpers import open_client
+from ._interactive_support import InteractiveFixture
 from ._point_application import PointAdapter, PointApplication, PointController
 
 
@@ -58,3 +59,16 @@ def application(
         for tab_id in tuple(state.list_tab_ids()):
             controller.tab_control.close_tab(tab_id)
         qapp.processEvents()
+
+
+@pytest.fixture
+def fx(qapp, tmp_path):
+    fixture = InteractiveFixture(project_root=str(tmp_path))
+    fixture.start()
+    yield fixture
+    fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - queued owner deliveries precede widget GC
+    for widget in fixture.widgets:
+        widget.teardown()
+        widget.deleteLater()
+    fixture.stop()
+    qapp.processEvents()

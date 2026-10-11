@@ -389,65 +389,88 @@ class CfgFormWidget(QWidget):
         }
 
     def _find_first_invalid(self, field: CfgField, *, path: str) -> str | None:
+        # Child reporters re-enter this dispatch to retain depth-first field order.
         if isinstance(field, ScalarField):
-            if field.is_valid():
-                return None
-            val = field.get_value()
-            if isinstance(val, EvalValue) and val.error:
-                return f"{path or field.spec.label}: {val.error}"
-            return f"{path or field.spec.label}: invalid scalar value"
-
+            return _scalar_invalid_reason(field, path=path)
         if isinstance(field, SweepField):
-            if field.start_field.is_valid() and field.stop_field.is_valid():
-                return None
-            start_reason = self._find_first_invalid(
-                field.start_field,
-                path=f"{path}.start" if path else "sweep.start",
-            )
-            if start_reason:
-                return start_reason
-            return self._find_first_invalid(
-                field.stop_field,
-                path=f"{path}.stop" if path else "sweep.stop",
-            )
-
+            return self._sweep_invalid_reason(field, path=path)
         if isinstance(field, CenteredSweepField):
-            if field.center_field.is_valid():
-                return None
-            return self._find_first_invalid(
-                field.center_field,
-                path=f"{path}.center" if path else "sweep.center",
-            )
-
+            return self._centered_sweep_invalid_reason(field, path=path)
         if isinstance(field, ReferenceField):
-            if field.is_valid():
-                return None
-            key = field.get_chosen_key()
-            label = path or field.spec.label
-            if field.has_missing_library_ref():
-                return f"{label}: missing library reference '{key}'"
-            if field.sub_field is not None:
-                nested = self._find_first_invalid(
-                    field.sub_field, path=f"{label}.{key}"
-                )
-                if nested:
-                    return nested
-            return f"{label}: invalid module reference '{key}'"
-
+            return self._reference_invalid_reason(field, path=path)
         if isinstance(field, SectionField):
-            for key, child in field.fields.items():
-                child_path = f"{path}.{key}" if path else key
-                reason = self._find_first_invalid(child, path=child_path)
-                if reason:
-                    return reason
-            return None
+            return self._section_invalid_reason(field, path=path)
+        return (
+            f"{path or type(field.spec).__name__}: invalid field"
+            if not field.is_valid()
+            else None
+        )
 
-        if not field.is_valid():
-            return f"{path or type(field.spec).__name__}: invalid field"
+    def _sweep_invalid_reason(self, field: SweepField, *, path: str) -> str | None:
+        """Report start before stop, retaining the short-circuit validity check."""
+        if field.start_field.is_valid() and field.stop_field.is_valid():
+            return None
+        start_reason = self._find_first_invalid(
+            field.start_field,
+            path=f"{path}.start" if path else "sweep.start",
+        )
+        if start_reason:
+            return start_reason
+        return self._find_first_invalid(
+            field.stop_field,
+            path=f"{path}.stop" if path else "sweep.stop",
+        )
+
+    def _centered_sweep_invalid_reason(
+        self, field: CenteredSweepField, *, path: str
+    ) -> str | None:
+        """Report only the center scalar, as in the draft form's range policy."""
+        if field.center_field.is_valid():
+            return None
+        return self._find_first_invalid(
+            field.center_field,
+            path=f"{path}.center" if path else "sweep.center",
+        )
+
+    def _reference_invalid_reason(
+        self, field: ReferenceField, *, path: str
+    ) -> str | None:
+        """Report missing identity before nested failure, then generic failure."""
+        if field.is_valid():
+            return None
+        key = field.get_chosen_key()
+        label = path or field.spec.label
+        if field.has_missing_library_ref():
+            return f"{label}: missing library reference '{key}'"
+        if field.sub_field is not None:
+            # Re-enter the common traversal to preserve depth-first nested order.
+            nested = self._find_first_invalid(field.sub_field, path=f"{label}.{key}")
+            if nested:
+                return nested
+        return f"{label}: invalid module reference '{key}'"
+
+    def _section_invalid_reason(self, field: SectionField, *, path: str) -> str | None:
+        """Report the first invalid descendant in field insertion order."""
+        for key, child in field.fields.items():
+            child_path = f"{path}.{key}" if path else key
+            # Re-enter the common traversal before advancing to the next sibling.
+            reason = self._find_first_invalid(child, path=child_path)
+            if reason:
+                return reason
         return None
 
 
 __all__ = ["CfgFormWidget"]
+
+
+def _scalar_invalid_reason(field: ScalarField, *, path: str) -> str | None:
+    """Prefer expression error detail over the generic invalid-scalar report."""
+    if field.is_valid():
+        return None
+    val = field.get_value()
+    if isinstance(val, EvalValue) and val.error:
+        return f"{path or field.spec.label}: {val.error}"
+    return f"{path or field.spec.label}: invalid scalar value"
 
 
 def _choice_state_for_model(model: SectionField) -> tuple[tuple[str, str], ...]:

@@ -162,10 +162,10 @@ def test_empty_alias_submission_before_a_point_prevents_default_rebinding(
     with pytest.raises(FailedPreconditionError) as caught:
         context.read_context()
     assert caught.value.reason_code == "no_context"
-    context.set_alias_rows(context.get_alias_rows())
     entry = _entry(tmp_path)
     entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0)
     context.install_entry(entry)
+    context.set_alias_rows(context.get_alias_rows())
     context.new_point(_new_request("first"))
     assert context.get_alias_rows()[0].value == ""
 

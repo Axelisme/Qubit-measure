@@ -112,6 +112,7 @@ def test_read_field_retains_named_inputs_and_invalid_diagnostics(
     gui.publication["tree"]["children"]["range"] = {
         "kind": kind,
         "valid": False,
+        "readonly": False,
         "inputs": {
             "edge": {
                 "mode": "expression",

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import cast
-
 import numpy as np
 from numpy.typing import NDArray
 
@@ -73,7 +71,7 @@ def fit_rabi(
     pi_x_err = _xerr(pi_x)
     pi2_x_err = _xerr(pi2_x)
 
-    pOpt = cast(tuple[float, float, float, float, float], tuple(pOpt))
+    pOpt = tuple(pOpt)
 
     return (
         float(pi_x),

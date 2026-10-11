@@ -155,11 +155,11 @@ class Rig:
                 return Done()
             result = yield from calibrate(
                 env,
-                plan.qub_pulse,
-                plan.readout,
-                tun,
-                float(state.index),
-                state.carry,
+                qub_pulse=plan.qub_pulse,
+                readout=plan.readout,
+                tun=tun,
+                flux=float(state.index),
+                carry=state.carry,
                 t1_estimate_us=t1_estimate_us,
                 savers=CalibrationSavers(
                     self.save_frequency, self.save_rabi, self.save_readout

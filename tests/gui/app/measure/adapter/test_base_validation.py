@@ -5,6 +5,7 @@ from inspect import signature
 from typing import Any, ClassVar
 
 import pytest
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterCfgDefinition,
@@ -298,7 +299,7 @@ def test_run_preflight_protocol_and_base_signatures_match() -> None:
 
 def test_base_run_preflight_default_is_noop() -> None:
     req: Any = object()
-    raw_cfg: dict[str, object] = {"sentinel": object()}
+    raw_cfg: dict[str, ExperimentCfgValue] = {"sentinel": "unchanged"}
 
     assert _MinimalNoAnalysisAdapter().validate_run_request(req, raw_cfg) is None
     assert set(raw_cfg) == {"sentinel"}

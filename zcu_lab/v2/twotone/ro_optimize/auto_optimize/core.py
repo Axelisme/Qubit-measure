@@ -372,7 +372,7 @@ class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
                         **(acquire_kwargs or {}),
                     )
                 )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return AutoOptResult(params, signals)
 

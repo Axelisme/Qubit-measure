@@ -103,8 +103,8 @@ def make_soc_proxy(
     #      that takes more than 1s (program.acquire, sweeps, etc. can take minutes).
     #      We must therefore explicitly reset soc._pyroTimeout after restoring the
     #      global so the returned proxy is uncapped.
-    prev_timeout: float | None = Pyro4.config.COMMTIMEOUT  # type: ignore[attr-defined]
-    Pyro4.config.COMMTIMEOUT = 1.0  # type: ignore[attr-defined]
+    prev_timeout: float | None = Pyro4.config.COMMTIMEOUT
+    Pyro4.config.COMMTIMEOUT = 1.0
     soc: Any = None
     try:
         ns = Pyro4.locateNS(host=ns_host, port=ns_port)
@@ -112,7 +112,7 @@ def make_soc_proxy(
         soccfg = QickConfig(soc.get_cfg())  # first call is under the 1s fail-fast cap
     finally:
         # Restore process-global so nothing outside this function sees the cap.
-        Pyro4.config.COMMTIMEOUT = prev_timeout  # type: ignore[attr-defined]
+        Pyro4.config.COMMTIMEOUT = prev_timeout
         if soc is not None:
             # Drop the 1s snapshot on the returned proxy; None means "no cap" (default).
             soc._pyroTimeout = prev_timeout or None

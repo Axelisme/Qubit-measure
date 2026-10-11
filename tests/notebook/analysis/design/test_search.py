@@ -241,3 +241,28 @@ def test_calculate_snr_requires_esys(grid: pd.DataFrame) -> None:
     # include in an anchor test, so its numerics are intentionally not locked.
     with pytest.raises(ValueError, match="esys"):
         S.calculate_snr(grid, g=0.1, r_f=7.0, rf_w=7e-3, max_photon=70)
+
+
+def test_generate_params_table_preserves_keyword_inputs_and_product_order() -> None:
+    table = S.generate_params_table(
+        EJ=np.array([4.25, 4.0]),
+        EC=1.0,
+        EL=(0.5, 1.0),
+        precision=0.25,
+        flux=0.45,
+    )
+
+    assert list(table.columns) == ["flux", "EJ", "EC", "EL", "valid"]
+    np.testing.assert_array_equal(
+        table[["flux", "EJ", "EC", "EL"]].to_numpy(),
+        [
+            [0.45, 4.25, 1.0, 0.5],
+            [0.45, 4.25, 1.0, 0.75],
+            [0.45, 4.0, 1.0, 0.5],
+            [0.45, 4.0, 1.0, 0.75],
+        ],
+    )
+    np.testing.assert_array_equal(table["valid"].to_numpy(), [True, True, True, True])
+    for column in ["flux", "EJ", "EC", "EL"]:
+        assert table[column].dtype == np.float64
+    assert table["valid"].dtype == np.bool_

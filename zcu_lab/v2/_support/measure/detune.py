@@ -10,8 +10,12 @@ adapter.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 
-def detune_ratio_of(raw_cfg: dict[str, object]) -> float:
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
+
+
+def detune_ratio_of(raw_cfg: Mapping[str, ExperimentCfgValue]) -> float:
     """Read and validate the run-only ``detune_ratio`` knob from the raw cfg."""
     value = raw_cfg.get("detune_ratio")
     if not isinstance(value, (int, float)):
@@ -19,7 +23,9 @@ def detune_ratio_of(raw_cfg: dict[str, object]) -> float:
     return float(value)
 
 
-def strip_detune_ratio(raw_cfg: dict[str, object]) -> dict[str, object]:
+def strip_detune_ratio(
+    raw_cfg: Mapping[str, ExperimentCfgValue],
+) -> dict[str, ExperimentCfgValue]:
     """Return a copy of ``raw_cfg`` without the run-only ``detune_ratio`` key.
 
     The experiment Cfg has no ``detune_ratio`` field and rejects unknown keys, so

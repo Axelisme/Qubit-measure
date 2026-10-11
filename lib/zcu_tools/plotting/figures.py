@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from threading import RLock
-from typing import Any, Literal, cast, overload
+from typing import Any, Literal, overload
 from weakref import ReferenceType, WeakKeyDictionary, ref
 
 import numpy as np
@@ -124,17 +124,14 @@ class FigureCollection(Mapping[str, Figure]):
         """
         figure = Figure(**figure_kwargs)
         FigureCanvasAgg(figure)
-        axes = cast(
-            "Axes | NDArray[np.object_]",
-            figure.subplots(
-                nrows=nrows,
-                ncols=ncols,
-                sharex=sharex,
-                sharey=sharey,
-                squeeze=squeeze,
-                subplot_kw=subplot_kw,
-                gridspec_kw=gridspec_kw,
-            ),
+        axes = figure.subplots(
+            nrows=nrows,
+            ncols=ncols,
+            sharex=sharex,
+            sharey=sharey,
+            squeeze=squeeze,
+            subplot_kw=subplot_kw,
+            gridspec_kw=gridspec_kw,
         )
         self.adopt(name, figure)
         return figure, axes

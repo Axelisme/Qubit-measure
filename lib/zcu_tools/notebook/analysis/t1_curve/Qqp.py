@@ -154,5 +154,4 @@ def calc_Qqp_vs_omega(
         Qqp_vs_omega_err = T1errs * dipoles
 
         return Qqp_vs_omega, Qqp_vs_omega_err
-    else:
-        return Qqp_vs_omega
+    return Qqp_vs_omega

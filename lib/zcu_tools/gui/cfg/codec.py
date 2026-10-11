@@ -166,7 +166,6 @@ def _node_value_to_raw(
             return {
                 "__kind": f"{spec.kind}_ref",
                 "chosen_key": value.chosen_key,
-                "is_overridden": value.is_overridden,
                 "value": _section_value_to_raw(
                     _select_allowed_spec(
                         spec,
@@ -336,7 +335,6 @@ def _ref_value_from_raw(
         return ReferenceValue(
             chosen_key=chosen_key,
             value=nested,
-            is_overridden=bool(raw.get("is_overridden", False)),
         )
     kind_label = spec.kind.capitalize()
     raise RuntimeError(

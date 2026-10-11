@@ -13,31 +13,21 @@ directly (replacing the old `_on_run_*` method calls).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
-from uuid import UUID
 
-import h5py
 import numpy as np
 import pytest
-from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import RunSnapshot, SoftwareProvenance, load_run_data
-from zcu_tools.device import BaseDevice, FakeDevice, FakeDeviceInfo
-from zcu_tools.experiment import ExpCfgModel
-from zcu_tools.experiment.acquisition import new_run_id
+from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
     ContextReadiness,
-    ExpAdapterProtocol,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -45,13 +35,9 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from zcu_tools.gui.app.measure.services.guard import RunInputs
 from zcu_tools.gui.app.measure.services.operation_gate import (
-    OperationGate,
     OperationKind,
 )
-from zcu_tools.gui.app.measure.services.run import RunService
-from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -60,187 +46,27 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
-from zcu_tools.gui.session.operation_handles import OperationHandles
-from zcu_tools.gui.session.operation_runner import (
-    OperationRunner,
-)
-from zcu_tools.gui.session.services.progress import ProgressService
-from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import Module, ProgramV2Cfg
+from zcu_tools.program.v2 import ProgramV2Cfg
 
-from tests.device._snapshot_fakes import SnapshotDevice
-from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
-from tests.gui.app.measure._native_save_support import native_save_session
-from tests.gui.app.measure.services._snapshot_adapter import SnapshotAdapter
 from zcu_lab.v2.fake.stub.core import FakeResult, FakeRunResult
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
-from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 
-
-def _empty_schema() -> CfgSchema:
-    return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
-
-
-def _make_state(
-    *,
-    readiness: ContextReadiness = ContextReadiness.EMPTY,
-) -> tuple[State, str, MagicMock]:
-    state = State(
-        SessionEnv(
-            parameters=parameter_capture(),
-            soc=MagicMock(),
-            soccfg=MagicMock(),
-            readiness=readiness,
-        )
-    )
-    tab_id = "tab-1"
-    adapter = MagicMock()
-    adapter.capabilities = AdapterCapabilities(requires_soc=True)
-    state.add_tab(
-        tab_id,
-        Session(
-            adapter_name="any",
-            adapter=adapter,
-            cfg=make_cfg(_empty_schema(), state=state),
-        ),
-    )
-    return state, tab_id, adapter
-
-
-def _plots() -> Plots:
-    return Plots(NonPresentingHost())
-
-
-def _make_inputs(state: State, tab_id: str, adapter: ExpAdapterProtocol) -> RunInputs:
-    ctx = state.session_env
-    parameters = ctx.parameters
-    return RunInputs(
-        tab_id=tab_id,
-        adapter_name=state.get_tab(tab_id).adapter_name,
-        request=RunRequest(
-            soc=ctx.soc,
-            soccfg=ctx.soccfg,
-            cfg_context=None
-            if parameters is None
-            else parameters.library.validation_context(),
-        ),
-        accepted_cfg=state.get_tab(tab_id).cfg.accept(
-            state.get_tab(tab_id).cfg.observe().ref.revision
-        ),
-        adapter=adapter,
-        parameters=parameters,
-    )
-
-
-class _FakeBg:
-    """Synchronous background executor stub: calls work() and on_done/on_error inline."""
-
-    def __init__(self, *, fail_submit: bool = False, fail_work: bool = False) -> None:
-        self._fail_submit = fail_submit
-        self._fail_work = fail_work
-        self.last_work: Callable[[], Any] | None = None
-        self.last_on_done: Callable[[Any], None] | None = None
-        self.last_on_error: Callable[[Exception], None] | None = None
-
-    def submit(
-        self,
-        work: Callable[[], Any],
-        *,
-        run_in_pool: bool,
-        on_done: Callable[[Any], None],
-        on_error: Callable[[Exception], None],
-    ) -> None:
-        if self._fail_submit:
-            raise RuntimeError("worker boom")
-        self.last_work = work
-        self.last_on_done = on_done
-        self.last_on_error = on_error
-
-    def run_work(self) -> None:
-        """Drive the captured work synchronously (for tests that need to inspect outcome)."""
-        assert self.last_work is not None
-        if self._fail_work:
-            assert self.last_on_error is not None
-            self.last_on_error(RuntimeError("work boom"))
-        else:
-            try:
-                result = self.last_work()
-                assert self.last_on_done is not None
-                self.last_on_done(result)
-            except (RuntimeError, ValueError, TypeError, OSError) as exc:
-                assert self.last_on_error is not None
-                self.last_on_error(exc)
-
-
-class _ConstructorFailingProgram:
-    @property
-    def cfg_model(self) -> ProgramV2Cfg:
-        raise NotImplementedError
-
-    def __init__(
-        self,
-        soccfg: Any,
-        cfg: ProgramV2Cfg,
-        *,
-        modules: list[Any],
-        sweep: list[tuple[str, Any]] | None,
-    ) -> None:
-        raise RuntimeError("builder boom")
-
-    def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
-        raise NotImplementedError
-
-    def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
-        raise NotImplementedError
-
-
-class _NoopModule(Module):
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def init(self, prog: Any) -> None:
-        pass
-
-    def run(self, prog: Any, t: Any = 0.0) -> Any:
-        return t
-
-
-def _make_run_service(
-    state: State,
-    *,
-    fail_submit: bool = False,
-    mock_emit: bool = True,
-    devices: Mapping[str, BaseDevice[Any]] | None = None,
-) -> tuple[RunService, OperationGate, _FakeBg, OperationHandles]:
-    bg = _FakeBg(fail_submit=fail_submit)
-    bus = EventBus()
-    if mock_emit:
-        bus.emit = MagicMock()  # type: ignore[method-assign]
-    gate = OperationGate(bus)
-    handles = OperationHandles()
-    writeback = MagicMock()
-    progress = ProgressService(DirectProgressTransport())
-    runner = OperationRunner(gate, handles, progress, bg, bus)  # type: ignore[arg-type]
-    svc = RunService(
-        state,
-        runner,
-        bus,
-        handles,
-        writeback,
-        gate=gate,
-        devices=lambda: {} if devices is None else devices,
-    )
-    return svc, gate, bg, handles
+from ._run_support import (
+    ConstructorFailingProgram,
+    NoopModule,
+    last_run_finished_payload,
+    make_inputs,
+    make_plots,
+    make_run_service,
+    make_state,
+)
 
 
 @pytest.mark.parametrize(
@@ -253,8 +79,8 @@ def _make_run_service(
 def test_run_started_and_terminal_events_keep_operation_origin(
     origin: EventOrigin, expected_kind: str
 ) -> None:
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, _handles = _make_run_service(state, mock_emit=False)
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, _handles = make_run_service(state, mock_emit=False)
     observed: list[tuple[object, EventMeta]] = []
     svc._bus.subscribe_with_meta(  # type: ignore[attr-defined]
         RunStartedPayload, lambda payload, meta: observed.append((payload, meta))
@@ -264,7 +90,7 @@ def test_run_started_and_terminal_events_keep_operation_origin(
     )
 
     with svc._bus.origin(origin):  # type: ignore[attr-defined]
-        token = svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+        token = svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
     assert bg.last_on_done is not None
     bg.last_on_done(object())
 
@@ -286,11 +112,6 @@ def test_run_started_and_terminal_events_keep_operation_origin(
     ]
 
 
-# ---------------------------------------------------------------------------
-# start_run — normal path
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("context_free", [False, True])
 @pytest.mark.parametrize("cancelled", [False, True])
 def test_run_publishes_admitted_source_despite_later_global_change(
@@ -298,19 +119,19 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     context_free: bool,
     cancelled: bool,
 ) -> None:
-    state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
     q1, q2 = result_sources
     captured = None if context_free else q1
     tab = state.get_tab(tab_id)
     state.update_tab_result(tab_id, object(), parameters=q2, source_operation_id=91)
     state.update_tab_analyze(tab_id, object(), None)
     state.set_context(replace(state.session_env, parameters=captured))
-    inputs = _make_inputs(state, tab_id, adapter)
+    inputs = make_inputs(state, tab_id, adapter)
     assert inputs.parameters is captured
-    service, gate, background, _handles = _make_run_service(state)
+    service, gate, background, _handles = make_run_service(state)
     result = object()
     adapter.run.return_value = result
-    token = service.start_run(inputs, plots=_plots())
+    token = service.start_run(inputs, plots=make_plots())
 
     assert tab.run.result is None
     assert tab.run.parameters is None
@@ -329,8 +150,8 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     assert not state.is_tab_running(tab_id)
     assert not gate.has_active(OperationKind.RUN)
 
-    next_inputs = _make_inputs(state, tab_id, adapter)
-    next_token = service.start_run(next_inputs, plots=_plots())
+    next_inputs = make_inputs(state, tab_id, adapter)
+    next_token = service.start_run(next_inputs, plots=make_plots())
     assert tab.run.parameters is None
     assert tab.run.source_operation_id is None
     background.run_work()
@@ -349,14 +170,14 @@ def test_run_publishes_admitted_source_despite_later_global_change(
 def test_cancelled_run_without_data_keeps_no_previous_source(
     result_sources: tuple[ParameterContext, ParameterContext],
 ) -> None:
-    state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
     q1, q2 = result_sources
     tab = state.get_tab(tab_id)
     state.update_tab_result(tab_id, object(), parameters=q1, source_operation_id=91)
     state.set_context(replace(state.session_env, parameters=q2))
-    inputs = _make_inputs(state, tab_id, adapter)
-    service, _gate, background, _handles = _make_run_service(state)
-    service.start_run(inputs, plots=_plots())
+    inputs = make_inputs(state, tab_id, adapter)
+    service, _gate, background, _handles = make_run_service(state)
+    service.start_run(inputs, plots=make_plots())
     service.cancel_run()
     assert background.last_on_error is not None
     background.last_on_error(RuntimeError("interrupted"))
@@ -368,12 +189,12 @@ def test_cancelled_run_without_data_keeps_no_previous_source(
 
 
 def test_start_run_acquires_lease_and_submits_to_bg():
-    state, tab_id, adapter = _make_state()
-    svc, gate, bg, _ = _make_run_service(state)
+    state, tab_id, adapter = make_state()
+    svc, gate, bg, _ = make_run_service(state)
 
-    svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
-    # bg.submit was called (work captured in _FakeBg)
+    # bg.submit was called (work captured in FakeBg)
     assert bg.last_work is not None
     assert gate.has_active(OperationKind.RUN)
     assert state.is_tab_running(tab_id)
@@ -384,7 +205,7 @@ def test_start_run_acquires_lease_and_submits_to_bg():
 
 
 def test_worker_executes_permit_after_model_changes_and_releases_lease():
-    state, tab_id, adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))
     )
@@ -394,11 +215,11 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     )
     cfg = make_cfg(schema, state=state)
     state.get_tab(tab_id).cfg = cfg
-    inputs = _make_inputs(state, tab_id, adapter)
-    svc, gate, bg, _ = _make_run_service(state)
+    inputs = make_inputs(state, tab_id, adapter)
+    svc, gate, bg, _ = make_run_service(state)
     result = object()
     adapter.run.return_value = result
-    plots = _plots()
+    plots = make_plots()
 
     svc.start_run(inputs, plots=plots)
     schema.value.fields["gain"] = DirectValue(0.75)
@@ -437,7 +258,7 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
                 result=FakeResult(np.empty(0)),
             )
 
-    state, tab_id, _adapter = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, _adapter = make_state(readiness=ContextReadiness.ACTIVE)
     adapter = RecordingSnapshotAdapter()
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))
@@ -448,11 +269,11 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     state.get_tab(tab_id).adapter = adapter
     state.get_tab(tab_id).cfg = cfg
     accepted_ref = cfg.observe().ref
-    inputs = _make_inputs(state, tab_id, adapter)
+    inputs = make_inputs(state, tab_id, adapter)
     accepted_basis = inputs.accepted_cfg.source_basis
-    service, _gate, background, _handles = _make_run_service(state)
+    service, _gate, background, _handles = make_run_service(state)
 
-    service.start_run(inputs, plots=_plots())
+    service.start_run(inputs, plots=make_plots())
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.75))
     )
@@ -471,12 +292,12 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
 
 
 def test_start_run_rejects_when_tab_busy():
-    state, tab_id, adapter = _make_state()
+    state, tab_id, adapter = make_state()
     state.set_tab_analyzing(tab_id, analyzing=True)
-    svc, gate, bg, _ = _make_run_service(state)
+    svc, gate, bg, _ = make_run_service(state)
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
-        svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+        svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
@@ -485,11 +306,11 @@ def test_start_run_rejects_when_tab_busy():
 
 
 def test_start_run_releases_lease_when_submit_raises():
-    state, tab_id, adapter = _make_state()
-    svc, gate, _bg, _ = _make_run_service(state, fail_submit=True)
+    state, tab_id, adapter = make_state()
+    svc, gate, _bg, _ = make_run_service(state, fail_submit=True)
 
     with pytest.raises(RuntimeError, match="worker boom"):
-        svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+        svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     assert not gate.has_active(OperationKind.RUN)
     assert not state.is_tab_running(tab_id)
@@ -498,32 +319,16 @@ def test_start_run_releases_lease_when_submit_raises():
     )
 
 
-# ---------------------------------------------------------------------------
-# on_terminal — run finished / cancelled / failed paths
-# Drive bg.last_on_done / on_error directly to trigger on_terminal.
-# ---------------------------------------------------------------------------
-
-
-def _last_run_finished_payload(bus_emit: MagicMock):
-    from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
-
-    for call in reversed(bus_emit.call_args_list):
-        (payload,) = call.args
-        if isinstance(payload, RunFinishedPayload):
-            return payload
-    raise AssertionError("no RUN_FINISHED emitted")
-
-
 def test_run_finished_emits_outcome_finished():
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, _ = make_run_service(state)
+    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     # Trigger on_done without cancel → finished
     assert bg.last_on_done is not None
     bg.last_on_done(object())
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.tab_id == tab_id
     assert payload.outcome == "finished"
     assert not any(
@@ -536,11 +341,11 @@ def test_run_finished_emits_outcome_finished():
 def test_result_commit_failure_settles_run_as_failed(
     monkeypatch, cancel_requested: bool
 ) -> None:
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, handles = _make_run_service(state)
-    plots = _plots()
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, handles = make_run_service(state)
+    plots = make_plots()
     plots.subplots("trace")
-    token = svc.start_run(_make_inputs(state, tab_id, adapter), plots=plots)
+    token = svc.start_run(make_inputs(state, tab_id, adapter), plots=plots)
     monkeypatch.setattr(
         state,
         "update_tab_result",
@@ -560,20 +365,20 @@ def test_result_commit_failure_settles_run_as_failed(
 
 
 def test_run_failed_emits_outcome_failed_with_message():
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, _ = make_run_service(state)
+    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("boom"))
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "failed"
     assert payload.error_message == "boom"
 
 
 def test_schedule_failure_reports_failed_not_cancelled():
-    state, tab_id, adapter = _make_state()
+    state, tab_id, adapter = make_state()
 
     def run_with_schedule_failure(*_args: Any, context: RunContext) -> object:
         with Schedule(
@@ -585,20 +390,20 @@ def test_schedule_failure_reports_failed_not_cancelled():
                 sched.prog_builder(
                     "soc",
                     "soccfg",
-                    program_cls=_ConstructorFailingProgram,
+                    program_cls=ConstructorFailingProgram,
                 )
-                .add(_NoopModule("readout"))
+                .add(NoopModule("readout"))
                 .build_and_acquire()
             )
         return object()
 
     adapter.run.side_effect = run_with_schedule_failure
-    svc, _gate, bg, handles = _make_run_service(state)
-    token = svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    svc, _gate, bg, handles = make_run_service(state)
+    token = svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     bg.run_work()
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "failed"
     assert payload.error_message == "RuntimeError: builder boom"
     outcome = handles.poll(token)
@@ -610,9 +415,9 @@ def test_schedule_failure_reports_failed_not_cancelled():
 
 
 def test_cancel_run_sets_operation_stop_event():
-    state, tab_id, adapter = _make_state()
-    svc, gate, _bg, handles = _make_run_service(state)
-    token = svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    state, tab_id, adapter = make_state()
+    svc, gate, _bg, handles = make_run_service(state)
+    token = svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     assert handles.poll(token) is None  # still pending before cancel
     svc.cancel_run()
@@ -622,7 +427,7 @@ def test_cancel_run_sets_operation_stop_event():
 
 
 def test_cancel_run_stops_selected_flux_before_first_write():
-    state, tab_id, adapter = _make_state()
+    state, tab_id, adapter = make_state()
     dev = FakeDevice(fast_mode=True)
 
     def run_flux(*_args: Any, context: RunContext) -> object:
@@ -632,8 +437,8 @@ def test_cancel_run_stops_selected_flux_before_first_write():
         return object()
 
     adapter.run.side_effect = run_flux
-    svc, _gate, bg, handles = _make_run_service(state, devices={"run-dev": dev})
-    token = svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    svc, _gate, bg, handles = make_run_service(state, devices={"run-dev": dev})
+    token = svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
     svc.cancel_run()
     bg.run_work()
 
@@ -645,7 +450,7 @@ def test_cancel_run_stops_selected_flux_before_first_write():
 
 
 def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
-    state, tab_id, adapter = _make_state()
+    state, tab_id, adapter = make_state()
     first_device = FakeDevice(fast_mode=True)
     second_device = FakeDevice(fast_mode=True)
     devices = {"flux": first_device}
@@ -661,9 +466,9 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
         return object()
 
     adapter.run.side_effect = run_flux
-    service, gate, background, handles = _make_run_service(state, devices=devices)
-    inputs = _make_inputs(state, tab_id, adapter)
-    first_token = service.start_run(inputs, plots=_plots())
+    service, gate, background, handles = make_run_service(state, devices=devices)
+    inputs = make_inputs(state, tab_id, adapter)
+    first_token = service.start_run(inputs, plots=make_plots())
     devices["flux"] = second_device
     background.run_work()
 
@@ -673,7 +478,7 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
     assert second_device.get_value() == 0.0
     assert not gate.has_active(OperationKind.RUN)
 
-    second_token = service.start_run(inputs, plots=_plots())
+    second_token = service.start_run(inputs, plots=make_plots())
     background.run_work()
 
     second_outcome = handles.poll(second_token)
@@ -686,9 +491,9 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
 
 
 def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, _ = make_run_service(state)
+    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     # Simulate: cancel sets stop_event, then worker returns partial result
     svc.cancel_run()
@@ -696,59 +501,59 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
     assert bg.last_on_done is not None
     bg.last_on_done(partial)
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is partial
     assert not state.is_tab_running(tab_id)
 
 
 def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, _ = make_run_service(state)
+    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     # Simulate: cancel + worker errors
     svc.cancel_run()
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("interrupted"))
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is None
     assert not state.is_tab_running(tab_id)
 
 
 def test_bg_done_without_cancel_reports_finished():
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, _ = make_run_service(state)
+    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
     result = object()
 
     assert bg.last_on_done is not None
     bg.last_on_done(result)
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "finished"
     assert state.get_tab(tab_id).run.result is result
 
 
 def test_bg_done_after_cancel_reports_cancelled_with_partial():
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, _ = make_run_service(state)
+    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     svc.cancel_run()  # sets the captured stop_event
     partial = object()
     assert bg.last_on_done is not None
     bg.last_on_done(partial)
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is partial
 
 
 def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
-    state, tab_id, adapter = _make_state()
+    state, tab_id, adapter = make_state()
     partial = object()
 
     def run_after_retry_reset(*_args: Any, context: RunContext) -> object:
@@ -756,13 +561,13 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
         return partial
 
     adapter.run.side_effect = run_after_retry_reset
-    svc, _gate, bg, handles = _make_run_service(state)
-    token = svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    svc, _gate, bg, handles = make_run_service(state)
+    token = svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     svc.cancel_run()
     bg.run_work()
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is partial
     outcome = handles.poll(token)
@@ -771,487 +576,27 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
 
 
 def test_bg_error_without_cancel_reports_failed():
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, _ = make_run_service(state)
+    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("boom"))
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "failed"
     assert payload.error_message == "boom"
 
 
 def test_bg_error_after_cancel_reports_cancelled_without_result():
-    state, tab_id, adapter = _make_state()
-    svc, _gate, bg, _ = _make_run_service(state)
-    svc.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
+    state, tab_id, adapter = make_state()
+    svc, _gate, bg, _ = make_run_service(state)
+    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     svc.cancel_run()
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("interrupted"))
 
-    payload = _last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is None
-
-
-def _run_snapshot() -> RunSnapshot:
-    return RunSnapshot(
-        entry_id=UUID("00000000-0000-0000-0000-000000000001"),
-        entry_name="original-entry",
-        point="original-point",
-        description="original description",
-        roles={"qubit": "Q1", "resonator": "R1"},
-    )
-
-
-def _provenance() -> SoftwareProvenance:
-    return SoftwareProvenance(
-        software_versions={"python": "3.13"},
-        git_commit="a" * 40,
-        git_dirty=False,
-        qick_version=None,
-        soc_fingerprint="cached-config",
-        hostname="test-host",
-    )
-
-
-@pytest.mark.parametrize("stopped", [False, True])
-def test_run_publishes_record_and_historical_metadata_together(
-    monkeypatch: pytest.MonkeyPatch, stopped: bool
-) -> None:
-    state, tab_id, adapter = _make_state()
-    record = RunRecord(cfg=ExpCfgModel(), result=FakeResult(np.array([1.0])))
-    adapter.run.return_value = record
-    provenance = _provenance()
-    capture = MagicMock(return_value=provenance)
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance", capture
-    )
-    snapshot = _run_snapshot()
-    inputs = replace(
-        _make_inputs(state, tab_id, adapter),
-        snapshot=snapshot,
-        experiment_tag="test/native",
-    )
-    settings = FakeDeviceInfo(address="offline", value=1.25)
-    state.put_device(
-        DeviceState(
-            name="flux",
-            type_name="FakeDevice",
-            address="offline",
-            status=DeviceStatus.CONNECTED,
-            remember=False,
-            info=settings,
-        )
-    )
-    identity = MagicMock(wraps=new_run_id)
-    monkeypatch.setattr("zcu_tools.gui.app.measure.services.run.new_run_id", identity)
-    driver = FakeDevice()
-    driver.set_value(1.25)
-    service, _gate, background, handles = _make_run_service(
-        state, devices={"flux": driver}
-    )
-    before_run = datetime.now(UTC)
-    token = service.start_run(inputs, plots=_plots())
-    after_admission = datetime.now(UTC)
-    assert identity.called  # Identity is already fixed before acquisition starts.
-    settings.value = 9.5
-    state.set_context(
-        replace(state.session_env, parameters=parameter_capture(gain=0.8))
-    )
-    if stopped:
-        assert service.cancel_run()
-    background.run_work()
-    after_acquire = datetime.now(UTC)
-    pane = state.get_tab(tab_id).run
-    assert pane.result is record
-    assert pane.source_operation_id == token
-    metadata = pane.metadata
-    assert metadata is not None
-    assert metadata.snapshot == snapshot
-    assert metadata.experiment == "test/native"
-    assert metadata.provenance == provenance
-    assert metadata.completion == ("stopped" if stopped else "complete")
-    assert metadata.labber_path is None
-    assert metadata.finished_at is not None
-    assert metadata.device_snapshot == {
-        "flux": FakeDeviceInfo(address="none", value=1.25).model_dump(mode="json")
-    }
-    assert before_run <= datetime.fromisoformat(metadata.started_at) <= after_admission
-    assert (
-        datetime.fromisoformat(metadata.started_at)
-        <= datetime.fromisoformat(metadata.finished_at)
-        <= after_acquire
-    )
-    assert metadata.run_id.startswith(
-        datetime.fromisoformat(metadata.started_at).strftime("%Y%m%dT%H%M%SZ-")
-    )
-    capture.assert_called_once()
-    outcome = handles.poll(token)
-    assert outcome is not None
-    assert outcome.status == ("cancelled" if stopped else "finished")
-
-
-@pytest.mark.parametrize("provenance_failure", [False, True])
-def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
-    monkeypatch: pytest.MonkeyPatch, provenance_failure: bool
-) -> None:
-    state, tab_id, adapter = _make_state()
-    adapter.run.return_value = RunRecord(
-        cfg=ExpCfgModel(), result=FakeResult(np.array([1.0]))
-    )
-    capture = MagicMock(return_value=_provenance())
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance", capture
-    )
-    inputs = replace(
-        _make_inputs(state, tab_id, adapter),
-        snapshot=_run_snapshot(),
-        experiment_tag="test/native",
-    )
-    service, _gate, background, handles = _make_run_service(state)
-    service.start_run(inputs, plots=_plots())
-    background.run_work()
-    assert state.get_tab(tab_id).run.metadata is not None
-    if provenance_failure:
-        capture.side_effect = RuntimeError("provenance failed")
-    else:
-        adapter.run.side_effect = RuntimeError("acquire failed")
-    token = service.start_run(inputs, plots=_plots())
-    assert state.get_tab(tab_id).run.result is None
-    assert state.get_tab(tab_id).run.metadata is None
-    background.run_work()
-    assert state.get_tab(tab_id).run.result is None
-    assert state.get_tab(tab_id).run.metadata is None
-    outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "failed"
-
-
-@pytest.mark.parametrize("has_snapshot", [False, True])
-def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence(
-    monkeypatch: pytest.MonkeyPatch, has_snapshot: bool
-) -> None:
-    state, tab_id, adapter = _make_state()
-    capture = MagicMock(side_effect=RuntimeError("must not capture"))
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance", capture
-    )
-    inputs = replace(
-        _make_inputs(state, tab_id, adapter),
-        snapshot=_run_snapshot() if has_snapshot else None,
-        experiment_tag=None if has_snapshot else "test/native",
-    )
-    service, _gate, background, _handles = _make_run_service(state)
-    service.start_run(inputs, plots=_plots())
-    background.run_work()
-    assert state.get_tab(tab_id).run.metadata is None
-    capture.assert_not_called()
-
-
-def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # This producer seam substitutes the public cfg assembly/acquisition
-    # collaborators. It does not claim the pending assembler/core integration.
-    state, tab_id, _mock_adapter = _make_state()
-    adapter = T1Adapter()
-    pulse = {
-        "type": "pulse",
-        "waveform": {"style": "const", "length": 0.1},
-        "ch": 0,
-        "nqz": 2,
-        "freq": 4400.0,
-        "gain": 0.2,
-    }
-    cfg = T1Cfg.model_validate(
-        {
-            "modules": {
-                "pi_pulse": pulse,
-                "readout": {
-                    "type": "readout/pulse",
-                    "pulse_cfg": pulse,
-                    "ro_cfg": {
-                        "ro_ch": 0,
-                        "ro_freq": 4400.0,
-                        "ro_length": 1.0,
-                        "trig_offset": 0.5,
-                        "gen_ch": 0,
-                    },
-                },
-            },
-            "sweep": {"length": {"start": 0.0, "stop": 1.0, "expts": 2, "step": 1.0}},
-        }
-    )
-    result = T1Result(
-        times=np.array([0.0, 1.0]), signals=np.array([1.0 + 0j, 0.5 + 0j])
-    )
-
-    def assemble(
-        self: T1Adapter, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
-    ) -> T1Cfg:
-        return cfg
-
-    def acquire(self: T1Exp, config: T1Cfg, *, context: RunContext) -> T1Result:
-        assert config is cfg
-        assert not context.cancel_signal.is_set()
-        return result
-
-    monkeypatch.setattr(T1Adapter, "build_exp_cfg", assemble)
-    monkeypatch.setattr(T1Exp, "run", acquire)
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
-        MagicMock(return_value=_provenance()),
-    )
-    tab = state.get_tab(tab_id)
-    tab.adapter = adapter
-    inputs = RunInputs(
-        tab_id=tab_id,
-        adapter_name="twotone/t1",
-        adapter=adapter,
-        request=RunRequest(soc=None, soccfg=None, cfg_context=None),
-        accepted_cfg=tab.cfg.accept(tab.cfg.observe().ref.revision),
-        snapshot=_run_snapshot(),
-        experiment_tag=adapter.experiment_tag,
-    )
-    service, _gate, background, handles = _make_run_service(state)
-    token = service.start_run(inputs, plots=_plots())
-    background.run_work()
-    record = state.get_tab(tab_id).run.result
-    metadata = state.get_tab(tab_id).run.metadata
-    assert isinstance(record, RunRecord)
-    assert isinstance(record.cfg, T1Cfg)
-    assert record.cfg == cfg
-    assert record.result is result
-    assert metadata is not None
-    assert metadata.experiment == T1Exp().persistence_spec().tag
-    assert metadata.completion == "complete"
-    outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "finished"
-
-
-def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state, tab_id, adapter = _make_state()
-    adapter.run.return_value = RunRecord(
-        cfg=ExpCfgModel(), result=FakeResult(np.array([1.0]))
-    )
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
-        MagicMock(return_value=_provenance()),
-    )
-    inputs = replace(
-        _make_inputs(state, tab_id, adapter),
-        snapshot=_run_snapshot(),
-        experiment_tag="test/native",
-    )
-    service, _gate, background, handles = _make_run_service(state)
-    token = service.start_run(inputs, plots=_plots())
-    assert background.last_work is not None
-    acquired = background.last_work()
-    assert service.cancel_run()
-    assert background.last_on_done is not None
-    background.last_on_done(acquired)
-    metadata = state.get_tab(tab_id).run.metadata
-    assert metadata is not None and metadata.completion == "complete"
-    outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "cancelled"
-
-
-def test_native_run_rejects_an_unpaired_result_without_publishing_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state, tab_id, adapter = _make_state()
-    adapter.run.return_value = object()
-    monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
-        MagicMock(return_value=_provenance()),
-    )
-    inputs = replace(
-        _make_inputs(state, tab_id, adapter),
-        snapshot=_run_snapshot(),
-        experiment_tag="test/native",
-    )
-    service, _gate, background, handles = _make_run_service(state)
-    token = service.start_run(inputs, plots=_plots())
-    background.run_work()
-    assert state.get_tab(tab_id).run.result is None
-    assert state.get_tab(tab_id).run.metadata is None
-    outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "failed"
-    assert outcome.error == "Native acquisition must return a RunRecord"
-
-
-def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
-    state, tab_id, _ = _make_state()
-    adapter = SnapshotAdapter()
-    flux, unused = SnapshotDevice(), SnapshotDevice()
-    flux.set_value(0.25)
-    unused.set_value(0.6)
-    flux.events.clear()
-    unused.events.clear()
-    service, gate, background, handles = _make_run_service(
-        state, devices={"flux": flux, "unused": unused}
-    )
-
-    def require_lease() -> None:
-        assert gate.has_active(OperationKind.RUN)
-
-    flux.before_read = unused.before_read = require_lease
-    inputs = _make_inputs(state, tab_id, adapter)
-    inputs = replace(
-        inputs,
-        request=replace(inputs.request, soc=None, soccfg=None),
-        snapshot=_run_snapshot(),
-        experiment_tag=adapter.experiment_tag,
-    )
-    token = service.start_run(inputs, plots=_plots())
-    assert flux.events == unused.events == []
-    background.run_work()
-    assert flux.events == ["read", "write"]
-    assert unused.events == ["read"]
-    metadata = state.get_tab(tab_id).run.metadata
-    assert metadata is not None
-    assert metadata.device_snapshot is not None
-    assert metadata.device_snapshot["flux"]["value"] == 0.25
-    assert metadata.device_snapshot["unused"]["value"] == 0.6
-    flux.set_value(0.9)
-    assert metadata.device_snapshot["flux"]["value"] == 0.25
-    outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "finished"
-
-
-def test_device_read_failure_rejects_run_before_core() -> None:
-    state, tab_id, _ = _make_state()
-    adapter = SnapshotAdapter()
-    flux, unused = SnapshotDevice(), SnapshotDevice()
-    unused.read_failure = OSError("snapshot read failed")
-    service, gate, background, handles = _make_run_service(
-        state, devices={"flux": flux, "unused": unused}
-    )
-    token = service.start_run(_make_inputs(state, tab_id, adapter), plots=_plots())
-    background.run_work()
-    assert state.get_tab(tab_id).run.result is None
-    assert flux.events == unused.events == ["read"]
-    assert flux.get_value() == 0.0
-    outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "failed"
-    assert outcome.error == "snapshot read failed"
-    assert not gate.has_active(OperationKind.RUN)
-
-
-def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.cfg.resource import CfgResource
-    from zcu_tools.gui.session.aliases import AliasRow
-
-    from tests.gui.app.measure._cfg_fakes import PublishedHost
-
-    with native_save_session(tmp_path, qapp) as session:
-        session.context.set_alias_rows((AliasRow("flux_dev", "yoko1"),))
-        captured = session.context.read_context()
-        state = session.state
-        adapter = SnapshotAdapter()
-        state.get_tab("tab").adapter = adapter
-        schema = CfgSchema(
-            CfgSectionSpec(
-                fields={
-                    "dev": CfgSectionSpec(
-                        fields={
-                            "flux_dev": ScalarSpec(
-                                "Flux", str, choices_source="devices"
-                            )
-                        }
-                    )
-                }
-            ),
-            CfgSectionValue(
-                fields={
-                    "dev": CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev")})
-                }
-            ),
-        )
-        bindings = MeasureCfgBindings(PublishedHost(state))
-        state.get_tab("tab").cfg = CfgResource(
-            lambda: schema,
-            resolution=lambda: bindings.snapshot(
-                (), captured_values={}, parameters=captured
-            ),
-        )
-        service, _gate, background, handles = _make_run_service(state, devices={})
-        inputs = replace(
-            _make_inputs(state, "tab", adapter),
-            parameters=captured,
-            snapshot=replace(
-                session.metadata.snapshot, roles=captured.capture_storage().roles
-            ),
-            experiment_tag=adapter.experiment_tag,
-        )
-        token = service.start_run(inputs, plots=_plots())
-        session.context.set_alias_rows((AliasRow("flux_dev", "yoko2"),))
-        background.run_work()
-        outcome = handles.poll(token)
-        assert outcome is not None and outcome.status == "finished"
-        result = state.get_tab("tab").run.result
-        assert isinstance(result, RunRecord)
-        assert result.cfg is not None
-        assert result.cfg.dev == {"flux_dev": "yoko1"}
-        metadata = state.get_tab("tab").run.metadata
-        assert metadata is not None and metadata.snapshot.roles["flux_dev"] == "yoko1"
-        report = session.save()
-        path = next(
-            item.output.path
-            for item in report.outputs
-            if item.output.format == "data_h5"
-        )
-        restored = load_run_data(path)
-        assert restored.metadata.snapshot.roles["flux_dev"] == "yoko1"
-        assert restored.cfg.values["dev"] == {"flux_dev": "yoko1"}
-        assert session.context.read_context().value("$flux_dev") == "yoko2"
-
-
-def test_gui_save_uses_fixed_run_device_snapshot(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    with native_save_session(tmp_path, qapp) as session:
-        state = session.state
-        adapter = SnapshotAdapter()
-        state.get_tab("tab").adapter = adapter
-        flux = SnapshotDevice()
-        flux.set_value(0.25)
-        flux.events.clear()
-        service, _gate, background, handles = _make_run_service(
-            state, devices={"flux": flux}
-        )
-        inputs = replace(
-            _make_inputs(state, "tab", adapter),
-            snapshot=session.metadata.snapshot,
-            experiment_tag=adapter.experiment_tag,
-        )
-        token = service.start_run(inputs, plots=_plots())
-        background.run_work()
-        outcome = handles.poll(token)
-        assert outcome is not None and outcome.status == "finished"
-        assert flux.events == ["read", "write"]
-        flux.read_failure = OSError("Save must not read hardware")
-        report = session.save()
-        path = next(
-            item.output.path
-            for item in report.outputs
-            if item.output.format == "data_h5"
-        )
-        restored = load_run_data(path)
-        assert restored.metadata.device_snapshot is not None
-        assert restored.metadata.device_snapshot["flux"]["value"] == 0.25
-        with h5py.File(path, "r") as file:
-            dataset = file["device"]
-            assert isinstance(dataset, h5py.Dataset)
-            assert dataset.shape == ()
-            string = h5py.check_string_dtype(dataset.dtype)
-            assert string is not None and string.encoding == "utf-8"
-        assert flux.events == ["read", "write"]
