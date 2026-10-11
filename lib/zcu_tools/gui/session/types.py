@@ -5,8 +5,8 @@ the minimal ``SocHandle`` / ``SocCfgHandle`` surfaces a connected QICK board
 exposes, and ``SessionEnv`` (the published parameters/soc/project bundle) + its
 ``ContextReadiness`` lifecycle. They carry no experiment cfg-tree coupling
 (``CfgSchema``, the Spec/Value trees, ``RunRequest``/analyze/writeback types stay
-in the adapter layer), so they sit below the apps in ``gui/session`` and are
-import-clean (only TYPE_CHECKING references to parameter context/ModuleLibrary/predictor).
+in the adapter layer), so they sit below the apps in ``gui/session``. Their
+session-core imports provide parameter captures and cached value lookup.
 
 The adapter package re-exports ``SessionEnv`` / ``ContextReadiness`` /
 ``SocHandle`` / ``SocCfgHandle`` because ``ExpAdapterProtocol``'s own signatures
