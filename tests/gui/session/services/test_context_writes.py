@@ -184,7 +184,7 @@ def _source(entry: ResultEntry) -> Provenance:
             origin="gui",
             payload=AcceptedPayload(
                 writes=(AcceptedWrite(path="general.ext.flux_value", value=0.2),),
-                analysis_summary={},
+                
             ),
         )
     )
@@ -533,7 +533,7 @@ def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
     if saved:
         assert session.entry.use_point("a").description == "retained"
     else:
-        assert session.entry.list_points() == ()
+        assert session.entry.list_points() == []
         assert not tuple((session.entry.result_path / "points").rglob("*.yaml"))
 
 

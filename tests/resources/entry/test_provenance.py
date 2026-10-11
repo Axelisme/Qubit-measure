@@ -169,7 +169,7 @@ def ledger(container: tuple[ResultEntry, SetupView | PointView, Path]) -> Path:
         origin="notebook",
         payload=AcceptedPayload(
             writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
-            analysis_summary={},
+            
         ),
     )
     entry.ledger.append(event)
@@ -661,7 +661,7 @@ def test_source_with_missing_record_reports_file_and_keeps_values_unpublished(
         origin="notebook",
         payload=AcceptedPayload(
             writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
-            analysis_summary={},
+            
         ),
     )
     entry.ledger.append(event, record={"fit": 1})

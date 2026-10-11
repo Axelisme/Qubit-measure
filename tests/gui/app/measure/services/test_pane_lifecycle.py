@@ -454,7 +454,7 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     )
     bus = EventBus()
     writeback = WritebackService(
-        MagicMock(), MagicMock(), entry_ledger=native_session.context.entry_ledger
+        MagicMock(), MagicMock()
     )
     primary_service, primary_bg = _analyze_service(state, writeback, bus)
     params = GEAnalyzeParams(initial_state="excited", length_ratio=0.01)

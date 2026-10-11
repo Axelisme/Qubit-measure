@@ -82,7 +82,7 @@ def waveform_writeback(tmp_path: Path):
         target = control.read_context().target
         control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.1))
         editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
+        service = WritebackService(editor, control)
         spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=0.1))
         draft = service.create_draft(
             [
@@ -91,7 +91,7 @@ def waveform_writeback(tmp_path: Path):
                 )
             ],
             parameters=control.read_context(),
-        )
+         experiment_name="test/writeback",)
         service.apply_draft(draft)
         yield control, service, draft
         assert registry_state() == installed
@@ -114,7 +114,7 @@ def multiple_waveform_writeback(waveform_writeback):
         proposals.append(
             WaveformWriteback(name, name, edit_schema=CfgSchema(spec, value))
         )
-    draft = service.create_draft(proposals, parameters=control.read_context())
+    draft = service.create_draft(proposals, parameters=control.read_context(), experiment_name="test/writeback")
     try:
         service.apply_draft(draft)
         yield control, service, draft, names

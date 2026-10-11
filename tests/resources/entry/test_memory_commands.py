@@ -33,7 +33,7 @@ def _source(entry: ResultEntry) -> Provenance:
             origin="gui",
             payload=AcceptedPayload(
                 writes=(AcceptedWrite(path="general.ext.flux_value", value=0.2),),
-                analysis_summary={},
+                
             ),
         )
     )

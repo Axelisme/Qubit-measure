@@ -237,7 +237,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     writeback = WritebackService(
         editor,
         write_port=control,
-        entry_ledger=session.context.entry_ledger,
+        
     )
     runner = OperationRunner(
         None, session.handles, None, session.background, session.bus
@@ -357,7 +357,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
         MagicMock(), control, MagicMock(), MagicMock(), session.bus
     )
     writeback = WritebackService(
-        editor, write_port=control, entry_ledger=session.context.entry_ledger
+        editor, write_port=control
     )
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
@@ -382,7 +382,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
         [ParameterWriteback("Q1.rate", "rate", 99.0)],
         parameters=None,
         run_id=session.metadata.run_id,
-    )
+     experiment_name="test/writeback",)
     tab.analysis.writeback_draft = rejected
     selection = control.get_source_binding()
     try:
@@ -408,14 +408,14 @@ def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
         MagicMock(), control, MagicMock(), MagicMock(), session.bus
     )
     writeback = WritebackService(
-        editor, write_port=control, entry_ledger=session.context.entry_ledger
+        editor, write_port=control
     )
     _, wb = _native_controls(session, writeback, control)
     draft = writeback.create_draft(
         [ParameterWriteback("$source_qubit.rate", "rate", 99.0)],
         parameters=parameters,
         run_id=session.metadata.run_id,
-    )
+     experiment_name="test/writeback",)
     session.state.update_tab_analyze("tab", PaneSummary(), None, writeback_draft=draft)
     other = ResultEntry.create(
         "foreign",

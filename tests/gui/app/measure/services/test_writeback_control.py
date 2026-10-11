@@ -240,12 +240,12 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
         ),
     )
     service = WritebackService(
-        MagicMock(), control, entry_ledger=context_service.entry_ledger
+        MagicMock(), control
     )
     draft = service.create_draft(
         [ParameterWriteback("general.ext.a", "d", proposed_value=1)],
         parameters=parameters,
-    )
+     experiment_name="test/writeback",)
     tab = state.get_tab("tab-1")
     getattr(tab, pane).writeback_draft = draft
     accepted_before = len(entry.ledger.events())
