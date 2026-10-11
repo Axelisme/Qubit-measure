@@ -50,7 +50,10 @@ class RabiFit:
     """Nondecaying Rabi fit with native phase estimation.
 
     pi_length_us/error_us are the fitted pi-pulse duration and its propagated
-    standard error. observed/fitted are float64 vectors aligned with
+    standard error. pi2_length_us/pi2_error_us retain the phase-aware native
+    pi/2 duration and propagated error, not half the fitted pi duration.
+    Both durations use the same acquisition waveform and gain, in microseconds.
+    observed/fitted are float64 vectors aligned with
     source.lengths. quality contains residual diagnostics with no
     parameter-error entries. Native nonfinite estimates/errors are retained;
     this value does not certify calibration acceptance.
@@ -58,6 +61,8 @@ class RabiFit:
 
     pi_length_us: float
     error_us: float
+    pi2_length_us: float
+    pi2_error_us: float
     observed: NDArray[np.float64]
     fitted: NDArray[np.float64]
     quality: FitQuality
@@ -115,17 +120,24 @@ def analyze_len_rabi(result: LenRabiResult) -> RabiFit:
     1-D shape. Reuse the native real-axis rotation and phase-aware pi estimate.
     Estimating phase avoids a fixed-phase optimizer local minimum on native
     traces whose first sample is nonzero.
-    Return the pi duration, propagated uncertainty and residual curves.
+    Return pi and pi/2 durations, propagated uncertainties and residual curves.
     Do not skip/mask data, mutate result or acquire, plot, save, or accept a fit.
     Native projection/fitting errors and optimizer warnings propagate.
     """
     observed = rabi_signal2real(result.signals)
-    pi_length, error, _pi2, _pi2_error, _freq, _freq_error, fitted, _optimizer = (
-        fit_rabi(result.lengths, observed, decay=False, init_phase=None)
+    pi_length, error, pi2, pi2_error, _freq, _freq_error, fitted, _optimizer = fit_rabi(
+        result.lengths, observed, decay=False, init_phase=None
     )
-    # This calibration consumes pi only; the native helper also reports pi/2 and frequency.
     quality = compute_fit_quality(observed, fitted, {}, None)
-    return RabiFit(float(pi_length), float(error), observed, fitted, quality)
+    return RabiFit(
+        float(pi_length),
+        float(error),
+        float(pi2),
+        float(pi2_error),
+        observed,
+        fitted,
+        quality,
+    )
 
 
 def analyze_t1(result: T1Result) -> DecayFit:

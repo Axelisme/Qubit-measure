@@ -288,7 +288,9 @@ def test_calibration_transports_fitted_pi2_without_changing_seed_or_template(
     assert result.pi_length_us == fitted.pi_length_us
     assert rig.carries[0].last == result
     assert source.cfg.modules.qub_pulse.gain == original.qub_pulse.gain
-    assert source.cfg.modules.qub_pulse.waveform.style == original.qub_pulse.waveform.style
+    assert (
+        source.cfg.modules.qub_pulse.waveform.style == original.qub_pulse.waveform.style
+    )
     assert rig.plan == original
     assert rig.seed == Calibrated(
         rig.seed.f01_mhz, 0.4, rig.seed.readout_freq_mhz, rig.seed.readout_gain

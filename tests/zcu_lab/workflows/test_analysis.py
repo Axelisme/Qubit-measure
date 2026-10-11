@@ -65,8 +65,7 @@ def test_rabi_fit_recovers_pi_length_for_both_zero_drive_extrema(
 def test_rabi_fit_preserves_phase_aware_pi2_instead_of_halving_pi() -> None:
     lengths = np.linspace(0.0, 1.6, 101)
     signals = (
-        (1.0 + 0.4j)
-        * (0.3 + 0.8 * np.cos(2 * np.pi * lengths / 0.8 + np.pi / 3))
+        (1.0 + 0.4j) * (0.3 + 0.8 * np.cos(2 * np.pi * lengths / 0.8 + np.pi / 3))
     ).astype(np.complex128)
     original = signals.copy()
 
