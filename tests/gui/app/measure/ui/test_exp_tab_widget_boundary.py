@@ -7,12 +7,14 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import QCoreApplication, QEvent
 from qtpy.QtWidgets import QTabWidget, QWidget
 from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.services import create_persistence_caretaker
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.plotting.figures import FigureCollection
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
+from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     PaneParams,
@@ -121,6 +123,44 @@ def test_unmounted_interactive_frontend_stops_authority_projection(
 
     assert widget.stopped is True
     assert widget.read_only_changes == [False]
+
+
+@pytest.mark.parametrize("retirement", ["close_tab", "window_close", "runtime_shutdown"])
+def test_retired_view_stops_authority_projection(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    retirement: str,
+) -> None:
+    _session, ctrl, _fixture_window, _fixture_tab = live_ui
+    ctrl.attach_caretaker(create_persistence_caretaker(ctrl))
+    tab_id = ctrl.new_tab("saving")
+    dialogs = RecordingDialogPresenter(destructive_answers=[True, True])
+    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window.add_tab_widget(tab_id, "saving")
+    window.show()
+    widget = _RecordingInteractive()
+    window.mount_interactive_analysis(tab_id, lambda _env: widget)
+    assert widget.read_only_changes == [False]
+    try:
+        if retirement == "close_tab":
+            ctrl.tab_control.close_tab(tab_id)
+        elif retirement == "window_close":
+            window.close()
+            QCoreApplication.processEvents()
+            assert not window.isVisible()
+        else:
+            window.request_shutdown()
+            QCoreApplication.processEvents()
+            assert not window.isVisible()
+
+        ctrl.control_identity.connect("agent", "retired-view-check", "owner")
+
+        assert widget.read_only_changes == [False]
+    finally:
+        ctrl.abort_shutdown()
+        if ctrl.has_tab(tab_id):
+            ctrl.tab_control.close_tab(tab_id)
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def test_interactive_widget_lifecycle_is_owned_by_tab(
