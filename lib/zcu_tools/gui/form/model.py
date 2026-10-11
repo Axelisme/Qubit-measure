@@ -196,8 +196,10 @@ class FormModel(BaseModel):
     def input_schema(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Describe accepted input without constructing editing state.
 
-        Include numeric Expr alternatives, the shared complex tag, Field
-        constraints, Display metadata and current choices enums. Each tagged
+        Include Expr alternatives for numeric, complex and string value leaves,
+        the shared complex tag, Field constraints, Display metadata and current
+        choices enums. Structural selectors accept only ordinary typed tags,
+        never Expr envelopes. Each tagged
         oneOf branch has x-form-discriminator-values: its intrinsic Literal
         tags as ordinary JSON values, independent of current choices. This
         schema describes partial JSON input, not just a valid model. Domain
@@ -214,8 +216,10 @@ class FormInput[F: FormModel]:
     def __init__(self, model: type[F], data: Mapping[str, JsonValue]) -> None:
         """Copy JSON input for model; do not require model validity.
 
-        Missing keys remain missing and None remains explicit null. Numeric
-        expressions use {"expr": text}; complex uses {"__complex__": [re, im]}.
+        Missing keys remain missing and None remains explicit null. Numeric,
+        complex and string value expressions use {"expr": text}; ordinary strings
+        remain literal. Complex literals use {"__complex__": [re, im]}.
+        Structural selectors require ordinary typed tags, not Expr envelopes.
         Non-JSON/nonfinite data raises ValueError; unknown fields, malformed tags
         and invalid values remain input for result/compatible restoration.
         """

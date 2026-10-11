@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-11，worker device 接線與固定 alias capture
+**Last updated:** 2026-10-11，字串 expression 與固定保存接線
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -28,7 +28,9 @@ Complete、Stop 或 failure 只有一個終局入口。有 producer 時，必須
 
 Start／Resume 不再讀取所有已連線裝置，也不在 journal 記錄 device snapshot。Start 表單直接使用 DeviceService 的公開 typed cached native mapping。Resume 只接受 run_id；健康 paused run 的提交失敗不建立新 operation，不清掉原 handle／lease。
 
-Device 實際值只由每次 env.run 在同一 RUN lease 下、experiment callback 前捕捉。DevicePort.capture_snapshot 讀取所有 connected drivers，將固定 JSON 交給 Run，再由 native acquisition evidence 與 metadata 保存。讀取失敗使 run failed，不呼叫 experiment，不使用 cache fallback。缺 devices capability 不等於零 device，真正零 device 的 host 明確提供回傳 {} 的 port。SessionDevices 在 worker 借公開 driver mapping，getter 回 detached 的實際 Info 子類。完整 setup 用 selected driver.info_model 重新驗證 dump 後呼叫 driver.setup，傳同一 StopSignal 的 event。Journal 記錄 name 與完整 cfg；框架不認識 flux、unit 或 device 種類。使用者 set_flux 工具重用已交付的 check_flux_unit。Host capture 重用 native acquisition helper，不更新 GUI State。Device 接線與 Window 的 SessionServices 組裝已完成，不能據此宣稱完整 CP-B 或 integration 全綠。共用 alias preset 與裸 alias 求值已接入來源，T1 表單 caller 仍需共用 FormState 支援字串 expression。Base 09 終驗與使用者驗收尚未完成。
+Device 實際值只由每次 env.run 在同一 RUN lease 下、experiment callback 前捕捉。DevicePort.capture_snapshot 讀取所有 connected drivers，將固定 JSON 交給 Run，再由 native acquisition evidence 與 metadata 保存。讀取失敗使 run failed，不呼叫 experiment，不使用 cache fallback。缺 devices capability 不等於零 device，真正零 device 的 host 明確提供回傳 {} 的 port。SessionDevices 在 worker 借公開 driver mapping，getter 回 detached 的實際 Info 子類。完整 setup 用 selected driver.info_model 重新驗證 dump 後呼叫 driver.setup，傳同一 StopSignal 的 event。Journal 記錄 name 與完整 cfg；框架不認識 flux、unit 或 device 種類。使用者 set_flux 工具重用已交付的 check_flux_unit。Host capture 重用 native acquisition helper，不更新 GUI State。Device 接線與 Window 的 SessionServices 組裝已完成，不能據此宣稱完整 CP-B 或 integration 全綠。
+
+共用 alias preset、裸 alias 求值與 FormState 的顯式字串 expression 已接線。普通字串仍是 literal，結構 selector 仍使用普通 typed tag。T1 flux_dev 的表單 default 是顯式 $flux_dev expression，與數值欄位使用同一份固定 alias capture。Focused GUI／MCP 表單 seam、固定 RunSnapshot 與 native 再次 Save 已通過，後續 alias 修改與 Save 不重新解析該 snapshot。這些證據不涵蓋 scenario 14 或完整 integration。S4 source reload 與 U7 input 保存還原尚未實作。Base 09 終驗與使用者 CP-B 驗收仍須分別完成，不授權硬體操作。
 
 各裝置的讀值不是跨欄位、跨裝置或跨 process 的原子 snapshot。同步 I/O 可能阻塞，沒有固定 query 或 settling 時間保證。Snapshot 只記錄讀回值，不要求硬體自動復原；workflow 的後續 device effect 仍由 driver 設定值與驗證 limits。
 

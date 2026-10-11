@@ -404,6 +404,10 @@ def _restore_field(
     if isinstance(saved, dict) and tag is not None and tag not in saved:
         child = selected(info, current)
     if child is not None and isinstance(saved, dict):
+        # Structural selectors cannot accept Expr or complex envelopes.
+        if tag is not None and isinstance(saved.get(tag), dict):
+            dropped.append((*path, tag))
+            saved = {name: value for name, value in saved.items() if name != tag}
         prior = current if isinstance(current, dict) else {}
         if tag is not None and tag in saved and saved[tag] != prior.get(tag):
             try:
