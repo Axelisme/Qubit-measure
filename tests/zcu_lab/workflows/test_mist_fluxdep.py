@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from matplotlib.collections import QuadMesh
 from zcu_tools.datafile import SoftwareProvenance, load_run_data
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import Engine, EnginePorts, RunIdentity, RunPaths
@@ -24,9 +25,9 @@ from ._sim_inputs import Inputs, make_plan, make_snapshot, seed_from_inputs
 
 
 def start_mist(
-    inputs: Inputs, root: Path
+    inputs: Inputs, root: Path, *, gain_points: int = 3
 ) -> tuple[Engine[Calibrated], RecordingDevices, Plots]:
-    """Start fixed three-gain scans at two setpoints with isolated ports."""
+    """Start fixed gain scans at two setpoints with isolated ports."""
     base = make_plan(inputs)
     plan = workflows.MISTPlan(
         flux_dev=base.flux_dev,
@@ -38,7 +39,7 @@ def start_mist(
         reset=None,
         gain_start=0.0,
         gain_stop=1.0,
-        gain_points=3,
+        gain_points=gain_points,
         snapshot=base.snapshot,
     )
     devices, plots = RecordingDevices(), Plots(NonPresentingHost())
@@ -140,3 +141,53 @@ def test_mist_commits_two_gain_traces_with_calibrated_preparation(
         np.asarray(plots["mist/gain"].axes[0].lines[0].get_ydata()),
         analysis.mist_signal2real(source.result.signals),
     )
+
+
+def test_mist_map_uses_actual_native_gain_and_flux_coordinates(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    engine, devices, plots = start_mist(inputs, tmp_path, gain_points=101)
+    try:
+        status = engine.execute("workflow")
+        assert status.lifecycle == "done", status.reason
+        records = engine.records("workflow")
+        assert len(records) == 2
+        sources = [
+            load_run_with_metadata(
+                tmp_path / "data" / record.iteration_dir / record.run_files[-1],
+                spec=PowerDepExp().persistence_spec(),
+            )[0]
+            for record in records
+        ]
+        expected_gains = sources[0].result.gains
+        assert not np.array_equal(expected_gains, np.linspace(0.0, 1.0, 101))
+        for source in sources:
+            np.testing.assert_array_equal(source.result.gains, expected_gains)
+        expected_fluxes = np.array([value for _, value in devices.values])
+        expected_signals = np.stack(
+            [analysis.mist_signal2real(source.result.signals) for source in sources]
+        )
+        axes = plots["mist/vs_flux"].axes[0]
+        if axes.collections:
+            mesh = axes.collections[0]
+            assert isinstance(mesh, QuadMesh)
+            coordinates = mesh.get_coordinates()
+            gains = (coordinates[0, :-1, 0] + coordinates[0, 1:, 0]) / 2
+            fluxes = (coordinates[:-1, 0, 1] + coordinates[1:, 0, 1]) / 2
+            signals = np.asarray(mesh.get_array())
+        else:
+            # A raster's extent describes pixel edges, not sample centres.
+            raster = axes.images[0]
+            signals = np.asarray(raster.get_array())
+            left, right, bottom, top = raster.get_extent()
+            rows, columns = signals.shape
+            half_gain = (right - left) / (2 * columns)
+            half_flux = (top - bottom) / (2 * rows)
+            gains = np.linspace(left + half_gain, right - half_gain, columns)
+            fluxes = np.linspace(bottom + half_flux, top - half_flux, rows)
+        np.testing.assert_allclose(gains, expected_gains, rtol=0, atol=1e-15)
+        np.testing.assert_allclose(fluxes, expected_fluxes, rtol=0, atol=1e-15)
+        np.testing.assert_allclose(signals, expected_signals, rtol=0, atol=1e-15)
+    finally:
+        plots.finish()
+        plots.release()
