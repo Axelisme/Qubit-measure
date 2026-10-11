@@ -161,3 +161,48 @@ def test_progress_ambient_none_factory_is_noop(qapp):
     )
     _pump_until(qapp, lambda: seen)
     assert seen == [None]
+
+
+@pytest.mark.parametrize("run_in_pool", [True, False])
+def test_terminal_admission_drains_accepted_delivery_and_rejects_submit(
+    qapp, run_in_pool
+):
+    bg = _bg()
+    delivered: list[object] = []
+    bg.submit(
+        lambda: 7,
+        run_in_pool=run_in_pool,
+        on_done=delivered.append,
+        on_error=delivered.append,
+    )
+    assert callable(getattr(bg, "stop_accepting", None)), (
+        "executor needs terminal admission"
+    )
+    bg.stop_accepting()
+    bg.stop_accepting()
+    with pytest.raises(RuntimeError, match="background") as caught:
+        bg.submit(
+            lambda: 9,
+            run_in_pool=run_in_pool,
+            on_done=delivered.append,
+            on_error=delivered.append,
+        )
+    assert type(caught.value).__name__ == "BackgroundAdmissionClosedError"
+    assert bg.quiesce()
+    assert delivered == [7]
+    with pytest.raises(RuntimeError, match="background") as caught:
+        bg.submit(lambda: 9, on_done=delivered.append, on_error=delivered.append)
+    assert type(caught.value).__name__ == "BackgroundAdmissionClosedError"
+
+
+def test_repeatable_quiesce_does_not_close_qt_admission(qapp):
+    bg = _bg()
+    delivered: list[object] = []
+    for value in (1, 2):
+        bg.submit(
+            lambda value=value: value,
+            on_done=delivered.append,
+            on_error=delivered.append,
+        )
+        assert bg.quiesce()
+    assert delivered == [1, 2]

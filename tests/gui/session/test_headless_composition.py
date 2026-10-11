@@ -142,10 +142,10 @@ def test_session_core_connects_and_cancels_on_owner_thread(
         handles=handles,
         background=background,
         progress=progress,
-        bind_assets=ArbWaveformDatabase.info_at,
         runner=runner,
         driver_factory=unexpected_driver_factory,
         device_registry=registry,
+        bind_assets=ArbWaveformDatabase.info_at,
     )
 
     gate_events: list[tuple[int, tuple[object, ...]]] = []
