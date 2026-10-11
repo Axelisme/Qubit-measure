@@ -55,10 +55,8 @@ from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
-from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
-from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
@@ -189,11 +187,12 @@ class T1WorkflowWindow(QWidget):
     plan_panel and tunables_panel expose the existing editable form state.
     controller is fixed for this Window's lifetime; its native engine is None
     until startup acceptance. tuning_panel presents its unique run binding.
-    The supplied session/runner own shared hardware, exclusion and workers.
+    The supplied SessionServices owns shared runner/progress infrastructure,
+    hardware, exclusion and workers. parent permits Qt embedding.
     This window does not create a second registry, launch a GUI process or
-    refresh YAML. Its RPC adapter calls the same controls. Start and each Resume
-    synchronously read all connected devices for native provenance; any read
-    failure names the device and rejects that request without cached fallback.
+    refresh YAML. Its RPC adapter calls the same controls. Start uses cached
+    native device info for forms; each env.run captures connected devices in
+    the worker before acquisition. Resume retains the same operation.
     Pause retains plan, plots and input capture for the same run.
     """
 
@@ -201,17 +200,16 @@ class T1WorkflowWindow(QWidget):
         self,
         state: SessionState,
         services: SessionServices,
-        runner: OperationRunner,
         owner: OwnerScheduler,
-        progress: ProgressService,
         *,
         on_close: Callable[[], None] | None = None,
+        parent: QWidget | None = None,
     ) -> None:
-        """Build a top-level Window on the GUI owner with a QApplication.
+        """Build a Window on the GUI owner with an existing QApplication.
 
-        state/services/runner/progress must be the same owning session. The
-        progress service is borrowed directly from its composition root, not
-        obtained through a wider control facet. owner marshals
+        state is the session state owned by services. services supplies the shared
+        runner and progress infrastructure for this session. parent embeds the
+        Window in a Qt widget; None creates a top-level Window. owner marshals
         plot commands to this thread. EMPTY builds partial source-free drafts.
         prepare_forms explicitly replaces drafts using the readable context
         and its fixed global qubit alias capture. Source errors propagate without
@@ -220,22 +218,25 @@ class T1WorkflowWindow(QWidget):
         session's setup_control. The Aliases button opens the shared AliasDialog
         over this session's context_control; closing it updates source status,
         not captured forms. Only explicit prepare_forms replaces those drafts.
-        The caller retains this top-level Window through shutdown. Closing during
-        work requests Stop and keeps it alive until terminal delivery. Once native
+        The caller retains this Window and any Qt parent through shutdown.
+        Closing during work requests Stop and keeps it alive until terminal
+        delivery. Once native
         work ends, optional on_close releases composition-owned resources on the
         GUI owner before accepting close. If it raises, close is rejected
         and the error is displayed, so resources remain alive for another attempt.
         No instrument is contacted by construction.
         """
-        super().__init__()
+        super().__init__(parent)
         self._state = state
         self._services = services
-        self._runner = runner
+        self._runner = services.runner
         self._owner = owner
-        self._progress = progress
+        self._progress = services.progress
         self._on_close = on_close
         self.controller: WorkflowController[T1TunablesForm, Calibrated] = (
-            WorkflowController(runner, "t1-workflow", on_finished=self._finished)
+            WorkflowController(
+                services.runner, "t1-workflow", on_finished=self._finished
+            )
         )
         self.tuning_panel: T1TuningPanel | None = None
         self._plots: Plots | None = None

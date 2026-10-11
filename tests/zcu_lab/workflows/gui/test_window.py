@@ -120,9 +120,7 @@ def attachment(
         window = T1WorkflowWindow(
             harness.state,
             harness.services,
-            harness.runner,
             harness.owner,
-            harness.progress,
         )
         window.plan_panel.state.reset(inline_input(inputs))
         yield window, harness, entry
