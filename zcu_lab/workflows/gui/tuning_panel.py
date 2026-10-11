@@ -1,7 +1,7 @@
 """Concrete T1 tuning caller for the shared workflow submission policy."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from pydantic import JsonValue
 from qtpy.QtGui import QCloseEvent
@@ -9,45 +9,49 @@ from qtpy.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 from zcu_tools.experiment.workflows import Actor, TunablesSnapshot
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
-from zcu_tools.gui.form import FormErrors, FormWritePath
+from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState, FormWritePath
 
-from zcu_lab.workflows.calibration import Calibrated
-
-from .panel import T1TunablesPanel
-from .tunables import T1TunablesForm
+from .panel import WorkflowFormPanel
 
 logger = logging.getLogger(__name__)
 
 
-class T1TuningPanel(QWidget):
-    """Edit knobs for an already accepted native T1 run on the GUI thread.
+class T1TuningPanel[F: FormModel, C](QWidget):
+    """Edit an already accepted workflow's unique knobs on the GUI thread.
+
+    F pairs Controller/Host state with the embedded editor; C preserves native
+    context typing without reading or producing that context here.
 
     The composition root supplies the fixed Controller with an accepted binding.
     This panel presents that Host's unique FormState, without copying its input
     or capture. GUI and JSON Apply use the Controller's same submission entry.
     It does not Start, capture sources, own lifecycle or save input files.
     accepted_input is available on host for the app's persistence policy.
-    panel is the existing T1 attachment; Engine owns numeric revisions.
+    panel presents the same current attachment model; Engine owns numeric revisions.
     This transitional caller does not implement or check holder identity.
     """
 
-    panel: T1TunablesPanel
-    host: TunablesHost[T1TunablesForm, Calibrated]
+    panel: WorkflowFormPanel[F]
+    host: TunablesHost[F, C]
 
     def __init__(
         self,
-        controller: WorkflowController[T1TunablesForm, Calibrated],
+        controller: WorkflowController[F, C],
         parent: QWidget | None = None,
         *,
-        panel_factory: type[T1TunablesPanel] = T1TunablesPanel,
+        panel_factory: Callable[
+            [FormState[F], FormEnv, QWidget | None], WorkflowFormPanel[F]
+        ]
+        | None = None,
     ) -> None:
         """Present controller's accepted Host on the QApplication/GUI thread.
 
         Missing/pending binding raises RuntimeError. The panel retains this run
         target; replacement makes its commands stale before any draft write.
         panel_factory is this Start's current catalog knobs attachment, with the
-        supplied unique state/env/parent constructor contract. Omission preserves
-        standalone T1 embedding. Source/editor errors propagate. parent controls Qt lifetime.
+        supplied unique state/env/parent constructor contract. None uses the shared
+        editor directly over the same Host state. Source/editor errors propagate;
+        parent controls Qt lifetime. No defaults or independent draft is built.
         """
         super().__init__(parent)
         binding = controller.binding
@@ -55,7 +59,11 @@ class T1TuningPanel(QWidget):
             raise RuntimeError("Tuning requires an accepted Controller binding")
         self._controller = controller
         self.host = binding
-        self.panel = panel_factory(self.host.state, self.host.env, self)
+        self.panel = (
+            WorkflowFormPanel(self.host.state, self.host.env, self)
+            if panel_factory is None
+            else panel_factory(self.host.state, self.host.env, self)
+        )
         self._message = QLabel(self)
         self._message.setObjectName("workflow.tuning.message")
         apply_button = QPushButton("Apply", self)

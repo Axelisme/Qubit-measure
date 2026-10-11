@@ -1,6 +1,6 @@
 # workflows/gui — Workflow form attachments
 
-**Last updated:** 2026-10-12，輸入保存、shared source reload 與 terminal 匯出
+**Last updated:** 2026-10-12, workflow selection, per-workflow drafts and shared source reload
 
 這個 package 擁有具體 workflow 的表單、明寫的 to_cfg 與 Qt panel attachment，不實作通用 editor 或 Engine。Native workflow definitions 不依賴這些 GUI attachments。
 
@@ -16,7 +16,7 @@ T1WorkflowWindow.create_remote_service以同一Window、session bus與owner組�
 
 `T1WorkflowWindow.export_fluxdep(run_id, origin='gui')` 與 `Export merged/Labber` 動作呼同一 Controller public entry。動作的 objectName 為 workflow.run.export_fluxdep，只在 done、stopped、failed、aborted enable；nonterminal/pending/stale target 由共同 admission 拒絕。Start 固定 native plan、identity/provenance、entry storage 與 ledger，terminal delivery 不自動匯出。每次匯出建立新的 SaveLayout，native 原子覆寫 workflow data_root/merged.h5，Labber 新增日期樹檔案。訊息列每個輸出的 path/status/error，未分配的 Labber 顯示 unallocated，ledger_error 另列。GUI 只提供功能動作，位置與呈現另由 UIUX 持有。
 
-RPC `workflow.export_fluxdep` 必填 run_id，回 native/Labber outputs 與 ledger_error，未分配 path 投影為 null。MCP `workflows_workflow_export_fluxdep` 只送一次 RPC，不預讀、不重試，origin 為 mcp。GUI、wire 與 MCP 版本均為 2，沒有舊版本 fallback。Native public reader 與 Labber public grouped reader 已驗證 Signal/Time 2D 及 T1 Flux 1D；這不代表實際 Labber Log Browser 能開此版面，仍需另外驗收。
+RPC `workflow.export_fluxdep` 必填 run_id，回 native/Labber outputs 與 ledger_error，未分配 path 投影為 null。MCP `workflows_workflow_export_fluxdep` 只送一次 RPC，不預讀、不重試，origin 為 mcp。GUI, wire and MCP versions are 3，沒有舊版本 fallback。Native public reader 與 Labber public grouped reader 已驗證 Signal/Time 2D 及 T1 Flux 1D；這不代表實際 Labber Log Browser 能開此版面，仍需另外驗收。
 
 Records／具名圖 RPC 讀同一 Window 的 native run。Records 直接投影 Engine 已提交的 records，保留 commit cursor 與 captured revision，不從圖反推數值。圖名與 PNG 由 Window 持有的 Plots 提供，PNG 沿 shared renderer 在 Qt owner 產生；status-only 不渲染。Pending acceptance 明確失敗，terminal 圖保留至新 Start 或 close；close 成功釋放後不再提供舊圖。MCP forwarding 已接同一 GUI RPC。
 
@@ -26,9 +26,11 @@ App 組裝一份 SessionServices，Window constructor 為 `(state, services, own
 
 workflow.form 讀同一 Window 的 plan／knobs schema、input、普通求值 leaves、path errors 與 native revision。未 Start 讀 constructor captures；已附 run 必須明填 run_id，改用 Controller binding 的固定 env 與唯一 knobs state，pending acceptance 明確拒絕。Optional batch 只在 call-local FormState 套用目前 parsed input 加修改，不提交、不改 GUI draft/base、accepted input、local text 或 Engine。Read 包含 local parse errors；batch 預覽不把尚未 parse 的文字當成候選。Complex 沿既有 codec tag，whole tuple 在 JSON 為 array；values 不代表可提交。Panel 的 env 是固定 capture；source reload 保留此 capture，不重新選取 session 來源。
 
-`WorkflowCatalog` 配對 native callable、plan/knobs model、panel constructors、seed 與 science export preparer。固定 builder 在 reload 範圍內重新 import 宣告，以 WorkflowRegistry 驗名字，不新增 lookup 或 listing RPC。Start、preview、表單 GUI/RPC 與新 run 的 export preparer 都讀目前 pairing。Start 將 detached native plan/root 綁定 preparer；舊 terminal run 的 export binding 留在原 Controller run，不因 reload 或 draft 改動重建。
+`WorkflowCatalog` contains ordered `WorkflowAttachment` pairings for T1 and overnight. Each attachment keeps its native step, independent form models/converters, seed and optional science exporter together. The fixed builder imports current declarations within bounded reload and uses WorkflowRegistry only to validate declarations, not for lookup. Window has one selector and one fixed `WorkflowController[FormModel, Calibrated]`. T1 keeps its scalar seed; overnight is context-parametric and receives actual `None`, without fabricated calibration. GUI Start uses the current selection. RPC/MCP `workflow.start` accepts optional `name`; omission selects the catalog default (shipped T1), and explicit unknown names raise.
 
-App 使用 `SourceCatalogLoader` 監控 zcu_tools/zcu_lab。Reload scope 是 zcu_lab.workflows；app/window/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 接縫固定，其餘 framework、components 與實驗 source 固定。`reload_source()` 僅在 owner thread 呼叫；pending/running/paused 在 prepare/import 前拒絕。成功替換兩個 panels，保留 compatible parsed draft、重設 bases 並顯示 dropped paths，不重建 session/services/controller/hardware，也不讀 journal。未標 tag 的 inline union 由 shared FormState 唯一結構相容規則還原，不由 Window 補資料。
+`WorkflowForms` owns selected Start panels and inactive per-name RAM parsed drafts. Selection stores the outgoing draft and builds both incoming panels in the fixed capture before switching attachments. Prepare replaces selected defaults in a new capture. MCP partial Start still uses call-local defaults plus its batch, not GUI draft. Controller remains the sole owner of run input, tunables revision and accepted Host binding. New Start/preview/form RPC use the current attachment. Start binds its detached native plan/root to its current exporter; existing run export bindings never follow selection or reload. Overnight has no fluxdep exporter.
+
+App 使用 `SourceCatalogLoader` 監控 zcu_tools/zcu_lab。Reload scope 是 zcu_lab.workflows；app/window/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 接縫固定，其餘 framework、components 與實驗 source 固定。`reload_source()` 僅在 owner thread 呼叫；pending/running/paused 在 prepare/import 前拒絕。Successful reload builds both replacement panels before publication, retains compatible parsed drafts, resets bases and reports dropped paths. A still-declared selection stays selected. A removed or renamed selection changes to the new catalog's first/default attachment, synchronizes the single selector and shows both old and new names in the run message. Explicit unknown Start/select still raises; there is no rename guessing or old callable fallback. Reload never rebuilds session/services/controller/hardware or reads the journal.未標 tag 的 inline union 由 shared FormState 唯一結構相容規則還原，不由 Window 補資料。
 
 Import 或 panel replacement 失敗保留原 panels 與 RAM parsed draft，但 Start 不可用，直到 retry 成功。Fixed source 改變要求重啟。Bounded import 可能已有副作用，不宣稱 rollback，也不以舊 catalog fallback 啟動。Reload source 動作只提供功能，不處理 UIUX 美化。
 

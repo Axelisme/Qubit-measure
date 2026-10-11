@@ -126,6 +126,8 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
                     "remote",
                     "remote_methods",
                     "catalog",
+                    "attachment",
+                    "forms",
                     "persistence",
                     "tuning_panel",
                     "_form_io",

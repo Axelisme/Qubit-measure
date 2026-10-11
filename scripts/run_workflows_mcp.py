@@ -14,7 +14,8 @@ if __name__ == "__main__":
         tool_prefix="workflows_",
         server_display_name="workflows-gui",
         server_instructions=(
-            "Operate the GUI-owned T1 workflow through its declared RPC tools. "
+            "Operate GUI-owned T1 or overnight through the same declared RPC tools. "
+            "Start's optional name selects workflow; omission selects T1_fluxdep. "
             "Read status and use an explicit run_id for commands and data. "
             "Start receipts are pending, not native acceptance. Pause/Stop "
             "receipts are requests, not producer completion. Read figures before "
@@ -24,7 +25,7 @@ if __name__ == "__main__":
         app_name="workflows",
         app_slug="workflows",
         default_port=8768,
-        mcp_version=2,
+        mcp_version=3,
         wire_version=WIRE_VERSION,
         pid_file=repo_root / "logs/workflows/gui.pid",
         log_file=repo_root / "logs/workflows/gui.log",

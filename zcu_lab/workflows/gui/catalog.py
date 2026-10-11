@@ -1,83 +1,66 @@
-"""Current typed attachments and Start's science callback binding.
-
-Imports reloadable declarations at call time. Binding captures Start's detached
-plan/root and storage for the Controller, without retaining any run/live resource
-in this module or catalog, and without orchestrating writers.
-"""
+"""App-owned current attachments; native Registry only validates declarations."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from functools import partial
-from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
-from qtpy.QtWidgets import QWidget
-from zcu_tools.datafile import SoftwareProvenance
-from zcu_tools.experiment.workflows import (
-    CommittedRecord,
-    FluxdepExportSnapshot,
-    PreparedFluxdepExport,
-    RunIdentity,
-    RunPaths,
-)
-from zcu_tools.experiment.workflows.declaration import WorkflowRegistry, WorkflowStep
-from zcu_tools.gui.app.workflows.exporting import FluxdepExportBinding
-from zcu_tools.gui.form import FormEnv
-from zcu_tools.resources.entry import PointStorageBinding, WorkflowRoots
+from zcu_tools.experiment.workflows.declaration import WorkflowRegistry
+from zcu_tools.gui.expected_error import InvalidInputError
+
+from .attachment import Attachment, WorkflowAttachment
 
 if TYPE_CHECKING:
     from ..calibration import Calibrated
-    from ..t1 import T1Plan, T1Point, T1State, T1Tunables
-    from .panel import T1PlanPanel, T1TunablesPanel
+    from ..t1 import T1Plan
     from .plan import T1PlanForm
-    from .tunables import T1TunablesForm
-
-
-class WorkflowExportPreparer(Protocol):
-    """Science callback shared by T1 and the other fluxdep attachment builders.
-
-    plan is Start's detached native plan, data_root its exact run directory and
-    records the Engine's committed evidence. Return one native/Labber payload;
-    invalid/no usable evidence raises before either writer. No host admission,
-    ledger, live source, hardware, fitting or file writes belong in this callback.
-    """
-
-    def __call__(
-        self, *, plan: T1Plan, data_root: Path, records: tuple[CommittedRecord, ...]
-    ) -> PreparedFluxdepExport:
-        """Prepare the fixed plan and committed records without output writes."""
-        ...
 
 
 @dataclass(frozen=True)
 class WorkflowCatalog:
-    """One current typed T1 declaration and its matching GUI attachments.
+    """Current coherent attachments in selector order, without run/draft state.
 
-    step is the declared native callable; plan_model/knobs_model are its input
-    FormModel types, with explicit native to_cfg methods. plan_panel/knobs_panel
-    build the corresponding Qt views in the supplied fixed FormEnv and parent.
-    seed builds the scalar initial context from native plan and pi length in us.
-    prepare_export is the same revision's science callback; None explicitly marks
-    an unsupported workflow. Each Start fixes this callback with its detached
-    native plan/root, so later reload cannot rebind an existing run's export.
-    Builders must supply a coherent pairing; Registry validates names/declarations
-    but does not provide a heterogeneous callable lookup. No live resources or
-    mutable draft are owned by this frozen catalog.
+    attachments pairs native science with independent current forms. The first
+    attachment is the default for Start without name (shipped T1_fluxdep).
+    Names must be unique and at least one attachment must exist. The app selector
+    and optional Start name consume this same pairing; Registry has no lookup.
+    New Starts use current callables; Controller's existing export binding stays
+    fixed across catalog replacement. No live resources are owned here.
     """
 
-    step: WorkflowStep[T1Plan, T1Tunables, T1State, T1Point, Calibrated]
-    plan_model: type[T1PlanForm]
-    knobs_model: type[T1TunablesForm]
-    plan_panel: Callable[[FormEnv, QWidget | None], T1PlanPanel]
-    knobs_panel: type[T1TunablesPanel]
-    seed: Callable[[T1Plan, float], Calibrated]
-    prepare_export: WorkflowExportPreparer | None
+    attachments: tuple[Attachment, ...]
+
+    def __post_init__(self) -> None:
+        """Reject empty catalogs or duplicate declared names before publication."""
+        if not self.attachments:
+            raise ValueError("Workflow catalog must contain an attachment")
+        names = self.names
+        if len(names) != len(set(names)):
+            raise ValueError("Workflow catalog names must be unique")
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """Return selector names in app-declared order, without Registry lookup."""
+        return tuple(attachment.name for attachment in self.attachments)
+
+    def select(self, name: str | None = None) -> Attachment:
+        """Return a current pairing; None selects default, unknown name raises InvalidInputError."""
+        if name is None:
+            return self.attachments[0]
+        for attachment in self.attachments:
+            if attachment.name == name:
+                return attachment
+        raise InvalidInputError(
+            f"Unknown workflow: {name}", reason_code="unknown_workflow"
+        )
 
 
-def _calibrated_seed(plan: T1Plan, pi_length_us: float) -> Calibrated:
+def calibrated_seed(plan: T1Plan, form: T1PlanForm) -> Calibrated:
+    """Build T1 scalar context from fixed modules and required form pi estimate.
+
+    No calibration or live source read occurs. Non-scalar module frequency/gain
+    raises ValueError; pi estimate is in microseconds and already form-validated.
+    """
     from ..calibration import Calibrated
 
     frequency = plan.qub_pulse.freq
@@ -88,70 +71,43 @@ def _calibrated_seed(plan: T1Plan, pi_length_us: float) -> Calibrated:
         or not isinstance(readout.gain, float)
     ):
         raise ValueError("T1 initial calibration requires scalar module frequency/gain")
-    return Calibrated(frequency, pi_length_us, readout.freq, readout.gain)
+    return Calibrated(frequency, form.pi_length_us, readout.freq, readout.gain)
 
 
 def build_catalog() -> WorkflowCatalog:
-    """Import current native science/forms/panels and return their typed pairing.
+    """Import current native/form declarations and their coherent typed attachments.
 
-    Run on the app owner thread, inside SourceCatalogLoader's bounded import for
-    reload. Fresh Registry registration validates the native declaration, without
-    duplicating lookup or publishing global state. Import/declaration errors
-    propagate; no session, device, Engine or background work is constructed.
+    Use on the app owner, inside bounded source reload. Fresh Registry validates
+    both declarations without publishing global state or adding lookup. T1 is
+    first/default; overnight is context-independent and has no fluxdep exporter.
+    Import/declaration errors propagate; no session, Engine or device is built.
     """
     from ..export import prepare_t1_fluxdep_export
+    from ..overnight import overnight
     from ..t1 import t1_fluxdep
-    from .panel import T1PlanPanel, T1TunablesPanel
+    from .overnight import OvernightPlanForm, OvernightTunablesForm
     from .plan import T1PlanForm
     from .tunables import T1TunablesForm
 
     registry = WorkflowRegistry()
     registry.add(t1_fluxdep)
-    return WorkflowCatalog(
+    registry.add(overnight)
+    t1 = WorkflowAttachment(
         step=t1_fluxdep,
         plan_model=T1PlanForm,
         knobs_model=T1TunablesForm,
-        plan_panel=T1PlanPanel,
-        knobs_panel=T1TunablesPanel,
-        seed=_calibrated_seed,
+        plan_to_cfg=T1PlanForm.to_cfg,
+        knobs_to_cfg=T1TunablesForm.to_cfg,
+        seed=calibrated_seed,
         prepare_export=prepare_t1_fluxdep_export,
     )
-
-
-def build_export_binding(
-    plan: T1Plan,
-    storage: PointStorageBinding,
-    run_id: str,
-    provenance: SoftwareProvenance,
-    roots: WorkflowRoots,
-    catalog: WorkflowCatalog,
-) -> FluxdepExportBinding | None:
-    """Detach native plan and bind this Start's catalog callback and exact storage.
-
-    App-internal assembly helper, not an export entry. plan is the validated
-    native plan; storage is Start's exact entry/point paths and scoped ledger.
-    run_id/provenance identify this run; roots are its exact workflow directories.
-    catalog is the current science/attachment pairing. None prepare_export leaves
-    export unsupported. Fix identity/paths/UTC start time and historical snapshot
-    without writes or source/hardware reads. Native
-    validation errors propagate; Controller owns the returned run binding. Later
-    reload/draft changes cannot rebind this callback's plan/root or ledger.
-    """
-    if catalog.prepare_export is None:
-        return None
-    identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
-    paths = RunPaths(metadata_root=roots.result, data_root=roots.database)
-    fixed_plan = type(plan).model_validate_json(
-        plan.model_dump_json(),
-        by_name=True,
-        by_alias=False,
+    monitoring = WorkflowAttachment(
+        step=overnight,
+        plan_model=OvernightPlanForm,
+        knobs_model=OvernightTunablesForm,
+        plan_to_cfg=OvernightPlanForm.to_cfg,
+        knobs_to_cfg=OvernightTunablesForm.to_cfg,
+        seed=lambda _plan, _form: None,
+        prepare_export=None,
     )
-    return FluxdepExportBinding(
-        FluxdepExportSnapshot(
-            identity, paths, fixed_plan.snapshot, datetime.now(UTC), None
-        ),
-        partial(catalog.prepare_export, plan=fixed_plan, data_root=paths.data_root),
-        storage.result_path,
-        storage.database_path,
-        storage.ledger,
-    )
+    return WorkflowCatalog((t1, monitoring))

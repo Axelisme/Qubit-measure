@@ -252,7 +252,8 @@ def overnight[C](
     return Next(point, state)
 
 
-# Declare the original function without erasing its parametric context type.
+# The decorator's return fixes invariant C, losing the function's parametric context.
+# Declare the original function in place instead of assigning that return.
 workflow(
     name="overnight",
     plan=OvernightPlan,

@@ -3,8 +3,8 @@
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-WIRE_VERSION = 2
-GUI_VERSION = 2
+WIRE_VERSION = 3
+GUI_VERSION = 3
 
 _RUN_ID = ParamSpec(
     "run_id",
@@ -18,6 +18,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Submit partial Start input; native operation_id is pending, not acceptance.",
         params=(
             _RUN_ID,
+            ParamSpec(
+                "name",
+                JsonType.STRING,
+                required=False,
+                default=None,
+                description="Native workflow name; omitted/null selects T1_fluxdep, not GUI draft selection.",
+            ),
             ParamSpec(
                 "plan",
                 JsonType.JSON,

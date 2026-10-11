@@ -9,16 +9,17 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue
 from qick import QickConfig
-from qtpy.QtCore import QTimer
+from qtpy.QtCore import QSignalBlocker, QTimer
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
+    QComboBox,
     QLabel,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
-from zcu_tools.datafile import RunSnapshot
+from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
@@ -36,14 +37,13 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
-from zcu_tools.gui.app.workflows.tunables import TunablesHost
 from zcu_tools.gui.catalog_loader import CatalogReloadError, SourceCatalogLoader
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
-    FormState,
+    FormModel,
     FormWritePath,
 )
 from zcu_tools.gui.plotting.container import FigureContainer
@@ -67,32 +67,29 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from ._form_io import inspect_form_input, prepare_start_form
-from .catalog import WorkflowCatalog, build_catalog, build_export_binding
+from .catalog import WorkflowCatalog, build_catalog
+from .forms import WorkflowForms
 from .persistence import WorkflowInputRestoreReport, WorkflowInputSnapshot
 from .remote import FormInspectionReply, T1RemoteControlAdapter
 from .tuning_panel import T1TuningPanel
 
 if TYPE_CHECKING:
     from ..calibration import Calibrated
-    from .panel import T1PlanPanel, T1TunablesPanel
-    from .tunables import T1TunablesForm
+    from .panel import WorkflowFormPanel, WorkflowPlanPanel
 
 logger = logging.getLogger(__name__)
 
 
 class T1WorkflowWindow(QWidget):
-    """Compose captured T1 run controls and accepted-run tuning on the Qt owner.
+    """Compose one workflow selector, captured Start and tuning on the Qt owner.
 
-    plan_panel and tunables_panel expose the existing editable form state.
-    controller is fixed for this Window's lifetime; its native engine is None
-    until startup acceptance. tuning_panel presents its unique run binding.
-    The supplied SessionServices owns shared runner/progress infrastructure,
-    hardware, exclusion and workers. parent permits Qt embedding.
-    This window does not create a second registry, launch a GUI process or
-    refresh YAML. Its RPC adapter calls the same controls. Start uses cached
-    native device info for forms; each env.run captures connected devices in
-    the worker before acquisition. Resume retains the same operation.
-    Pause retains plan, plots and input capture for the same run.
+    plan_panel/tunables_panel expose selected independent parsed drafts.
+    controller stays fixed; its engine is None until native acceptance, and
+    tuning_panel presents its unique run binding. SessionServices owns shared
+    runner/progress, hardware, exclusion and workers; parent permits embedding.
+    RPC calls these same controls. Start uses cached native info; every env.run
+    captures live drivers in the worker. Pause retains plan/plots/input capture;
+    Resume keeps the same operation, without recapture or a second Engine owner.
     """
 
     def __init__(
@@ -108,30 +105,17 @@ class T1WorkflowWindow(QWidget):
     ) -> None:
         """Build a Window on the GUI owner with an existing QApplication.
 
-        state is the session state owned by services. services supplies the shared
-        runner and progress infrastructure for this session. parent embeds the
-        Window in a Qt widget; None creates a top-level Window. owner marshals
-        plot commands to this thread. EMPTY builds partial source-free drafts.
-        prepare_forms explicitly replaces drafts using the readable context
-        and its fixed global qubit alias capture. Source errors propagate without
-        fallback. Start requires a saved point, native QickConfig and connected
-        SoC. setup_dialog is the retained shared Setup instance over this
-        session's setup_control. The Aliases button opens the shared AliasDialog
-        over this session's context_control; closing it updates source status,
-        not captured forms. Only explicit prepare_forms replaces those drafts.
-        The caller retains this Window and any Qt parent through shutdown.
-        Closing during work requests Stop and keeps it alive until terminal
-        delivery. Once native
-        work ends, optional on_close releases composition-owned resources on the
-        GUI owner before accepting close. If it raises, close is rejected
-        and the error is displayed, so resources remain alive for another attempt.
-        catalog pairs current science/forms/panels; None builds the default T1
-        catalog. loader enables explicit source reload; None leaves embedding
-        unmonitored. Reload preserves this session/controller and terminal export
-        binding. No instrument is contacted by construction.
+        state belongs to services; owner marshals plot commands. parent=None is
+        top-level; otherwise embedded. EMPTY builds partial source-free drafts.
+        catalog=None builds T1/overnight, T1 first. loader=None is unmonitored.
+        Reload keeps session/Controller and terminal export bindings. Prepare
+        captures context/global qubit alias; source errors propagate without I/O.
+        Caller retains this Window/parent through shutdown. Close requests Stop,
+        waits for delivery, then calls on_close on owner; None skips caller cleanup.
+        Callback errors reject close, display diagnostics and retain retry resources.
         """
         super().__init__(parent)
-        self._catalog = catalog if catalog is not None else build_catalog()
+        current = catalog if catalog is not None else build_catalog()
         self._loader = loader
         self._thread = get_ident()
         self._forms_for_run = False
@@ -142,12 +126,10 @@ class T1WorkflowWindow(QWidget):
         self._owner = owner
         self._progress = services.progress
         self._on_close = on_close
-        self.controller: WorkflowController[T1TunablesForm, Calibrated] = (
-            WorkflowController(
-                services.runner, "t1-workflow", on_finished=self._finished
-            )
+        self.controller: WorkflowController[FormModel, Calibrated] = WorkflowController(
+            services.runner, "t1-workflow", on_finished=self._finished
         )
-        self.tuning_panel: T1TuningPanel | None = None
+        self.tuning_panel: T1TuningPanel[FormModel, Calibrated] | None = None
         self._plots: Plots | None = None
 
         env = (
@@ -155,10 +137,8 @@ class T1WorkflowWindow(QWidget):
             if state.session_env.parameters is not None
             else FormEnv()
         )
-        self.plan_panel = self._catalog.plan_panel(env, self)
-        self.tunables_panel = self._catalog.knobs_panel(
-            FormState(self._catalog.knobs_model.default_input(env)), env, self
-        )
+        self._forms = WorkflowForms(current, env, self)
+        self._init_selector(current)
         self._message = QLabel(self)
         self._message.setObjectName("workflow.run.message")
         self._message.setWordWrap(True)
@@ -188,6 +168,7 @@ class T1WorkflowWindow(QWidget):
         self._layout = QVBoxLayout(self)
         self._init_source_controls()
         for widget in (
+            self._selector,
             self.plan_panel,
             self.tunables_panel,
             self._start_button,
@@ -202,6 +183,12 @@ class T1WorkflowWindow(QWidget):
         self._poll = QTimer(self)
         self._poll.setInterval(50)
         self._poll.timeout.connect(self._refresh_run)
+
+    def _init_selector(self, catalog: WorkflowCatalog) -> None:
+        self._selector = QComboBox(self)
+        self._selector.setObjectName("workflow.select")
+        self._selector.addItems(list(catalog.names))
+        self._selector.currentTextChanged.connect(self._selection_changed)
 
     setup_dialog: SetupDialog
 
@@ -292,30 +279,71 @@ class T1WorkflowWindow(QWidget):
         if env.parameters is None:
             raise FailedPreconditionError("No parameter context is installed")
         env.parameters.resolve_path("$qubit.kind")
-        plan_panel = self._catalog.plan_panel(env, self)
+        old = self.plan_panel, self.tunables_panel
+        self._forms.prepare(env, self)
+        self._publish_panels(*old)
+
+    @property
+    def plan_panel(self) -> WorkflowPlanPanel:
+        """Return the selected attachment's current parsed Start plan view."""
+        return self._forms.plan
+
+    @property
+    def tunables_panel(self) -> WorkflowFormPanel[FormModel]:
+        """Return the selected attachment's current parsed Start knobs view."""
+        return self._forms.knobs
+
+    @property
+    def workflow_name(self) -> str:
+        """Return the native name selected by the sole GUI/MCP catalog."""
+        return self._forms.attachment.name
+
+    @property
+    def default_workflow_name(self) -> str:
+        """Return the catalog's default native name for Start without RPC name."""
+        return self._forms.catalog.select().name
+
+    def select_workflow(self, name: str) -> None:
+        """Select current native/form attachments, retaining independent parsed drafts.
+
+        Use on the GUI owner before Start or after terminal delivery. Unknown
+        names raise InvalidInputError; pending/running/paused ownership rejects before
+        changes. Existing terminal run/export binding stays with Controller.
+        Selection reuses fixed form captures, without device/source reads. Local
+        unparsed text is not saved. No run/operation/lease is created or replaced.
+        """
+        self._ensure_can_start()
+        if name == self.workflow_name:
+            return
+        old = self.plan_panel, self.tunables_panel
+        self._forms.select(name, self.capture_persisted_state(), self)
+        self._publish_panels(*old)
+        self._sync_selector()
+
+    def _sync_selector(self) -> None:
+        with QSignalBlocker(self._selector):
+            self._selector.clear()
+            self._selector.addItems(list(self._forms.catalog.names))
+            self._selector.setCurrentText(self.workflow_name)
+
+    def _selection_changed(self, name: str) -> None:
         try:
-            tunables_panel = self._catalog.knobs_panel(
-                FormState(self._catalog.knobs_model.default_input(env)), env, self
-            )
-        except Exception:
-            # The first editor is not installed if the second construction fails.
-            plan_panel.close()
-            plan_panel.deleteLater()
-            raise
-        self._publish_panels(plan_panel, tunables_panel)
+            self.select_workflow(name)
+        except Exception as exc:
+            self._sync_selector()
+            logger.exception("Workflow selection failed")
+            self._message.setText(str(exc))
 
     def _publish_panels(
-        self, plan_panel: T1PlanPanel, tunables_panel: T1TunablesPanel
+        self, old_plan: WorkflowPlanPanel, old_tunables: WorkflowFormPanel[FormModel]
     ) -> None:
-        old_plan, old_tunables = self.plan_panel, self.tunables_panel
-        self._layout.replaceWidget(old_plan, plan_panel)
-        self._layout.replaceWidget(old_tunables, tunables_panel)
-        self.plan_panel, self.tunables_panel = plan_panel, tunables_panel
+        self._layout.replaceWidget(old_plan, self.plan_panel)
+        self._layout.replaceWidget(old_tunables, self.tunables_panel)
         for panel in (old_plan, old_tunables):
             panel.close()
             panel.deleteLater()
-        plan_panel.show()
-        tunables_panel.show()
+        self.plan_panel.show()
+        self.tunables_panel.show()
         self._forms_for_run = False
         self._close_tuning_panel()
 
@@ -330,8 +358,9 @@ class T1WorkflowWindow(QWidget):
 
         Pending/running/paused ownership rejects before source preflight/import.
         loader=None rejects unmonitored embedding. Success replaces only form
-        panels/catalog, resets bases and reports dropped paths in the existing
-        message label; services/session/controller/hardware and old run export
+        panels/catalog, retains a still-declared selection or chooses the new
+        default, and reports changed names/dropped paths in the message label.
+        services/session/controller/hardware and old run export
         binding remain unchanged. Local unparsed text is not a saved draft.
         Failure retains parsed drafts and old panels but makes Start unavailable
         until successful retry. CatalogReloadError.restart_required forbids retry
@@ -349,9 +378,11 @@ class T1WorkflowWindow(QWidget):
         if self._catalog_error is not None and self._catalog_error.restart_required:
             raise self._catalog_error
         snapshot = self.capture_persisted_state()
+        old_name = self.workflow_name
+        old = self.plan_panel, self.tunables_panel
         try:
             candidate = self._loader.load(self._loader.prepare())
-            plan, knobs, report = self._build_reload_panels(candidate, snapshot)
+            report = self._forms.reload(candidate, snapshot, self)
         except Exception as exc:
             error = (
                 exc
@@ -365,41 +396,16 @@ class T1WorkflowWindow(QWidget):
             if error is exc:
                 raise
             raise error from exc
-        self._publish_panels(plan, knobs)
-        self._catalog = candidate
+        self._publish_panels(*old)
+        self._sync_selector()
         self._catalog_error = None
         self._start_button.setEnabled(True)
         self.show_input_restore_message(report)
+        if old_name != self.workflow_name:
+            notice = f"Reload could not find {old_name}; selected {self.workflow_name}."
+            details = self._message.text()
+            self._message.setText(f"{notice} {details}" if details else notice)
         return report
-
-    def _build_reload_panels(
-        self,
-        catalog: WorkflowCatalog,
-        snapshot: WorkflowInputSnapshot,
-    ) -> tuple[T1PlanPanel, T1TunablesPanel, WorkflowInputRestoreReport]:
-        env = self.plan_panel.env
-        plan = catalog.plan_panel(env, self)
-        knobs = None
-        try:
-            knobs = catalog.knobs_panel(
-                FormState(catalog.knobs_model.default_input(env)), env, self
-            )
-            report = WorkflowInputRestoreReport(
-                plan_dropped=plan.state.write_compatible(snapshot.plan, env),
-                knobs_dropped=knobs.state.write_compatible(snapshot.knobs, env),
-            )
-            plan.state.reset(plan.state.input)
-            knobs.state.reset(knobs.state.input)
-            plan.editor.refresh(env)
-            knobs.editor.refresh(env)
-            return plan, knobs, report
-        except Exception:
-            plan.close()
-            plan.deleteLater()
-            if knobs is not None:
-                knobs.close()
-                knobs.deleteLater()
-            raise
 
     def _reload_clicked(self) -> None:
         try:
@@ -437,20 +443,7 @@ class T1WorkflowWindow(QWidget):
         restoration refreshes both editors and clears renderer-local text.
         """
         self._ensure_can_start()
-        plan = FormState(self._catalog.plan_model.default_input(self.plan_panel.env))
-        knobs = FormState(
-            self._catalog.knobs_model.default_input(self.tunables_panel.env)
-        )
-        report = WorkflowInputRestoreReport(
-            plan_dropped=plan.write_compatible(state.plan, self.plan_panel.env),
-            knobs_dropped=knobs.write_compatible(state.knobs, self.tunables_panel.env),
-        )
-        self.plan_panel.state.reset(plan.input)
-        self.tunables_panel.state.reset(knobs.input)
-        for panel in (self.plan_panel, self.tunables_panel):
-            panel.editor.refresh(panel.env)
-            panel.editor.discard_local_text()
-        return report
+        return self._forms.restore(state)
 
     def show_input_restore_message(
         self,
@@ -512,34 +505,35 @@ class T1WorkflowWindow(QWidget):
         *,
         plan_batch: Mapping[FormWritePath, JsonValue] | None = None,
         tunables_batch: Mapping[FormWritePath, JsonValue] | None = None,
+        name: str | None = None,
     ) -> int | FormErrors:
-        """Capture/validate and submit T1, returning a token or directed errors.
+        """Capture/validate and submit the selected workflow, returning token or errors.
 
-        run_id is a nonempty path-safe segment for this run's exact directories.
-        A None batch reads that GUI panel and its local parse errors. An explicit
-        batch, including {}, starts from that form's default_input in this Start's
-        fixed capture, then uses FormState.write once. Paths are model-field tuple
-        leaves; lists/mappings are whole leaves and branch switches use core rules.
-        Invalid batch/model input returns FormErrors without touching either panel,
-        submission or files. Structural errors without a directed path are model-wide.
-        Success resets both panel bases to the submitted input and clears local text.
-        Both editors display ordinary values in this same fixed Start capture,
-        not their old constructor capture; they do not poll later source changes.
-        Draft/unbound storage, missing hardware, source/provenance and native
-        failures raise without fallback/retry. Forms use detached native device
-        info from the session cache; Start does not read connected drivers.
-        The returned operation token is
-        pending, not proof of accepted startup. Calibrated uses the validated
-        form's required pi_length_us and selected native module scalars.
-        Expressions remain in the accepted FormInput used for later tuning.
+        run_id is a nonempty path-safe segment for exact directories. name=None
+        uses GUI selection; a name selects the same catalog first, retaining
+        independent parsed drafts. Each None batch reads its panel/local errors;
+        explicit batches (including {}) use defaults in this Start's fixed capture
+        plus one FormState.write, not GUI draft. Paths are model-field tuple leaves;
+        containers are whole leaves and branch switches use shared core rules.
+        Invalid input returns FormErrors without applying batches or submitting;
+        structural errors use path (). Success resets both panel bases and clears
+        local text in that same capture; expressions stay in accepted input.
+        Cached native device info is used for forms; no driver live read occurs.
+        Missing storage/hardware, source/provenance and native failures propagate,
+        without retry/fallback. Pending/active/paused ownership rejects replacement.
+        T1 uses validated pi estimate/module scalars; overnight context is None.
+        The token is pending submission, not native acceptance.
         """
         self._ensure_can_start()
+        if name is not None:
+            self.select_workflow(name)
+        attachment = self._forms.attachment
         env = self._capture_env(self._services.device.capture_native_device_info())
         if env.parameters is None:
-            raise ValueError("T1 Start requires captured parameters")
+            raise ValueError("Workflow Start requires captured parameters")
         storage = self._services.context.capture_storage(env.parameters)
         prepared_plan = prepare_start_form(
-            self._catalog.plan_model,
+            attachment.plan_model,
             self.plan_panel.state,
             self.plan_panel.editor,
             plan_batch,
@@ -549,7 +543,7 @@ class T1WorkflowWindow(QWidget):
             return prepared_plan
         form, submitted_plan = prepared_plan
         prepared_tunables = prepare_start_form(
-            self._catalog.knobs_model,
+            attachment.knobs_model,
             self.tunables_panel.state,
             self.tunables_panel.editor,
             tunables_batch,
@@ -565,10 +559,11 @@ class T1WorkflowWindow(QWidget):
             description=storage.description,
             roles=storage.roles,
         )
-        plan = form.to_cfg(env, snapshot)
-        if isinstance(plan, FormErrors):
-            return plan
-        seed = self._catalog.seed(plan, form.pi_length_us)
+        prepared = attachment.prepare(
+            form, tunables_form, accepted_input, env, snapshot
+        )
+        if isinstance(prepared, FormErrors):
+            return prepared
         session = self._state.session_env
         if session.soc is None or not isinstance(session.soccfg, QickConfig):
             raise ValueError("T1 Start requires connected SoC and native QickConfig")
@@ -578,40 +573,24 @@ class T1WorkflowWindow(QWidget):
             run_id=run_id,
         )
         plots = Plots(self._plot_host)
-        devices = self._services.device.get_connected_devices()
-        context = RunContext(session.soc, session.soccfg, plots, devices, StopSignal())
-        provenance = capture_software_provenance(context=context)
-        ports = EnginePorts(
-            plots=plots,
-            progress=TQDMProgressBar,
-            clock=UtcClock(),
-            context=seed,
-            soc=session.soc,
-            soccfg=session.soccfg,
-            devices=SessionDevices(self._services.device),
+        ports, provenance = self._start_ports(
+            session.soc, session.soccfg, plots, prepared.context
         )
-        binding: TunablesHost[T1TunablesForm, Calibrated] = TunablesHost(
-            FormState(accepted_input), env, run_id
-        )
+        identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
+        export_binding = prepared.bind_export(storage, identity, roots)
         if self._plots is not None:
             self._plots.release()
         # Install presentation before synchronous admission listeners can reenter.
         self._close_tuning_panel()
         self._plots = plots
         try:
-            token = self.controller.start(
-                self._catalog.step,
-                plan=plan,
-                tunables=tunables_form.to_cfg(),
-                paths=RunPaths(metadata_root=roots.result, data_root=roots.database),
-                ports=ports,
-                binding=binding,
-                identity=RunIdentity(
-                    run_id, provenance, str(storage.entry_id), storage.point
-                ),
-                export_binding=build_export_binding(
-                    plan, storage, run_id, provenance, roots, self._catalog
-                ),
+            token = prepared.submit(
+                self.controller,
+                ports,
+                RunPaths(metadata_root=roots.result, data_root=roots.database),
+                identity,
+                env,
+                export_binding,
             )
         except Exception:
             plots.finish(present=False)
@@ -625,12 +604,35 @@ class T1WorkflowWindow(QWidget):
             editor.discard_local_text()
         self.plan_panel.setEnabled(False)
         self.tunables_panel.setEnabled(False)
+        self._selector.setEnabled(False)
         self._start_button.setEnabled(False)
         self._export_button.setEnabled(False)
         self._message.setText("Startup pending")
         self._forms_for_run = True
         self._poll.start()
         return token
+
+    def _start_ports(
+        self,
+        soc: object,
+        soccfg: QickConfig,
+        plots: Plots,
+        seed: Calibrated | None,
+    ) -> tuple[EnginePorts[Calibrated], SoftwareProvenance]:
+        # Native handles were validated before roots/Plots allocation in Start.
+        devices = self._services.device.get_connected_devices()
+        context = RunContext(soc, soccfg, plots, devices, StopSignal())
+        provenance = capture_software_provenance(context=context)
+        ports = EnginePorts(
+            plots=plots,
+            progress=TQDMProgressBar,
+            clock=UtcClock(),
+            context=seed,
+            soc=soc,
+            soccfg=soccfg,
+            devices=SessionDevices(self._services.device),
+        )
+        return ports, provenance
 
     def create_remote_service(
         self, opts: ControlOptions, bus: BaseEventBus
@@ -863,12 +865,13 @@ class T1WorkflowWindow(QWidget):
         )
         binding = controller.binding
         if (
-            self.tuning_panel is None
+            self._forms_for_run
+            and self.tuning_panel is None
             and binding is not None
             and binding.engine is not None
         ):
             self.tuning_panel = T1TuningPanel(
-                controller, self, panel_factory=self._catalog.knobs_panel
+                controller, self, panel_factory=self._forms.attachment.knobs_panel
             )
             self._layout.addWidget(self.tuning_panel)
         if self.tuning_panel is not None:
@@ -894,6 +897,7 @@ class T1WorkflowWindow(QWidget):
         self._poll.stop()
         self.plan_panel.setEnabled(True)
         self.tunables_panel.setEnabled(True)
+        self._selector.setEnabled(True)
         self._start_button.setEnabled(True)
         if error is not None:
             self._message.setText(str(error))
