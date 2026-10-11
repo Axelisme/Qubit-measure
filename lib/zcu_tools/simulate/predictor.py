@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from math import isfinite
 from typing import Literal, Protocol, runtime_checkable
 
 import numpy as np
@@ -116,3 +118,22 @@ class PredictorParams(Protocol):
     def build_predictor(self) -> Predictor:
         """Build a fresh query model; ValueError names missing or invalid inputs."""
         ...
+
+
+def parameter_number(values: Mapping[str, object], name: str) -> float | None:
+    """Decode one nullable finite numeric field; reject bool/non-numbers with ValueError.
+
+    A missing key or null is unknown. Does not mutate the mapping.
+    """
+    value = values.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number or null")
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be finite") from exc
+    if not isfinite(number):
+        raise ValueError(f"{name} must be finite")
+    return number

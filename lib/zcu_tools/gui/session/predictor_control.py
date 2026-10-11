@@ -15,7 +15,7 @@ if TYPE_CHECKING:
         PredictMatrixCurveResult,
         PredictorService,
     )
-    from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+    from zcu_tools.simulate.parameters import ModelParams
     from zcu_tools.simulate.predictor import PredictorParams
 
 
@@ -26,7 +26,7 @@ class PredictorControlPort(Protocol):
     PredictorService. No query installs a model or reads dialog state/cache.
     """
 
-    def params_for_qubit(self, qubit: str) -> FluxoniumParams:
+    def params_for_qubit(self, qubit: str) -> ModelParams:
         """Read current concrete component inputs; see PredictorService.params_for_qubit."""
         ...
 
@@ -59,7 +59,7 @@ class PredictorControlFacet:
     def __init__(self, predictor: PredictorService) -> None:
         self._predictor = predictor
 
-    def params_for_qubit(self, qubit: str) -> FluxoniumParams:
+    def params_for_qubit(self, qubit: str) -> ModelParams:
         """Read current concrete inputs; see PredictorService.params_for_qubit."""
         return self._predictor.params_for_qubit(qubit)
 

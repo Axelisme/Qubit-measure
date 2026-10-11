@@ -20,7 +20,7 @@ Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。G
 
 日常量測優先 recipe，既有資料分析使用共用分析工具。細部 setup、cfg、保存、writeback 及排查由 RPC 承接。日常／排查是使用指引，不是權限模式。`rpc_call` 接受 catalog 中全部 `rpc` 與 `tool` methods；tool 名稱只提示高層入口。GUI 仍驗證每次操作。公開 method 的參數、回覆及前置條件由 `rpc_describe` 提供。
 
-Predictor 透過 `rpc_call(method="predictor.predict"|"predictor.calibrate"|"predictor.info", params=...)` 查詢。每次恰填一個來源：`qubit="Q2"` 讀目前選定工作點的具體元件，或 `params={"model":"fluxonium","EJ":5,"EC":1,"EL":0.5,"flux_half":0,"flux_period":1,"flux_bias":0}` 做獨立試算。qubit 不解析 alias 或 path。直接參數不需要工作點，不讀 dialog/cache。能量用 GHz；flux_half、flux_period、flux_bias 與 device_value 用來源的 native device units，不是 flux quanta；frequency_mhz 與預測頻率用 MHz。
+Predictor 透過 `rpc_call(method="predictor.predict"|"predictor.calibrate"|"predictor.info", params=...)` 查詢。每次恰填一個來源：`qubit="Q2"` 讀目前選定工作點的具體元件，或 `params={"model":"transmon","EJmax":20,"EC":0.25,"d":0.1,"flux_half":0,"flux_period":1,"flux_bias":0}`（SQUID transmon，d 為 junction asymmetry），或 `params={"model":"fluxonium","EJ":5,"EC":1,"EL":0.5,"flux_half":0,"flux_period":1,"flux_bias":0}` 做獨立試算。qubit 不解析 alias 或 path。直接參數不需要工作點，不讀 dialog/cache。能量用 GHz；flux_half、flux_period、flux_bias 與 device_value 用來源的 native device units，不是 flux quanta；frequency_mhz 與預測頻率用 MHz。
 
 `predictor.info` 回 `{model, params, missing}`，省略或 null 欄位保持未知。Predict 另填 device_value，Calibrate 另填 device_value 與 frequency_mhz。兩者需要完整有效參數，可填 from_level/to_level，預設 0/1。Calibrate 只回候選 flux_bias_before/after，不寫元件、dialog 或檔案。數值求根失敗沿模型的 warning/fallback 規則回候選，不保證擬合成功。
 

@@ -70,7 +70,7 @@ session/
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件；高頻 render 只對變更過的 maximum/format/value 寫入 LightweightProgressBar；可注入 profiling callback 拆量 derive / value writes）
     ├── setup_dialog.py — Result entry、Working points 與 Connection 的 shared dialog。New entry／Open 與 point Switch／Create 都交既有 owner。Working points 清單顯示 description，Create 明確提交 Label、Clone from 與 Description。Track device 只用 cached value＋unit 建議可修改的 Label，不讀硬體、不綁裝置。`(empty)` 使用 setup seed 與空 library。Reopen 使用 cached queries，不切 binding、不連硬體
     ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 `md_provider`（eval mode apply-time resolve 不污染 device facet）；per-device panel lazy-import zcu_tools.device.*；host 可切 `set_read_only(True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
-    ├── predictor_dialog.py — Independent fluxonium trials, frequency/matrix curves and local Calibrate. No Apply or session model. Device values and frequency expressions remain optional inputs.
+    ├── predictor_dialog.py — Independent fluxonium or SQUID transmon trials, frequency curves (matrix curves only for models that provide them) and local Calibrate. No Apply or session model. Device values and frequency expressions remain optional inputs.
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；支援多條 transition 同時 highlight；host 可關閉 marker interaction 讓 live view 只由外部 value 驅動；主線程同步繪圖不需 marshal
     ├── inspect_base.py   — InspectDialogBase：md tab + ml view/rename/del；hook `_build_extra_toolbar_buttons` 讓子類在 Refresh 左側加 app-specific 入口，hook `_build_extra_ml_buttons` / `_on_ml_selection_changed` 讓子類加 app-local actions。**consumer**：measure subclass 自己擁有 embedded CfgEditor Modules presentation，不改 base。
     └── value_source_input.py — QLineEdit value-source helper：`@{prefix` 顯示分段 completion（`@{`→頂層、`dev`→`device.` 並展開下一段、`device.`→下一段），Tab/Backtab 接受預設候選時若當前候選全是 namespace 會自動補 `.` drill down，補到完整 key 才加 `}`；在 `@{full.key} ` 後輸入空格才立即 resolve 並以文字替換；token 完成或解析後明確 hide popup；依賴 `ValueSourceInputHost` port，不知道 ContextService/LiveModel
@@ -121,10 +121,10 @@ introduced.
 
 ## 獨立 predictor
 
-`simulate.fluxonium.predict.FluxoniumParams` 保存可未知的具名物理輸入，missing() 指出缺項。
+`simulate.fluxonium.predict.FluxoniumParams` 與 `simulate.transmon.TransmonParams` 保存可未知的具名物理輸入，missing() 指出缺項。
 齊全且有效才建立中性 query model。Service 不持有 installed model，不讀 dialog。
 App 注入使用者的 params_for，把當前 capture 中的具體元件轉成參數。
 Framework 不猜元件欄位，也不 import 使用者套件。查詢與 Calibrate 不寫元件或版本。
 Dialog 的元件選單初始選 alias qubit；Load component 才經注入的 params_for 預填，選取或切換工作點不改 trial。欄位勾選代表已知，取消勾選保留 None；缺項會明示，完整且有效才計算。
-模型選單目前接 Fluxonium；SQUID transmon 由後續模型 slice 加入。
+模型選單有 Fluxonium 與 SQUID transmon，各自顯示自己的能量欄位，flux 欄位共用。Fluxonium 顯示頻率與 |n|、|phi| 曲線。Transmon 沒有矩陣元素能力，只顯示頻率曲線。Load component 依元件 kind 選模型；params.json 只預填 fluxonium。
 Measure registry 啟用獨立 predictor.json user cache。Dialog 持有 versioned PredictorSnapshot 與 SingleFileCaretaker，保存 model 與 nullable params；每次編輯與關閉保存，重建 dialog 還原。Standalone callers 以 enable_parameter_cache(cache_dir=...) 明確啟用與隔離 cache，啟用時立即還原。Cache decode failure 回空 trial 並顯示錯誤，不讀寫 component DocumentStore。

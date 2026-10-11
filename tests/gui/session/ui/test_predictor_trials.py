@@ -157,7 +157,9 @@ def test_dialog_component_prefill_defaults_to_alias_and_stays_detached(
         dialog.load_component("Q1")
         assert dialog.parameters().flux_bias == 0.0
         assert context.read_context().document() == before
-        assert query.params_for_qubit("Q2").EL is None
+        q2 = query.params_for_qubit("Q2")
+        assert isinstance(q2, FluxoniumParams)
+        assert q2.EL is None
     finally:
         dialog.close()
 

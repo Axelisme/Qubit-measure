@@ -15,7 +15,7 @@ from zcu_tools.gui.session.services.predictor import (
     CalibrateFluxBiasRequest,
     PredictFreqRequest,
 )
-from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+from zcu_tools.simulate.parameters import ModelParams, params_class
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 def _source_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> FluxoniumParams:
+) -> ModelParams:
     qubit, direct = params.get("qubit"), params.get("params")
     if (qubit is None) == (direct is None):
         raise RemoteError(
@@ -42,14 +42,9 @@ def _source_params(
             ) from exc
     if not isinstance(direct, dict):
         raise TypeError("Invalid validated parameter object")
-    if direct.get("model") != "fluxonium":
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            "params.model must be 'fluxonium'",
-            reason="invalid_predictor_params",
-        )
+    model = direct.get("model")
     try:
-        return FluxoniumParams.from_mapping(
+        return params_class(str(model)).from_mapping(
             {name: value for name, value in direct.items() if name != "model"}
         )
     except ValueError as exc:
@@ -60,7 +55,7 @@ def _source_params(
 
 def _complete_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> FluxoniumParams:
+) -> ModelParams:
     inputs = _source_params(adapter, params)
     missing = inputs.missing()
     if missing:
@@ -137,13 +132,14 @@ def h_predictor_info(
 ) -> Mapping[str, object]:
     """Return {model, params, missing} for one possibly incomplete source.
 
-    Params retain null unknown fields in GHz/native units. No model is built.
+    model is fluxonium or transmon. Params retain null unknown fields in
+    GHz/native units. No model is built.
     INVALID_PARAMS names source conflicts, unknown qubits or malformed direct
     inputs. The selected point is read as-is, without dialog/alias/cache access.
     """
     inputs = _source_params(adapter, params)
     return {
-        "model": "fluxonium",
+        "model": inputs.model,
         "params": inputs.to_dict(),
         "missing": list(inputs.missing()),
     }

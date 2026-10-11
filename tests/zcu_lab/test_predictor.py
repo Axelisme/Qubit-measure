@@ -56,7 +56,9 @@ def test_params_for_reads_partial_current_point_without_writing(
     assert params == FluxoniumParams(4.3, 1.2, None, 1.75, 3.5, 0.012)
     assert params.missing() == ("EL",)
     assert snapshot(point) == before
-    assert components.params_for(entry.setup.Q2).EJ == 4.1
+    setup_q2 = components.params_for(entry.setup.Q2)
+    assert isinstance(setup_q2, FluxoniumParams)
+    assert setup_q2.EJ == 4.1
 
 
 def test_params_for_keeps_unknown_bias_unknown(entry: ResultEntry) -> None:

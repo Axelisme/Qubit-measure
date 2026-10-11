@@ -4,13 +4,14 @@ import warnings
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields
 from math import isfinite
-from typing import TypedDict, overload
+from typing import ClassVar, Literal, TypedDict, overload
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import root_scalar
 
 from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction, MatrixOperator
+from zcu_tools.simulate.predictor import parameter_number
 
 
 class FluxoniumParameterValues(TypedDict):
@@ -41,6 +42,8 @@ class FluxoniumParams:
     creating or completing one never changes its component or file source.
     """
 
+    model: ClassVar[Literal["fluxonium"]] = "fluxonium"
+
     EJ: float | None = None
     EC: float | None = None
     EL: float | None = None
@@ -61,12 +64,12 @@ class FluxoniumParams:
         if unknown:
             raise ValueError("Unknown parameters: " + ", ".join(sorted(unknown)))
         return cls(
-            EJ=_parameter_number(values, "EJ"),
-            EC=_parameter_number(values, "EC"),
-            EL=_parameter_number(values, "EL"),
-            flux_half=_parameter_number(values, "flux_half"),
-            flux_period=_parameter_number(values, "flux_period"),
-            flux_bias=_parameter_number(values, "flux_bias"),
+            EJ=parameter_number(values, "EJ"),
+            EC=parameter_number(values, "EC"),
+            EL=parameter_number(values, "EL"),
+            flux_half=parameter_number(values, "flux_half"),
+            flux_period=parameter_number(values, "flux_period"),
+            flux_bias=parameter_number(values, "flux_bias"),
         )
 
     def to_dict(self) -> FluxoniumParameterValues:
@@ -122,21 +125,6 @@ class FluxoniumParams:
         if period == 0:
             raise ValueError("flux_period must be nonzero")
         return FluxoniumPredictor((ej, ec, el), half, period, bias)
-
-
-def _parameter_number(values: Mapping[str, object], name: str) -> float | None:
-    value = values.get(name)
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be a number or null")
-    try:
-        number = float(value)
-    except OverflowError as exc:
-        raise ValueError(f"{name} must be finite") from exc
-    if not isfinite(number):
-        raise ValueError(f"{name} must be finite")
-    return number
 
 
 class FluxoniumPredictor:

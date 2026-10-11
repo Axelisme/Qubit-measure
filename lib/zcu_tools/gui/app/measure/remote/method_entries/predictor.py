@@ -18,10 +18,12 @@ _SOURCES = (
         "params",
         JsonType.OBJECT,
         required=False,
-        description="Independent named inputs: {model: 'fluxonium', EJ, EC, EL, "
-        "flux_half, flux_period, flux_bias}. Energies use GHz; affine values use "
-        "native device units. Omitted/null fields are unknown. Supply exactly one "
-        "of qubit or params; no dialog/cache or alias is read.",
+        description="Independent named inputs. Fluxonium: {model: 'fluxonium', EJ, "
+        "EC, EL, flux_half, flux_period, flux_bias}. SQUID transmon: {model: "
+        "'transmon', EJmax, EC, d, flux_half, flux_period, flux_bias}, where d is "
+        "the junction asymmetry. Energies use GHz; affine values use native device "
+        "units. Omitted/null fields are unknown. Supply exactly one of qubit or "
+        "params; no dialog/cache or alias is read.",
     ),
 )
 

@@ -18,6 +18,7 @@ from zcu_tools.resources.entry.schema import ComponentSchema
 from zcu_tools.resources.entry.views import ComponentView
 from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+from zcu_tools.simulate.parameters import ModelParams
 from zcu_tools.simulate.predictor import MatrixPredictor, PredictorParams
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 
 # The user package owns component field meanings. The framework only passes the
 # captured component; no factory metadata, write paths or schema guessing.
-ParamsFor = Callable[[ComponentSchema | ComponentView], FluxoniumParams]
+ParamsFor = Callable[[ComponentSchema | ComponentView], ModelParams]
 
 
 @dataclass(frozen=True)
@@ -134,7 +135,7 @@ class PredictorService:
         self._context = context
         self._params_for = params_for
 
-    def params_for_qubit(self, qubit: str) -> FluxoniumParams:
+    def params_for_qubit(self, qubit: str) -> ModelParams:
         """Read named inputs for one concrete component at the current point.
 
         Names must be public Python identifiers (e.g. Q2), not aliases/paths.

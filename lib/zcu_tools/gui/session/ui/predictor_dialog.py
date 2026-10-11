@@ -1,4 +1,4 @@
-"""Independent fluxonium simulator dialog; edits and calibration remain local.
+"""Independent fluxonium / SQUID transmon simulator dialog; edits and calibration remain local.
 
 The optional device control supplies values only. params.json loads are read-only
 prefill. No operation installs a model or writes a component or source file.
@@ -48,6 +48,9 @@ from zcu_tools.gui.session.ui.predictor_cache import (
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+from zcu_tools.simulate.parameters import ModelParams
+from zcu_tools.simulate.predictor import MatrixPredictor
+from zcu_tools.simulate.transmon import TransmonParams
 
 if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo
@@ -77,6 +80,9 @@ _DEFAULT_TRANSITIONS: list[tuple[int, int]] = [
 _DEFAULT_EJ: float = 4.0
 _DEFAULT_EC: float = 1.0
 _DEFAULT_EL: float = 1.0
+_DEFAULT_EJMAX: float = 20.0
+_DEFAULT_TRANSMON_EC: float = 0.25
+_DEFAULT_ASYMMETRY: float = 0.0
 _DEFAULT_FLUX_HALF: float = 0.0
 _DEFAULT_FLUX_PERIOD: float = 0.005
 _DEFAULT_FLUX_BIAS: float = 0.0
@@ -121,7 +127,7 @@ def _normalize_tracked_transitions(
 
 
 class PredictorDialog(QDialog):
-    """Own detached fluxonium inputs for prediction and local calibration.
+    """Own detached fluxonium or SQUID transmon inputs for prediction and calibration.
 
     device optionally supplies cached/live device values. parameter_provider
     supplies fixed ParameterContext captures for component choices/alias default
@@ -141,7 +147,7 @@ class PredictorDialog(QDialog):
         device: DeviceControlPort | None = None,
         parameter_provider: Callable[[], ParameterContext | None] | None = None,
         persistent_on_close: bool = False,
-        params: FluxoniumParams | None = None,
+        params: ModelParams | None = None,
     ) -> None:
         super().__init__(parent)
         self._pred = predictor
@@ -168,6 +174,8 @@ class PredictorDialog(QDialog):
         self._last_mat_phi_result = None
         self._synced_xlim: tuple[float, float] | None = None
         self._syncing_xlim = False
+        # Matrix curves are an optional model capability, learned from the built model.
+        self._matrix_supported = True
 
         # Root layout: left controls | right tab widget.
         root_layout = QHBoxLayout(self)
@@ -184,6 +192,7 @@ class PredictorDialog(QDialog):
 
         self._model_combo = QComboBox()
         self._model_combo.addItem("Fluxonium", "fluxonium")
+        self._model_combo.addItem("SQUID transmon", "transmon")
         model_form.addRow("Model:", self._model_combo)
 
         self._component_combo = QComboBox()
@@ -218,19 +227,31 @@ class PredictorDialog(QDialog):
         model_form.addRow("params.json:", params_path_holder)
 
         # Energies in GHz; flux anchors and bias in device-value units. Wide
-        # ranges + many decimals allow exploration. FluxoniumParams owns physics
+        # ranges + many decimals allow exploration. The params classes own physics
         # validation; unchecked fields remain unknown rather than zero-filled.
         self._ej_spin = self._make_param_spin(_DEFAULT_EJ)
         self._ec_spin = self._make_param_spin(_DEFAULT_EC)
         self._el_spin = self._make_param_spin(_DEFAULT_EL)
-        model_form.addRow(
-            "Energies:",
-            self._make_param_row(
-                ("EJ", self._ej_spin),
-                ("EC", self._ec_spin),
-                ("EL", self._el_spin),
-            ),
+        self._fluxonium_energies_label = QLabel("Energies:")
+        self._fluxonium_energies_row = self._make_param_row(
+            ("EJ", self._ej_spin),
+            ("EC", self._ec_spin),
+            ("EL", self._el_spin),
         )
+        model_form.addRow(self._fluxonium_energies_label, self._fluxonium_energies_row)
+        # SQUID transmon: EJmax/EC in GHz, d is the dimensionless asymmetry.
+        self._ejmax_spin = self._make_param_spin(_DEFAULT_EJMAX)
+        self._transmon_ec_spin = self._make_param_spin(_DEFAULT_TRANSMON_EC)
+        self._asymmetry_spin = self._make_param_spin(_DEFAULT_ASYMMETRY)
+        self._transmon_energies_label = QLabel("Energies:")
+        self._transmon_energies_row = self._make_param_row(
+            ("EJmax", self._ejmax_spin),
+            ("EC", self._transmon_ec_spin),
+            ("d", self._asymmetry_spin),
+        )
+        model_form.addRow(self._transmon_energies_label, self._transmon_energies_row)
+        self._model_combo.currentIndexChanged.connect(self._sync_model_rows)
+        self._sync_model_rows()
         self._flux_half_spin = self._make_param_spin(_DEFAULT_FLUX_HALF)
         self._flux_period_spin = self._make_param_spin(_DEFAULT_FLUX_PERIOD)
         # flux_bias lives here (was in the old "Load predictor" group).
@@ -427,6 +448,7 @@ class PredictorDialog(QDialog):
         self._parameter_timer.setInterval(_DEBOUNCE_MS)
         self._parameter_timer.timeout.connect(self._refresh_curves)
         self._refresh_components()
+        self._model_combo.currentIndexChanged.connect(self._on_parameters_changed)
         for spin, known in self._known_fields.items():
             spin.valueChanged.connect(self._on_parameters_changed)
             known.toggled.connect(self._on_parameters_changed)
@@ -447,33 +469,54 @@ class PredictorDialog(QDialog):
         self.finished.connect(self._cleanup_subscriptions)
         self.destroyed.connect(self._cleanup_subscriptions)
 
-    def parameters(self) -> FluxoniumParams:
-        """Return the current local trial: GHz energies and native affine inputs.
+    def parameters(self) -> ModelParams:
+        """Return the selected model's local trial: GHz energies and native affine inputs.
 
         Unchecked fields return None. No source/session read or write occurs.
         Invalid physical values are rejected only when queried.
         """
-        return FluxoniumParams(
-            self._parameter_value(self._ej_spin),
-            self._parameter_value(self._ec_spin),
-            self._parameter_value(self._el_spin),
+        affine = (
             self._parameter_value(self._flux_half_spin),
             self._parameter_value(self._flux_period_spin),
             self._parameter_value(self._flux_bias_spin),
         )
+        if self._model_combo.currentData() == "transmon":
+            return TransmonParams(
+                self._parameter_value(self._ejmax_spin),
+                self._parameter_value(self._transmon_ec_spin),
+                self._parameter_value(self._asymmetry_spin),
+                *affine,
+            )
+        return FluxoniumParams(
+            self._parameter_value(self._ej_spin),
+            self._parameter_value(self._ec_spin),
+            self._parameter_value(self._el_spin),
+            *affine,
+        )
 
-    def set_parameters(self, params: FluxoniumParams) -> None:
-        """Replace the detached trial, retaining unknown or invalid physics inputs.
+    def set_parameters(self, params: ModelParams) -> None:
+        """Replace the detached trial and select its model, retaining invalid physics.
 
         None unchecks the field; users check and edit it to complete the model.
         Computation validates physics later. If enabled, only user cache is saved.
         """
         self._updating_parameters = True
         try:
+            self._model_combo.setCurrentIndex(self._model_combo.findData(params.model))
+            if isinstance(params, TransmonParams):
+                energies = (
+                    (self._ejmax_spin, params.EJmax),
+                    (self._transmon_ec_spin, params.EC),
+                    (self._asymmetry_spin, params.d),
+                )
+            else:
+                energies = (
+                    (self._ej_spin, params.EJ),
+                    (self._ec_spin, params.EC),
+                    (self._el_spin, params.EL),
+                )
             for spin, value in (
-                (self._ej_spin, params.EJ),
-                (self._ec_spin, params.EC),
-                (self._el_spin, params.EL),
+                *energies,
                 (self._flux_half_spin, params.flux_half),
                 (self._flux_period_spin, params.flux_period),
                 (self._flux_bias_spin, params.flux_bias),
@@ -490,6 +533,14 @@ class PredictorDialog(QDialog):
         self._refresh_curves()
         self._sync_calibration_button()
         self._save_parameters()
+
+    def _sync_model_rows(self, *_args: object) -> None:
+        """Show only the selected model's energy inputs; keep hidden values untouched."""
+        transmon = self._model_combo.currentData() == "transmon"
+        self._fluxonium_energies_label.setVisible(not transmon)
+        self._fluxonium_energies_row.setVisible(not transmon)
+        self._transmon_energies_label.setVisible(transmon)
+        self._transmon_energies_row.setVisible(transmon)
 
     def selected_component(self) -> str | None:
         """Return the concrete prefill selection, or None with no choices.
@@ -541,7 +592,8 @@ class PredictorDialog(QDialog):
 
     def capture_persisted_state(self) -> PredictorSnapshot:
         """Capture detached model/params for user cache, not component storage."""
-        return PredictorSnapshot(params=self.parameters())
+        params = self.parameters()
+        return PredictorSnapshot(model=params.model, params=params)
 
     def restore_persisted_state(self, state: PredictorSnapshot) -> None:
         """Restore a validated cache snapshot into editable local fields only."""
@@ -753,6 +805,9 @@ class PredictorDialog(QDialog):
             self._ej_spin,
             self._ec_spin,
             self._el_spin,
+            self._ejmax_spin,
+            self._transmon_ec_spin,
+            self._asymmetry_spin,
             self._flux_half_spin,
             self._flux_period_spin,
             self._flux_bias_spin,
@@ -792,7 +847,7 @@ class PredictorDialog(QDialog):
 
         Range is intentionally permissive so exploratory inputs (any positive
         energy ratio, arbitrary flux anchors) are accepted; the only hard guard
-        (flux_period != 0) belongs to FluxoniumParams validation.
+        (flux_period != 0) belongs to the model params validation.
         """
         spin = TrimDoubleSpinBox()
         spin.setRange(-1e6, 1e6)
@@ -855,6 +910,7 @@ class PredictorDialog(QDialog):
             model = self.parameters().build_predictor()
         except ValueError:
             return None, None
+        self._matrix_supported = isinstance(model, MatrixPredictor)
         return model.value_to_flux, model.flux_to_value
 
     # ------------------------------------------------------------------
@@ -1275,24 +1331,24 @@ class PredictorDialog(QDialog):
             return
 
         # ── Matrix element curves (both operators, one tab each) ───────────
-        if not self._render_matrix_curve(
-            "n",
-            self._mat_n_canvas,
-            grid,
-            highlights,
-            marker_value,
-            flux_to_value,
-            value_to_flux,
-        ):
-            return
-        if not self._render_matrix_curve(
-            "phi",
-            self._mat_phi_canvas,
-            grid,
-            highlights,
-            marker_value,
-            flux_to_value,
-            value_to_flux,
+        self._sync_matrix_capability()
+        matrix_canvases: tuple[
+            tuple[Literal["n", "phi"], PredictorCurveCanvas], ...
+        ] = (
+            ("n", self._mat_n_canvas),
+            ("phi", self._mat_phi_canvas),
+        )
+        if self._matrix_supported and not all(
+            self._render_matrix_curve(
+                operator,
+                canvas,
+                grid,
+                highlights,
+                marker_value,
+                flux_to_value,
+                value_to_flux,
+            )
+            for operator, canvas in matrix_canvases
         ):
             return
 
@@ -1300,6 +1356,20 @@ class PredictorDialog(QDialog):
 
         # Refresh all value columns for the new marker position.
         self._update_value_columns()
+
+    def _sync_matrix_capability(self) -> None:
+        """Hide matrix tabs/columns for models without optional matrix elements."""
+        supported = self._matrix_supported
+        for index, canvas, column in (
+            (1, self._mat_n_canvas, _COL_MAG_N),
+            (2, self._mat_phi_canvas, _COL_MAG_PHI),
+        ):
+            self._tab_widget.setTabEnabled(index, supported)
+            self._table.setColumnHidden(column, not supported)
+            if not supported:
+                canvas.clear()
+        if not supported and self._tab_widget.currentIndex() != 0:
+            self._tab_widget.setCurrentIndex(0)
 
     def _render_matrix_curve(
         self,
