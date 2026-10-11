@@ -372,6 +372,17 @@ def _agent_endpoint(
     return resolved, commit
 
 
+def _range_scalar_value(value: ScalarValue) -> float | ScalarValue:
+    if (
+        isinstance(value, EvalValue)
+        or value.raw is not None
+        or value.error is not None
+        or not isinstance(value.value, (int, float))
+    ):
+        return value
+    return float(value.value)
+
+
 class SweepField(CfgField):
     spec: SweepSpec
 
@@ -423,8 +434,8 @@ class SweepField(CfgField):
     def get_value(self) -> SweepValue:
         self._require_open()
         return SweepValue(
-            start=self._edge_value(self.start_field.get_value()),
-            stop=self._edge_value(self.stop_field.get_value()),
+            start=_range_scalar_value(self.start_field.get_value()),
+            stop=_range_scalar_value(self.stop_field.get_value()),
             expts=self._expts,
             step=self._step,
             auto_norm=False,
@@ -500,11 +511,9 @@ class SweepField(CfgField):
         self.on_change.emit(self.get_value())
 
     def update_expts(self, expts: int) -> None:
-        self._require_open()
         self.set_value(SweepEditor.update_expts(self.get_value(), expts))
 
     def update_step(self, step: float) -> None:
-        self._require_open()
         self.set_value(SweepEditor.update_step(self.get_value(), step))
 
     def refresh_expressions(self) -> None:
@@ -527,17 +536,6 @@ class SweepField(CfgField):
         raise TypeError(
             f"Sweep edge expects float or EvalValue, got {type(value).__name__}"
         )
-
-    @staticmethod
-    def _edge_value(value: ScalarValue) -> float | ScalarValue:
-        if (
-            isinstance(value, EvalValue)
-            or value.raw is not None
-            or value.error is not None
-            or not isinstance(value.value, (int, float))
-        ):
-            return value
-        return float(value.value)
 
     def _on_child_change(self, *_: object) -> None:
         if self._updating:
@@ -604,7 +602,7 @@ class CenteredSweepField(CfgField):
     def get_value(self) -> CenteredSweepValue:
         self._require_open()
         return CenteredSweepValue(
-            center=self._center_value(self.center_field.get_value()),
+            center=_range_scalar_value(self.center_field.get_value()),
             span=self._span,
             expts=self._expts,
             step=self._step,
@@ -726,17 +724,6 @@ class CenteredSweepField(CfgField):
         raise TypeError(
             f"Centered sweep center expects float or EvalValue, got {type(value).__name__}"
         )
-
-    @staticmethod
-    def _center_value(value: ScalarValue) -> float | ScalarValue:
-        if (
-            isinstance(value, EvalValue)
-            or value.raw is not None
-            or value.error is not None
-            or not isinstance(value.value, (int, float))
-        ):
-            return value
-        return float(value.value)
 
     def _validate_value(self, value: CenteredSweepValue) -> None:
         points = resolved_direct_number(value.expts)
