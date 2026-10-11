@@ -9,6 +9,7 @@ from zcu_tools.resources.entry.registry import ComponentRegistry, RoleSpec
 from zcu_tools.resources.entry.schema import ComponentSchema
 from zcu_tools.resources.entry.views import ComponentView, FieldView
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+from zcu_tools.simulate.predictor import PredictorInputError
 from zcu_tools.simulate.transmon import TransmonParams
 
 Frequency = Annotated[
@@ -125,11 +126,11 @@ def params_for(
     EJmax/EC/d; energies are GHz and d is dimensionless. Both read flux_half,
     flux_period and ext.flux_bias in native device units. Missing/unset fields
     stay None. No read refreshes, edits, adds defaults or builds a model.
-    Unsupported kinds and nonnumeric/nonfinite supplied fields raise ValueError
+    Unsupported kinds and nonnumeric/nonfinite supplied fields raise PredictorInputError
     naming the field.
     """
     if component.kind not in ("qubit/fluxonium", "qubit/transmon"):
-        raise ValueError(f"Unsupported predictor kind: {component.kind}")
+        raise PredictorInputError(f"Unsupported predictor kind: {component.kind}")
     ext = getattr(component, "ext", None)
     if isinstance(ext, dict):
         bias = ext.get("flux_bias")
@@ -159,7 +160,7 @@ def _optional_number(value: object, name: str) -> float | None:
         or not isinstance(value, (float, int))
         or not isfinite(value)
     ):
-        raise ValueError(f"{name} must be a finite number or None")
+        raise PredictorInputError(f"{name} must be a finite number or None")
     return float(value)
 
 

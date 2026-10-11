@@ -46,10 +46,14 @@ from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshotCodec,
 )
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
-from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
+from zcu_tools.gui.widgets.spinbox import FiniteFloatSpinBox, TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
-from zcu_tools.simulate.predictor import CalibrationResult, MatrixPredictor
+from zcu_tools.simulate.predictor import (
+    CalibrationResult,
+    MatrixPredictor,
+    PredictorInputError,
+)
 from zcu_tools.simulate.transmon import TransmonParams
 
 if TYPE_CHECKING:
@@ -157,7 +161,7 @@ class PredictorDialog(QDialog):
         self._live_mode = False
         self._suppress_state_changed = False
         self._updating_parameters = False
-        self._known_fields: dict[TrimDoubleSpinBox, QCheckBox] = {}
+        self._known_fields: dict[FiniteFloatSpinBox, QCheckBox] = {}
         self._caretaker: SingleFileCaretaker[PredictorSnapshot, None] | None = None
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
@@ -497,7 +501,8 @@ class PredictorDialog(QDialog):
     def set_parameters(self, params: ModelParams) -> None:
         """Replace the detached trial and select its model, retaining invalid physics.
 
-        None unchecks the field; users check and edit it to complete the model.
+        Every finite float is retained exactly, including subnormals. None unchecks
+        the field; users check and edit it to complete the model.
         Computation validates physics later. If enabled, only user cache is saved.
         """
         self._updating_parameters = True
@@ -599,7 +604,7 @@ class PredictorDialog(QDialog):
         """Restore a validated cache snapshot into editable local fields only."""
         self.set_parameters(state.params)
 
-    def _parameter_value(self, spin: TrimDoubleSpinBox) -> float | None:
+    def _parameter_value(self, spin: FiniteFloatSpinBox) -> float | None:
         return spin.value() if self._known_fields[spin].isChecked() else None
 
     def _save_parameters(self) -> None:
@@ -655,7 +660,7 @@ class PredictorDialog(QDialog):
     def _on_load_component_clicked(self) -> None:
         try:
             self.load_component()
-        except (ExpectedError, ValueError) as exc:
+        except (ExpectedError, PredictorInputError) as exc:
             self._set_status(str(exc), error=True)
 
     def predict_frequency(
@@ -841,20 +846,13 @@ class PredictorDialog(QDialog):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_param_spin(default: float = 0.0) -> TrimDoubleSpinBox:
-        """A wide-range, high-precision spinbox for an editable model param.
-
-        Range is intentionally permissive so exploratory inputs (any positive
-        energy ratio, arbitrary flux anchors) are accepted; the only hard guard
-        (flux_period != 0) belongs to the model params validation.
-        """
-        spin = TrimDoubleSpinBox()
-        spin.setRange(-1e6, 1e6)
-        spin.setDecimals(12)
+    def _make_param_spin(default: float = 0.0) -> FiniteFloatSpinBox:
+        """Preserve every finite model float; physical validation belongs to the model."""
+        spin = FiniteFloatSpinBox()
         spin.setValue(default)
         return spin
 
-    def _make_param_row(self, *pairs: tuple[str, TrimDoubleSpinBox]) -> QWidget:
+    def _make_param_row(self, *pairs: tuple[str, FiniteFloatSpinBox]) -> QWidget:
         holder = QWidget()
         row = QHBoxLayout(holder)
         row.setContentsMargins(0, 0, 0, 0)
@@ -907,7 +905,7 @@ class PredictorDialog(QDialog):
         """
         try:
             model = self.parameters().build_predictor()
-        except ValueError:
+        except PredictorInputError:
             return None, None
         self._matrix_supported = isinstance(model, MatrixPredictor)
         return model.value_to_flux, model.flux_to_value
@@ -1149,7 +1147,7 @@ class PredictorDialog(QDialog):
             return ("Live mode keeps calibration read-only.", False)
         try:
             self.parameters().build_predictor()
-        except ValueError as exc:
+        except PredictorInputError as exc:
             return (str(exc), True)
         selected = self._selected_transitions()
         if len(selected) != 1:
@@ -1188,7 +1186,11 @@ class PredictorDialog(QDialog):
         )
         try:
             result = self._pred.calibrate_flux_bias(self.parameters(), req)
-        except (PredictorLoadError, ValueError) as exc:
+        except (PredictorLoadError, PredictorInputError) as exc:
+            self._set_status(str(exc), error=True)
+            return
+        except Exception as exc:
+            logger.exception("predictor calibration failed")
             self._set_status(str(exc), error=True)
             return
         self._display_calibration(result)
@@ -1224,7 +1226,7 @@ class PredictorDialog(QDialog):
                         PredictFreqRequest(value=marker_value, transition=transition),
                     )
                     freq_text = f"{freq:.4f}"
-                except (FailedPreconditionError, ValueError):
+                except (FailedPreconditionError, PredictorInputError):
                     freq_text = "—"
 
                 freq_item = self._table.item(row_idx, _COL_FREQ)
@@ -1273,7 +1275,7 @@ class PredictorDialog(QDialog):
                 ),
             )
             return f"{mat_result.mags[0, 0]:.5f}"
-        except (FailedPreconditionError, ValueError):
+        except (FailedPreconditionError, PredictorInputError):
             return "—"
 
     # ------------------------------------------------------------------
@@ -1296,7 +1298,7 @@ class PredictorDialog(QDialog):
             self._clear_predictor_display()
             try:
                 self.parameters().build_predictor()
-            except ValueError as exc:
+            except PredictorInputError as exc:
                 self._set_status(str(exc), error=True)
             return
 
@@ -1328,7 +1330,7 @@ class PredictorDialog(QDialog):
                 value_to_flux=value_to_flux,
                 flux_to_value=flux_to_value,
             )
-        except (FailedPreconditionError, ValueError) as exc:
+        except (FailedPreconditionError, PredictorInputError) as exc:
             self._set_status(str(exc), error=True)
             return
         except Exception as exc:
@@ -1405,7 +1407,7 @@ class PredictorDialog(QDialog):
                     operator=operator,
                 ),
             )
-        except (FailedPreconditionError, ValueError) as exc:
+        except (FailedPreconditionError, PredictorInputError) as exc:
             self._set_status(str(exc), error=True)
             return False
         except Exception as exc:

@@ -16,6 +16,7 @@ from zcu_tools.gui.session.services.predictor import (
     PredictFreqRequest,
 )
 from zcu_tools.simulate.parameters import ModelParams, params_class
+from zcu_tools.simulate.predictor import PredictorInputError
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -36,7 +37,7 @@ def _source_params(
             raise TypeError("Invalid validated qubit name")
         try:
             return adapter.predictor_control.params_for_qubit(qubit)
-        except ValueError as exc:
+        except PredictorInputError as exc:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_qubit"
             ) from exc
@@ -47,7 +48,7 @@ def _source_params(
         return params_class(str(model)).from_mapping(
             {name: value for name, value in direct.items() if name != "model"}
         )
-    except ValueError as exc:
+    except PredictorInputError as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_params"
         ) from exc
@@ -89,7 +90,7 @@ def h_predictor_predict(
         frequency = adapter.predictor_control.predict_freq(
             inputs, PredictFreqRequest(float(value), (frm, to))
         )
-    except ValueError as exc:
+    except PredictorInputError as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_params"
         ) from exc
@@ -121,7 +122,7 @@ def h_predictor_calibrate(
         result = adapter.predictor_control.calibrate_flux_bias(
             inputs, CalibrateFluxBiasRequest(float(value), float(frequency), (frm, to))
         )
-    except ValueError as exc:
+    except PredictorInputError as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_params"
         ) from exc

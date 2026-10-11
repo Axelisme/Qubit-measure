@@ -25,10 +25,15 @@ def calibrate_spectrum(
 ) -> CalibrationResult:
     """Invert an even periodic MHz spectrum, without installing a bias.
 
-    Model callers validate transitions and provide their own exact spectrum.
-    Nonfinite inputs/spectra raise ValueError; solver failures propagate. Frequencies
-    within 1e-7 MHz are numerically equal. Sampling resolves separate branches;
-    extrema are refined before root bracketing, including tangential roots.
+    frequencies accepts a finite 1-D flux-quanta grid and returns one MHz value
+    per grid point for the selected transition. zero_bias_flux is the model's
+    computed flux at the measured device value with zero bias; period is the
+    signed nonzero native device change per quantum; target_mhz is measured MHz.
+    Model callers validate physical parameters and measured inputs before this
+    numerical seam. Nonfinite computed flux or spectra raise ordinary ValueError,
+    not PredictorInputError; solver failures propagate without translation.
+    Frequencies within 1e-7 MHz are numerically equal. Sampling resolves separate
+    branches; extrema are refined before root bracketing, including tangencies.
     """
     if not (isfinite(zero_bias_flux) and isfinite(target_mhz)):
         raise ValueError("cur_value and cur_freq must be finite")

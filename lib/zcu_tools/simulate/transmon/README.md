@@ -1,9 +1,14 @@
 # SQUID transmon simulation
 
+**Last updated:** 2026-10-12，explicit predictor input failures
+
 `TransmonParams` holds EJmax and EC in GHz, junction asymmetry d in [0, 1],
 and flux_half, flux_period, flux_bias in native device units. None means unknown.
 `missing()` lists unknown fields. `build_predictor()` rejects incomplete or
-invalid inputs and builds a fresh model. It never reads or changes a component.
+invalid inputs with `simulate.predictor.PredictorInputError` (a ValueError leaf)
+and builds a fresh model. Frontends translate only that explicit input failure;
+ordinary ValueError, nonfinite computed spectra and solver failures retain their
+unexpected diagnostics. It never reads or changes a component.
 
 ## Spectrum and queries
 

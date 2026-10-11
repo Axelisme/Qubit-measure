@@ -12,7 +12,11 @@ from numpy.typing import NDArray
 
 from zcu_tools.simulate._calibration import calibrate_spectrum
 from zcu_tools.simulate.fluxonium.prediction import FluxAffineMap
-from zcu_tools.simulate.predictor import CalibrationResult, parameter_number
+from zcu_tools.simulate.predictor import (
+    CalibrationResult,
+    PredictorInputError,
+    parameter_number,
+)
 
 # Charge states n = -N..N at zero offset charge; converged far beyond the levels
 # a front end can request.
@@ -61,14 +65,16 @@ class TransmonParams:
     def from_mapping(cls, values: Mapping[str, object]) -> TransmonParams:
         """Decode named parameters in the class's GHz/native units, without defaults.
 
-        Omitted/null fields remain unknown. ValueError names unknown keys,
+        Omitted/null fields remain unknown. PredictorInputError names unknown keys,
         nonnumeric/bool or nonfinite values. Physical constraints are checked
         by build_predictor, so partial inputs can still be inspected/edited.
         The source mapping is never changed.
         """
         unknown = values.keys() - {field.name for field in fields(cls)}
         if unknown:
-            raise ValueError("Unknown parameters: " + ", ".join(sorted(unknown)))
+            raise PredictorInputError(
+                "Unknown parameters: " + ", ".join(sorted(unknown))
+            )
         return cls(
             EJmax=parameter_number(values, "EJmax"),
             EC=parameter_number(values, "EC"),
@@ -98,12 +104,12 @@ class TransmonParams:
     def build_predictor(self) -> TransmonPredictor:
         """Build a fresh MHz-query model, without modifying these parameters.
 
-        ValueError names missing fields, nonfinite inputs, nonpositive energies
-        or a zero period. No physical or affine value is filled implicitly.
+        PredictorInputError names missing fields, nonfinite inputs, nonpositive
+        energies, d outside [0, 1], or a zero period. No value is filled implicitly.
         """
         missing = self.missing()
         if missing:
-            raise ValueError("Missing parameters: " + ", ".join(missing))
+            raise PredictorInputError("Missing parameters: " + ", ".join(missing))
         ej, ec, asymmetry = self.EJmax, self.EC, self.d
         half, period, bias = self.flux_half, self.flux_period, self.flux_bias
         # Explicit narrowing also keeps the runtime contract valid under python -O.
@@ -115,7 +121,7 @@ class TransmonParams:
             or period is None
             or bias is None
         ):
-            raise ValueError("Missing parameters")
+            raise PredictorInputError("Missing parameters")
         for name, value in (
             ("EJmax", ej),
             ("EC", ec),
@@ -125,13 +131,13 @@ class TransmonParams:
             ("flux_bias", bias),
         ):
             if not isfinite(value):
-                raise ValueError(f"{name} must be finite")
+                raise PredictorInputError(f"{name} must be finite")
             if name in ("EJmax", "EC") and value <= 0:
-                raise ValueError(f"{name} must be positive")
+                raise PredictorInputError(f"{name} must be positive")
         if not 0 <= asymmetry <= 1:
-            raise ValueError("d must be between 0 and 1")
+            raise PredictorInputError("d must be between 0 and 1")
         if period == 0:
-            raise ValueError("flux_period must be nonzero")
+            raise PredictorInputError("flux_period must be nonzero")
         return TransmonPredictor((ej, ec, asymmetry), half, period, bias)
 
 
@@ -144,6 +150,16 @@ class TransmonPredictor:
     (``flux_half`` in device units) is the minimum-EJ point; d = 0 is symmetric
     and EJ vanishes there. Frequencies are MHz. Queries never mutate the model.
     Matrix elements are not provided by this model.
+
+    Constructor params are (EJmax, EC, d), with energies in GHz and dimensionless
+    junction asymmetry d. EJmax/EC must be finite and positive; d must be finite
+    in [0, 1]. flux_half, flux_period and flux_bias are finite native device
+    values in the same units; period is signed and nonzero. The affine is
+    flux = (value + flux_bias - flux_half)/flux_period + 0.5.
+    Direct callers supply validated inputs; TransmonParams.build_predictor()
+    validates completeness and all physical constraints with PredictorInputError.
+    A zero period raises PredictorInputError at construction. Spectrum evaluation
+    is deferred to queries; numerical failures propagate without fallback.
     """
 
     def __init__(
@@ -153,6 +169,13 @@ class TransmonPredictor:
         flux_period: float,
         flux_bias: float,
     ) -> None:
+        """Construct from validated (EJmax [GHz], EC [GHz], d [dimensionless]).
+
+        flux_half is the zero-bias half-flux native value, flux_period the signed
+        native change per quantum, and flux_bias the additive native correction.
+        See the class contract for required finite/physical ranges and failures.
+        No spectrum is computed or source modified during construction.
+        """
         self.params = params
         self._affine = FluxAffineMap(flux_half, flux_period, flux_bias)
 
@@ -197,12 +220,12 @@ class TransmonPredictor:
 
         values is a finite 1-D native device-value grid; transitions is a nonempty
         ordered tuple of nonnegative integer (from, to) levels with from <= to and
-        to <= MAX_LEVEL. Invalid inputs raise ValueError; nothing is mutated.
+        to <= MAX_LEVEL. Invalid inputs raise PredictorInputError; nothing is mutated.
         """
         _validate_transitions(transitions)
         value_arr = np.asarray(values, dtype=np.float64)
         if value_arr.ndim != 1 or not np.all(np.isfinite(value_arr)):
-            raise ValueError("values must be a finite 1-D array")
+            raise PredictorInputError("values must be a finite 1-D array")
         fluxs = self._affine.values_to_flux(value_arr)
         levels = self._levels_ghz(fluxs, max(to for _, to in transitions) + 1)
         rows = [(levels[:, to] - levels[:, frm]) * 1e3 for frm, to in transitions]
@@ -215,13 +238,13 @@ class TransmonPredictor:
 
         All branches participate in smallest-|bias| selection. An unreachable
         target returns nearest actual MHz and clamped=true. Invalid inputs raise
-        ValueError, numerical failures propagate, and no parameters are changed.
+        PredictorInputError; numerical failures propagate and no parameters change.
         """
         _validate_transitions((transition,))
         if transition[0] >= transition[1]:
-            raise ValueError("Calibration needs from-level < to-level")
+            raise PredictorInputError("Calibration needs from-level < to-level")
         if not (isfinite(cur_value) and isfinite(cur_freq)):
-            raise ValueError("cur_value and cur_freq must be finite")
+            raise PredictorInputError("cur_value and cur_freq must be finite")
 
         def frequencies(fluxs: NDArray[np.float64]) -> NDArray[np.float64]:
             levels = self._levels_ghz(fluxs, transition[1] + 1)
@@ -253,11 +276,13 @@ class TransmonPredictor:
 
 def _validate_transitions(transitions: tuple[tuple[int, int], ...]) -> None:
     if not transitions:
-        raise ValueError("transitions must not be empty")
+        raise PredictorInputError("transitions must not be empty")
     for frm, to in transitions:
         if type(frm) is not int or type(to) is not int:
-            raise ValueError(f"Transition levels must be integers, got {(frm, to)}")
+            raise PredictorInputError(
+                f"Transition levels must be integers, got {(frm, to)}"
+            )
         if frm < 0 or to < frm or to > MAX_LEVEL:
-            raise ValueError(
+            raise PredictorInputError(
                 f"Transition must satisfy 0 <= from <= to <= {MAX_LEVEL}, got {(frm, to)}"
             )

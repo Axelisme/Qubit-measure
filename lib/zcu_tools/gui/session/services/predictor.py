@@ -20,7 +20,11 @@ from zcu_tools.resources.qubit_params import QubitParams, QubitParamsError
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
 from zcu_tools.simulate.predictor import CalibrationResult as CalibrateFluxBiasResult
-from zcu_tools.simulate.predictor import MatrixPredictor, PredictorParams
+from zcu_tools.simulate.predictor import (
+    MatrixPredictor,
+    PredictorInputError,
+    PredictorParams,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
@@ -133,24 +137,24 @@ class PredictorService:
         """Read named inputs for one concrete component at the current point.
 
         Names must be public Python identifiers (e.g. Q2), not aliases/paths.
-        ValueError names invalid/unknown components or unsupported physics kinds.
+        PredictorInputError names invalid/unknown components or unsupported physics kinds.
         Missing provider/context raises FailedPreconditionError. EMPTY/source
         faults from ContextService propagate. Missing fields remain None.
         No read refreshes a source, changes aliases or binds a dialog to a qubit.
         """
         if not qubit.isidentifier() or qubit.startswith("_"):
-            raise ValueError(f"Invalid concrete qubit name: {qubit}")
+            raise PredictorInputError(f"Invalid concrete qubit name: {qubit}")
         if self._context is None or self._params_for is None:
             raise FailedPreconditionError(
                 "Component parameter prefill is not configured"
             )
         document = self._context.read_context().document()
         if qubit not in document.components:
-            raise ValueError(f"Unknown qubit component: {qubit}")
+            raise PredictorInputError(f"Unknown qubit component: {qubit}")
         return self._params_for(document.components[qubit])
 
     def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
-        """Return MHz for the explicit params/request; ValueError rejects missing/invalid inputs."""
+        """Return MHz for the explicit params/request; PredictorInputError rejects missing/invalid inputs."""
         return params.build_predictor().predict_freq(req.value, req.transition)
 
     def calibrate_flux_bias(
@@ -158,7 +162,7 @@ class PredictorService:
     ) -> CalibrateFluxBiasResult:
         """Return the model's native bias, actual MHz and clamped status, without writes.
 
-        Missing/invalid params raise ValueError. Non-increasing/negative or
+        Missing/invalid params raise PredictorInputError. Non-increasing/negative or
         noninteger levels raise InvalidInputError. The model owns root selection
         and clamping; numerical failures propagate. No caller recomputes the fit.
         """
@@ -177,7 +181,7 @@ class PredictorService:
     ) -> PredictCurveResult:
         """Return labeled MHz curves using the neutral batch model contract.
 
-        Missing/invalid params or batch inputs raise ValueError. Engine failures
+        Missing/invalid params or batch inputs raise PredictorInputError. Engine failures
         propagate. Returned values are copied; the request arrays are not changed.
         """
         values = np.array(req.values, dtype=np.float64, copy=True)
@@ -193,7 +197,7 @@ class PredictorService:
     ) -> PredictMatrixCurveResult:
         """Return labeled dimensionless magnitudes for n/phi, including high levels.
 
-        ValueError rejects missing/invalid inputs. A frequency-only model raises
+        PredictorInputError rejects missing/invalid inputs. A frequency-only model raises
         FailedPreconditionError. Engine errors propagate; inputs are not changed.
         """
         model = params.build_predictor()

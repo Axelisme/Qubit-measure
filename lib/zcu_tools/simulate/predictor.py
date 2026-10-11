@@ -11,6 +11,22 @@ import numpy as np
 from numpy.typing import NDArray
 
 
+class PredictorInputError(ValueError):
+    """Caller-correctable simulator input failure, with ValueError ancestry.
+
+    Named-parameter decoding/building rejects unknown fields, missing values,
+    nonnumeric/bool/nonfinite inputs, invalid energies/asymmetry and zero period.
+    Query validators reject invalid values, shapes, operators and transitions.
+    The message names the invalid input. No GUI or wire metadata is attached.
+    Ordinary ValueError, nonfinite computed spectra and solver exceptions are
+    not input failures; frontends must preserve their diagnostic traceback.
+    """
+
+    def __init__(self, message: str) -> None:
+        """Describe the caller-correctable input failure, naming its field or constraint."""
+        super().__init__(message)
+
+
 @dataclass(frozen=True)
 class CalibrationResult:
     """Read-only spectrum inversion result, not installed in any model or source.
@@ -33,7 +49,7 @@ class Predictor(Protocol):
     Flux coordinates are in flux quanta, not folded into a single period.
     Batch inputs are finite one-dimensional arrays; transitions are a nonempty
     ordered tuple of nonnegative integer (from, to) levels with to >= from.
-    Invalid transitions raise ValueError; numerical and array-shape failures
+    Invalid transitions raise PredictorInputError; numerical and array-shape failures
     propagate from the selected engine.
     No query changes parameters or inputs, reads hardware or writes storage.
     """
@@ -67,7 +83,7 @@ class Predictor(Protocol):
         """Return E_to - E_from in MHz at a finite native device value.
 
         Levels are nonnegative integers; equal levels return zero. Negative
-        levels raise ValueError. Engine failures propagate without state changes.
+        levels raise PredictorInputError. Engine failures propagate without state changes.
         """
         ...
 
@@ -117,7 +133,7 @@ class MatrixPredictor(Predictor, Protocol):
         fluxs has shape (n_values,) in flux quanta; dimensionless absolute
         |<from|operator|to>| rows have shape (n_transitions, n_values).
         n is the charge operator, phi the phase operator. High levels are allowed.
-        Unknown operators or invalid batch inputs raise ValueError; see Predictor.
+        Unknown operators or invalid batch inputs raise PredictorInputError; see Predictor.
         """
         ...
 
@@ -134,12 +150,12 @@ class PredictorParams(Protocol):
         ...
 
     def build_predictor(self) -> Predictor:
-        """Build a fresh query model; ValueError names missing or invalid inputs."""
+        """Build a fresh query model; PredictorInputError names missing or invalid inputs."""
         ...
 
 
 def parameter_number(values: Mapping[str, object], name: str) -> float | None:
-    """Decode one nullable finite numeric field; reject bool/non-numbers with ValueError.
+    """Decode one nullable finite numeric field; reject bool/non-numbers with PredictorInputError.
 
     A missing key or null is unknown. Does not mutate the mapping.
     """
@@ -147,11 +163,11 @@ def parameter_number(values: Mapping[str, object], name: str) -> float | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be a number or null")
+        raise PredictorInputError(f"{name} must be a number or null")
     try:
         number = float(value)
     except OverflowError as exc:
-        raise ValueError(f"{name} must be finite") from exc
+        raise PredictorInputError(f"{name} must be finite") from exc
     if not isfinite(number):
-        raise ValueError(f"{name} must be finite")
+        raise PredictorInputError(f"{name} must be finite")
     return number

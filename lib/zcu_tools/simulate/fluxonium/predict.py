@@ -10,7 +10,11 @@ from numpy.typing import NDArray
 
 from zcu_tools.simulate._calibration import calibrate_spectrum
 from zcu_tools.simulate.fluxonium.prediction import FluxoniumPrediction, MatrixOperator
-from zcu_tools.simulate.predictor import CalibrationResult, parameter_number
+from zcu_tools.simulate.predictor import (
+    CalibrationResult,
+    PredictorInputError,
+    parameter_number,
+)
 
 
 class FluxoniumParameterValues(TypedDict):
@@ -54,14 +58,16 @@ class FluxoniumParams:
     def from_mapping(cls, values: Mapping[str, object]) -> FluxoniumParams:
         """Decode named parameters in the class's GHz/native units, without defaults.
 
-        Omitted/null fields remain unknown. ValueError names unknown keys,
+        Omitted/null fields remain unknown. PredictorInputError names unknown keys,
         nonnumeric/bool or nonfinite values. Physical constraints are checked
         by build_predictor, so partial inputs can still be inspected/edited.
         The source mapping is never changed.
         """
         unknown = values.keys() - {field.name for field in fields(cls)}
         if unknown:
-            raise ValueError("Unknown parameters: " + ", ".join(sorted(unknown)))
+            raise PredictorInputError(
+                "Unknown parameters: " + ", ".join(sorted(unknown))
+            )
         return cls(
             EJ=parameter_number(values, "EJ"),
             EC=parameter_number(values, "EC"),
@@ -91,12 +97,12 @@ class FluxoniumParams:
     def build_predictor(self) -> FluxoniumPredictor:
         """Build a fresh MHz-query model, without modifying these parameters.
 
-        ValueError names missing fields, nonfinite inputs, nonpositive energies
+        PredictorInputError names missing fields, nonfinite inputs, nonpositive energies
         or a zero period. No physical or affine value is filled implicitly.
         """
         missing = self.missing()
         if missing:
-            raise ValueError("Missing parameters: " + ", ".join(missing))
+            raise PredictorInputError("Missing parameters: " + ", ".join(missing))
         ej, ec, el = self.EJ, self.EC, self.EL
         half, period, bias = self.flux_half, self.flux_period, self.flux_bias
         # Explicit narrowing also keeps the runtime contract valid under python -O.
@@ -108,7 +114,7 @@ class FluxoniumParams:
             or period is None
             or bias is None
         ):
-            raise ValueError("Missing parameters")
+            raise PredictorInputError("Missing parameters")
         for name, value in (
             ("EJ", ej),
             ("EC", ec),
@@ -118,11 +124,11 @@ class FluxoniumParams:
             ("flux_bias", bias),
         ):
             if not isfinite(value):
-                raise ValueError(f"{name} must be finite")
+                raise PredictorInputError(f"{name} must be finite")
             if name in ("EJ", "EC", "EL") and value <= 0:
-                raise ValueError(f"{name} must be positive")
+                raise PredictorInputError(f"{name} must be positive")
         if period == 0:
-            raise ValueError("flux_period must be nonzero")
+            raise PredictorInputError("flux_period must be nonzero")
         return FluxoniumPredictor((ej, ec, el), half, period, bias)
 
 
@@ -225,18 +231,18 @@ class FluxoniumPredictor:
     ) -> CalibrationResult:
         """Invert the exact spectrum; see Predictor.calculate_bias for result policy.
 
-        Invalid finite inputs or non-increasing/integer levels raise ValueError.
+        Invalid finite inputs or non-increasing/integer levels raise PredictorInputError.
         Searches every branch, choosing smallest |bias| independent of current
         bias. Unreachable targets return closest actual MHz with clamped=true.
         No parameters change, and numerical failures propagate without fallback.
         """
         frm, to = transition
         if type(frm) is not int or type(to) is not int or frm < 0 or to <= frm:
-            raise ValueError(
+            raise PredictorInputError(
                 "Calibration needs nonnegative integer from-level < to-level"
             )
         if not (isfinite(cur_value) and isfinite(cur_freq)):
-            raise ValueError("cur_value and cur_freq must be finite")
+            raise PredictorInputError("cur_value and cur_freq must be finite")
 
         def frequencies(fluxs: NDArray[np.float64]) -> NDArray[np.float64]:
             # Convert using this engine's affine; requested flux, not its current
@@ -317,7 +323,7 @@ class FluxoniumPredictor:
         values is a finite 1-D native device-value grid. transitions is a nonempty
         ordered tuple of nonnegative integer (from, to) levels with to >= from.
         Rows/columns preserve request order and duplicates. Invalid transitions
-        raise ValueError; numerical errors propagate. Inputs/model are unchanged.
+        raise PredictorInputError; numerical errors propagate. Inputs/model are unchanged.
         """
         return self._engine.predict_frequencies_mhz(values, transitions, cutoff=40)
 
@@ -332,7 +338,7 @@ class FluxoniumPredictor:
         values is a finite 1-D native grid; fluxs are flux quanta. transitions is
         nonempty with nonnegative integer levels and to >= from. n is charge,
         phi is phase; dimensionless absolute rows include levels above one.
-        Invalid transitions/operators raise ValueError; numerical errors propagate.
+        Invalid transitions/operators raise PredictorInputError; numerical errors propagate.
         """
         return self._engine.predict_matrix_elements(values, transitions, operator)
 
@@ -405,7 +411,7 @@ def _frequency_engine_transition(
 ) -> tuple[tuple[int, int], float]:
     frm, to = transition
     if frm < 0 or to < 0:
-        raise ValueError(f"Transition levels must be >= 0, got {transition}")
+        raise PredictorInputError(f"Transition levels must be >= 0, got {transition}")
     if to >= frm:
         return transition, 1.0
     return (to, frm), -1.0
@@ -414,9 +420,9 @@ def _frequency_engine_transition(
 def _matrix_engine_transition(transition: tuple[int, int]) -> tuple[int, int]:
     frm, to = transition
     if frm < 0 or to < 0:
-        raise ValueError(f"Transition levels must be >= 0, got {transition}")
+        raise PredictorInputError(f"Transition levels must be >= 0, got {transition}")
     if frm > 1 or to > 1:
-        raise ValueError(
+        raise PredictorInputError(
             "FluxoniumPredictor matrix elements support only levels 0 and 1; "
             f"got {transition}"
         )
