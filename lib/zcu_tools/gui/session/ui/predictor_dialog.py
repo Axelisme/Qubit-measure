@@ -9,14 +9,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent, QShowEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -35,9 +37,14 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+from zcu_tools.gui.session.persistence import PersistenceError, SingleFileCaretaker
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
+from zcu_tools.gui.session.ui.predictor_cache import (
+    PredictorSnapshot,
+    PredictorSnapshotCodec,
+)
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
@@ -114,11 +121,12 @@ def _normalize_tracked_transitions(
 
 
 class PredictorDialog(QDialog):
-    """Load a fluxonium model and predict or calibrate through predictor.
+    """Own detached fluxonium inputs for prediction and local calibration.
 
     device optionally supplies cached/live device values. parameter_provider
-    supplies a fixed ParameterContext for each frequency preview or calibration
-    resolve; omitted or None-returning providers allow only pure calculations.
+    supplies fixed ParameterContext captures for component choices/alias default
+    and frequency expressions; omitted or None-returning providers allow only
+    explicit trials. params optionally prefills complete or partial local inputs.
     Unresolved frequency paths disable calibration without substituting a value.
     persistent_on_close hides instead of finishing, retaining the plotted model.
     """
@@ -142,6 +150,9 @@ class PredictorDialog(QDialog):
         self._persistent_on_close = persistent_on_close
         self._live_mode = False
         self._suppress_state_changed = False
+        self._updating_parameters = False
+        self._known_fields: dict[TrimDoubleSpinBox, QCheckBox] = {}
+        self._caretaker: SingleFileCaretaker[PredictorSnapshot, None] | None = None
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
         self.setMinimumHeight(480)
@@ -171,6 +182,27 @@ class PredictorDialog(QDialog):
         model_group = QGroupBox("Model params")
         model_form = QFormLayout(model_group)
 
+        self._model_combo = QComboBox()
+        self._model_combo.addItem("Fluxonium", "fluxonium")
+        model_form.addRow("Model:", self._model_combo)
+
+        self._component_combo = QComboBox()
+        self._component_combo.setMinimumContentsLength(12)
+        component_row = QHBoxLayout()
+        component_row.addWidget(self._component_combo, stretch=1)
+        self._component_refresh_btn = QPushButton("↻")
+        self._component_refresh_btn.setToolTip(
+            "Refresh component choices without loading parameters"
+        )
+        self._component_refresh_btn.clicked.connect(self._refresh_components)
+        component_row.addWidget(self._component_refresh_btn)
+        self._component_load_btn = QPushButton("Load component")
+        self._component_load_btn.clicked.connect(self._on_load_component_clicked)
+        component_row.addWidget(self._component_load_btn)
+        component_holder = QWidget()
+        component_holder.setLayout(component_row)
+        model_form.addRow("Component:", component_holder)
+
         self._params_path_edit = QLineEdit()
         self._params_path_edit.setPlaceholderText("params.json containing fluxdep_fit")
         params_path_row = QHBoxLayout()
@@ -186,8 +218,8 @@ class PredictorDialog(QDialog):
         model_form.addRow("params.json:", params_path_holder)
 
         # Energies in GHz; flux anchors and bias in device-value units. Wide
-        # ranges + many decimals so exploratory inputs are accepted; the only hard
-        # guard (flux_period != 0) lives in _on_apply_model_params.
+        # ranges + many decimals allow exploration. FluxoniumParams owns physics
+        # validation; unchecked fields remain unknown rather than zero-filled.
         self._ej_spin = self._make_param_spin(_DEFAULT_EJ)
         self._ec_spin = self._make_param_spin(_DEFAULT_EC)
         self._el_spin = self._make_param_spin(_DEFAULT_EL)
@@ -390,7 +422,15 @@ class PredictorDialog(QDialog):
         self._rebuild_table()
         self._refresh_device_selector()
 
-        # Pre-fill with current predictor state.
+        self._parameter_timer = QTimer(self)
+        self._parameter_timer.setSingleShot(True)
+        self._parameter_timer.setInterval(_DEBOUNCE_MS)
+        self._parameter_timer.timeout.connect(self._refresh_curves)
+        self._refresh_components()
+        for spin, known in self._known_fields.items():
+            spin.valueChanged.connect(self._on_parameters_changed)
+            known.toggled.connect(self._on_parameters_changed)
+
         if params is not None:
             self.set_parameters(params)
         else:
@@ -410,30 +450,161 @@ class PredictorDialog(QDialog):
     def parameters(self) -> FluxoniumParams:
         """Return the current local trial: GHz energies and native affine inputs.
 
-        No source/session read or write occurs. This retained numeric UI exposes
-        all six fields; support for editing unknown fields belongs to the next
-        dialog slice. Invalid physical values are rejected when queried.
+        Unchecked fields return None. No source/session read or write occurs.
+        Invalid physical values are rejected only when queried.
         """
         return FluxoniumParams(
-            self._ej_spin.value(),
-            self._ec_spin.value(),
-            self._el_spin.value(),
-            self._flux_half_spin.value(),
-            self._flux_period_spin.value(),
-            self._flux_bias_spin.value(),
+            self._parameter_value(self._ej_spin),
+            self._parameter_value(self._ec_spin),
+            self._parameter_value(self._el_spin),
+            self._parameter_value(self._flux_half_spin),
+            self._parameter_value(self._flux_period_spin),
+            self._parameter_value(self._flux_bias_spin),
         )
 
     def set_parameters(self, params: FluxoniumParams) -> None:
-        """Prefill this dialog from complete parameters, without changing their source.
+        """Replace the detached trial, retaining unknown or invalid physics inputs.
 
-        This numeric UI cannot represent None; ValueError names missing/invalid
-        inputs before changing any field. No model is installed in the session.
+        None unchecks the field; users check and edit it to complete the model.
+        Computation validates physics later. If enabled, only user cache is saved.
         """
-        model = params.build_predictor()
-        self._populate_model_fields(*model.params, model.flux_half, model.flux_period)
-        self._flux_bias_spin.setValue(model.flux_bias)
+        self._updating_parameters = True
+        try:
+            for spin, value in (
+                (self._ej_spin, params.EJ),
+                (self._ec_spin, params.EC),
+                (self._el_spin, params.EL),
+                (self._flux_half_spin, params.flux_half),
+                (self._flux_period_spin, params.flux_period),
+                (self._flux_bias_spin, params.flux_bias),
+            ):
+                self._known_fields[spin].setChecked(value is not None)
+                spin.setEnabled(value is not None and not self._live_mode)
+                if value is not None:
+                    spin.setValue(value)
+                else:
+                    spin.clear()
+        finally:
+            self._updating_parameters = False
+        self._parameter_timer.stop()
         self._refresh_curves()
         self._sync_calibration_button()
+        self._save_parameters()
+
+    def selected_component(self) -> str | None:
+        """Return the concrete prefill selection, or None with no choices.
+
+        Selection alone never loads parameters or binds the trial to a component.
+        """
+        return self._component_combo.currentText() or None
+
+    def load_component(self, qubit: str | None = None) -> None:
+        """Prefill current-point params via injected params_for; never write back.
+
+        Omit qubit to use the selector (initially alias qubit, when bound).
+        Unknown/unsupported component and unavailable context errors propagate.
+        Missing fields remain None. Loading is explicit, not live binding.
+        """
+        name = qubit if qubit is not None else self.selected_component()
+        if name is None:
+            raise FailedPreconditionError("No qubit component selected")
+        params = self._pred.params_for_qubit(name)
+        self.set_parameters(params)
+        index = self._component_combo.findText(name)
+        if index >= 0:
+            self._component_combo.setCurrentIndex(index)
+
+    def enable_parameter_cache(self, *, cache_dir: Path | None = None) -> None:
+        """Restore and enable versioned user-cache persistence for this trial.
+
+        None uses SingleFileCaretaker's existing zcu_tools/gui user-cache root
+        (platformdirs, with a temporary-directory fallback). An explicit directory
+        isolates a caller's cache. The file is predictor.json, never a component
+        DocumentStore. Enabling restores immediately, replacing current inputs;
+        subsequent edits and close save only local model/params via atomic replace.
+        Read, version or data errors restore an empty trial and display an error.
+        Save I/O errors leave the trial editable and display an error. Calling
+        twice raises ValueError rather than silently changing the cache owner.
+        """
+        if self._caretaker is not None:
+            raise ValueError("Parameter cache is already enabled")
+        caretaker = SingleFileCaretaker(
+            self,
+            codec=PredictorSnapshotCodec(),
+            filename="predictor.json",
+            cache_dir=cache_dir,
+        )
+        outcome = caretaker.restore_all()
+        self._caretaker = caretaker
+        if outcome.load_error is not None:
+            self._set_status(str(outcome.load_error), error=True)
+
+    def capture_persisted_state(self) -> PredictorSnapshot:
+        """Capture detached model/params for user cache, not component storage."""
+        return PredictorSnapshot(params=self.parameters())
+
+    def restore_persisted_state(self, state: PredictorSnapshot) -> None:
+        """Restore a validated cache snapshot into editable local fields only."""
+        self.set_parameters(state.params)
+
+    def _parameter_value(self, spin: TrimDoubleSpinBox) -> float | None:
+        return spin.value() if self._known_fields[spin].isChecked() else None
+
+    def _save_parameters(self) -> None:
+        if self._caretaker is not None:
+            try:
+                self._caretaker.flush()
+            except PersistenceError as exc:
+                self._set_status(str(exc), error=True)
+
+    def _on_parameters_changed(self, *_args: object) -> None:
+        if self._updating_parameters:
+            return
+        for spin, known in self._known_fields.items():
+            spin.setEnabled(known.isChecked() and not self._live_mode)
+        self._clear_predictor_display()
+        self._sync_calibration_button()
+        missing = self.parameters().missing()
+        if missing:
+            self._set_status("Missing parameters: " + ", ".join(missing), error=True)
+        self._save_parameters()
+        self._parameter_timer.start()
+
+    def _refresh_components(self) -> None:
+        previous = self.selected_component()
+        self._component_combo.clear()
+        try:
+            context = self._parameter_provider()
+            if context is None:
+                return
+            names = [
+                name
+                for name, component in context.document().components.items()
+                if component.kind.startswith("qubit/")
+            ]
+            self._component_combo.addItems(names)
+            preferred = previous
+            if preferred is None:
+                preferred = next(
+                    (
+                        row.resolved
+                        for row in context.resolved_aliases()
+                        if row.alias == "qubit"
+                    ),
+                    None,
+                )
+            if preferred in names:
+                self._component_combo.setCurrentIndex(names.index(preferred))
+        except ExpectedError as exc:
+            self._set_status(str(exc), error=True)
+        finally:
+            self._component_load_btn.setEnabled(self.selected_component() is not None)
+
+    def _on_load_component_clicked(self) -> None:
+        try:
+            self.load_component()
+        except (ExpectedError, ValueError) as exc:
+            self._set_status(str(exc), error=True)
 
     def predict_frequency(
         self, value: float, transition: tuple[int, int] = (0, 1)
@@ -505,12 +676,18 @@ class PredictorDialog(QDialog):
         self.state_changed.emit()
 
     def reject(self) -> None:
+        self._save_parameters()
+        self._parameter_timer.stop()
+        self._debounce_timer.stop()
         if self._persistent_on_close:
             self.hide()
             return
         super().reject()
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
+        self._save_parameters()
+        self._parameter_timer.stop()
+        self._debounce_timer.stop()
         if self._persistent_on_close:
             if a0 is not None:
                 a0.ignore()
@@ -532,6 +709,7 @@ class PredictorDialog(QDialog):
             self._set_status("Live predictor view", error=False)
             return
         self._refresh_device_selector()
+        self._refresh_components()
         selected = self._selected_device_name()
         if selected is not None:
             self._apply_cached_device_value(selected)
@@ -586,6 +764,15 @@ class PredictorDialog(QDialog):
             self._calibration_freq_field,
         ):
             widget.setEnabled(enabled)
+        for spin, known in self._known_fields.items():
+            known.setEnabled(enabled)
+            spin.setEnabled(enabled and known.isChecked())
+        self._model_combo.setEnabled(enabled)
+        self._component_combo.setEnabled(enabled)
+        self._component_refresh_btn.setEnabled(enabled)
+        self._component_load_btn.setEnabled(
+            enabled and self.selected_component() is not None
+        )
         if self._device_combo is not None:
             self._device_combo.setEnabled(enabled)
         if self._device_refresh_btn is not None:
@@ -613,14 +800,19 @@ class PredictorDialog(QDialog):
         spin.setValue(default)
         return spin
 
-    @staticmethod
-    def _make_param_row(*pairs: tuple[str, TrimDoubleSpinBox]) -> QWidget:
+    def _make_param_row(self, *pairs: tuple[str, TrimDoubleSpinBox]) -> QWidget:
         holder = QWidget()
         row = QHBoxLayout(holder)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
         for label, spin in pairs:
-            row.addWidget(QLabel(label))
+            known = QCheckBox(label)
+            known.setToolTip(
+                "Checked: known input. Uncheck for unknown; check to enter a value."
+            )
+            known.setChecked(True)
+            self._known_fields[spin] = known
+            row.addWidget(known)
             row.addWidget(spin, stretch=1)
         return holder
 
@@ -635,16 +827,6 @@ class PredictorDialog(QDialog):
         layout.addWidget(toolbar)
         layout.addWidget(canvas, stretch=1)
         return page, toolbar
-
-    def _populate_model_fields(
-        self, ej: float, ec: float, el: float, flux_half: float, flux_period: float
-    ) -> None:
-        """Set the five energy/flux-anchor spinboxes (no install side effect)."""
-        self._ej_spin.setValue(ej)
-        self._ec_spin.setValue(ec)
-        self._el_spin.setValue(el)
-        self._flux_half_spin.setValue(flux_half)
-        self._flux_period_spin.setValue(flux_period)
 
     def _clear_predictor_display(self) -> None:
         self._synced_xlim = None
@@ -1049,6 +1231,11 @@ class PredictorDialog(QDialog):
 
         value_to_flux, flux_to_value = self._make_affine()
         if value_to_flux is None or flux_to_value is None:
+            self._clear_predictor_display()
+            try:
+                self.parameters().build_predictor()
+            except ValueError as exc:
+                self._set_status(str(exc), error=True)
             return
 
         # Build value grid from the default flux window.

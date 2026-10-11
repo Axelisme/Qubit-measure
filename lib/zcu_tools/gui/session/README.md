@@ -125,4 +125,6 @@ introduced.
 齊全且有效才建立中性 query model。Service 不持有 installed model，不讀 dialog。
 App 注入使用者的 params_for，把當前 capture 中的具體元件轉成參數。
 Framework 不猜元件欄位，也不 import 使用者套件。查詢與 Calibrate 不寫元件或版本。
-目前 dialog 保留 numeric fluxonium trial UI；component 選單、unknown 欄位 UI 與 user-cache 保存由後續 dialog slice 完成。
+Dialog 的元件選單初始選 alias qubit；Load component 才經注入的 params_for 預填，選取或切換工作點不改 trial。欄位勾選代表已知，取消勾選保留 None；缺項會明示，完整且有效才計算。
+模型選單目前接 Fluxonium；SQUID transmon 由後續模型 slice 加入。
+Measure registry 啟用獨立 predictor.json user cache。Dialog 持有 versioned PredictorSnapshot 與 SingleFileCaretaker，保存 model 與 nullable params；每次編輯與關閉保存，重建 dialog 還原。Standalone callers 以 enable_parameter_cache(cache_dir=...) 明確啟用與隔離 cache，啟用時立即還原。Cache decode failure 回空 trial 並顯示錯誤，不讀寫 component DocumentStore。
