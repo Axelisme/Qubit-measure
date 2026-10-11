@@ -129,6 +129,38 @@ def test_reference_children_reject_edit_until_explicit_conversion() -> None:
         draft.close()
 
 
+def test_ref_range_edge_controls_reject_direct_binding_edits() -> None:
+    from zcu_tools.gui.cfg import SweepSpec, SweepValue
+    from zcu_tools.gui.cfg.binding import SweepField
+    from zcu_tools.gui.cfg.resource import CfgInputError, CfgInputReason
+
+    shape = CfgSectionSpec(label="Range", fields={"axis": SweepSpec()})
+    value = CfgSectionValue({"axis": SweepValue(0.0, 1.0, 11, 0.1)})
+    ports = BindingPorts()
+    ports.references[("module", "range")] = ResolvedReference("Range", value)
+    draft = _draft(
+        ports,
+        ReferenceValue("range", value),
+        reference_spec=ReferenceSpec("module", [shape]),
+    )
+    reference = _field(draft)
+    try:
+        assert reference.sub_field is not None
+        axis = reference.sub_field.fields["axis"]
+        assert isinstance(axis, SweepField)
+        with pytest.raises(CfgInputError) as rejected:
+            axis.start_field.set_value(0.2)
+        assert rejected.value.reason is CfgInputReason.READONLY
+        reference.convert_reference_to_inline()
+        assert reference.sub_field is not None
+        inline_axis = reference.sub_field.fields["axis"]
+        assert isinstance(inline_axis, SweepField)
+        inline_axis.start_field.set_value(0.2)
+        assert inline_axis.get_value().start == DirectValue(0.2)
+    finally:
+        draft.close()
+
+
 def test_reference_catalog_supplies_compatible_keys_and_linked_snapshot() -> None:
     ports = BindingPorts()
     ports.references[("module", "drive_lib")] = ResolvedReference(
