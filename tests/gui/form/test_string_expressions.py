@@ -149,17 +149,17 @@ def test_string_expressions_obey_choices_and_pydantic_constraints(
 
 
 class FirstSelector(FormModel):
-    """String and numeric intrinsic tags select the same structural branch."""
+    """An ordinary string tag selects the short-name branch."""
 
-    kind: Literal["first", 1] = "first"
-    name: str = "literal"
+    kind: Literal["first"] = "first"
+    name: str = Field(default="short", max_length=10)
 
 
 class SecondSelector(FormModel):
-    """Another branch keeps its own string and numeric tag identity."""
+    """Another string tag selects a branch with a different name constraint."""
 
-    kind: Literal["second", 2] = "second"
-    name: str = "literal"
+    kind: Literal["second"] = "second"
+    name: str = Field(default="a sufficiently long name", min_length=20)
 
 
 class SelectorForm(FormModel):
@@ -168,16 +168,46 @@ class SelectorForm(FormModel):
     branch: Annotated[FirstSelector | SecondSelector, Field(discriminator="kind")]
 
 
-@pytest.mark.parametrize("tag", ["first", "second", 1, 2])
+class NumericFirstSelector(FormModel):
+    """An ordinary numeric tag selects the short-name branch."""
+
+    kind: Literal[1] = 1
+    name: str = Field(default="short", max_length=10)
+
+
+class NumericSecondSelector(FormModel):
+    """A second numeric tag selects a branch with a different name constraint."""
+
+    kind: Literal[2] = 2
+    name: str = Field(default="a sufficiently long name", min_length=20)
+
+
+class NumericSelectorForm(FormModel):
+    """Numeric selectors have the same ordinary-only schema as string selectors."""
+
+    branch: Annotated[
+        NumericFirstSelector | NumericSecondSelector, Field(discriminator="kind")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("model", "tag"),
+    [
+        (SelectorForm, "first"),
+        (SelectorForm, "second"),
+        (NumericSelectorForm, 1),
+        (NumericSelectorForm, 2),
+    ],
+)
 def test_structural_selectors_reject_expression_envelopes(
-    name_env: FormEnv, tag: JsonValue
+    name_env: FormEnv, model: type[FormModel], tag: JsonValue
 ) -> None:
-    validator = Draft202012Validator(SelectorForm.input_schema(name_env))
-    assert validator.is_valid({"branch": {"kind": tag}})
-    assert not validator.is_valid({"branch": {"kind": {"expr": "$device"}}})
-    state = FormState(
-        FormInput(SelectorForm, {"branch": {"kind": tag, "name": {"expr": "$device"}}})
+    validator = Draft202012Validator(model.input_schema(name_env))
+    name = "short" if tag in ("first", 1) else "a sufficiently long name"
+    ordinary: dict[str, JsonValue] = {"branch": {"kind": tag, "name": name}}
+    assert validator.is_valid(ordinary)
+    assert not validator.is_valid(
+        {"branch": {"kind": {"expr": "$device"}, "name": "short"}}
     )
-    result = state.result(name_env)
-    assert isinstance(result, SelectorForm), result
-    assert result.branch.kind == tag and result.branch.name == "yoko1"
+    result = FormState(FormInput(model, ordinary)).result(name_env)
+    assert isinstance(result, model), result
