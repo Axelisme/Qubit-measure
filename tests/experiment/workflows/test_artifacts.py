@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,17 @@ from pydantic import TypeAdapter
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.workflows import (
+    Aborted,
+    Done,
+    Engine,
+    EnginePorts,
+    Next,
+    Run,
+    Step,
+    TunableChange,
+    WorkflowEnv,
+)
 from zcu_tools.experiment.workflows.artifacts import RunArtifacts
 from zcu_tools.experiment.workflows.encoding import encode_record
 from zcu_tools.experiment.workflows.journal import (
@@ -38,6 +50,21 @@ from zcu_tools.experiment.workflows.models import (
     Completed,
     RunIdentity,
     RunPaths,
+)
+
+from ._engine_fakes import (
+    START,
+    Plan,
+    Rig,
+    State,
+    Tunables,
+    save_integer,
+)
+from ._engine_fakes import (
+    Cfg as EngineCfg,
+)
+from ._engine_fakes import (
+    ManualClock as EngineClock,
 )
 
 
@@ -554,3 +581,308 @@ def test_journal_rejects_external_path_references(
     with pytest.raises(ValueError, match="relative paths"):
         artifacts.append(IterationStarted(1, 0, 0, reference))
     assert artifacts.journal_path.read_bytes() == before
+
+
+@pytest.fixture
+def record_rig(tmp_path: Path) -> Rig:
+    return Rig(tmp_path)
+
+
+def iteration_document(rig: Rig, call_seq: int) -> dict[str, object]:
+    """Read a completed invocation through its on-disk JSON contract."""
+    path = rig.paths.data_root / f"iter/{call_seq:06d}/record.json"
+    assert path.is_file(), f"Completed invocation {call_seq} must have record.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_iteration_record_contains_inputs_and_journal_result_after_next_and_done(
+    record_rig: Rig,
+) -> None:
+    rig = record_rig
+
+    def experiment(run: Run[EngineCfg]) -> int:
+        return run.cfg.value * 10
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        assert not (env.iter_dir.parent / "record.json").exists()
+        if state.index == plan.count:
+            return Done()
+        yield from env.run(experiment, EngineCfg(tun.value), save=save_integer)
+        state.index += 1
+        return Next(tun.value, state)
+
+    rig.start(step, plan=Plan(count=1, values=[10, 20]))
+    assert not tuple(rig.paths.data_root.rglob("record.json"))
+    final = rig.engine.execute("run")
+    assert (final.lifecycle, final.committed_seq) == ("done", 1)
+    committed = iteration_document(rig, 1)
+    finished = iteration_document(rig, 2)
+    for document in (committed, finished):
+        assert set(document) == {
+            "format",
+            "format_version",
+            "identity",
+            "workflow",
+            "plan",
+            "tunables",
+            "started",
+            "result",
+        }
+        assert document["format"] == "zcu-workflow-iteration"
+        assert document["format_version"] == 1
+        assert document["identity"] == rig.events()[0]["identity"]
+        assert document["workflow"] == "example"
+        assert document["plan"] == {"count": 1, "values": [10, 20]}
+        assert document["tunables"] == {"value": 1}
+    assert committed["started"] == {
+        "call_seq": 1,
+        "commit_seq": 0,
+        "revision": 0,
+        "kind": "iteration_started",
+    }
+    assert committed["result"] == {
+        "kind": "step_committed",
+        "call_seq": 1,
+        "commit_seq": 1,
+        "revision": 0,
+        "encoded_record": {"mode": "json", "value": 1, "error": None},
+        "iteration_dir": "iter/000001",
+        "run_files": ["runs/01-experiment.h5"],
+    }
+    assert finished["started"] == {
+        "call_seq": 2,
+        "commit_seq": 1,
+        "revision": 0,
+        "kind": "iteration_started",
+    }
+    assert finished["result"] == {
+        "kind": "step_finished",
+        "call_seq": 2,
+        "revision": 0,
+        "iteration_dir": "iter/000002",
+        "run_files": [],
+        "outcome": "done",
+        "reason": None,
+    }
+    assert (
+        rig.paths.data_root / "iter/000001/runs/01-experiment.h5"
+    ).read_text() == "1:10"
+    assert rig.engine.records("run")[0].encoded_record.value == 1
+    assert not tuple(rig.paths.data_root.rglob("*.tmp.json"))
+
+
+def test_iteration_record_pause_resume_retains_captured_tunables(
+    record_rig: Rig,
+) -> None:
+    rig = record_rig
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if state.index == plan.count:
+            return Done()
+        yield from env.wait_until(START + timedelta(seconds=1))
+        state.index += 1
+        return Next(tun.value, state)
+
+    def change_and_pause(_signal: StopSignal) -> None:
+        rig.engine.update_tunables(
+            "run",
+            (TunableChange("value", 8),),
+            expected_revision=0,
+            actor=Actor("agent", "test"),
+        )
+        rig.engine.pause("run")
+
+    rig.clock.on_wait = change_and_pause
+    rig.start(step, plan=Plan(count=1))
+    assert rig.engine.execute("run").lifecycle == "paused"
+    discarded = iteration_document(rig, 1)
+    assert discarded["tunables"] == {"value": 1}
+    assert discarded["started"] == {
+        "call_seq": 1,
+        "commit_seq": 0,
+        "revision": 0,
+        "kind": "iteration_started",
+    }
+    assert discarded["result"] == {
+        "kind": "step_discarded",
+        "call_seq": 1,
+        "revision": 0,
+        "iteration_dir": "iter/000001",
+        "run_files": [],
+        "reason": "pause",
+    }
+    assert rig.engine.records("run") == ()
+    rig.clock.on_wait = None
+    rig.engine.resume("run")
+    assert rig.engine.execute("run").lifecycle == "done"
+    resumed = iteration_document(rig, 2)
+    assert resumed["tunables"] == {"value": 8}
+    assert resumed["started"] == {
+        "call_seq": 2,
+        "commit_seq": 0,
+        "revision": 1,
+        "kind": "iteration_started",
+    }
+    assert rig.engine.records("run")[0].encoded_record.value == 8
+    assert iteration_document(rig, 1) == discarded
+
+
+@pytest.mark.parametrize("outcome", ["failed", "aborted", "stop", "interrupt"])
+def test_iteration_record_preserves_failure_abort_and_stop_classification(
+    record_rig: Rig,
+    outcome: str,
+) -> None:
+    rig = record_rig
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if outcome == "failed":
+            raise ValueError("original workflow cause")
+        if outcome == "aborted":
+            return Aborted("quality rejected")
+        if outcome == "interrupt":
+            raise KeyboardInterrupt()
+        rig.engine.stop("run")
+        yield from env.wait_until(START)
+        return Done()
+
+    rig.start(step)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == (
+        outcome if outcome in ("failed", "aborted") else "stopped"
+    )
+    document = iteration_document(rig, 1)
+    result = document["result"]
+    assert isinstance(result, dict)
+    assert result == {
+        key: value
+        for key, value in rig.events()[-2].items()
+        if key not in ("format_version", "seq", "run_id", "time")
+    }
+    if outcome == "failed":
+        assert result["kind"] == "step_failed"
+        assert result["error"]["message"] == "original workflow cause"
+    elif outcome == "aborted":
+        assert result["kind"] == "step_finished"
+        assert result["reason"] == "quality rejected"
+    else:
+        assert result["kind"] == "step_discarded"
+        assert result["reason"] == "stop"
+    assert rig.engine.records("run") == ()
+
+
+class JournalObservingClock(EngineClock):
+    """Observe a real journal append through the injected clock port."""
+
+    before_now: Callable[[], None] | None = None
+
+    def now(self) -> datetime:
+        observer = self.before_now
+        self.before_now = None
+        if observer is not None:
+            observer()
+        return super().now()
+
+
+def test_iteration_record_is_absent_until_result_is_written_to_journal(
+    record_rig: Rig,
+) -> None:
+    rig = record_rig
+    clock = JournalObservingClock()
+    rig.engine = Engine(
+        EnginePorts(rig.plots, rig.progress, clock, context=7, devices=rig.devices)
+    )
+    observed: list[str] = []
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        path = env.iter_dir.parent / "record.json"
+        assert not path.exists()
+        if state.index == 1:
+            iteration_document(rig, 1)
+            return Done()
+
+        def before_result_append() -> None:
+            assert rig.kinds()[-1] == "iteration_started"
+            assert not path.exists()
+            observed.append("no record before journal result")
+
+        state.index += 1
+        yield from env.wait_until(START)
+        clock.before_now = before_result_append
+        return Next(tun.value, state)
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "done"
+    assert observed == ["no record before journal result"]
+    iteration_document(rig, 2)
+
+
+def test_iteration_record_replace_failure_logs_and_keeps_commits_and_next_state(
+    record_rig: Rig,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rig = record_rig
+    reached: list[int] = []
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        reached.append(state.index)
+        if state.index == 0:
+            # A real filesystem conflict fails replace, not journal or run files.
+            (env.iter_dir.parent / "record.json").mkdir()
+        elif state.index == 1:
+            assert rig.kinds()[-2:] == ("step_committed", "iteration_started")
+            assert len(rig.engine.records("run")) == 1
+        else:
+            return Done()
+        state.index += 1
+        yield from env.wait_until(START)
+        return Next(tun.value, state)
+
+    rig.start(step)
+    final = rig.engine.execute("run")
+    assert (final.lifecycle, final.committed_seq) == ("done", 2)
+    assert reached == [0, 1, 2]
+    # Later invocations still publish their own summaries and state is committed.
+    iteration_document(rig, 2)
+    iteration_document(rig, 3)
+    assert [record.commit_seq for record in rig.engine.records("run")] == [1, 2]
+    assert "step_failed" not in rig.kinds()
+    errors = [record for record in caplog.records if record.exc_info is not None]
+    assert any(
+        "record" in record.getMessage().lower()
+        and isinstance(record.exc_info[1], OSError)
+        for record in errors
+    )
+    assert (rig.paths.data_root / "iter/000001/record.json").is_dir()
+
+
+def test_iteration_record_publication_replaces_instead_of_editing_destination(
+    record_rig: Rig,
+) -> None:
+    rig = record_rig
+    external = rig.root / "external.json"
+    external.write_text("unrelated file", encoding="utf-8")
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        yield from env.wait_until(START)
+        # A real destination symlink distinguishes replace from in-place writes.
+        (env.iter_dir.parent / "record.json").symlink_to(external)
+        return Done()
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "done"
+    path = rig.paths.data_root / "iter/000001/record.json"
+    assert not path.is_symlink()
+    assert iteration_document(rig, 1)["format"] == "zcu-workflow-iteration"
+    assert external.read_text(encoding="utf-8") == "unrelated file"
