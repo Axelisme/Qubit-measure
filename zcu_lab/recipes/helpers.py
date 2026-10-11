@@ -1,0 +1,296 @@
+"""Frequency and native-flux policy composed from generic recipe cfg operations."""
+
+from dataclasses import dataclass
+from math import isfinite
+from typing import TypeGuard
+
+from zcu_tools.mcp.measure.recipe import (
+    MissingParameter,
+    RecipeExpression,
+    RecipeFieldEdit,
+    RecipeNeedsParameters,
+    RecipeTab,
+)
+from zcu_tools.mcp.measure.recipe_capture import SweepSources
+from zcu_tools.mcp.measure.session import GuiRpcError
+
+
+def _finite(value: object) -> TypeGuard[int | float]:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and isfinite(value)
+    )
+
+
+def _points(expts: object) -> None:
+    if expts is not None and (
+        isinstance(expts, bool) or not isinstance(expts, int) or expts < 2
+    ):
+        raise ValueError("expts must be an integer of at least two")
+
+
+def _frequency_fields(tab: RecipeTab, field: str) -> tuple[list[str], str | None]:
+    node = tab.read_field(field)
+    if node.kind == "reference":
+        if "ro_freq" in node.children:
+            paths = [f"{field}.ro_freq"]
+        elif "pulse_cfg" in node.children and "ro_cfg" in node.children:
+            paths = [f"{field}.pulse_cfg.freq", f"{field}.ro_cfg.ro_freq"]
+        else:
+            raise GuiRpcError("Unsupported readout shape", reason="invalid_cfg")
+        return paths, node.reference
+    if node.kind != "scalar":
+        raise ValueError(f"Not a frequency field: {field}")
+    ancestors = field.split(".")[:-1]
+    while ancestors:
+        parent = tab.read_field(".".join(ancestors))
+        if parent.kind == "reference":
+            return [field], parent.reference
+        ancestors.pop()
+    return [field], None
+
+
+def _usable_frequency(tab: RecipeTab, field: str) -> bool:
+    state = tab.read_field(field)
+    value = state.input
+    return bool(
+        state.valid
+        and value is not None
+        and value.error is None
+        and value.validation_error is None
+        and _finite(value.resolved)
+    )
+
+
+def set_frequency(
+    tab: RecipeTab,
+    field: str,
+    frequency_mhz: float | None = None,
+    *,
+    calibration: str,
+    prefer_library: bool = True,
+    required: str,
+) -> None:
+    """Select explicit, usable library, or calibrated frequency in MHz.
+
+    tab is opened; field is a dotted scalar frequency or readout reference root.
+    Both pulse/readout and single-frequency readout shapes are supported.
+    calibration is a caller-owned logical scalar path (not a formula). required
+    names the missing tool parameter when no source is usable. Explicit finite
+    nonboolean frequency_mhz wins; otherwise prefer_library enables current
+    valid library leaf selection, followed by finite calibration. Supplied values
+    carry explicit provenance; library:<root> and calibration labels persist.
+    Validate all leaves before one batch edit; retained library leaves cause no
+    edit. Invalid explicit values raise ValueError; absent sources raise
+    RecipeNeedsParameters with no edit. Invalid cfg and source/connection errors
+    propagate without fallback or retry. Calibration uses a GUI expression.
+    """
+    if frequency_mhz is not None and not _finite(frequency_mhz):
+        raise ValueError("frequency_mhz must be finite and not boolean")
+    paths, reference = _frequency_fields(tab, field)
+    library = (
+        tab.read_library_root(reference)
+        if frequency_mhz is None and prefer_library
+        else None
+    )
+    needs_calibration = frequency_mhz is None and any(
+        library is None or not _usable_frequency(tab, path) for path in paths
+    )
+    calibrated = tab.read_value(calibration) if needs_calibration else None
+    edits: list[RecipeFieldEdit] = []
+    retained: dict[str, str] = {}
+    for path in paths:
+        if frequency_mhz is not None:
+            edits.append(RecipeFieldEdit(path, frequency_mhz, "explicit"))
+        elif library is not None and _usable_frequency(tab, path):
+            retained[path] = f"library:{library}"
+        elif _finite(calibrated):
+            edits.append(
+                RecipeFieldEdit(path, RecipeExpression(__expr=calibration), calibration)
+            )
+        else:
+            raise RecipeNeedsParameters(
+                (
+                    MissingParameter(
+                        required,
+                        f"Provide an explicit frequency, valid library, or calibrated {calibration}",
+                    ),
+                )
+            )
+    tab.set_fields(edits)
+    for path in paths:
+        if not _usable_frequency(tab, path):
+            raise GuiRpcError(f"Invalid {path} frequency", reason="invalid_cfg")
+    for path, label in retained.items():
+        tab.retain_source(path, label)
+
+
+@dataclass(frozen=True)
+class FrequencySweepCalibration:
+    """Caller-owned numeric frequency-range calibration policy.
+
+    frequency_path and linewidth_path are nonblank logical scalar paths, such as
+    $resonator.freq and $resonator.kappa, not arithmetic formulas. Both values
+    use MHz. span_linewidths is a finite positive full-span multiplier: 3 means
+    start=center-1.5*linewidth and stop=center+1.5*linewidth. It is not an endpoint
+    coefficient. The helper validates the policy before any read or sweep edit.
+    """
+
+    frequency_path: str
+    linewidth_path: str
+    span_linewidths: float
+
+
+def _calibrated_endpoints(
+    tab: RecipeTab,
+    calibration: FrequencySweepCalibration,
+    center_mhz: float | None,
+    span_mhz: float | None,
+) -> tuple[float, float]:
+    """Read omitted calibration values and compute finite increasing MHz edges.
+
+    Explicit values and policy have passed preflight. Report missing center/span
+    together without edits; reject invalid computed edges before returning.
+    """
+    missing: list[MissingParameter] = []
+    center = (
+        tab.read_value(calibration.frequency_path) if center_mhz is None else center_mhz
+    )
+    if not _finite(center):
+        missing.append(
+            MissingParameter(
+                "center_mhz", f"No finite {calibration.frequency_path} calibration"
+            )
+        )
+    span = span_mhz
+    if span is None:
+        width = tab.read_value(calibration.linewidth_path)
+        if _finite(width) and width > 0:
+            span = calibration.span_linewidths * width
+        if span is None or not _finite(span) or span <= 0:
+            missing.append(
+                MissingParameter(
+                    "span_mhz",
+                    f"No finite positive {calibration.linewidth_path} linewidth",
+                )
+            )
+    if missing:
+        raise RecipeNeedsParameters(tuple(missing))
+    if not _finite(center) or not _finite(span):
+        raise ValueError("center and span must be finite")
+    start, stop = center - span / 2, center + span / 2
+    if (
+        not _finite(start)
+        or not _finite(stop)
+        or stop <= start
+        or not _finite(stop - start)
+    ):
+        raise ValueError("frequency range must be finite and increasing")
+    return float(start), float(stop)
+
+
+def set_frequency_sweep(
+    tab: RecipeTab,
+    field: str,
+    *,
+    calibration: FrequencySweepCalibration,
+    center_mhz: float | None = None,
+    span_mhz: float | None = None,
+    expts: int | None = None,
+) -> None:
+    """Write numeric MHz endpoints using explicit values or current calibration.
+
+    tab is an opened recipe tab; field names its dotted sweep path. calibration
+    is the caller-owned path/full-width policy described by FrequencySweepCalibration.
+    Missing center/span reads these paths now, then computes center +/- span/2.
+    expts must be an integer >=2; None retains the GUI count. Explicit values
+    carry explicit provenance; derived edges retain calibration/linewidth labels.
+    Missing/nonfinite center or nonpositive/nonfinite/bool linewidth reports all
+    missing center_mhz/span_mhz via RecipeNeedsParameters without sweep edits.
+    Invalid explicit inputs raise ValueError before reads/edits. Source errors
+    propagate without fallback/retry. Native cfg failures propagate from tab.
+    """
+    _points(expts)
+    if not calibration.frequency_path.strip() or not calibration.linewidth_path.strip():
+        raise ValueError("calibration paths must be non-empty logical scalar paths")
+    if not _finite(calibration.span_linewidths) or calibration.span_linewidths <= 0:
+        raise ValueError("span_linewidths must be finite and positive")
+    if center_mhz is not None and not _finite(center_mhz):
+        raise ValueError("center_mhz must be finite and not boolean")
+    if span_mhz is not None and (not _finite(span_mhz) or span_mhz <= 0):
+        raise ValueError("span_mhz must be finite and positive")
+    state = tab.read_field(field)
+    if state.kind != "sweep":
+        raise ValueError(f"Not a sweep cfg field: {field}")
+    start, stop = _calibrated_endpoints(tab, calibration, center_mhz, span_mhz)
+    edge_source = (
+        "explicit"
+        if center_mhz is not None and span_mhz is not None
+        else "gui_calibration"
+        if center_mhz is None and span_mhz is None
+        else calibration.frequency_path
+        if center_mhz is None
+        else "gui_linewidth"
+    )
+    sources: SweepSources = {
+        "start": edge_source,
+        "stop": edge_source,
+        "expts": "explicit",
+    }
+    tab.set_sweep(field, start=start, stop=stop, expts=expts, sources=sources)
+
+
+def set_flux_sweep(
+    tab: RecipeTab,
+    field: str,
+    *,
+    start: float | None,
+    stop: float | None,
+    expts: int | None = None,
+) -> None:
+    """Write explicit distinct native flux endpoints, without unit conversion.
+
+    tab is opened; field is a dotted sweep path. start/stop are finite nonboolean
+    native coordinates in either direction. expts is integer >=2 or None to
+    retain GUI count. Invalid endpoints/count raise ValueError before any edit.
+    Native cfg/connection errors propagate without retry. Sources are explicit
+    for supplied values and gui_default for omitted count.
+    """
+    _points(expts)
+    if not _finite(start) or not _finite(stop) or start == stop:
+        raise ValueError("flux endpoints must both be finite and distinct")
+    tab.set_sweep(
+        field,
+        start=start,
+        stop=stop,
+        expts=expts,
+        sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
+    )
+
+
+def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
+    """Select a registered flux device after exact cached-snapshot unit validation.
+
+    tab is opened; name/unit are nonblank strings. unit must match snapshot unit
+    exactly, including explicitly requested native. Missing/blank/none snapshot
+    units or mismatch raise GuiRpcError(invalid_device); unknown-device errors
+    propagate from the owner. Validate before editing dev.flux_dev/flux_unit.
+    Never connect/setup a device, convert coordinates, or retry failures.
+    """
+    if not name or not name.strip():
+        raise ValueError("flux device name must be non-empty")
+    if not unit or not unit.strip():
+        raise ValueError("flux unit must be non-empty")
+    tab.read_field("dev.flux_dev")
+    observed = tab.read_device(name).unit
+    if not isinstance(observed, str) or not observed.strip() or observed == "none":
+        raise GuiRpcError(
+            "Flux device has no usable flux coordinate", reason="invalid_device"
+        )
+    if unit != observed:
+        raise GuiRpcError(
+            "Flux unit does not match the device coordinate", reason="invalid_device"
+        )
+    tab.set("dev.flux_dev", name)
+    tab.set("flux_unit", observed)

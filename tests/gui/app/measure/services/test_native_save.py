@@ -89,6 +89,7 @@ from tests.resources.entry.fakes import (
     registry_state,
     restore_registry,
 )
+from zcu_lab.definitions import ALIAS_PRESET
 
 
 class RoleSavingAdapter(SavingAdapter):
@@ -228,6 +229,7 @@ def role_application(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
     services = build_app_services(
+        alias_preset=ALIAS_PRESET,
         state=state,
         bus=bus,
         registry=registry,
