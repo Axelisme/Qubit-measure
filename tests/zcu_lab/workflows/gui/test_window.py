@@ -18,6 +18,7 @@ from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QStacke
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.device import DeviceInfo
 from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.experiment.native_persistence import load_run_with_metadata, save_run
 from zcu_tools.experiment.workflows import (
     Actor,
     Done,
@@ -55,6 +56,7 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.resources.entry.fakes import registry_state, restore_registry
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.components import QubitSchema
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.plan import T1PlanForm
@@ -2942,6 +2944,101 @@ def test_window_tunables_journal_failure_reraises_the_original_cause(
     window.stop("tuning")
     window.close()
     window.close()
+
+
+@pytest.mark.parametrize("starter", ["gui", "mcp"])
+@pytest.mark.parametrize("device", ["flux", "offline-device"])
+def test_default_device_alias_start_and_native_save_use_the_run_capture(
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
+    mcp_tools: ToolTable,
+    starter: str,
+    device: str,
+    tmp_path: Path,
+) -> None:
+    window, harness, entry = run_attachment
+    context = harness.services.context
+    context.set_alias_rows(
+        (
+            AliasRow("qubit", "Q1"),
+            AliasRow("source", device),
+            AliasRow("flux_dev", "$source"),
+        )
+    )
+    window.prepare_forms()
+    plan = [e for e in _start_plan_batch(inputs) if e["path"] != ["flux_dev"]]
+    for edit in plan:
+        if edit["path"] == ["fluxes", "values"]:
+            edit["value"] = [inputs.flux_value]
+    tunables: list[FormWrite] = [
+        {"path": ["cal", "span_mhz"], "value": 2.0},
+        {"path": ["cal", "rabi_start_factor"], "value": 0.125},
+        {"path": ["rounds"], "value": 2},
+    ]
+    run_id = "alias-" + starter
+    if starter == "gui":
+        window.plan_panel.state.write(
+            {tuple(e["path"]): e["value"] for e in plan}, window.plan_panel.env
+        )
+        window.tunables_panel.state.write(
+            {tuple(e["path"]): e["value"] for e in tunables}, FormEnv()
+        )
+        token = window.start(run_id)
+    else:
+        receipt = None
+        start_error = None
+        try:
+            receipt = mcp_tools["workflows_workflow_start"]["handler"](
+                {"run_id": run_id, "plan": plan, "tunables": tunables}
+            )
+        except RuntimeError as exc:
+            start_error = exc
+        assert start_error is None, start_error
+        assert isinstance(receipt, dict)
+        token = receipt["operation_id"]
+    # No membership check at Start, even for an unknown device name.
+    assert isinstance(token, int), token
+    assert window.plan_panel.state.input.data["flux_dev"] == {"expr": "$flux_dev"}
+    context.set_alias_rows(
+        (
+            AliasRow("qubit", "Q1"),
+            AliasRow("source", "later-device"),
+            AliasRow("flux_dev", "$source"),
+        )
+    )
+    harness.complete_segment()
+    status = window.controller.status()
+    assert status is not None
+    engine = window.controller.engine
+    assert engine is not None
+    if device == "offline-device":
+        assert status.lifecycle == "failed" and device in str(status.reason)
+        assert engine.records(run_id) == ()
+        return
+    assert status.lifecycle == "done" and status.committed_seq == 1, status
+    record = engine.records(run_id)[0]
+    source = (
+        entry.database_path
+        / "workflows"
+        / run_id
+        / record.iteration_dir
+        / record.run_files[-1]
+    )
+    spec = T1Exp().persistence_spec()
+    native, metadata = load_run_with_metadata(source, spec=spec)
+    assert native.cfg is not None and native.cfg.dev.flux_dev == "flux"
+    assert metadata.snapshot.roles == {
+        "qubit": "Q1",
+        "source": "flux",
+        "flux_dev": "flux",
+    }
+    # Save again after the live alias edit; neither form input nor history refreshes.
+    destination = tmp_path / "saved-again.h5"
+    save_run(native, destination, spec=spec, metadata=metadata)
+    _, saved = load_run_with_metadata(destination, spec=spec)
+    assert saved.snapshot == metadata.snapshot
+    assert saved.snapshot.roles["flux_dev"] == "flux"
+    assert window.plan_panel.state.input.data["flux_dev"] == {"expr": "$flux_dev"}
 
 
 def _start_plan_batch(_inputs: Inputs) -> list[FormWrite]:

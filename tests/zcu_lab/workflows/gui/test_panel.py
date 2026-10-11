@@ -3,8 +3,9 @@
 from collections.abc import Iterator
 
 import pytest
-from qtpy.QtWidgets import QApplication, QLineEdit
-from zcu_tools.gui.form import FormEnv, FormErrors, FormState
+from qtpy.QtWidgets import QApplication, QLabel, QLineEdit
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -12,6 +13,7 @@ from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan
 from zcu_lab.workflows.gui.panel import T1PlanPanel, T1TunablesPanel
+from zcu_lab.workflows.gui.plan import T1PlanForm
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.t1 import T1Plan
 
@@ -144,3 +146,68 @@ def test_plan_panel_previews_native_plan_and_blocks_incomplete_text(
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+@pytest.mark.parametrize("softlink", [False, True])
+def test_plan_panel_resolves_default_device_alias_in_fixed_preview(
+    qapp: QApplication, inputs: Inputs, softlink: bool
+) -> None:
+    parameters = environment(30.0).parameters
+    assert parameters is not None
+    rows = (
+        (AliasRow("source", "offline-device"), AliasRow("flux_dev", "$source"))
+        if softlink
+        else (AliasRow("flux_dev", "offline-device"),)
+    )
+    captured = parameters.bind_aliases(rows, {})
+    env = FormEnv(parameters=captured)
+    panel = T1PlanPanel(env)
+    try:
+        # Supply acquisition choices only; the device comes from form defaults.
+        choices = inline_input(inputs).data
+        del choices["flux_dev"]
+        data = panel.state.input.data
+        data.update(choices)
+        panel.state.reset(FormInput(T1PlanForm, data))
+        panel.editor.refresh(env)
+        preview = panel.preview(make_plan(inputs).snapshot)
+        assert isinstance(preview, T1Plan), preview
+        assert preview.flux_dev == "offline-device"  # Not in any device catalog.
+        assert panel.state.input.data["flux_dev"] == {"expr": "$flux_dev"}
+        shown = panel.editor.findChild(QLabel, "form.value.flux_dev")
+        assert shown is not None and "offline-device" in shown.text()
+        parameters.bind_aliases((AliasRow("flux_dev", "later-device"),), {})
+        again = panel.preview(make_plan(inputs).snapshot)
+        assert isinstance(again, T1Plan) and again.flux_dev == "offline-device"
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("binding", ["missing", "unbound", "source-free"])
+def test_plan_default_device_alias_is_invalid_without_a_binding(
+    inputs: Inputs, binding: str
+) -> None:
+    parameters = environment(30.0).parameters
+    assert parameters is not None
+    env = (
+        FormEnv()
+        if binding == "source-free"
+        else FormEnv(
+            parameters=parameters.bind_aliases(
+                () if binding == "missing" else (AliasRow("flux_dev", ""),), {}
+            )
+        )
+    )
+    choices = inline_input(inputs).data
+    del choices["flux_dev"]
+    data = T1PlanForm.default_input(env).data
+    data.update(choices)
+    state = FormState(FormInput(T1PlanForm, data))
+    preview = state.preview(env)
+    assert preview.errors is not None
+    assert ("flux_dev",) not in preview.values
+    assert "alias" in preview.errors.messages[("flux_dev",)].lower()
+    assert "flux_dev" in preview.errors.messages[("flux_dev",)]
+    assert state.input.data["flux_dev"] == {"expr": "$flux_dev"}
