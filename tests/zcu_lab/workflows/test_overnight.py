@@ -38,7 +38,6 @@ def test_overnight_commits_fixed_native_pairs_and_round_progress(
     tun = workflows.OvernightTunables(reps=100, rounds=2)
     devices = RecordingDevices()
     driver = FakeDevice(fast_mode=True)
-    driver.connect("memory")
     devices.drivers["flux"] = driver
     paths = RunPaths(tmp_path / "metadata", tmp_path / "data")
     engine = Engine[None](EnginePorts(
@@ -56,14 +55,14 @@ def test_overnight_commits_fixed_native_pairs_and_round_progress(
     try:
         status = engine.execute("overnight")
         assert status.lifecycle == "done", status.reason
-        assert status.commit_seq == 3
+        assert status.committed_seq == 3
         records = engine.records("overnight")
         assert len(records) == 3
         assert devices.captures == 6
         assert devices.values == [("flux", inputs.flux_value)] * 3
-        assert any(p.total == 3 and p.progress == 3 for p in status.progress)
+        assert any(p.total == 3 and p.completed == 3 for p in status.progress)
         for index, record in enumerate(records):
-            data = record.record.value
+            data = record.encoded_record.value
             assert isinstance(data, dict)
             assert data["round_index"] == index
             assert data["flux"] == inputs.flux_value
@@ -90,8 +89,8 @@ def test_overnight_commits_fixed_native_pairs_and_round_progress(
             assert t1.record.cfg.sweep.length.stop == 80.0
             assert t2.record.cfg.sweep.length.stop == 40.0
         journal = [json.loads(line) for line in (paths.metadata_root / "journal.jsonl").read_text().splitlines()]
-        commits = [event for event in journal if event["type"] == "step_committed"]
+        commits = [event for event in journal if event["kind"] == "step_committed"]
         assert len(commits) == 3
         assert [event["run_files"] for event in commits] == [list(record.run_files) for record in records]
     finally:
-        driver.disconnect()
+        driver.close()
