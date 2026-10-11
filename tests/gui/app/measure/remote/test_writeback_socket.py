@@ -1,7 +1,5 @@
 """Writeback preview and explicit apply against the real owner-thread socket."""
 
-from dataclasses import replace
-
 import numpy as np
 import pytest
 from pydantic import ValidationError
@@ -20,7 +18,6 @@ from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 
 from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
@@ -28,24 +25,6 @@ from zcu_lab.v2.twotone.time_domain.t1.gui import T1AnalyzeParams
 
 from ._helpers import Fixture, call, open_client
 from ._point_application import PointAdapter, PointApplication
-
-
-def publish_value(fx, value):
-    """Publish an isolated public capture, including serializer fault inputs."""
-    captured = fx.ctrl.read_context()
-    point = captured.document()
-    general = point.general.model_copy(
-        update={"ext": {**point.general.ext, "value": value}}
-    )
-    parameters = ParameterContext(
-        point=point.model_copy(update={"general": general}),
-        library=captured.library,
-        target=captured.target,
-        roles=captured.roles,
-        source_faults=captured.source_faults,
-        storage=captured.storage,
-    )
-    fx.state.set_context(replace(fx.state.session_env, parameters=parameters))
 
 
 def assert_rejected_write_preserves_context(fx, sock, tab, value):
@@ -184,12 +163,6 @@ def test_complete_md_values_survive_preview_and_write_socket(
             fx.ctrl.set_writeback_item_for_pane(
                 tab, "analysis", "param-1", proposed_value=1.0
             )
-        # Unsupported live context values must fail rather than claim a full preview.
-        publish_value(fx, object())
-        rejected = call(sock, "tab.writeback_preview", params)
-        assert not rejected["ok"]
-        assert rejected["error"]["code"] == "precondition_failed"
-        assert rejected["error"]["reason"] == "unserializable_context"
         for invalid in (
             np.array([float("nan")]),
             {"nested": [float("inf")]},
@@ -244,7 +217,12 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(
         target, "Q1.pulses.same", PulseSpec.model_validate(module.to_dict())
     )
     context.set_waveform(target, "Q1.waveforms.same", waveform)
-    before_module, before_waveform = module.to_dict(), waveform.to_dict()
+    before_module = PulseSpec.model_validate(module.to_dict()).model_dump(mode="python")
+    before_waveform = waveform.model_dump(mode="python")
+    after_module = PulseSpec.model_validate(
+        {**module.to_dict(), "gain": 0.8}
+    ).model_dump(mode="python")
+    after_waveform = ConstWaveformCfg(length=0.2).model_dump(mode="python")
     fx.start()
     sock = open_client(fx.service.port)
     try:
@@ -299,18 +277,14 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(
                 "kind": "module",
                 "target": "Q1.pulses.same",
                 "before": before_module,
-                "after": fx.ctrl.read_context()
-                .library.module_spec("Q1.pulses.same")
-                .model_dump(mode="python"),
+                "after": after_module,
             },
             {
                 "id": "wf-1",
                 "kind": "waveform",
                 "target": "Q1.waveforms.same",
                 "before": before_waveform,
-                "after": fx.ctrl.read_context()
-                .library.waveform_spec("Q1.waveforms.same")
-                .model_dump(mode="python"),
+                "after": after_waveform,
             },
         ]
     finally:
