@@ -128,9 +128,12 @@ def build_session_services(
     ``driver_factory`` defaults to the device service's built-in hardware factory
     when omitted; ``device_registry`` defaults to a new session-owned
     DeviceManager. Callers sharing drivers must supply the same registry.
-    alias_rows supplies the app's ordered session-memory defaults; ContextService
-    initializes an empty primary row once from the registered sole candidate.
-    Empty rows enable no aliases. Syntax/order errors propagate at construction.
+    alias_rows supplies the caller's ordered fallback for each entry without a
+    saved alias table. ContextService initializes an empty primary row on that
+    entry's first nonempty point from the registered sole candidate. Saved tables
+    are authoritative, including empty rows. Explicit Apply saves to the entry;
+    ordinary set_alias_rows remains memory-only. Empty defaults enable no aliases.
+    Syntax/order errors propagate at construction.
     """
     value_registry = ValueRegistry()
     device = DeviceService(

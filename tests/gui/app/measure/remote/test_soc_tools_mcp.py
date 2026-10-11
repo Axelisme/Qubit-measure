@@ -118,7 +118,10 @@ def test_simulation_initialize_binds_live_flux_and_reuses_gui_environment(
             "rpc_call",
             {
                 "method": "device.setup",
-                "params": {"name": "fake_flux", "updates": {"value": value}},
+                "params": {
+                    "name": "fake_flux",
+                    "cfg": {**snapshot["info"], "value": value},
+                },
             },
         )
         assert (

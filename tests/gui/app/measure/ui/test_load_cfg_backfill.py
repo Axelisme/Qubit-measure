@@ -1,4 +1,4 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
@@ -24,7 +24,6 @@ from zcu_tools.gui.cfg import DirectValue
 from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -60,11 +59,21 @@ class LoadAdapter(OldAdapter):
 
 
 @pytest.fixture
-def app(qapp):
-    state = State(replace(_make_empty_ctx(), readiness=ContextReadiness.DRAFT))
+def app(qapp, tmp_path):
+    state = State(_make_empty_ctx())
     registry = Registry()
     registry.register("demo", LoadAdapter)
-    ctrl = Controller(state, registry, None, BaseEventBus(), catalog_loader=Loader())
+    ctrl = Controller(
+        state,
+        registry,
+        None,
+        BaseEventBus(),
+        catalog_loader=Loader(),
+        project_root=str(tmp_path),
+    )
+    from zcu_tools.gui.session.context_types import EntryRequest
+
+    ctrl.setup_control.new_entry(EntryRequest("lab"))
     window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
     ctrl.add_view(window)
     window.show()
@@ -278,6 +287,17 @@ def test_qt_load_status_reports_one_overall_disposition(
         if button.text() == "Load Data"
     )
     assert load_button.isEnabled()
+
+    def choose_file():
+        from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
+
+        dialog = window.findChild(RunLoadDialog)
+        assert dialog is not None
+        file_button = dialog.findChild(QPushButton, "load_file")
+        assert file_button is not None
+        file_button.click()
+
+    QTimer.singleShot(0, choose_file)
     load_button.click()
     assert messages == [expected]
 

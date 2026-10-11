@@ -540,7 +540,7 @@ class CfgResource:
         source = self._resolution() if source is None else source
         failures: list[Exception] = []
 
-        def evaluate(expression: str) -> int | float | complex:
+        def evaluate(expression: str) -> int | float | complex | str:
             try:
                 return source.evaluate_expression(expression)
             except InvalidInputError:

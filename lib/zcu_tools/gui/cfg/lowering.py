@@ -44,7 +44,12 @@ _LOCKED_CENTER_ABS_TOL = 1e-12
 
 
 class ExpressionResolver(Protocol):
-    def __call__(self, expr: str, /) -> int | float | complex: ...
+    """Resolve authored text to a fixed-source numeric scalar or name string.
+
+    Raise on unavailable inputs; lowering never substitutes old string results.
+    """
+
+    def __call__(self, expr: str, /) -> int | float | complex | str: ...
 
 
 class ReferenceResolver(Protocol):
@@ -122,7 +127,9 @@ def lower_finished_cfg(
 
     Preserve static/dynamic/lower order. Sweep ranges contain start, stop,
     expts and step as plain data. Reject unsupported literals, tuples and
-    non-string keys at this boundary, without mutating the schema.
+    non-string keys at this boundary, without mutating the schema. String
+    expressions require a resolver and use its fresh name, never cached resolved
+    data. Numeric snapshots retain their existing authority and drift checks.
     """
     validate_finished_cfg(schema, resolve_reference=resolve_reference)
     if resolve_expression is not None:
@@ -143,8 +150,14 @@ def lower_finished_cfg(
 
 
 def _coerce_eval_result(
-    value: int | float | complex, type_: type
-) -> int | float | complex:
+    value: int | float | complex | str, type_: type
+) -> int | float | complex | str:
+    if type_ is str:
+        if isinstance(value, str):
+            return value
+        raise RuntimeError("Expression result must be a name string")
+    if isinstance(value, (str, bool)):
+        raise RuntimeError("Expression result must be numeric")
     if type_ is complex:
         result = complex(value)
         require_finite_scalar(result)
@@ -169,7 +182,20 @@ def _resolve_eval(
     path: str,
     label: str,
     type_: type = float,
-) -> int | float | complex:
+) -> int | float | complex | str:
+    if type_ is str:
+        if resolve_expression is None:
+            raise RuntimeError(
+                f"Config field '{path}' ({label}) expression {value.expr!r} "
+                "requires a context resolver"
+            )
+        try:
+            return _coerce_eval_result(resolve_expression(value.expr), type_)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Config field '{path}' ({label}) expression {value.expr!r} "
+                f"failed to evaluate: {exc}"
+            ) from exc
     if value.resolved is not None:
         resolved = value.resolved
         # A committed snapshot remains authoritative, but drift must stay visible.
@@ -230,7 +256,7 @@ def _resolve_sweep_edge(
         resolved = _resolve_eval(
             value, resolve_expression, path=path, label=label, type_=float
         )
-        if isinstance(resolved, complex):
+        if isinstance(resolved, (complex, str)):
             raise RuntimeError(f"Config field '{path}' ({label}) must be real")
         return float(resolved)
     raise RuntimeError(f"Config field '{path}' ({label}) must be numeric")

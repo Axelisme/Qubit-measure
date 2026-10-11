@@ -1,10 +1,16 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-10，容器版本與元件 model 的驗證分界
+**Last updated:** 2026-10-11，entry-authored alias table persistence
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
 `create` 建立 setup、points、records 與同名 Database 條目目錄。任一目的地已存在就拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 要求完整的新格式條目，不猜測 legacy 格式。
+
+## 條目 alias 表
+
+`ResultEntry.load_aliases` 與 `save_aliases` 使用具名 `EntryAliases`，保存 entry 的 authored 有序表。`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。Mapping 保留空字串、原始 `$` link 與順序。空 mapping 是明確空表，只有檔案不存在才回 `None`。格式、結構與非字串值錯誤直接回報，不退回 preset。
+
+Resources 只保存與驗證資料表示。Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。這不是 point、setup、ledger 或 memento，也不提供跨檔交易、multiwriter merge 或掉電恢復。
 
 ## 文件與 seed
 

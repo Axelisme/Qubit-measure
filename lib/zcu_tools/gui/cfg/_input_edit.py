@@ -194,6 +194,9 @@ class InputEditor:
     def _scalar(self, spec: ScalarSpec, value: CfgInput) -> ScalarValue:
         clean = decode_input(encode_input(value))
         if isinstance(clean, EvalValue):
+            if spec.type is str:
+                # Name aliases are dynamic authored inputs, not numeric $ captures.
+                return EvalValue(clean.expr)
             if (
                 spec.type not in (int, float, complex)
                 or spec.choices is not None

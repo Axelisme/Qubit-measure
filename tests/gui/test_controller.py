@@ -30,7 +30,6 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services import (
     ConnectionPreferences,
-    ProjectRequest,
 )
 from zcu_tools.gui.app.measure.services import (
     create_persistence_caretaker as PersistenceCaretaker,
@@ -41,20 +40,26 @@ from zcu_tools.gui.cfg import (
     CfgSchema,
     DirectValue,
 )
-from zcu_tools.gui.event_bus import EventMeta, EventOrigin
+from zcu_tools.gui.event_bus import BaseEventBus, EventMeta, EventOrigin
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.ports import OperationConflictError, OperationKind
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
     DisconnectDeviceRequest,
 )
-from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 from tests.gui._completion_helpers import (
     on_device_connected,
     on_device_operation_failed,
 )
+from tests.gui.app.measure._load_support import historical_metadata
+from tests.gui.app.measure.remote._helpers import _context_root
 from zcu_lab.definitions import ALIAS_PRESET, register_all
 from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
@@ -67,15 +72,10 @@ from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 
 def _make_ctx() -> SessionEnv:
     return SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
+        parameters=None,
         soc=MagicMock(),  # simulate connected soc
-        soccfg=MagicMock(),
+        soccfg=make_mock_soccfg(),
         res_name="fake_res",
-        result_dir="/tmp/zcu_result",
-        database_path="/tmp/zcu_db/fake_chip/fake_qubit",
-        active_label="ctx001",
-        readiness=ContextReadiness.ACTIVE,
     )
 
 
@@ -109,8 +109,6 @@ class ControllerFixture:
         if not self.registry.has("fake"):
             self.registry.register("fake", FakeAdapter)
         self.view = _make_view()
-        io_manager = IOManager()
-        io_manager._em = MagicMock()  # simulate a project being set up
         from zcu_tools.gui.event_bus import BaseEventBus
 
         self.bus = BaseEventBus()
@@ -120,10 +118,13 @@ class ControllerFixture:
             alias_preset=ALIAS_PRESET,
             state=self.state,
             registry=self.registry,
-            io_manager=io_manager,
             view=self.view,
             bus=self.bus,
-            project_root=project_root,
+            project_root=project_root or str(_context_root()),
+        )
+        self.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
+        self.ctrl.setup_control.new_point(
+            PointCreateRequest("ctx001", "", CommandOrigin("gui"))
         )
         self.caretaker = PersistenceCaretaker(self.ctrl, cache_dir=cache_dir)
         self.ctrl.attach_caretaker(self.caretaker)
@@ -149,9 +150,6 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
 
 
 def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
-    cf.state.set_context(
-        dataclasses.replace(cf.state.session_env, md=MetaDict(), ml=ModuleLibrary())
-    )
     tab_id = cf.ctrl.new_tab("twotone/flux_dep")
     values = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
@@ -205,8 +203,14 @@ def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):
     behaviour, so nothing regresses for callers that don't pass a root."""
     import os
 
-    fixture = ControllerFixture(cache_dir=tmp_path, project_root=None)
-    assert fixture.ctrl.get_project_root() == os.getcwd()
+    ctrl = Controller(
+        state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        registry=Registry(),
+        view=None,
+        bus=BaseEventBus(),
+    )
+    assert ctrl.get_project_root() == os.getcwd()
+    ctrl._background_svc.quiesce()
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +326,7 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
 
     spy = MagicMock(spec=FakeAdapter)
     spy.capabilities = real_adapter.capabilities
+    spy.experiment_tag = None
     spy.run.side_effect = _capture_run
     cf.state.get_tab(tab_id).adapter = spy
 
@@ -394,7 +399,9 @@ def test_result_commit_survives_analysis_preparation_failure(cf, monkeypatch, so
 
     loaded = SimpleNamespace(cfg_snapshot=None)
     monkeypatch.setattr(adapter, "get_analyze_params", fail_params)
-    monkeypatch.setattr(adapter, "load", lambda _request: loaded)
+    monkeypatch.setattr(
+        adapter, "load", lambda _request: (loaded, historical_metadata())
+    )
     cf.state.update_tab_analyze_param_instance(tab_id, object())
     facts = []
     cf.bus.subscribe(TabContentChangedPayload, facts.append)
@@ -458,6 +465,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     no_analysis = MagicMock(spec=FakeAdapter)
     no_analysis.run.return_value = object()  # any non-NO_RESULT run result
     no_analysis.capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
+    no_analysis.experiment_tag = None
     no_analysis.get_analyze_params.side_effect = NotImplementedError(
         "declares no analysis support"
     )
@@ -602,7 +610,7 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 
     adapter.capabilities = AdapterCapabilities(requires_soc=False, load_data=True)
-    adapter.load.return_value = loaded
+    adapter.load.return_value = (loaded, historical_metadata())
     adapter.get_analyze_params.return_value = _LoadedAnalyzeParams(threshold=0.7)
     cf.state.get_tab(tab_id).adapter = adapter
     cf.bus.emit.reset_mock()
@@ -801,52 +809,6 @@ def test_get_adapter_guide_serves_complete_jpa_family(cf):
         assert all(guide[field] for field in guide)
 
 
-def test_new_context_with_bind_device_resolves_unit_and_value(cf):
-    # bind_device -> Controller reads unit (strict whitelist) + current value
-    # from the device, then hands them to ContextService. The agent never
-    # supplies a raw value/unit.
-    cf.ctrl._dev_svc.get_device_unit_strict = MagicMock(return_value="A")
-    cf.ctrl._dev_svc.get_device_value_for_new_context = MagicMock(return_value=0.005)
-    cf.ctrl._ctx_svc.new_context = MagicMock()
-
-    cf.ctrl.new_context(bind_device="flux", clone_from="src")
-
-    cf.ctrl._dev_svc.get_device_unit_strict.assert_called_once_with("flux")
-    cf.ctrl._dev_svc.get_device_value_for_new_context.assert_called_once_with("flux")
-    cf.ctrl._ctx_svc.new_context.assert_called_once_with(
-        value=0.005, unit="A", clone_from="src"
-    )
-
-
-def test_new_context_without_bind_device_is_unbound(cf):
-    # No device -> unit "none", no value, no device read.
-    cf.ctrl._dev_svc.get_device_unit_strict = MagicMock()
-    cf.ctrl._dev_svc.get_device_value_for_new_context = MagicMock()
-    cf.ctrl._ctx_svc.new_context = MagicMock()
-
-    cf.ctrl.new_context()
-
-    cf.ctrl._dev_svc.get_device_unit_strict.assert_not_called()
-    cf.ctrl._dev_svc.get_device_value_for_new_context.assert_not_called()
-    cf.ctrl._ctx_svc.new_context.assert_called_once_with(
-        value=None, unit="none", clone_from=None
-    )
-
-
-def test_new_context_unknown_bind_device_raises_before_creating(cf):
-    # Strict whitelist failure must propagate (Fast-Fail) and never reach
-    # ContextService.
-    cf.ctrl._dev_svc.get_device_unit_strict = MagicMock(
-        side_effect=RuntimeError("no such device")
-    )
-    cf.ctrl._ctx_svc.new_context = MagicMock()
-
-    with pytest.raises(RuntimeError):
-        cf.ctrl.new_context(bind_device="ghost")
-
-    cf.ctrl._ctx_svc.new_context.assert_not_called()
-
-
 def test_persist_then_restore_app_state(tmp_path):
     """Full round-trip through the PersistenceCaretaker single-file memento:
     capture (flush) on one Controller, restore on a fresh one sharing the dir."""
@@ -856,7 +818,7 @@ def test_persist_then_restore_app_state(tmp_path):
 
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
     cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
-    resolved = cf.ctrl.apply_project(ProjectRequest("chip", "qub", "res"))
+    cf.ctrl.setup_control.new_entry(EntryRequest("chip"))
     cf.ctrl.setup_control.remember_connection(
         ConnectionPreferences(ip="10.0.0.2", port=7000)
     )
@@ -871,11 +833,10 @@ def test_persist_then_restore_app_state(tmp_path):
     assert restored_tab.cfg.snapshot_inputs().value.fields["reps"] == DirectValue(42)
     # remembered settings round-tripped (prefill values; project not auto-applied).
     prefs = cf_restored.ctrl.setup_control.get_setup_preferences()
-    assert prefs.chip_name == "chip"
-    assert prefs.scope_id == resolved["scope_id"]
+    assert prefs.entry_name == "chip"
     assert prefs.ip == "10.0.0.2"
     assert prefs.port == 7000
-    assert cf_restored.state.session_env.result_dir == "/tmp/zcu_result"
+    assert cf_restored.state.session_env.readiness is ContextReadiness.ACTIVE
 
 
 def test_restore_tab_events_use_system_origin(tmp_path) -> None:
@@ -929,62 +890,3 @@ def test_restore_invalid_tab_is_rejected_and_reported(cf):
 # ---------------------------------------------------------------------------
 # Notify façade (Stage 4b) — pure-Python, no Qt fixture needed
 # ---------------------------------------------------------------------------
-
-
-def test_open_notify_prompt_returns_token_and_calls_host() -> None:
-    """open_notify_prompt mints a token and forwards to render_host."""
-
-    cf = ControllerFixture()
-    host = MagicMock()
-    cf.ctrl._render_host = host
-
-    token = cf.ctrl.open_notify_prompt("hello", 60.0)
-    assert isinstance(token, int)
-    assert token >= 1
-    host.open_notify_prompt.assert_called_once_with(token, "hello", 60.0)
-    cf.quiesce()
-
-
-def test_open_notify_prompt_no_host_does_not_raise() -> None:
-    """open_notify_prompt is safe when no render_host is attached."""
-    cf = ControllerFixture()
-    cf.ctrl._render_host = None
-    token = cf.ctrl.open_notify_prompt("msg", 30.0)
-    assert isinstance(token, int)
-    cf.quiesce()
-
-
-def test_reply_notify_delivers_to_channel() -> None:
-    cf = ControllerFixture()
-    token = cf.ctrl.open_notify_prompt("prompt", 60.0)
-    cf.ctrl.reply_notify(token, "the answer")
-    result = cf.ctrl.await_notify(token, timeout=1.0)
-    assert result.reason == "reply"
-    assert result.reply == "the answer"
-    cf.quiesce()
-
-
-def test_dismiss_notify_delivers_to_channel() -> None:
-    cf = ControllerFixture()
-    token = cf.ctrl.open_notify_prompt("prompt", 60.0)
-    cf.ctrl.dismiss_notify(token)
-    result = cf.ctrl.await_notify(token, timeout=1.0)
-    assert result.reason == "dismiss"
-    cf.quiesce()
-
-
-def test_timeout_notify_delivers_to_channel() -> None:
-    cf = ControllerFixture()
-    token = cf.ctrl.open_notify_prompt("prompt", 60.0)
-    cf.ctrl.timeout_notify(token)
-    result = cf.ctrl.await_notify(token, timeout=1.0)
-    assert result.reason == "timeout"
-    cf.quiesce()
-
-
-def test_await_notify_unknown_token_returns_dismiss() -> None:
-    """Unknown token is treated as already-dismissed (ADR-0066)."""
-    cf = ControllerFixture()
-    result = cf.ctrl.await_notify(99999, timeout=0.1)
-    assert result.reason == "dismiss"
-    cf.quiesce()
