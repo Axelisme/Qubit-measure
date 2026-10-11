@@ -7,15 +7,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
 
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-
+from ...device import BaseDeviceInfo
+from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
-from .display import Live1D, Live2D, Live2DRow
 from .effects import DeviceEffect, RunEffect, WaitEffect
 from .models import Completed, Effect, Failed, MissingCapability, ProgressSnapshot
-from .ports import PlotPort, ProgressFactory
-from .run import Run
+from .ports import DevicePort, EnginePorts, ProgressFactory
+from .run import LiveUpdate, Run
 
 
 class InitEnv[C]:
@@ -46,27 +44,17 @@ class InitEnv[C]:
 
 
 class Displays:
-    """Engine-owned named axes and bars shared across step environments.
+    """Engine-owned named bars shared across step environments.
 
-    plots captures figures on the execution thread. progress is the concrete
-    runtime bar factory, not make_pbar. This owner retains bars during Pause and
-    closes them at terminal; environments do not own their lifecycle.
+    progress is the concrete runtime bar factory, not make_pbar. This owner
+    retains bars during Pause and closes them at terminal; environments do not
+    own their lifecycle. Plotting belongs to the injected Plots instead.
     """
 
-    def __init__(self, plots: PlotPort, progress: ProgressFactory) -> None:
-        self._plots = plots
+    def __init__(self, progress: ProgressFactory) -> None:
         self._progress = progress
-        self._axes: dict[str, Axes] = {}
         self._bars: dict[str, BaseProgressBar] = {}
         self._lock = RLock()
-
-    def axes(self, name: str) -> Axes:
-        """Return stable named axes; reject empty names with ValueError."""
-        if not name.strip():
-            raise ValueError("Axes name must not be empty")
-        if name not in self._axes:
-            self._axes[name] = self._plots.axes(name)
-        return self._axes[name]
 
     def pbar(self, desc: str, total: int) -> BaseProgressBar:
         """Return a retained named bar, requiring a consistent nonnegative total."""
@@ -94,16 +82,6 @@ class Displays:
                 for name, bar in self._bars.items()
             )
 
-    def refresh(self) -> None:
-        """Snapshot each used figure once; propagate plotting failures."""
-        figures = tuple(
-            dict.fromkeys(axis.get_figure(root=True) for axis in self._axes.values())
-        )
-        for figure in figures:
-            if not isinstance(figure, Figure):
-                raise ValueError("Workflow axes must belong to a root Figure")
-            self._plots.refresh(figure)
-
     def close(self) -> None:
         """Close all retained workflow bars after producers stop."""
         for bar in self._bars.values():
@@ -116,19 +94,52 @@ class WorkflowEnv[C](InitEnv[C]):
     started_at is the run's aware UTC start, unchanged by Resume. context is
     host-owned deeply read-only data. iter_dir is this invocation's files/
     directory, not the run root. displays is the engine's retained display owner.
+    soc/devices are read-only accessors for author-owned availability checks.
+    Hardware operations should still use effects to retain journal and cancellation
+    behavior; the framework trusts authors and does not enforce that restriction.
     Use yield from for every effect; the engine discards the generator on cancel.
     """
 
     def __init__(
         self,
         started_at: datetime,
-        context: C | None,
+        ports: EnginePorts[C],
         iter_dir: Path,
         displays: Displays,
     ) -> None:
-        super().__init__(started_at, context)
+        """Bind host ports and retained displays to one step's files directory.
+
+        ports supplies detached context and native handles without copying or
+        connecting them. iter_dir is the current invocation's files/ path.
+        displays retains bars across steps. started_at obeys InitEnv's UTC
+        contract. Missing ports are checked only when their accessor is used.
+        """
+        super().__init__(started_at, ports.context)
         self.iter_dir = iter_dir
+        self._ports = ports
         self._displays = displays
+
+    @property
+    def soc(self) -> object:
+        """Return the native SoC, or raise MissingCapability('soc').
+
+        Use this for availability checks. Hardware operations should go through
+        effects; direct access bypasses engine journaling and cancellation.
+        """
+        if self._ports.soc is None:
+            raise MissingCapability("soc")
+        return self._ports.soc
+
+    @property
+    def devices(self) -> DevicePort:
+        """Return the injected adapter, or raise MissingCapability('devices').
+
+        Use this for availability checks. Hardware operations should go through
+        effects; direct access bypasses engine journaling and cancellation.
+        """
+        if self._ports.devices is None:
+            raise MissingCapability("devices")
+        return self._ports.devices
 
     def run[Cfg, Result](
         self,
@@ -136,16 +147,22 @@ class WorkflowEnv[C](InitEnv[C]):
         cfg: Cfg,
         *,
         save: Callable[[Completed[Cfg, Result], Path], None],
-        live: Live1D | Live2D | Live2DRow | None = None,
+        live: LiveUpdate | None = None,
     ) -> Generator[Effect, None, Completed[Cfg, Result] | Failed]:
         """Execute and save an experiment; return its typed Completed or Failed.
 
         experiment must have an ASCII letter/digit/underscore function name;
         anonymous or unnamed callables raise ValueError at effect entry.
-        cfg must be a deepcopy-able dataclass. save must write and close the
-        exact temporary path; the engine publishes it before returning Completed.
-        live optionally projects a unique buffer. The experiment owns device
-        operations; the engine does not inspect cfg.dev or apply settings.
+        cfg must be a deepcopy-able dataclass or Pydantic BaseModel instance.
+        save must write and close the exact temporary path; the engine publishes
+        it before returning Completed.
+        live optionally receives (axes, samples) synchronously on each update
+        of the experiment's unique buffer: finite float64 axis vectors in buffer
+        dimension order, and complex128 samples of the buffer shape, including
+        partial NaNs. Do not mutate or retain these arrays; use Plots handles to
+        copy/dispatch real projected values to the host owner. Callback failures
+        fail the workflow even when Schedule catches them. The experiment owns
+        device operations; the engine does not inspect cfg.dev or apply settings.
         Outer, live, saver, and deepcopy errors propagate; Schedule failures
         return Failed without data or a run file.
         Cancellation discards the step and never returns a cancellation value.
@@ -156,13 +173,25 @@ class WorkflowEnv[C](InitEnv[C]):
             raise RuntimeError("Engine did not complete the run effect")
         return request.outcome
 
-    def set_device(self, name: str, value: float) -> Generator[Effect, None, None]:
-        """Set a finite absolute native-device value, or propagate adapter failure.
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Synchronously live-read detached device settings in the worker.
 
-        Empty names and nonfinite values raise ValueError. The adapter enforces
-        connectivity and limits. Cancellation discards the entire step.
+        This read is not an effect. The host returns the actual Info subclass;
+        unknown/disconnected names identify name and read failures propagate.
+        Missing devices raises MissingCapability('devices') at use.
         """
-        request = DeviceEffect(name, value)
+        return self.devices.get_device_cfg(name)
+
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo
+    ) -> Generator[Effect, None, None]:
+        """Apply complete typed settings with the engine's cooperative signal.
+
+        The host revalidates all fields with the selected driver's Info model.
+        Limits, validation and I/O failures propagate; no conversion, retries or
+        clamping occurs. Cancellation discards the entire step.
+        """
+        request = DeviceEffect(name, cfg)
         yield request
         if not request.done:
             raise RuntimeError("Engine did not complete the device effect")
@@ -178,9 +207,15 @@ class WorkflowEnv[C](InitEnv[C]):
         if not request.done:
             raise RuntimeError("Engine did not complete the wait effect")
 
-    def axes(self, name: str) -> Axes:
-        """Return the engine's stable axes for a nonempty name."""
-        return self._displays.axes(name)
+    @property
+    def plots(self) -> Plots:
+        """Return the injected Plots shared across steps and retries.
+
+        Use typed handles or draw/save for synchronous host-owner operations.
+        Do not mutate active artists on the workflow execution thread. The host
+        owns finish/release after the producer stops; Pause does not finish plots.
+        """
+        return self._ports.plots
 
     def pbar(self, desc: str, total: int) -> BaseProgressBar:
         """Return a retained named bar with a consistent nonnegative integer total."""

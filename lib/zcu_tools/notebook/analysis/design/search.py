@@ -429,8 +429,20 @@ def add_real_sample(
     rf_w: float = 7e-3,
     max_photon: int = 70,
     fallback_frame: SampleFluxFrame | None = None,
+    *,
+    samples: JsonlSampleTable,
 ) -> None:
+    """Overlay measured and predicted T1 at the requested operating flux.
 
+    fig receives a measured marker, a prediction and their connecting line.
+    result_dir supplies params.json with project, fluxdep and dispersive fits.
+    samples is the caller-bound history, such as entry.samples(component);
+    no sample path is inferred from result_dir. Select the latest row nearest
+    flux after resolving v2 coordinates, using fallback_frame only when needed.
+    Temp is in kelvin, rf_w in GHz, and max_photon bounds the SNR calculation.
+    noise_channels supplies scqubits T1 channel names and options. Sample schema,
+    unresolved coordinates, parameter loading and physics errors propagate.
+    """
     result_path = os.path.join(result_dir, "params.json")
     params_file = QubitParams(result_path, readonly=True)
     project = params_file.require_project()
@@ -447,8 +459,7 @@ def add_real_sample(
     # load freq data; the v2 table must resolve flux for every row (explicit
     # flux, row frame or the caller-declared fallback frame), and legacy
     # coordinate columns (e.g. "calibrated mA") fail before any comparison.
-    sample_path = os.path.join(result_dir, "samples.jsonl")
-    freq_df = JsonlSampleTable(sample_path).read()
+    freq_df = samples.read()
     validate_sample_table_v2(freq_df)
     resolution = resolve_sample_flux(freq_df, fallback_frame=fallback_frame)
     idx = int(np.argmin(np.abs(resolution.values - flux)))

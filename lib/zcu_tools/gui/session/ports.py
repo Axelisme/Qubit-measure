@@ -121,6 +121,14 @@ class OwnerScheduler(Protocol):
         ...
 
 
+class BackgroundAdmissionClosedError(RuntimeError):
+    """Submission was rejected because the executor's admission is terminally closed.
+
+    No worker or terminal delivery is scheduled for this submission. Already
+    accepted work still belongs to the executor and must be drained separately.
+    """
+
+
 class BackgroundExecutor(Protocol):
     """Off-main execution seam a session service depends on. The app injects its
     runtime-specific executor; the session service never constructs one.
@@ -128,7 +136,10 @@ class BackgroundExecutor(Protocol):
     ``submit`` runs ``work`` off-main, delivering its result to ``on_done`` or
     its exception to ``on_error`` on the owner thread. ``run_in_pool`` picks the
     shared pool vs a dedicated thread.  All ambient scopes must be built into
-    ``work`` by the caller before this call (ADR-0066).
+    ``work`` by the caller before this call (ADR-0066). Once the concrete executor
+    closes admission, submit raises BackgroundAdmissionClosedError synchronously,
+    without scheduling work or callbacks. Lifecycle APIs stay on the concrete
+    executor; callers of this port do not own admission state.
     """
 
     def submit(

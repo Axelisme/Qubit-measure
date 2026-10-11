@@ -94,10 +94,20 @@ Device panel 保留原 mode 顯示與 output／value／rampstep 控制，不提�
 
 Fluxdep search 重用 OperationRunner、OperationHandles 與 ProgressService。
 Runner 的 gate／progress injection 可為 None。begin 在建立 handle 前拒絕缺少的必要 facet。
-純分析不用注入硬體 gate。OperationSpec 的 optional on_opened hook 在 progress notification
-與 submit 前交出 token，讓 domain owner 保留 admission 與 startup-failure activity。
+純分析不用注入硬體 gate。OperationSpec 的 optional on_opened hook 在 lease registration、progress notification
+與 submit 前交出 token，讓 domain owner 先提交 admission。帶 exclusion 的 hook 只提交 owner
+state，不通知 listeners 或呼叫 reentrant UI；無 exclusion 的分析 owner 可發布 activity。
 Hook、registration、factory 或 submit 失敗時，runner 清理並重拋。
 Measure client 保留自己的硬體 policy。
+
+## Same-operation continuation
+
+Domain owner 在 producer delivery 後可保留未 settle 的 operation，再以 `continue_operation`
+提交下一個 producer。Runner 重用同一 token、原始 event origin 與 settle closure，不新增
+handle、lease、cancel hook 或 progress factory。Owner 負責 producer exclusivity 與 closure
+歸屬；Runner 不另建 producer registry。同步 continuation submit 失敗保留 ownership，讓 owner
+重試或終結。Worker failure 交給 terminal policy，escaping policy exception 則 settle failed。
+最終清理仍經原來的 call-once closure，只 discard progress、settle handle、release lease 一次。
 
 ## Operation markers
 

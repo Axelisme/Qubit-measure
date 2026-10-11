@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-11，現行參數容器與舊接線退休
+**Last updated:** 2026-10-12，現行參數容器、entry alias 表、shared session owner 與 workflows app
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -12,8 +12,10 @@ Core state belongs to one owner thread. `OwnerScheduler` is the marshal seam：Q
 composition使用queued-signal adapter，headless/test composition使用explicitly pumped manual
 adapter。`BackgroundExecutor`與scheduler分離：Qt runtime使用QThread/QThreadPool adapter；
 headless runtime使用pure `ThreadPoolBackgroundExecutor`，並在worker完成後透過scheduler
-投遞唯一terminal callback。具體executor的`quiesce()`會停止新工作並等待worker與owner delivery
-ack，session services只依賴`submit` port。
+投遞唯一terminal callback。Headless `quiesce()` 是 terminal close，會停止新工作並等待worker與owner delivery
+ack。Qt `quiesce()` 保持可重複 drain；terminal shutdown 先呼叫 `stop_accepting()`，再取消與drain。
+關閉入口後兩個executor的`submit`都立即拋`BackgroundAdmissionClosedError`，不排worker或callback。
+Session services只依賴`submit` port，不持有另一份admission狀態。
 
 ## Remote response delivery (`remote/`)
 
@@ -166,10 +168,13 @@ entrypoints and call `launch_gui_runtime(...)` directly.
 
 The runtime seam deliberately stops above remote method/domain/session policy:
 `gui.remote` still owns transport, each app owns dispatch/domain handlers, and
-`gui.session` owns measurement-session primitives. All three standalone GUI
-launchers (`measure`, `fluxdep`, `dispersive`) use this runtime
-directly; measurement-session apps keep their domain composition in app behavior
-classes and launcher-provided factories.
+`gui.session` owns measurement-session primitives. All four standalone GUI
+launchers (`measure`, `fluxdep`, `dispersive`, `workflows`) use this runtime
+directly. Measurement-session apps keep their domain composition in app behavior
+classes and launcher-provided factories. The workflows launcher composes
+`zcu_lab.workflows.gui.app.WorkflowsGuiBehavior`: one fresh EMPTY session, one
+T1 Window/Controller, and an optional RPC adapter over those same owners. It opens
+shared Setup non-modally; launch does not restore input or connect hardware.
 
 `gui.launcher` is the import-light CLI edge companion for runtime launchers. It
 declares shared logging/control/project flags and converts parser output into
@@ -369,7 +374,7 @@ state.
 ## Logging (`logging_setup.py`)
 
 `logging_setup.setup_gui_logging` is the single place that decides *how* every
-GUI entry point configures logging. All three `scripts/run_*_gui.py` launchers and
+GUI entry point configures logging. All four `scripts/run_*_gui.py` launchers and
 the measure MCP server (`mcp/measure/server.py:main`) call it instead of each
 rolling their own handler set.
 

@@ -10,7 +10,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
-from zcu_tools.gui.session.ports import OwnerScheduler
+from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, OwnerScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +56,17 @@ class ThreadPoolBackgroundExecutor:
         on_error: Callable[[Exception], None],
         run_in_pool: bool = True,
     ) -> None:
+        """Schedule work and deliver its outcome through the injected owner.
+
+        After terminal quiesce, raise BackgroundAdmissionClosedError before any
+        work or callback is scheduled. Non-callable work raises TypeError.
+        """
         if not callable(work):
             raise TypeError("background work must be callable")
 
         with self._condition:
             if not self._accepting:
-                raise RuntimeError("background executor is quiescing")
+                raise BackgroundAdmissionClosedError("background executor is quiescing")
             executor = self._pool
             dedicated: ThreadPoolExecutor | None = None
             if not run_in_pool:

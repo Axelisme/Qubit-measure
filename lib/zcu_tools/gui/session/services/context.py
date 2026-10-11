@@ -512,7 +512,9 @@ class ContextService:
         """Accept nonempty ordered concrete writes at a fixed SavedPoint.
 
         Validate the opened entry and captured SavedPoint before append.
-        SavedPoint parameter/library setters commit files; samples append to
+        ResultEntry.use_point validates its label, existence and point document;
+        ValueError/FileNotFoundError and other load errors propagate before
+        append. SavedPoint parameter/library setters commit files; samples append to
         entry JSONL immediately with the captured point label.
         Each successful item installs and publishes its actual content prefix,
         even when a later item fails. Detached point writes never select it.
@@ -524,6 +526,7 @@ class ContextService:
         if not items:
             raise ValueError("writeback items must be nonempty")
         entry = self._require_write_target(target)
+        entry.use_point(target.point)
         return apply_writeback(
             items,
             target=_ContextWritebackTarget(self, target, entry),

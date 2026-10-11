@@ -11,7 +11,6 @@ from pydantic import JsonValue
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.sample_table import (
     SAMPLE_COORDINATE_COLUMNS,
-    DeviceValueUnit,
     LegacyDeviceValueUnit,
     migrate_sample_table_v2,
     validate_sample_table_v2,
@@ -64,8 +63,10 @@ class MigrationReport:
 
 @dataclass(frozen=True)
 class _ConvertedRow:
+    """Owner-validated coordinates and renamed measurements ready for append."""
+
     dev_value: float
-    dev_unit: DeviceValueUnit
+    dev_unit: str
     fields: dict[str, JsonValue]
 
 
@@ -123,10 +124,9 @@ def _convert_row(
             continue
         value = frame[column].iloc[0]
         fields[column] = None if pd.isna(value) else float(value)
-    unit = frame["dev_unit"].iloc[0]
-    if unit not in ("A", "V"):
-        raise ValueError(f"dev_unit: unsupported migrated unit {unit!r}")
-    return _ConvertedRow(float(frame["dev_value"].iloc[0]), unit, fields)
+    return _ConvertedRow(
+        float(frame["dev_value"].iloc[0]), str(frame["dev_unit"].iloc[0]), fields
+    )
 
 
 def convert_sample_csv(
@@ -141,9 +141,9 @@ def convert_sample_csv(
     """Append synthetic samples from one or more operator-selected CSV files.
 
     entry is an already-open ResultEntry; component selects its sample table.
-    v2 CSVs provide dev_value/dev_unit directly. For legacy CSVs, explicitly
-    declare dev_value_column and source_unit (A/mA/V/mV); neither is inferred
-    from a header. Unmapped legacy coordinate columns require operator review.
+    v2 CSVs provide dev_value/dev_unit directly (A/V/native), without scaling.
+    For legacy CSVs, explicitly declare dev_value_column and source_unit
+    (A/mA/V/mV); neither is inferred from a header. Unmapped legacy coordinate columns require operator review.
     point is copied into every appended row, or left null when not supplied.
 
     Each row gets legacy-<Path.stem>-<1-based data row>, excluding the header,
@@ -170,7 +170,7 @@ def convert_sample_csv(
             raise ValueError(f"duplicate input stem {path.stem!r}")
         stems.add(path.stem)
     table = entry.samples(component)
-    output = entry.result_path / "samples" / f"{component}.jsonl"
+    output = table.path
     for path in paths:
         if output.exists() and path.exists() and path.samefile(output):
             raise ValueError(f"{path}: source aliases sample output {output}")

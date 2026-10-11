@@ -49,6 +49,15 @@ class JsonlSampleTable:
         """Bind an exact caller-selected JSONL file without reading or writing it."""
         self._path = Path(path)
 
+    @property
+    def path(self) -> Path:
+        """Return this table's exact bound JSONL file path without I/O.
+
+        Binding a table does not create or read the file. The returned Path
+        identifies this table's history, not its parent directory.
+        """
+        return self._path
+
     def append(
         self,
         *,

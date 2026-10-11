@@ -1,10 +1,10 @@
 # `zcu_tools.resources.sample_table` — sample records
 
-**Last updated:** 2026-10-11，JSONL optional producer fields and accepted timestamps
+**Last updated:** 2026-10-12，JSONL bound path capability
 
 ## 條目樣本（`jsonl.py`）
 
-`ResultEntry.samples(component)` 回傳 `JsonlSampleTable`，綁定 `results/<name>/samples/<component>.jsonl`。JSONL 是只追加的樣本歷史；`read()` 回傳每個 `run_id` 最後一整行的 DataFrame，不合併舊行欄位。不存在的檔案回空表，損壞行則回報檔名與行號，不跳過。
+`ResultEntry.samples(component)` 回傳 `JsonlSampleTable`，綁定 `results/<name>/samples/<component>.jsonl`。唯讀 `path` 提供該表 exact bound JSONL 路徑，供 caller 報告目的地或檢查同檔，不需重拼 entry 版面。綁定與查詢路徑不做 I/O。JSONL 是只追加的樣本歷史；`read()` 回傳每個 `run_id` 最後一整行的 DataFrame，不合併舊行欄位。不存在的檔案回空表，損壞行則回報檔名與行號，不跳過。
 
 `append` 要求 `run_id`。`dev_value`、`dev_unit` 與其他欄位皆由 producer 選填，保留原值與 caller 單位，不檢查 dev 存在或換算單位。`point` 可為空，`at` 預設由儲存層填 UTC，也可明示 accepted 事件的 UTC 時間。`source` 預設 manual，也可由 caller 提供 accepted 事件 ID 或 `workflow:<run_id>`。Producer 欄位可以保存巢狀 JSON。儲存層不計算 flux 座標，不讀 ledger 或元件 schema；下游查詢與 v2 驗證自行處理缺值。
 

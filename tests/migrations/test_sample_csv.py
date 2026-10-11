@@ -56,6 +56,27 @@ def test_v2_conversion_renames_measurements_preserves_source_and_appends(
     assert row["t2e_err_us"] == 3
 
 
+def test_v2_native_unit_is_preserved_without_scaling(
+    tmp_path: Path, entry: ResultEntry
+) -> None:
+    source = tmp_path / "native.csv"
+    source.write_text("dev_value,dev_unit,T1 (us)\n1.25,native,50\n", encoding="utf-8")
+    before = source.read_bytes()
+
+    report = sample_csv.convert_sample_csv([source], entry=entry, component="Q1")
+
+    assert report.converted_rows == 1
+    assert report.pending_rows == ()
+    row = entry.samples("Q1").read().iloc[0]
+    assert row["run_id"] == "legacy-native-1"
+    assert row["dev_value"] == 1.25
+    assert row["dev_unit"] == "native"
+    assert row["t1_us"] == 50
+    assert row["source"] == "manual"
+    assert row["point"] is None
+    assert source.read_bytes() == before
+
+
 @pytest.mark.parametrize(
     ("source_unit", "expected_value", "expected_unit"),
     [("A", 2.0, "A"), ("mA", 0.002, "A"), ("V", 2.0, "V"), ("mV", 0.002, "V")],
