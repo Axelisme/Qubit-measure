@@ -17,7 +17,12 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 from tests.mcp.measure._recipe_execution_support import definition
 from tests.mcp.measure._recipe_field_support import SweepGui as _SweepGui
 from tests.mcp.measure._recipe_parameter_support import SweepGui
-from tests.mcp.measure._recipe_support import LookbackGui, recipe_client, scalar
+from tests.mcp.measure._recipe_support import (
+    LookbackGui,
+    publish_reference_locks,
+    recipe_client,
+    scalar,
+)
 from tests.mcp.measure._support import make_client
 from zcu_lab.recipes.helpers import (
     FrequencySweepCalibration,
@@ -65,6 +70,7 @@ def test_author_frequency_only_uses_a_library_when_requested(tmp_path, prefer_li
     gui.md["$resonator.freq"] = 6100.0
     readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
     readout["ref"] = "R1.readout.readout"
+    publish_reference_locks(readout)
     gui.library["R1.readout.readout"] = {}
 
     with recipe_client(tmp_path, gui) as client:
@@ -103,6 +109,8 @@ def test_author_qubit_frequency_uses_the_named_calibration(tmp_path):
     gui.publication["tree"]["children"]["modules"]["children"]["qub_pulse"] = {
         "kind": "reference",
         "valid": True,
+        "readonly": False,
+        "mode": None,
         "ref": None,
         "children": {"freq": scalar(4000.0)},
     }

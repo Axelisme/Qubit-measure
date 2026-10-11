@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
 
+from zcu_tools.gui.cfg.reference_key import is_custom_reference_key
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
@@ -48,6 +49,42 @@ def scalar(value: object) -> dict[str, Any]:
 
 def section(**children: dict[str, Any]) -> dict[str, Any]:
     return {"kind": "section", "valid": True, "readonly": False, "children": children}
+
+
+def publish_reference_locks(node: object, *, readonly: bool = False) -> None:
+    """Update modes and locks in a recording cfg subtree, in place.
+
+    ``node`` is an observation dict with a boolean ``readonly`` and optional
+    ``children`` dict of observations. Reference nodes carry a string or None
+    ``ref``: library references use ref mode, custom references use inline mode,
+    and None disables the reference. ``readonly`` carries an ancestor lock.
+    Descendants of library references, literals and existing static locks stay
+    readonly. These recording trees do not simulate conversion back to inline.
+    Raise TypeError for malformed nodes, references or children.
+    """
+    if not isinstance(node, dict):
+        raise TypeError("Recording cfg nodes must be mappings")
+    locked = node.get("readonly")
+    if not isinstance(locked, bool):
+        raise TypeError("Recording cfg nodes must declare readonly")
+    child_readonly = readonly or locked or node.get("kind") == "literal"
+    node["readonly"] = child_readonly
+    if node.get("kind") == "reference":
+        reference = node.get("ref")
+        if reference is not None and not isinstance(reference, str):
+            raise TypeError("Recording references must be strings or None")
+        mode = (
+            ("inline" if is_custom_reference_key(reference) else "ref")
+            if reference is not None
+            else None
+        )
+        node["mode"] = mode
+        child_readonly = child_readonly or mode == "ref"
+    children = node.get("children", {})
+    if not isinstance(children, dict):
+        raise TypeError("Recording cfg children must be mappings")
+    for child in children.values():
+        publish_reference_locks(child, readonly=child_readonly)
 
 
 class LookbackGui:
@@ -182,6 +219,7 @@ class LookbackGui:
                 node = node["children"][part]
             if node["kind"] == "reference":
                 node["ref"] = edit["value"]["__ref"]
+                publish_reference_locks(node)
             else:
                 value = edit["value"]
                 if isinstance(value, dict) and "__expr" in value:

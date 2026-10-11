@@ -30,6 +30,7 @@ class SweepGui(LookbackGui):
                 freq={
                     "kind": "sweep",
                     "valid": True,
+                    "readonly": False,
                     "inputs": {
                         "start": self.input("$resonator.freq - 2 * $resonator.kappa"),
                         "stop": self.input("$resonator.freq + 3 * $resonator.kappa"),
@@ -39,6 +40,7 @@ class SweepGui(LookbackGui):
                 flux={
                     "kind": "sweep",
                     "valid": True,
+                    "readonly": False,
                     "inputs": {
                         "start": self.input("2 * $qubit.flux_int - $qubit.flux_half"),
                         "stop": self.input("2 * $qubit.flux_half - $qubit.flux_int"),
