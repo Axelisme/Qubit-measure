@@ -863,6 +863,72 @@ def test_load_dialog_remote_content_keeps_cancel(control_ui, qapp, opening):
     assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
 
 
+@pytest.mark.parametrize("stage", ["selection", "file-chooser"])
+def test_shutdown_finishes_load_interaction_before_owner_teardown(
+    control_ui, qapp, tmp_path, stage
+):
+    ui = control_ui
+    tab_id = ui.controller.new_tab("loadable")
+    ui.controller.load_tab_result(tab_id, "original.hdf5")
+    before = ui.controller.get_tab_snapshot(tab_id).run
+    assert before is not None
+    path = tmp_path / "late-choice.h5"
+    path.touch()
+    finished: list[tuple[int, str | None, bool]] = []
+    owner_finished: list[bool] = []
+    load_dialogs: list[RunLoadDialog] = []
+
+    def observe_finished(result: int) -> None:
+        load = load_dialogs[0]
+        authority = ui.controller.control_identity
+        authority.connect("shutdown", "shutdown-agent", "owner")
+        finished.append(
+            (result, load.selected_path(), button(load, "File…").isEnabled())
+        )
+        # Keep Local for a late chooser return; holder refusal must not hide a
+        # second acceptance of an interaction already ended by owner shutdown.
+        authority.reclaim_local()
+        authority.toggle_local()
+
+    def open_load(load: RunLoadDialog) -> None:
+        load_dialogs.append(load)
+        load.finished.connect(observe_finished)
+        if stage == "file-chooser":
+            button(load, "File…").click()
+        else:
+            ui.window.request_shutdown()
+            wait_until(qapp, lambda: not ui.window.isVisible())
+            owner_finished.append(bool(finished))
+            if load.isVisible():
+                load.reject()
+
+    def return_late_choice(chooser: QFileDialog) -> None:
+        chooser.selectFile(str(path))
+        ui.window.request_shutdown()
+        wait_until(qapp, lambda: not ui.window.isVisible())
+        owner_finished.append(bool(finished))
+        if load_dialogs[0].isVisible():
+            load_dialogs[0].reject()
+        if chooser.isVisible():
+            QMetaObject.invokeMethod(
+                chooser, "accept", Qt.ConnectionType.DirectConnection
+            )
+
+    interactions = [(RunLoadDialog, open_load)]
+    if stage == "file-chooser":
+        interactions.append((QFileDialog, return_late_choice))
+    modal_action(
+        qapp, lambda: ui.window.load_tab_data_dialog(tab_id), interactions
+    )
+    assert owner_finished == [True]
+    assert finished == [(int(QDialog.DialogCode.Rejected), None, True)]
+    after = ui.controller.get_tab_snapshot(tab_id).run
+    assert after is not None
+    assert after.source_path == before.source_path
+    assert after.result is before.result
+    assert not ui.window.isVisible()
+
+
 def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, qapp):
     ui = control_ui
     original = ui.controller.context_control.read_context()

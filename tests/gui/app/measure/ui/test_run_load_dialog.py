@@ -72,6 +72,53 @@ def test_dialog_filters_and_disables_unpersisted_selection(
     qapp.processEvents()
 
 
+@pytest.mark.parametrize("finish", ["load", "cancel", "reject", "close"])
+def test_finished_load_interaction_retires_control_projection(
+    qapp: QApplication, rows: tuple[SavedRunInfo, ...], finish: str
+) -> None:
+    authority = ControlIdentity()
+    dialog = RunLoadDialog(
+        rows, initial_point="p", start_directory="", control_identity=authority
+    )
+    table = dialog.findChild(QTableWidget, "load_runs")
+    point = dialog.findChild(QComboBox, "load_point")
+    file_button = dialog.findChild(QPushButton, "load_file")
+    load = dialog.findChild(QPushButton, "load_selected")
+    cancel = dialog.findChild(QPushButton, "load_cancel")
+    assert table is not None and point is not None
+    assert file_button is not None and load is not None and cancel is not None
+    try:
+        dialog.open()
+        table.selectRow(0)
+        authority.connect("agent", "load-agent", "owner")
+        assert not table.isEnabled() and not point.isEnabled()
+        assert not file_button.isEnabled() and not load.isEnabled()
+        assert cancel.isEnabled()
+        authority.reclaim_local()
+        assert table.isEnabled() and point.isEnabled()
+        assert file_button.isEnabled() and load.isEnabled()
+        if finish == "load":
+            load.click()
+        elif finish == "cancel":
+            cancel.click()
+        elif finish == "reject":
+            dialog.reject()
+        else:
+            dialog.close()
+        expected = str(rows[0].data_path) if finish == "load" else None
+        assert dialog.selected_path() == expected
+        assert not dialog.isVisible()
+        authority.toggle_local()
+        authority.acquire("agent")
+        assert authority.status().holder == "rpc:load-agent"
+        assert table.isEnabled() and point.isEnabled()
+        assert file_button.isEnabled() and load.isEnabled()
+        assert dialog.selected_path() == expected
+    finally:
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
 def test_dialog_cancel_and_file_selection(
     qapp: QApplication,
     rows: tuple[SavedRunInfo, ...],
