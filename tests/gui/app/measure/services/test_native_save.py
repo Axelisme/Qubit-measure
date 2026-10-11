@@ -84,11 +84,13 @@ from tests.gui.app.measure._native_save_support import (
     declare_panes,
     native_save_session,
 )
+from tests.gui.app.measure.remote._helpers import FixtureController
 from tests.resources.entry.fakes import (
     register_fakes,
     registry_state,
     restore_registry,
 )
+from zcu_lab.definitions import ALIAS_PRESET
 
 
 class RoleSavingAdapter(SavingAdapter):
@@ -228,6 +230,7 @@ def role_application(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
     services = build_app_services(
+        alias_preset=ALIAS_PRESET,
         state=state,
         bus=bus,
         registry=registry,
@@ -628,6 +631,25 @@ def test_save_events_observe_committed_state_and_complete_report(
         assert payload.data_path == str(native.output.path)
     assert len(session.artifact_completions if batch else session.completions) == 1
     assert (session.completions if batch else session.artifact_completions) == []
+
+
+@pytest.fixture
+def role_controller(
+    tmp_path: Path, qapp: QApplication
+) -> Generator[tuple[State, Controller, BaseEventBus]]:
+    """Compose the real diagnostic owner without hardware or mutable registries."""
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    registry = Registry()
+    registry.register("role_saving", RoleSavingAdapter)
+    controller = FixtureController(
+        state=state, registry=registry, view=None, bus=bus, project_root=str(tmp_path)
+    )
+    try:
+        yield state, controller, bus
+    finally:
+        assert controller.quiesce()
+        qapp.processEvents()
 
 
 @pytest.mark.parametrize("batch", [False, True])

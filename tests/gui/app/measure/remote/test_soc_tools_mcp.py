@@ -30,11 +30,11 @@ def test_soc_tools_observe_gui_connection_without_hardware(
     try:
         invoke("connect", {"port": fx.service.port})
         assert invoke("status", {})["soc"] == {"connected": False, "mock": False}
-        invoke(
+        entry = invoke(
             "rpc_call",
             {
-                "method": "project.apply",
-                "params": {"chip_name": "chip", "qub_name": "q", "res_name": "res"},
+                "method": "entry.new",
+                "params": {"name": "q"},
             },
         )
         invoke(
@@ -59,14 +59,14 @@ def test_soc_tools_observe_gui_connection_without_hardware(
         assert invoke(
             "rpc_call",
             {
-                "method": "context.new",
-                "params": {
-                    "label": "base",
-                    "bind_device": None,
-                    "clone_from": "current",
-                },
+                "method": "point.new",
+                "params": {"label": "base", "clone_from": None},
             },
-        ) == {"label": "base", "has_active_context": True}
+        ) == {
+            "kind": "saved_point",
+            "entry_id": entry["entry_id"],
+            "point": "base",
+        }
         assert invoke("status", {})["soc"] == {"connected": True, "mock": False}
     finally:
         bridge.disconnect()
@@ -118,7 +118,10 @@ def test_simulation_initialize_binds_live_flux_and_reuses_gui_environment(
             "rpc_call",
             {
                 "method": "device.setup",
-                "params": {"name": "fake_flux", "updates": {"value": value}},
+                "params": {
+                    "name": "fake_flux",
+                    "cfg": {**snapshot["info"], "value": value},
+                },
             },
         )
         assert (

@@ -25,7 +25,6 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.reset_bath import bath_reset_writeback_items
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -93,22 +92,24 @@ class BathFreqGainAdapter(
             "dumps the excitation into the cavity bath. Runs on real hardware."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' / 'rabi_f' — the "
-            "resonator frequency and bath Rabi frequency centring the cavity "
-            "freq sweep at 'r_f - rabi_f' (absent → a fixed span); 'q_f' / "
-            "'qub_ch' / 'res_ch' seed the bath-reset tone drive defaults."
+            "Requires $resonator.freq and $qubit.ext.rabi_freq for the "
+            "cavity sweep from resonator frequency minus 1.2 Rabi frequency "
+            "to minus 0.8 Rabi frequency. Other drive defaults use captured "
+            "qubit/resonator frequency and wiring. Missing, null or invalid "
+            "seed values fail cfg lowering."
         ),
         expects_ml=(
-            "Needs a bath-reset module (the tested reset, with cavity / qubit / "
-            "pi-2 tones) and a readout module. Optionally references a "
-            "calibrated upstream reset and an init pulse (a library pi pulse "
-            "when present) — both disabled when no library entry exists."
+            "Builds the tested bath-reset cfg with cavity, qubit and pi/2 "
+            "tones from captured defaults and needs a readout module. "
+            "Optionally references an upstream reset and an init pulse "
+            "(a library pi pulse when present), both disabled when no "
+            "library entry exists."
         ),
         typical_writeback=(
-            "Proposes the best cavity gain into MetaDict 'bathreset_gain' and "
-            "frequency into 'bathreset_freq'. No ModuleLibrary writeback — these "
-            "seed the final 'reset_bath' registration done after the length and "
-            "phase steps (D2(a))."
+            "Proposes the best cavity gain and frequency to "
+            "$qubit.ext.reset_bath_gain and $qubit.ext.reset_bath_freq only. "
+            "BathPhase proposes the tested ground/excited reset modules; "
+            "length analysis has no automatic writeback."
         ),
         recommended=(
             "Analysis denoises the 2D map before picking the peak; wavelet "
@@ -181,20 +182,20 @@ class BathFreqGainAdapter(
         self,
         req: WritebackRequest[BathFreqGainRunResult, BathFreqGainAnalyzeResult],
     ) -> Sequence[WritebackItem]:
+        """Propose this analysis's cavity gain then frequency to qubit ext."""
         result = req.analyze_result
         items: list[WritebackItem] = [
             ParameterWriteback(
-                target_name="bathreset_gain",
+                target_name="$qubit.ext.reset_bath_gain",
                 description="Bath-reset cavity gain (a.u.)",
                 proposed_value=result.gain,
             ),
             ParameterWriteback(
-                target_name="bathreset_freq",
+                target_name="$qubit.ext.reset_bath_freq",
                 description="Bath-reset cavity frequency (MHz)",
                 proposed_value=result.freq,
             ),
         ]
-        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg))
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

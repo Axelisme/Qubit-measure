@@ -44,7 +44,12 @@ from zcu_tools.resources.context.library import (
     ModuleLibrary,
     ModuleLibraryDocument,
 )
-from zcu_tools.resources.entry import snapshot, source_path
+from zcu_tools.resources.entry import (
+    DestinationExistsError,
+    snapshot,
+    source_path,
+    validate_path_segment,
+)
 from zcu_tools.resources.entry.roles import role_registry
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
@@ -217,23 +222,37 @@ class ContextService:
         """Create from setup or a same-entry clone, then install ACTIVE.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
-        and origin unchanged to ResultEntry.new_point; never copy DRAFT. Resource errors
-        propagate. Post-creation binding failure raises PointBindingError from
-        its cause, retaining the point and old binding without retry/deletion.
+        and origin unchanged to ResultEntry.new_point; never copy DRAFT. An unsafe
+        label raises InvalidInputError(point_label_invalid) before source reads or
+        writes, preserving binding, files, ledger and versions. Label safety follows
+        the entry owner's single path component rule. An existing destination
+        raises InvalidInputError with the entry owner's FileExistsError message,
+        preserving the same state. Other resource errors propagate. Post-creation
+        binding failure raises PointBindingError from its cause, retaining the
+        point and old binding without retry/deletion.
         """
         self._owner.assert_owner()
         entry = self._require_open_entry()
+        try:
+            validate_path_segment(request.label, field="label")
+        except ValueError as exc:
+            raise InvalidInputError(
+                str(exc), reason_code="point_label_invalid"
+            ) from exc
         clone = (
             entry.use_point(request.clone_from)
             if request.clone_from is not None
             else None
         )
-        point = entry.new_point(
-            request.label,
-            clone_from=clone,
-            description=request.description,
-            origin=request.origin.origin,
-        )
+        try:
+            point = entry.new_point(
+                request.label,
+                clone_from=clone,
+                description=request.description,
+                origin=request.origin.origin,
+            )
+        except DestinationExistsError as exc:
+            raise InvalidInputError(str(exc)) from exc
         try:
             parameters, library, sources, info = self._prepare_point(
                 entry, request.label, point
@@ -338,11 +357,13 @@ class ContextService:
     ) -> ParameterContext:
         """Capture published point/library/storage and all current alias rows.
 
-        aliases optionally maps alias names to temporary concrete component
-        names. Overrides retain dependent authored links and change only this
+        aliases optionally maps aliases to temporary component or device names.
+        Names need not belong to the point or device catalog. Overrides retain
+        dependent authored links and change only this
         capture, never global rows, versions, publication or selection. Invalid
-        identifiers raise InvalidInputError(alias_invalid). $alias.path reads
-        resolve lazily without consumer declarations or kind checks; missing or
+        identifiers raise InvalidInputError(alias_invalid). $alias returns its
+        name string; $alias.path reads resolve lazily without consumer kind
+        checks. Missing or
         unbound aliases raise RoleResolutionError naming the alias, with no
         concrete-name fallback. Bare concrete paths remain independent.
         The capture never follows later source or alias edits and performs no

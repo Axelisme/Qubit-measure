@@ -21,7 +21,7 @@ from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
-from .errors import RenameRecoveryError
+from .errors import DestinationExistsError, RenameRecoveryError
 from .ledger import RecordsLedger
 from .ledger_models import (
     AnalyzedPayload,
@@ -56,7 +56,7 @@ def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -
     root_path = Path(root)
     path = root_path / name
     if new_destination and (path.exists() or path.is_symlink()):
-        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(path))
+        raise DestinationExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(path))
     if path.resolve().parent != root_path.resolve():
         raise ValueError(f"{path}: entry escapes its root")
     return path
@@ -285,7 +285,8 @@ class ResultEntry:
     ) -> PointView:
         """Create an independent complete point and return its validated view.
 
-        label is a safe single path segment; existing destinations are rejected.
+        label is a safe single path segment; existing destinations raise
+        DestinationExistsError before writes.
         Without clone_from, copy the latest setup components and provenance.
         clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
         PointView using the same resolved result/database roots. Reload published

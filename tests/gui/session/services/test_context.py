@@ -8,6 +8,7 @@ from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     ContextSourceBinding,
@@ -479,6 +480,113 @@ def test_new_point_uses_seed_or_clone_and_request_description(
     assert document.general.description == "session description"
     assert document.general.ext.get("marker") == (None if clone is None else 7.0)
     assert {point.label for point in context.list_points()} == {"source", "destination"}
+
+
+@pytest.mark.parametrize("clone", [None, "source"], ids=["setup", "clone"])
+def test_duplicate_point_is_typed_input_error_without_side_effects(
+    tmp_path: Path, clone: str | None
+) -> None:
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    context = ContextControlFacet(context=service)
+    entry = _entry(tmp_path)
+    for label in ("copy", "source"):
+        entry.new_point(label, description="retained")
+    service.install_entry(entry)
+    target = context.use_point(PointUseRequest("source"))
+    before = context.read_context().document()
+    version = state.version.snapshot()
+    ledger = entry.ledger.events()
+    files = {
+        path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+        for path in tmp_path.rglob("*")
+    }
+    facts: list[ContextSwitchedPayload] = []
+    subscription = bus.subscribe(ContextSwitchedPayload, facts.append)
+    try:
+        with pytest.raises((FileExistsError, InvalidInputError)) as caught:
+            context.new_point(_new_request("copy", clone=clone))
+        assert isinstance(caught.value, InvalidInputError)
+        assert "exist" in str(caught.value)
+        assert context.read_context().target == target
+        assert context.read_context().document() == before
+        assert [point.label for point in context.list_points()] == ["copy", "source"]
+        assert state.version.snapshot() == version
+        assert entry.ledger.events() == ledger
+        assert facts == []
+        assert {
+            path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+            for path in tmp_path.rglob("*")
+        } == files
+    finally:
+        subscription.unsubscribe()
+
+
+@pytest.mark.parametrize("clone", [None, "source"])
+@pytest.mark.parametrize(
+    "label",
+    [
+        "../escape",
+        "",
+        ".",
+        "..",
+        "nested/point",
+        r"nested\point",
+        "\x00",
+        "C:point",
+        "/absolute",
+    ],
+    ids=[
+        "escape",
+        "empty",
+        "dot",
+        "parent",
+        "posix",
+        "windows",
+        "nul",
+        "drive",
+        "absolute",
+    ],
+)
+def test_unsafe_point_label_is_typed_input_error_without_side_effects(
+    tmp_path: Path, label: str, clone: str | None
+) -> None:
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    context = ContextControlFacet(context=service)
+    entry = _entry(tmp_path)
+    entry.new_point("source", description="retained")
+    service.install_entry(entry)
+    target = context.use_point(PointUseRequest("source"))
+    before = context.read_context().document()
+    version = state.version.snapshot()
+    ledger = entry.ledger.events()
+    files = {
+        path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+        for path in tmp_path.rglob("*")
+    }
+    facts: list[ContextSwitchedPayload] = []
+    subscription = bus.subscribe(ContextSwitchedPayload, facts.append)
+    try:
+        with pytest.raises((ValueError, InvalidInputError)) as caught:
+            context.new_point(_new_request(label, clone=clone))
+        assert isinstance(caught.value, InvalidInputError)
+        assert caught.value.reason_code == "point_label_invalid"
+        assert "single path component" in str(caught.value)
+        assert context.read_context().target == target
+        assert context.read_context().document() == before
+        assert [point.label for point in context.list_points()] == ["source"]
+        assert state.version.snapshot() == version
+        assert entry.ledger.events() == ledger
+        assert facts == []
+        assert {
+            path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+            for path in tmp_path.rglob("*")
+        } == files
+    finally:
+        subscription.unsubscribe()
 
 
 def test_created_point_binding_failure_retains_point_and_previous_binding(

@@ -23,6 +23,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import EvalValue
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
 from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
@@ -40,7 +41,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import flux_range, qub_freq_range
+from zcu_lab.v2._support.measure.seeds import flux_range, literal, qub_freq_range
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
 
 if TYPE_CHECKING:
@@ -88,9 +89,9 @@ class FluxDepAdapter(
             "Needs a qubit-probe pulse module and a pulse-readout module; "
             "references a ModuleLibrary waveform named 'ro_waveform' when "
             "present. Optionally references a calibrated reset module. Also "
-            "needs a flux device reference 'flux_dev' (a connected device, "
-            "defaulting to a registered device named 'flux' and falling back "
-            "to 'flux_yoko') — a device, not a library entry."
+            "needs a flux device name 'flux_dev' ($flux_dev resolves "
+            "from the alias table with no fallback) — "
+            "a device, not a library entry."
         ),
         typical_writeback=(
             "Interactive analysis (not a fit): after the run, the user drags "
@@ -150,11 +151,10 @@ class FluxDepAdapter(
                 locked={"freq": 0.0},
             )
             .readout()
-            .device_from_value_source(
+            .device(
                 "flux_dev",
                 label="Flux Device",
-                source_key="device.flux.name",
-                fallback="flux_yoko",
+                default=literal(EvalValue("$flux_dev")),
             )
             .relax_delay(1.0)
             .sweep(

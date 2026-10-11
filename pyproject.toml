@@ -159,10 +159,11 @@ include = ["lib", "zcu_lab", "tests", "scripts", "tools", "migrations"]
 executionEnvironments = [
   { root = "zcu_lab", extraPaths = ["lib", "."] },
   { root = "lib", extraPaths = ["lib", "."] },
-  { root = "tests", extraPaths = ["lib", "tools", "."] },
   { root = "scripts", extraPaths = ["lib", "."] },
   { root = "migrations", extraPaths = ["lib", "."] },
   { root = "tools", extraPaths = ["lib", "tools", "."] },
+  # Resolve production packages before same-named test packages.
+  { root = ".", extraPaths = ["lib", "tools", "tests"] },
 ]
 # strict, minus the rules whose diagnostics are produced by untyped third-party
 # packages (qick, pyvisa, scqubits, qtpy) rather than by this repository. Measured

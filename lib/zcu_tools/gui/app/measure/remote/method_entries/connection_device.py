@@ -127,13 +127,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "connection_device:h_device_setup",
         MethodSpec(
             30.0,
-            "Apply 'updates' to a connected device by name via rpc_call. "
-            "The GUI starts an asynchronous setup operation; MCP returns a "
-            "handle. Use wait(op=handle) for terminal status and Stop feedback, "
-            "then rpc_call on device.snapshot for current values.",
+            "Apply a complete Info cfg to a device by name via rpc_call. "
+            "All model-required fields must be supplied; defaults follow that Info "
+            "constructor, never cached values. Extra fields and validator errors "
+            "are rejected before setup. YOKO requires mode; omitted value_unit "
+            "is generated from mode. The GUI starts an asynchronous operation; "
+            "MCP returns a handle. Use wait(op=handle) for terminal status, then "
+            "device.snapshot for cached facts. For partial cfg and a fixed bounded "
+            "wait use the device_setup tool.",
             (
                 required_string("name", "Device name"),
-                required_object("updates", "Field updates"),
+                required_object("cfg", "Complete Info constructor cfg"),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -145,7 +149,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "connection_device:h_device_setup_spec",
         MethodSpec(
             5.0,
-            "List the fields accepted by device.setup's 'updates' for a connected "
+            "List the Info fields used by device.setup's complete cfg for a connected "
             "device: {fields: [{name, type, current, settable, choices?}, ...]} — each "
             "field's name, type, choices (for enum/Literal fields like output/mode), "
             "current value, and whether it is settable (the protected type/address are "

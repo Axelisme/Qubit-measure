@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.session.aliases import AliasRow
 
 RegistryFactory = Callable[
     [], tuple["Registry", "TemplateCatalog", "ExperimentCatalogLoader"]
@@ -54,7 +55,19 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         *,
         clean: bool = False,
         project_root: str | None = None,
+        alias_preset: tuple[AliasRow, ...] = (),
     ) -> None:
+        """Build caller catalogs now and retain initial session rows for assemble.
+
+        ``registry_factory`` returns the registry, templates and reload loader
+        after runtime setup. ``clean`` skips restoring persisted preferences;
+        ``project_root`` anchors default paths, or uses the working directory.
+        ``alias_preset`` is an ordered caller-owned table; omitted or empty means
+        no aliases. Softlinks and unbound rows are preserved. Assemble applies
+        the session's one-time unique-focus initialization and rejects invalid
+        syntax, duplicate names or forward links with InvalidInputError.
+        Presets do not bind devices from remembered settings or hardware.
+        """
         from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.measure.utils.error_handler import (
             install_global_exception_hook,
@@ -66,6 +79,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         )
         self._clean = clean
         self._project_root = project_root
+        self._alias_preset = alias_preset
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         from zcu_tools.gui.app.measure.state import State
@@ -77,6 +91,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             self._template_catalog,
             self._project_root,
             catalog_loader=self._catalog_loader,
+            alias_preset=self._alias_preset,
         )
 
         adapter = None
@@ -134,6 +149,7 @@ def _build_window(
     project_root: str | None = None,
     *,
     catalog_loader: ExperimentCatalogLoader | None = None,
+    alias_preset: tuple[AliasRow, ...] = (),
 ) -> tuple[Controller, MainWindow]:
     """Create Controller + MainWindow in the correct order."""
 
@@ -151,6 +167,7 @@ def _build_window(
         bus=bus,
         project_root=project_root,
         catalog_loader=catalog_loader,
+        alias_preset=alias_preset,
     )
 
     window = MainWindow(ctrl)

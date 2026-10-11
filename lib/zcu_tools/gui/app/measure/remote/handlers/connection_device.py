@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -120,16 +120,16 @@ def h_device_setup(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
-    updates = cast(dict[str, object], params["updates"])  # ParamSpec validated
+    cfg = params["cfg"]  # ParamSpec validated object; Info owns field validation.
     dev = adapter.device_control
     info = dev.get_device_info(name)
     if info is None:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            f"Device {name!r} has no live info to update",
+            f"Device {name!r} has no Info model for setup",
         )
     try:
-        updated = info.with_updates(**dict(updates))
+        updated = type(info).model_validate(cfg)
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     operation_id = dev.start_setup_device(SetupDeviceRequest(name=name, info=updated))

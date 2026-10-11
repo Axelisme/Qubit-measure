@@ -158,7 +158,7 @@ def test_device_dialog_drop_device(qapp):
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = [_entry("yoko", "YOKOGS200")]
 
-    info = YOKOGS200Info(address="GPIB::1")
+    info = YOKOGS200Info(address="GPIB::1", mode="voltage")
     ctrl.get_device_snapshot.return_value = _connected_snapshot("yoko", info)
 
     dialog = _make_dialog(ctrl)
