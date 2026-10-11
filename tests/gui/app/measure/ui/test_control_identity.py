@@ -1072,7 +1072,7 @@ def test_inspect_add_remote_gates_fields_and_submit_and_retires_on_close(
     baseline = ui.controller.context_control.inspect_document()
     if opening == "new":
         ui.connect()
-    dialog = open_resonator_add(tree, "remote-candidate")
+    dialog = open_resonator_add(tree, "remote_candidate")
     controls = dialog.findChildren(QLineEdit) + dialog.findChildren(QComboBox)
     assert controls
     if opening == "existing":
@@ -1109,15 +1109,15 @@ def test_inspect_add_late_submit_after_transfer_has_no_owner_effects(
     tree = inspect.findChild(ComponentTreeWidget)
     if tree is None:
         raise LookupError("Inspect lacks its component tree")
-    local = open_resonator_add(tree, "local-resonator")
+    local = open_resonator_add(tree, "local_resonator")
     add_control(local, QPushButton, "add_submit").click()
     assert (
         document_value(
-            ui.controller.context_control.inspect_document(), "local-resonator.freq"
+            ui.controller.context_control.inspect_document(), "local_resonator.freq"
         )
         == 6500.0
     )
-    late = open_resonator_add(tree, "late-resonator")
+    late = open_resonator_add(tree, "late_resonator")
     submit = add_control(late, QPushButton, "add_submit")
     baseline = ui.controller.context_control.inspect_document()
     changes: list[MdChangedPayload] = []
