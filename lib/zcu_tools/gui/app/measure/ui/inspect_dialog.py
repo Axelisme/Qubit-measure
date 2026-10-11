@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QFont, QKeyEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
@@ -335,14 +335,14 @@ class InspectDialog(InspectDialogBase):
                     continue
                 group_item = QTreeWidgetItem(self._ml_tree, [group])
                 group_item.setFont(0, bold)
-                group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # type: ignore[attr-defined]
+                group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 group_item.setExpanded(True)
                 for name in sorted(store):
                     child = QTreeWidgetItem(group_item, [name])
                     child.setData(
                         0,
                         Qt.ItemDataRole.UserRole,
-                        (group, name),  # type: ignore[attr-defined]
+                        (group, name),
                     )
                     if desired == (group, name):
                         restore_item = child

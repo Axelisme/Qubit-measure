@@ -35,6 +35,7 @@ def scalar(value: object) -> dict[str, Any]:
     return {
         "kind": "scalar",
         "valid": True,
+        "readonly": False,
         "input": {
             "mode": "direct",
             "raw": value,
@@ -46,7 +47,7 @@ def scalar(value: object) -> dict[str, Any]:
 
 
 def section(**children: dict[str, Any]) -> dict[str, Any]:
-    return {"kind": "section", "valid": True, "children": children}
+    return {"kind": "section", "valid": True, "readonly": False, "children": children}
 
 
 class LookbackGui:
@@ -61,11 +62,22 @@ class LookbackGui:
             "tree": section(
                 rounds=scalar(3),
                 modules=section(
-                    reset={"kind": "reference", "valid": True, "ref": None},
-                    init_pulse={"kind": "reference", "valid": True, "ref": None},
+                    reset={
+                        "kind": "reference",
+                        "valid": True,
+                        "readonly": False,
+                        "ref": None,
+                    },
+                    init_pulse={
+                        "kind": "reference",
+                        "valid": True,
+                        "readonly": False,
+                        "ref": None,
+                    },
                     readout={
                         "kind": "reference",
                         "valid": True,
+                        "readonly": False,
                         "ref": None,
                         "error": None,
                         "children": {
