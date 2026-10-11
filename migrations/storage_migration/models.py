@@ -8,7 +8,6 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import JsonValue
-
 from zcu_tools.datafile import (
     CfgSnapshot,
     JsonObject,

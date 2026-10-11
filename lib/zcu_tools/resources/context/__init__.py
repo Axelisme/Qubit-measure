@@ -1,4 +1,4 @@
-"""Point-local module library resources."""
+"""Point-local typed module library."""
 
 from .library import ModuleLibrary
 

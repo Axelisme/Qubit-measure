@@ -11,7 +11,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
-
 from zcu_tools.datafile import JsonObject
 
 from .errors import MigrationInputError
