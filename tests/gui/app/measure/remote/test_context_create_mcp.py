@@ -68,11 +68,55 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         assert "ghost" in unknown["error"]["message"]
         duplicate = call(sock, "point.new", {"label": "copy", "clone_from": None})
         assert duplicate["ok"] is False
-        assert duplicate["error"]["code"] == "controller_error"
+        assert duplicate["error"]["code"] == "invalid_params"
         assert "exist" in duplicate["error"]["message"]
         assert selection(invoke)["active"] == "base"
     finally:
         bridge.disconnect()
+        sock.close()
+        fx.stop()
+
+
+@pytest.mark.uses_wall_clock
+@pytest.mark.parametrize("clone", [None, "source"], ids=["setup", "clone"])
+def test_duplicate_point_returns_invalid_params_without_side_effects(
+    qapp, tmp_path: Path, clone: str | None
+) -> None:
+    fx = Fixture(project_root=str(tmp_path), empty_project=True)
+    fx.start()
+    sock = open_client(fx.service.port)
+    try:
+        info = call(sock, "entry.new", {"name": "q"})["result"]
+        for label in ("copy", "source"):
+            assert (
+                call(sock, "point.new", {"label": label, "description": "retained"})[
+                    "ok"
+                ]
+                is True
+            )
+        before = call(sock, "context.snapshot", {})["result"]
+        roots = [Path(info["result_path"]).parent, Path(info["database_path"]).parent]
+        files = {
+            path: path.read_bytes() if path.is_file() else None
+            for root in roots
+            for path in root.rglob("*")
+        }
+        failed = call(sock, "point.new", {"label": "copy", "clone_from": clone})
+        assert failed["ok"] is False
+        assert failed["error"]["code"] == "invalid_params"
+        assert "exist" in failed["error"]["message"]
+        assert failed["error"].get("data") is None
+        assert call(sock, "context.snapshot", {})["result"] == before
+        assert call(sock, "point.list", {})["result"]["points"] == [
+            {"label": "copy", "description": "retained"},
+            {"label": "source", "description": "retained"},
+        ]
+        assert {
+            path: path.read_bytes() if path.is_file() else None
+            for root in roots
+            for path in root.rglob("*")
+        } == files
+    finally:
         sock.close()
         fx.stop()
 
