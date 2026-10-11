@@ -23,7 +23,7 @@ from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     native_save_session,
 )
-from zcu_lab import ALIAS_PRESET
+from zcu_lab.definitions import ALIAS_PRESET
 
 
 def _make_service(

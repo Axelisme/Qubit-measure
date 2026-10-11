@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -30,7 +30,7 @@ def composed_context(
     rows: tuple[AliasRow, ...],
     root: Path,
     qapp: QApplication,
-) -> Iterator[ContextControlPort]:
+) -> Generator[ContextControlPort]:
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     bus = BaseEventBus()
     registry = Registry()
@@ -105,8 +105,10 @@ def test_caller_preset_preserves_order_links_and_unbound_rows(
 def test_invalid_caller_preset_fails_at_composition(
     seam: str, tmp_path: Path, qapp: QApplication
 ) -> None:
-    with pytest.raises(InvalidInputError, match="duplicate"):
-        with composed_context(
+    with (
+        pytest.raises(InvalidInputError, match="duplicate"),
+        composed_context(
             seam, (AliasRow("drive", "Q1"), AliasRow("drive", "Q2")), tmp_path, qapp
-        ):
-            pytest.fail("Duplicate caller aliases must not construct a session")
+        ),
+    ):
+        pytest.fail("Duplicate caller aliases must not construct a session")

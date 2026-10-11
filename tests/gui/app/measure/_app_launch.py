@@ -23,7 +23,7 @@ from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
 from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure.remote._helpers import mcp_client
-from zcu_lab import ALIAS_PRESET
+from zcu_lab.definitions import ALIAS_PRESET
 
 
 @dataclass(frozen=True)

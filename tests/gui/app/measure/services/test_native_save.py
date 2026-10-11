@@ -89,7 +89,7 @@ from tests.resources.entry.fakes import (
     registry_state,
     restore_registry,
 )
-from zcu_lab import ALIAS_PRESET
+from zcu_lab.definitions import ALIAS_PRESET
 
 
 class RoleSavingAdapter(SavingAdapter):

@@ -33,8 +33,8 @@ from zcu_tools.gui.session.events import MlChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import component_registry
 
-from zcu_lab import ALIAS_PRESET
 from zcu_lab.components import QubitSchema, ResonatorSchema
+from zcu_lab.definitions import ALIAS_PRESET
 from zcu_lab.templates import register_all_templates
 
 

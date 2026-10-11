@@ -55,8 +55,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from zcu_lab import ALIAS_PRESET
-from zcu_lab.definitions import register_all
+from zcu_lab.definitions import ALIAS_PRESET, register_all
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
