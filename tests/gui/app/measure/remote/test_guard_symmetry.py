@@ -18,8 +18,6 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.services.guard import GuardError
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg.edit_codec import encode_ref
-from zcu_tools.gui.cfg.resource import CfgRevision
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import (
@@ -98,7 +96,7 @@ def test_run_start_draft_context_symmetry(qapp):
 
     # UI path
     with pytest.raises(GuardError, match="active file-backed context"):
-        ctrl.start_run(tab_id, ctrl.cfg_resources.lookup(tab_id).observe().ref)
+        ctrl.start_run(tab_id)
 
     # Remote path — same precondition, mapped to a typed wire error.
     with pytest.raises(RemoteError) as excinfo:
@@ -107,7 +105,6 @@ def test_run_start_draft_context_symmetry(qapp):
             "tab.run_start",
             {
                 "tab_id": tab_id,
-                "expected": encode_ref(ctrl.cfg_resources.lookup(tab_id).observe().ref),
             },
         )
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
@@ -165,7 +162,5 @@ def test_run_permit_issued_for_active_valid_context(qapp):
     ctrl = _make_controller(ContextReadiness.ACTIVE)
     tab_id = ctrl.new_tab("fake")
 
-    permit = ctrl._guard_svc.acquire_run_permit(
-        tab_id, expected_revision=CfgRevision(0)
-    )
+    permit = ctrl._guard_svc.acquire_run_permit(tab_id)
     assert permit.tab_id == tab_id

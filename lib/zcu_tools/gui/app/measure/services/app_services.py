@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.cfg.resource import CfgResolution, CfgRevision, SourceRevision
+from zcu_tools.gui.cfg.resource import CfgResolution, SourceRevision
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -182,7 +182,7 @@ def build_app_services(
             source,
             source_basis=(
                 *source.source_basis,
-                SourceRevision("values", CfgRevision(captured.revision)),
+                SourceRevision("values", int(captured.revision)),
             ),
         )
 

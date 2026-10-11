@@ -1001,7 +1001,7 @@ class ExpTabWidget(QWidget):
         if not confirmed:
             return
         assert self._actions is not None, "reset clicked before bind"
-        self._cfg.reset(self.cfg_form.current_ref().revision)
+        self._cfg.reset()
         self._actions.refresh_interaction(self.tab_id)
 
     def _is_data_visible(self) -> bool:

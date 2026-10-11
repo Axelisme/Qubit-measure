@@ -181,14 +181,13 @@ class LoadService:
         if not isinstance(snapshot, ExpCfgModel):
             return "not_applied"
         cfg = self._state.get_tab(tab_id).cfg
-        revision = cfg.observe().ref.revision
         try:
             candidate = project_loaded_cfg(
                 cfg.snapshot_inputs(), snapshot, provide_options=self._provide_options
             )
             if candidate is None:
                 return "not_applied"
-            cfg.replace_inputs(revision, candidate, require_valid=True)
+            cfg.replace_inputs(candidate, require_valid=True)
         except (
             CfgInputError,
             CfgPreconditionError,

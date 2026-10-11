@@ -8,7 +8,6 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 from ._params import (
     optional_string,
     required_json,
-    required_object,
     required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
@@ -147,12 +146,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_get_cfg",
         MethodSpec(
             5.0,
-            "Return a complete cached resource publication: cfg_ref, status, tree, "
+            "Return a complete cached resource publication: status, tree, "
             "source_basis and diagnostics. Ordinary reads do not query sources. "
-            "Nonempty aliases requires expected cfg_ref and resolves current inputs "
-            "against named overrides without publication. None and {} read cached cfg. Stale "
-            "refs reject; the returned ref never refreshes to a newer revision. "
-            "Use cfg_ref as expected for tab.edit_cfg or tab.reset_cfg. Paths are arrays of field "
+            "Nonempty aliases resolves current inputs against named overrides "
+            "without publication. None and {} read cached cfg. Paths are arrays of field "
             "segments; writes use the closed __expr/__text/__complex/__ref codec. "
             "Library editor observations use their own independent interface.",
             (
@@ -163,7 +160,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     required=False,
                     description="Temporary alias-name to component-name overrides; None and {} mean no override",
                 ),
-                ParamSpec("expected", JsonType.OBJECT),
             ),
             readonly=True,
         ),
@@ -174,16 +170,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_reset_cfg",
         MethodSpec(
             5.0,
-            "Reset cfg to current adapter defaults at expected cfg_ref. Returns the "
-            "complete new publication, which may be Invalid. Every successful command "
-            "adds a revision, even if inputs are unchanged. Busy, stale and notification-"
-            "reentrant resets are rejected. Does not clear results or save artifacts.",
-            (
-                required_string("tab_id"),
-                required_object(
-                    "expected", "cfg_ref from the complete resource observation"
-                ),
-            ),
+            "Reset cfg to current adapter defaults. Returns the complete new "
+            "publication, which may be Invalid. Busy and notification-reentrant "
+            "resets are rejected. Does not clear results or save artifacts.",
+            (required_string("tab_id"),),
         ),
         agent=AgentMethodPolicy(refresh_after_write=True),
     ),
@@ -192,18 +182,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_edit_cfg",
         MethodSpec(
             5.0,
-            "Atomically apply an ordered edit batch at expected cfg_ref. Paths are "
+            "Atomically apply an ordered edit batch to current inputs. Paths are "
             "arrays of field-name segments. Scalars use __expr/__text/__complex; "
             "reference inputs use __ref and complete children; range inputs are "
             "complete objects. All edits publish together or none do. Valid "
-            "incomplete input may publish Invalid. Every successful command adds "
-            "a revision, including equal values. Busy, stale and notification-"
-            "reentrant edits are rejected. Returns the complete new observation.",
+            "incomplete input may publish Invalid. Busy and notification-reentrant "
+            "edits are rejected. Returns the complete new observation.",
             (
                 required_string("tab_id"),
-                required_object(
-                    "expected", "cfg_ref from the complete resource observation"
-                ),
                 required_json(
                     "edits", "Ordered list of {path: [segments], value} inputs"
                 ),

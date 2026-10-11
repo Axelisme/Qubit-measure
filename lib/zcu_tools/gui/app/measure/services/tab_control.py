@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
-from zcu_tools.gui.cfg.resource import CfgObservation, CfgRef
+from zcu_tools.gui.cfg.resource import CfgObservation
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ParameterContext
 
@@ -62,7 +62,7 @@ class TabControlPort(Protocol):
         ...
 
     def preview_cfg(
-        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> CfgObservation:
         """Resolve exact observed inputs with named aliases without publication.
 
@@ -163,7 +163,7 @@ class TabControlFacet:
         return self._tab.capture_parameters(tab_id, aliases=aliases)
 
     def preview_cfg(
-        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> CfgObservation:
         """Read temporary cfg; see TabControlPort.preview_cfg."""
-        return self._tab.preview_cfg(tab_id, expected, aliases=aliases)
+        return self._tab.preview_cfg(tab_id, aliases=aliases)

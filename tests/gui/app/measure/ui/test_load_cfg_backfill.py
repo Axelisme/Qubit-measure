@@ -86,22 +86,17 @@ def flush_form_timers():
 def test_local_load_publishes_to_the_same_resource_and_form(app):
     ctrl, window, state, tab_id = app
     resource = ctrl.cfg_resources.lookup(tab_id)
-    resource.edit(resource.observe().ref.revision, (CfgEdit(("knob",), 99),))
-    before = resource.observe().ref
+    resource.edit((CfgEdit(("knob",), 99),))
     outcome = ctrl.load_tab_result(tab_id, "result.hdf5")
     assert outcome.cfg_backfill == "applied"
-    after = resource.observe().ref
-    assert after.cfg_id == before.cfg_id
-    assert after.revision == before.revision + 1
     version = state.version.get(f"tab:{tab_id}:cfg")
     form = window.findChild(ResourceCfgFormWidget)
     assert form is not None
     entry = form.findChild(QLineEdit)
     assert entry is not None and entry.text() == "42"
     flush_form_timers()
-    assert resource.observe().ref == after
     assert state.version.get(f"tab:{tab_id}:cfg") == version
-    resource.edit(after.revision, (CfgEdit(("knob",), 43),))
+    resource.edit((CfgEdit(("knob",), 43),))
     assert entry.text() == "43"
     assert state.get_tab(tab_id).cfg.snapshot_inputs().value.fields[
         "knob"
@@ -114,7 +109,7 @@ def test_local_load_publishes_to_the_same_resource_and_form(app):
 def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, disposition):
     ctrl, window, _, tab_id = app
     resource = ctrl.cfg_resources.lookup(tab_id)
-    before = resource.observe().ref
+    before = resource.observe()
     remote = RemoteControlAdapter(
         controller=ctrl,
         opts=ControlOptions(port=0),
@@ -137,26 +132,8 @@ def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, dispos
             entry = form.findChild(QLineEdit)
             assert entry is not None
             assert entry.text() == ("42" if disposition == "applied" else "7")
-            after = resource.observe().ref
-            assert after.cfg_id == before.cfg_id
-            if disposition == "applied":
-                assert after.revision == before.revision + 1
-                rejected = call(
-                    client,
-                    "tab.edit_cfg",
-                    {
-                        "tab_id": tab_id,
-                        "expected": {
-                            "cfg_id": str(before.cfg_id),
-                            "revision": str(before.revision),
-                        },
-                        "edits": [{"path": ["knob"], "value": 99}],
-                    },
-                )
-                assert rejected["error"]["reason"] == "stale_revision"
-                assert entry.text() == "42"
-            else:
-                assert after == before
+            if disposition != "applied":
+                assert resource.observe() == before
     finally:
         remote.stop()
 

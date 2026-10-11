@@ -17,7 +17,6 @@ from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.resources.entry import AcquiredPayload
 
@@ -291,7 +290,6 @@ def test_native_run_rpc_records_mcp_acquired_without_save(
             "tab.run_start",
             {
                 "tab_id": "tab",
-                "expected": encode_ref(session.state.get_tab("tab").cfg.observe().ref),
             },
         )
         assert started["ok"] is True, started

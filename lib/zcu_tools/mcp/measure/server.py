@@ -65,7 +65,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v109: flux unit assertions and explicit native coordinate opt-in for FakeDevice.
 # v111: injected generator recipes, captured questions and explicit answer/writeback.
 # v112: status projects the opened EntryInfo rather than chip/qubit identity.
-MCP_VERSION = 112
+# v113: cfg commands and recipe captures no longer carry cfg refs.
+MCP_VERSION = 113
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
@@ -138,8 +139,8 @@ GUI hook and may report operation_failed for an already failed operation.
 Read tab.snapshot(tab_id), context.snapshot and soc.info(include_cfg=true)
 explicitly for their guarded resources, and device.snapshot for devices.
 Summaries, partial getters, status and bare versions do not replace these reads.
-Cfg editing and Run require the observed cfg_ref from tab.get_cfg. A new tab
-receipt certifies existence only. apply_writeback(tab, items) selects current
+Cfg editing applies to current inputs; Run accepts only Valid cfg and fixes
+its execution values at admission. A new tab receipt certifies existence only. apply_writeback(tab, items) selects current
 Primary/Post candidates by stable target_name. Omit items for all; an empty array
 writes none. It ignores checkboxes and rejects unknown or ambiguous names before
 any write, using current IDs rather than proposal IDs. It does not answer recipes

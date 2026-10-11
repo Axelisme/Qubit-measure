@@ -1,6 +1,5 @@
 """Author Run/source capture and raw-save contracts through the GUI transport."""
 
-from copy import deepcopy
 from threading import Event
 
 import pytest
@@ -24,7 +23,6 @@ def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_pa
         tab.set_frequency(
             "modules.readout", calibration="resonator", required="frequency_mhz"
         )
-        expected = deepcopy(gui.publication["cfg_ref"])
         operation = tab.run()
         assert gui.ran
         assert not any(
@@ -32,7 +30,6 @@ def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_pa
         )
         before = operation.snapshot()
         assert before is not None and before.start_status == "running"
-        assert before.actual["cfg_ref"] == expected
         assert before.actual["fields"]["rounds"] == {
             "value": 7,
             "source": "explicit",
@@ -58,7 +55,6 @@ def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_pa
         captured = run.snapshot()
         assert captured is not None
         assert captured.actual["fields"]["rounds"]["value"] == 7
-        assert captured.actual["cfg_ref"] == expected
         assert captured.actual["source_basis"] == [{"key": "r_f", "revision": "7"}]
         assert captured.result_state == {
             "available": True,
@@ -76,7 +72,9 @@ def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_pa
         assert captured is not None and captured.raw_save == receipt
         assert (
             "tab.run_start",
-            {"tab_id": "t", "expected": expected},
+            {
+                "tab_id": "t",
+            },
         ) in client.transport.sent
         assert (
             "tab.save_data",
@@ -265,10 +263,6 @@ def test_uncertain_start_does_not_infer_not_started_from_a_missing_handle(tmp_pa
         assert error.value.reason == "connection_lost"
         capture = recipe.run_snapshot()
         assert capture is not None and capture.start_status == "unknown"
-        assert (
-            capture.op is None
-            and capture.actual["cfg_ref"] == gui.publication["cfg_ref"]
-        )
         assert (
             sum(method == "tab.run_start" for method, _ in client.transport.sent) == 1
         )

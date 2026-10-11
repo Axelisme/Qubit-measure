@@ -1009,7 +1009,6 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert reply.images[0].data == PNG
         assert data["elapsed_s"] >= 0
         actual = data["actual"]
-        assert actual["cfg_ref"] == gui.publication["cfg_ref"]
         fields = actual["fields"]
         for path, value in {
             "modules.readout.pulse_cfg.freq": 6020.0,

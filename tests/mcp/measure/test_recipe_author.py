@@ -14,13 +14,12 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 from ._recipe_support import LookbackGui, recipe_client, scalar, section
 
 
-def test_author_edits_preserve_defaults_and_use_each_returned_cfg_ref(tmp_path):
+def test_author_edits_preserve_defaults(tmp_path):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.set("rounds", None)
         tab.use_library("modules.readout", None)
-        assert gui.publication["cfg_ref"]["revision"] == "2"
         tab.set("rounds", 7)
         # This short reference is a wire-edit literal, not native admission.
         tab.use_library("modules.readout", "readout")
@@ -31,7 +30,6 @@ def test_author_edits_preserve_defaults_and_use_each_returned_cfg_ref(tmp_path):
         gui.publication["tree"]["children"]["modules"]["children"]["readout"]["ref"]
         == "readout"
     )
-    assert gui.publication["cfg_ref"]["revision"] == "5"
 
 
 @pytest.mark.parametrize(
@@ -75,14 +73,12 @@ def test_author_reuse_resets_the_observed_cfg_before_editing(tmp_path):
             for method, params in client.transport.sent
             if method in {"tab.get_cfg", "tab.reset_cfg", "tab.edit_cfg", "tab.new"}
         ]
-    assert [method for method, _ in cfg_calls] == [
-        "tab.get_cfg",
-        "tab.reset_cfg",
-        "tab.edit_cfg",
-    ]
-    assert cfg_calls[1][1]["expected"] == {"cfg_id": "cfg", "revision": "2"}
-    assert cfg_calls[2][1]["expected"] == {"cfg_id": "cfg", "revision": "3"}
-    assert gui.publication["cfg_ref"]["revision"] == "4"
+    assert [method for method, _ in cfg_calls] == ["tab.reset_cfg", "tab.edit_cfg"]
+    assert cfg_calls[0][1] == {"tab_id": "t"}
+    assert cfg_calls[1][1] == {
+        "tab_id": "t",
+        "edits": [{"path": ["rounds"], "value": 9}],
+    }
     assert gui.publication["tree"]["children"]["rounds"]["input"]["resolved"] == 9
 
 
@@ -93,7 +89,6 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
         tab = RecipeSession(client.context).open_tab("lookback")
         with pytest.raises(ValueError, match="field"):
             tab.set(field, 5)
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 def test_author_missing_required_library_is_a_named_parameter_gap(tmp_path):
@@ -103,7 +98,6 @@ def test_author_missing_required_library_is_a_named_parameter_gap(tmp_path):
         with pytest.raises(RecipeNeedsParameters) as error:
             tab.use_library("modules.readout", None, required="readout_ref")
         assert [item.parameter for item in error.value.missing] == ["readout_ref"]
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
@@ -225,7 +219,6 @@ def test_author_rejects_nonfinite_or_boolean_frequency_before_editing(
                 calibration="resonator",
                 required="frequency_mhz",
             )
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 class _SweepGui(LookbackGui):
@@ -361,7 +354,6 @@ def test_author_frequency_sweep_reports_all_missing_inputs_before_edit(tmp_path)
             "center_mhz",
             "span_mhz",
         ]
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 @pytest.mark.parametrize("expts", [None, 5])
@@ -394,7 +386,6 @@ def test_author_flux_sweep_rejects_invalid_explicit_endpoints(tmp_path, start, s
         RecipeSession(client.context).open_tab("lookback").set_flux_sweep(
             "sweep.flux", start=start, stop=stop
         )
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 def test_author_flux_sweep_requires_calibrations_only_for_omitted_endpoints(tmp_path):
@@ -421,7 +412,6 @@ def test_author_sweep_rejects_invalid_counts_before_edit(tmp_path, expts):
         RecipeSession(client.context).open_tab("lookback").set_sweep(
             "sweep.freq", expts=expts
         )
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 def test_author_sweep_only_edits_supplied_fields(tmp_path):
@@ -432,7 +422,6 @@ def test_author_sweep_only_edits_supplied_fields(tmp_path):
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.set_sweep("sweep.freq")
-        assert gui.publication["cfg_ref"]["revision"] == "2"
         tab.set_sweep("sweep.freq", start=6000.0, expts=2)
     inputs = gui.publication["tree"]["children"]["sweep"]["children"]["freq"]["inputs"]
     assert inputs["start"]["resolved"] == 6000.0
@@ -551,7 +540,6 @@ def test_author_flux_device_rejects_mismatched_or_unconfirmed_units_before_edit(
                 "coil", unit=unit
             )
         assert error.value.reason == "invalid_device"
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 def test_author_fake_flux_requires_explicit_native_opt_in(tmp_path):
@@ -565,7 +553,6 @@ def test_author_fake_flux_requires_explicit_native_opt_in(tmp_path):
         RecipeSession(client.context).open_tab("lookback").use_flux_device(
             "coil", unit="native"
         )
-    assert gui.publication["cfg_ref"]["revision"] == "4"
 
 
 @pytest.mark.parametrize(
@@ -579,7 +566,6 @@ def test_author_flux_device_rejects_blank_assertions_before_edit(tmp_path, name,
         with pytest.raises(ValueError, match="must be non-empty"):
             tab.use_flux_device(name, unit=unit)
         assert len(client.transport.sent) == before
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 def test_author_disconnected_binding_does_not_reconnect_or_replay_an_edit(tmp_path):
@@ -592,7 +578,6 @@ def test_author_disconnected_binding_does_not_reconnect_or_replay_an_edit(tmp_pa
             tab.set("rounds", 5)
         assert error.value.reason == "connection_lost"
         assert len(client.transport.sent) == before
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 @pytest.mark.parametrize("items", [None, []])
@@ -767,7 +752,6 @@ def test_author_flux_device_uses_declared_native_coordinate(tmp_path, type_name)
     assert children["dev"]["children"]["flux_dev"]["input"]["resolved"] == "coil"
     assert children["flux_unit"]["input"]["resolved"] == "native"
     assert children["sweep"] == before_sweep
-    assert gui.publication["cfg_ref"]["revision"] == "4"
 
 
 def test_author_flux_device_rejects_unknown_coordinate_before_edit(tmp_path):
@@ -785,4 +769,3 @@ def test_author_flux_device_rejects_unknown_coordinate_before_edit(tmp_path):
         assert error.value.reason == "invalid_device"
         assert not [call for call in client.transport.sent if call[0] == "tab.edit_cfg"]
     assert gui.publication == before
-    assert gui.publication["cfg_ref"]["revision"] == "2"

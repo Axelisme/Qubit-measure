@@ -134,9 +134,7 @@ def _make_inputs(state: State, tab_id: str, adapter: ExpAdapterProtocol) -> RunI
             if parameters is None
             else parameters.library.validation_context(),
         ),
-        accepted_cfg=state.get_tab(tab_id).cfg.accept(
-            state.get_tab(tab_id).cfg.observe().ref.revision
-        ),
+        accepted_cfg=state.get_tab(tab_id).cfg.accept(),
         adapter=adapter,
         parameters=parameters,
     )
@@ -406,7 +404,7 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
         replace(state.session_env, parameters=parameter_capture(gain=0.75))
     )
     state.version.bump("context")
-    cfg.refresh(cfg.observe().ref.revision)
+    cfg.refresh()
     bg.run_work()
 
     context = adapter.run.call_args.kwargs["context"]
@@ -447,7 +445,7 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     cfg = make_cfg(schema, state=state)
     state.get_tab(tab_id).adapter = adapter
     state.get_tab(tab_id).cfg = cfg
-    accepted_ref = cfg.observe().ref
+    cfg.observe()
     inputs = _make_inputs(state, tab_id, adapter)
     accepted_basis = inputs.accepted_cfg.source_basis
     service, _gate, background, _handles = _make_run_service(state)
@@ -457,16 +455,14 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
         replace(state.session_env, parameters=parameter_capture(gain=0.75))
     )
     state.version.bump("context")
-    after = cfg.refresh(cfg.observe().ref.revision)
+    after = cfg.refresh()
     background.run_work()
 
     result = state.get_tab(tab_id).run.result
     assert isinstance(result, RunRecord)
     assert result.cfg is not None
     assert result.cfg.gain == 0.25
-    assert inputs.accepted_cfg.ref == accepted_ref
     assert inputs.accepted_cfg.source_basis == accepted_basis
-    assert after.ref != accepted_ref
     assert after.source_basis != accepted_basis
 
 
@@ -1012,7 +1008,7 @@ def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
         adapter_name="twotone/t1",
         adapter=adapter,
         request=RunRequest(soc=None, soccfg=None, cfg_context=None),
-        accepted_cfg=tab.cfg.accept(tab.cfg.observe().ref.revision),
+        accepted_cfg=tab.cfg.accept(),
         snapshot=_run_snapshot(),
         experiment_tag=adapter.experiment_tag,
     )

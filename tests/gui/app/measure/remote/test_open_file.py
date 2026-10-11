@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     LoadDataRequest,
 )
 from zcu_tools.gui.cfg import DirectValue
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import CfgResource
 from zcu_tools.gui.session.types import ContextReadiness
 
@@ -112,7 +111,6 @@ def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
         "tab.run_start",
         {
             "tab_id": tab,
-            "expected": encode_ref(fx.ctrl.cfg_resources.lookup(tab).observe().ref),
         },
     )
     assert run["error"]["reason"] == "stale_version"

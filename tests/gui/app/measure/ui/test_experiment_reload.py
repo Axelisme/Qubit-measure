@@ -20,7 +20,6 @@ from zcu_tools.gui.app.measure.remote import (
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -118,13 +117,13 @@ def test_remote_facing_facets_cannot_reenter_during_import(
 ) -> None:
     app = window_app
     previous = app.ctrl.new_tab("demo")
-    expected = app.ctrl.cfg_resources.lookup(previous).observe().ref
+    app.ctrl.cfg_resources.lookup(previous).observe()
 
     def during_load() -> None:
         with pytest.raises(FailedPreconditionError, match="reload"):
             app.ctrl.tab_control.new_tab("demo")
         with pytest.raises(FailedPreconditionError, match="reload"):
-            app.ctrl.run_analyze_control.start_run(previous, expected)
+            app.ctrl.run_analyze_control.start_run(previous)
         with pytest.raises(FailedPreconditionError, match="reload"):
             app.ctrl.run_analyze_control.load_tab_result(previous, "unused.h5")
 
@@ -207,8 +206,7 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
     app = window_app
     previous = app.ctrl.new_tab("demo")
     cfg = app.ctrl.cfg_resources.lookup(previous)
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("knob",), 8),))
-    expected = encode_ref(cfg.observe().ref)
+    cfg.edit((CfgEdit(("knob",), 8),))
     scheduler = ObservedOwnerScheduler()
     remote = RemoteControlAdapter(
         controller=app.ctrl,
@@ -228,7 +226,6 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
                 method = "tab.close"
                 if request_kind == "stale":
                     method = "tab.run_start"
-                    params["expected"] = expected
                 elif request_kind == "new":
                     method = "tab.new"
                     params = {"adapter_name": "demo"}

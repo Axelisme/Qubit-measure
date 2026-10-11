@@ -27,7 +27,6 @@ from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgResolution,
     CfgResource,
-    CfgRevision,
     CfgStatus,
 )
 from zcu_tools.gui.session.expression import validate_scalar_expr
@@ -94,10 +93,10 @@ def test_one_off_acceptance_resolves_linked_reference_without_rebinding(
     temporary = Catalog({"first": entry(8.0)}).snapshot()
     catalog.lookups.clear()
 
-    accepted = resource.accept(before.ref.revision, resolution=temporary)
+    accepted = resource.accept(resolution=temporary)
 
     assert accepted.values["ref"] == {"x": 8.0}
-    assert resource.accept(before.ref.revision).values["ref"] == {"x": 1.0}
+    assert resource.accept().values["ref"] == {"x": 1.0}
     assert resource.observe() == before
     assert resource.snapshot_inputs() == inputs
     assert seen == [before]
@@ -111,18 +110,14 @@ def test_relink_then_children_is_independent_of_key_order(
     resource, _ = reference_resource
     pairs = [("__ref", "second"), ("x", 7.0)]
     payload = dict(reversed(pairs) if reversed_keys else pairs)
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref",), payload),)
-    )
+    changed = resource.edit((CfgEdit(("ref",), payload),))
     value = changed.tree.children["ref"].value
     assert isinstance(value, ReferenceValue)
     assert value.chosen_key == "second"
     assert value.is_overridden
-    assert resource.accept(changed.ref.revision).values["ref"] == {"x": 7.0}
-    relinked = resource.edit(
-        changed.ref.revision, (CfgEdit(("ref", "__ref"), "second"),)
-    )
-    assert resource.accept(relinked.ref.revision).values["ref"] == {"x": 2.0}
+    assert resource.accept().values["ref"] == {"x": 7.0}
+    relinked = resource.edit((CfgEdit(("ref", "__ref"), "second"),))
+    assert resource.accept().values["ref"] == {"x": 2.0}
     relinked_value = relinked.tree.children["ref"].value
     assert isinstance(relinked_value, ReferenceValue)
     assert not relinked_value.is_overridden
@@ -137,21 +132,17 @@ def test_failed_reference_write_leaves_no_relinked_prefix(
     resource, _ = reference_resource
     before = resource.observe()
     with pytest.raises(CfgInputError):
-        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+        resource.edit((CfgEdit(("ref",), payload),))
     assert resource.observe() == before
 
 
 def test_disabled_reference_can_be_relinked(reference_resource) -> None:
     resource, _ = reference_resource
-    disabled = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref", "__ref"), None),)
-    )
+    disabled = resource.edit((CfgEdit(("ref", "__ref"), None),))
     assert disabled.tree.children["ref"].value is None
-    assert resource.accept(disabled.ref.revision).values == {}
-    enabled = resource.edit(
-        disabled.ref.revision, (CfgEdit(("ref", "__ref"), "second"),)
-    )
-    assert resource.accept(enabled.ref.revision).values["ref"] == {"x": 2.0}
+    assert resource.accept().values == {}
+    resource.edit((CfgEdit(("ref", "__ref"), "second"),))
+    assert resource.accept().values["ref"] == {"x": 2.0}
 
 
 def test_complete_override_recovers_without_resolving_failed_old_key(
@@ -159,12 +150,12 @@ def test_complete_override_recovers_without_resolving_failed_old_key(
 ) -> None:
     resource, catalog = reference_resource
     catalog.failed_keys = frozenset({"first"})
-    unavailable = resource.refresh(resource.observe().ref.revision)
+    unavailable = resource.refresh()
     assert unavailable.status is CfgStatus.UNAVAILABLE
     catalog.lookups.clear()
-    changed = resource.edit(unavailable.ref.revision, (CfgEdit(("ref",), {"x": 7.0}),))
+    changed = resource.edit((CfgEdit(("ref",), {"x": 7.0}),))
     assert changed.status is CfgStatus.VALID
-    assert resource.accept(changed.ref.revision).values == {"ref": {"x": 7.0}}
+    assert resource.accept().values == {"ref": {"x": 7.0}}
     assert "first" not in catalog.lookups
 
 
@@ -173,20 +164,19 @@ def test_partial_override_cannot_recover_by_using_failed_key_cache(
 ) -> None:
     resource, catalog = reference_resource
     catalog.failed_keys = frozenset({"first"})
-    unavailable = resource.refresh(resource.observe().ref.revision)
+    unavailable = resource.refresh()
     with pytest.raises(RuntimeError, match="reference resolver defect"):
-        resource.edit(unavailable.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
+        resource.edit((CfgEdit(("ref", "x"), 7.0),))
     assert resource.observe() == unavailable
 
 
 def test_linked_refresh_uses_new_catalog_value(reference_resource) -> None:
     resource, catalog = reference_resource
-    before = resource.observe()
+    resource.observe()
     catalog.entries["first"] = entry(10.0)
-    changed = resource.refresh(before.ref.revision)
+    changed = resource.refresh()
     assert changed.status is CfgStatus.VALID
-    assert resource.accept(changed.ref.revision).values["ref"] == {"x": 10.0}
-    assert resource.accept(changed.ref.revision).ref == changed.ref
+    assert resource.accept().values["ref"] == {"x": 10.0}
 
 
 @pytest.mark.parametrize(
@@ -197,32 +187,28 @@ def test_same_value_content_write_detaches_from_source(
     reference_resource, edit: CfgEdit
 ) -> None:
     resource, catalog = reference_resource
-    changed = resource.edit(resource.observe().ref.revision, (edit,))
+    resource.edit((edit,))
     catalog.entries["first"] = entry(20.0)
     catalog.lookups.clear()
-    refreshed = resource.refresh(changed.ref.revision)
-    assert resource.accept(refreshed.ref.revision).values["ref"] == {"x": 1.0}
+    resource.refresh()
+    assert resource.accept().values["ref"] == {"x": 1.0}
     assert "first" not in catalog.lookups
 
 
 def test_override_no_longer_resolves_original_key(reference_resource) -> None:
     resource, catalog = reference_resource
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref", "x"), 7.0),)
-    )
+    resource.edit((CfgEdit(("ref", "x"), 7.0),))
     del catalog.entries["first"]
     catalog.lookups.clear()
-    refreshed = resource.refresh(changed.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
-    assert resource.accept(refreshed.ref.revision).values["ref"] == {"x": 7.0}
+    assert resource.accept().values["ref"] == {"x": 7.0}
     assert "first" not in catalog.lookups
     catalog.entries["first"] = entry(20.0)
-    restored = resource.refresh(refreshed.ref.revision)
-    assert resource.accept(restored.ref.revision).values["ref"] == {"x": 7.0}
-    relinked = resource.edit(
-        restored.ref.revision, (CfgEdit(("ref", "__ref"), "first"),)
-    )
-    assert resource.accept(relinked.ref.revision).values["ref"] == {"x": 20.0}
+    resource.refresh()
+    assert resource.accept().values["ref"] == {"x": 7.0}
+    resource.edit((CfgEdit(("ref", "__ref"), "first"),))
+    assert resource.accept().values["ref"] == {"x": 20.0}
 
 
 @pytest.mark.parametrize("written", [1.0, 7.0])
@@ -255,16 +241,14 @@ def test_nested_edit_detaches_only_ancestors_and_keeps_sibling_link(
         lambda: schema,
         resolution=catalog.snapshot,
     )
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("parent", "left", "x"), written),)
-    )
+    resource.edit((CfgEdit(("parent", "left", "x"), written),))
     del catalog.entries["parent"]
     del catalog.entries["left"]
     catalog.entries["right"] = entry(20.0)
     catalog.lookups.clear()
-    refreshed = resource.refresh(changed.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
-    assert resource.accept(refreshed.ref.revision).values == {
+    assert resource.accept().values == {
         "parent": {"left": {"x": written}, "right": {"x": 20.0}}
     }
     assert set(catalog.lookups) == {"right"}
@@ -302,15 +286,11 @@ def test_later_edit_uses_shape_selected_by_earlier_relink() -> None:
         resolution=catalog.snapshot,
     )
     changed = resource.edit(
-        resource.observe().ref.revision,
         (CfgEdit(("ref", "__ref"), "second"), CfgEdit(("ref", "y"), 8.0)),
     )
-    assert resource.accept(changed.ref.revision).values == {
-        "ref": {"type": "second", "y": 8.0}
-    }
+    assert resource.accept().values == {"ref": {"type": "second", "y": 8.0}}
     with pytest.raises(CfgInputError):
         resource.edit(
-            changed.ref.revision,
             (CfgEdit(("ref",), {"__ref": "second", "type": "first", "x": 9.0}),),
         )
     assert resource.observe() == changed
@@ -409,9 +389,9 @@ def _waveform_resource(
 
 def test_select_custom_waveform_inherits_compatible_values_only() -> None:
     resource = _waveform_resource()
-    before = resource.observe()
+    resource.observe()
 
-    changed = resource.select_custom_reference(before.ref.revision, ("ref",), "DRAG")
+    changed = resource.select_custom_reference(("ref",), "DRAG")
 
     selected = changed.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
@@ -423,16 +403,15 @@ def test_select_custom_waveform_inherits_compatible_values_only() -> None:
         "delta": DirectValue(0.0),
         "alpha": DirectValue(0.0),
     }
-    assert changed.ref.revision == before.ref.revision + 1
-    assert resource.accept(changed.ref.revision).values["ref"] == {
+    assert resource.accept().values["ref"] == {
         "style": "drag",
         "length": 0.8,
         "sigma": 0.2,
         "delta": 0.0,
         "alpha": 0.0,
     }
-    arb = resource.select_custom_reference(changed.ref.revision, ("ref",), "Arb")
-    restored = resource.select_custom_reference(arb.ref.revision, ("ref",), "Gauss")
+    resource.select_custom_reference(("ref",), "Arb")
+    restored = resource.select_custom_reference(("ref",), "Gauss")
     gauss = restored.tree.children["ref"].value
     assert isinstance(gauss, ReferenceValue)
     assert gauss.value.fields["length"] == DirectValue(0.0)
@@ -468,13 +447,13 @@ def test_select_custom_re_resolves_inherited_expression() -> None:
     assert isinstance(length, EvalValue) and length.resolved == 0.8
 
     sources["duration"] = 1.4
-    changed = resource.select_custom_reference(before.ref.revision, ("ref",), "DRAG")
+    changed = resource.select_custom_reference(("ref",), "DRAG")
 
     length = changed.tree.children["ref"].children["length"].value
     assert isinstance(length, EvalValue)
     assert length.expr == "duration"
     assert length.resolved == 1.4
-    assert resource.accept(changed.ref.revision).values["ref"] == {
+    assert resource.accept().values["ref"] == {
         "style": "drag",
         "length": 1.4,
         "sigma": 0.2,
@@ -486,19 +465,18 @@ def test_select_custom_re_resolves_inherited_expression() -> None:
 def test_select_custom_preserves_invalid_inherited_input() -> None:
     resource = _waveform_resource()
     invalid = resource.edit(
-        resource.observe().ref.revision,
         (CfgEdit(("ref", "length"), DirectValue(None, raw="-")),),
     )
     assert invalid.status is CfgStatus.INVALID
 
-    switched = resource.select_custom_reference(invalid.ref.revision, ("ref",), "DRAG")
+    switched = resource.select_custom_reference(("ref",), "DRAG")
 
     assert switched.status is CfgStatus.INVALID
     length = switched.tree.children["ref"].children["length"].value
     assert isinstance(length, DirectValue)
     assert length.raw == "-" and length.error is not None
     with pytest.raises(CfgPreconditionError):
-        resource.accept(switched.ref.revision)
+        resource.accept()
 
 
 def _nested_waveform_resource() -> tuple[CfgResource, Catalog]:
@@ -533,20 +511,18 @@ def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
     assert isinstance(parent, CfgSectionValue)
     parent.fields["length"] = DirectValue(1.6)
     catalog.entries["parent"] = ResolvedReference("FlatTop", parent)
-    current = resource.refresh(resource.observe().ref.revision)
-    published = resource.accept(current.ref.revision).values["ref"]
+    resource.refresh()
+    published = resource.accept().values["ref"]
     assert isinstance(published, dict) and published["length"] == 1.6
     catalog.failed_keys = frozenset({"parent"})
     catalog.lookups.clear()
 
-    switched = resource.select_custom_reference(
-        current.ref.revision, ("ref",), "FlatTop"
-    )
+    switched = resource.select_custom_reference(("ref",), "FlatTop")
 
     selected = switched.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
     assert selected.chosen_key == "<Custom:FlatTop>"
-    published = resource.accept(switched.ref.revision).values["ref"]
+    published = resource.accept().values["ref"]
     assert isinstance(published, dict) and published["length"] == 1.6
     nested = selected.value.fields["raise_waveform"]
     assert isinstance(nested, ReferenceValue)
@@ -556,8 +532,8 @@ def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
     assert isinstance(rise, CfgSectionValue)
     rise.fields["length"] = DirectValue(0.7)
     catalog.entries["rise"] = ResolvedReference("Gauss", rise)
-    refreshed = resource.refresh(switched.ref.revision)
-    values = resource.accept(refreshed.ref.revision).values["ref"]
+    resource.refresh()
+    values = resource.accept().values["ref"]
     assert isinstance(values, dict)
     assert values["length"] == 1.6
     nested_values = values["raise_waveform"]
@@ -567,11 +543,9 @@ def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
 
 def test_select_custom_nested_waveform_detaches_only_edited_layers() -> None:
     resource, catalog = _nested_waveform_resource()
-    current = resource.observe()
+    resource.observe()
 
-    changed = resource.select_custom_reference(
-        current.ref.revision, ("ref", "raise_waveform"), "DRAG"
-    )
+    changed = resource.select_custom_reference(("ref", "raise_waveform"), "DRAG")
 
     parent = changed.tree.children["ref"].value
     assert isinstance(parent, ReferenceValue) and parent.is_overridden
@@ -582,23 +556,20 @@ def test_select_custom_nested_waveform_detaches_only_edited_layers() -> None:
     assert nested.value.fields["sigma"] == DirectValue(0.1)
     catalog.failed_keys = frozenset({"parent", "rise"})
     catalog.lookups.clear()
-    refreshed = resource.refresh(changed.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
     assert catalog.lookups == []
 
 
 def test_select_custom_preserves_nested_override_without_old_source() -> None:
     resource, catalog = _nested_waveform_resource()
-    edited = resource.edit(
-        resource.observe().ref.revision,
+    resource.edit(
         (CfgEdit(("ref", "raise_waveform", "length"), 0.6),),
     )
     catalog.failed_keys = frozenset({"parent", "rise"})
     catalog.lookups.clear()
 
-    switched = resource.select_custom_reference(
-        edited.ref.revision, ("ref",), "FlatTop"
-    )
+    switched = resource.select_custom_reference(("ref",), "FlatTop")
 
     selected = switched.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
@@ -606,7 +577,7 @@ def test_select_custom_preserves_nested_override_without_old_source() -> None:
     assert isinstance(nested, ReferenceValue)
     assert nested.chosen_key == "rise" and nested.is_overridden
     assert catalog.lookups == []
-    values = resource.accept(switched.ref.revision).values["ref"]
+    values = resource.accept().values["ref"]
     assert isinstance(values, dict)
     nested_values = values["raise_waveform"]
     assert isinstance(nested_values, dict) and nested_values["length"] == 0.6
@@ -618,25 +589,24 @@ def test_select_custom_preparation_failure_preserves_publication() -> None:
     catalog.failed_keys = frozenset({"rise"})
 
     with pytest.raises(RuntimeError, match="reference resolver defect"):
-        resource.select_custom_reference(before.ref.revision, ("ref",), "FlatTop")
+        resource.select_custom_reference(("ref",), "FlatTop")
 
     assert resource.observe() == before
 
 
 def test_select_custom_notifies_once_and_rejects_reentrant_selection() -> None:
     resource = _waveform_resource()
-    seen: list[int] = []
+    seen = []
 
     def subscriber(observation) -> None:
-        seen.append(observation.ref.revision)
+        seen.append(observation)
         with pytest.raises(CfgPreconditionError):
-            resource.select_custom_reference(observation.ref.revision, ("ref",), "DRAG")
+            resource.select_custom_reference(("ref",), "DRAG")
 
     unsubscribe = resource.watch(subscriber)
-    changed = resource.select_custom_reference(
-        resource.observe().ref.revision, ("ref",), "DRAG"
-    )
-    assert seen == [0, 1]
+    changed = resource.select_custom_reference(("ref",), "DRAG")
+    assert len(seen) == 2
+    assert seen[-1] == changed
     assert resource.observe() == changed
     unsubscribe()
 
@@ -658,11 +628,9 @@ def test_select_custom_uses_default_label_for_unnamed_shape() -> None:
         resolution=Catalog().snapshot,
     )
 
-    changed = resource.select_custom_reference(
-        resource.observe().ref.revision, ("ref",), "Custom"
-    )
+    resource.select_custom_reference(("ref",), "Custom")
 
-    assert resource.accept(changed.ref.revision).values == {"ref": {"x": 7.0}}
+    assert resource.accept().values == {"ref": {"x": 7.0}}
 
 
 def test_select_custom_rejects_invalid_choice_without_publishing(
@@ -672,24 +640,17 @@ def test_select_custom_rejects_invalid_choice_without_publishing(
     before = resource.observe()
     for path, label in (((), "Second"), (("missing",), "Second"), (("ref",), "Other")):
         with pytest.raises(CfgInputError):
-            resource.select_custom_reference(before.ref.revision, path, label)
+            resource.select_custom_reference(path, label)
         assert resource.observe() == before
-    with pytest.raises(CfgPreconditionError):
-        resource.select_custom_reference(
-            CfgRevision(before.ref.revision + 1), ("ref",), "Second"
-        )
-    assert resource.observe() == before
 
 
 def test_complete_shape_switch_uses_new_inputs_and_existing_range_owner(
     switchable_resource: CfgResource,
 ) -> None:
     resource = switchable_resource
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref",), complete_second_input()),)
-    )
+    changed = resource.edit((CfgEdit(("ref",), complete_second_input()),))
     assert changed.status is CfgStatus.VALID
-    assert resource.accept(changed.ref.revision).values == {
+    assert resource.accept().values == {
         "ref": {
             "type": "second",
             "fixed": "locked",
@@ -709,7 +670,7 @@ def test_shape_switch_does_not_fill_missing_input_defaults(
     payload = complete_second_input()
     del payload[missing]
     with pytest.raises(CfgInputError):
-        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+        resource.edit((CfgEdit(("ref",), payload),))
     assert resource.observe() == before
 
 
@@ -724,7 +685,7 @@ def test_shape_switch_requires_complete_nested_range(
     payload = complete_second_input()
     payload["range"] = replacement
     with pytest.raises(CfgInputError):
-        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+        resource.edit((CfgEdit(("ref",), payload),))
     assert resource.observe() == before
 
 
@@ -744,7 +705,7 @@ def test_invalid_shape_payload_preserves_publication(
     full = complete_second_input()
     full.update(payload)
     with pytest.raises(CfgInputError):
-        resource.edit(before.ref.revision, (CfgEdit(("ref",), full),))
+        resource.edit((CfgEdit(("ref",), full),))
     assert resource.observe() == before
 
 
@@ -755,9 +716,7 @@ def test_shape_switch_preserves_expression_and_nested_link_input(
     payload = complete_second_input()
     payload["number"] = EvalValue("dynamic")
     payload["child"] = {"__ref": "child"}
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref",), payload),)
-    )
+    changed = resource.edit((CfgEdit(("ref",), payload),))
     ref = changed.tree.children["ref"]
     number = ref.children["number"].value
     child = ref.children["child"].value
@@ -773,17 +732,15 @@ def test_complete_single_shape_input_rebuilds_unavailable_reference(
     reference_resource, unavailable: str
 ) -> None:
     resource, catalog = reference_resource
-    current = resource.observe()
+    resource.observe()
     if unavailable == "disabled":
-        current = resource.edit(
-            current.ref.revision, (CfgEdit(("ref", "__ref"), None),)
-        )
+        resource.edit((CfgEdit(("ref", "__ref"), None),))
     else:
         del catalog.entries["first"]
-        current = resource.refresh(current.ref.revision)
-    changed = resource.edit(current.ref.revision, (CfgEdit(("ref",), {"x": 7.0}),))
-    assert resource.accept(changed.ref.revision).values == {"ref": {"x": 7.0}}
-    refreshed = resource.refresh(changed.ref.revision)
+        resource.refresh()
+    resource.edit((CfgEdit(("ref",), {"x": 7.0}),))
+    assert resource.accept().values == {"ref": {"x": 7.0}}
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
 
 
@@ -793,9 +750,7 @@ def test_shape_switch_accepts_complete_but_unfinished_text(
     resource = switchable_resource
     payload = complete_second_input()
     payload["number"] = DirectValue(None, raw="-")
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref",), payload),)
-    )
+    changed = resource.edit((CfgEdit(("ref",), payload),))
     assert changed.status is CfgStatus.INVALID
     number = changed.tree.children["ref"].children["number"].value
     assert isinstance(number, DirectValue)
@@ -837,18 +792,16 @@ def test_empty_linked_reference_waits_for_catalog_shape(second: bool) -> None:
         for diagnostic in initial.diagnostics
     )
     with pytest.raises(CfgPreconditionError):
-        resource.accept(initial.ref.revision)
+        resource.accept()
     field_name = "y" if second else "x"
     type_name = "second" if second else "first"
     catalog.entries[key] = ResolvedReference(
         "Second" if second else "First",
         CfgSectionValue({"type": DirectValue(type_name), field_name: DirectValue(2.0)}),
     )
-    refreshed = resource.refresh(initial.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
-    assert resource.accept(refreshed.ref.revision).values == {
-        "ref": {"type": type_name, field_name: 2.0}
-    }
+    assert resource.accept().values == {"ref": {"type": type_name, field_name: 2.0}}
 
 
 def test_missing_reference_diagnostic_survives_valid_cached_children(
@@ -856,7 +809,7 @@ def test_missing_reference_diagnostic_survives_valid_cached_children(
 ) -> None:
     resource, catalog = reference_resource
     del catalog.entries["first"]
-    missing = resource.refresh(resource.observe().ref.revision)
+    missing = resource.refresh()
     assert missing.status is CfgStatus.INVALID
     node = missing.tree.children["ref"]
     assert isinstance(node.value, ReferenceValue)
@@ -910,7 +863,7 @@ def test_custom_empty_reference_keeps_explicit_shape_and_defaults() -> None:
     assert set(node.children) == {"type", "x"}
     assert isinstance(node.value, ReferenceValue)
     assert node.value.error is None
-    selected = resource.accept(initial.ref.revision).values["ref"]
+    selected = resource.accept().values["ref"]
     assert isinstance(selected, dict)
     assert selected["type"] == "first"
     assert "x" in selected
@@ -921,12 +874,12 @@ def test_missing_reference_does_not_offer_stale_children_for_partial_edit(
 ) -> None:
     resource, catalog = reference_resource
     del catalog.entries["first"]
-    before = resource.refresh(resource.observe().ref.revision)
+    before = resource.refresh()
     assert before.status is CfgStatus.INVALID
     with pytest.raises(CfgPreconditionError):
-        resource.accept(before.ref.revision)
+        resource.accept()
     with pytest.raises(CfgInputError):
-        resource.edit(before.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
+        resource.edit((CfgEdit(("ref", "x"), 7.0),))
     assert resource.observe() == before
 
 
@@ -936,11 +889,11 @@ def test_discriminator_is_only_writable_as_aggregate_selection(
     resource = switchable_resource
     before = resource.observe()
     with pytest.raises(CfgInputError):
-        resource.edit(before.ref.revision, (CfgEdit(("ref", "type"), "second"),))
+        resource.edit((CfgEdit(("ref", "type"), "second"),))
     payload = complete_second_input()
     payload["fixed"] = "locked"
     with pytest.raises(CfgInputError):
-        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+        resource.edit((CfgEdit(("ref",), payload),))
     assert resource.observe() == before
 
 
@@ -959,7 +912,7 @@ def test_complete_input_never_fabricates_readonly_values(payload) -> None:
     )
     before = resource.observe()
     with pytest.raises(CfgInputError):
-        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+        resource.edit((CfgEdit(("ref",), payload),))
     assert resource.observe() == before
 
 
@@ -1004,6 +957,6 @@ def test_override_shape_uses_declared_discriminator_not_other_literals() -> None
     )
     observation = resource.observe()
     assert observation.status is CfgStatus.VALID
-    assert resource.accept(observation.ref.revision).values == {
+    assert resource.accept().values == {
         "ref": {"decoration": "blue", "variant": "two", "y": 4.0}
     }

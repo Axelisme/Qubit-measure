@@ -127,14 +127,13 @@ def _acquire_to_terminal(
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
-    cfg = session.state.get_tab("tab").cfg
     inputs = GuardService(
         session.state,
         captured_parameters=session.capture_parameters,
         cfg_resolution=lambda parameters: MeasureCfgBindings(
             MagicMock()
         ).snapshot_from_state(session.state, captured_values={}, parameters=parameters),
-    ).capture_run_inputs("tab", expected_revision=cfg.observe().ref.revision)
+    ).capture_run_inputs("tab")
     loop = QEventLoop()
     timer = QTimer()
     timer.setSingleShot(True)
@@ -296,7 +295,6 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     try:
         services.run_analyze_control.start_run(
             tab_id,
-            tab.cfg.observe().ref,
             origin=origin,
             aliases=None if target is None else {"driver": target},
         )

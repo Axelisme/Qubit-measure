@@ -90,7 +90,6 @@ def _actual(
         else:
             parameters[parameter.name] = projected
     return {
-        "cfg_ref": captured["cfg_ref"] if captured is not None else None,
         "parameters": parameters,
         "modules": modules,
     }
@@ -194,7 +193,7 @@ def _changed_paths(
     return paths
 
 
-def _candidate(item: dict[str, Any], cfg_ref: dict[str, Any] | None) -> dict[str, Any]:
+def _candidate(item: dict[str, Any]) -> dict[str, Any]:
     candidate: dict[str, Any] = {
         "id": item["id"],
         "kind": item.get("kind"),
@@ -207,7 +206,6 @@ def _candidate(item: dict[str, Any], cfg_ref: dict[str, Any] | None) -> dict[str
         proposed = candidate["proposed"]
         current = candidate["current"]
         candidate.update(
-            cfg_ref=deepcopy(cfg_ref),
             proposed=_module_summary(proposed),
             current=_module_summary(current),
             changes=_changed_paths(proposed, current)
@@ -234,14 +232,13 @@ def _destination(native: dict[str, Any] | None) -> dict[str, Any]:
 def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:
     primary = snapshot.get("writeback") or {}
     post = snapshot.get("post_writeback") or {}
-    cfg_ref = (snapshot.get("actual") or {}).get("cfg_ref")
     return {
         "destination": _destination(
             primary.get("destination_context") or post.get("destination_context")
         ),
         "stages": {
-            "primary": [_candidate(item, cfg_ref) for item in primary.get("items", [])],
-            "post": [_candidate(item, cfg_ref) for item in post.get("items", [])],
+            "primary": [_candidate(item) for item in primary.get("items", [])],
+            "post": [_candidate(item) for item in post.get("items", [])],
         },
         "requires": primary.get("requires", []) + post.get("requires", []),
         "receipts": snapshot.get("written", ()),

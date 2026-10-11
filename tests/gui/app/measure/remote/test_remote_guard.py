@@ -22,7 +22,6 @@ from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
 )
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import (
     CfgEdit,
     CfgPreconditionError,
@@ -211,66 +210,16 @@ def test_socket_self_write_advances_only_its_prior_seen_context(fx) -> None:
         second.close()
 
 
-@pytest.mark.parametrize("stale_cfg", [False, True], ids=["current-ref", "old-ref"])
-def test_source_write_requires_the_explicit_current_cfg_ref(fx, stale_cfg) -> None:
-    _prepare_guarded_context(fx)
-    fx.ctrl.context_control.create_md_attr("count", 4)
-    tab_id = fx.ctrl.new_tab("fake")
-    from zcu_tools.gui.cfg import EvalValue
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
-    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), EvalValue("count")),))
-    sock = _open_client(fx.service.port)
-    try:
-        for method, params in (
-            ("tab.snapshot", {"tab_id": tab_id}),
-            ("context.snapshot", {}),
-            ("soc.info", {"include_cfg": True}),
-            ("device.list", {}),
-        ):
-            assert _raw_call(sock, method, params)["ok"] is True
-        expected = encode_ref(cfg.observe().ref)
-        before = cfg.observe().ref
-        assert (
-            _raw_call(sock, "context.md_set_attr", {"key": "count", "value": 7})["ok"]
-            is True
-        )
-        assert cfg.observe().ref != before
-        started = _raw_call(
-            sock,
-            "tab.run_start",
-            {
-                "tab_id": tab_id,
-                "expected": expected if stale_cfg else encode_ref(cfg.observe().ref),
-            },
-        )
-        if stale_cfg:
-            assert started["error"]["reason"] == "stale_revision"
-            assert started["error"]["data"] == {
-                "expected": expected,
-                "actual": encode_ref(cfg.observe().ref),
-            }
-        else:
-            assert started["ok"] is True
-            result = _raw_call(
-                sock,
-                "operation.await",
-                {"operation_id": started["result"]["operation_id"], "timeout": 3.0},
-            )
-            assert result["result"]["status"] == "finished"
-    finally:
-        sock.close()
-
-
 def test_cross_connection_cfg_ref_runs_only_after_other_full_reads(fx) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
     source = _open_client(fx.service.port)
     runner = _open_client(fx.service.port)
     try:
-        publication = _raw_call(source, "tab.get_cfg", {"tab_id": tab_id})["result"]
-        args = {"tab_id": tab_id, "expected": publication["cfg_ref"]}
+        _raw_call(source, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        args = {
+            "tab_id": tab_id,
+        }
         unread = _raw_call(runner, "tab.run_start", args)
         assert unread["error"]["reason"] == "stale_version"
         assert "soc" in unread["error"]["data"]["stale"]
@@ -426,9 +375,6 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": tab_id,
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                 },
             },
         )
@@ -479,9 +425,6 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": tab_id,
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                 },
             },
         )["handle"]
@@ -605,9 +548,6 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
             {
                 "method": "tab.run_start",
                 "params": {
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                     "tab_id": tab_id,
                 },
             },
@@ -699,9 +639,6 @@ def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
             {
                 "method": "tab.run_start",
                 "params": {
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                     "tab_id": tab_id,
                 },
             },
@@ -740,9 +677,6 @@ def test_tab_run_rejects_missing_active_context_without_starting(
                 {
                     "method": "tab.run_start",
                     "params": {
-                        "expected": encode_ref(
-                            fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                        ),
                         "tab_id": tab_id,
                     },
                 },
@@ -789,9 +723,6 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
             {
                 "method": "tab.run_start",
                 "params": {
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                     "tab_id": tab_id,
                 },
             },
@@ -803,18 +734,15 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
                 {
                     "method": "tab.run_start",
                     "params": {
-                        "expected": encode_ref(
-                            fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                        ),
                         "tab_id": tab_id,
                     },
                 },
             )
         editor = fx.ctrl.cfg_resources.lookup(tab_id)
-        accepted_ref = editor.observe().ref
+        editor.observe()
         for command in (
-            lambda: editor.edit(accepted_ref.revision, (CfgEdit(("gain",), 0.2),)),
-            lambda: editor.reset(accepted_ref.revision),
+            lambda: editor.edit((CfgEdit(("gain",), 0.2),)),
+            lambda: editor.reset(),
         ):
             with pytest.raises(CfgPreconditionError) as blocked:
                 command()
@@ -823,11 +751,8 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
             fx.ctrl.close_tab(tab_id)
         other = fx.ctrl.new_tab("fake")
         other_editor = fx.ctrl.cfg_resources.lookup(other)
-        other_editor.edit(
-            other_editor.observe().ref.revision, (CfgEdit(("gain",), 0.3),)
-        )
+        other_editor.edit((CfgEdit(("gain",), 0.3),))
         _edit_context_as_gui(fx, "run_source", 17)
-        assert editor.observe().ref != accepted_ref
         if terminal == "cancelled":
             assert call("cancel", {"op": op})["status"] in {"cancelling", "cancelled"}
         release.set()
@@ -870,9 +795,6 @@ def test_restarted_gui_requires_new_full_reads_before_running(
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": first_tab,
-                    "expected": encode_ref(
-                        first.ctrl.cfg_resources.lookup(first_tab).observe().ref
-                    ),
                 },
             },
         )["handle"]
@@ -900,9 +822,6 @@ def test_restarted_gui_requires_new_full_reads_before_running(
                     "method": "tab.run_start",
                     "params": {
                         "tab_id": second_tab,
-                        "expected": encode_ref(
-                            second.ctrl.cfg_resources.lookup(second_tab).observe().ref
-                        ),
                     },
                 },
             )
@@ -923,9 +842,6 @@ def test_restarted_gui_requires_new_full_reads_before_running(
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": second_tab,
-                    "expected": encode_ref(
-                        second.ctrl.cfg_resources.lookup(second_tab).observe().ref
-                    ),
                 },
             },
         )["handle"]
@@ -1006,15 +922,9 @@ def test_failed_complete_context_read_does_not_advance_mcp_load_guard(
         bridge.disconnect()
 
 
-@pytest.mark.parametrize("mutate_cfg", [False, True])
-def test_frozen_run_needs_cfg_observation_not_large_context_export(
-    fx, tmp_path: Path, mutate_cfg: bool
-) -> None:
+def test_frozen_run_does_not_require_large_context_export(fx, tmp_path: Path) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
-    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
@@ -1024,26 +934,16 @@ def test_frozen_run_needs_cfg_observation_not_large_context_export(
             call("rpc_call", {"method": "context.snapshot"})
         assert getattr(oversized.value, "reason", None) == "response_encoding_failed"
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
-        call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
         _edit_context_as_gui(fx, "unrelated", 17)
-        # Every source publication advances cfg; a small complete cfg read
-        # establishes the new baseline without exporting the large context.
-        call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
-        expected = encode_ref(cfg.observe().ref)
-        if mutate_cfg:
-            cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
-        args = {
-            "method": "tab.run_start",
-            "params": {"tab_id": tab_id, "expected": expected},
-        }
-        if mutate_cfg:
-            with pytest.raises(RuntimeError) as stale:
-                call("rpc_call", args)
-            assert getattr(stale.value, "reason", None) == "stale_revision"
-        else:
-            started = call("rpc_call", args)
-            _await_completed_run(call, started["handle"])
+        started = call(
+            "rpc_call",
+            {
+                "method": "tab.run_start",
+                "params": {"tab_id": tab_id},
+            },
+        )
+        _await_completed_run(call, started["handle"])
     finally:
         bridge.disconnect()
 

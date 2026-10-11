@@ -59,12 +59,11 @@ def test_headless_create_edit_and_accept_use_one_resource() -> None:
     owner = make_owner()
     resource = owner.create("tab", defaults, resolution=resolution)
     editing = owner.lookup("tab")
-    before = editing.observe()
-    changed = editing.edit(before.ref.revision, (CfgEdit(("value",), 7.0),))
+    editing.observe()
+    changed = editing.edit((CfgEdit(("value",), 7.0),))
     assert changed.status is CfgStatus.VALID
     assert resource.observe() == changed
-    accepted = owner.acceptance("tab").accept(changed.ref.revision)
-    assert accepted.ref == changed.ref
+    accepted = owner.acceptance("tab").accept()
     assert accepted.values == {"value": 7.0}
 
 
@@ -81,16 +80,11 @@ def test_restore_skips_defaults_but_reset_uses_them() -> None:
     owner.create("restored", fresh, resolution=resolution, initial=initial)
     assert calls == []
     editing = owner.lookup("restored")
-    before = editing.observe()
-    assert owner.acceptance("restored").accept(before.ref.revision).values == {
-        "value": 8.0
-    }
-    reset = editing.reset(before.ref.revision)
-    assert reset.ref.cfg_id == before.ref.cfg_id
+    editing.observe()
+    assert owner.acceptance("restored").accept().values == {"value": 8.0}
+    editing.reset()
     assert calls == ["defaults"]
-    assert owner.acceptance("restored").accept(reset.ref.revision).values == {
-        "value": 1.0
-    }
+    assert owner.acceptance("restored").accept().values == {"value": 1.0}
 
 
 def test_retire_revokes_retained_handles_and_recreate_has_new_identity() -> None:
@@ -98,18 +92,17 @@ def test_retire_revokes_retained_handles_and_recreate_has_new_identity() -> None
     owner.create("tab", defaults, resolution=resolution)
     old = owner.lookup("tab")
     acceptance = owner.acceptance("tab")
-    before = old.observe()
+    old.observe()
     owner.retire("tab")
     for read in (
         old.observe,
-        lambda: acceptance.accept(before.ref.revision),
+        lambda: acceptance.accept(),
         lambda: owner.lookup("tab"),
     ):
         with pytest.raises(CfgPreconditionError) as caught:
             read()
         assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
     owner.create("tab", defaults, resolution=resolution)
-    assert owner.lookup("tab").observe().ref.cfg_id != before.ref.cfg_id
 
 
 def test_duplicate_create_does_not_replace_existing_resource() -> None:
@@ -149,14 +142,12 @@ def test_busy_policy_is_bound_to_the_correct_tab_and_does_not_block_refresh() ->
     running = "running"
     busy = owner.lookup("running")
     with pytest.raises(CfgPreconditionError) as caught:
-        busy.edit(busy.observe().ref.revision, ())
+        busy.edit(())
     assert caught.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
-    busy.refresh(busy.observe().ref.revision)
+    busy.refresh()
     other = owner.lookup("other")
-    changed = other.edit(other.observe().ref.revision, (CfgEdit(("value",), 7.0),))
-    assert owner.acceptance("other").accept(changed.ref.revision).values == {
-        "value": 7.0
-    }
+    other.edit((CfgEdit(("value",), 7.0),))
+    assert owner.acceptance("other").accept().values == {"value": 7.0}
 
 
 def test_retire_during_notification_keeps_association_and_handle_alive() -> None:
