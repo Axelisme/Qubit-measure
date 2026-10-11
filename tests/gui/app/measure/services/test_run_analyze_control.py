@@ -21,7 +21,6 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
 )
-from zcu_tools.gui.cfg.resource import CfgId, CfgRef, CfgRevision, CfgStaleError
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.context_types import CommandOrigin
@@ -47,11 +46,6 @@ class RecordingState:
             adapter=RecordingAdapter(log, analysis=analysis),
             parameters=None,
             run=SimpleNamespace(result="run-result", parameters=None),
-            cfg=SimpleNamespace(
-                observe=lambda: SimpleNamespace(
-                    ref=CfgRef(CfgId("cfg-1"), CfgRevision(0))
-                )
-            ),
         )
 
     def has_tab(self, tab_id: str) -> bool:
@@ -95,7 +89,6 @@ class RecordingGuard:
         self,
         tab_id: str,
         *,
-        expected_revision: int,
         aliases: Mapping[str, str] | None = None,
     ) -> object:
         self._log.add("guard", "capture_run_inputs", tab_id)
@@ -336,35 +329,17 @@ def test_gui_started_run_and_both_analysis_stages_are_indexed() -> None:
 def test_run_control_starts_with_guard_and_live_container() -> None:
     facet, log, _state, _bus = _facet()
 
-    assert facet.start_run("tab-1", CfgRef(CfgId("cfg-1"), CfgRevision(0))) == 11
+    assert facet.start_run("tab-1") == 11
 
-    assert log.calls[:4] == [
-        call("state", "get_tab", "tab-1"),
+    assert log.calls[:3] == [
         call("guard", "capture_run_inputs", "tab-1"),
         call("state", "is_tab_busy", "tab-1"),
         call("host", "make_run_container", "tab-1"),
     ]
-    assert log.calls[4].target == "run"
-    assert log.calls[4].method == "start_run"
-    assert log.calls[4].args[0] == "run-inputs"
-    assert isinstance(log.calls[4].args[1], Plots)
-
-
-@pytest.mark.parametrize(
-    "expected",
-    [CfgRef(CfgId("cfg-1"), CfgRevision(1)), CfgRef(CfgId("other"), CfgRevision(0))],
-)
-def test_run_rejects_a_different_publication_before_capture_or_presentation(
-    expected: CfgRef,
-) -> None:
-    facet, log, _state, _bus = _facet()
-
-    with pytest.raises(CfgStaleError) as caught:
-        facet.start_run("tab-1", expected)
-
-    assert caught.value.expected == expected
-    assert caught.value.actual == CfgRef(CfgId("cfg-1"), CfgRevision(0))
-    assert log.calls == [call("state", "get_tab", "tab-1")]
+    assert log.calls[3].target == "run"
+    assert log.calls[3].method == "start_run"
+    assert log.calls[3].args[0] == "run-inputs"
+    assert isinstance(log.calls[3].args[1], Plots)
 
 
 def test_load_result_initializes_analyze_params_and_emits_content_changed() -> None:
@@ -482,9 +457,7 @@ def test_post_analyze_uses_shared_live_container() -> None:
     ("operation", "forbidden_host_call"),
     [
         (
-            lambda facet: facet.start_run(
-                "tab-1", CfgRef(CfgId("cfg-1"), CfgRevision(0))
-            ),
+            lambda facet: facet.start_run("tab-1"),
             "make_run_container",
         ),
         (lambda facet: facet.analyze("tab-1", object()), "make_analysis_container"),

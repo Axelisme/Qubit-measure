@@ -719,10 +719,7 @@ class RecipeSession:
             interaction = _cfg_object(snapshot["interaction"])
             if interaction["is_running"] or interaction["is_analyzing"]:
                 raise GuiRpcError("Tab is busy", reason="tab_busy")
-            observed_cfg = self._tools.send_gui_rpc("tab.get_cfg", {"tab_id": tab})
-            publication = self._tools.send_gui_rpc(
-                "tab.reset_cfg", {"tab_id": tab, "expected": observed_cfg["cfg_ref"]}
-            )
+            publication = self._tools.send_gui_rpc("tab.reset_cfg", {"tab_id": tab})
         return RecipeTab(
             _TabBinding(
                 self._tools,
@@ -765,7 +762,6 @@ class RecipeTab:
                         if self._binding.aliases
                         else {}
                     ),
-                    "expected": self._binding.publication["cfg_ref"],
                 },
             )
             self._binding.publication = _cfg_object(reply)
@@ -816,7 +812,6 @@ class RecipeTab:
                 "tab.edit_cfg",
                 {
                     "tab_id": self._binding.tab,
-                    "expected": self._binding.publication["cfg_ref"],
                     "edits": edits,
                 },
             )
@@ -1317,7 +1312,7 @@ class RecipeTab:
                 raise _StepCancelled
             binding.publish(replace(binding.capture, start_status="unknown"))
 
-        payload: dict[str, object] = {"tab_id": tab, "expected": actual["cfg_ref"]}
+        payload: dict[str, object] = {"tab_id": tab}
         if self._binding.aliases:
             payload["aliases"] = self._binding.aliases
         try:

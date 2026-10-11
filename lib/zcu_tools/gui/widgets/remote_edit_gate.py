@@ -68,3 +68,20 @@ class RemoteEditGate(QObject):
             lifetime.destroyed.disconnect(detach)
             dispose()
         self._bindings.clear()
+
+
+def watch_control(
+    widget: QWidget,
+    authority: ControlIdentity,
+    render: Callable[[ControlStatus], None],
+) -> None:
+    """Render immediately and dispose the owner-thread watch on Qt destruction."""
+    dispose = authority.watch(render)
+    widget.destroyed.connect(lambda *_args: dispose())
+
+
+def bind_control_enabled(widget: QWidget, authority: ControlIdentity) -> None:
+    """Gate a write-only widget, leaving its children's domain gates intact."""
+    watch_control(
+        widget, authority, lambda status: widget.setEnabled(status.holder == "gui")
+    )

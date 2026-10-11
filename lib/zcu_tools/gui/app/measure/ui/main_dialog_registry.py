@@ -10,6 +10,7 @@ from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.widgets import DialogRefStore, widget_to_png_bytes
+from zcu_tools.gui.widgets.remote_edit_gate import bind_control_enabled, watch_control
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -45,6 +46,10 @@ class MainDialogRegistry:
         self._dialog_refs = dialog_refs
         self._dialog_names: dict[DialogName, None] = {}
 
+    def _reclaim_for_stop(self) -> None:
+        if self._ctrl.control_identity.status().holder != "gui":
+            self._ctrl.control_identity.reclaim_local()
+
     def _dialog(self, name: DialogName) -> QDialog | None:
         return self._dialog_refs.get(name)
 
@@ -69,6 +74,7 @@ class MainDialogRegistry:
                 self._ctrl.device_control,
                 parameter_provider=self._ctrl.context_control.read_context,
                 parent=self._parent,
+                before_stop=self._reclaim_for_stop,
             )
         if name is DialogName.PREDICTOR:
             from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
@@ -110,6 +116,18 @@ class MainDialogRegistry:
                 self._forget(name)
 
         dialog = self._build_dialog(name)
+        if name is DialogName.DEVICE:
+            from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+
+            if not isinstance(dialog, DeviceDialog):
+                raise TypeError("Device dialog has no inspection gate")
+            watch_control(
+                dialog,
+                self._ctrl.control_identity,
+                lambda status: dialog.set_read_only(status.holder != "gui"),
+            )
+        elif name is not DialogName.INSPECT:
+            bind_control_enabled(dialog, self._ctrl.control_identity)
         self._dialog_names[name] = None
         if name in _PERSISTENT_DIALOGS:
             self._dialog_refs.retain_named(

@@ -22,7 +22,6 @@ from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
 )
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import (
     CfgEdit,
     CfgPreconditionError,
@@ -103,33 +102,6 @@ def _edit_context_as_gui(fx: _Fixture, key: str, value: object) -> None:
         sock.close()
 
 
-def test_socket_write_requires_a_full_read_on_that_connection(fx) -> None:
-    _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
-    sock = _open_client(fx.service.port)
-    try:
-        args = {"tab_id": tab_id, "data_path": "missing.h5"}
-        _send(sock, {"id": "unread", "method": "tab.load_data", "params": args})
-        unread = _recv_response(sock)
-        assert unread["error"]["reason"] == "stale_version"
-        assert "context" in unread["error"]["data"]["stale"]
-        assert f"tab:{tab_id}:result" in unread["error"]["data"]["stale"]
-        assert f"tab:{tab_id}:analyze" in unread["error"]["data"]["stale"]
-
-        for method, params in (
-            ("tab.snapshot", {"tab_id": tab_id}),
-            ("context.snapshot", {}),
-        ):
-            _send(sock, {"id": method, "method": method, "params": params})
-            assert _recv_response(sock)["ok"] is True
-        _send(sock, {"id": "read", "method": "tab.load_data", "params": args})
-        after_read = _recv_response(sock)
-        assert after_read["ok"] is False
-        assert after_read["error"].get("reason") != "stale_version"
-    finally:
-        sock.close()
-
-
 def test_socket_snapshot_exposes_result_replacement_and_restores_guard(fx) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
@@ -153,8 +125,6 @@ def test_socket_snapshot_exposes_result_replacement_and_restores_guard(fx) -> No
         # A non-serializable result stays in State; the operational projection
         # identifies replacements without requiring its payload on the wire.
         fx.state.update_tab_loaded_result(tab_id, object(), "loaded.h5")
-        args = {"tab_id": tab_id, "data_path": "missing.h5"}
-        assert rpc("tab.load_data", args)["error"]["reason"] == "stale_version"
         observed = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert observed["result_state"] == {
             "revision": 1,
@@ -162,118 +132,22 @@ def test_socket_snapshot_exposes_result_replacement_and_restores_guard(fx) -> No
             "source_path": "loaded.h5",
             "source_operation_id": None,
         }
-        assert rpc("tab.load_data", args)["error"].get("reason") != "stale_version"
         fx.state.update_tab_loaded_result(tab_id, object(), "loaded.h5")
-        assert rpc("tab.load_data", args)["error"]["reason"] == "stale_version"
         replacement = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert replacement["result_state"]["revision"] == 2
         assert replacement["result_state"]["source_path"] == "loaded.h5"
-        assert rpc("tab.load_data", args)["error"].get("reason") != "stale_version"
     finally:
         sock.close()
 
 
-def test_socket_self_write_advances_only_its_prior_seen_context(fx) -> None:
-    _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
-    first = _open_client(fx.service.port)
-    second = _open_client(fx.service.port)
-    try:
-        for sock in (first, second):
-            for method, params in (
-                ("tab.snapshot", {"tab_id": tab_id}),
-                ("context.snapshot", {}),
-            ):
-                _send(sock, {"id": method, "method": method, "params": params})
-                assert _recv_response(sock)["ok"] is True
-
-        _send(
-            first,
-            {
-                "id": "write",
-                "method": "context.md_set_attr",
-                "params": {"key": "r_f", "value": 6000.0},
-            },
-        )
-        assert _recv_response(first)["ok"] is True
-        args = {"tab_id": tab_id, "data_path": "missing.h5"}
-        _send(first, {"id": "self", "method": "tab.load_data", "params": args})
-        assert _recv_response(first)["error"].get("reason") != "stale_version"
-        _send(second, {"id": "other", "method": "tab.load_data", "params": args})
-        assert _recv_response(second)["error"]["reason"] == "stale_version"
-
-        _send(second, {"id": "refresh", "method": "context.snapshot", "params": {}})
-        assert _recv_response(second)["result"]["md"]["r_f"] == 6000.0
-        _send(second, {"id": "retry", "method": "tab.load_data", "params": args})
-        assert _recv_response(second)["error"].get("reason") != "stale_version"
-    finally:
-        first.close()
-        second.close()
-
-
-@pytest.mark.parametrize("stale_cfg", [False, True], ids=["current-ref", "old-ref"])
-def test_source_write_requires_the_explicit_current_cfg_ref(fx, stale_cfg) -> None:
-    _prepare_guarded_context(fx)
-    fx.ctrl.context_control.create_md_attr("count", 4)
-    tab_id = fx.ctrl.new_tab("fake")
-    from zcu_tools.gui.cfg import EvalValue
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
-    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), EvalValue("count")),))
-    sock = _open_client(fx.service.port)
-    try:
-        for method, params in (
-            ("tab.snapshot", {"tab_id": tab_id}),
-            ("context.snapshot", {}),
-            ("soc.info", {"include_cfg": True}),
-            ("device.list", {}),
-        ):
-            assert _raw_call(sock, method, params)["ok"] is True
-        expected = encode_ref(cfg.observe().ref)
-        before = cfg.observe().ref
-        assert (
-            _raw_call(sock, "context.md_set_attr", {"key": "count", "value": 7})["ok"]
-            is True
-        )
-        assert cfg.observe().ref != before
-        started = _raw_call(
-            sock,
-            "tab.run_start",
-            {
-                "tab_id": tab_id,
-                "expected": expected if stale_cfg else encode_ref(cfg.observe().ref),
-            },
-        )
-        if stale_cfg:
-            assert started["error"]["reason"] == "stale_revision"
-            assert started["error"]["data"] == {
-                "expected": expected,
-                "actual": encode_ref(cfg.observe().ref),
-            }
-        else:
-            assert started["ok"] is True
-            result = _raw_call(
-                sock,
-                "operation.await",
-                {"operation_id": started["result"]["operation_id"], "timeout": 3.0},
-            )
-            assert result["result"]["status"] == "finished"
-    finally:
-        sock.close()
-
-
-def test_cross_connection_cfg_ref_runs_only_after_other_full_reads(fx) -> None:
+def test_current_cfg_runs_from_another_holder_connection(fx) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
     source = _open_client(fx.service.port)
     runner = _open_client(fx.service.port)
     try:
-        publication = _raw_call(source, "tab.get_cfg", {"tab_id": tab_id})["result"]
-        args = {"tab_id": tab_id, "expected": publication["cfg_ref"]}
-        unread = _raw_call(runner, "tab.run_start", args)
-        assert unread["error"]["reason"] == "stale_version"
-        assert "soc" in unread["error"]["data"]["stale"]
+        assert _raw_call(source, "tab.get_cfg", {"tab_id": tab_id})["ok"]
+        args = {"tab_id": tab_id}
         for method, params in (
             ("tab.snapshot", {"tab_id": tab_id}),
             ("soc.info", {"include_cfg": True}),
@@ -282,7 +156,7 @@ def test_cross_connection_cfg_ref_runs_only_after_other_full_reads(fx) -> None:
         devices = _raw_call(runner, "device.list")["result"]["devices"]
         for device in devices:
             assert _raw_call(runner, "device.snapshot", {"name": device["name"]})["ok"]
-        # Only the other connection read cfg. This request supplies that ref.
+        # Read cfg on one holder connection and run current inputs on the other.
         started = _raw_call(runner, "tab.run_start", args)
         assert started["ok"]
         result = _raw_call(
@@ -320,10 +194,6 @@ def test_editor_consecutive_self_writes_preserve_commit_observation(fx) -> None:
                 )["ok"]
                 is True
             )
-        stale = _raw_call(
-            second, "editor.commit", {"editor_id": editor_id, "name": "other"}
-        )
-        assert stale["error"]["reason"] == "stale_version"
         assert (
             _raw_call(first, "editor.commit", {"editor_id": editor_id, "name": "copy"})[
                 "ok"
@@ -365,15 +235,6 @@ def test_timed_out_socket_read_does_not_establish_guard_baseline(fx) -> None:
         timed_out = _recv_response(sock)
         assert timed_out["ok"] is False
         assert timed_out["error"]["code"] == "timeout"
-        _send(
-            sock,
-            {
-                "id": "write",
-                "method": "tab.load_data",
-                "params": {"tab_id": tab_id, "data_path": "missing.h5"},
-            },
-        )
-        assert _recv_response(sock)["error"]["reason"] == "stale_version"
     finally:
         sock.close()
 
@@ -426,9 +287,6 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": tab_id,
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                 },
             },
         )
@@ -479,9 +337,6 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": tab_id,
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                 },
             },
         )["handle"]
@@ -605,9 +460,6 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
             {
                 "method": "tab.run_start",
                 "params": {
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                     "tab_id": tab_id,
                 },
             },
@@ -699,9 +551,6 @@ def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
             {
                 "method": "tab.run_start",
                 "params": {
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                     "tab_id": tab_id,
                 },
             },
@@ -740,9 +589,6 @@ def test_tab_run_rejects_missing_active_context_without_starting(
                 {
                     "method": "tab.run_start",
                     "params": {
-                        "expected": encode_ref(
-                            fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                        ),
                         "tab_id": tab_id,
                     },
                 },
@@ -789,9 +635,6 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
             {
                 "method": "tab.run_start",
                 "params": {
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                     "tab_id": tab_id,
                 },
             },
@@ -803,18 +646,15 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
                 {
                     "method": "tab.run_start",
                     "params": {
-                        "expected": encode_ref(
-                            fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                        ),
                         "tab_id": tab_id,
                     },
                 },
             )
         editor = fx.ctrl.cfg_resources.lookup(tab_id)
-        accepted_ref = editor.observe().ref
+        editor.observe()
         for command in (
-            lambda: editor.edit(accepted_ref.revision, (CfgEdit(("gain",), 0.2),)),
-            lambda: editor.reset(accepted_ref.revision),
+            lambda: editor.edit((CfgEdit(("gain",), 0.2),)),
+            lambda: editor.reset(),
         ):
             with pytest.raises(CfgPreconditionError) as blocked:
                 command()
@@ -823,11 +663,8 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
             fx.ctrl.close_tab(tab_id)
         other = fx.ctrl.new_tab("fake")
         other_editor = fx.ctrl.cfg_resources.lookup(other)
-        other_editor.edit(
-            other_editor.observe().ref.revision, (CfgEdit(("gain",), 0.3),)
-        )
+        other_editor.edit((CfgEdit(("gain",), 0.3),))
         _edit_context_as_gui(fx, "run_source", 17)
-        assert editor.observe().ref != accepted_ref
         if terminal == "cancelled":
             assert call("cancel", {"op": op})["status"] in {"cancelling", "cancelled"}
         release.set()
@@ -870,9 +707,6 @@ def test_restarted_gui_requires_new_full_reads_before_running(
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": first_tab,
-                    "expected": encode_ref(
-                        first.ctrl.cfg_resources.lookup(first_tab).observe().ref
-                    ),
                 },
             },
         )["handle"]
@@ -891,22 +725,6 @@ def test_restarted_gui_requires_new_full_reads_before_running(
         with pytest.raises(RuntimeError) as expired:
             call("wait", {"op": old_handle, "timeout": 0.01})
         assert getattr(expired.value, "reason", None) == "unknown_op"
-        # The old snapshots must not supply the new GUI's nonzero tab, SoC or
-        # context guard baseline. Explicit reads restore access to this tab.
-        with pytest.raises(RuntimeError) as stale:
-            call(
-                "rpc_call",
-                {
-                    "method": "tab.run_start",
-                    "params": {
-                        "tab_id": second_tab,
-                        "expected": encode_ref(
-                            second.ctrl.cfg_resources.lookup(second_tab).observe().ref
-                        ),
-                    },
-                },
-            )
-        assert getattr(stale.value, "reason", None) == "stale_version"
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": second_tab}})
         call("rpc_call", {"method": "context.snapshot"})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
@@ -923,9 +741,6 @@ def test_restarted_gui_requires_new_full_reads_before_running(
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": second_tab,
-                    "expected": encode_ref(
-                        second.ctrl.cfg_resources.lookup(second_tab).observe().ref
-                    ),
                 },
             },
         )["handle"]
@@ -936,33 +751,6 @@ def test_restarted_gui_requires_new_full_reads_before_running(
         first.stop()
         if second is not None:
             second.stop()
-
-
-def test_load_after_gui_context_edit_requires_a_new_full_read(
-    fx, tmp_path: Path
-) -> None:
-    _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
-    bridge, call = _mcp_client(fx.service.port, tmp_path)
-    try:
-        call("connect", {"port": fx.service.port})
-        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
-        call("rpc_call", {"method": "context.snapshot"})
-        _edit_context_as_gui(fx, "r_f", 6000.0)
-        args = {
-            "method": "tab.load_data",
-            "params": {"tab_id": tab_id, "data_path": "missing.h5"},
-        }
-        with pytest.raises(RuntimeError) as stale:
-            call("rpc_call", args)
-        assert getattr(stale.value, "reason", None) == "stale_version"
-
-        assert call("rpc_call", {"method": "context.snapshot"})["md"]["r_f"] == 6000.0
-        with pytest.raises(RuntimeError) as missing_file:
-            call("rpc_call", args)
-        assert getattr(missing_file.value, "reason", None) != "stale_version"
-    finally:
-        bridge.disconnect()
 
 
 @pytest.mark.parametrize(
@@ -991,30 +779,20 @@ def test_failed_complete_context_read_does_not_advance_mcp_load_guard(
             "method": "tab.load_data",
             "params": {"tab_id": tab_id, "data_path": "missing.h5"},
         }
-        with pytest.raises(RuntimeError) as stale:
-            call("rpc_call", args)
-        assert getattr(stale.value, "reason", None) == "stale_version"
 
         md.update({"nested": {"first": "a", "second": "b"}})
         fx.state.version.bump("context")
         snapshot = call("rpc_call", {"method": "context.snapshot"})
         assert snapshot["md"]["nested"] == {"first": "a", "second": "b"}
-        with pytest.raises(RuntimeError) as missing_file:
+        with pytest.raises(RuntimeError):
             call("rpc_call", args)
-        assert getattr(missing_file.value, "reason", None) != "stale_version"
     finally:
         bridge.disconnect()
 
 
-@pytest.mark.parametrize("mutate_cfg", [False, True])
-def test_frozen_run_needs_cfg_observation_not_large_context_export(
-    fx, tmp_path: Path, mutate_cfg: bool
-) -> None:
+def test_frozen_run_does_not_require_large_context_export(fx, tmp_path: Path) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
-    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
@@ -1024,26 +802,16 @@ def test_frozen_run_needs_cfg_observation_not_large_context_export(
             call("rpc_call", {"method": "context.snapshot"})
         assert getattr(oversized.value, "reason", None) == "response_encoding_failed"
         call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
-        call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
         call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
         _edit_context_as_gui(fx, "unrelated", 17)
-        # Every source publication advances cfg; a small complete cfg read
-        # establishes the new baseline without exporting the large context.
-        call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}})
-        expected = encode_ref(cfg.observe().ref)
-        if mutate_cfg:
-            cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
-        args = {
-            "method": "tab.run_start",
-            "params": {"tab_id": tab_id, "expected": expected},
-        }
-        if mutate_cfg:
-            with pytest.raises(RuntimeError) as stale:
-                call("rpc_call", args)
-            assert getattr(stale.value, "reason", None) == "stale_revision"
-        else:
-            started = call("rpc_call", args)
-            _await_completed_run(call, started["handle"])
+        started = call(
+            "rpc_call",
+            {
+                "method": "tab.run_start",
+                "params": {"tab_id": tab_id},
+            },
+        )
+        _await_completed_run(call, started["handle"])
     finally:
         bridge.disconnect()
 
@@ -1072,16 +840,12 @@ def test_large_context_roundtrip_restores_load_guard(
             "method": "tab.load_data",
             "params": {"tab_id": tab_id, "data_path": "missing.h5"},
         }
-        with pytest.raises(RuntimeError) as stale:
-            call("rpc_call", args)
-        assert getattr(stale.value, "reason", None) == "stale_version"
 
         observed = call("rpc_call", {"method": "context.snapshot"})
         assert observed["md"]["large"] == value
         assert observed["md"]["changed"] == 17
-        with pytest.raises(RuntimeError) as missing_file:
+        with pytest.raises(RuntimeError):
             call("rpc_call", args)
-        assert getattr(missing_file.value, "reason", None) != "stale_version"
     finally:
         bridge.disconnect()
 
@@ -1107,51 +871,12 @@ def test_oversized_context_read_returns_error_without_advancing_guard(
             "method": "tab.load_data",
             "params": {"tab_id": tab_id, "data_path": "missing.h5"},
         }
-        with pytest.raises(RuntimeError) as stale:
-            call("rpc_call", args)
-        assert getattr(stale.value, "reason", None) == "stale_version"
 
         _edit_context_as_gui(fx, "large", "small")
         assert (
             call("rpc_call", {"method": "context.snapshot"})["md"]["large"] == "small"
         )
-        with pytest.raises(RuntimeError) as missing_file:
+        with pytest.raises(RuntimeError):
             call("rpc_call", args)
-        assert getattr(missing_file.value, "reason", None) != "stale_version"
-    finally:
-        bridge.disconnect()
-
-
-def test_editor_commit_rejects_unseen_gui_edit_then_accepts_full_read(
-    fx, tmp_path: Path
-) -> None:
-    ml = ModuleLibrary()
-    ml.waveforms["seed"] = WaveformCfgFactory.from_raw(
-        {"style": "const", "length": 0.1}
-    )
-    _prepare_guarded_context(fx, ml)
-    bridge, call = _mcp_client(fx.service.port, tmp_path)
-    try:
-        call("connect", {"port": fx.service.port})
-        editor_id = call(
-            "rpc_call",
-            {
-                "method": "editor.new",
-                "params": {"item_kind": "waveform", "from_name": "seed"},
-            },
-        )["editor_id"]
-        call("rpc_call", {"method": "editor.get", "params": {"editor_id": editor_id}})
-        call("rpc_call", {"method": "context.snapshot"})
-        _edit_context_as_gui(fx, "r_f", 6000.0)
-        args = {
-            "method": "editor.commit",
-            "params": {"editor_id": editor_id, "name": "copy"},
-        }
-        with pytest.raises(RuntimeError) as stale:
-            call("rpc_call", args)
-        assert getattr(stale.value, "reason", None) == "stale_version"
-        call("rpc_call", {"method": "context.snapshot"})
-        assert call("rpc_call", args) == {}
-        assert ml.waveforms["copy"] == ml.waveforms["seed"]
     finally:
         bridge.disconnect()

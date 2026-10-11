@@ -75,7 +75,7 @@ def test_library_mutation_refreshes_linked_and_modified_tab_drafts(
 
     tab_id = "references"
     cfg = fx.prepare_tab(tab_id, FakeAdapter(), schema)
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("modified", field), 0.75),))
+    cfg.edit((CfgEdit(("modified", field), 0.75),))
     fx.start()
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     bridge, invoke = mcp_client(fx.service.port, tmp_path)

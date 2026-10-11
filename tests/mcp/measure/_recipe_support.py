@@ -54,7 +54,6 @@ class LookbackGui:
 
     def __init__(self):
         self.publication: dict[str, Any] = {
-            "cfg_ref": {"cfg_id": "cfg", "revision": "2"},
             "status": "Valid",
             "source_basis": [],
             "diagnostics": [],
@@ -162,7 +161,6 @@ class LookbackGui:
         }
 
     def _edit(self, params: dict[str, Any]) -> None:
-        assert params["expected"] == self.publication["cfg_ref"]
         for edit in params["edits"]:
             node = self.publication["tree"]
             for part in edit["path"]:
@@ -176,8 +174,6 @@ class LookbackGui:
                     node["input"].update(mode="expression", raw=value["__expr"])
                 else:
                     node.update(scalar(value))
-        revision = int(self.publication["cfg_ref"]["revision"]) + 1
-        self.publication["cfg_ref"]["revision"] = str(revision)
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         observations = self._observations()
@@ -207,7 +203,9 @@ class LookbackGui:
                 )
             return deepcopy(self.publication)
         if method == "tab.run_start":
-            assert params == {"tab_id": "t", "expected": self.publication["cfg_ref"]}
+            assert params == {
+                "tab_id": "t",
+            }
             assert not self.ran
             self.ran = True
             return {"operation_id": 71}

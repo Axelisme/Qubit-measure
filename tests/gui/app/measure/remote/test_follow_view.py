@@ -18,7 +18,6 @@ from zcu_tools.gui.app.measure.remote.handlers.run_save import (
 from zcu_tools.gui.app.measure.remote.handlers.writeback import (
     h_tab_writeback_write,
 )
-from zcu_tools.gui.cfg.resource import CfgId, CfgRef, CfgRevision
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.session.context_types import CommandOrigin
 
@@ -66,7 +65,6 @@ def test_write_follow_precedes_mutation_and_headless_still_works(
         adapter,
         {
             "tab_id": "t",
-            "expected": {"cfg_id": "cfg-t", "revision": "0"},
             "updates": {},
             "edits": [],
             "agent_edit": True,
@@ -171,13 +169,12 @@ def test_run_forwards_one_run_target_without_editing_sources(target):
     adapter = MagicMock()
     adapter.render_view = None
     adapter.run_analyze_control.start_run.return_value = 19
-    params = {"tab_id": "t", "expected": {"cfg_id": "cfg-t", "revision": "0"}}
+    params: dict[str, object] = {"tab_id": "t"}
     if target is not None:
         params["aliases"] = {"qubit": target}
     assert h_tab_run_start(adapter, params) == {"operation_id": 19}
     adapter.run_analyze_control.start_run.assert_called_once_with(
         "t",
-        CfgRef(CfgId("cfg-t"), CfgRevision(0)),
         aliases=None if target is None else {"qubit": target},
         origin=CommandOrigin("mcp"),
     )
@@ -191,7 +188,6 @@ def test_run_rejects_malformed_target_before_operation_or_view_changes(target):
             adapter,
             {
                 "tab_id": "t",
-                "expected": {"cfg_id": "cfg-t", "revision": "0"},
                 "aliases": {"qubit": target},
             },
         )
@@ -206,7 +202,10 @@ def test_failed_view_selection_does_not_start_an_operation():
     adapter.render_view.select_tab_pane.side_effect = failure
     with pytest.raises(ValueError, match="unavailable pane") as caught:
         h_tab_run_start(
-            adapter, {"tab_id": "t", "expected": {"cfg_id": "cfg-t", "revision": "0"}}
+            adapter,
+            {
+                "tab_id": "t",
+            },
         )
     assert caught.value is failure
     adapter.run_analyze_control.start_run.assert_not_called()

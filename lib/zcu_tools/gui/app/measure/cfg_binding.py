@@ -14,7 +14,6 @@ from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
     CfgResolution,
-    CfgRevision,
     SourceBasis,
     SourceRevision,
 )
@@ -134,15 +133,15 @@ class MeasureCfgBindings:
         """
         versions = state.version.snapshot()
         basis: SourceBasis = (
-            SourceRevision("context", CfgRevision(versions.get("context", 0))),
+            SourceRevision("context", int(versions.get("context", 0))),
             SourceRevision(
                 DEVICE_SET_VERSION_KEY,
-                CfgRevision(versions.get(DEVICE_SET_VERSION_KEY, 0)),
+                int(versions.get(DEVICE_SET_VERSION_KEY, 0)),
             ),
             *(
                 SourceRevision(
                     f"device:{device.name}",
-                    CfgRevision(versions.get(f"device:{device.name}", 0)),
+                    int(versions.get(f"device:{device.name}", 0)),
                 )
                 for device in state.list_devices()
             ),

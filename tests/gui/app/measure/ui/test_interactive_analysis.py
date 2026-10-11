@@ -424,3 +424,34 @@ def test_done_and_cancel_drop_unplaced_preview(qapp):
     assert widget.preview_active is False
     assert updates == []
     widget.deleteLater()
+
+
+def test_readonly_frontend_keeps_plot_viewing_but_blocks_buttons_and_line_edits(qapp):
+    widget, plugin, session, env, done, cancelled, canvas = _frontend(qapp)
+    start = session.snapshot()
+    _pointer(canvas, "button_press_event", start.flux_half)
+    _pointer(canvas, "motion_notify_event", start.flux_half + 0.5)
+    assert widget.preview_active
+    assert hasattr(widget, "set_read_only"), (
+        "interactive controls need a readonly presentation gate"
+    )
+    widget.set_read_only(read_only=True)
+    assert not widget.preview_active
+    assert canvas.isEnabled()
+    assert all(not b.isEnabled() for b in widget.findChildren(QPushButton))
+    _pointer(canvas, "button_press_event", start.flux_half)
+    _pointer(canvas, "motion_notify_event", start.flux_half + 0.5)
+    _pointer(canvas, "button_press_event", start.flux_half + 0.5)
+    assert session.snapshot() == start
+    assert not widget.preview_active
+    assert not env.pending and not done and not cancelled
+    # External publication does not restore write controls remotely.
+    plugin.execute_command(session, "swap_lines", {})
+    assert all(not b.isEnabled() for b in widget.findChildren(QPushButton))
+    widget.set_read_only(read_only=False)
+    assert _button(widget, "Swap Lines").isEnabled()
+    _button(widget, "Swap Lines").click()
+    assert session.snapshot().flux_half == pytest.approx(start.flux_half)
+    widget.teardown()
+    session.dispose()
+    widget.deleteLater()

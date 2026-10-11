@@ -38,7 +38,6 @@ from zcu_tools.gui.cfg.resource import (
     CfgPath,
     CfgResolution,
     CfgResource,
-    CfgRevision,
     CfgStatus,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -167,11 +166,8 @@ def test_scalar_input_publishes_each_keystroke(form: ResourceCfgFormWidget) -> N
         )
     )
     form.attach(owner)
-    base = form.current_ref()
     type_text(scalar_line(form), "3.5")
-    assert form.current_ref() == owner.observe().ref
-    assert form.current_ref().revision == base.revision + 3
-    assert owner.accept(form.current_ref().revision).values == {"value": 3.5}
+    assert owner.accept().values == {"value": 3.5}
     assert not any(
         isinstance(label, QLabel) and label.isVisible() and label.text()
         for label in form.findChildren(QLabel, "cfgSubmitError")
@@ -199,15 +195,12 @@ def test_external_update_keeps_typed_text_focus_selection(
     type_text(line, "3.51")
     line.setSelection(1, 2)
     assert line.hasFocus() and line.selectedText() == ".5"
-    current = owner.edit(
-        owner.observe().ref.revision, (CfgEdit(("b",), DirectValue(8.0)),)
-    )
+    owner.edit((CfgEdit(("b",), DirectValue(8.0)),))
     qapp.processEvents()
 
-    assert form.current_ref() == current.ref
     assert scalar_line(form, "b").text() == "8.0"
     assert line.text() == "3.51" and line.hasFocus() and line.selectedText() == ".5"
-    assert owner.accept(current.ref.revision).values == {"value": 3.51, "b": 8.0}
+    assert owner.accept().values == {"value": 3.51, "b": 8.0}
 
 
 def test_invalid_input_reflects_published_status_and_reason(
@@ -272,18 +265,15 @@ def test_reference_shape_switch_rebuilds_after_qt_signal(
     assert combo is not None
 
     combo.setCurrentIndex(combo.findText("DRAG"))
-    assert owner.observe().ref.revision == 1
     qapp.processEvents()
     assert form.findChild(ScalarInputWidget, "cfgInput:ref.delta") is not None
-    contents = owner.accept(owner.observe().ref.revision).values["ref"]
+    contents = owner.accept().values["ref"]
     assert isinstance(contents, dict) and contents["length"] == 0.8
     combo = tree.findChild(QComboBox)
     assert combo is not None
     type_text(scalar_line(form, "ref.length"), "1.6")
-    assert owner.observe().ref.revision == 4
     combo.setCurrentIndex(combo.findData(NONE_KEY))
     qapp.processEvents()
-    assert owner.observe().ref.revision == 5
     assert owner.observe().tree.children["ref"].value is None
     assert form.findChild(ScalarInputWidget, "cfgInput:ref.delta") is None
 
@@ -308,9 +298,8 @@ def test_range_input_submits_subpath_to_owner(
 
     type_text(step, "0.5")
 
-    observed = owner.observe()
-    assert observed.ref.revision == 3
-    assert owner.accept(observed.ref.revision).values == {
+    owner.observe()
+    assert owner.accept().values == {
         "range": {"start": 0, "stop": 2, "expts": 5, "step": 0.5}
     }
 
@@ -375,7 +364,7 @@ def test_range_sampling_uses_the_last_operation(
     type_text(points, "9")
     type_text(step, "0.5")
     type_text(points, "7")
-    assert owner.accept(owner.observe().ref.revision).values == {
+    assert owner.accept().values == {
         "range": {"start": 0, "stop": 2, "expts": 7, "step": 1 / 3}
     }
 
@@ -426,8 +415,7 @@ def test_choice_selection_changes_visible_rows_after_publication(
     type_text(line, "b")
     qapp.processEvents()
 
-    assert owner.observe().ref.revision == 5
-    assert owner.accept(form.current_ref().revision).values["choice"] == {
+    assert owner.accept().values["choice"] == {
         "mode": "b",
         "a": 4.25,
         "b": 2.0,
@@ -472,7 +460,7 @@ def test_same_shape_library_relink_collapses_and_custom_expands(
     assert combo is not None
 
     combo.setCurrentIndex(combo.findText("Lib: saved"))
-    assert owner.accept(owner.observe().ref.revision).values["ref"] == {
+    assert owner.accept().values["ref"] == {
         "style": "gauss",
         "length": 1.0,
         "sigma": 0.2,
@@ -481,7 +469,7 @@ def test_same_shape_library_relink_collapses_and_custom_expands(
 
     combo.setCurrentIndex(combo.findText("Gauss"))
     assert ref_row.isExpanded()
-    assert owner.accept(owner.observe().ref.revision).values["ref"] == {
+    assert owner.accept().values["ref"] == {
         "style": "gauss",
         "length": 1.0,
         "sigma": 0.2,
@@ -522,9 +510,7 @@ def test_singleton_reference_wrapper_elision_keeps_real_edit_path(
 
     type_text(line, "5")
 
-    assert owner.accept(owner.observe().ref.revision).values == {
-        "ref": {"shape": {"x": 5.0}}
-    }
+    assert owner.accept().values == {"ref": {"shape": {"x": 5.0}}}
 
 
 def test_detach_reopen_shows_owner_publication_without_defaults(
@@ -552,12 +538,10 @@ def test_detach_reopen_shows_owner_publication_without_defaults(
     )
     form.attach(owner)
     type_text(scalar_line(form), "3.5")
-    base = owner.observe().ref
+    owner.observe()
     form.detach()
-    assert owner.observe().ref == base
-    current = owner.edit(base.revision, (CfgEdit(("value",), DirectValue(9.0)),))
+    owner.edit((CfgEdit(("value",), DirectValue(9.0)),))
     form.attach(owner)
-    assert form.current_ref() == current.ref
     assert scalar_line(form).text() == "9.0"
     assert calls == ["defaults"]
 
@@ -574,20 +558,16 @@ class RejectingEditor:
     def watch(self, callback: Callable[[CfgObservation], None]) -> Callable[[], None]:
         return self.owner.watch(callback)
 
-    def edit(
-        self, expected_revision: CfgRevision, edits: tuple[CfgEdit, ...]
-    ) -> CfgObservation:
+    def edit(self, edits: tuple[CfgEdit, ...]) -> CfgObservation:
         raise FailedPreconditionError("rejected")
 
-    def select_custom_reference(
-        self, expected_revision: CfgRevision, path: CfgPath, label: str
-    ) -> CfgObservation:
+    def select_custom_reference(self, path: CfgPath, label: str) -> CfgObservation:
         raise FailedPreconditionError("rejected")
 
-    def reset(self, expected_revision: CfgRevision) -> CfgObservation:
+    def reset(self) -> CfgObservation:
         raise FailedPreconditionError("rejected")
 
-    def refresh(self, expected_revision: CfgRevision) -> CfgObservation:
+    def refresh(self) -> CfgObservation:
         raise FailedPreconditionError("rejected")
 
 
@@ -607,7 +587,7 @@ def test_rejected_input_shows_error_and_restores_published_values(
         )
     )
     form.attach(RejectingEditor(owner))
-    base = owner.observe().ref
+    owner.observe()
     error = form.findChild(QLabel, "cfgSubmitError")
     assert error is not None and not error.isVisible()
 
@@ -619,7 +599,6 @@ def test_rejected_input_shows_error_and_restores_published_values(
     combo.setCurrentIndex(combo.findText("b"))
     qapp.processEvents()
 
-    assert owner.observe().ref == base == form.current_ref()
     assert error.isVisible() and error.text() == "mode: rejected"
     assert scalar_line(form).text() == "2.0"
     assert combo.currentText() == "a"
@@ -647,9 +626,6 @@ def test_range_keeps_typed_text_focus_selection_on_external_update(
     assert step is not None
     type_text(step, "0.51")
     step.setSelection(2, 1)
-    current = owner.edit(
-        owner.observe().ref.revision, (CfgEdit(("other",), DirectValue(0.5)),)
-    )
+    owner.edit((CfgEdit(("other",), DirectValue(0.5)),))
     qapp.processEvents()
-    assert form.current_ref() == current.ref
     assert step.text() == "0.51" and step.hasFocus() and step.selectedText() == "5"

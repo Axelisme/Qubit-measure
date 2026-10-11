@@ -19,11 +19,10 @@ from zcu_tools.gui.cfg import (
     SweepValue,
 )
 from zcu_tools.gui.cfg.binding import CfgDraft, CfgNodeObservation
-from zcu_tools.gui.cfg.edit_codec import encode_input, encode_ref
+from zcu_tools.gui.cfg.edit_codec import encode_input
 from zcu_tools.gui.cfg.resource import (
     CfgInputError,
     CfgPreconditionError,
-    CfgStaleError,
 )
 from zcu_tools.gui.cfg.resource import CfgObservation as ResourceObservation
 from zcu_tools.gui.remote.errors import RemoteError, remote_error_from_expected
@@ -50,9 +49,6 @@ def cfg_error_to_remote(exc: CfgInputError | CfgPreconditionError) -> RemoteErro
         data["path"] = list(exc.path)
     if exc.edit_index is not None:
         data["edit_index"] = exc.edit_index
-    if isinstance(exc, CfgStaleError):
-        data["expected"] = encode_ref(exc.expected)
-        data["actual"] = encode_ref(exc.actual)
     return RemoteError(
         mapped.code, mapped.message, reason=mapped.reason, data=data or None
     )
@@ -61,7 +57,6 @@ def cfg_error_to_remote(exc: CfgInputError | CfgPreconditionError) -> RemoteErro
 def build_resource_observation(observation: ResourceObservation) -> dict[str, object]:
     """Serialize a complete publication without querying a live provider."""
     return {
-        "cfg_ref": encode_ref(observation.ref),
         "status": observation.status.value,
         "tree": _project(observation.tree, ()),
         "source_basis": [

@@ -32,7 +32,6 @@ from zcu_tools.gui.cfg.resource import (
     CfgObservation,
     CfgPreconditionError,
     CfgPreconditionReason,
-    CfgStaleError,
     CfgStatus,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -85,10 +84,8 @@ def test_headless_lifetime_snapshot_and_single_authority(application: Fixture) -
     assert before.status is CfgStatus.VALID
     snapshot = application.ctrl.get_tab_snapshot(tab_id)
     snapshot.cfg_schema.value.fields["gain"] = DirectValue(99.0)
-    assert application.state.get_tab(tab_id).cfg.accept(before.ref.revision).values == {
-        "gain": 1.0
-    }
-    editor.edit(before.ref.revision, (CfgEdit(("gain",), 7.0),))
+    assert application.state.get_tab(tab_id).cfg.accept().values == {"gain": 1.0}
+    editor.edit((CfgEdit(("gain",), 7.0),))
     assert application.ctrl.get_tab_snapshot(tab_id).cfg_schema.value.fields[
         "gain"
     ] == DirectValue(7.0)
@@ -96,51 +93,30 @@ def test_headless_lifetime_snapshot_and_single_authority(application: Fixture) -
     with pytest.raises(CfgPreconditionError) as caught:
         editor.observe()
     assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
-    recreated = application.ctrl.new_tab("cfg-contract")
-    assert (
-        application.ctrl.cfg_resources.lookup(recreated).observe().ref.cfg_id
-        != before.ref.cfg_id
-    )
+    application.ctrl.new_tab("cfg-contract")
 
 
-@pytest.mark.parametrize("failure", ["stale", "invalid", "wrong_resource"])
 def test_run_rejects_unaccepted_cfg_without_preflight_or_operation(
-    application: Fixture, monkeypatch: pytest.MonkeyPatch, failure: str
+    application: Fixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tab_id = application.ctrl.new_tab("cfg-contract")
     editor = application.ctrl.cfg_resources.lookup(tab_id)
-    expected = editor.observe().ref
     publication = editor.edit(
-        expected.revision,
-        (
-            CfgEdit(
-                ("gain",),
-                DirectValue(None, raw="unfinished") if failure == "invalid" else 2.0,
-            ),
-        ),
+        (CfgEdit(("gain",), DirectValue(None, raw="unfinished")),)
     )
-    if failure == "invalid":
-        expected = publication.ref
-    elif failure == "wrong_resource":
-        other = application.ctrl.new_tab("cfg-contract")
-        expected = application.ctrl.cfg_resources.lookup(other).observe().ref
     preflight = MagicMock()
     monkeypatch.setattr(
         application.state.get_tab(tab_id).adapter, "validate_run_request", preflight
     )
 
     with pytest.raises(CfgPreconditionError) as caught:
-        application.ctrl.start_run(tab_id, expected)
+        application.ctrl.start_run(tab_id)
 
-    if failure == "invalid":
-        assert caught.value.reason is CfgPreconditionReason.NOT_VALID
-    else:
-        assert isinstance(caught.value, CfgStaleError)
-        assert caught.value.actual == publication.ref
+    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
     preflight.assert_not_called()
     assert application.ctrl.run_analyze_control.active_tab_operations() == ()
     assert application.ctrl.get_running_tab_id() is None
-    assert editor.observe().ref == publication.ref
+    assert editor.observe() == publication
 
 
 def test_definition_failure_does_not_publish_a_partial_tab(
@@ -180,22 +156,18 @@ def test_production_capture_uses_published_cache_without_live_provider(
         raise AssertionError("Capture must not query a live value provider")
 
     monkeypatch.setattr(application.ctrl, "read_value_source", live_read_forbidden)
-    published = editor.edit(
-        editor.observe().ref.revision,
+    editor.edit(
         (CfgEdit(("gain",), EvalValue("@{device.flux.value}")),),
     )
-    accepted = application.state.get_tab(tab_id).cfg.accept(published.ref.revision)
+    accepted = application.state.get_tab(tab_id).cfg.accept()
     assert accepted.values == {"gain": 0.25}
     assert any(source.source_id == "values" for source in accepted.source_basis)
     application.state.set_device_info(
         "flux", FakeDeviceInfo(address="none", value=0.75)
     )
     application.bus.emit(DeviceChangedPayload(name="flux"))
-    after = editor.observe()
-    assert after.ref.revision > published.ref.revision
-    assert application.state.get_tab(tab_id).cfg.accept(after.ref.revision).values == {
-        "gain": 0.25
-    }
+    editor.observe()
+    assert application.state.get_tab(tab_id).cfg.accept().values == {"gain": 0.25}
     assert accepted.values == {"gain": 0.25}
 
 
@@ -211,14 +183,13 @@ def test_source_event_publishes_every_tab_before_callback(application: Fixture) 
     ]
     for editor in editors:
         editor.edit(
-            editor.observe().ref.revision,
             (CfgEdit(("gain",), EvalValue("general.ext.x")),),
         )
-    before = editors[0].observe().ref
+    before = editors[0].observe()
     observed = []
 
     def callback(publication: CfgObservation) -> None:
-        if publication.ref != before:
+        if publication != before:
             observed.append(tuple(editor.observe() for editor in editors))
 
     unsubscribe = editors[0].watch(callback)
@@ -228,28 +199,24 @@ def test_source_event_publishes_every_tab_before_callback(application: Fixture) 
     unsubscribe()
     assert len(observed) == 1
     assert observed[0][0].source_basis == observed[0][1].source_basis
-    for tab_id, publication in zip((first, second), observed[0], strict=True):
-        assert application.state.get_tab(tab_id).cfg.accept(
-            publication.ref.revision
-        ).values == {"gain": 9.0}
+    for tab_id in (first, second):
+        assert application.state.get_tab(tab_id).cfg.accept().values == {"gain": 9.0}
 
 
 def test_cfg_notification_rejects_app_lifetime_and_run(application: Fixture) -> None:
     first = application.ctrl.new_tab("cfg-contract")
     second = application.ctrl.new_tab("cfg-contract")
     editor = application.ctrl.cfg_resources.lookup(first)
-    initial = editor.observe().ref
+    initial = editor.observe()
     failures = []
 
     def callback(publication: CfgObservation) -> None:
-        if publication.ref == initial:
+        if publication == initial:
             return
         for command in (
             lambda: application.ctrl.new_tab("cfg-contract"),
             lambda: application.ctrl.close_tab(second),
-            lambda: application.ctrl.start_run(
-                second, application.ctrl.cfg_resources.lookup(second).observe().ref
-            ),
+            lambda: application.ctrl.start_run(second),
         ):
             try:
                 command()
@@ -257,7 +224,7 @@ def test_cfg_notification_rejects_app_lifetime_and_run(application: Fixture) -> 
                 failures.append(exc.reason)
 
     unsubscribe = editor.watch(callback)
-    editor.edit(initial.revision, (CfgEdit(("gain",), 2.0),))
+    editor.edit((CfgEdit(("gain",), 2.0),))
     unsubscribe()
     assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 3
     assert set(application.ctrl.list_tab_ids()) == {first, second}
@@ -270,7 +237,7 @@ def test_run_registration_notification_blocks_tab_mutation(
 ) -> None:
     tab_id = application.ctrl.new_tab("fake")
     cfg = application.state.get_tab(tab_id).cfg
-    expected = cfg.observe().ref
+    cfg.observe()
     original = cfg.snapshot_inputs()
     outcomes: list[str] = []
 
@@ -280,11 +247,11 @@ def test_run_registration_notification_blocks_tab_mutation(
         outcomes.append("accepted")
         try:
             if command == "edit":
-                cfg.edit(expected.revision, (CfgEdit(("reps",), 9),))
+                cfg.edit((CfgEdit(("reps",), 9),))
             elif command == "reset":
-                cfg.reset(expected.revision)
+                cfg.reset()
             elif command == "replace":
-                cfg.replace_inputs(expected.revision, original)
+                cfg.replace_inputs(original)
             else:
                 application.ctrl.close_tab(tab_id)
         except CfgPreconditionError as exc:
@@ -296,7 +263,7 @@ def test_run_registration_notification_blocks_tab_mutation(
 
     unsubscribe = application.bus.subscribe(GateChangedPayload, during_registration)
     try:
-        application.ctrl.start_run(tab_id, expected)
+        application.ctrl.start_run(tab_id)
     finally:
         unsubscribe.unsubscribe()
         application.ctrl.cancel_run()
@@ -308,7 +275,6 @@ def test_run_registration_notification_blocks_tab_mutation(
             sleep(0.001)
         assert application.ctrl.get_running_tab_id() is None
     assert outcomes == ["blocked"]
-    assert cfg.observe().ref == expected
     assert cfg.snapshot_inputs() == original
 
 
@@ -390,38 +356,26 @@ def test_named_aliases_preview_and_admission_share_capture_without_publication(
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg
     expression = "2 * $custom.gain + $qubit.gain"
-    observed = cfg.edit(
-        cfg.observe().ref.revision, (CfgEdit(("gain",), EvalValue(expression)),)
-    )
+    observed = cfg.edit((CfgEdit(("gain",), EvalValue(expression)),))
     rows = services.context.get_alias_rows()
     versions = state.version.snapshot()
     aliases = {"custom": "Q1"}
-    preview = services.tab.preview_cfg(tab_id, observed.ref, aliases=aliases)
-    assert preview.ref == observed.ref
+    preview = services.tab.preview_cfg(tab_id, aliases=aliases)
     assert preview.status is CfgStatus.VALID
-    admitted = services.guard.capture_run_inputs(
-        tab_id, expected_revision=observed.ref.revision, aliases=aliases
-    )
-    assert admitted.accepted_cfg.ref == observed.ref
+    admitted = services.guard.capture_run_inputs(tab_id, aliases=aliases)
     assert admitted.accepted_cfg.values["gain"] == 30.0
     assert admitted.snapshot is not None
     assert admitted.snapshot.roles == {"custom": "Q1", "qubit": "Q1"}
     assert admitted.parameters is not None
     assert admitted.parameters.value("$custom.gain") == 10.0
     assert admitted.parameters.value("$qubit.gain") == 10.0
-    assert cfg.accept(observed.ref.revision).values["gain"] == 50.0
+    assert cfg.accept().values["gain"] == 50.0
     assert cfg.observe() == observed
     assert services.context.get_alias_rows() == rows
     assert state.version.snapshot() == versions
     services.context.set_parameter(admitted.parameters.target, "Q1.gain", 40.0)
     assert admitted.parameters.value("$custom.gain") == 10.0
     assert admitted.accepted_cfg.values["gain"] == 30.0
-    with pytest.raises(CfgStaleError):
-        services.tab.preview_cfg(tab_id, observed.ref, aliases=aliases)
-    with pytest.raises(CfgStaleError):
-        services.guard.capture_run_inputs(
-            tab_id, expected_revision=observed.ref.revision, aliases=aliases
-        )
 
 
 @pytest.mark.parametrize("aliases", [None, {}], ids=["none", "empty"])
@@ -430,7 +384,7 @@ def test_empty_aliases_preserve_cached_acceptance_and_deferred_context(
 ) -> None:
     services, state = global_sources
     tab_id = services.tab.new_tab("global-source")
-    observed = state.get_tab(tab_id).cfg.observe()
+    state.get_tab(tab_id).cfg.observe()
 
     def unavailable_resolution(_parameters: object) -> NoReturn:
         raise AssertionError("No override must accept the cached publication")
@@ -442,11 +396,8 @@ def test_empty_aliases_preserve_cached_acceptance_and_deferred_context(
         ),
         cfg_resolution=unavailable_resolution,
     )
-    admitted = guard.capture_run_inputs(
-        tab_id, expected_revision=observed.ref.revision, aliases=aliases
-    )
+    admitted = guard.capture_run_inputs(tab_id, aliases=aliases)
     assert admitted.accepted_cfg.values["gain"] == 10.0
-    assert admitted.accepted_cfg.ref == observed.ref
     services.context.clear_context()
     deferred = services.tab.new_tab("global-source")
     assert services.tab.capture_parameters(deferred, aliases=aliases) is None
@@ -458,12 +409,9 @@ def test_empty_aliases_preserve_cached_acceptance_and_deferred_context(
 def test_existing_tab_and_run_admission_use_current_point(
     global_sources: tuple[AppServices, State],
 ) -> None:
-    services, state = global_sources
+    services, _state = global_sources
     tab_id = services.tab.new_tab("global-source")
-    cfg = state.get_tab(tab_id).cfg
-    first = services.guard.capture_run_inputs(
-        tab_id, expected_revision=cfg.observe().ref.revision
-    )
+    first = services.guard.capture_run_inputs(tab_id)
     assert first.accepted_cfg.values["gain"] == 10.0
     assert first.snapshot is not None
     assert first.snapshot.point == "first"
@@ -472,9 +420,7 @@ def test_existing_tab_and_run_admission_use_current_point(
     services.context.new_point(PointCreateRequest("second", "", CommandOrigin("gui")))
     parameters = services.context.read_context()
     services.context.set_parameter(parameters.target, "Q1.gain", 30.0)
-    second = services.guard.capture_run_inputs(
-        tab_id, expected_revision=cfg.observe().ref.revision
-    )
+    second = services.guard.capture_run_inputs(tab_id)
     assert second.accepted_cfg.values["gain"] == 30.0
     assert second.snapshot is not None
     assert second.snapshot.point == "second"
@@ -495,14 +441,11 @@ def test_dollar_cfg_refreshes_with_aliases_and_retains_authored_input(
     services, state = global_sources
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg
-    initial = cfg.edit(
-        cfg.observe().ref.revision, (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
-    )
-    assert cfg.accept(initial.ref.revision).values["gain"] == 10.0
+    cfg.edit((CfgEdit(("gain",), EvalValue("$qubit.gain")),))
+    assert cfg.accept().values["gain"] == 10.0
     services.context.set_alias_rows((AliasRow("qubit", "Q2"), AliasRow("custom", "Q1")))
     refreshed = cfg.observe()
-    assert refreshed.ref.cfg_id == initial.ref.cfg_id
-    assert cfg.accept(refreshed.ref.revision).values["gain"] == 20.0
+    assert cfg.accept().values["gain"] == 20.0
     value = refreshed.tree.children["gain"].value
     assert isinstance(value, EvalValue) and value.expr == "$qubit.gain"
 
@@ -515,25 +458,17 @@ def test_run_target_capture_does_not_mutate_global_rows_or_cfg(
     cfg = state.get_tab(tab_id).cfg
     observed = cfg.observe()
     rows = services.context.get_alias_rows()
-    observed = cfg.edit(
-        observed.ref.revision, (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
-    )
-    admitted = services.guard.capture_run_inputs(
-        tab_id, expected_revision=observed.ref.revision, aliases={"qubit": "Q2"}
-    )
+    observed = cfg.edit((CfgEdit(("gain",), EvalValue("$qubit.gain")),))
+    admitted = services.guard.capture_run_inputs(tab_id, aliases={"qubit": "Q2"})
     assert admitted.snapshot is not None
     assert admitted.snapshot.roles == {"qubit": "Q2", "custom": "Q2"}
     assert admitted.parameters is not None
     assert admitted.parameters.value("$qubit.gain") == 20.0
     assert admitted.accepted_cfg.values["gain"] == 20.0
-    assert cfg.accept(observed.ref.revision).values["gain"] == 10.0
+    assert cfg.accept().values["gain"] == 10.0
     assert services.context.get_alias_rows() == rows
     assert cfg.observe() == observed
-    cfg.edit(observed.ref.revision, (CfgEdit(("gain",), 15.0),))
-    with pytest.raises(CfgStaleError):
-        services.guard.capture_run_inputs(
-            tab_id, expected_revision=observed.ref.revision, aliases={"qubit": "Q2"}
-        )
+    cfg.edit((CfgEdit(("gain",), 15.0),))
 
 
 @pytest.mark.parametrize("target,qubit", [(None, "Q1"), ("Q2", "Q2")])
@@ -548,9 +483,7 @@ def test_run_control_delivers_target_capture_to_execution_without_publication_ch
     cfg = state.get_tab(tab_id).cfg
     observed = cfg.observe()
     rows = services.context.get_alias_rows()
-    observed = cfg.edit(
-        observed.ref.revision, (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
-    )
+    observed = cfg.edit((CfgEdit(("gain",), EvalValue("$qubit.gain")),))
     admitted: list[RunInputs] = []
 
     def receive_run(
@@ -562,7 +495,7 @@ def test_run_control_delivers_target_capture_to_execution_without_publication_ch
     monkeypatch.setattr(RunService, "start_run", receive_run)
     assert (
         services.run_analyze_control.start_run(
-            tab_id, observed.ref, aliases=None if target is None else {"qubit": target}
+            tab_id, aliases=None if target is None else {"qubit": target}
         )
         == 99
     )
@@ -572,16 +505,11 @@ def test_run_control_delivers_target_capture_to_execution_without_publication_ch
     assert inputs.snapshot.roles == {"qubit": qubit, "custom": "Q2"}
     assert inputs.parameters is not None
     assert inputs.parameters.value("$qubit.gain") == (10.0 if target is None else 20.0)
-    assert inputs.accepted_cfg.ref == observed.ref
     assert inputs.accepted_cfg.values["gain"] == (10.0 if target is None else 20.0)
-    assert cfg.accept(observed.ref.revision).values["gain"] == 10.0
+    assert cfg.accept().values["gain"] == 10.0
     assert cfg.observe() == observed
     assert services.context.get_alias_rows() == rows
-    cfg.edit(observed.ref.revision, (CfgEdit(("gain",), 15.0),))
-    with pytest.raises(CfgStaleError):
-        services.run_analyze_control.start_run(
-            tab_id, observed.ref, aliases=None if target is None else {"qubit": target}
-        )
+    cfg.edit((CfgEdit(("gain",), 15.0),))
     assert len(admitted) == 1
 
 
@@ -604,9 +532,7 @@ def test_run_control_rejects_unresolvable_target_before_execution(
 
     monkeypatch.setattr(RunService, "start_run", receive_run)
     with pytest.raises(RoleResolutionError):
-        services.run_analyze_control.start_run(
-            tab_id, observed.ref, aliases={"qubit": "missing"}
-        )
+        services.run_analyze_control.start_run(tab_id, aliases={"qubit": "missing"})
     assert executions == []
     assert cfg.observe() == observed
     assert services.context.get_alias_rows() == rows
@@ -623,7 +549,7 @@ def test_run_registration_and_failed_submission_allow_operation_reads(
 
         monkeypatch.setattr(BackgroundRunner, "submit", reject_submission)
     tab_id = application.ctrl.new_tab("fake")
-    ref = application.ctrl.cfg_resources.lookup(tab_id).observe().ref
+    application.ctrl.cfg_resources.lookup(tab_id).observe()
     observed: list[tuple[bool, tuple[int, ...], tuple[int, ...]]] = []
     errors: list[str] = []
 
@@ -645,11 +571,11 @@ def test_run_registration_and_failed_submission_allow_operation_reads(
     try:
         if fail_submit:
             with pytest.raises(RuntimeError, match="submission rejected"):
-                application.ctrl.start_run(tab_id, ref)
+                application.ctrl.start_run(tab_id)
             assert application.ctrl.get_running_tab_id() is None
             assert application.ctrl.operation_control.active_operations() == ()
         else:
-            token = application.ctrl.start_run(tab_id, ref)
+            token = application.ctrl.start_run(tab_id)
             assert tuple(
                 op.op for op in application.ctrl.operation_control.active_operations()
             ) == (token,)

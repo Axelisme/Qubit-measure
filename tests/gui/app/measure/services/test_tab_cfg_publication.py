@@ -49,13 +49,12 @@ def test_source_refresh_publishes_all_tabs_before_any_notification() -> None:
     first = owner.create("first", expression_schema, resolution=resolution)
     second = owner.create("second", expression_schema, resolution=resolution)
     observations = []
-    initial = first.observe().ref
 
     def observe_pair(publication) -> None:
-        if publication.ref != initial:
-            observations.append((first.observe(), second.observe()))
+        observations.append((first.observe(), second.observe()))
 
     unsubscribe = first.watch(observe_pair)
+    observations.clear()
     state.set_context(replace(state.session_env, parameters=parameter_capture(x=9.0)))
     state.version.bump("context")
     publications = owner.refresh_all()
@@ -64,9 +63,8 @@ def test_source_refresh_publishes_all_tabs_before_any_notification() -> None:
     assert len(observations) == 1
     assert observations[0] == publications
     assert publications[0].source_basis == publications[1].source_basis
-    assert publications[0].ref.revision == publications[1].ref.revision == 1
-    assert first.accept(publications[0].ref.revision).values == {"value": 1.0}
-    assert second.accept(publications[1].ref.revision).values == {"value": 1.0}
+    assert first.accept().values == {"value": 1.0}
+    assert second.accept().values == {"value": 1.0}
 
 
 @pytest.mark.parametrize("batch", [False, True])
@@ -80,17 +78,15 @@ def test_notification_blocks_other_tab_commands_and_lifetime(batch: bool) -> Non
     owner = cfg_resources(state)
     first = owner.create("first", expression_schema, resolution=resolution)
     second = owner.create("second", expression_schema, resolution=resolution)
-    initial = first.observe().ref
+    armed = False
     failures = []
 
     def subscriber(publication) -> None:
-        if publication.ref == initial:
+        if not armed:
             return
         commands: tuple[Callable[[], object], ...] = (
-            lambda: second.edit(
-                second.observe().ref.revision, (CfgEdit(("value",), 5.0),)
-            ),
-            lambda: second.accept(second.observe().ref.revision),
+            lambda: second.edit((CfgEdit(("value",), 5.0),)),
+            lambda: second.accept(),
             lambda: owner.retire("second"),
             lambda: owner.create("third", expression_schema, resolution=resolution),
             lambda: owner.refresh_all(),
@@ -102,15 +98,16 @@ def test_notification_blocks_other_tab_commands_and_lifetime(batch: bool) -> Non
                 failures.append(exc.reason)
 
     unsubscribe = first.watch(subscriber)
+    armed = True
     if batch:
         owner.refresh_all()
     else:
-        first.edit(initial.revision, (CfgEdit(("value",), 2.0),))
+        first.edit((CfgEdit(("value",), 2.0),))
     unsubscribe()
 
     assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 5
-    second.edit(second.observe().ref.revision, (CfgEdit(("value",), 5.0),))
-    assert second.accept(second.observe().ref.revision).values == {"value": 5.0}
+    second.edit((CfgEdit(("value",), 5.0),))
+    assert second.accept().values == {"value": 5.0}
     owner.retire("second")
     owner.create("third", expression_schema, resolution=resolution)
 
@@ -127,17 +124,16 @@ def test_source_fault_publishes_unavailable_for_every_tab_then_recovers(
     owner = cfg_resources(state)
     first = owner.create("first", expression_schema, resolution=resolution)
     second = owner.create("second", expression_schema, resolution=resolution)
-    initial = first.observe().ref
     observations = []
 
     def subscriber(publication) -> None:
-        if publication.ref != initial:
-            observations.append((first.observe().status, second.observe().status))
+        observations.append((first.observe().status, second.observe().status))
 
     def fail_options(self):
         raise RuntimeError("Published source is unavailable")
 
     unsubscribe = first.watch(subscriber)
+    observations.clear()
     with monkeypatch.context() as patch:
         patch.setattr(PublishedHost, "list_device_names", fail_options)
         publications = owner.refresh_all()
@@ -149,7 +145,6 @@ def test_source_fault_publishes_unavailable_for_every_tab_then_recovers(
     )
     for cfg in (first, second):
         with pytest.raises(CfgPreconditionError):
-            cfg.accept(cfg.observe().ref.revision)
+            cfg.accept()
     recovered = owner.refresh_all()
     assert all(publication.status is CfgStatus.VALID for publication in recovered)
-    assert recovered[0].ref.revision == recovered[1].ref.revision == 2

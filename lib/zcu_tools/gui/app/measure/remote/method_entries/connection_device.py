@@ -30,7 +30,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_integer("port", "Real board port"),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "simulation.initialize",
@@ -46,7 +45,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Failure may leave partial changes; inspect state before retrying.",
             (),
         ),
-        agent=AgentMethodPolicy(operation_key="simulation", refresh_after_write=True),
+        agent=AgentMethodPolicy(
+            operation_key="simulation",
+        ),
     ),
     method_entry(
         "device.connect",
@@ -72,7 +73,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            operation_key="device:{name}", refresh_after_write=True
+            operation_key="device:{name}",
         ),
     ),
     method_entry(
@@ -94,7 +95,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            operation_key="device:{name}", refresh_after_write=True
+            operation_key="device:{name}",
         ),
     ),
     method_entry(
@@ -109,7 +110,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (required_string("name", "Device name"),),
         ),
         agent=AgentMethodPolicy(
-            operation_key="device:{name}", refresh_after_write=True
+            operation_key="device:{name}",
         ),
     ),
     method_entry(
@@ -120,7 +121,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Forget a memory-only device (synchronous). Echoes {forgotten: name}.",
             (required_string("name", "Device name"),),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "device.setup",
@@ -137,7 +137,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            operation_key="device:{name}", refresh_after_write=True
+            operation_key="device:{name}",
         ),
     ),
     method_entry(
@@ -195,7 +195,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "live (no driver).",
             readonly=True,
         ),
-        agent=AgentMethodPolicy(reveals=("devices:__set__",)),
     ),
     method_entry(
         "device.snapshot",
@@ -212,6 +211,5 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (required_string("name", "Device name"),),
             readonly=True,
         ),
-        agent=AgentMethodPolicy(reveals=("device:{name}",)),
     ),
 )

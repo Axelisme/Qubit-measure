@@ -49,7 +49,6 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.cfg.resource import (
     AcceptedConfig,
     CfgEdit,
-    CfgRef,
     CfgResolution,
     CfgResource,
 )
@@ -1319,11 +1318,10 @@ def test_exp_tab_attach_projects_existing_resource(qapp):
 
     ctrl = _editor_wiring_ctrl()
     cfg = ctrl.cfg_resources.lookup("tab-1")
-    before = cfg.observe().ref
+    cfg.observe()
     tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     tab.attach(_snapshot("tab-1"), _RecordingTabActions())
-    assert cfg.observe().ref == before
-    cfg.edit(before.revision, (CfgEdit(("gain",), 0.45),))
+    cfg.edit((CfgEdit(("gain",), 0.45),))
     widget = tab.cfg_form.findChild(QWidget, "cfgInput:gain")
     assert widget is not None
     entry = widget.findChild(QLineEdit)
@@ -1338,10 +1336,9 @@ def test_exp_tab_detach_preserves_resource_for_later_views(qapp):
     tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     tab.attach(_snapshot("tab-1"), _RecordingTabActions())
     tab.detach()
-    after = cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), 0.45),))
+    after = cfg.edit((CfgEdit(("gain",), 0.45),))
     other = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     other.attach(_snapshot("tab-1"), _RecordingTabActions())
-    assert cfg.observe().ref == after.ref
     assert other.cfg_form.is_valid() == (after.status.value == "Valid")
 
 
@@ -1519,8 +1516,8 @@ def test_exp_tab_reset_publishes_defaults_on_same_resource(qapp):
     ctrl = _editor_wiring_ctrl()
     cfg = ctrl.cfg_resources.lookup("tab-1")
     defaults = cfg.snapshot_inputs()
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), 0.45),))
-    before = cfg.observe().ref
+    cfg.edit((CfgEdit(("gain",), 0.45),))
+    cfg.observe()
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
@@ -1530,9 +1527,8 @@ def test_exp_tab_reset_publishes_defaults_on_same_resource(qapp):
     actions = _RecordingTabActions()
     tab.attach(_snapshot("tab-1"), actions)
     tab.reset_btn.click()
-    after = cfg.observe().ref
-    assert after.cfg_id == before.cfg_id
-    assert after.revision == before.revision + 1
+    cfg.observe()
+
     assert cfg.snapshot_inputs() == defaults
     assert actions.calls[-1] == ("refresh_interaction", "tab-1")
 
@@ -2442,7 +2438,7 @@ class RunFormFixture:
     owner: CfgResource
     tab: ExpTabWidget
     line: QLineEdit
-    runs: list[tuple[CfgRef, AcceptedConfig]]
+    runs: list[AcceptedConfig]
 
 
 @pytest.fixture
@@ -2492,10 +2488,10 @@ def run_form(
         )
     owner = CfgResource(lambda: schema, resolution=resolution)
     ctrl.cfg_resources.lookup.side_effect = lambda tab_id: owner
-    runs: list[tuple[CfgRef, AcceptedConfig]] = []
+    runs: list[AcceptedConfig] = []
 
-    def start(tab_id: str, ref: CfgRef) -> None:
-        runs.append((ref, owner.accept(ref.revision)))
+    def start(tab_id: str) -> None:
+        runs.append(owner.accept())
 
     ctrl.start_run.side_effect = start
     window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
@@ -2532,15 +2528,12 @@ def test_run_uses_the_input_published_while_typing(
     run_form: RunFormFixture,
 ) -> None:
     fx = run_form
-    base = fx.owner.observe().ref
+    fx.owner.observe()
     edit_run_input(fx, "3.5")
-    assert fx.owner.observe().ref.revision == base.revision + 3
     assert fx.tab.run_btn.isEnabled()
     fx.tab.run_btn.click()
     assert len(fx.runs) == 1
-    ref, accepted = fx.runs[0]
-    assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
-    assert accepted.values == {"value": 3.5}
+    assert fx.runs[0].values == {"value": 3.5}
 
 
 @pytest.mark.parametrize("run_form", ["endpoints", "center-span"], indirect=True)
@@ -2563,9 +2556,7 @@ def test_run_uses_the_last_sampling_operation(
                 )
     fx.tab.run_btn.click()
     assert len(fx.runs) == 1
-    ref, accepted = fx.runs[0]
-    assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
-    assert accepted.values == {
+    assert fx.runs[0].values == {
         "value": 2.0,
         "range": {"start": 0.0, "stop": 2.0, "expts": 7, "step": 1 / 3},
     }
@@ -2589,15 +2580,11 @@ def test_run_uses_the_external_update_shown_in_the_form(
 ) -> None:
     fx = run_form
     edit_run_input(fx, "3.51")
-    current = fx.owner.edit(
-        fx.owner.observe().ref.revision, (CfgEdit(("value",), DirectValue(8.0)),)
-    )
+    fx.owner.edit((CfgEdit(("value",), DirectValue(8.0)),))
     assert fx.line.text() == "8.0"
     fx.window.run_or_stop_tab("pending-tab")
     assert len(fx.runs) == 1
-    ref, accepted = fx.runs[0]
-    assert ref == current.ref
-    assert accepted.values == {"value": 8.0}
+    assert fx.runs[0].values == {"value": 8.0}
 
 
 def test_run_can_submit_a_repair_to_invalid_published_config(
@@ -2605,7 +2592,6 @@ def test_run_can_submit_a_repair_to_invalid_published_config(
 ) -> None:
     fx = run_form
     fx.owner.edit(
-        fx.owner.observe().ref.revision,
         (CfgEdit(("value",), DirectValue(None, raw="-")),),
     )
     assert not fx.tab.run_btn.isEnabled()
@@ -2613,7 +2599,7 @@ def test_run_can_submit_a_repair_to_invalid_published_config(
     assert fx.tab.run_btn.isEnabled()
     fx.tab.run_btn.click()
     assert len(fx.runs) == 1
-    assert fx.runs[0][1].values == {"value": 4.5}
+    assert fx.runs[0].values == {"value": 4.5}
 
 
 @pytest.mark.parametrize("block", ["busy", "context", "soc", "global-run"])
@@ -2641,14 +2627,13 @@ def test_valid_input_does_not_bypass_other_run_gates(
 def test_stop_does_not_publish_or_run(run_form: RunFormFixture) -> None:
     fx = run_form
     edit_run_input(fx, "3.5")
-    base = fx.owner.observe().ref
+    fx.owner.observe()
     fx.ctrl.get_tab_snapshot.return_value = _snapshot(
         "pending-tab",
         supports_analysis=False,
         is_running=True,
     )
     fx.window.run_or_stop_tab("pending-tab")
-    assert fx.owner.observe().ref == base
     assert fx.runs == []
     fx.ctrl.cancel_run.assert_called_once_with()
 
@@ -2676,7 +2661,7 @@ def test_reset_replaces_published_input_with_defaults(
             line,
             QKeyEvent(QEvent.Type.KeyRelease, 0, Qt.KeyboardModifier.NoModifier, char),
         )
-    assert fx.owner.accept(tab.cfg_form.current_ref().revision).values == {"value": 3.5}
+    assert fx.owner.accept().values == {"value": 3.5}
     tab.reset_btn.click()
     assert line.text() == "2.0"
-    assert fx.owner.accept(tab.cfg_form.current_ref().revision).values == {"value": 2.0}
+    assert fx.owner.accept().values == {"value": 2.0}

@@ -47,7 +47,7 @@ analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬�
 session 受 LRU／disconnect 回收；由 UI owner 建立的 seeded session 由 owner
 顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。
 Tab cfg 由 `Session.cfg` 的 `CfgResource` 擁有，不建立 editor session 或
-`State.cfg_schema` 鏡像。Qt 與 remote 都向同一資源提交指定 revision 的命令。
+`State.cfg_schema` 鏡像。Qt 與 remote 都向同一資源提交作用於目前 inputs 的命令。
 `WritebackService` 以 opaque draft 保存候選項及 item-local editor
 session，不能把 preview 當成再次計算候選項的指令。`CfgDraft` 的共用
 Spec／Value、`None`、locked literal、reference binding 與 lowering 契約見
@@ -64,11 +64,11 @@ Run、Qt 與 remote 的資源契約現況見 Cfg ADR；library conversion、sele
 依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
 版本由資源 owner 發布，不以每次 emit 必然 bump 推導：
 `SessionState.refresh_device_info_cache()` 在 driver info 與快取相同時不 bump，
-不同時 bump device version，caller 再發布變更。Tab cfg edit／Run 使用明示
-`CfgRef`，不另要求每條連線的 cfg seen；它不取代 authentication 或其他 guards。
+不同時 bump device version，caller 再發布變更。Tab cfg edit／Run 不收 ref，
+不另要求每條連線的 cfg seen；authentication 或其他 guards 仍適用。
 其他受護 RPC 由 remote adapter 在 GUI owner thread 比對該連線的 seen 與目前
 版本，依賴與讀取揭露資源由 method entries 宣告。這些 key 未讀過時，即使
-版本為 0 也不能寫入。MCP 原樣轉送 supplied cfg ref，不保存第二份 seen，
+版本為 0 也不能寫入。MCP 不保存第二份 seen，
 不傳 `expected_versions`，不隱藏預讀或自動重試。Stale 由 caller 明確重讀
 对应完整 publication／snapshot，再決定是否重送。
 GUI 事件與 service 協作見 [GUI ADR](../../../../../docs/adr/0067-gui-application.md)，
@@ -84,6 +84,21 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
 完成。保存邊界見 [Persistence ADR](../../../../../docs/adr/0063-persistence-ownership.md)，
 關閉與取消見 [Operation ADR](../../../../../docs/adr/0066-operation-lifecycle.md)
 及 [operation draft](../../../../../docs/adr/draft/operation-lifecycle-boundaries.md)。
+
+## Qt control identity
+
+`Controller.control_identity` 是 holder／lock／online 的唯一 owner。MainWindow 的指示燈
+透過 `gui.widgets.control_indicator.ControlIndicator` 投影它，點擊直接委派 `toggle_local`。
+Remote 時只停用寫入區，不停用主 root、tab 檢視與 canvas。每次 domain interaction refresh
+同時套用 holder 和既有 busy/readiness 條件，不因背景事件自動收回。GUI 檢視 tab 不改 Remote
+holder 的 application active tab，關窗先顯示含 holder label 的確認，再沿既有 shutdown 流程。
+
+`gui.widgets.remote_edit_gate` 綁定 owner watch 與 Qt destruction。Setup、Aliases、Predictor、
+ArbWaveform 和巢狀 writeback dialogs 使用 write-only widget gate。DeviceDialog 與 Inspect 保留
+只讀瀏覽，分別套用自己的 read-only presentation gate。只有量測 Stop 和 device setup Stop
+在 Remote 時收回成 Local locked 並提交 cancellation；收回本身不取消 operation。
+Mounted `InteractiveFrontend.set_read_only(read_only=...)` 必須停用 plugin command controls 和
+pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 alignment busy gate。
 
 ## Package Boundaries
 
@@ -375,10 +390,9 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    renders its params through the app-local 13 px ledger with whole-header
    folding and a full-width `Analyze` immediately below parameters.
 
-3. `Controller.start_run(tab_id, expected)` requires the observed `CfgRef`.
-   Qt supplies the form's displayed ref; remote callers supply their observed ref.
-   A different cfg identity or revision rejects Run without refresh or fallback.
-   `GuardService.capture_run_inputs` accepts that exact Valid revision and captures RunInputs with
+3. `Controller.start_run(tab_id)` accepts the current Valid cfg.
+   Qt and remote use the same admission path without an expected ref.
+   `GuardService.capture_run_inputs` captures fixed RunInputs with
    `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
    settings for a live device reject admission without querying hardware.
    `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
@@ -416,7 +430,7 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 
 - `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。
   缺 cfg 時保留可用資料，不捏造設定。WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
-  有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource identity 並推進 revision。
+  有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource lifetime。
   Run/Load 先提交 primary result。Analysis preparation 失敗不撤回它，只報 diagnostic。
   Named figures 和各 pane 的 presentation lifecycle 分開管理。
 dynamic selectors must match live options and the new complete draft must be valid
@@ -526,7 +540,7 @@ Invalid input never runs the previous values. Input that repairs an Invalid
 publication still cannot bypass busy, context or SoC gates. Library editors and writeback keep their existing `CfgDraft` binding behavior.
 
 `Session.cfg` 只引用該 tab 的 `CfgResource`，不保存另一份 live schema。
-CfgResource 擁有 input、resolution、revision、publication 與 acceptance。
+CfgResource 擁有 input、resolution、publication 與 acceptance。
 Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
 發布 Invalid；拒絕不留下成功前綴。Observe、snapshot 和 Run acceptance 不重新讀取來源。
 `TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
@@ -548,8 +562,8 @@ Nonempty caller-owned `aliases` maps alias names to concrete components and
 resolves the same inputs against its temporary capture. It changes neither tab
 publication nor global rows. Omission, None and {} use cached acceptance.
 Recipe parameter/library queries and cfg preview use the same named overrides.
-Temporary preview requires the original full CfgRef and returns an observation
-without replacing it or publishing. Adapters do not declare parameter roles.
+Temporary preview resolves current inputs and returns an observation
+without replacing the cached publication. Adapters do not declare parameter roles.
 EMPTY app captures without overrides retain deferred None; nonempty overrides
 reject no_context. Native Load takes Save storage from that one Load-time capture
 and reads historical fixed names without expanding current alias links.

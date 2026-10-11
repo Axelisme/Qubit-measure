@@ -164,9 +164,7 @@ class CoherenceGui(LookbackGui):
             assert params == {"adapter_name": f"twotone/{self.adapter}"}
             return {"tab_id": "t"}
         if method == "tab.reset_cfg":
-            revision = self.publication["cfg_ref"]
             self.publication = deepcopy(self.defaults)
-            self.publication["cfg_ref"] = revision
         if method == "tab.get_post_analyze_result":
             assert "operation_id" not in params
             return {"summary": None}

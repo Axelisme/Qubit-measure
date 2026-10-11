@@ -122,9 +122,8 @@ def device_app():
 
 def test_load_updates_same_resource_and_preserves_current_input(app: LoadApp) -> None:
     editor = app.resources.lookup("tab")
-    initial = editor.observe().ref
+    editor.observe()
     editor.edit(
-        initial.revision,
         (
             CfgEdit(("reps",), 7),
             CfgEdit(("note",), "unflushed"),
@@ -132,7 +131,7 @@ def test_load_updates_same_resource_and_preserves_current_input(app: LoadApp) ->
     )
     observations = []
     unsubscribe = editor.watch(observations.append)
-    before = editor.observe()
+    editor.observe()
     outcome = app.service.load_result("tab", "result.hdf5")
     after = editor.observe()
     unsubscribe()
@@ -140,16 +139,14 @@ def test_load_updates_same_resource_and_preserves_current_input(app: LoadApp) ->
     assert outcome.cfg_backfill == "applied"
     assert app.state.get_tab("tab").run.result is app.adapter.load.return_value[0]
     assert app.state.get_tab("tab").run.metadata == app.adapter.load.return_value[1]
-    assert after.ref.cfg_id == before.ref.cfg_id
-    assert after.ref.revision == before.ref.revision + 1
     assert after.status is CfgStatus.VALID
     assert app.cfg.snapshot_inputs().value.fields == {
         "reps": DirectValue(20),
         "note": DirectValue("unflushed"),
     }
     assert observations[-1] == after
-    editor.edit(after.ref.revision, (CfgEdit(("reps",), 9),))
-    assert app.cfg.accept(editor.observe().ref.revision).values["reps"] == 9
+    editor.edit((CfgEdit(("reps",), 9),))
+    assert app.cfg.accept().values["reps"] == 9
 
 
 @pytest.mark.parametrize("snapshot", [None, ExpCfgModel()])
@@ -166,7 +163,7 @@ def test_unavailable_snapshot_keeps_cfg_and_loaded_result(
 
 
 def test_invalid_complete_candidate_keeps_input_and_revision(app: LoadApp) -> None:
-    app.cfg.edit(app.cfg.observe().ref.revision, (CfgEdit(("note",), ""),))
+    app.cfg.edit((CfgEdit(("note",), ""),))
     before = app.cfg.observe()
     inputs = app.cfg.snapshot_inputs()
     outcome = app.service.load_result("tab", "result.hdf5")
@@ -207,13 +204,12 @@ def test_missing_device_option_preserves_selector_when_other_fields_apply(
 ) -> None:
     app = device_app
     app.adapter.load.return_value = make_record(RuntimeCfg(dev={"jpa_rf_dev": "stale"}))
-    before = app.cfg.observe()
+    app.cfg.observe()
     outcome = app.service.load_result("tab", "result.hdf5")
     assert outcome.cfg_backfill == "applied"
-    accepted = app.cfg.accept(app.cfg.observe().ref.revision)
+    accepted = app.cfg.accept()
     assert accepted.values["reps"] == 20
     assert accepted.values["dev"] == {"jpa_rf_dev": "stable"}
-    assert app.cfg.observe().ref.cfg_id == before.ref.cfg_id
 
 
 def test_candidate_device_missing_from_fixed_source_rejects_complete_backfill(
@@ -258,8 +254,8 @@ def test_option_failure_keeps_entire_cfg_and_loaded_result(
     assert app.cfg.snapshot_inputs() == inputs
     assert app.state.get_tab("tab").run.result is app.adapter.load.return_value[0]
     assert app.state.get_tab("tab").run.metadata == app.adapter.load.return_value[1]
-    app.cfg.edit(before.ref.revision, (CfgEdit(("reps",), 9),))
-    assert app.cfg.accept(app.cfg.observe().ref.revision).values["reps"] == 9
+    app.cfg.edit((CfgEdit(("reps",), 9),))
+    assert app.cfg.accept().values["reps"] == 9
 
 
 def test_reentrant_load_does_not_publish_cfg_or_replace_result(app: LoadApp) -> None:
@@ -267,7 +263,7 @@ def test_reentrant_load_does_not_publish_cfg_or_replace_result(app: LoadApp) -> 
     before = app.cfg.observe()
 
     def subscriber(observation) -> None:
-        if observation.ref == before.ref:
+        if observation == before:
             return
         try:
             app.service.load_result("tab", "result.hdf5")
@@ -275,9 +271,9 @@ def test_reentrant_load_does_not_publish_cfg_or_replace_result(app: LoadApp) -> 
             attempts.append(exc)
 
     unsubscribe = app.cfg.watch(subscriber)
-    app.cfg.edit(before.ref.revision, (CfgEdit(("reps",), 3),))
+    app.cfg.edit((CfgEdit(("reps",), 3),))
     unsubscribe()
     # Loading during publication must be rejected before changing result state.
     assert attempts
     assert app.state.get_tab("tab").run.result is None
-    assert app.cfg.accept(app.cfg.observe().ref.revision).values["reps"] == 3
+    assert app.cfg.accept().values["reps"] == 3

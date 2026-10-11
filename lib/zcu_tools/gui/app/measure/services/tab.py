@@ -11,9 +11,7 @@ from zcu_tools.gui.app.measure.state import Session, TabInteractionState
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.resource import (
     CfgObservation,
-    CfgRef,
     CfgResolution,
-    CfgStaleError,
 )
 from zcu_tools.gui.session.types import ParameterContext
 
@@ -103,27 +101,22 @@ class TabService:
         return self._captured_parameters(aliases)
 
     def preview_cfg(
-        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> CfgObservation:
         """Preview cfg with named aliases without publication or Run acceptance.
 
-        Require an existing tab and its exact observed identity/revision.
-        Resolve current inputs from the same capture owner as Run admission.
-        Stale refs, source/alias failures and cfg notification guards propagate.
-        None and {} return the cached observation. Nonempty aliases resolves
-        current inputs once. Return Valid or Invalid without changing global rows,
-        inputs or revision.
+        Require an existing tab. Resolve current inputs from the same
+        capture owner as Run admission. Source/alias failures and cfg notification
+        guards propagate. None and {} return the cached observation.
+        Nonempty aliases resolves current inputs once. Return Valid or Invalid
+        without changing global rows, inputs or publication.
         """
         tab = self._state.get_tab(tab_id)
         observed = tab.cfg.observe()
-        if expected != observed.ref:
-            raise CfgStaleError(expected, observed.ref)
         if not aliases:
             return observed
         parameters = self.capture_parameters(tab_id, aliases=aliases)
-        return tab.cfg.preview(
-            expected.revision, resolution=self._cfg_resolution(parameters)
-        )
+        return tab.cfg.preview(resolution=self._cfg_resolution(parameters))
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields

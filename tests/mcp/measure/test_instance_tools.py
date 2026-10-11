@@ -26,12 +26,6 @@ def test_fixed_rpc_tools_keep_their_own_transport_and_catalog(tmp_path: Path) ->
                         "timeout_seconds": 5.0,
                         "exposure": "rpc",
                         "tool_names": [],
-                        "guard_deps": [],
-                        "reveals": [],
-                        "reveals_without": [],
-                        "reveals_when_nonempty": [],
-                        "refresh_after_write": False,
-                        "created_resource": None,
                         "operation_key": None,
                     }
                 ],

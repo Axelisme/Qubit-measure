@@ -1,4 +1,4 @@
-"""Public contracts for owner-sequenced, versioned cfg resources.
+"""Public contracts for owner-sequenced cfg resources.
 
 Editing handles identify one resource for its entire lifetime. Implementations
 must detach inputs and observations, publish batches atomically, and reject
@@ -11,10 +11,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, TypeAlias
-from uuid import uuid4
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
@@ -59,7 +58,6 @@ class CfgInputReason(str, Enum):
 
 
 class CfgPreconditionReason(str, Enum):
-    STALE_REVISION = "stale_revision"
     RESOURCE_GONE = "resource_gone"
     MUTATION_BLOCKED = "mutation_blocked"
     REENTRANT_MUTATION = "reentrant_mutation"
@@ -97,31 +95,6 @@ class CfgPreconditionError(FailedPreconditionError):
         self.edit_index = edit_index
 
 
-class CfgId(str):
-    def __new__(cls, value: object) -> CfgId:
-        if not isinstance(value, str) or not value:
-            raise CfgInputError(
-                CfgInputReason.MALFORMED_INPUT, "cfg_id must be a nonempty string"
-            )
-        return super().__new__(cls, value)
-
-
-class CfgRevision(int):
-    def __new__(cls, value: object) -> CfgRevision:
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise CfgInputError(
-                CfgInputReason.MALFORMED_INPUT,
-                "revision must be a nonnegative integer, not bool",
-            )
-        return super().__new__(cls, value)
-
-
-@dataclass(frozen=True)
-class CfgRef:
-    cfg_id: CfgId
-    revision: CfgRevision
-
-
 @dataclass(frozen=True)
 class CfgEdit:
     path: CfgPath
@@ -140,7 +113,7 @@ class CfgStatus(str, Enum):
 @dataclass(frozen=True)
 class SourceRevision:
     source_id: str
-    revision: CfgRevision
+    revision: int
 
 
 SourceBasis: TypeAlias = tuple[SourceRevision, ...]
@@ -155,7 +128,6 @@ class CfgDiagnostic:
 
 @dataclass(frozen=True)
 class CfgObservation:
-    ref: CfgRef
     status: CfgStatus
     tree: CfgNodeObservation
     source_basis: SourceBasis
@@ -164,19 +136,8 @@ class CfgObservation:
 
 @dataclass(frozen=True)
 class AcceptedConfig:
-    ref: CfgRef
     source_basis: SourceBasis
     values: dict[str, LoweredData]
-
-
-class CfgStaleError(CfgPreconditionError):
-    def __init__(self, expected: CfgRef, actual: CfgRef) -> None:
-        super().__init__(
-            CfgPreconditionReason.STALE_REVISION,
-            f"Expected cfg revision {expected.revision}, current is {actual.revision}",
-        )
-        self.expected = expected
-        self.actual = actual
 
 
 class CfgEditing(Protocol):
@@ -186,31 +147,26 @@ class CfgEditing(Protocol):
         self, callback: Callable[[CfgObservation], None]
     ) -> Callable[[], None]: ...
 
-    def edit(
-        self, expected_revision: CfgRevision, edits: tuple[CfgEdit, ...]
-    ) -> CfgObservation: ...
+    def edit(self, edits: tuple[CfgEdit, ...]) -> CfgObservation: ...
 
-    def select_custom_reference(
-        self, expected_revision: CfgRevision, path: CfgPath, label: str
-    ) -> CfgObservation: ...
+    def select_custom_reference(self, path: CfgPath, label: str) -> CfgObservation: ...
 
-    def reset(self, expected_revision: CfgRevision) -> CfgObservation: ...
+    def reset(self) -> CfgObservation: ...
 
-    def refresh(self, expected_revision: CfgRevision) -> CfgObservation: ...
+    def refresh(self) -> CfgObservation: ...
 
 
 class CfgAcceptance(Protocol):
     def accept(
         self,
-        expected_revision: CfgRevision,
         *,
         resolution: CfgResolution | None = None,
     ) -> AcceptedConfig:
-        """Accept the observed inputs, optionally against a fixed one-off source.
+        """Accept the current inputs, optionally against a fixed one-off source.
 
         Without ``resolution``, require the published observation to be Valid.
         With it, resolve the same inputs without changing their publication.
-        Both paths reject stale revisions, revoked resources and notification
+        Both paths reject revoked resources and notification
         reentry; a non-Valid result raises CfgPreconditionError.
         """
         ...
@@ -268,9 +224,7 @@ class CfgResource:
         self._spec = deepcopy(schema.spec)
         self._inputs = deepcopy(schema)
         self._draft, basis = self._prepare(schema)
-        self._observation = self._observe_draft(
-            self._draft, CfgRef(CfgId(uuid4().hex), CfgRevision(0)), basis
-        )
+        self._observation = self._observe_draft(self._draft, basis)
 
     def observe(self) -> CfgObservation:
         self._require_open()
@@ -287,13 +241,11 @@ class CfgResource:
 
         return unsubscribe
 
-    def edit(
-        self, expected_revision: CfgRevision, edits: tuple[CfgEdit, ...]
-    ) -> CfgObservation:
+    def edit(self, edits: tuple[CfgEdit, ...]) -> CfgObservation:
         from ._input_edit import InputEditor
 
         edits = _validate_edits(edits)
-        self._check_command(expected_revision)
+        self._check_command()
         source = self._resolution()
         editor = InputEditor(self._inputs, source)
         for index, edit in enumerate(edits):
@@ -309,10 +261,8 @@ class CfgResource:
                 ) from exc
         return self._commit_inputs(editor.schema, source)
 
-    def select_custom_reference(
-        self, expected_revision: CfgRevision, path: CfgPath, label: str
-    ) -> CfgObservation:
-        """Atomically select Custom with best-effort inheritance from this revision.
+    def select_custom_reference(self, path: CfgPath, label: str) -> CfgObservation:
+        """Select Custom atomically, inheriting the current publication's inputs.
 
         This is an explicit selection command, not incomplete ordinary edit
         admission. It uses the cached published contents, so detaching a linked
@@ -322,7 +272,7 @@ class CfgResource:
         from .inheritance import detach_input_tree
 
         _validate_path(path)
-        self._check_command(expected_revision)
+        self._check_command()
         source = self._resolution()
         published = self._draft.snapshot()
         published.value = detach_input_tree(published.value)
@@ -338,7 +288,7 @@ class CfgResource:
     ) -> CfgObservation:
         candidate, basis = self._prepare(deepcopy(inputs), source=source)
         try:
-            observation = self._next_observation(candidate, basis)
+            observation = self._observe_draft(candidate, basis)
         except BaseException:
             candidate.close()
             raise
@@ -346,7 +296,7 @@ class CfgResource:
 
     def require_mutation_allowed(self) -> None:
         """Guard an owning flow before it commits related non-cfg state."""
-        self._check_command(self._observation.ref.revision)
+        self._check_command()
 
     def snapshot_inputs(self) -> CfgSchema:
         """Detach input state for the owning persistence/load flow, without refresh."""
@@ -355,17 +305,16 @@ class CfgResource:
 
     def replace_inputs(
         self,
-        expected_revision: CfgRevision,
         schema: CfgSchema,
         *,
         require_valid: bool = False,
     ) -> CfgObservation:
         """Install owning-flow inputs; optional backfill can require Valid."""
-        self._check_command(expected_revision)
+        self._check_command()
         return self._replace_inputs(deepcopy(schema), require_valid=require_valid)
 
-    def reset(self, expected_revision: CfgRevision) -> CfgObservation:
-        self._check_command(expected_revision)
+    def reset(self) -> CfgObservation:
+        self._check_command()
         return self._replace_inputs(deepcopy(self._defaults()))
 
     def _replace_inputs(
@@ -375,7 +324,7 @@ class CfgResource:
             raise RuntimeError("replacement changed the resource definition")
         candidate, basis = self._prepare(deepcopy(schema))
         try:
-            observation = self._next_observation(candidate, basis)
+            observation = self._observe_draft(candidate, basis)
             if require_valid and observation.status is not CfgStatus.VALID:
                 raise CfgInputError(
                     CfgInputReason.INVALID_VALUE,
@@ -386,26 +335,25 @@ class CfgResource:
             raise
         return self._publish(candidate, observation, schema)
 
-    def refresh(self, expected_revision: CfgRevision) -> CfgObservation:
-        self._check_command(expected_revision, editing=False)
+    def refresh(self) -> CfgObservation:
+        self._check_command(editing=False)
         return self.refresh_group((self,), resolution=self._resolution)[0]
 
     def accept(
         self,
-        expected_revision: CfgRevision,
         *,
         resolution: CfgResolution | None = None,
     ) -> AcceptedConfig:
-        """Return detached execution values for the observed input revision.
+        """Return detached execution values for the current inputs.
 
         Without ``resolution``, use only the cached Valid publication. A supplied
         fixed resolution prepares the current inputs as a temporary candidate,
         including when the publication is Invalid or Unavailable. It never
-        changes inputs, revision, subscribers or the source factory. Non-Valid
-        results raise NOT_VALID; stale, revoked and notification guards apply
+        changes inputs, subscribers or the source factory. Non-Valid
+        results raise NOT_VALID; revoked and notification guards apply
         before evaluating the candidate. Unexpected resolver errors propagate.
         """
-        self._check_command(expected_revision, editing=False)
+        self._check_command(editing=False)
         if resolution is not None:
             candidate, basis = self._prepare(deepcopy(self._inputs), source=resolution)
             try:
@@ -414,7 +362,7 @@ class CfgResource:
                         CfgPreconditionReason.NOT_VALID, "cfg is not valid"
                     )
                 values = lower_resolved_cfg(candidate.snapshot())
-                return AcceptedConfig(self._observation.ref, basis, values)
+                return AcceptedConfig(basis, values)
             finally:
                 candidate.close()
         if self._observation.status is not CfgStatus.VALID:
@@ -422,25 +370,21 @@ class CfgResource:
                 CfgPreconditionReason.NOT_VALID, "cfg is not valid"
             )
         values = lower_resolved_cfg(self._draft.snapshot())
-        return AcceptedConfig(
-            self._observation.ref, self._observation.source_basis, deepcopy(values)
-        )
+        return AcceptedConfig(self._observation.source_basis, deepcopy(values))
 
-    def preview(
-        self, expected_revision: CfgRevision, *, resolution: CfgResolution
-    ) -> CfgObservation:
-        """Resolve observed inputs against a fixed source without publication.
+    def preview(self, *, resolution: CfgResolution) -> CfgObservation:
+        """Resolve current inputs against a fixed source without publication.
 
         App owners receive a detached Valid or Invalid observation with the
-        same ref and the supplied source basis. Inputs, publication, subscribers
-        and the source factory stay unchanged. Stale, revoked and notification
+        supplied source basis. Inputs, publication, subscribers
+        and the source factory stay unchanged. Revoked and notification
         guards run before evaluation; unexpected resolver failures propagate.
-        This does not accept execution values or refresh the observed revision.
+        This does not accept execution values or refresh the publication.
         """
-        self._check_command(expected_revision, editing=False)
+        self._check_command(editing=False)
         candidate, basis = self._prepare(deepcopy(self._inputs), source=resolution)
         try:
-            return self._observe_draft(candidate, self._observation.ref, basis)
+            return self._observe_draft(candidate, basis)
         finally:
             candidate.close()
 
@@ -465,12 +409,8 @@ class CfgResource:
                 "cfg mutation and acceptance are forbidden during notification",
             )
 
-    def _check_command(self, expected: CfgRevision, *, editing: bool = True) -> None:
+    def _check_command(self, *, editing: bool = True) -> None:
         self._require_open()
-        expected = CfgRevision(expected)
-        actual = self._observation.ref
-        if expected != actual.revision:
-            raise CfgStaleError(CfgRef(actual.cfg_id, expected), actual)
         self._require_not_notifying()
         if editing and not self._mutation_allowed():
             raise CfgPreconditionError(
@@ -508,21 +448,12 @@ class CfgResource:
             raise failures[0]
         return draft, source.source_basis
 
-    def _next_observation(self, draft: CfgDraft, basis: SourceBasis) -> CfgObservation:
-        ref = replace(
-            self._observation.ref,
-            revision=CfgRevision(self._observation.ref.revision + 1),
-        )
-        return self._observe_draft(draft, ref, basis)
-
     @staticmethod
-    def _observe_draft(
-        draft: CfgDraft, ref: CfgRef, basis: SourceBasis
-    ) -> CfgObservation:
+    def _observe_draft(draft: CfgDraft, basis: SourceBasis) -> CfgObservation:
         tree = draft.observe()
         diagnostics = tuple(_diagnostics(tree))
         status = CfgStatus.VALID if tree.valid else CfgStatus.INVALID
-        return CfgObservation(ref, status, tree, basis, diagnostics)
+        return CfgObservation(status, tree, basis, diagnostics)
 
     def _publish(
         self,
@@ -548,10 +479,6 @@ class CfgResource:
         from ._unavailable import unavailable_tree
 
         return CfgObservation(
-            replace(
-                self._observation.ref,
-                revision=CfgRevision(self._observation.ref.revision + 1),
-            ),
             CfgStatus.UNAVAILABLE,
             unavailable_tree(self._draft.observe()),
             () if source is None else source.source_basis,
@@ -586,7 +513,7 @@ class CfgResource:
         candidate: CfgDraft | None = None
         try:
             candidate, basis = self._prepare(deepcopy(self._inputs), source=source)
-            return candidate, self._next_observation(candidate, basis)
+            return candidate, self._observe_draft(candidate, basis)
         except Exception as exc:
             if candidate is not None:
                 candidate.close()
@@ -630,7 +557,7 @@ class CfgResource:
         if not members:
             return ()
         for resource in members:
-            resource._check_command(resource._observation.ref.revision, editing=False)
+            resource._check_command(editing=False)
         source: CfgResolution | None = None
         failure: Exception | None = None
         if resolution is not None:

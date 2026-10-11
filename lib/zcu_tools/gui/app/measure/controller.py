@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.services.experiment_reload import (
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
-from zcu_tools.gui.cfg.resource import CfgRef
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventOrigin
@@ -675,13 +674,13 @@ class Controller(SessionControllerMixin):
         return self._state.version.snapshot()
 
     def start_run(
-        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> int:
         """Start observed cfg inputs with an optional single-Run alias override.
 
         See RunAnalyzeControlFacet.start_run for admission and failure semantics.
         """
-        return self._run_analyze_control.start_run(tab_id, expected, aliases=aliases)
+        return self._run_analyze_control.start_run(tab_id, aliases=aliases)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         return self._run_analyze_control.load_tab_result(tab_id, data_path)

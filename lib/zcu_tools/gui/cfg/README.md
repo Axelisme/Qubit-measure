@@ -6,7 +6,7 @@
 
 每個 Spec 欄位在 value tree 中都有 entry。停用 optional reference 用裸 `None`，未填 scalar 用 `DirectValue(None)` 保留 direct／expression 模式區別。codec 保存編輯狀態，不以 lowering 對 disabled reference 的省略規則寫 memento。`CfgSchema` 可以承載尚未完成的編輯；成品邊界顯式驗證完整性、literal、direct value 型別與 choices。dynamic expression 與 required value 在 lowering 時檢查；不在 `CfgSchema` 建構時拒絕所有編輯中間態。
 
-`CfgResource` 擁有隔離的 input tree 與已發布 observation。Edit 先在候選 input 套用完整 batch，再解析新內容；被完整取代的舊 expression／reference 不會先被求值。Partial reference write、range step 計算與 `$` capture 只讀完成該意圖所需的固定來源。Scalar 文字／型別規則與 range 正規化由共用純函式處理，不依賴 field setter 的求值副作用。Binding 在 resource 中只建立最終解析快照，不是 input mutation 的權威。Custom 選擇使用獨立的 resource-bound 命令，從指定 revision 的已發布內容建立完整新候選，best-effort 繼承相容輸入，保留 nested linkage，並原子發布；普通 edit 的跨型別寫入仍要求完整 payload。App owner 可用 `initial` 恢復保存輸入，不執行 defaults；`snapshot_inputs` 提供 detached 持久化輸入，`replace_inputs` 原子替換同 definition 的內容。這些能力不在 frontend 的 `CfgEditing` 中。需要不同 definition 時，app 建立新資源並撤銷舊身份。
+`CfgResource` 擁有隔離的 input tree 與已發布 observation。Edit 先在候選 input 套用完整 batch，再解析新內容；被完整取代的舊 expression／reference 不會先被求值。Partial reference write、range step 計算與 `$` capture 只讀完成該意圖所需的固定來源。Scalar 文字／型別規則與 range 正規化由共用純函式處理，不依賴 field setter 的求值副作用。Binding 在 resource 中只建立最終解析快照，不是 input mutation 的權威。Custom 選擇使用獨立的 resource-bound 命令，從目前已發布內容建立完整新候選，best-effort 繼承相容輸入，保留 nested linkage，並原子發布；普通 edit 的跨型別寫入仍要求完整 payload。App owner 可用 `initial` 恢復保存輸入，不執行 defaults；`snapshot_inputs` 提供 detached 持久化輸入，`replace_inputs` 原子替換同 definition 的內容。這些能力不在 frontend 的 `CfgEditing` 中。需要不同 definition 時，app 建立新資源並撤銷舊身份。
 
 Source owner 提供固定 `CfgResolution`。`CfgResource.refresh_group` 使用同一來源快照
 準備所有受影響的 cfg，先安裝全部 publication，再通知 subscriber。Source／resolution
@@ -14,11 +14,14 @@ Source owner 提供固定 `CfgResolution`。`CfgResource.refresh_group` 使用�
 app 可提供跨 resource 的通知禁令。Observe、普通 accept 及 snapshot 不刷新來源。
 Run owner 可以向 accept 提供固定的一次性 `CfgResolution`，用目前 inputs 準備 Valid
 候選，回傳該來源的 AcceptedConfig。這條路可解析 Invalid／Unavailable publication 的
-inputs，但不改 input、revision、原 publication 或 subscriber。Stale／revoked／notification
-禁令與普通 accept 相同。App owner 的 preview 使用同一個候選準備機制，回傳同 ref 的
+inputs，但不改 input、原 publication 或 subscriber。Revoked／notification
+禁令與普通 accept 相同。App owner 的 preview 使用同一個候選準備機制，回傳
 Valid／Invalid observation 及臨時 source basis，不發布或接受 Run。Frontend 不提供 source。
-App 的 Load owning flow 可要求完整 Valid 候選，拒絕不改 input
-或 revision。
+App 的 Load owning flow 可要求完整 Valid 候選，拒絕不改 input 或 publication。
+
+Cfg 命令直接作用於目前 inputs，不收 expected revision。Watch 推送最新 observation，
+revoke 撤銷舊 handle。普通 acceptance 只接受 Valid publication；Run 取得深層隔離的
+固定 values 和 source basis，後續編輯不改變已接受的執行資料。
 
 既有 `binding.CfgDraft` 仍提供可編輯 field tree，提供 snapshot、valid、refresh 與 nominal `SettableTarget`。scalar 使用 dotted leaf，sweep 使用直接 edge，reference key 使用 `.ref`，子欄位直接下鑽。列舉和解析共用 grammar；不受理未列出的舊 `.sweep.*`／`.value.*` alias。Reference refresh 透過 caller 提供的 catalog。Linked empty section 可等待 catalog 提供 shape，不拿 fallback tree 填資料。缺少來源時保持 Invalid，未知 shape 不建立子欄位；已知 shape 沿既有 missing 規則處理。`ReferenceValue.error` 投影為 reference 節點的公開 diagnostic，不因保留子欄位而消失。停用 optional 的裸 None 維持停用，refresh 不重掛 default。Linked value 跟隨當次 catalog snapshot；override 保留自身內容與 shape，不再解析原 key。Override 內的 nested linked reference 仍更新，明確 relink 才恢復這層的來源依賴。`ReferenceSpec.discriminator` 由 domain builder 明確宣告，指向每個 allowed shape 的唯一 literal 值；generic cfg 不從 literal 欄位排列推測辨識規則。Measure tab 的 input round trip、publication 與固定 acceptance 使用 resource 路徑。Library conversion、selected Apply 及其他 app 的 caller 收斂仍見 [待實作設計](../../../../docs/adr/draft/cfg-editing-boundaries.md)。
 

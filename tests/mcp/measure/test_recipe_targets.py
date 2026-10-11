@@ -64,7 +64,6 @@ class TargetGui(LookbackGui):
             self.created.append(dict(params))
             return {"tab_id": "t"}
         if method == "tab.get_cfg" and params.get("aliases") is not None:
-            assert params["expected"] == self.publication["cfg_ref"]
             projected = deepcopy(self.publication)
             projected["status"] = "Valid"
             readout = projected["tree"]["children"]["modules"]["children"]["readout"]
@@ -162,13 +161,10 @@ def test_open_tab_preserves_named_aliases_for_new_and_reused_recipe_runs(
             params["aliases"] == {"custom": "Q1", "resonator": "R2"}
             for _, params in gui.alias_requests
         )
-        run = next(
+        next(
             params for method, params in gui.alias_requests if method == "tab.run_start"
         )
-        preview = [
-            params for method, params in gui.alias_requests if method == "tab.get_cfg"
-        ][-1]
-        assert run["expected"] == preview["expected"] == gui.publication["cfg_ref"]
+        [params for method, params in gui.alias_requests if method == "tab.get_cfg"][-1]
         assert all(
             "aliases" not in params
             for method, params in client.transport.sent
@@ -242,7 +238,6 @@ class SweepGui(TargetGui):
             edits = params["edits"]
             assert isinstance(edits, list)
             if len(edits) == 1 and edits[0]["path"] == ["sweep"]:
-                assert params["expected"] == self.publication["cfg_ref"]
                 inputs = self.publication["tree"]["children"]["sweep"]["inputs"]
                 for key, value in edits[0]["value"].items():
                     if isinstance(value, dict):
@@ -252,8 +247,6 @@ class SweepGui(TargetGui):
                     else:
                         state = scalar(value)["input"]
                     inputs[key] = state
-                ref = self.publication["cfg_ref"]
-                ref["revision"] = str(int(ref["revision"]) + 1)
                 return self.publication
         return super().__call__(method, params)
 
@@ -403,50 +396,6 @@ def test_recipe_run_uses_temporary_target_without_tab_birth_binding(
                 "children"
             ]["pulse_cfg"]["children"]["freq"]["input"]["resolved"]
             == 6200.0
-        )
-
-
-def test_recipe_stale_run_ref_is_not_refreshed_or_retried(tmp_path: Path) -> None:
-    gui = TargetGui()
-    client = make_client(tmp_path, gui, recipes=(TARGETED,))
-    client.transport.replies["tab.run_start"] = {
-        "ok": False,
-        "error": {
-            "code": "precondition_failed",
-            "reason": "stale_revision",
-            "message": "Source publication changed after preview",
-        },
-    }
-    with closing(client.context.session):
-        reply = client.call("sample", {"target": "Q2"})
-        assert reply.data["status"] == "failed"
-        assert not gui.ran
-        starts = [
-            params
-            for method, params in client.transport.sent
-            if method == "tab.run_start"
-        ]
-        assert starts == [
-            {
-                "tab_id": "t",
-                "expected": gui.publication["cfg_ref"],
-                "aliases": {"qubit": "Q2"},
-            }
-        ]
-        previews = [
-            params
-            for method, params in client.transport.sent
-            if method == "tab.get_cfg" and params.get("aliases") is not None
-        ]
-        assert previews[-1]["expected"] == starts[0]["expected"]
-        start_index = next(
-            index
-            for index, (method, _) in enumerate(client.transport.sent)
-            if method == "tab.run_start"
-        )
-        assert not any(
-            method == "tab.get_cfg"
-            for method, _ in client.transport.sent[start_index + 1 :]
         )
 
 

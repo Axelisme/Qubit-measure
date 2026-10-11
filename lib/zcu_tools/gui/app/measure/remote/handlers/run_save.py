@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from zcu_tools.experiment.run_saving import ArtifactRef
-from zcu_tools.gui.cfg.edit_codec import decode_ref
 from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import CommandOrigin
@@ -31,10 +30,9 @@ def h_tab_run_start(
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
-        expected = decode_ref(params["expected"])
         follow_tab(adapter, tab_id, "run")
         operation_id = control.start_run(
-            tab_id, expected, aliases=aliases, origin=CommandOrigin("mcp")
+            tab_id, aliases=aliases, origin=CommandOrigin("mcp")
         )
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc

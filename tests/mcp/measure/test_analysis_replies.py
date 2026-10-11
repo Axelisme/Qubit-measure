@@ -301,7 +301,7 @@ def test_analysis_initial_wait_and_status_share_the_same_summary(
         ("timeout", "gui_transport_timeout", "unknown"),
         ("handler_timeout", "gui_handler_timeout", "unknown"),
         ("internal", "injected", "unknown"),
-        ("stale", "stale_version", "not_started"),
+        ("not_holder", "not_holder", "not_started"),
         ("busy", "operation_busy", "not_started"),
         ("invalid_params", "execution_failed", "not_started"),
     ],
@@ -312,14 +312,20 @@ def test_analysis_start_failure_retains_a_queryable_execution(
     method = "tab.analyze" if stage == "primary" else "tab.post_analyze"
     client = _client(tmp_path, clients)
     pending = Event()
-    if receipt in {"handler_timeout", "internal", "stale", "busy", "invalid_params"}:
+    if receipt in {
+        "handler_timeout",
+        "internal",
+        "not_holder",
+        "busy",
+        "invalid_params",
+    }:
         client.transport.replies[method] = {
             "ok": False,
             "error": {
                 "code": {
                     "handler_timeout": "timeout",
                     "internal": "internal",
-                    "stale": "precondition_failed",
+                    "not_holder": "precondition_failed",
                     "busy": "busy",
                     "invalid_params": "invalid_params",
                 }[receipt],

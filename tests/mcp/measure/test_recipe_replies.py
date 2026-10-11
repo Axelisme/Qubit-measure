@@ -50,9 +50,6 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
             assert initial.images
             assert waited.images
             assert summary["artifacts"]["raw"] == full["raw_save"]["artifacts"]["raw"]
-            assert (
-                full["actual"]["publication"]["cfg_ref"] == summary["actual"]["cfg_ref"]
-            )
         elif outcome == "missing":
             assert summary["missing"] == full["missing"]
         else:
@@ -160,7 +157,6 @@ def test_pulse_readout_candidate_summary_keeps_nested_values_and_captured_full(
         candidate = summary["writeback"]["stages"]["primary"][0]
         assert candidate == completed.data["writeback"]["stages"]["primary"][0]
         assert candidate["target"] == "readout_rf"
-        assert candidate["cfg_ref"] == summary["actual"]["cfg_ref"]
         for source, expected in (("current", current), ("proposed", proposed)):
             projected = candidate[source]
             assert projected["type"] == "readout/pulse"
@@ -227,7 +223,6 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
         assert candidate["target"] == "pi_len"
         assert candidate["resolved_target"] is None
         assert full["writeback"]["items"][0]["selected"] is False
-        assert candidate["cfg_ref"] == summary["actual"]["cfg_ref"]
         assert candidate["proposed"] == {
             "type": "pulse",
             "freq": 6100.0,
@@ -249,7 +244,7 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
         ("timeout", "gui_transport_timeout", "unknown"),
         ("handler_timeout", "gui_handler_timeout", "unknown"),
         ("internal", "injected", "unknown"),
-        ("stale", "stale_version", "not_started"),
+        ("not_holder", "not_holder", "not_started"),
         ("busy", "operation_busy", "not_started"),
     ],
 )
@@ -260,11 +255,11 @@ def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
     pending = Event()
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     with recipe_client(tmp_path, gui) as client:
-        if receipt in {"handler_timeout", "internal", "stale", "busy"}:
+        if receipt in {"handler_timeout", "internal", "not_holder", "busy"}:
             code = {
                 "handler_timeout": "timeout",
                 "internal": "internal",
-                "stale": "precondition_failed",
+                "not_holder": "precondition_failed",
                 "busy": "busy",
             }[receipt]
             client.transport.replies["tab.run_start"] = {
@@ -305,7 +300,6 @@ def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
         assert full["run_start"]["status"] == step_status
         assert summary["error"]["reason"] == reason
         assert summary["run_op"] is None
-        assert summary["actual"]["cfg_ref"] == full["actual"]["publication"]["cfg_ref"]
         assert summary["steps"]["raw_save"] is None
         assert len(client.transport.sent) == before
         assert [method for method, _ in client.transport.sent].count(
@@ -437,7 +431,6 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         full = client.call("status", {"execution": execution, "detail": "full"})
         assert summary["execution"] == full["execution"] == execution
         assert summary["run_id"] == full["raw_save"]["run_id"] == "run-a"
-        assert summary["actual"]["cfg_ref"] == full["actual"]["cfg_ref"]
         assert summary["actual"]["parameters"]["frequency_mhz"] == {
             "value": 6020.0,
             "source": "frequency_mhz",
@@ -620,7 +613,6 @@ def test_full_query_keeps_the_publication_used_before_run(tmp_path):
         if method == "tab.run_start":
             captured.update(deepcopy(gui.publication))
             gui.publication["source_basis"][0]["revision"] = 99
-            gui.publication["cfg_ref"]["revision"] = "99"
             gui.publication["tree"]["children"]["rounds"] = {
                 "kind": "scalar",
                 "input": {"resolved": 999},

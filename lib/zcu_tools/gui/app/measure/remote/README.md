@@ -152,9 +152,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 91`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 123`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 112`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION = 93`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 125`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION = 113`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.
@@ -306,27 +306,24 @@ terminal status, not removed aliases. No tool inventory is generated from
 changes. `cfg_observation.py` projects `CfgDraft.observe()` data, never binding
 field/editor classes. Setters retain canonical paths and reject legacy aliases.
 
-`tab.get_cfg` returns cfg_ref, status, tree, source_basis and diagnostics from the
+`tab.get_cfg` returns status, tree, source_basis and diagnostics from the
 persistent tab resource. It has no prefix or widget prerequisite. Tree paths are
-string arrays. `tab.edit_cfg` requires expected cfg_id and canonical decimal-string
-revision, decodes the common editing codec, then performs one atomic batch.
-Stale errors include expected/actual; input errors can include path/edit_index.
+string arrays. `tab.edit_cfg` decodes the common editing codec and applies one
+atomic batch to current inputs. Input errors can include path/edit_index.
 The adapter does not retry or publish a successful prefix. Plain strings are typed
 strings; __text, __expr, __complex and __ref carry the declared editing intents.
-Source publications advance revision and update all affected cfg before notification.
+Source publications update all affected cfg before notification.
 
-`tab.reset_cfg` uses the same explicit cfg_ref contract. The tab resource obtains
-current adapter defaults and publishes one new revision, even for unchanged inputs.
-Reset can publish Invalid and returns the complete observation. It preserves results
-and saved files, adds no unsaved guard, and follows the Run pane only after success.
+`tab.reset_cfg` obtains current adapter defaults and publishes a complete
+observation, even for unchanged inputs. Reset can publish Invalid. It preserves
+results and saved files, adds no unsaved guard, and follows the Run pane only
+after success.
 
-`tab.run_start` requires the observed cfg_ref as `expected`. Cfg admission does
-not require a second per-connection cfg observation. Tab, SoC, device and
-authentication guards remain independent. A stale identity or revision returns expected/actual
-without starting an operation. Optional `aliases` maps alias names to concrete
-components for parameter/library reads, cfg preview and Run acceptance. Omission,
-None and {} mean no override and use cached cfg. Nonempty preview requires the
-original expected ref and resolves current inputs without publication. Run uses
+`tab.run_start` accepts current Valid cfg without an expected ref.
+Tab, SoC, device and authentication guards remain independent. Optional `aliases`
+maps alias names to concrete components for parameter/library reads, cfg preview
+and Run acceptance. Omission, None and {} mean no override and use cached cfg.
+Nonempty preview resolves current inputs without publication. Run uses
 that same mapping for its cfg and fixed metadata capture. An Invalid publication
 cannot run without a valid temporary resolution. Global rows and tab state never
 retain these overrides. Active Run
@@ -356,9 +353,9 @@ exposes `center` / `span` / `expts` / `step`. Independent `editor.set_field`
 accepts dotted edge paths from the editor read model. Tab cfg observations and
 `tab.edit_cfg` use string-array paths instead.
 
-`TabCfgResources` owns tab cfg identity. Tab creation provides the resource before
-any view attaches; close revokes its identity. Qt detach only stops watching.
-Load backfill preserves cfg_id and advances revision on the same resource.
+`TabCfgResources` owns tab cfg lifetime. Tab creation provides the resource before
+any view attaches; close revokes old handles. Qt detach only stops watching.
+Load backfill publishes on the same resource.
 `CfgEditorService` owns separate library, inspect and writeback drafts.
 Agent-created sessions are garbage-collected on commit/discard/client drop;
 UI-owned independent drafts follow their own owner lifetime.

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-10, caller-owned aliases and temporary cfg preview
+**Last updated:** 2026-10-11, MCP connection identity and control diagnostics
 
 # `zcu_tools/mcp/measure/`
 
@@ -36,7 +36,7 @@ Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server �
 
 `finish_early` 對 recipe 停止採集，有可用結果就先保存 raw，再繼續分析及保存。`cancel` 優先，停止後續分析與保存；已啟動且不可取消的保存仍等真實結果。Registered analysis 的 cancel 也不再啟動新的結果讀取。GUI cancellation 回覆獨立放在 `gui_cancel`，不能拿它覆寫 execution 的既有 terminal outcome。未註冊的 `cancel(op)` 沿用直接 GUI hook。
 
-Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` 的流程先確認可用，再 reset、套本次 cfg 與 Run。`RecipeSession.open_tab` 接收 caller-owned `aliases`，以 alias 名稱指定當次覆寫，並複製這份 mapping。省略 aliases、None 與 {} 等價，不觸發 temporary preview 或重新 lowering。非空 mapping 讓參數／library 查詢、cfg preview 與 Run 使用同一份覆寫。新 tab 與 reuse tab 都不保存覆寫，tab.new/reset 不收這份 mapping。Zcu_lab recipes 保留 target 參數，明確對到 qubit alias，沒有 target 就不覆寫。Temporary preview 必須使用原 observed ref。Source 變更造成 stale 時拒絕，不換成新 ref 或重試。Execution 的 resolved conditions 捕捉這份 preview，不冒用全域 publication。關閉由 `tab_close` 明確指定。
+Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` 的流程先確認可用，再 reset、套本次 cfg 與 Run。`RecipeSession.open_tab` 接收 caller-owned `aliases`，以 alias 名稱指定當次覆寫，並複製這份 mapping。省略 aliases、None 與 {} 等價，不觸發 temporary preview 或重新 lowering。非空 mapping 讓參數／library 查詢、cfg preview 與 Run 使用同一份覆寫。新 tab 與 reuse tab 都不保存覆寫，tab.new/reset 不收這份 mapping。Zcu_lab recipes 保留 target 參數，明確對到 qubit alias，沒有 target 就不覆寫。Temporary preview 解析目前 inputs，不發布 cfg。Execution 的 resolved conditions 捕捉這份 preview，不冒用全域 publication。關閉由 `tab_close` 明確指定。
 
 Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與該 Run 的 run_id，全部輸出失敗亦保留這個 ID。Author handle 使用這份保存契約。沒有 SaveReport 時 steps.raw_save 為 null，不推論 not_started、unknown 或 Save 是否已送出。save_raw 的傳輸與 admission 失敗照常拋出，recipe 回覆的原因只在 error；不加 requested 旗標。
 
@@ -75,7 +75,11 @@ Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一
 
 ## 連線與觀察
 
-`connect` 可連既有 GUI 或依 launch 參數啟動，這一步不連硬體。Control token 留在 session 供重新握手；顯式切換 port 不沿用前一 GUI token，tool log 遮蔽 token。認證失敗與 wire 不相容分別回報。Bridge 不會把仍活著的自有 GUI 當成可在另一空 port 再啟動的程序。
+`connect` 可連既有 GUI 或依 launch 參數啟動，這一步不連硬體。首次 label 預設 `agent`，mode 預設 `owner`；`readonly` 永不取得控制權。Owner 在未鎖定 Local 自動取得。GUI 鎖定或別的在線 holder 不阻止連線，回覆的 `control` 顯示 `{holder, locked, online, me}`。身份初始化在認證與 wire 檢查之後、catalog 之前。省略 label/mode 的重連保留原身份，顯式換身份會重開 socket。
+
+`rpc_call` 提供 `control.status`、`control.acquire`、`control.release`。重複 connect 同一身份只查詢現在的控制狀態，不自動再 acquire。四種控制拒絕 `not_holder`、`control_locked`、`control_held`、`readonly_connection` 在 MCP `isError` 的文字 content 中保留 JSON `error`，包含原生 code、message、reason、data。GUI 負責每次 dispatch 的權限判定，MCP 不複製 holder 規則。
+
+Control token 留在 session 供重新握手；顯式切換 port 不沿用前一 GUI token，tool log 遮蔽 token。認證失敗與 wire 不相容分別回報。Bridge 不會把仍活著的自有 GUI 當成可在另一空 port 再啟動的程序。
 
 Session 將 GUI operation ID 映射為 opaque integer handle。明確重連或 EOF 後清除 catalog 與舊 handle 對應。GUI 可重用 wire ID，MCP session 不重用已外露 handle。GUI-origin operation 經 `status` 使用同一映射。每次 wire 操作前先確認連線，再解析 handle；不向新 GUI 重送舊 ID。
 
@@ -83,7 +87,7 @@ GUI owner 維護每連線的 seen。成功完整讀取才建立觀察，部分 g
 
 接手既有或重啟後的 GUI 時，按操作需要明確讀 `tab.snapshot(tab_id)`、`soc.info(include_cfg=true)`、`context.snapshot` 與 `device.snapshot`。Context 完整讀取可能包含大型敏感資料，不可序列化時會失敗而不刷新觀察。`status`、摘要與裸 `resources.versions` 都不替代完整讀取。
 
-Cfg 使用 `tab.get_cfg` 的 publication 與顯式 cfg_ref，包含 cfg identity 及 canonical decimal revision。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 必須帶觀察到的 ref。Run 只接受指定 Valid publication，不換成最新 cfg。這個 ref 與 tab、SoC、device 的 per-connection seen guards 分開。`tab.open_file` 需要先觀察 context；成功的新 tab receipt 只認證存在性，後續資源仍需明確讀取。
+Cfg 使用 `tab.get_cfg` 的 publication。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 ref。Edit/reset 作用於目前 inputs，Run 接受當下 Valid cfg 並固定執行值。Cfg admission 與 tab、SoC、device 的 guards 分開。`tab.open_file` 需要先觀察 context；成功的新 tab receipt 只認證存在性，後續資源仍需明確讀取。
 
 Stale、斷線或 timeout 都不自動重送。它們不證明 mutation 沒有副作用；先讀現況，再由 caller 決定下一步。
 
