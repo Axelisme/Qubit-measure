@@ -1,8 +1,8 @@
 """Owner-turn route harness using the shipped Fluxdep adapter and Controller.
 
-Only scheduling is replaced. Request validation, guards, handlers, successful
-observations and response encoding all run through the real shared dispatch.
-No socket, QApplication, background worker or second seen map is created.
+Only scheduling is replaced. Request validation, control authority, handlers and
+response encoding all run through the real shared dispatch.
+No socket, QApplication or background worker is created.
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ class RouteHarness:
         return cls(ctrl, service)
 
     def client(self) -> ClientLink:
-        """Open a fresh unguarded connection with its own real app context."""
+        """Open an owner connection with the default control label and real app context."""
         link = ClientLink(f"client-{len(self.links)}", token_required=False)
         self.service.on_client_open(link)
         self.links.append(link)
@@ -120,7 +120,7 @@ class RouteHarness:
         """Route a request and decode its envelope; validation errors propagate.
 
         Shared route raises RemoteError for malformed ParamSpec input before
-        dispatch. The transport normally envelopes that error. Owner/guard
+        dispatch. The transport normally envelopes that error. Owner/control
         errors are encoded by shared dispatch itself and returned here.
         """
         self.request_id += 1

@@ -180,23 +180,6 @@ def test_list_failure_keeps_cache_instead_of_returning_cached_success(
     assert context.list_points() == before
 
 
-def test_metadata_read_and_point_write_do_not_unlock_context_guard(
-    application: PointApplication,
-) -> None:
-    info = application.open_entry()
-    application.result("point.list", {})
-    opened_resource(info).new_point("base")
-    application.result("point.use", {"label": "base"})
-    reply = application.rpc(
-        "context.ml_edit", {"kind": "module", "name": "unused", "edits": []}
-    )
-    error = reply["error"]
-    assert isinstance(error, dict)
-    assert error["code"] == ErrorCode.PRECONDITION_FAILED
-    assert error["reason"] == "stale_version"
-    assert error["data"] == {"stale": ["context"]}
-
-
 def test_created_binding_failure_preserves_destination_and_recovers_with_use(
     application: PointApplication,
 ) -> None:

@@ -19,7 +19,6 @@ from zcu_tools.mcp.core.bridge import (
 )
 from zcu_tools.mcp.core.control import ControlConnection
 from zcu_tools.mcp.core.rpc import GuiInvocationError
-from zcu_tools.mcp.measure.session_policy import describe_stale_keys
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe import RecipeDefinition
@@ -598,16 +597,6 @@ class MeasureMcpSession:
             raise _transport_timeout(exc) from exc
         if not resp.get("ok", False):
             err = resp.get("error", {})
-            if err.get("reason") == "stale_version":
-                stale = describe_stale_keys((err.get("data") or {}).get("stale", []))
-                detail = f" ({', '.join(stale)})" if stale else ""
-                raise GuiRpcError(
-                    "GUI Error (PRECONDITION_FAILED): a resource changed since your last read"
-                    f"{detail}; review then retry",
-                    reason="stale_version",
-                    code="precondition_failed",
-                    request_rejected=True,
-                )
             code = err.get("code")
             reason = err.get("reason")
             if code == "timeout" and reason is None:

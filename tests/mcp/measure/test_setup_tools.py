@@ -374,7 +374,9 @@ def test_device_precondition_failure_retains_before_without_mutation(
         ),
     ],
 )
-@pytest.mark.parametrize("failure", ["stale", "transport_timeout", "handler_timeout"])
+@pytest.mark.parametrize(
+    "failure", ["not_holder", "transport_timeout", "handler_timeout"]
+)
 def test_start_failure_distinguishes_rejection_from_unknown_without_retry(
     setup_client, tool, method, arguments, failure
 ):
@@ -387,8 +389,8 @@ def test_start_failure_distinguishes_rejection_from_unknown_without_retry(
         return {
             "ok": False,
             "error": {
-                "code": "precondition_failed" if failure == "stale" else "timeout",
-                "reason": "stale_version" if failure == "stale" else None,
+                "code": "precondition_failed" if failure == "not_holder" else "timeout",
+                "reason": "not_holder" if failure == "not_holder" else None,
                 "message": "wire failure",
             },
         }
@@ -398,12 +400,12 @@ def test_start_failure_distinguishes_rejection_from_unknown_without_retry(
     assert result.is_error
     assert result.data["op"] is None
     assert result.data["steps"]["start"]["status"] == (
-        "failed" if failure == "stale" else "unknown"
+        "failed" if failure == "not_holder" else "unknown"
     )
     assert result.data["steps"]["wait"]["status"] == "not_started"
     assert [sent for sent, _ in client.transport.sent].count(method) == 1
-    if failure == "stale":
-        assert result.data["error"]["reason"] == "stale_version"
+    if failure == "not_holder":
+        assert result.data["error"]["reason"] == "not_holder"
         assert result.data["steps"]["post_read"]["status"] == "not_started"
     else:
         assert result.data["status"] == "unknown"
@@ -683,7 +685,7 @@ def test_unknown_recipe_is_rejected_without_querying_gui(setup_client):
     "code,reason",
     [
         ("invalid_params", "unknown_adapter"),
-        ("precondition_failed", "stale_version"),
+        ("precondition_failed", "source_unavailable"),
         ("timeout", None),
     ],
 )

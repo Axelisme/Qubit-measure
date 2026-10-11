@@ -49,6 +49,7 @@ class ComponentTreeWidget(QWidget):
         """
         super().__init__(parent)
         self._control = control
+        self._read_only = False
         self._field_inputs: dict[str, tuple[QLineEdit, QLabel, bool, bool]] = {}
         self._row_values: dict[str, YamlValue] = {}
         layout = QVBoxLayout(self)
@@ -69,6 +70,16 @@ class ComponentTreeWidget(QWidget):
         self._build_creation(layout)
         self._build_editing(layout)
         self.refresh()
+
+    def set_read_only(self, *, read_only: bool) -> None:
+        """Keep tree/destination browsing available while blocking field writes."""
+        self._read_only = read_only
+        self._name.setEnabled(not read_only)
+        self._kind.setEnabled(not read_only)
+        self._add_btn.setEnabled(not read_only)
+        for edit, _label, _required, _is_text in self._field_inputs.values():
+            edit.setEnabled(not read_only)
+        self._on_selection(self._tree.currentItem(), None)
 
     def refresh(self) -> None:
         """Render the cached selected document; never implicitly refresh files."""
@@ -152,9 +163,9 @@ class ComponentTreeWidget(QWidget):
         self._kind = QComboBox()
         self._kind.addItems(list(component_registry.kinds()))
         row.addWidget(self._kind)
-        add = QPushButton("Add")
-        add.clicked.connect(self._on_add)
-        row.addWidget(add)
+        self._add_btn = QPushButton("Add")
+        self._add_btn.clicked.connect(self._on_add)
+        row.addWidget(self._add_btn)
         layout.addLayout(row)
         self._fields = QFormLayout()
         layout.addLayout(self._fields)
@@ -176,6 +187,7 @@ class ComponentTreeWidget(QWidget):
             required = field.is_required()
             label = QLabel(f"{key}{' *' if required else ''}")
             edit = QLineEdit()
+            edit.setEnabled(not self._read_only)
             if required:
                 self._mark_red(label)
                 edit.setPlaceholderText("Required")
@@ -194,6 +206,8 @@ class ComponentTreeWidget(QWidget):
                 label.setPalette(self.palette())
 
     def _on_add(self) -> None:
+        if self._read_only:
+            return
         fields: YamlMap = {}
         missing = []
         try:
@@ -239,7 +253,11 @@ class ComponentTreeWidget(QWidget):
     ) -> None:
         path = current.toolTip(0) if current is not None else ""
         self._path.setText(path)
-        editable = path in self._row_values and not path.endswith(".kind")
+        editable = (
+            not self._read_only
+            and path in self._row_values
+            and not path.endswith(".kind")
+        )
         self._apply_btn.setEnabled(editable)
         self._value.setEnabled(editable)
         if editable:
@@ -255,6 +273,8 @@ class ComponentTreeWidget(QWidget):
             self._value.clear()
 
     def _on_edit(self) -> None:
+        if self._read_only:
+            return
         path = self._path.text()
         if path not in self._row_values:
             return

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-from dataclasses import replace
 from pathlib import Path
 from typing import TypeAlias
 
@@ -16,7 +15,6 @@ from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import SpectrumAddedPayload
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 from zcu_tools.gui.event_bus import EventMeta
-from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 
@@ -26,14 +24,6 @@ from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
 SpectrumFile: TypeAlias = tuple[
     str, NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
-
-
-def _assert_stale(reply: RouteReply, keys: list[str]) -> None:
-    assert reply["ok"] is False
-    error = reply["error"]
-    assert error["code"] == "precondition_failed"
-    assert error.get("reason") == "stale_version"
-    assert error.get("data") == {"stale": sorted(keys)}
 
 
 def _observe_sources(harness: RouteHarness, client: ClientLink) -> None:
@@ -69,166 +59,6 @@ def processed_hdf5(spectrum_hdf5: SpectrumFile, tmp_path: Path) -> str:
         return ctrl.export_spectrums(str(tmp_path / "processed.hdf5"))
     finally:
         ctrl.interactive.dispose()
-
-
-@pytest.mark.parametrize("method", ["spectrum.load", "spectrum.load_processed"])
-@pytest.mark.parametrize(
-    "missing", ["project", "spectrums:__set__", "spectrum:Q1_flux_1.hdf5"]
-)
-def test_load_requires_project_collection_and_every_full_leaf_read(
-    route_harness: RouteHarness,
-    spectrum_hdf5: SpectrumFile,
-    method: str,
-    missing: str,
-) -> None:
-    filepath, *_ = spectrum_hdf5
-    name = route_harness.ctrl.load_spectrum(filepath, "TwoTone")
-    # The all-source guard includes an empty completed spectrum, not just points.
-    route_harness.ctrl.set_alignment(name, 0.0, 1.0)
-    route_harness.ctrl.set_points(name, np.empty(0), np.empty(0))
-    client = route_harness.client()
-    for key, read, params in (
-        ("project", "project.info", {}),
-        ("spectrums:__set__", "spectrum.list", {}),
-        (f"spectrum:{name}", "spectrum.snapshot", {"name": name}),
-    ):
-        if key != missing:
-            assert route_harness.request(client, read, **params)["ok"]
-    # Bookkeeping and derived reads cannot fill a missing observation.
-    for read in ("resources.versions", "state.check", "selection.pointcloud"):
-        assert route_harness.request(client, read)["ok"]
-    before = route_harness.ctrl.state.version.snapshot()
-    _assert_stale(
-        _load_request(route_harness, client, method, "missing.hdf5"), [missing]
-    )
-    assert route_harness.ctrl.state.version.snapshot() == before
-    assert route_harness.ctrl.state.get_spectrum(name).points_completed
-
-
-@pytest.mark.parametrize("method", ["spectrum.load", "spectrum.load_processed"])
-def test_first_load_requires_zero_version_reads_and_does_not_observe_new_leaves(
-    route_harness: RouteHarness,
-    spectrum_hdf5: SpectrumFile,
-    processed_hdf5: str,
-    method: str,
-) -> None:
-    client = route_harness.client()
-    filepath = spectrum_hdf5[0] if method == "spectrum.load" else processed_hdf5
-    _assert_stale(
-        _load_request(route_harness, client, method, filepath),
-        ["project", "spectrums:__set__"],
-    )
-    _observe_sources(route_harness, client)
-    loaded = _load_request(route_harness, client, method, filepath)
-    assert loaded["ok"] is True
-    names = list(route_harness.ctrl.state.spectrums)
-    assert loaded["result"] == (
-        {"name": names[0]} if method == "spectrum.load" else {"names": names}
-    )
-    # Collection self-write advanced, but receipts did not reveal new leaves.
-    _assert_stale(
-        _load_request(route_harness, client, method, filepath),
-        [f"spectrum:{name}" for name in names],
-    )
-    for name in names:
-        _assert_stale(
-            route_harness.request(client, "spectrum.reset_alignment", name=name),
-            [f"spectrum:{name}"],
-        )
-        assert route_harness.request(client, "spectrum.snapshot", name=name)["ok"]
-    assert _load_request(route_harness, client, method, filepath)["ok"]
-    # A successful replacement advances matching observations, unlike creation.
-    assert _load_request(route_harness, client, method, filepath)["ok"]
-
-
-@pytest.mark.parametrize("method", ["spectrum.load", "spectrum.load_processed"])
-def test_all_source_guards_detect_other_clients_gui_edits_and_retired_leaves(
-    route_harness: RouteHarness,
-    spectrum_hdf5: SpectrumFile,
-    processed_hdf5: str,
-    method: str,
-) -> None:
-    ctrl = route_harness.ctrl
-    name = ctrl.load_spectrum(spectrum_hdf5[0], "TwoTone")
-    filepath = spectrum_hdf5[0] if method == "spectrum.load" else processed_hdf5
-    first, second = route_harness.client(), route_harness.client()
-    _observe_sources(route_harness, first)
-    _assert_stale(
-        _load_request(route_harness, second, method, filepath),
-        ["project", "spectrums:__set__", f"spectrum:{name}"],
-    )
-    _observe_sources(route_harness, second)
-    assert _load_request(route_harness, first, method, filepath)["ok"]
-    stale = [f"spectrum:{name}"]
-    if method == "spectrum.load_processed":
-        stale += ["spectrums:__set__", "spectrum:empty.hdf5"]
-    _assert_stale(_load_request(route_harness, second, method, filepath), stale)
-
-    _observe_sources(route_harness, first)
-    ctrl.reset_alignment(name)
-    _assert_stale(
-        _load_request(route_harness, first, method, filepath), [f"spectrum:{name}"]
-    )
-    _observe_sources(route_harness, first)
-    ctrl.setup_project(ProjectInfo(chip_name="GUI", qub_name="Q2"))
-    _assert_stale(_load_request(route_harness, first, method, filepath), ["project"])
-    _observe_sources(route_harness, first)
-    ctrl.remove_spectrum(name)
-    # Wildcard includes previously seen leaves even after the owner retires them.
-    _assert_stale(
-        _load_request(route_harness, first, method, filepath),
-        ["spectrums:__set__", f"spectrum:{name}"],
-    )
-    assert route_harness.request(first, "spectrum.list")["ok"]
-    _assert_stale(
-        _load_request(route_harness, first, method, filepath), [f"spectrum:{name}"]
-    )
-    absent = route_harness.request(first, "spectrum.snapshot", name=name)
-    assert absent["ok"] is True
-    assert absent["result"] == {"name": name, "exists": False}
-    assert _load_request(route_harness, first, method, filepath)["ok"]
-
-
-@pytest.mark.parametrize("method", ["spectrum.load", "spectrum.load_processed"])
-def test_all_source_guard_includes_literal_star_names_and_their_neighbors(
-    route_harness: RouteHarness,
-    spectrum_hdf5: SpectrumFile,
-    processed_hdf5: str,
-    tmp_path: Path,
-    method: str,
-) -> None:
-    path = tmp_path / "測量:one*.hdf5"
-    shutil.copyfile(spectrum_hdf5[0], path)
-    ctrl = route_harness.ctrl
-    name = ctrl.load_spectrum(str(path), "TwoTone")
-    neighbor = name + ":neighbor"
-    ctrl.state.put_spectrum(replace(ctrl.state.get_spectrum(name), name=neighbor))
-    client = route_harness.client()
-    assert route_harness.request(client, "project.info")["ok"]
-    assert route_harness.request(client, "spectrum.list")["ok"]
-    assert route_harness.request(client, "spectrum.snapshot", name=name)["ok"]
-    filepath = str(path) if method == "spectrum.load" else processed_hdf5
-    _assert_stale(
-        _load_request(route_harness, client, method, filepath),
-        [f"spectrum:{neighbor}"],
-    )
-    assert route_harness.request(client, "spectrum.snapshot", name=neighbor)["ok"]
-    assert _load_request(route_harness, client, method, filepath)["ok"]
-
-
-def test_successful_load_advances_a_previously_read_full_absence(
-    route_harness: RouteHarness, spectrum_hdf5: SpectrumFile
-) -> None:
-    client = route_harness.client()
-    _observe_sources(route_harness, client)
-    name = "Q1_flux_1.hdf5"
-    absent = route_harness.request(client, "spectrum.snapshot", name=name)
-    assert absent["ok"] is True
-    assert absent["result"] == {"name": name, "exists": False}
-    assert _load_request(route_harness, client, "spectrum.load", spectrum_hdf5[0])["ok"]
-    # This is normal self-write tracking of the full absence, not a creation
-    # receipt granting an observation to an unread new resource.
-    assert route_harness.request(client, "spectrum.reset_alignment", name=name)["ok"]
 
 
 def test_raw_load_preserves_basename_replacement_and_inherited_calibration(
@@ -503,12 +333,6 @@ def test_processed_partial_publication_is_not_rolled_back_or_self_refreshed(
     assert state.get_spectrum(name).spec_type == "OneTone"
     assert state.version.get(f"spectrum:{name}") == before + 1
     # Failed handlers do not advance even previously matching observations.
-    _assert_stale(
-        route_harness.request(
-            client, "spectrum.load_processed", filepath=processed_hdf5
-        ),
-        [f"spectrum:{name}"],
-    )
     _observe_sources(route_harness, client)
     assert route_harness.request(
         client, "spectrum.load_processed", filepath=processed_hdf5

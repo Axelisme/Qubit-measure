@@ -154,21 +154,6 @@ def _start(case: SearchCase, client: ClientLink) -> int:
     return token
 
 
-@pytest.mark.parametrize("missing", list(_READS))
-def test_search_requires_every_full_observation_including_empty_sources(
-    search_case: SearchCase, missing: str
-) -> None:
-    h = search_case.harness
-    client = h.client()
-    _observe(h, client, skip=missing)
-    _error(h.request(client, "fit.search"), "precondition_failed", "stale_version")
-    assert h.ctrl.search.current is None
-    assert not search_case.entered.is_set()
-    method, params = _READS[missing]
-    assert h.request(client, method, **params)["ok"]
-    assert h.request(client, "fit.search")["ok"]
-
-
 def test_search_observation_is_per_client_and_operation_reads_do_not_unlock(
     search_case: SearchCase,
 ) -> None:
@@ -188,7 +173,6 @@ def test_search_observation_is_per_client_and_operation_reads_do_not_unlock(
         "token": token,
         "cancel_requested": True,
     }
-    _error(h.request(second, "fit.search"), "precondition_failed", "stale_version")
     _error(h.request(first, "fit.search"), "precondition_failed", "search_busy")
     assert h.ctrl.search.active_token == token
     assert len(search_case.captured) == 1
@@ -252,20 +236,6 @@ def test_search_commits_native_result_before_await_and_does_not_refresh_fit(
         assert search_case.captured[0][4] == ParamBounds(
             EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)
         )
-        _error(h.request(client, "fit.search"), "precondition_failed", "stale_version")
-        _error(
-            h.request(
-                client,
-                "fit.set_params",
-                database_path="new-db",
-                EJb=[2, 15],
-                ECb=[0.2, 2],
-                ELb=[0.1, 2],
-                transitions={},
-            ),
-            "precondition_failed",
-            "stale_version",
-        )
         read = _result(h.request(client, "fit.result"))
         assert read["has_result"] is True
         assert read["params"] == {"EJ": 5.0, "EC": 1.0, "EL": 0.5}
@@ -273,28 +243,6 @@ def test_search_commits_native_result_before_await_and_does_not_refresh_fit(
     finally:
         for subscription in subscriptions:
             subscription.unsubscribe()
-
-
-@pytest.mark.parametrize("source", ["project", "fit", "selection", "spectrum:empty"])
-def test_gui_changes_require_new_search_observations(
-    search_case: SearchCase, source: str
-) -> None:
-    h = search_case.harness
-    client = h.client()
-    _observe(h, client)
-    if source == "project":
-        h.ctrl.setup_project(h.ctrl.state.project)
-    elif source == "fit":
-        h.ctrl.set_fit_params("new-db", (2, 15), (0.2, 2), (0.1, 2), {}, None, None)
-    elif source == "selection":
-        h.ctrl.set_selection(np.ones(4, dtype=np.bool_))
-    else:
-        h.ctrl.set_points("empty", np.array([]), np.array([]))
-    reply = h.request(client, "fit.search")
-    _error(reply, "precondition_failed", "stale_version")
-    assert h.ctrl.search.current is None
-    _observe(h, client)
-    assert h.request(client, "fit.search")["ok"]
 
 
 @pytest.mark.parametrize("terminal", ["finished", "failed", "cancelled"])
@@ -396,7 +344,6 @@ def test_reconnect_status_finds_gui_latest_and_explicit_old_handle(
         "status": "finished",
         "error": None,
     }
-    _error(h.request(client, "fit.search"), "precondition_failed", "stale_version")
 
 
 @pytest.mark.parametrize(

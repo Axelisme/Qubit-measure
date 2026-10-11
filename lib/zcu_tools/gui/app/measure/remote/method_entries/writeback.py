@@ -10,7 +10,7 @@ from ._params import (
     optional_string,
     required_string,
 )
-from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
+from ._registry import RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -25,22 +25,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "complete actual destination values. Kinds are md|module|waveform; "
             "cross-kind names may coincide. Empty write is a no-op. Explicit null "
             "value sets an md value to null; omission keeps its proposal. "
-            "Context apply retains existing failure semantics, not cross-file atomicity. "
-            "Read tab.snapshot and context.snapshot explicitly before writing; "
-            "writeback_preview shows proposals but does not refresh those guards.",
+            "Context apply retains existing failure semantics, not cross-file atomicity.",
             (
                 required_string("tab_id"),
                 required_string("subtab_id", "Pane: analysis|post_analysis"),
                 ParamSpec("write", JsonType.JSON, required=True),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:{writeback_resource}",
-                "context",
-            ),
-            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -123,14 +113,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:{writeback_resource}",
-                "context",
-            ),
-            refresh_after_write=True,
-        ),
     ),
     method_entry(
         "tab.writeback_apply",
@@ -144,8 +126,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "nothing; unknown or duplicate IDs fail before writing. Returns "
             "{applied_ids, written, context_version, destination_context}: written lists the destination "
             "names actually pushed, split by kind ({md, ml_modules, ml_waveforms}); "
-            "context_version is the bumped 'context' resource version after apply (use "
-            "re-read the context before a dependent follow-up write); "
+            "context_version is the bumped 'context' resource version after apply; "
             "destination_context is the active SessionEnv projection at reply time.",
             (
                 required_string("tab_id"),
@@ -157,14 +138,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     description="Explicit writeback item IDs; omitted uses GUI selection",
                 ),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:{writeback_resource}",
-                "context",
-            ),
-            refresh_after_write=True,
         ),
     ),
 )

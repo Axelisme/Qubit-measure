@@ -39,14 +39,6 @@ def _spectrum(name: str) -> SpectrumEntry:
     )
 
 
-def _assert_stale(reply: RouteReply, keys: list[str]) -> None:
-    assert reply["ok"] is False
-    error = reply["error"]
-    assert error["code"] == "precondition_failed"
-    assert error.get("reason") == "stale_version"
-    assert error.get("data") == {"stale": sorted(keys)}
-
-
 def _assert_unknown_spectrum(reply: RouteReply) -> None:
     assert reply["ok"] is False
     assert reply["error"]["code"] == "invalid_params"
@@ -127,59 +119,6 @@ def test_empty_completed_spectrum_has_empty_axes_and_published_points(
     }
 
 
-@pytest.mark.parametrize(
-    "read_method",
-    [
-        "spectrum.list",
-        "resources.versions",
-        "state.check",
-        "selection.pointcloud",
-        "project.info",
-        "fit.result",
-        "selection.snapshot",
-    ],
-)
-def test_other_reads_do_not_unlock_a_spectrum_mutation(
-    route_harness: RouteHarness,
-    read_method: str,
-) -> None:
-    route_harness.ctrl.state.put_spectrum(_spectrum("one"))
-    client = route_harness.client()
-    assert route_harness.request(client, read_method)["ok"]
-    before = route_harness.ctrl.state.version.snapshot()
-    _assert_stale(
-        route_harness.request(client, "spectrum.reset_alignment", name="one"),
-        ["spectrum:one"],
-    )
-    assert route_harness.ctrl.state.get_spectrum("one").aligned
-    assert route_harness.ctrl.state.version.snapshot() == before
-
-
-def test_leaf_reads_are_per_client_and_gui_changes_make_them_stale(
-    route_harness: RouteHarness,
-) -> None:
-    route_harness.ctrl.state.put_spectrum(_spectrum("one"))
-    first, second = route_harness.client(), route_harness.client()
-    _read_spectrum(route_harness, first, "one")
-    _assert_stale(
-        route_harness.request(second, "spectrum.reset_points", name="one"),
-        ["spectrum:one"],
-    )
-    _read_spectrum(route_harness, second, "one")
-    assert route_harness.request(first, "spectrum.reset_points", name="one")["ok"]
-    _assert_stale(
-        route_harness.request(second, "spectrum.reset_alignment", name="one"),
-        ["spectrum:one"],
-    )
-    _read_spectrum(route_harness, second, "one")
-    route_harness.ctrl.reset_alignment("one")
-    for client in (first, second):
-        _assert_stale(
-            route_harness.request(client, "spectrum.reset_alignment", name="one"),
-            ["spectrum:one"],
-        )
-
-
 def test_literal_star_guard_does_not_expand_to_a_same_prefix_neighbor(
     route_harness: RouteHarness,
 ) -> None:
@@ -245,9 +184,6 @@ def test_full_absence_read_admits_owner_lookup_but_is_not_existence_proof(
     name = "不存在:*"
     if method == "spectrum.remove":
         assert route_harness.request(client, "spectrum.list")["ok"]
-    _assert_stale(
-        route_harness.request(client, method, name=name), [f"spectrum:{name}"]
-    )
     assert _read_spectrum(route_harness, client, name) == {
         "name": name,
         "exists": False,
@@ -255,11 +191,6 @@ def test_full_absence_read_admits_owner_lookup_but_is_not_existence_proof(
     before = route_harness.ctrl.state.version.snapshot()
     _assert_unknown_spectrum(route_harness.request(client, method, name=name))
     assert route_harness.ctrl.state.version.snapshot() == before
-    route_harness.ctrl.state.put_spectrum(_spectrum(name))
-    stale_keys = [f"spectrum:{name}"]
-    if method == "spectrum.remove":
-        stale_keys.append("spectrums:__set__")
-    _assert_stale(route_harness.request(client, method, name=name), stale_keys)
 
 
 def test_remove_requires_the_collection_and_exact_leaf_reads(
@@ -269,20 +200,11 @@ def test_remove_requires_the_collection_and_exact_leaf_reads(
     state.put_spectrum(_spectrum("one"))
     client = route_harness.client()
     _read_spectrum(route_harness, client, "one")
-    _assert_stale(
-        route_harness.request(client, "spectrum.remove", name="one"),
-        ["spectrums:__set__"],
-    )
     assert route_harness.request(client, "spectrum.list")["ok"]
     state.put_spectrum(_spectrum("another"))
-    _assert_stale(
-        route_harness.request(client, "spectrum.remove", name="one"),
-        ["spectrums:__set__"],
-    )
     assert state.get_spectrum("one").aligned
     assert route_harness.request(client, "spectrum.list")["ok"]
     assert route_harness.request(client, "spectrum.remove", name="one")["ok"]
-    # Successful remove advanced this client's collection and absence baseline.
     _assert_unknown_spectrum(
         route_harness.request(client, "spectrum.remove", name="one")
     )
@@ -314,12 +236,7 @@ def test_remove_and_same_name_recreate_retire_only_the_exact_leaf(
 
     state.put_spectrum(original)
     assert state.version.get(f"spectrum:{name}") == 2
-    _assert_stale(
-        route_harness.request(client, "spectrum.reset_alignment", name=name),
-        [f"spectrum:{name}"],
-    )
     assert state.get_spectrum(name).aligned
-    # Recreating the removed name did not stale the neighbor's leaf observation.
     assert route_harness.request(client, "spectrum.reset_alignment", name=neighbor)[
         "ok"
     ]
@@ -335,10 +252,6 @@ def test_set_active_null_and_omission_clear_display_without_source_version_chang
     state = route_harness.ctrl.state
     state.put_spectrum(_spectrum("one"))
     client = route_harness.client()
-    _assert_stale(
-        route_harness.request(client, "spectrum.set_active", name="one"),
-        ["spectrums:__set__"],
-    )
     assert route_harness.request(client, "spectrum.list")["ok"]
     before = state.version.snapshot()
     chosen = route_harness.request(client, "spectrum.set_active", name="one")
@@ -368,8 +281,4 @@ def test_malformed_snapshot_name_cannot_unlock_a_leaf(
     with pytest.raises(RemoteError) as failure:
         route_harness.request(client, "spectrum.snapshot", name=name)
     assert failure.value.code is ErrorCode.INVALID_PARAMS
-    _assert_stale(
-        route_harness.request(client, "spectrum.reset_alignment", name="one"),
-        ["spectrum:one"],
-    )
     assert state.version.snapshot() == before

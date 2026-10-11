@@ -8,8 +8,7 @@ even though the transport mechanisms pull it in. Two tiers:
 - **Import-clean wire primitives** (no Qt, no matplotlib): ``framing`` (NDJSON),
   ``errors`` (envelopes), ``wire`` (Request/Response + field coercion),
   ``param_spec`` (the ParamSpec schema engine), ``method_spec``
-  (MethodSpec/BoundMethod + ``build_method_registry``), ``observation``
-  (ResourceObservationPolicy).
+  (MethodSpec/BoundMethod + ``build_method_registry``).
 - **Transport mechanism**: ``rpc_endpoint`` — the Qt-free
   ``NdjsonRpcEndpoint`` GUI-side server (socket + framing + handshake + push
   fan-out). ``RemoteControlServiceBase`` receives an injected ``OwnerScheduler``
@@ -19,8 +18,8 @@ even though the transport mechanisms pull it in. Two tiers:
 
 Each app keeps its own domain: dispatch tables, method specs, the
 ``RemoteControlAdapter`` router (its ``route`` seam + event serializers),
-resource-version producers and guard/reveal declarations. Shared dispatch owns
-per-connection observation tracking. The launchable MCP server bridge (config
+domain commands and queries. Shared dispatch checks the application control
+identity before owner-thread writes. The launchable MCP server bridge (config
 and tool composition) lives under ``zcu_tools.mcp.<app>``; it does not keep a
-second seen map.
+second copy of application state.
 """
