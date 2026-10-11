@@ -138,11 +138,13 @@ class MainDialogRegistry:
 
             if not isinstance(dialog, DeviceDialog):
                 raise TypeError("Device dialog has no inspection gate")
-            watch_control(
+            dispose = watch_control(
                 dialog,
                 self._ctrl.control_identity,
                 lambda status: dialog.set_read_only(status.holder != "gui"),
             )
+            # Device dialogs retire on finished; Predictor's hide/reuse does not.
+            dialog.finished.connect(dispose)
         self._dialog_names[name] = None
         if name in _PERSISTENT_DIALOGS:
             self._dialog_refs.retain_named(

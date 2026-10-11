@@ -15,7 +15,16 @@ class ControlIndicator(QPushButton):
         super().__init__(parent)
         self.setObjectName("control_indicator")
         self.clicked.connect(authority.toggle_local)
-        watch_control(self, authority, self._render)
+        self._dispose_control = watch_control(self, authority, self._render)
+
+    def dispose_control_watch(self) -> None:
+        """Retire the holder projection before its view owner deletes this lamp."""
+        self._dispose_control()
+
+    def deleteLater(self) -> None:
+        """Retire authority projection before scheduling owner-thread deletion."""
+        self.dispose_control_watch()
+        super().deleteLater()
 
     def _render(self, status: ControlStatus) -> None:
         if status.holder == "gui":

@@ -37,7 +37,11 @@ from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
-from zcu_tools.gui.widgets.remote_edit_gate import bind_control_enabled, watch_control
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    bind_control_enabled,
+    dispose_control_watches,
+    watch_control,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -135,7 +139,20 @@ class _MlCreateDialog(QDialog):
         create_btn.clicked.connect(self._on_create)
         cancel_btn.clicked.connect(self.reject)
         for content in (self._template_combo, self._name_edit, create_btn):
-            bind_control_enabled(content, ctrl.control_identity)
+            bind_control_enabled(content, ctrl.control_identity, retirement_dialog=self)
+
+    def dispose_control_watches(self) -> None:
+        """Retire owned authority projections before final view destruction.
+
+        Hiding a persistent dialog is not retirement. Call on the owner thread
+        before its parent shuts down or schedules the view's Qt deletion.
+        """
+        dispose_control_watches(self)
+
+    def deleteLater(self) -> None:
+        """Release authority watches before direct owner-thread Qt deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def _suggest_name(self, entry: Any) -> str:
         """Convention-based name suggestion for ``entry``, de-duplicated.
@@ -213,11 +230,25 @@ class InspectDialog(InspectDialogBase):
         self._ml_refresh_pending = False
         super().__init__(ctrl.context_control, bus, parent=parent)
         self.finished.connect(self._on_finished)
-        watch_control(
+        dispose = watch_control(
             self,
             ctrl.control_identity,
             lambda status: self.set_read_only(read_only=status.holder != "gui"),
         )
+        self.finished.connect(dispose)
+
+    def dispose_control_watches(self) -> None:
+        """Retire owned authority projections before final view destruction.
+
+        Hiding a persistent dialog is not retirement. Call on the owner thread
+        before its parent shuts down or schedules the view's Qt deletion.
+        """
+        dispose_control_watches(self)
+
+    def deleteLater(self) -> None:
+        """Release authority watches before direct owner-thread Qt deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def set_read_only(self, *, read_only: bool) -> None:
         """Disable editing while retaining module/parameter inspection."""

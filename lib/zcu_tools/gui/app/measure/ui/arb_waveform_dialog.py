@@ -32,6 +32,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.widgets.remote_edit_gate import (
     bind_control_enabled,
+    dispose_control_watches,
     local_write_allowed,
 )
 from zcu_tools.resources.waveform_assets import (
@@ -253,7 +254,7 @@ class ArbWaveformDialog(QDialog):
         top_layout.addWidget(self._build_asset_group(), stretch=2)
         top_layout.addWidget(self._build_recipe_group(), stretch=3)
         splitter.addWidget(top)
-        bind_control_enabled(top, control_identity)
+        bind_control_enabled(top, control_identity, retirement_dialog=self)
 
         preview_group = QGroupBox("Preview")
         preview_layout = QVBoxLayout(preview_group)
@@ -265,6 +266,19 @@ class ArbWaveformDialog(QDialog):
         self._close_btn.clicked.connect(self.reject)
         self.refresh()
         self._reset_draft()
+
+    def dispose_control_watches(self) -> None:
+        """Retire owned authority projections before final view destruction.
+
+        Hiding a persistent dialog is not retirement. Call on the owner thread
+        before its parent shuts down or schedules the view's Qt deletion.
+        """
+        dispose_control_watches(self)
+
+    def deleteLater(self) -> None:
+        """Release authority watches before direct owner-thread Qt deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def refresh(self) -> None:
         selected = self._current_data_key

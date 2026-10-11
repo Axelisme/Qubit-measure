@@ -112,8 +112,17 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
     def before_show(self, assembly: GuiAssembly) -> None:
+        from qtpy.QtWidgets import QApplication
+
         from zcu_tools.gui.app.measure.services import create_persistence_caretaker
 
+        window = assembly.window
+        assert _is_main_window(window)
+        application = QApplication.instance()
+        if not isinstance(application, QApplication):
+            raise RuntimeError("measure app requires a QApplication before assembly")
+        # before_show precedes the runtime's remote stop connection on aboutToQuit.
+        window.watch_application_shutdown(application)
         ctrl = assembly.controller
         assert _is_controller(ctrl)
         caretaker = create_persistence_caretaker(ctrl)

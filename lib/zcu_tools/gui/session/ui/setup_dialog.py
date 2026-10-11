@@ -39,6 +39,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
 from zcu_tools.gui.widgets.remote_edit_gate import (
     bind_control_enabled,
+    dispose_control_watches,
     local_write_allowed,
 )
 from zcu_tools.program import describe_soc
@@ -226,7 +227,7 @@ class SetupDialog(QDialog):
         splitter.addWidget(right_widget)
 
         splitter.setSizes([450, 450])
-        bind_control_enabled(splitter, control_identity)
+        bind_control_enabled(splitter, control_identity, retirement_dialog=self)
 
         # ── Close button ─────────────────────────────────────────────────
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -254,6 +255,19 @@ class SetupDialog(QDialog):
         self._bus_subs_active = True
         self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
+
+    def dispose_control_watches(self) -> None:
+        """Retire owned authority projections before final view destruction.
+
+        Hiding a persistent dialog is not retirement. Call on the owner thread
+        before its parent shuts down or schedules the view's Qt deletion.
+        """
+        dispose_control_watches(self)
+
+    def deleteLater(self) -> None:
+        """Release authority watches before direct owner-thread Qt deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         if not self._bus_subs_active:

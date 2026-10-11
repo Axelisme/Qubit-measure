@@ -57,6 +57,7 @@ from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
 from zcu_tools.gui.widgets.remote_edit_gate import (
     bind_control_enabled,
+    dispose_control_watches,
     local_write_allowed,
 )
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
@@ -377,7 +378,11 @@ class PredictorDialog(QDialog):
             calibration_group,
             remove_region,
         ):
-            bind_control_enabled(content, control_identity)
+            bind_control_enabled(
+                content,
+                control_identity,
+                retirement_dialog=None if self._persistent_on_close else self,
+            )
 
         # ── Right: QTabWidget with three canvases ─────────────────────────
         # Frequency, |n|, |phi|. All three share one marker value and one set of
@@ -454,6 +459,19 @@ class PredictorDialog(QDialog):
         )
         self.finished.connect(self._cleanup_subscriptions)
         self.destroyed.connect(self._cleanup_subscriptions)
+
+    def dispose_control_watches(self) -> None:
+        """Retire owned authority projections before final view destruction.
+
+        Hiding a persistent dialog is not retirement. Call on the owner thread
+        before its parent shuts down or schedules the view's Qt deletion.
+        """
+        dispose_control_watches(self)
+
+    def deleteLater(self) -> None:
+        """Release authority watches before direct owner-thread Qt deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def capture_state(self) -> PredictorDialogState:
         """Return the persistent UI state only; live marker/device/cache state is excluded."""

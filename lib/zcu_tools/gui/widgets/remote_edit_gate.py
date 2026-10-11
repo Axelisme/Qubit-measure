@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from qtpy.QtCore import QObject
-from qtpy.QtWidgets import QWidget
+from qtpy.QtWidgets import QDialog, QWidget
 
 from zcu_tools.gui.control_identity import ControlIdentity, ControlStatus
 
@@ -47,7 +47,13 @@ class RemoteEditGate(QObject):
         def update(status: ControlStatus) -> None:
             callback(status.holder == "gui")
 
-        dispose = self._control.watch(update)
+        self.watch_status(update, lifetime=lifetime)
+
+    def watch_status(
+        self, callback: Callable[[ControlStatus], None], *, lifetime: QObject
+    ) -> None:
+        """Project authority status until explicit retirement or target destruction."""
+        dispose = self._control.watch(callback)
 
         def detach() -> None:
             dispose()
@@ -74,10 +80,16 @@ def watch_control(
     widget: QWidget,
     authority: ControlIdentity,
     render: Callable[[ControlStatus], None],
-) -> None:
-    """Render immediately and dispose the owner-thread watch on Qt destruction."""
-    dispose = authority.watch(render)
-    widget.destroyed.connect(lambda *_args: dispose())
+) -> Callable[[], None]:
+    """Render current authority and return an owner-thread retirement command.
+
+    The view owner must call the idempotent disposer before retiring the widget.
+    It removes both the authority callback and the Qt destruction connection.
+    Destruction remains a fallback while the widget and owner are still alive.
+    """
+    gate = RemoteEditGate(authority, widget)
+    gate.watch_status(render, lifetime=widget)
+    return gate.dispose
 
 
 def local_write_allowed(authority: ControlIdentity | None) -> bool:
@@ -89,14 +101,35 @@ def local_write_allowed(authority: ControlIdentity | None) -> bool:
     return authority is None or authority.status().holder == "gui"
 
 
-def bind_control_enabled(widget: QWidget, authority: ControlIdentity | None) -> None:
+def dispose_control_watches(widget: QWidget) -> None:
+    """Retire this view's owned authority projections before Qt child destruction.
+
+    Only RemoteEditGate children are touched. Persistent hide/reopen is not
+    retirement; its final view owner calls this before shutdown or deletion.
+    """
+    for gate in widget.findChildren(RemoteEditGate):
+        gate.dispose()
+
+
+def bind_control_enabled(
+    widget: QWidget,
+    authority: ControlIdentity | None,
+    *,
+    retirement_dialog: QDialog | None = None,
+) -> Callable[[], None] | None:
     """Gate a write-only region, preserving child domain gates and dialog exit.
 
     Bind content containers and write controls, never a closable dialog root.
-    None leaves shared widgets' existing behavior unchanged.
+    ``retirement_dialog.finished`` must mean actual retirement. Do not pass a
+    persistent dialog: its hide/reopen lifetime ends only at final owner disposal.
+    The returned idempotent disposer and the final parent owner can also retire
+    the projection. None authority leaves existing shared-widget behavior alone.
     """
     if authority is None:
-        return
-    watch_control(
+        return None
+    dispose = watch_control(
         widget, authority, lambda status: widget.setEnabled(status.holder == "gui")
     )
+    if retirement_dialog is not None:
+        retirement_dialog.finished.connect(dispose)
+    return dispose

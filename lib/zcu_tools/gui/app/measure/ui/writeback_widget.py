@@ -34,7 +34,10 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
-from zcu_tools.gui.widgets.remote_edit_gate import bind_control_enabled
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    bind_control_enabled,
+    dispose_control_watches,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -288,6 +291,19 @@ class WritebackWidget(QWidget):
         self._rows: list[_WritebackRow] = []
 
         self._refresh_apply_enabled()
+
+    def dispose_control_watches(self) -> None:
+        """Retire owned authority projections before final view destruction.
+
+        Hiding a persistent dialog is not retirement. Call on the owner thread
+        before its parent shuts down or schedules the view's Qt deletion.
+        """
+        dispose_control_watches(self)
+
+    def deleteLater(self) -> None:
+        """Release authority watches before direct owner-thread Qt deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def populate(
         self,
@@ -610,7 +626,9 @@ class WritebackWidget(QWidget):
                 QMessageBox.critical(dialog, "Validation Error", str(exc))
 
         for content in (name_edit, value_edit, save_btn):
-            bind_control_enabled(content, self._ctrl.control_identity)
+            bind_control_enabled(
+                content, self._ctrl.control_identity, retirement_dialog=dialog
+            )
         save_btn.clicked.connect(save)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.open()
@@ -704,7 +722,9 @@ class WritebackWidget(QWidget):
     ) -> None:
         """Gate the editor content while keeping its close action available."""
         for widget in content:
-            bind_control_enabled(widget, self._ctrl.control_identity)
+            bind_control_enabled(
+                widget, self._ctrl.control_identity, retirement_dialog=dialog
+            )
         button_row = QHBoxLayout()
         close_button = QPushButton("Close")
         close_button.clicked.connect(dialog.accept)

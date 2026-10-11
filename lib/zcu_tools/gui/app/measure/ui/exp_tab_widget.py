@@ -874,6 +874,8 @@ class ExpTabWidget(QWidget):
         for index in reversed(range(self._analysis_stack.count())):
             widget = self._analysis_stack.widget(index)
             if isinstance(widget, widget_type):
+                if isinstance(widget, InteractiveFrontend):
+                    widget.dispose_control_watch()
                 self._analysis_stack.removeWidget(widget)
                 widget.deleteLater()
         self._analysis_stack.setCurrentWidget(self._analysis_placeholder)
@@ -1209,8 +1211,22 @@ class ExpTabWidget(QWidget):
         models = tuple(m for _, m in self._progress_control.progress_bars(self.tab_id))
         self.progress_stack.render_models(models)
 
+    def dispose_control_watches(self) -> None:
+        """Retire mounted authority projections before the view's Qt children."""
+        from zcu_tools.gui.widgets.remote_edit_gate import dispose_control_watches
+
+        dispose_control_watches(self)
+        for frontend in self.findChildren(InteractiveFrontend):
+            frontend.dispose_control_watch()
+
+    def deleteLater(self) -> None:
+        """Retire view watches before direct owner-thread Qt deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
+
     def detach(self) -> None:
         """Tear this tab widget down."""
+        self.dispose_control_watches()
         if self._actions is None:
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
         self.cfg_form.validity_changed.disconnect(self._validity_cb)

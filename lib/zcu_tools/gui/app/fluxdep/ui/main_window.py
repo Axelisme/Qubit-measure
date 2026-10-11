@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -70,6 +71,9 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
 from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    dispose_control_watches as dispose_owned_control_watches,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +101,8 @@ class MainWindow(QMainWindow):
         self._ctrl = ctrl
         self._dialogs = dialog_presenter or QtDialogPresenter()
         self._edit_gate = RemoteEditGate(ctrl.control_identity, self)
+        self._control_disposed = False
+        self._shutdown_application: QApplication | None = None
         self._interactive_runner = interactive_runner
         self._search_runner = search_runner
         if search_runner is not None:
@@ -115,6 +121,38 @@ class MainWindow(QMainWindow):
         self._rebuild_editor()
 
     # --- construction ----------------------------------------------------
+
+    def watch_application_shutdown(self, application: QApplication) -> None:
+        """Bind app-local watch retirement before the runtime's adapter stop.
+
+        Call once on the owner thread. Final view disposal removes this app
+        connection, so QApplication cannot retain an already retired window.
+        """
+        if self._shutdown_application is not None or self._control_disposed:
+            raise RuntimeError("window shutdown projection is already bound or retired")
+        self._shutdown_application = application
+        application.aboutToQuit.connect(self.dispose_control_watches)
+
+    def dispose_control_watches(self) -> None:
+        """Retire only owned authority projections, on the owner thread.
+
+        This is idempotent. It does not cancel or drain domain work. Refused
+        closes keep watches; accepted closes retire before view teardown.
+        """
+        if self._control_disposed:
+            return
+        self._control_disposed = True
+        dispose_owned_control_watches(self)
+        if self._shutdown_application is not None:
+            self._shutdown_application.aboutToQuit.disconnect(
+                self.dispose_control_watches
+            )
+            self._shutdown_application = None
+
+    def deleteLater(self) -> None:
+        """Retire watches before direct Qt deletion, without domain shutdown."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -629,6 +667,7 @@ class MainWindow(QMainWindow):
             if a0 is not None:
                 a0.ignore()
             return
+        self.dispose_control_watches()
         self._ctrl.interactive.dispose()
         if self._interactive_runner is not None:
             self._interactive_runner.quiesce()

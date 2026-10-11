@@ -9,9 +9,10 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+from qtpy.QtCore import QTimer
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -34,7 +35,12 @@ from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
-from zcu_tools.gui.widgets.remote_edit_gate import watch_control
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    dispose_control_watches as dispose_owned_control_watches,
+)
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    watch_control,
+)
 from zcu_tools.resources.entry import RoleResolutionError
 
 from .exp_tab_widget import ExpTabWidget, TabActions
@@ -162,10 +168,49 @@ class MainWindow(QMainWindow):
         self._events.bind(self._ctrl.get_bus())
         self._control_indicator = ControlIndicator(self._ctrl.control_identity, self)
         self._status_bar.addPermanentWidget(self._control_indicator)
-        watch_control(self, self._ctrl.control_identity, self._refresh_control)
+        self._dispose_control = watch_control(
+            self, self._ctrl.control_identity, self._refresh_control
+        )
+        self._shutdown_application: QApplication | None = None
+        self._control_disposed = False
 
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
+
+    def watch_application_shutdown(self, application: QApplication) -> None:
+        """Retire this app's views on normal Qt exit, before adapter shutdown.
+
+        The app composition calls this once on the owner thread before remote
+        control starts. Retiring the window also disconnects this app signal.
+        """
+        if self._shutdown_application is not None or self._control_disposed:
+            raise RuntimeError("window shutdown projection is already bound or retired")
+        self._shutdown_application = application
+        application.aboutToQuit.connect(self.dispose_control_watches)
+
+    def dispose_control_watches(self) -> None:
+        """Idempotently retire authority projections before owner-thread teardown.
+
+        This only releases view watches; it does not cancel domain operations.
+        """
+        if self._control_disposed:
+            return
+        self._control_disposed = True
+        dispose_owned_control_watches(self)
+        for tab in self._tab_widgets.values():
+            tab.dispose_control_watches()
+        self._control_indicator.dispose_control_watch()
+        self._dispose_control()
+        if self._shutdown_application is not None:
+            self._shutdown_application.aboutToQuit.disconnect(
+                self.dispose_control_watches
+            )
+            self._shutdown_application = None
+
+    def deleteLater(self) -> None:
+        """Retire control watches before scheduling direct Python-owner deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def _refresh_control(self, status: ControlStatus) -> None:
         writable = status.holder == "gui"
@@ -482,14 +527,11 @@ class MainWindow(QMainWindow):
         widget = frontend_factory(self._ctrl)
         if not isinstance(widget, InteractiveFrontend):
             raise TypeError("interactive frontend must be an InteractiveFrontend")
-        watch_control(
-            widget,
-            self._ctrl.control_identity,
-            lambda status: widget.set_read_only(read_only=status.holder != "gui"),
-        )
+        widget.bind_control(self._ctrl.control_identity)
         try:
             tab_w.mount_interactive_widget(widget)
         except Exception:
+            widget.dispose_control_watch()
             widget.teardown()
             widget.deleteLater()
             raise
@@ -520,6 +562,7 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         for widget in tab_w.findChildren(InteractiveFrontend):
+            widget.dispose_control_watch()
             widget.teardown()
         tab_w.unmount_interactive_widgets(InteractiveFrontend)
         if restore_result:
@@ -1159,6 +1202,7 @@ class MainWindow(QMainWindow):
         the Controller's shutdown coordinator. Shared by closeEvent (user) and
         request_shutdown (RPC)."""
         self._closing = True
+        self.dispose_control_watches()
         # A nested Load exec/chooser may still be running during RPC shutdown.
         # Finish it and retire its watches before deleting the window's children.
         for dialog in self.findChildren(RunLoadDialog):

@@ -19,7 +19,10 @@ from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.widgets.remote_edit_gate import bind_control_enabled
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    bind_control_enabled,
+    dispose_control_watches,
+)
 
 
 class AliasDialog(QDialog):
@@ -90,7 +93,20 @@ class AliasDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         for content in (self._table, add, remove, apply_button):
-            bind_control_enabled(content, control_identity)
+            bind_control_enabled(content, control_identity, retirement_dialog=self)
+
+    def dispose_control_watches(self) -> None:
+        """Retire owned authority projections before final view destruction.
+
+        Hiding a persistent dialog is not retirement. Call on the owner thread
+        before its parent shuts down or schedules the view's Qt deletion.
+        """
+        dispose_control_watches(self)
+
+    def deleteLater(self) -> None:
+        """Release authority watches before direct owner-thread Qt deletion."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def _append_row(self, row: AliasRow) -> None:
         index = self._table.rowCount()
