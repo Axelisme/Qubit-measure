@@ -102,7 +102,7 @@ def test_terminal_export_roundtrip_overwrite_new_labber_and_ledger(
         assert [item.status for item in report.outputs] == ["saved", "saved"]
         native = load_run_data(paths.data_root / "merged.h5")
         labber = load_grouped_labber_data(
-            str(report.outputs[1].output.path),
+            str(report.outputs[1].path),
             required_variables=("signal", "time", "t1"),
         )
         for name in map(DataVariable, ("signal", "time", "t1")):
@@ -125,20 +125,20 @@ def test_terminal_export_roundtrip_overwrite_new_labber_and_ledger(
         )
         assert native.payload.variables["signal"].z.shape == (4, 3)
     assert (
-        reports[0].outputs[0].output.path
-        == reports[1].outputs[0].output.path
+        reports[0].outputs[0].path
+        == reports[1].outputs[0].path
         == paths.data_root / "merged.h5"
     )
-    assert reports[0].outputs[1].output.path != reports[1].outputs[1].output.path
-    assert "Labber/2026/10/Data_1006" in str(reports[0].outputs[1].output.path)
+    assert reports[0].outputs[1].path != reports[1].outputs[1].path
+    assert "Labber/2026/10/Data_1006" in str(reports[0].outputs[1].path)
     events = ledger.events()
     assert len(events) == 2
     for event, report in zip(events, reports, strict=True):
         assert event.kind == "saved" and event.origin == "gui"
         assert isinstance(event.payload, SavedPayload)
-        assert event.payload.labber_path == str(report.outputs[1].output.path)
+        assert event.payload.labber_path == str(report.outputs[1].path)
         assert [out.path for out in event.payload.outputs] == [
-            str(out.output.path) for out in report.outputs
+            str(out.path) for out in report.outputs
         ]
     assert engine.records(RUN_ID) == canonical
     assert engine.status() is not None and engine.status().lifecycle == terminal
@@ -192,10 +192,10 @@ def test_output_and_ledger_failures_retain_independent_successes(
     for out in report.outputs:
         if out.status == "saved":
             assert out.error is None
-            if out.output.format == "data_h5":
-                assert load_run_data(out.output.path).metadata.finished_at is None
+            if out.format == "data_h5":
+                assert load_run_data(out.path).metadata.finished_at is None
             else:
-                assert load_grouped_labber_data(str(out.output.path)).variables[
+                assert load_grouped_labber_data(str(out.path)).variables[
                     "signal"
                 ].z.shape == (4, 3)
         else:
@@ -250,3 +250,57 @@ def test_export_admission_rejects_before_writes(
     assert not (paths.data_root / "merged.h5").exists()
     assert not (tmp_path / "database").exists()
     assert ledger.events() == ()
+
+
+def test_labber_allocation_failure_keeps_native_and_full_ledger_record(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    engine, plan, identity, paths = synthetic_run(inputs, tmp_path)
+    engine.execute(RUN_ID)
+    snapshot = framework.FluxdepExportSnapshot(
+        identity, paths, plan.snapshot, SAVED_AT, None
+    )
+    records_dir = tmp_path / "records"
+    records_dir.mkdir()
+    ledger = RecordsLedger(records_dir, entry_id=str(plan.snapshot.entry_id))
+    database = tmp_path / "database"
+    database.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (database / "Labber").symlink_to(outside, target_is_directory=True)
+    layout = SaveLayout(
+        result_path=tmp_path / "result",
+        database_path=database,
+        run_id=RUN_ID,
+        point=plan.snapshot.point,
+        saved_at=SAVED_AT,
+    )
+    report = host.export_fluxdep_run(
+        RUN_ID,
+        engine=engine,
+        snapshot=snapshot,
+        prepare=partial(
+            science.prepare_t1_fluxdep_export, plan=plan, data_root=paths.data_root
+        ),
+        layout=layout,
+        ledger=ledger,
+        origin="gui",
+        saved_at=SAVED_AT,
+    )
+    assert report.outputs[0].status == "saved"
+    assert report.outputs[0].path == paths.data_root / "merged.h5"
+    assert load_run_data(report.outputs[0].path).payload.variables[
+        DataVariable("signal")
+    ].z.shape == (4, 3)
+    assert report.outputs[1].path is None
+    assert report.outputs[1].status == "failed" and report.outputs[1].error
+    assert report.ledger_error is None
+    event = ledger.events()[0]
+    assert isinstance(event.payload, SavedPayload)
+    assert len(event.payload.outputs) == 1
+    assert event.payload.outputs[0].path == str(report.outputs[0].path)
+    entry = ledger.get(event.id)
+    assert entry.record is not None
+    assert entry.record["outputs"][1]["path"] is None
+    assert entry.record["outputs"][1]["error"] == report.outputs[1].error
+    assert list(outside.iterdir()) == []
