@@ -146,7 +146,7 @@ class BathLengthAdapter(
         self,
         req: WritebackRequest[BathLengthRunResult, BathLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        # D5: no scalar is fitted, so nothing is proposed back to the parameter context.
+        # No scalar is fitted, so nothing is proposed back to the parameter context.
         # Gated per-experiment 'reset_bath' / 'reset_bath_e' proposals: emitted when
         # md carries the calibrated cavity freq/gain and the matching pi/2 phase.
         items: list[WritebackItem] = []

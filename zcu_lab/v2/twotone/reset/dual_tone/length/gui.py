@@ -153,7 +153,7 @@ class DualToneLengthAdapter(
         self,
         req: WritebackRequest[DualToneLengthRunResult, DualToneLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        # D5: no scalar is fitted, so nothing is proposed back to the parameter context.
+        # No scalar is fitted, so nothing is proposed back to the parameter context.
         # Gated per-experiment 'reset_120' proposal: when md carries the calibrated
         # freqs + gains, register the calibrated two-pulse reset built from this
         # run's tested_reset template (md overwrites those fields).

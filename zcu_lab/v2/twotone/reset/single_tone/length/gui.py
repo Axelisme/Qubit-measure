@@ -145,7 +145,7 @@ class SingleToneLengthAdapter(
         self,
         req: WritebackRequest[SingleToneLengthRunResult, SingleToneLengthAnalyzeResult],
     ) -> Sequence[WritebackItem]:
-        # D5: no scalar is fitted, so nothing is proposed back to the parameter context.
+        # No scalar is fitted, so nothing is proposed back to the parameter context.
         # Gated per-experiment 'reset_10' proposal: when md carries the calibrated
         # sideband freq, register the calibrated single-pulse reset built from this
         # run's tested_reset template (md overwrites its freq).
