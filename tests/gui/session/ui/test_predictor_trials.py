@@ -186,20 +186,21 @@ def test_dialog_cache_restores_partial_trial_without_changing_component(
     context = component_context
     query = PredictorService(context, components.params_for)
     before = context.read_context().document()
-    kwargs = dict(cache_parameters=True, cache_dir=tmp_path / "cache")
     dialog = PredictorDialog(
-        PredictorControlFacet(query), parameter_provider=context.read_context, **kwargs
+        PredictorControlFacet(query), parameter_provider=context.read_context
     )
     try:
+        dialog.enable_parameter_cache(cache_dir=tmp_path / "cache")
         dialog.load_component()
         dialog.set_parameters(replace(dialog.parameters(), flux_bias=0.012))
         saved = dialog.parameters()
     finally:
         dialog.close()
     reopened = PredictorDialog(
-        PredictorControlFacet(query), parameter_provider=context.read_context, **kwargs
+        PredictorControlFacet(query), parameter_provider=context.read_context
     )
     try:
+        reopened.enable_parameter_cache(cache_dir=tmp_path / "cache")
         assert reopened.parameters() == saved
         assert reopened.parameters().missing() == ("EL",)
         assert context.read_context().document() == before
