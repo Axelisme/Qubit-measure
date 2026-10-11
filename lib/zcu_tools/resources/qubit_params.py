@@ -9,9 +9,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Self
-
-from .syncfile import SyncFile
 
 PARAMS_SCHEMA_VERSION = 1
 UNKNOWN_PROJECT_NAME = "unknown"
@@ -603,19 +602,28 @@ def _project_from_result_path(
     return ParamsProject(UNKNOWN_PROJECT_NAME, UNKNOWN_PROJECT_NAME)
 
 
-class QubitParams(SyncFile):
+class QubitParams:
     """Typed owner of one result-scope ``params.json`` file.
 
     Known sections are exposed through typed methods; unknown sections are
     preserved during typed writes so future sections can coexist with current
-    callers.  The raw helpers exist for transitional legacy wrappers only.
+    callers. The raw helpers exist for transitional legacy wrappers only.
+
+    A path binds the owner to a JSON file, refreshed before public reads and
+    writes. Writes serialize fully before atomically replacing that file.
+    With no path, operations use memory only. Readonly owners reject writes
+    with RuntimeError before reading or changing data. See qubit_params.md
+    for method prerequisites and error classifications.
     """
 
     def __init__(
         self, params_path: str | Path | None = None, readonly: bool = False
     ) -> None:
         self._data: dict[str, Any] = {}
-        super().__init__(params_path, readonly=readonly)
+        self._path = Path(params_path) if params_path is not None else None
+        self._readonly = readonly
+        if self._path is not None and self._path.exists():
+            self._load(str(self._path))
 
     @classmethod
     def for_result_dir(cls, result_dir: str | Path, *, readonly: bool = False) -> Self:
@@ -638,45 +646,59 @@ class QubitParams(SyncFile):
         self._data.clear()
         self._data.update(loaded)
 
-    def _dump(self, path: str) -> None:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, ensure_ascii=False, indent=4)
-            f.write("\n")
+    def _refresh_existing(self) -> None:
+        if self._path is not None:
+            if not self._path.exists():
+                raise FileNotFoundError(f"params.json not found at {self._path!s}")
+            self._load(str(self._path))
 
-    def _sync_existing(self) -> None:
-        if self._path is not None and not self._path.exists():
-            raise FileNotFoundError(f"params.json not found at {self._path!s}")
-        self.sync()
-
-    def _sync_before_write(self, *, require_existing: bool) -> None:
-        self.require_writable()
+    def _refresh_before_write(self, *, require_existing: bool) -> None:
+        if self._readonly:
+            raise RuntimeError(f"{self.__class__.__name__} is read-only")
         if require_existing:
-            self._sync_existing()
-        elif self._path is None or self._path.exists():
-            self.sync()
+            self._refresh_existing()
+        elif self._path is not None and self._path.exists():
+            self._load(str(self._path))
 
     def _store(self) -> None:
-        self._dirty = True
-        self.sync()
+        if self._path is None:
+            return
+        content = json.dumps(self._data, ensure_ascii=False, indent=4) + "\n"
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        temporary: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self._path.parent,
+                prefix=f".{self._path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+            temporary.replace(self._path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def to_raw(self) -> dict[str, Any]:
-        self._sync_existing()
+        self._refresh_existing()
         return deepcopy(self._data)
 
     def replace_raw(self, raw: Mapping[str, Any]) -> None:
-        self._sync_before_write(require_existing=False)
+        self._refresh_before_write(require_existing=False)
         self._data.clear()
         self._data.update(deepcopy(dict(raw)))
         self._store()
 
     def update_raw(self, update: Mapping[str, Any]) -> None:
-        self._sync_before_write(require_existing=True)
+        self._refresh_before_write(require_existing=True)
         self._data.update(deepcopy(dict(update)))
         self._store()
 
     def get_project(self) -> ParamsProject | None:
-        self._sync_existing()
+        self._refresh_existing()
         return _project_from_raw(self._data)
 
     def require_project(self) -> ParamsProject:
@@ -689,14 +711,14 @@ class QubitParams(SyncFile):
         return project
 
     def ensure_project(self, project: ParamsProject) -> None:
-        self._sync_before_write(require_existing=False)
+        self._refresh_before_write(require_existing=False)
         self._data["schema_version"] = PARAMS_SCHEMA_VERSION
         self._data["project"] = project.to_json_project()
         self._data["name"] = project.name
         self._store()
 
     def migrate_project_from_path(self, *, result_root: str | Path) -> ParamsProject:
-        self._sync_existing()
+        self._refresh_before_write(require_existing=True)
         project = _canonical_project_from_raw(self._data)
         if project is None:
             if self._path is None:
@@ -709,7 +731,7 @@ class QubitParams(SyncFile):
         return project
 
     def get_fluxdep_fit(self) -> FluxDepFit | None:
-        self._sync_existing()
+        self._refresh_existing()
         raw = self._data.get("fluxdep_fit")
         if raw is None:
             return None
@@ -725,25 +747,25 @@ class QubitParams(SyncFile):
         return fit
 
     def set_fluxdep_fit(self, fit: FluxDepFit) -> None:
-        self._sync_before_write(require_existing=False)
+        self._refresh_before_write(require_existing=False)
         self._data["fluxdep_fit"] = _with_current_timestamp(fit.to_json_section())
         self._store()
 
     def get_dispersive_fit(self) -> DispersiveFit | None:
-        self._sync_existing()
+        self._refresh_existing()
         raw = self._data.get("dispersive")
         if raw is None:
             return None
         return self._parse_dispersive_fit(raw)
 
     def set_dispersive_fit(self, fit: DispersiveFit) -> None:
-        self._sync_before_write(require_existing=True)
+        self._refresh_before_write(require_existing=True)
         self.require_fluxdep_fit()
         self._data["dispersive"] = _with_current_timestamp(fit.to_json_section())
         self._store()
 
     def get_t1_curve_fit(self) -> T1CurveFit | None:
-        self._sync_existing()
+        self._refresh_existing()
         raw = self._data.get("t1_curve_fit")
         if raw is None:
             return None
@@ -759,7 +781,7 @@ class QubitParams(SyncFile):
         return fit
 
     def set_t1_curve_fit(self, fit: T1CurveFit) -> None:
-        self._sync_before_write(require_existing=True)
+        self._refresh_before_write(require_existing=True)
         self.require_fluxdep_fit()
         self._data["t1_curve_fit"] = _with_current_timestamp(fit.to_json_section())
         self._store()
