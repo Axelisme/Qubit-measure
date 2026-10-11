@@ -365,10 +365,13 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
             == "finished"
         ),
     )
+    snapshot = ui.rpc("device.snapshot", name="bias")
+    assert snapshot["ok"], snapshot
+    cfg = snapshot["result"]["snapshot"]["info"]
     setup = ui.rpc(
-        "device.setup", name="bias", updates={"value": 10.0, "rampstep": 0.0001}
+        "device.setup", name="bias", cfg={**cfg, "value": 10.0, "rampstep": 0.0001}
     )
-    assert setup["ok"]
+    assert setup["ok"], setup
     ui.window.open_dialog(DialogName.DEVICE)
     dialog = ui.window.findChild(DeviceDialog)
     assert dialog is not None
@@ -382,7 +385,7 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
     assert ui.controller.control_identity.status().holder == "gui"
     assert ui.controller.control_identity.status().locked
     assert (
-        ui.rpc("device.setup", name="bias", updates={"value": 0.0})["error"]["reason"]
+        ui.rpc("device.setup", name="bias", cfg={**cfg, "value": 0.0})["error"]["reason"]
         == "not_holder"
     )
     wait_until(
