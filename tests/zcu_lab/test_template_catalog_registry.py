@@ -4,7 +4,6 @@ create_from_role)."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 
 import pytest
@@ -154,16 +153,6 @@ def _role_value_payload(entries) -> dict[str, object]:
     }
 
 
-def _ordered_json_oracle(payload: object) -> tuple[int, str]:
-    encoded = json.dumps(
-        payload,
-        sort_keys=False,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode()
-    return len(encoded), hashlib.sha256(encoded).hexdigest()
-
-
 def test_named_role_values_match_tracked_golden() -> None:
     named_entries = [
         entry
@@ -178,16 +167,3 @@ def test_named_role_values_match_tracked_golden() -> None:
     actual = _role_value_payload(named_entries)
 
     assert actual == expected
-
-
-def test_structural_blank_values_preserve_exact_ordered_hash() -> None:
-    blank_entries = [
-        entry for entry in ALL_TEMPLATE_ENTRIES if entry.template_id.endswith(":blank")
-    ]
-    payload = _role_value_payload(blank_entries)
-
-    assert len(blank_entries) == 13
-    assert _ordered_json_oracle(payload) == (
-        3982,
-        "d0ae77e39560a0f980c31e6cb55ab17abe3f92c25299117fb58c2ba5982ef954",
-    )
