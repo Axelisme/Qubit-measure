@@ -247,8 +247,8 @@ def test_window_services_run_and_progress_share_session(
         assert stop_button is not None
         stop_button.click()
         status = window.controller.status()
-        assert status is not None and status.lifecycle == "cancelled"
-        assert harness.handles.known_outcome(token) is not None
+        assert status is not None and status.lifecycle == "stopped"
+        assert harness.handles.known_outcome(token) == OperationOutcome("cancelled")
         assert harness.services.progress.bars_for_operation(token) == ()
         assert not harness.gate.snapshot()
         assert window.close()
