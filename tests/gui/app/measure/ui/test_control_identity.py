@@ -55,6 +55,7 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
+    PointUseRequest,
 )
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
@@ -834,4 +835,81 @@ def test_remote_gates_open_template_content_but_keeps_cancel(control_ui):
     button(create, "Cancel").click()
     assert not create.isVisible()
     assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+    assert inspect.close()
+
+
+@pytest.mark.parametrize("opening", ["existing", "new"])
+def test_load_dialog_remote_content_keeps_cancel(control_ui, qapp, opening):
+    ui = control_ui
+    if opening == "new":
+        ui.connect()
+
+    def cancel(dialog: RunLoadDialog) -> None:
+        if opening == "existing":
+            ui.connect()
+        assert dialog.isEnabled() and dialog.isModal()
+        assert all(not field.isEnabled() for field in dialog.findChildren(QLineEdit))
+        assert not button(dialog, "File…").isEnabled()
+        assert not button(dialog, "Load selected").isEnabled()
+        assert button(dialog, "Cancel").isEnabled()
+        button(dialog, "Cancel").click()
+
+    modal_action(
+        qapp,
+        lambda: ui.window.load_tab_data_dialog(ui.tab_id),
+        [(RunLoadDialog, cancel)],
+    )
+    assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+
+
+def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, qapp):
+    ui = control_ui
+    original = ui.controller.context_control.read_context()
+    ui.controller.context_control.set_waveform(
+        original.target,
+        "Q1.waveforms.pulse",
+        waveform_spec_from_raw({"style": "const", "length": 1.0}),
+    )
+    ui.window.open_dialog(DialogName.INSPECT)
+    inspect = ui.window.findChild(InspectDialog)
+    assert inspect is not None
+    tree = next(
+        t
+        for t in inspect.findChildren(QTreeWidget)
+        if t.objectName() != "component_tree"
+    )
+    group = tree.topLevelItem(0)
+    assert group is not None
+    tree.setCurrentItem(group.child(0))
+    failures: list[str] = []
+
+    def dismiss_failure() -> None:
+        prompt = qapp.activeModalWidget()
+        if isinstance(prompt, QMessageBox) and prompt.windowTitle() == "Delete failed":
+            failures.append(prompt.text())
+            prompt.accept()
+
+    def choose(prompt: QMessageBox) -> None:
+        ui.controller.setup_control.new_point(
+            PointCreateRequest("other", "", CommandOrigin("gui"))
+        )
+        other = ui.controller.context_control.read_context()
+        ui.controller.context_control.set_waveform(
+            other.target,
+            "Q1.waveforms.pulse",
+            waveform_spec_from_raw({"style": "const", "length": 2.0}),
+        )
+        QTimer.singleShot(0, dismiss_failure)
+        selected = prompt.button(QMessageBox.StandardButton.Yes)
+        assert selected is not None
+        selected.click()
+
+    modal_action(
+        qapp, lambda: button(inspect, "Delete").click(), [(QMessageBox, choose)]
+    )
+    assert failures == []
+    assert ui.controller.has_ml_entry("waveform", "Q1.waveforms.pulse")
+    assert ui.controller.get_session_env().active_label == "other"
+    ui.controller.context_control.use_point(PointUseRequest("point"))
+    assert not ui.controller.has_ml_entry("waveform", "Q1.waveforms.pulse")
     assert inspect.close()
