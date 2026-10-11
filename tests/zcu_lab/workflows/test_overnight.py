@@ -8,7 +8,7 @@ import pytest
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
-from zcu_tools.experiment.workflows import Engine, EnginePorts, RunIdentity, RunPaths
+from zcu_tools.experiment.workflows import CommittedRecord, Engine, EnginePorts, RunIdentity, RunPaths
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -75,22 +75,30 @@ def test_overnight_commits_fixed_native_pairs_and_round_progress(
             assert data["t2_us"] == pytest.approx(10.0, abs=2.0)
             assert data["t1_reason"] is None and data["t2_reason"] is None
             assert len(record.run_files) == 2
-            root = paths.data_root / record.iteration_dir
-            t1 = load_run_with_metadata(root / record.run_files[0], spec=T1Exp().persistence_spec())
-            t2 = load_run_with_metadata(root / record.run_files[1], spec=T2EchoExp().persistence_spec())
-            assert "run_t1" in record.run_files[0]
-            assert "run_t2echo" in record.run_files[1]
-            assert t1.metadata.device_snapshot is not None
-            assert t2.metadata.device_snapshot == t1.metadata.device_snapshot
-            assert t1.metadata.snapshot == plan.snapshot
-            assert t2.metadata.snapshot == plan.snapshot
-            assert t1.record.cfg.reps == t2.record.cfg.reps == tun.reps
-            assert t1.record.cfg.rounds == t2.record.cfg.rounds == tun.rounds
-            assert t1.record.cfg.sweep.length.stop == 80.0
-            assert t2.record.cfg.sweep.length.stop == 40.0
+            assert_native_pair(paths, record, plan, tun)
         journal = [json.loads(line) for line in (paths.metadata_root / "journal.jsonl").read_text().splitlines()]
         commits = [event for event in journal if event["kind"] == "step_committed"]
         assert len(commits) == 3
         assert [event["run_files"] for event in commits] == [list(record.run_files) for record in records]
     finally:
         driver.close()
+
+
+def assert_native_pair(
+    paths: RunPaths, record: CommittedRecord, plan: workflows.OvernightPlan,
+    tun: workflows.OvernightTunables,
+) -> None:
+    """Read both native members and verify fixed cfg and acquisition metadata."""
+    root = paths.data_root / record.iteration_dir
+    t1, t1_metadata = load_run_with_metadata(root / record.run_files[0], spec=T1Exp().persistence_spec())
+    t2, t2_metadata = load_run_with_metadata(root / record.run_files[1], spec=T2EchoExp().persistence_spec())
+    assert "run_t1" in record.run_files[0]
+    assert "run_t2echo" in record.run_files[1]
+    assert t1_metadata.device_snapshot is not None
+    assert t2_metadata.device_snapshot == t1_metadata.device_snapshot
+    assert t1_metadata.snapshot == plan.snapshot
+    assert t2_metadata.snapshot == plan.snapshot
+    assert t1.cfg.reps == t2.cfg.reps == tun.reps
+    assert t1.cfg.rounds == t2.cfg.rounds == tun.rounds
+    assert t1.cfg.sweep.length.stop == 80.0
+    assert t2.cfg.sweep.length.stop == 40.0
