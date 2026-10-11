@@ -55,6 +55,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from zcu_lab import ALIAS_PRESET
 from zcu_lab.definitions import register_all
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
@@ -173,6 +174,7 @@ class Fixture:
         self.bus = EventBus()
         fixture_root = str(_context_root()) if project_root is None else project_root
         self.ctrl = Controller(
+            alias_preset=ALIAS_PRESET,
             state=self.state,
             registry=self.registry,
             view=self.view,

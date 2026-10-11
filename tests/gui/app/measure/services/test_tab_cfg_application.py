@@ -58,6 +58,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui.app.measure.remote._helpers import Fixture
+from zcu_lab import ALIAS_PRESET
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
@@ -346,6 +347,7 @@ def global_sources(
     registry.register("global-source", GlobalSourceAdapter)
     try:
         services = build_app_services(
+            alias_preset=ALIAS_PRESET,
             state=state,
             bus=EventBus(),
             registry=registry,

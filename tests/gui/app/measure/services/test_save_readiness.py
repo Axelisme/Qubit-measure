@@ -23,6 +23,7 @@ from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     native_save_session,
 )
+from zcu_lab import ALIAS_PRESET
 
 
 def _make_service(
@@ -103,6 +104,7 @@ def test_assembled_save_driving_entry_observes_shared_catalog_access(
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         services = build_app_services(
+            alias_preset=ALIAS_PRESET,
             state=session.state,
             bus=session.bus,
             registry=Registry(),

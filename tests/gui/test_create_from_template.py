@@ -33,6 +33,7 @@ from zcu_tools.gui.session.events import MlChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import component_registry
 
+from zcu_lab import ALIAS_PRESET
 from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.templates import register_all_templates
 
@@ -47,6 +48,7 @@ def _make_ctrl(
         catalog = TemplateCatalog()
         register_all_templates(catalog)
     ctrl = Controller(
+        alias_preset=ALIAS_PRESET,
         state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry=Registry(),
         view=None,
@@ -228,6 +230,7 @@ def test_create_from_template_context_failure_calls_no_factory_or_write(qapp) ->
     writes: list[MlChangedPayload] = []
     bus.subscribe(MlChangedPayload, writes.append)
     ctrl = Controller(
+        alias_preset=ALIAS_PRESET,
         state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry=Registry(),
         view=None,
@@ -395,6 +398,7 @@ def test_empty_name_raises(qapp, tmp_path: Path):
 def test_no_catalog_wired_raises(qapp):
     ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
     ctrl = Controller(
+        alias_preset=ALIAS_PRESET,
         state=State(ctx),
         registry=Registry(),
         view=None,

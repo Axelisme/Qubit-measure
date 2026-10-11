@@ -23,6 +23,7 @@ from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
 from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure.remote._helpers import mcp_client
+from zcu_lab import ALIAS_PRESET
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,7 @@ def launched_measure_app(
     try:
         behavior = MeasureGuiBehavior(
             lambda: (Registry(), TemplateCatalog(), Loader()),
+            alias_preset=ALIAS_PRESET,
             clean=True,
             project_root=str(tmp_path),
         )
