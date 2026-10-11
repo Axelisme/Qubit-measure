@@ -16,8 +16,8 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - Experiment Data File 保存一個 Experiment Result。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow Run Result Artifact 保存跨 node／flux 的資料與 audit。autofluxdep 的 lifecycle／`RunStore` 擁有 run-scoped artifact；node 經 observer 與 store 提交結果，不直接管理 HDF5。它不是單一 Experiment Result。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
-- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。ModuleLibrary 使用同一類單檔交易；GUI／MCP 經 ContextService 的固定 ParameterContext 讀取與命令入口操作，不保留舊 metadata store。Ledger producer 由 acquisition、save 與 accept 的 owner 編排。
-- SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；`SampleTable` 只存 schema-free CSV。
+- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件。DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 擁有來源記錄與本條目 ledger 引用驗證。ModuleLibrary 使用同一類單檔交易。GUI／MCP 經 ContextService 的固定 ParameterContext 讀取與命令入口操作，不保留舊 metadata store。Ledger producer 由 acquisition、save 與 accept 的 owner 編排。
+- SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；`JsonlSampleTable` 只存 schema-free JSONL 樣本行。
 - Waveform asset 擁有播放 arrays、reference time axis 和 duration。Core waveform_format 驗證 samples 與編解碼 NPZ，只驗 recipe JSON 語法。Resources 管理 formula 語意、命名與實體 I/O。ModuleLibrary Spec 只保存 asset key。Native arb cfg 保存 key 與必填本機絕對 path，不另存播放長度或 provider。Program/sim 讀 path 的 samples，在完整 asset duration 取樣，不解讀 formula，也不查 global DB。
 
 ### Run 輸出位置與 writer 權責

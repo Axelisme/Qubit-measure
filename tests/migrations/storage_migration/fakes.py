@@ -18,7 +18,8 @@ from zcu_tools.datafile import (
     write_labber,
 )
 from zcu_tools.resources.entry import ComponentSchema
-from zcu_tools.resources.storage_migration import (
+
+from migrations.storage_migration import (
     LegacyRunEvidence,
     LegacySnapshotEvidence,
     MigrationRequest,

@@ -12,7 +12,8 @@ from zcu_tools.cfg_model import FlatTopWaveformCfg, PulseCfg, PulseReadoutCfg, P
 from zcu_tools.resources.document_store import YamlMap
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.views import FieldView
-from zcu_tools.resources.storage_migration import (
+
+from migrations.storage_migration import (
     MigrationInputError,
     MigrationManifest,
     MigrationMapping,
@@ -21,8 +22,7 @@ from zcu_tools.resources.storage_migration import (
     ModuleRule,
     migrate_storage,
 )
-
-from tests.resources.storage_migration.fakes import (
+from tests.migrations.storage_migration.fakes import (
     manifest_path,
     noop_validation,
     validate_cfg,
