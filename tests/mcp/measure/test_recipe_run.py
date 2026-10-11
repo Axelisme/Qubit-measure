@@ -189,9 +189,11 @@ def test_between_yield_cancel_suppresses_only_one_start_not_fast_edits(tmp_path)
         return False
 
     with recipe_client(tmp_path, gui) as client:
-        tab = RecipeSession(client.context, consume_cancel=consume_cancel).open_tab(
-            "lookback"
-        )
+        tab = RecipeSession(
+            client.context,
+            consume_cancel=consume_cancel,
+            summary_parameters=(SummaryParameter("rounds", "rounds"),),
+        ).open_tab("lookback")
         pending.set()
         tab.set("rounds", 8)
         assert pending.is_set()
@@ -232,7 +234,10 @@ def test_cancel_at_native_start_admission_does_not_send_run(tmp_path):
 def test_start_rejection_retains_the_attempted_cfg_without_retry(tmp_path):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
-        recipe = RecipeSession(client.context)
+        recipe = RecipeSession(
+            client.context,
+            summary_parameters=(SummaryParameter("rounds", "rounds"),),
+        )
         tab = recipe.open_tab("lookback")
         tab.set("rounds", 6)
         client.transport.replies["tab.run_start"] = {
