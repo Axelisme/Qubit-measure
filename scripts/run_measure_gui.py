@@ -105,8 +105,8 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
     from zcu_tools.gui.runtime import launch_gui_runtime
 
-    from zcu_lab.components import params_for
     from zcu_lab import ALIAS_PRESET
+    from zcu_lab.components import params_for
 
     return launch_gui_runtime(
         MeasureGuiBehavior,

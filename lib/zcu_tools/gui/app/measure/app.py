@@ -26,8 +26,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-    from zcu_tools.gui.session.services.predictor import ParamsFor
     from zcu_tools.gui.session.aliases import AliasRow
+    from zcu_tools.gui.session.services.predictor import ParamsFor
 
 RegistryFactory = Callable[
     [], tuple["Registry", "TemplateCatalog", "ExperimentCatalogLoader"]

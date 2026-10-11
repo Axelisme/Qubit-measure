@@ -114,7 +114,7 @@ def test_allxy_analysis_reports_fitted_errors(fit_ge: bool) -> None:
                 record,
                 AllXYAnalyzeParams(fit_ge=fit_ge),
                 parameters=None,
-                    ),
+            ),
             plots=plots,
         )
         assert answer.amplitude_error == pytest.approx(0.05 / (np.pi / 2), abs=0.003)
