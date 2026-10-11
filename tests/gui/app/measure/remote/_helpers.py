@@ -212,13 +212,12 @@ class Fixture:
         resources = cast(TabCfgResources, self.ctrl.cfg_resources)
         from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 
-        parameters = self.ctrl.read_context()
         cfg = resources.create(
             tab_id,
             lambda: schema,
             initial=schema,
             resolution=lambda: MeasureCfgBindings(self.ctrl).snapshot_from_state(
-                self.state, captured_values={}, parameters=parameters
+                self.state, captured_values={}, parameters=self.ctrl.read_context()
             ),
         )
         self.state.add_tab(
