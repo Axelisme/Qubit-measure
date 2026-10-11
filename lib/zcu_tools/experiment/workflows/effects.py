@@ -5,14 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from math import isfinite
 from pathlib import Path
 from re import fullmatch
 from typing import Protocol
 
-from .display import Live1D, Live2D, Live2DRow
+from ...device import BaseDeviceInfo
 from .models import Completed, Effect, Failed
-from .run import Run
+from .run import LiveUpdate, Run
 
 
 class EffectExecutor(Protocol):
@@ -34,8 +33,8 @@ class EffectExecutor(Protocol):
         """
         ...
 
-    def set_device(self, name: str, value: float) -> None:
-        """Set a connected device's absolute native value, or raise."""
+    def setup_device(self, name: str, cfg: BaseDeviceInfo) -> None:
+        """Apply complete connected-device settings, or raise."""
         ...
 
     def wait_until(self, target: datetime) -> None:
@@ -55,7 +54,7 @@ class RunEffect[Cfg, Result](Effect):
     experiment: Callable[[Run[Cfg]], Result]
     cfg: Cfg
     save: Callable[[Completed[Cfg, Result], Path], None]
-    live: Live1D | Live2D | Live2DRow | None
+    live: LiveUpdate | None
     name: str = field(init=False)
     outcome: Completed[Cfg, Result] | Failed | None = field(default=None, init=False)
 
@@ -76,23 +75,17 @@ class RunEffect[Cfg, Result](Effect):
 
 @dataclass
 class DeviceEffect(Effect):
-    """Internal absolute setpoint request; done is true after adapter return."""
+    """Internal full-settings request; done is true after adapter return."""
 
     name: str
-    value: float
+    cfg: BaseDeviceInfo
     done: bool = field(default=False, init=False)
 
-    def __post_init__(self) -> None:
-        if not self.name.strip() or not isfinite(self.value):
-            raise ValueError(
-                "Device setpoint requires a name and finite absolute value"
-            )
-
     def execute(self, executor: EffectExecutor) -> None:
-        """Apply name/value once; propagate cancellation and device errors."""
+        """Apply name/cfg once; propagate cancellation and device errors."""
         if self.done:
             raise RuntimeError("Device effect has already completed")
-        executor.set_device(self.name, self.value)
+        executor.setup_device(self.name, self.cfg)
         self.done = True
 
 

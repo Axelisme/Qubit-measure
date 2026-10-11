@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-09-27 — prediction owner
+**Last updated:** 2026-10-11 — named independent parameters
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -70,7 +70,11 @@ Prediction policy 由本模組擁有。GUI/session/notebook adapter 使用 engin
 - `FluxoniumPrediction.bind_flux_axis(fluxs)` — 建 `FluxoniumPredictionSession`,axis copy 由 engine 持有,cache key 只含 `(g, bare_rf, return_dim)`;controller 在 params/axis 變化時重建 session。
 - `predict_frequencies_mhz` / `predict_matrix_elements` — session predictor dialog 的批次曲線 helper,共用 engine affine 與一次 sweep 多 transition 的計算。
 
-### `predict.py` — `FluxoniumPredictor`
+### `predict.py` — `FluxoniumParams` 與 `FluxoniumPredictor`
+
+SQUID transmon 的 `TransmonParams` 與 `TransmonPredictor` 在 `simulate/transmon/`，共用 `simulate.predictor` 的中性 query 契約與 `FluxAffineMap`；`simulate.parameters` 列出前端可選的模型名稱。
+
+FluxoniumParams 是可未知的具名輸入。EJ／EC／EL 用 GHz，flux_half／flux_period／flux_bias 用 native device units。missing() 列缺項；build_predictor() 只接受完整且有效的輸入，每次建立独立 model，不寫來源。from_mapping() 解析具名數值，省略或 null 保持未知，拒絕未知欄位、bool、非數字及非有限值。to_dict() 回具名的 detached FluxoniumParameterValues，保留 None。Wire adapters 使用這兩個公開介面，不自行推斷參數內部形狀。
 
 應用層預測器,連接實驗電流/電壓值與理論模型。
 
@@ -80,7 +84,11 @@ Prediction policy 由本模組擁有。GUI/session/notebook adapter 使用 engin
 - `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。scalar/array 都委派到 `FluxoniumPrediction.predict_frequencies_mhz` 的批次路徑，不保留共享 mutable `Fluxonium` instance；reverse transition 仍回傳帶符號頻差。
 - `predict_matrix_element(cur_value, transition, operator="n"|"phi")` — 回傳 `|⟨i|O|j⟩|`。scalar/array 都委派到 `FluxoniumPrediction.predict_matrix_elements`；facade 仍只支援含 level 0,1 的 transition，level≥2 以 `ValueError` fast-fail，高 level 支援屬功能擴充另案。
 - `calculate_bias(cur_value, cur_freq, transition)` —
-  在 `[cur_value ± 0.25·flux_period]` 本地窗口中以 `scipy.root_scalar(method="secant")` 找使預測頻率吻合的點,然後枚舉 **週期 + 鏡像對稱** 的所有等價 bias,回傳 `|bias|` 最小者。root find 失敗或落在窗口外時會 `RuntimeWarning`，並用目前值作 fallback。
+  以自身的精確頻譜反解，回 `simulate.predictor.CalibrationResult(flux_bias, frequency_mhz, clamped)`。
+  枚舉所有根與週期／鏡像等價 bias，選 `|bias|` 最小者，不依目前 bias 選根。
+  不可達目標回全域最近的實際頻率，clamped=true，同距選最小 `|bias|`。
+  可達時 clamped=false。無效輸入拒絕，數值失敗傳遞，不警告後保留原值。
+  共享 solver 的分支掃描、極值細化與容差見 [transmon 數值政策](../transmon/README.md#calibration)。
 - `update_bias(flux_bias)` — 就地更新 bias。
 - `clone()` — 返回同參數的新實例(不共享 `Fluxonium` state)。
 

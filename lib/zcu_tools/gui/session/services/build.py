@@ -24,7 +24,7 @@ from zcu_tools.gui.session.progress_control import ProgressControlFacet
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
-from zcu_tools.gui.session.services.predictor import PredictorService
+from zcu_tools.gui.session.services.predictor import ParamsFor, PredictorService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.services.simulated_environment import (
     SimulatedEnvironmentCoordinator,
@@ -113,6 +113,7 @@ def build_session_services(
     driver_factory: DriverFactoryPort | None = None,
     device_registry: DeviceRegistryPort | None = None,
     alias_rows: tuple[AliasRow, ...] = (),
+    params_for: ParamsFor | None = None,
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
@@ -134,6 +135,8 @@ def build_session_services(
     are authoritative, including empty rows. Explicit Apply saves to the entry;
     ordinary set_alias_rows remains memory-only. Empty defaults enable no aliases.
     Syntax/order errors propagate at construction.
+    params_for is the user-owned read-only component-to-simulator parameter
+    conversion; None disables component prefill, not explicit-parameter queries.
     """
     value_registry = ValueRegistry()
     device = DeviceService(
@@ -147,8 +150,6 @@ def build_session_services(
         device_registry=device_registry,
     )
     soc_connection = SoCConnectionService(state, bus, gate, handles, runner)
-    predictor = PredictorService(state, bus)
-    predictor_control = PredictorControlFacet(bus=bus, predictor=predictor)
     progress_control = ProgressControlFacet(progress)
     context = ContextService(
         state,
@@ -158,6 +159,8 @@ def build_session_services(
         alias_rows=alias_rows,
     )
     context_control = ContextControlFacet(context=context)
+    predictor = PredictorService(context_control, params_for)
+    predictor_control = PredictorControlFacet(predictor)
     device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
     # ProjectSettingsService bridges the two session services it commands through
@@ -170,7 +173,7 @@ def build_session_services(
         database_root=Path(project_root) / "Database",
     )
     simulated_environment = SimulatedEnvironmentCoordinator(
-        bus, device, soc_connection, predictor, gate, handles
+        bus, device, soc_connection, gate, handles
     )
     setup_control = SetupControlFacet(
         bus=bus,

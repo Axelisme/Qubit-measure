@@ -12,6 +12,7 @@ from zcu_tools.simulate.fluxonium.dispersive import (
     calculate_dispersive_vs_flux_fast,
 )
 from zcu_tools.simulate.fluxonium.dressed import DressedLabelingError
+from zcu_tools.simulate.predictor import PredictorInputError
 
 PredictionBackend = Literal["fast", "scqubits"]
 MatrixOperator = Literal["n", "phi"]
@@ -32,7 +33,7 @@ class PredictionResolution:
             ("res_dim", self.res_dim),
         ):
             if value <= 0:
-                raise ValueError(f"{name} must be positive, got {value}")
+                raise PredictorInputError(f"{name} must be positive, got {value}")
 
 
 DEFAULT_PREDICTION_RESOLUTION = PredictionResolution()
@@ -48,7 +49,9 @@ class FluxAffineMap:
 
     def __post_init__(self) -> None:
         if self.flux_period == 0.0:
-            raise ValueError("flux_period must be non-zero (value<->flux affine)")
+            raise PredictorInputError(
+                "flux_period must be non-zero (value<->flux affine)"
+            )
 
     def value_to_flux(self, value: float) -> float:
         return (value + self.flux_bias - self.flux_half) / self.flux_period + 0.5
@@ -93,7 +96,7 @@ class FluxoniumPrediction:
         resolution: PredictionResolution = DEFAULT_PREDICTION_RESOLUTION,
     ) -> None:
         if len(params) != 3:
-            raise ValueError(f"params must be (EJ, EC, EL), got {params!r}")
+            raise PredictorInputError(f"params must be (EJ, EC, EL), got {params!r}")
         self.params: tuple[float, float, float] = (
             float(params[0]),
             float(params[1]),
@@ -147,7 +150,7 @@ class FluxoniumPrediction:
         return_dim: int = 2,
     ) -> DispersivePredictionResult:
         if return_dim <= 0:
-            raise ValueError(f"return_dim must be positive, got {return_dim}")
+            raise PredictorInputError(f"return_dim must be positive, got {return_dim}")
 
         flux_arr = np.asarray(fluxs, dtype=np.float64)
         res = self.resolution
@@ -193,7 +196,7 @@ class FluxoniumPrediction:
         """
         _validate_transitions(transitions)
         if cutoff <= 0:
-            raise ValueError(f"cutoff must be positive, got {cutoff}")
+            raise PredictorInputError(f"cutoff must be positive, got {cutoff}")
 
         from zcu_tools.simulate.fluxonium import energies as energies_mod
 
@@ -237,7 +240,7 @@ class FluxoniumPrediction:
                 self.params, fluxs, return_dim=return_dim
             )
         else:
-            raise ValueError(f"unsupported matrix operator: {operator!r}")
+            raise PredictorInputError(f"unsupported matrix operator: {operator!r}")
 
         rows: list[NDArray[np.float64]] = []
         for frm, to in transitions:
@@ -286,11 +289,13 @@ def _as_float_lines(
 
 def _validate_transitions(transitions: tuple[tuple[int, int], ...]) -> None:
     if len(transitions) == 0:
-        raise ValueError("transitions must not be empty")
+        raise PredictorInputError("transitions must not be empty")
     for frm, to in transitions:
         if frm < 0 or to < 0:
-            raise ValueError(f"Transition levels must be >= 0, got ({frm}, {to})")
+            raise PredictorInputError(
+                f"Transition levels must be >= 0, got ({frm}, {to})"
+            )
         if to < frm:
-            raise ValueError(
+            raise PredictorInputError(
                 f"Transition to-level must be >= from-level, got ({frm}, {to})"
             )

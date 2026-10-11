@@ -66,7 +66,9 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v111: injected generator recipes, captured questions and explicit answer/writeback.
 # v112: status projects the opened EntryInfo rather than chip/qubit identity.
 # v113: bounded partial device_setup over complete Info device.setup RPC.
-MCP_VERSION = 113
+# v114: integration revision above the base's device_setup release.
+# v115: read-only predictor inputs and readiness without an installed predictor.
+MCP_VERSION = 115
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.

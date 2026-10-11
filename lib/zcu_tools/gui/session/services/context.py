@@ -51,6 +51,7 @@ from zcu_tools.resources.entry import (
     validate_path_segment,
 )
 from zcu_tools.resources.entry.aliases import EntryAliases
+from zcu_tools.resources.entry.ledger_models import JsonObject, JsonValue
 from zcu_tools.resources.entry.roles import role_registry
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
@@ -60,6 +61,11 @@ from zcu_tools.resources.entry.schema import (
     SetupDocument,
 )
 from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point_storage
+from zcu_tools.resources.entry.writeback import (
+    WritebackEvidence,
+    WritebackItem,
+    apply_writeback,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformAssetInfo, WaveformSpec
@@ -81,6 +87,42 @@ if TYPE_CHECKING:
     )
     from zcu_tools.resources.entry.ledger import RecordsLedger
     from zcu_tools.resources.entry.provenance import Provenance
+
+
+class _ContextWritebackTarget:
+    """Bind the context's target setters to the shared ordered execution loop."""
+
+    def __init__(
+        self, context: ContextService, target: SavedPoint, entry: ResultEntry
+    ) -> None:
+        self._context = context
+        self._target = target
+        self._entry = entry
+        self.entry_id = entry.entry_id
+        self.ledger = entry.ledger
+        self.point = target.point
+
+    def set_parameter(self, path: str, value: JsonValue, source: Provenance) -> None:
+        self._context.set_parameter(self._target, path, value, source=source)
+
+    def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> None:
+        self._context.set_module(self._target, path, value, source=source)
+
+    def set_waveform(self, path: str, value: WaveformSpec, source: Provenance) -> None:
+        self._context.set_waveform(self._target, path, value, source=source)
+
+    def append_sample(
+        self,
+        component: str,
+        fields: JsonObject,
+        *,
+        run_id: str,
+        at: datetime,
+        source: str,
+    ) -> None:
+        self._entry.samples(component).append(
+            run_id=run_id, point=self.point, at=at, source=source, **fields
+        )
 
 
 class ContextService:
@@ -493,6 +535,58 @@ class ContextService:
             target=target,
             roles=roles,
             storage=capture_point_storage(point),
+        )
+
+    def read_sample(
+        self, target: ContextTarget, component: str, run_id: str
+    ) -> JsonObject | None:
+        """Read one run's latest entry JSONL sample without changing selection.
+
+        target validates the opened entry and existing selected-draft requirement;
+        sample history itself belongs to the entry, independent of point. The
+        sample owner returns a detached complete JSON row or None if absent.
+        Invalid component/run_id, corrupt history and I/O errors propagate. No
+        dataframe projection, context publication or refresh is performed here.
+        """
+        self._owner.assert_owner()
+        return self._require_write_target(target).samples(component).latest(run_id)
+
+    def apply_writeback(
+        self,
+        target: ContextTarget,
+        items: tuple[WritebackItem, ...],
+        *,
+        evidence: WritebackEvidence,
+    ) -> str:
+        """Accept nonempty ordered concrete writes at a fixed SavedPoint.
+
+        Validate the opened entry and target before append. EntryDraft raises
+        FailedPreconditionError(storage_unavailable), requiring the caller to
+        select or create a working point. No event or value is written for it.
+        SavedPoint labels and existence are checked by ResultEntry.use_point;
+        its ValueError/FileNotFoundError and other load errors propagate before
+        append. SavedPoint parameter/library setters commit files; samples append to
+        entry JSONL immediately with the captured point label.
+        Each successful item installs and publishes its actual content prefix,
+        even when a later item fails. Detached point writes never select it.
+        Return the accepted ID on success. WritebackApplyError exposes event_id,
+        applied and original cause for item failures; append errors propagate
+        unchanged. No point creation, draft save, retry or rollback occurs.
+        """
+        self._owner.assert_owner()
+        if not items:
+            raise ValueError("writeback items must be nonempty")
+        entry = self._require_write_target(target)
+        if not isinstance(target, SavedPoint):
+            raise FailedPreconditionError(
+                "Please select or create a working point before applying writeback",
+                reason_code="storage_unavailable",
+            )
+        entry.use_point(target.point)
+        return apply_writeback(
+            items,
+            target=_ContextWritebackTarget(self, target, entry),
+            evidence=evidence,
         )
 
     def set_parameter(

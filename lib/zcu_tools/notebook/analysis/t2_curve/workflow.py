@@ -27,6 +27,7 @@ from zcu_tools.resources.qubit_params import (
 )
 from zcu_tools.resources.sample_table import (
     DeviceValueUnit,
+    JsonlSampleTable,
     SampleFluxFrame,
     SampleFluxResolution,
     resolve_sample_flux,
@@ -63,11 +64,11 @@ ProbeStatistic = Literal["min", "median", "mean", "p90", "max", "half_flux"]
 DisplayFn = Callable[[object], None]
 
 _REQUIRED_COLUMNS = [
-    "Freq (MHz)",
-    "T1 (us)",
-    "T1err (us)",
-    "T2e (us)",
-    "T2e err (us)",
+    "freq_mhz",
+    "t1_us",
+    "t1_err_us",
+    "t2e_us",
+    "t2e_err_us",
 ]
 _DEFAULT_THERMAL_PROBE_N_TH = (0.0, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2)
 
@@ -78,7 +79,7 @@ class T2CurveAnalysisConfig:
     analysis_flux_range: tuple[float, float] = (0.49, 0.53)
     readout_kappa_over_2pi_mhz: float = 14.75412896809815
     image_dir: str | None = None
-    samples_filename: str = "samples.csv"
+    samples_filename: str = "samples.jsonl"
     default_bare_rf: float = 5.0
     t_flux_count: int = 1000
     fallback_frame_unit: DeviceValueUnit = "A"
@@ -337,11 +338,19 @@ class T2CurveAnalysisResult:
 def load_t2_curve_context(
     *,
     result_dir: str,
-    samples_filename: str = "samples.csv",
+    samples_filename: str = "samples.jsonl",
     image_dir: str | None = None,
     default_bare_rf: float = 5.0,
     preview_rows: int = 10,
 ) -> T2CurveContext:
+    """Load fluxdep/dispersive params and latest JSONL rows from result_dir.
+
+    samples_filename is relative to result_dir and defaults to samples.jsonl;
+    rows require freq_mhz, t1_us, t1_err_us, t2e_us and t2e_err_us. Create
+    image_dir (default result_dir/t2_curve) and return rows with a preview of
+    preview_rows rows. default_bare_rf is in GHz for dispersive input loading.
+    Missing params, invalid JSONL or missing required columns fail fast.
+    """
     resolved_image_dir = image_dir or os.path.join(result_dir, "t2_curve")
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(resolved_image_dir, exist_ok=True)
@@ -352,7 +361,7 @@ def load_t2_curve_context(
     if dispersive_fit is None:
         raise RuntimeError("params.json needs a dispersive section with g and bare_rf.")
 
-    samples_df = pd.read_csv(os.path.join(result_dir, samples_filename))
+    samples_df = JsonlSampleTable(os.path.join(result_dir, samples_filename)).read()
     _validate_required_columns(samples_df)
     params = fit_inputs.params
     params_table = pd.DataFrame(
@@ -400,18 +409,18 @@ def calibrate_t2_flux(
         samples_df,
         fallback_frame=fallback_frame,
     )
-    t2e_values = _float_column(samples_df, "T2e (us)")
+    t2e_values = _float_column(samples_df, "t2e_us")
     t2e_mask = np.isfinite(t2e_values)
     t2e_df = samples_df.loc[t2e_mask].copy()
-    if "T2r (us)" in samples_df.columns:
-        t2r_values = _float_column(samples_df, "T2r (us)")
+    if "t2r_us" in samples_df.columns:
+        t2r_values = _float_column(samples_df, "t2r_us")
         t2r_mask = np.isfinite(t2r_values)
         t2r_df = samples_df.loc[t2r_mask].copy()
     else:
         t2r_mask = np.zeros(len(samples_df), dtype=bool)
         t2r_df = samples_df.iloc[0:0].copy()
 
-    freq_mask = np.isfinite(_float_column(samples_df, "Freq (MHz)"))
+    freq_mask = np.isfinite(_float_column(samples_df, "freq_mhz"))
     freq_rows = samples_df.loc[freq_mask].copy()
     source_counts = {
         source: sum(1 for item in resolution.sources if item == source)
@@ -419,7 +428,7 @@ def calibrate_t2_flux(
     }
     summary_table = pd.DataFrame(
         [
-            ("samples.csv rows", str(len(samples_df))),
+            ("samples.jsonl rows", str(len(samples_df))),
             ("explicit flux rows", str(source_counts["explicit"])),
             ("row-frame flux rows", str(source_counts["row-frame"])),
             ("fallback-frame flux rows", str(source_counts["fallback-frame"])),
@@ -1348,7 +1357,7 @@ def _resolve_analysis_frame(
     resolution = calibration.resolution
     raw_fluxs = np.asarray(resolution.values[row_mask], dtype=np.float64)
     row_sources = tuple(resolution.sources[index] for index in np.flatnonzero(row_mask))
-    f01_observed = _float_column(samples_df, "Freq (MHz)")[row_mask]
+    f01_observed = _float_column(samples_df, "freq_mhz")[row_mask]
     f01_measured = np.isfinite(f01_observed)
     corrected_fluxs = np.asarray(raw_fluxs, dtype=np.float64).copy()
     applied = np.zeros(len(raw_fluxs), dtype=bool)
@@ -1409,7 +1418,7 @@ def _prepare_window_data(
     correct_flux_from_f01_enabled: bool = True,
 ) -> T2WindowData:
     samples_df = calibration.context.samples_df
-    t2e_values = _float_column(samples_df, "T2e (us)")
+    t2e_values = _float_column(samples_df, "t2e_us")
     valid_t2e = np.isfinite(t2e_values) & (t2e_values > 0.0)
     if not np.any(valid_t2e):
         raise ValueError("no finite positive T2e rows are available for analysis")
@@ -1425,7 +1434,7 @@ def _prepare_window_data(
     def take[T: np.generic](values_arr: NDArray[T]) -> NDArray[T]:
         return np.asarray(values_arr)[resolved.in_window][order]
 
-    f01_observed = _float_column(samples_df, "Freq (MHz)")[valid_t2e]
+    f01_observed = _float_column(samples_df, "freq_mhz")[valid_t2e]
     measured_taken = take(resolved.f01_measured)
     observed_taken = take(f01_observed)
     f01_used = np.where(
@@ -1447,10 +1456,10 @@ def _prepare_window_data(
         correction_skipped_reason=tuple(
             take(np.asarray(resolved.correction_skipped_reason, dtype=object)).tolist()
         ),
-        T2e_us=take(_float_column(samples_df, "T2e (us)")[valid_t2e]),
-        T2e_err_us=take(_float_column(samples_df, "T2e err (us)")[valid_t2e]),
-        T1_us=take(_float_column(samples_df, "T1 (us)")[valid_t2e]),
-        T1_err_us=take(_float_column(samples_df, "T1err (us)")[valid_t2e]),
+        T2e_us=take(_float_column(samples_df, "t2e_us")[valid_t2e]),
+        T2e_err_us=take(_float_column(samples_df, "t2e_err_us")[valid_t2e]),
+        T1_us=take(_float_column(samples_df, "t1_us")[valid_t2e]),
+        T1_err_us=take(_float_column(samples_df, "t1_err_us")[valid_t2e]),
         kept_rows=int(np.count_nonzero(resolved.in_window)),
         source_rows=int(np.count_nonzero(valid_t2e)),
     )
@@ -1545,7 +1554,7 @@ def _t2r_diagnostics(
         max_abs_flux_correction=max_abs_flux_correction,
         correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
     )
-    f01_observed = _float_column(samples_df, "Freq (MHz)")[row_mask]
+    f01_observed = _float_column(samples_df, "freq_mhz")[row_mask]
     f01_model = predict_f01_mhz(calibration.context.params, resolved.aligned_fluxs)
     return T2RowDiagnostics(
         sample_indexes=np.flatnonzero(row_mask).astype(np.int64),
@@ -1780,10 +1789,10 @@ def _half_preview_table(
     preview_columns = [
         column
         for column in [
-            "Freq (MHz)",
-            "T2r (us)",
-            "T2e (us)",
-            "T2e err (us)",
+            "freq_mhz",
+            "t2r_us",
+            "t2e_us",
+            "t2e_err_us",
         ]
         if column in frame.columns
     ]

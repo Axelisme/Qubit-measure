@@ -10,6 +10,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     ModuleWriteback,
     ParameterWriteback,
+    SampleWriteback,
     WaveformWriteback,
     WritebackItem,
 )
@@ -53,7 +54,7 @@ def _writeback_wire_value(value: object) -> object:
         ) from exc
 
 
-def _writeback_item_wire(item) -> dict[str, object]:
+def _writeback_item_wire(item: WritebackItem) -> dict[str, object]:
     base: dict[str, object] = {
         "id": item.session_id,
         "target_name": item.target_name,
@@ -62,6 +63,9 @@ def _writeback_item_wire(item) -> dict[str, object]:
     }
     if isinstance(item, ParameterWriteback):
         base["kind"] = "parameter"
+        base["proposed_value"] = _writeback_wire_value(item.proposed_value)
+    elif isinstance(item, SampleWriteback):
+        base["kind"] = "sample"
         base["proposed_value"] = _writeback_wire_value(item.proposed_value)
     elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
         is_module = isinstance(item, ModuleWriteback)
@@ -126,6 +130,7 @@ def h_tab_writeback_preview(
     )
     return {
         "has_draft": pane.has_writeback_draft,
+        "unavailable_reasons": list(pane.unavailable_reasons),
         "items": [
             {
                 **_writeback_item_wire(item),

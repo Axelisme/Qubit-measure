@@ -11,7 +11,6 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
-    PredictorChangedPayload,
 )
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
@@ -57,34 +56,6 @@ def test_context_sources_read_live_context_values() -> None:
     bus.emit(ContextSwitchedPayload(binding_id=None, sources=None))
 
     assert registry.get_as("context.chip_name", str) == "chip2"
-
-
-def test_predictor_sources_follow_predictor_lifecycle() -> None:
-    state = _state()
-    registry, bus, _ = _binder(state)
-
-    assert registry.get_as("predictor.loaded", bool) is False
-    with pytest.raises(MissingValue):
-        registry.get_as("predictor.EJ", float)
-
-    predictor = MagicMock()
-    predictor.params = (4.0, 1.0, 0.5)
-    predictor.flux_half = 0.25
-    predictor.flux_period = 0.5
-    predictor.flux_bias = -0.01
-    state.set_context(dataclasses.replace(state.session_env, predictor=predictor))
-    bus.emit(PredictorChangedPayload())
-
-    assert registry.get_as("predictor.loaded", bool) is True
-    assert registry.get_as("predictor.EJ", float) == pytest.approx(4.0)
-    assert registry.get_as("predictor.flux_bias", float) == pytest.approx(-0.01)
-
-    state.set_context(dataclasses.replace(state.session_env, predictor=None))
-    bus.emit(PredictorChangedPayload())
-
-    assert registry.get_as("predictor.loaded", bool) is False
-    with pytest.raises(MissingValue):
-        registry.get_as("predictor.EJ", float)
 
 
 def test_device_sources_read_cached_state_without_polling() -> None:

@@ -18,8 +18,8 @@ if TYPE_CHECKING:
     from zcu_tools.datafile import RunMetadata
     from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.storage import PointStorageBinding
-    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 
 # ``SocProtocol``/``SocCfgProtocol`` + the ``SocHandle``/``SocCfgHandle`` aliases,
@@ -184,13 +184,11 @@ class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     run_result is the selected run data. analyze_params holds adapter-specific
     inputs. parameters is the Run/Load result's fixed source, or None for pure
     calculation.
-    predictor is the operation-start model, or None when no model is loaded.
     """
 
     run_result: T_Result
     analyze_params: T_AnalyzeParams
     parameters: ParameterContext | None
-    predictor: FluxoniumPredictor | None
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +225,8 @@ class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]
 
     run_result is the selected run data. analyze_result is the required primary
     analysis result. post_analyze_params are adapter-specific inputs. parameters is the Run/Load
-    result's fixed source, or None for pure calculation. predictor is the shared
-    operation-start model, or None when no model is loaded. Later tab bindings
+    result's fixed source, or None for pure calculation.
+    Later tab bindings
     and session edits do not replace these request inputs.
     """
 
@@ -236,7 +234,6 @@ class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]
     analyze_result: T_AnalyzeResult
     post_analyze_params: T_PostAnalyzeParams
     parameters: ParameterContext | None
-    predictor: FluxoniumPredictor | None
 
 
 @dataclass(frozen=True)
@@ -322,6 +319,20 @@ class ModuleWriteback(WritebackItem):
 class WaveformWriteback(WritebackItem):
     edit_schema: CfgSchema | None = None
     role_id: str | None = None
+
+
+@dataclass
+class SampleWriteback(WritebackItem):
+    """Propose producer-defined JSON fields for target_name, a concrete component.
+
+    Only adapters whose Run keeps the flux device fixed provide this proposal.
+    WritebackService adds dev_value/dev_unit from the Run's fixed $flux_dev and
+    device snapshot, replacing those fields if supplied here. Missing captured
+    device facts omit this item with a public reason. The sample can be selected
+    independently; it needs no cfg schema or editor session.
+    """
+
+    proposed_value: JsonObject
 
 
 @dataclass

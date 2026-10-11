@@ -3,20 +3,18 @@ from __future__ import annotations
 import copy
 import logging
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.cfg_model import (
-    ModuleSpec,
-    WaveformSpec,
     module_spec_from_raw,
     waveform_spec_from_raw,
 )
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
     ParameterWriteback,
+    SampleWriteback,
     WaveformWriteback,
     WritebackItem,
 )
@@ -26,14 +24,9 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import document_unit
-from zcu_tools.resources.entry.ledger import RecordsLedger
-from zcu_tools.resources.entry.ledger_models import (
-    AcceptedPayload,
-    AcceptedWrite,
-    LedgerEvent,
-)
-from zcu_tools.resources.entry.provenance import Provenance
+from zcu_tools.resources.entry import RoleResolutionError, document_unit
+from zcu_tools.resources.entry import writeback as concrete
+from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
 
 from .ports import CfgEdit, CfgEditorPort
 
@@ -49,10 +42,44 @@ _KIND_PREFIX = {
     ParameterWriteback: "param",
     ModuleWriteback: "ml",
     WaveformWriteback: "wf",
+    SampleWriteback: "sample",
 }
 
 # Sentinel for "argument not supplied" in set_item_field (None is a real value).
 _UNSET: Any = object()
+
+
+def _sample_fields(
+    fields: JsonObject,
+    parameters: ParameterContext | None,
+    device_snapshot: Mapping[str, JsonObject] | None,
+) -> JsonObject:
+    """Bind automatic GUI coordinates once, or explain why no sample is offered."""
+    if parameters is None:
+        raise FailedPreconditionError(
+            "Sample writeback requires a Run $flux_dev binding"
+        )
+    try:
+        device_name = parameters.value("$flux_dev")
+    except RoleResolutionError as exc:
+        raise FailedPreconditionError(
+            f"Sample writeback requires $flux_dev: {exc}"
+        ) from exc
+    if not isinstance(device_name, str) or not device_name:
+        raise FailedPreconditionError("Sample writeback requires a Run $flux_dev name")
+    if device_snapshot is None or device_name not in device_snapshot:
+        raise FailedPreconditionError(f"Run snapshot has no device {device_name!r}")
+    device = device_snapshot[device_name]
+    value, unit = device.get("value"), device.get("value_unit")
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise FailedPreconditionError(
+            f"Run device {device_name!r} has no numeric value"
+        )
+    if unit not in ("A", "V", "native"):
+        raise FailedPreconditionError(
+            f"Run device {device_name!r} has no usable value_unit"
+        )
+    return copy.deepcopy(fields) | {"dev_value": value, "dev_unit": unit}
 
 
 @dataclass(frozen=True)
@@ -67,16 +94,25 @@ class WritebackEdit:
 
 @dataclass(frozen=True)
 class WritebackWritten:
-    """Actual destination values around a successful context write."""
+    """Actual destination values around a successful context write.
+
+    id is the draft-local item ID. kind identifies parameter/module/waveform/sample.
+    target is a concrete point path, library key or sample component. before is
+    the latest stored value before application, or None when absent. after is the
+    value read after successful application. Sample values are complete JSONL
+    rows, including accepted metadata, not the producer-only proposal fields.
+    """
 
     id: str
-    kind: Literal["parameter", "module", "waveform"]
+    kind: Literal["parameter", "module", "waveform", "sample"]
     target: str
     before: object
     after: object
 
 
 def _destination_path(item: WritebackItem, parameters: ParameterContext) -> str:
+    if isinstance(item, SampleWriteback):
+        return item.target_name
     if isinstance(item, ParameterWriteback):
         return parameters.resolve_path(item.target_name)
     return parameters.library_key(item.target_name)
@@ -101,7 +137,7 @@ def _destination_value(
 class WritebackValues:
     """Complete preview facts for one item at its captured destination.
 
-    actual_path is the captured role-resolved parameter path or library key,
+    actual_path is the captured parameter path, library key or sample component,
     after any draft-local retarget edit. current is the latest stored value at
     that destination, or None if missing. proposed is the complete validated
     value, lowered against the creation capture for cfg items. unit is the
@@ -133,6 +169,15 @@ class _DraftEntry:
     applied: bool = False
 
 
+@dataclass(frozen=True)
+class _RunSource:
+    """Captured Run facts, independent of the editable destination/proposals."""
+
+    experiment_name: str
+    run_id: str | None
+    device_snapshot: Mapping[str, JsonObject] | None
+
+
 class WritebackDraft:
     """Opaque, service-owned writeback draft.
 
@@ -149,7 +194,8 @@ class WritebackDraft:
         "_entries",
         "_closed",
         "_parameters",
-        "_run_id",
+        "_run_source",
+        "_unavailable_reasons",
     )
 
     def __init__(
@@ -158,13 +204,16 @@ class WritebackDraft:
         identity: str,
         entries: list[_DraftEntry],
         parameters: ParameterContext | None,
-        run_id: str | None = None,
+        *,
+        run_source: _RunSource,
+        unavailable_reasons: tuple[str, ...],
     ) -> None:
+        self._run_source = copy.deepcopy(run_source)
+        self._unavailable_reasons = unavailable_reasons
         self._service = service
         self._identity = identity
         self._entries = entries
         self._parameters = parameters
-        self._run_id = run_id
         self._closed = False
 
     @property
@@ -177,13 +226,28 @@ class WritebackDraft:
         return self._parameters
 
     @property
+    def device_snapshot(self) -> Mapping[str, JsonObject] | None:
+        """Detached Run-time device settings, or None when not captured."""
+        return copy.deepcopy(self._run_source.device_snapshot)
+
+    @property
+    def unavailable_reasons(self) -> tuple[str, ...]:
+        """Reasons for omitted sample proposals, fixed when the draft was created."""
+        return self._unavailable_reasons
+
+    @property
+    def experiment_name(self) -> str:
+        """Experiment name fixed at creation, used as accepted provenance kind."""
+        return self._run_source.experiment_name
+
+    @property
     def run_id(self) -> str | None:
         """Historical RunMetadata identity fixed at creation, or None without it.
 
         Save does not change this value. It identifies a Run, not whether that
         Run has a saved file; native Load retains the file's original identity.
         """
-        return self._run_id
+        return self._run_source.run_id
 
     @property
     def items(self) -> tuple[WritebackItem, ...]:
@@ -255,11 +319,9 @@ class WritebackService:
         self,
         cfg_editor: CfgEditorPort,
         write_port: ContextControlPort,
-        entry_ledger: Callable[[str], RecordsLedger],
     ) -> None:
         self._cfg_editor = cfg_editor
         self._write = write_port
-        self._entry_ledger = entry_ledger
 
     # ------------------------------------------------------------------
     # Opaque draft lifecycle
@@ -270,7 +332,9 @@ class WritebackService:
         items: Iterable[WritebackItem],
         *,
         parameters: ParameterContext | None,
+        experiment_name: str,
         run_id: str | None = None,
+        device_snapshot: Mapping[str, JsonObject] | None = None,
     ) -> WritebackDraft:
         """Create a draft and all item-local cfg sessions transactionally.
 
@@ -284,16 +348,37 @@ class WritebackService:
         target for the draft lifetime. None is valid for an empty/context-free
         proposal, but nonempty application fails without a destination. Baseline
         display uses this capture; no live selection provider is retained.
+        experiment_name is the captured experiment name, never a frontend/event kind.
         run_id is the source RunMetadata.run_id, including unsaved Runs and
         historical native Loads; None means no native acquisition evidence.
         It stays fixed through Save, selection changes, edits and application.
         Application copies it into accepted evidence and destination provenance.
+        device_snapshot maps Run-fixed device names to their JSON settings; None
+        means no device evidence. Samples require run_id and a captured flux
+        binding with value/value_unit. Missing facts omit only those proposals
+        and appear in draft.unavailable_reasons. Sample fields are detached and
+        automatic device coordinates replace any producer-supplied coordinates.
         """
+        if not experiment_name.strip():
+            raise InvalidInputError("experiment_name must be nonempty")
         identity = uuid.uuid4().hex
         entries: list[_DraftEntry] = []
+        unavailable_reasons: list[str] = []
         try:
             for raw_item in items:
                 item = self._copy_item(raw_item)
+                if isinstance(item, SampleWriteback):
+                    try:
+                        if run_id is None or not run_id.strip():
+                            raise FailedPreconditionError(
+                                "Sample writeback requires a captured run_id"
+                            )
+                        item.proposed_value = _sample_fields(
+                            item.proposed_value, parameters, device_snapshot
+                        )
+                    except FailedPreconditionError as exc:
+                        unavailable_reasons.append(f"{item.target_name}: {exc}")
+                        continue
                 prefix = self._kind_prefix(item)
                 item.session_id = self._next_session_id(entries, prefix)
                 item.selected = True
@@ -323,7 +408,14 @@ class WritebackService:
             # observable error and no draft is returned.
             self._teardown_entries(entries)
             raise
-        return WritebackDraft(self, identity, entries, parameters, run_id=run_id)
+        return WritebackDraft(
+            self,
+            identity,
+            entries,
+            parameters,
+            run_source=_RunSource(experiment_name, run_id, device_snapshot),
+            unavailable_reasons=tuple(unavailable_reasons),
+        )
 
     def preview_draft(self, draft: WritebackDraft) -> list[WritebackItem]:
         self._require_draft(draft)
@@ -356,19 +448,20 @@ class WritebackService:
         values: dict[str, WritebackValues] = {}
         for item in items:
             path = _destination_path(item, parameters)
-            proposed = (
-                AcceptedWrite.model_validate(
+            if isinstance(item, SampleWriteback):
+                proposed = item.proposed_value
+            elif isinstance(item, ParameterWriteback):
+                proposed = AcceptedWrite.model_validate(
                     {"path": path, "value": item.proposed_value}
                 ).value
-                if isinstance(item, ParameterWriteback)
-                else schema_to_raw_dict(
+            else:
+                proposed = schema_to_raw_dict(
                     self._entry_schema(self._find_draft_entry(draft, item.session_id)),
                     parameters,
                 )
-            )
             values[item.session_id] = WritebackValues(
                 actual_path=path,
-                current=_destination_value(item, current, path),
+                current=self._read_destination_value(draft, item, current, path),
                 proposed=proposed,
                 unit=(
                     document_unit(current.document(), path)
@@ -377,6 +470,19 @@ class WritebackService:
                 ),
             )
         return values
+
+    def _read_destination_value(
+        self,
+        draft: WritebackDraft,
+        item: WritebackItem,
+        current: ParameterContext,
+        path: str,
+    ) -> object:
+        """Read one captured destination consistently for preview and receipts."""
+        if isinstance(item, SampleWriteback) and draft.run_id is not None:
+            parameters = self._require_parameters(draft)
+            return self._write.read_sample(parameters.target, path, draft.run_id)
+        return _destination_value(item, current, path)
 
     @staticmethod
     def _require_parameters(draft: WritebackDraft) -> ParameterContext:
@@ -471,9 +577,11 @@ class WritebackService:
 
         Role paths resolve through the creation capture, never current focus.
         All selected values lower before the ledger append. Append failure writes
-        nothing; setter failure stops immediately, retaining accepted evidence
-        and successful writes. Empty selection is a no-op without context.
-        Nonempty writes require a capture and its still-open entry. GUI defaults
+        nothing. On item failure, mark the successful prefix applied and re-raise
+        the original cause unchanged, retaining accepted evidence and writes.
+        Empty selection is a no-op without context. Nonempty writes require a
+        captured SavedPoint in its still-open entry; EntryDraft is rejected by
+        the context owner before append. GUI defaults
         to the GUI origin; MCP callers explicitly identify the MCP frontend.
         Unknown/duplicate IDs or concrete destinations fail before any write.
         Accepted payload and every destination provenance use draft.run_id;
@@ -485,78 +593,74 @@ class WritebackService:
             "parameter": [],
             "ml_modules": [],
             "ml_waveforms": [],
+            "samples": [],
         }
         if not selected_entries:
             return {"applied_ids": [], "written": written}
         parameters = self._require_parameters(draft)
-        ledger = self._entry_ledger(parameters.target.entry_id)
         destinations: set[str] = set()
-        writes: list[AcceptedWrite] = []
-        modules: dict[str, ModuleSpec] = {}
-        waveforms: dict[str, WaveformSpec] = {}
+        items: list[concrete.WritebackItem] = []
         for entry in selected_entries:
             item = entry.item
-            if isinstance(item, ParameterWriteback):
+            if isinstance(item, SampleWriteback):
+                path = item.target_name
+                items.append(concrete.SampleWriteback(path, item.proposed_value))
+                written["samples"].append(path)
+            elif isinstance(item, ParameterWriteback):
                 path = parameters.resolve_path(item.target_name)
                 write = AcceptedWrite.model_validate(
                     {"path": path, "value": item.proposed_value}
+                )
+                items.append(
+                    concrete.ParameterWriteback(path, write.value, item.stderr)
                 )
                 written["parameter"].append(path)
             else:
                 path = parameters.library_key(item.target_name)
                 raw = schema_to_raw_dict(self._entry_schema(entry), parameters)
                 if isinstance(item, ModuleWriteback):
-                    spec = module_spec_from_raw(raw)
-                    modules[path] = spec
+                    items.append(
+                        concrete.ModuleWriteback(
+                            path, module_spec_from_raw(raw), item.stderr
+                        )
+                    )
                     written["ml_modules"].append(path)
                 else:
-                    spec = waveform_spec_from_raw(raw)
-                    waveforms[path] = spec
+                    items.append(
+                        concrete.WaveformWriteback(
+                            path, waveform_spec_from_raw(raw), item.stderr
+                        )
+                    )
                     written["ml_waveforms"].append(path)
-                write = AcceptedWrite.model_validate(
-                    {"path": path, "value": spec.model_dump(mode="json")}
-                )
             if path in destinations:
                 raise InvalidInputError(f"duplicate writeback destination: {path!r}")
             destinations.add(path)
-            writes.append(write)
-
-        event = LedgerEvent(
-            id=str(uuid.uuid4()),
-            kind="accepted",
-            at=datetime.now(timezone.utc).isoformat(),
-            entry_id=parameters.target.entry_id,
-            origin=origin.origin,
-            payload=AcceptedPayload(
-                writes=tuple(writes), analysis_summary={}, run_id=draft.run_id
-            ),
-        )
-        ledger.append(event)
-        applied_ids: list[str] = []
-        for entry, write in zip(selected_entries, writes, strict=True):
-            item = entry.item
-            source = Provenance(
-                source=event.id,
-                kind=event.kind,
-                run_id=draft.run_id,
-                at=event.at,
-                stderr=item.stderr,
+        try:
+            self._write.apply_writeback(
+                parameters.target,
+                tuple(items),
+                evidence=concrete.WritebackEvidence(
+                    kind=draft.experiment_name,
+                    origin=origin.origin,
+                    run_id=draft.run_id,
+                ),
             )
-            if isinstance(item, ParameterWriteback):
-                self._write.set_parameter(
-                    parameters.target, write.path, write.value, source=source
-                )
-            elif isinstance(item, ModuleWriteback):
-                self._write.set_module(
-                    parameters.target, write.path, modules[write.path], source=source
-                )
-            else:
-                self._write.set_waveform(
-                    parameters.target, write.path, waveforms[write.path], source=source
-                )
+        except concrete.WritebackApplyError as exc:
+            for entry in selected_entries[: exc.applied]:
+                entry.applied = True
+            # Keep GUI/wire classification and the producer's own cause chain.
+            cause = exc.__cause__
+            if cause is None:
+                raise RuntimeError(
+                    "WritebackApplyError requires its original cause"
+                ) from exc
+            raise cause from cause.__cause__
+        for entry in selected_entries:
             entry.applied = True
-            applied_ids.append(item.session_id)
-        return {"applied_ids": applied_ids, "written": written}
+        return {
+            "applied_ids": [entry.item.session_id for entry in selected_entries],
+            "written": written,
+        }
 
     def write_draft(
         self,
@@ -599,7 +703,7 @@ class WritebackService:
         paths = [_destination_path(item, parameters) for item in items]
         current = self._write.read_target(parameters.target, roles=parameters.roles)
         before = [
-            _destination_value(item, current, path)
+            self._read_destination_value(draft, item, current, path)
             for item, path in zip(items, paths, strict=True)
         ]
         self.apply_draft(draft, item_ids=ids, origin=origin)
@@ -608,7 +712,9 @@ class WritebackService:
             WritebackWritten(
                 id=item.session_id,
                 kind=(
-                    "parameter"
+                    "sample"
+                    if isinstance(item, SampleWriteback)
+                    else "parameter"
                     if isinstance(item, ParameterWriteback)
                     else "module"
                     if isinstance(item, ModuleWriteback)
@@ -616,7 +722,7 @@ class WritebackService:
                 ),
                 target=path,
                 before=previous,
-                after=_destination_value(item, after, path),
+                after=self._read_destination_value(draft, item, after, path),
             )
             for item, path, previous in zip(items, paths, before, strict=True)
         ]
@@ -738,7 +844,10 @@ class WritebackService:
     ) -> None:
         """Capture display-only summaries from the creation context."""
         item = entry.item
-        if isinstance(item, ParameterWriteback):
+        if isinstance(item, SampleWriteback):
+            entry.current_summary = "entry sample"
+            entry.proposed_summary = self._format_value_summary(item.proposed_value)
+        elif isinstance(item, ParameterWriteback):
             current = (
                 None if parameters is None else parameters.lookup(item.target_name)
             )

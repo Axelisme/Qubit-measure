@@ -6,6 +6,8 @@ from pathlib import Path
 from types import MappingProxyType
 from uuid import UUID
 
+from zcu_tools.resources.sample_table import JsonlSampleTable
+
 from ._path_segments import validate_path_segment
 from .ledger import RecordsLedger
 from .points import PointView
@@ -33,6 +35,21 @@ class PointStorageBinding:
     database_path: Path
     ledger: RecordsLedger
     roles: Mapping[str, str]
+
+
+def bind_sample_table(result_path: Path, component: str) -> JsonlSampleTable:
+    """Bind entry sample history without reading schemas, ledger or files.
+
+    result_path is the exact entry Result directory, not its parent root.
+    component is a safe single path segment, never a role alias. Rows live at
+    samples/<component>.jsonl. Unsafe names or symlinks escaping the entry raise
+    ValueError. The returned owner handles append, latest-row read and export.
+    """
+    validate_path_segment(component, field="component")
+    path = result_path / "samples" / f"{component}.jsonl"
+    if not path.resolve().is_relative_to(result_path.resolve()):
+        raise ValueError(f"{path}: samples escape their entry")
+    return JsonlSampleTable(path)
 
 
 def capture_point_storage(

@@ -8,7 +8,7 @@ Qt 視窗、socket client 與 MCP agent 都能接觸同一個 GUI application。
 
 ## 分層與連線
 
-`gui.remote` 提供 NDJSON framing、request／reply、握手、per-client queue、backpressure 和 lazy push endpoint。`mcp.core.bridge` 持有 agent 程序的 GUI socket、連線與可選的 GUI subprocess；`mcp.core.stdio_server` 提供 stdio MCP 機制。四個 app 使用共用 GUI remote 機制，但各自註冊 wire method、驗證與 event serializer。共用 `RemoteControlServiceBase` 擁有 seen map 與 observation 演算法。App 以 `ResourceObservationPolicy` 宣告自己的依賴、完整讀取與 write tracking，並注入 owner version snapshot。Measure 另外擁有 operation tracking、診斷、writeback pane mapping 和 editor 清理。Fluxdep 透過同一 Controller 提供 pipeline commands、app-owned search 與四種 interactive Session。Interactive state／PNG 不建立 published-resource observation；身份與 terminal receipts 由 app owner 和 wire projection 決定。Fluxdep MCP 從 GUI declarations 產生 pipeline tools，interactive replies 附同次 capture 的 MCP image content，文字只保留 MIME／bytes。Lifecycle 與 PNG integrity producer 與現存 MCP callers 共用，server exit 只 disconnect；不重試、不隱藏預讀或另建 operation registry。MCP→GUI remote consumption 由 C13 約束。Dispersive 與 autofluxdep 的 remote 接口仍只讀。共用機制接收 app 注入的 metadata 和 owner scheduler，不決定實驗或資源政策。精確封套、上限、版本與 method 說明見 [measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
+`gui.remote` 提供 NDJSON framing、request／reply、握手、per-client queue、backpressure 和 lazy push endpoint。`mcp.core.bridge` 持有 agent 程序的 GUI socket、連線與可選的 GUI subprocess；`mcp.core.stdio_server` 提供 stdio MCP 機制。四個 app 使用共用 GUI remote 機制，但各自註冊 wire method、驗證與 event serializer。共用 `RemoteControlServiceBase` 擁有 seen map 與 observation 演算法。App 以 `ResourceObservationPolicy` 宣告自己的依賴、完整讀取與 write tracking，並注入 owner version snapshot。Measure 另外擁有 operation tracking、診斷、writeback pane mapping 和 editor 清理。Fluxdep 透過同一 Controller 提供 pipeline commands、app-owned search 與四種 interactive Session。Interactive state／PNG 不建立 published-resource observation；身份與 terminal receipts 由 app owner 和 wire projection 決定。Fluxdep MCP 從 GUI declarations 產生 pipeline tools，interactive replies 附同次 capture 的 MCP image content，文字只保留 MIME／bytes。Lifecycle 與 PNG integrity producer 與現存 MCP callers 共用，server exit 只 disconnect；不重試、不隱藏預讀或另建 operation registry。MCP→GUI remote consumption 由 C13 約束。Dispersive 的 remote 接口仍只讀。Workflows 的 remote 呼叫同一 T1 Window／Controller，提供 native run 控制、表單、records 與 PNG，不另建 Engine。共用機制接收 app 注入的 metadata 和 owner scheduler，不決定實驗或資源政策。精確封套、上限、版本與 method 說明見 [measure remote README](../../lib/zcu_tools/gui/app/measure/remote/README.md)。
 
 同機跨程序的 MCP 使用 socket；同機並不等於同程序呼叫。GUI 可停用 remote socket，GUI core 不依賴 MCP。MCP `connect` 可接上現有 GUI，或經明確選項啟動 GUI；MCP server 結束只斷開連線，不關閉 GUI。外部 CLI／MCP workflow 擁有 agent 的啟動。GUI 不啟動 agent terminal、不管理可恢復的 agent session，也不注入 bootstrap prompt。Connection authentication 與 method exposure 是兩道不同的邊界：有 token 時 GUI 在 method 前驗證；沒有 token 的 loopback 允許本機可連線程序控制 GUI。隱藏 method 不等於授權機制，現有連線方式不承諾任意跨機部署。
 
@@ -26,7 +26,7 @@ RPC `device.setup(name, cfg)` 只收完整 Info constructor cfg，不合併 cach
 
 工具沒有 timeout 參數，最多等待 300 秒，逾時回 running 與已知 handle，不取消，caller 用 `wait(op)` 續等。回覆保留 pre_read、start、wait、post_read、native operation 和 before／after。Requested.cfg 在 before 讀取並完成合併前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時 pre_read failed；有 Info 但 disconnected 時沿 service 回 start failed，保完整候選與 before，after 為 null。工具不做 verification、單位換算、重連、retry 或 rollback。
 
-當前握手版本為 WIRE_VERSION 94、GUI_VERSION 126、MCP_VERSION 113。只有 wire 版本用於相容比對，其餘是程式版本投影；權威仍在各 owner 的版本宣告。
+當前握手版本為 WIRE_VERSION 95、GUI_VERSION 127、MCP_VERSION 114。只有 wire 版本用於相容比對，其餘是程式版本投影；權威仍在各 owner 的版本宣告。
 
 Recipe、`tab_analyze`、`wait(execution)` 與互動完成回覆使用同一 execution 摘要。MCP 在 Run 前捕捉 resolved publication，以它投影條件與來源，不以後來的 GUI 狀態代替當次事實。`status(execution, detail="full")` 讀同一已保存的 native snapshot，不新增 RPC 或 guard 觀察。摘要列出 Primary/Post 結果、全部 writeback candidates 及 destination 身分。
 
@@ -49,6 +49,26 @@ Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數�
 MCP 不保存第二份 seen，也不用 wire expected-version table 或隱藏預讀解鎖。其他資源的 Stale 須重讀對應完整 snapshot，再由 caller 決定是否重試；event origin 不能授權寫入。Guard 不替代 operation snapshot、互斥及後續提交檢查，生命週期歸 [[0066]]。Timeout、斷線或回覆編碼失敗不證明命令沒有副作用。Reply failure 可撤回該回覆建立的 seen observation，但不回滾 business publication。沒有明確冪等契約時不自動重送。
 
 `context.snapshot` 從同一次公開 capture 回 native target、point、library 與有序 aliases。Alias rows 保留 authored value 與 resolved 名稱，單列解析失敗附 error；它不是歷史 Run 的參數版本。Parameter／library 變更事件提示重讀這份 snapshot，alias 變更提示重讀已先發布的 tab cfg，Caller 使用 native snapshot，不使用舊 md／ml getters。Optional summaries 或 path 是部分讀取，即使 false 或空 path 也不建立完整 seen；精確投影見 remote owner README。
+
+## Workflows 的同一 run
+
+`scripts/run_workflows_gui.py` 經共用 runtime 組裝獨立 app，具體 owner 在 `zcu_lab.workflows.gui.app`。App 建立一份 EMPTY session，將同一份 SessionServices 交給 T1WorkflowWindow。Window constructor 為 `(state, services, owner, *, on_close=None, parent=None)`，runner 與 progress 取自 services。`parent=None` 時 Window 為 top-level，指定 QWidget 時嵌入該 Qt parent。GUI 和 RPC 使用同一 Window 與固定 WorkflowController。
+
+App 直接重用 `zcu_lab.ALIAS_PRESET`，交給 shared `build_session_services(alias_rows=...)`。Preset 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列，不由 framework 選裝置。Shared Setup 非 modal 開啟，global alias 表由 shared AliasDialog 修改。Prepare forms 用 `read_context()` 固定當次 alias 表與來源，不宣告角色或檢查 kind。π defaults 在同一 capture 用 `resolve_path('$qubit.module.x180.waveform.length')` 產生具體元件路徑 expression，不可讀時留空。Prepare 整份替換 defaults，不是 reload。啟動不還原 input 或連硬體。共用 framework 不反向依賴 zcu_lab，依賴方向由 C16 約束；共用 mcp.core 只消費 GUI remote 的依賴邊界由 C13 約束。
+
+`scripts/run_workflows_mcp.py` 啟動 stdio MCP attachment。Workflow tools 由同一份 app method declarations 產生，lifecycle tools 明確 launch／connect／disconnect。MCP 不持 Engine、hardware session、operation registry 或另一份 draft。Start 用當次 defaults 加 path/value batch，不讀 GUI draft；tunables edit 則提交同一 Host 的完整當前 input。Form batch preview 只在呼叫內求值，不提交。Engine journal 只記普通值，expression 留在 FormInput，過渡期不檢查 holder 或 GUI draft revision。
+
+Start／Resume 回 operation receipt，不代表 native acceptance。Pause／Stop 回控制請求，不代表 producer 已停止。Caller 明填 run_id，stale target 拒絕，不重送。一個 run 從 Start 到 terminal 只有一個 operation／handle。Pause 後 worker 返回但 handle 不 settle，保留本程序 RUN lease；Resume 重用原 handle。Start／Resume 不做 all-device live read，也不在 journal 記錄 device snapshot。這是本程序互斥，不是跨程序硬體仲裁。Run 與 operation 分工見 [[0062]]、[[0066]]。
+
+每次 `env.run` 在同一 RUN lease 下、experiment callback 前，透過 DevicePort.capture_snapshot 讀取所有 connected drivers。Host 在 worker 重用 native capture helper，不更新 GUI State。讀取失敗會使 run failed，不執行該 callback，也不以 cache 代替。缺少 devices port 時，env.run 在 callback 前拋出 `MissingCapability('devices')`；真正零 device 的 host 明確提供 `{}` snapshot。Run constructor 要求 caller 傳入已捕捉的 device_snapshot，不另讀硬體。固定 snapshot 經 Run、AcquisitionEvidence 與 RunMetadata 原樣保存到 native `/device` JSON，後續 Save 不刷新。
+
+Device 設定使用完整 cfg。同步 `env.get_device_cfg(name)` 在 worker live 讀 get_info，回 detached 的實際 BaseDeviceInfo 子類 model。`yield from env.setup_device(name, cfg)` 透過 selected driver.info_model 驗完整 cfg，再呼叫 `driver.setup(cfg, stop_event=cancel_signal.event)`。Env、effect 與 DevicePort 傳遞同一個 engine-owned StopSignal，native driver 接其原有的 threading.Event，不另建 signal 或 event。Journal 記 name 與 cfg。`zcu_lab.workflows.devices.set_flux` 組合讀 cfg、共用 check_flux_unit、model_copy 改 value 與完整 setup；framework 不認識 flux 或單位。GUI／MCP plan 的 flux_unit 必填，Fake 明填 native，YOKO 明填 A 或 V。未知或斷線 device 在實際使用時指名報錯，driver limits 與 I/O 錯誤原樣傳播，不 retry 或 clamp。
+
+Status 與 records 讀 Engine facts，不從 artists 反推數值。圖名來自同一 Window 的 Plots，PNG 在 owner thread 由 shared renderer 讀原生 Figure。QtPlotHost 只收合 presentation，每次 owner 同步更新 artists，final refresh 立即 flush。MCP 驗證 PNG 並附 image content，不保存 preview 檔或序列化 Figure。Status-only 不渲染，terminal 圖保留到新 Start 或成功 close。Timeout／斷線不取消 run，也不證明命令沒有副作用。
+
+Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<run_id>/`，native acquisition 與圖在條目 Database 的 `workflows/<run_id>/iter/`。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
+
+共用 alias preset 與 Window 的 SessionServices 組裝已接入。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。Source reload S4 與 input 保存還原 U7 未做，由 workflows-p3 承接。S1–S3 的既有 in-process simulator 證據與完整 device cfg 的 bounded 接受紀錄保留，但不代表完整 integration 或使用者 CP-B 驗收。Startup-failure scenario 14 未完成完整驗證。Base 09 終驗與 land review 前完整 integration gates 仍待完成。Agent 交付 CP-B 功能證據；UI／UX 設計與使用者走查由 UI／UX 工作另行負責，不等待 UI 修改才申請功能 landing 授權。這些證據不授權硬體或真實資料。
 
 ## 事件與錯誤
 

@@ -61,8 +61,13 @@ class RecordingWriteback:
     def __init__(self, log: CallLog) -> None:
         self._log = log
         self.items = [object()]
-        self.analysis_draft: MagicMock = MagicMock(is_active=True)
-        self.post_draft: MagicMock = MagicMock(is_active=True)
+        service = WritebackService(MagicMock(), MagicMock())
+        self.analysis_draft = service.create_draft(
+            [], parameters=None, experiment_name="test/analysis"
+        )
+        self.post_draft = service.create_draft(
+            [], parameters=None, experiment_name="test/post-analysis"
+        )
 
     def get_item_draft(self, draft: object, session_id: str) -> object:
         self._log.add("writeback", "get_item_draft", draft, session_id)
@@ -239,12 +244,11 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
             cfg=MagicMock(),
         ),
     )
-    service = WritebackService(
-        MagicMock(), control, entry_ledger=context_service.entry_ledger
-    )
+    service = WritebackService(MagicMock(), control)
     draft = service.create_draft(
         [ParameterWriteback("general.ext.a", "d", proposed_value=1)],
         parameters=parameters,
+        experiment_name="test/writeback",
     )
     tab = state.get_tab("tab-1")
     getattr(tab, pane).writeback_draft = draft

@@ -14,6 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
+    SampleWriteback,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -144,7 +145,9 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         ),
         typical_writeback=(
             "Proposes fitted qubit.t1 and its standard error (us) to the "
-            "captured qubit and working point. No module writeback."
+            "captured qubit and working point. Also offers an independent sample "
+            "with t1_us/t1_err_us at the Run bias when captured device evidence "
+            "is available. No module writeback."
         ),
         recommended=(
             "Analysis defaults to a single-exponential fit; enable "
@@ -234,8 +237,18 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
     def get_writeback_items(
         self, req: WritebackRequest[T1RunResult, T1AnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose fitted T1 parameters and a captured-component sample.
+
+        req supplies the source result and fixed Run context. Sample fields use
+        us and target the Run's resolved $qubit, never the live selection. Without
+        a parameter capture, retain parameter proposals only so loaded data can
+        still be analyzed; Apply rejects the missing capture. Unbound $qubit
+        with a capture raises RoleResolutionError. WritebackService supplies
+        bias coordinates or omits the sample with its existing public reason.
+        No write or device access occurs here; this Run leaves devices fixed.
+        """
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             ParameterWriteback(
                 target_name="$qubit.t1",
                 description="T1 relaxation time (us)",
@@ -243,6 +256,19 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
                 stderr=result.t1_err,
             ),
         ]
+        parameters = req.ctx.parameters
+        if parameters is not None:
+            items.append(
+                SampleWriteback(
+                    target_name=parameters.resolve_path("$qubit"),
+                    description="T1 sample at the captured bias",
+                    proposed_value={
+                        "t1_us": result.t1,
+                        "t1_err_us": result.t1_err,
+                    },
+                )
+            )
+        return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_t1_{time.strftime('%m%d')}"

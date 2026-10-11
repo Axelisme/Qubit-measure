@@ -44,6 +44,7 @@ from zcu_tools.gui.cfg.binding.fields import ScalarField
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv as ParameterSessionEnv
@@ -78,11 +79,13 @@ def waveform_writeback(tmp_path: Path):
         )
         context.install_entry(entry)
         control = ContextControlFacet(context=context)
+        entry.new_point("working")
+        control.use_point(PointUseRequest("working"))
         control.add_component("Q1", "fake/drive/a", {})
         target = control.read_context().target
         control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.1))
         editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
+        service = WritebackService(editor, control)
         spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=0.1))
         draft = service.create_draft(
             [
@@ -91,6 +94,7 @@ def waveform_writeback(tmp_path: Path):
                 )
             ],
             parameters=control.read_context(),
+            experiment_name="test/writeback",
         )
         service.apply_draft(draft)
         yield control, service, draft
@@ -114,7 +118,9 @@ def multiple_waveform_writeback(waveform_writeback):
         proposals.append(
             WaveformWriteback(name, name, edit_schema=CfgSchema(spec, value))
         )
-    draft = service.create_draft(proposals, parameters=control.read_context())
+    draft = service.create_draft(
+        proposals, parameters=control.read_context(), experiment_name="test/writeback"
+    )
     try:
         service.apply_draft(draft)
         yield control, service, draft, names
@@ -186,7 +192,6 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
             run_result=result,
             analyze_params=_default_analyze_params(adapter, result, ctx),
             parameters=ctx.parameters,
-            predictor=ctx.predictor,
         ),
         plots=analysis_plots,
     )

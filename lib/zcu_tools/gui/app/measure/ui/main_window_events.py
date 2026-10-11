@@ -20,7 +20,6 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
-    PredictorChangedPayload,
     SocChangedPayload,
 )
 
@@ -61,7 +60,6 @@ class MainWindowEventHost(Protocol):
     ) -> None: ...
     def refresh_run_lock(self, running_tab_id: str | None) -> None: ...
     def refresh_context_panel(self) -> None: ...
-    def refresh_predictor_panel(self) -> None: ...
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None: ...
 
@@ -214,7 +212,6 @@ class MainWindowEventCoordinator:
         self._subs.subscribe(
             bus, TabContentChangedPayload, self._on_tab_content_changed
         )
-        self._subs.subscribe(bus, PredictorChangedPayload, self._on_predictor_changed)
         self._subs.subscribe(bus, SocChangedPayload, self._on_soc_changed)
         self._subs.subscribe(bus, SaveDataFinishedPayload, self._on_save_data_finished)
 
@@ -292,10 +289,6 @@ class MainWindowEventCoordinator:
         }
         for reaction in reactions:
             actions[reaction]()
-
-    def _on_predictor_changed(self, payload: PredictorChangedPayload) -> None:
-        del payload
-        self._host.refresh_predictor_panel()
 
     def _on_soc_changed(self, payload: SocChangedPayload) -> None:
         del payload

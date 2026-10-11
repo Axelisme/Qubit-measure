@@ -1,115 +1,152 @@
-"""Predictor remote handlers."""
+"""Read-only simulator wire adapter: exactly one concrete qubit or named params.
+
+Source selection and model discrimination belong to this adapter. simulate owns
+named parameter decoding/projection and physical validation. Computations use
+PredictorControlPort; they never read a dialog, cache or installed model.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.services.predictor import (
+    CalibrateFluxBiasRequest,
+    PredictFreqRequest,
+)
+from zcu_tools.simulate.parameters import ModelParams, params_class
+from zcu_tools.simulate.predictor import PredictorInputError
+
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-# The method-entry registry imports this callable by name at runtime.
-__all__ = ["h_predictor_calibrate"]
 
-
-def h_predictor_load(
+def _source_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.predictor import LoadPredictorRequest
+) -> ModelParams:
+    qubit, direct = params.get("qubit"), params.get("params")
+    if (qubit is None) == (direct is None):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "Supply exactly one source: qubit or params",
+            reason="invalid_predictor_source",
+        )
+    if qubit is not None:
+        if not isinstance(qubit, str):
+            raise TypeError("Invalid validated qubit name")
+        try:
+            return adapter.predictor_control.params_for_qubit(qubit)
+        except PredictorInputError as exc:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_qubit"
+            ) from exc
+    if not isinstance(direct, dict):
+        raise TypeError("Invalid validated parameter object")
+    model = direct.get("model")
+    try:
+        return params_class(str(model)).from_mapping(
+            {name: value for name, value in direct.items() if name != "model"}
+        )
+    except PredictorInputError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_params"
+        ) from exc
 
-    path = str(params["path"])
-    flux_bias = float(params["flux_bias"])  # type: ignore[arg-type]
-    adapter.predictor_control.load_predictor(
-        LoadPredictorRequest(path=path, flux_bias=flux_bias)
-    )
-    # Echo the installed model so the agent verifies the load without a follow-up
-    # read; get_predictor_info() is non-None right after a successful install (a
-    # None here is a broken invariant, so raise rather than echo a half-shape).
-    info = adapter.predictor_control.get_predictor_info()
-    if info is None:
-        raise RuntimeError("predictor missing immediately after a successful load")
-    return {"loaded": True, **info}
 
-
-def h_predictor_set_model_params(
+def _complete_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.predictor import SetModelParamsRequest
-
-    req = SetModelParamsRequest(
-        EJ=float(params["EJ"]),  # type: ignore[arg-type]
-        EC=float(params["EC"]),  # type: ignore[arg-type]
-        EL=float(params["EL"]),  # type: ignore[arg-type]
-        flux_half=float(params["flux_half"]),  # type: ignore[arg-type]
-        flux_period=float(params["flux_period"]),  # type: ignore[arg-type]
-        flux_bias=float(params["flux_bias"]),  # type: ignore[arg-type]
-    )
-    adapter.predictor_control.set_predictor_model_params(req)
-    # Echo the installed model (path is null — in-memory install has no file); a
-    # None right after a successful install is a broken invariant, so raise.
-    info = adapter.predictor_control.get_predictor_info()
-    if info is None:
-        raise RuntimeError("predictor missing immediately after a successful install")
-    return {"loaded": True, **info}
-
-
-def h_predictor_clear(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    adapter.predictor_control.clear_predictor()
-    return {"loaded": False}
+) -> ModelParams:
+    inputs = _source_params(adapter, params)
+    missing = inputs.missing()
+    if missing:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "Missing parameters: " + ", ".join(missing),
+            reason="missing_predictor_params",
+            data={"missing": list(missing)},
+        )
+    return inputs
 
 
 def h_predictor_predict(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.predictor import PredictFreqRequest
+    """Return {freq_mhz} for one complete qubit/params source at device_value.
 
-    device_value = float(params["device_value"])  # type: ignore[arg-type]
-    from_level = int(params["from_level"])  # type: ignore[arg-type]
-    to_level = int(params["to_level"])  # type: ignore[arg-type]
-    freq = adapter.predictor_control.predict_freq(
-        PredictFreqRequest(value=device_value, transition=(from_level, to_level))
-    )
-    return {"freq_mhz": freq}
+    Device values use native units; energies use GHz; frequencies use MHz.
+    INVALID_PARAMS names source conflicts, missing fields or invalid inputs.
+    Queries leave components and supplied parameters unchanged.
+    """
+    inputs = _complete_params(adapter, params)
+    value, frm, to = params["device_value"], params["from_level"], params["to_level"]
+    if (
+        not isinstance(value, (int, float))
+        or type(frm) is not int
+        or type(to) is not int
+    ):
+        raise TypeError("Invalid validated predictor request")
+    try:
+        frequency = adapter.predictor_control.predict_freq(
+            inputs, PredictFreqRequest(float(value), (frm, to))
+        )
+    except PredictorInputError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_params"
+        ) from exc
+    return {"freq_mhz": frequency}
 
 
 def h_predictor_calibrate(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
+    """Return {flux_bias_before, flux_bias_after, frequency_mhz, clamped}.
 
-    value = params["device_value"]
-    frequency = params["frequency_mhz"]
+    device_value is the measured native setpoint, frequency_mhz the measured MHz
+    frequency; from_level < to_level are nonnegative integers. Source/field
+    failures are INVALID_PARAMS. No component, dialog, hardware or cache writes
+    occur. The model selects smallest |bias|; unreachable targets clamp to the
+    nearest frequency. Numerical failures propagate without fallback.
+    """
+    inputs = _complete_params(adapter, params)
+    value, frequency = params["device_value"], params["frequency_mhz"]
     frm, to = params["from_level"], params["to_level"]
-    # MethodSpec already validates the wire types before reaching this handler.
-    assert isinstance(value, (int, float)) and not isinstance(value, bool)
-    assert isinstance(frequency, (int, float)) and not isinstance(frequency, bool)
-    assert type(frm) is int and type(to) is int
-    before = adapter.predictor_control.get_predictor_info()
-    result = adapter.predictor_control.calibrate_flux_bias(
-        CalibrateFluxBiasRequest(
-            value=float(value),
-            frequency_mhz=float(frequency),
-            transition=(frm, to),
+    if (
+        not isinstance(value, (int, float))
+        or not isinstance(frequency, (int, float))
+        or type(frm) is not int
+        or type(to) is not int
+    ):
+        raise TypeError("Invalid validated calibration request")
+    try:
+        result = adapter.predictor_control.calibrate_flux_bias(
+            inputs, CalibrateFluxBiasRequest(float(value), float(frequency), (frm, to))
         )
-    )
-    if before is None:
-        raise RuntimeError("calibration succeeded without a previous predictor")
+    except PredictorInputError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_params"
+        ) from exc
     return {
-        "flux_bias_before": before["flux_bias"],
+        "flux_bias_before": inputs.flux_bias,
         "flux_bias_after": result.flux_bias,
+        "frequency_mhz": result.frequency_mhz,
+        "clamped": result.clamped,
     }
 
 
 def h_predictor_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    del params
-    # Flatten the model fields to the top level; the `loaded` flag replaces a null
-    # payload so the agent never has to distinguish {info: null} from a real read.
-    info = adapter.predictor_control.get_predictor_info()
-    if info is None:
-        return {"loaded": False}
-    return {"loaded": True, **info}
+    """Return {model, params, missing} for one possibly incomplete source.
+
+    model is fluxonium or transmon. Params retain null unknown fields in
+    GHz/native units. No model is built.
+    INVALID_PARAMS names source conflicts, unknown qubits or malformed direct
+    inputs. The selected point is read as-is, without dialog/alias/cache access.
+    """
+    inputs = _source_params(adapter, params)
+    return {
+        "model": inputs.model,
+        "params": inputs.to_dict(),
+        "missing": list(inputs.missing()),
+    }

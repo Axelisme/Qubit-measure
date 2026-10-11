@@ -191,14 +191,13 @@ class AnalyzedPayload(_LedgerModel):
 
 
 class AcceptedPayload(_LedgerModel):
-    """One or more accepted writes and their JSON analysis_summary.
+    """One or more concrete accepted writes linked to their source evidence.
 
     run_id and source optionally identify existing evidence; both may be None.
     No prior acquisition, analysis event or database run is required.
     """
 
     writes: Annotated[tuple[AcceptedWrite, ...], Field(min_length=1)]
-    analysis_summary: JsonObject
     run_id: StrictStr | None = None
     source: SourceReference | None = None
 

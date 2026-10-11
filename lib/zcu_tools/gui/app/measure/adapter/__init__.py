@@ -32,6 +32,7 @@ from .types import (
     PostAnalyzeResultBase,
     PostWritebackRequest,
     RunRequest,
+    SampleWriteback,
     SaveDataRequest,
     SavePaths,
     T_AnalyzeParams,

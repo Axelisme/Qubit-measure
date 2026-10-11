@@ -32,6 +32,7 @@ RESERVED_SEGMENTS: Final = frozenset({"contract", "parity"})
 # different source root. This is a mapping, not an exemption: the target must exist.
 _DEFAULT_SOURCE_ROOT: Final = PurePosixPath("lib/zcu_tools")
 _SOURCE_ROOT_OVERRIDES: Final = {
+    "migrations": PurePosixPath("migrations"),
     "scripts": PurePosixPath("scripts"),
     "tools": PurePosixPath("tools"),
     "zcu_lab": PurePosixPath("zcu_lab"),

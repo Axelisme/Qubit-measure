@@ -36,7 +36,8 @@ class TunableValues[T: BaseModel]:
     from its fields and detached at construction, creating revision zero.
     control_lock is the Engine's shared RLock. append must append/flush one
     TunablesChanged event or raise. The same lock serializes capture, update,
-    and the append, so the model is published only after its journal line.
+    and append, so model values and revision are published only after their
+    journal line.
 
     This package-internal seam hides schema paths, whole-model validation,
     detached JSON projections, and atomic revision publication. Engine retains
@@ -77,7 +78,7 @@ class TunableValues[T: BaseModel]:
             return CapturedTunables(self._revision, deepcopy(self._values))
 
     def snapshot(self) -> TunablesSnapshot:
-        """Return the current revision and detached complete JSON model values."""
+        """Return detached JSON values at one revision."""
         with self._lock:
             return TunablesSnapshot(self._revision, _model_json(self._values))
 
@@ -104,6 +105,7 @@ class TunableValues[T: BaseModel]:
         The complete candidate is validated, including cross-field rules.
         append errors propagate with their original cause and publish nothing.
         A successful batch increments revision once, including same-value edits.
+        Values and revision are installed only after append succeeds.
         """
         with self._lock:
             if type(expected_revision) is not int or expected_revision < 0:

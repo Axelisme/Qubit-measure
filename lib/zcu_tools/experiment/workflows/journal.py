@@ -7,10 +7,10 @@ from datetime import datetime
 from traceback import TracebackException
 from typing import Literal
 
-from pydantic import JsonValue
+from pydantic import JsonValue, SerializeAsAny
 
-from .models import Actor, Capability, CommittedRecord, RunIdentity, RunPaths
-from .ports import DeviceSnapshot
+from ...device import BaseDeviceInfo
+from .models import Actor, CommittedRecord, RunIdentity, RunPaths
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class RunMetadata:
 
     identity is host-supplied provenance. workflow is the declared name. plan
     and tunables are complete, validated JSON model projections at revision 0.
-    requires lists declared capabilities. roots are absolute run directories.
+    roots are absolute run directories.
     started_at is the original timezone-aware UTC start time.
     """
 
@@ -27,7 +27,6 @@ class RunMetadata:
     workflow: str
     plan: JsonValue
     tunables: JsonValue
-    requires: tuple[Capability, ...]
     roots: RunPaths
     started_at: datetime
 
@@ -54,6 +53,19 @@ class IterationStarted:
     revision: int
     iteration_dir: str
     kind: Literal["iteration_started"] = field(default="iteration_started", init=False)
+
+
+@dataclass(frozen=True)
+class DeviceSetup:
+    """One completed setup attempt: requested name and all typed cfg fields.
+
+    cfg retains the selected Info subclass in its JSON projection; the journal
+    does not interpret settings, units, limits or hardware readback.
+    """
+
+    name: str
+    cfg: SerializeAsAny[BaseDeviceInfo]
+    kind: Literal["device_setup"] = field(default="device_setup", init=False)
 
 
 @dataclass(frozen=True)
@@ -149,7 +161,10 @@ class StepFailed(IterationResult):
 
 @dataclass(frozen=True)
 class ChangedValue:
-    """One applied leaf change: dot path and detached old/new JSON values."""
+    """One applied leaf change with detached ordinary values.
+
+    path is the model-field leaf dot path. old/new are validated JSON values.
+    """
 
     path: str
     old: JsonValue
@@ -207,15 +222,13 @@ class Paused:
 
 @dataclass(frozen=True)
 class Resumed:
-    """Segment resume provenance after the host acquired its device lease.
+    """Continuation of a paused run under the host's retained RUN lease.
 
     commit_seq counts existing commits; revision is the next call's version.
-    devices is the detached host-supplied current device snapshot.
     """
 
     commit_seq: int
     revision: int
-    devices: DeviceSnapshot
     kind: Literal["resumed"] = field(default="resumed", init=False)
 
 
@@ -238,6 +251,7 @@ type JournalPayload = (
     RunStarted
     | IterationStarted
     | ExperimentFailed
+    | DeviceSetup
     | StepCommitted
     | StepFinished
     | StepDiscarded

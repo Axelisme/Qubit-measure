@@ -1,6 +1,8 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-10-02 — explicit diagnostic display
+**Last updated:** 2026-10-11 — JSONL sample consumers
+
+`FreqFluxDependVisualizer.plot_sample_points()` 接受 JSONL reader 的 DataFrame，以 `freq_mhz` 換算 GHz，再由共用 resolver 解析 flux。它不讀檔，也不對舊量測欄位名加 alias。
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 [`notebook_md/analysis/fluxdep_fit.md`](../../../../../notebook_md/analysis/fluxdep_fit.md) 使用。

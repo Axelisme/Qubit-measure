@@ -29,8 +29,6 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from qtpy.QtCore import (  # type: ignore[attr-defined]
     QCoreApplication,
     QObject,
@@ -46,6 +44,9 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
 # the operation layer share one sentinel identity; importing it does not make
 # ``operation_handles`` (or ``operation_runner``) pull Qt.
 from zcu_tools.gui.session.operation_handles import NO_RESULT
+from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError
+
+logger = logging.getLogger(__name__)
 
 
 class _OpSignals(QObject):
@@ -111,11 +112,17 @@ class _OpWorker(QThread):
 
 
 class BackgroundRunner(QObject):
-    """Run thunks off the main thread, optionally inside a caller ``enter`` scope."""
+    """Run thunks off-main and deliver their outcomes on the Qt owner thread.
+
+    Construct, submit, stop_accepting and quiesce on the Qt owner thread.
+    quiesce is repeatable and does not close admission. Opt into terminal
+    shutdown with stop_accepting before cancellation and draining.
+    """
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._pool = QThreadPool(self)
+        self._accepting = True
         # Hold dedicated workers until they settle so the Python wrapper is not
         # GC'd before ``finished`` fires (parent= keeps the C++ object; the set
         # keeps the Python ref symmetric and explicit).
@@ -124,6 +131,15 @@ class BackgroundRunner(QObject):
         # for the same reason: the carrier's C++ half must outlive the cross-thread
         # ``QMetaCallEvent`` that delivers the outcome on the main thread.
         self._pool_signals: set[_OpSignals] = set()
+
+    def stop_accepting(self) -> None:
+        """Permanently reject new submissions without cancelling accepted work.
+
+        Call on the Qt owner thread before cancellation/drain. Idempotent;
+        failed drains do not reopen admission. quiesce still drains accepted
+        workers and queued delivery, and can be retried after a timeout.
+        """
+        self._accepting = False
 
     def submit(
         self,
@@ -140,7 +156,11 @@ class BackgroundRunner(QObject):
         ``run_in_pool=True`` uses the shared pool (short helper); ``False`` spawns
         a dedicated thread (long operation). ``enter`` (if given) is entered on the
         worker thread when the thunk is invoked, never here at build time.
+        After stop_accepting, raise BackgroundAdmissionClosedError immediately
+        without allocating a worker or scheduling either callback.
         """
+        if not self._accepting:
+            raise BackgroundAdmissionClosedError("background executor is quiescing")
 
         logger.debug("background submit: run_in_pool=%s", run_in_pool)
 
@@ -194,7 +214,9 @@ class BackgroundRunner(QObject):
         ``processEvents`` so every pending delivery (and the carrier's own deferred
         delete) lands while its target is still alive. Call it from widget close and
         test teardown before the runner goes out of scope. Returns ``True`` if every
-        substrate drained within ``timeout_ms``.
+        substrate drained within ``timeout_ms``. Does not change admission: other
+        Qt apps may submit again. Terminal callers first use stop_accepting so
+        callbacks dispatched while draining cannot enqueue another producer.
         """
         drained = self._pool.waitForDone(timeout_ms)
         for worker in list(self._workers):
