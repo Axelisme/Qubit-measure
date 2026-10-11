@@ -357,6 +357,7 @@ def test_invalid_workflow_layout_fails_before_file_creation(
         representation=representation,
     )
     destination = tmp_path / "invalid.hdf5"
+    # Deliberately decoded external input exercises runtime contract rejection.
     with pytest.raises(ValueError, match="layout|grouped"):
-        write_labber(destination, payload, cfg=_cfg(), grouped_layout=layout)
+        write_labber(destination, payload, cfg=_cfg(), grouped_layout=json.loads(json.dumps(layout)))
     assert not destination.exists()

@@ -1,6 +1,6 @@
 """Synthetic committed T1 acquisitions through the public Engine seam."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -122,43 +122,43 @@ def synthetic_run(
 
     @workflow("T1_fluxdep", plan=T1Plan, tunables=T1Tunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], fixed: T1Plan, _tun: T1Tunables, index: int
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
     ) -> Step[int, T1Point]:
-        if index == 3 and terminal == "done":
+        if state == 3 and terminal == "done":
             return Done()
-        if index == 3 and terminal == "failed":
+        if state == 3 and terminal == "failed":
             raise RuntimeError("synthetic failure")
-        if index == 3 and terminal == "aborted":
+        if state == 3 and terminal == "aborted":
             return Aborted("synthetic abort")
-        if index == 2:
+        if state == 2:
             return Next(
                 T1Point(
-                    index,
-                    fixed.fluxes[index],
+                    state,
+                    plan.fluxes[state],
                     CalibrationFailed("frequency", "missing calibration"),
                     None,
                     None,
                     "missing calibration",
                 ),
-                index + 1,
+                state + 1,
             )
         yield from env.run(
-            acquire, TraceCfg(index, "synthetic/calibration"), save=save_trace
+            acquire, TraceCfg(state, "synthetic/calibration"), save=save_trace
         )
-        yield from env.run(acquire, TraceCfg(index, "twotone/ge/t1"), save=save_trace)
-        if index == 3:
+        yield from env.run(acquire, TraceCfg(state, "twotone/ge/t1"), save=save_trace)
+        if state == 3:
             clock.on_wait = lambda _signal: engine.stop(RUN_ID)
             yield from env.wait_until(clock.now() + timedelta(seconds=1))
         return Next(
             T1Point(
-                index,
-                fixed.fluxes[index],
+                state,
+                plan.fluxes[state],
                 env.context,
-                20.0 if index == 0 else None,
-                1.0 if index == 0 else None,
-                None if index == 0 else "T1 fit rejected",
+                20.0 if state == 0 else None,
+                1.0 if state == 0 else None,
+                None if state == 0 else "T1 fit rejected",
             ),
-            index + 1,
+            state + 1,
         )
 
     engine.start(step, plan=plan, tunables=T1Tunables(), paths=paths, identity=identity)

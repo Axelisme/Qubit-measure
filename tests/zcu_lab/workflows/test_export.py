@@ -30,7 +30,7 @@ def test_t1_adapter_keeps_actual_delay_rows_and_rejected_fit(
     variables = prepared.payload.variables
     assert tuple(variables) == ("signal", "time", "t1")
     np.testing.assert_array_equal(
-        variables["signal"].z,
+        variables[DataVariable("signal")].z,
         [
             [1 + 2j, 2 + 3j, complex(np.nan, np.nan)],
             [4 + 5j, 6 + 7j, complex(np.nan, np.nan)],
@@ -39,19 +39,19 @@ def test_t1_adapter_keeps_actual_delay_rows_and_rejected_fit(
         ],
     )
     np.testing.assert_array_equal(
-        variables["time"].z,
+        variables[DataVariable("time")].z,
         [[0, 1e-6, 2e-6], [0, 3e-6, np.nan], [np.nan] * 3, [np.nan] * 3],
     )
-    np.testing.assert_array_equal(variables["t1"].z, [20e-6, np.nan, np.nan, np.nan])
-    assert [(a.name, a.unit) for a in variables["signal"].axes] == [
+    np.testing.assert_array_equal(variables[DataVariable("t1")].z, [20e-6, np.nan, np.nan, np.nan])
+    assert [(a.name, a.unit) for a in variables[DataVariable("signal")].axes] == [
         ("Time Index", ""),
         ("Flux", "native"),
     ]
-    np.testing.assert_array_equal(variables["signal"].axes[0].values, [0, 1, 2])
+    np.testing.assert_array_equal(variables[DataVariable("signal")].axes[0].values, [0, 1, 2])
     np.testing.assert_array_equal(
-        variables["signal"].axes[1].values, [1, 1.1, 1.2, 1.3]
+        variables[DataVariable("signal")].axes[1].values, [1, 1.1, 1.2, 1.3]
     )
-    assert [(a.name, a.unit) for a in variables["t1"].axes] == [("Flux", "native")]
+    assert [(a.name, a.unit) for a in variables[DataVariable("t1")].axes] == [("Flux", "native")]
     assert prepared.cfg.values == plan.model_dump(mode="json")
     assert (prepared.cfg.cfg_type, prepared.cfg.schema_version) == ("T1Plan", "1.0")
     with pytest.raises(ValueError, match="usable committed"):
@@ -90,12 +90,14 @@ def test_terminal_export_roundtrip_overwrite_new_labber_and_ledger(
         report = host.export_fluxdep_run(
             RUN_ID,
             engine=engine,
-            snapshot=snapshot,
-            prepare=prepare,
-            layout=layout,
-            ledger=ledger,
-            origin="gui",
-            saved_at=SAVED_AT,
+            request=host.FluxdepExportRequest(
+                snapshot=snapshot,
+                prepare=prepare,
+                layout=layout,
+                ledger=ledger,
+                origin="gui",
+                saved_at=SAVED_AT,
+            ),
         )
         reports.append(report)
         assert report.ledger_error is None
@@ -121,9 +123,9 @@ def test_terminal_export_roundtrip_overwrite_new_labber_and_ledger(
         assert native.cfg.values == plan.model_dump(mode="json")
         assert native.metadata.device_snapshot is None
         np.testing.assert_array_equal(
-            native.payload.variables["t1"].z, [20e-6, np.nan, np.nan, np.nan]
+            native.payload.variables[DataVariable("t1")].z, [20e-6, np.nan, np.nan, np.nan]
         )
-        assert native.payload.variables["signal"].z.shape == (4, 3)
+        assert native.payload.variables[DataVariable("signal")].z.shape == (4, 3)
     assert (
         reports[0].outputs[0].path
         == reports[1].outputs[0].path
@@ -141,7 +143,8 @@ def test_terminal_export_roundtrip_overwrite_new_labber_and_ledger(
             str(out.path) for out in report.outputs
         ]
     assert engine.records(RUN_ID) == canonical
-    assert engine.status() is not None and engine.status().lifecycle == terminal
+    status = engine.status()
+    assert status is not None and status.lifecycle == terminal
 
 
 @pytest.mark.parametrize("failure", ["native", "labber", "ledger"])
@@ -174,14 +177,16 @@ def test_output_and_ledger_failures_retain_independent_successes(
     report = host.export_fluxdep_run(
         RUN_ID,
         engine=engine,
-        snapshot=snapshot,
-        prepare=partial(
-            science.prepare_t1_fluxdep_export, plan=plan, data_root=paths.data_root
+        request=host.FluxdepExportRequest(
+            snapshot=snapshot,
+            prepare=partial(
+                science.prepare_t1_fluxdep_export, plan=plan, data_root=paths.data_root
+            ),
+            layout=layout,
+            ledger=ledger,
+            origin="mcp",
+            saved_at=SAVED_AT,
         ),
-        layout=layout,
-        ledger=ledger,
-        origin="mcp",
-        saved_at=SAVED_AT,
     )
     assert [item.status for item in report.outputs] == {
         "native": ["failed", "saved"],
@@ -192,6 +197,7 @@ def test_output_and_ledger_failures_retain_independent_successes(
     for out in report.outputs:
         if out.status == "saved":
             assert out.error is None
+            assert out.path is not None
             if out.format == "data_h5":
                 assert load_run_data(out.path).metadata.finished_at is None
             else:
@@ -200,7 +206,8 @@ def test_output_and_ledger_failures_retain_independent_successes(
                 ].z.shape == (4, 3)
         else:
             assert out.error
-    assert engine.status() is not None and engine.status().lifecycle == "done"
+    status = engine.status()
+    assert status is not None and status.lifecycle == "done"
 
 
 @pytest.mark.parametrize("state", ["running", "paused", "mismatch", "unsupported"])
@@ -236,16 +243,18 @@ def test_export_admission_rejects_before_writes(
         host.export_fluxdep_run(
             "stale" if state == "mismatch" else RUN_ID,
             engine=engine,
-            snapshot=snapshot,
-            prepare=None
-            if state == "unsupported"
-            else partial(
-                science.prepare_t1_fluxdep_export, plan=plan, data_root=paths.data_root
+            request=host.FluxdepExportRequest(
+                snapshot=snapshot,
+                prepare=None
+                if state == "unsupported"
+                else partial(
+                    science.prepare_t1_fluxdep_export, plan=plan, data_root=paths.data_root
+                ),
+                layout=layout,
+                ledger=ledger,
+                origin="gui",
+                saved_at=SAVED_AT,
             ),
-            layout=layout,
-            ledger=ledger,
-            origin="gui",
-            saved_at=SAVED_AT,
         )
     assert not (paths.data_root / "merged.h5").exists()
     assert not (tmp_path / "database").exists()
@@ -278,18 +287,20 @@ def test_labber_allocation_failure_keeps_native_and_full_ledger_record(
     report = host.export_fluxdep_run(
         RUN_ID,
         engine=engine,
-        snapshot=snapshot,
-        prepare=partial(
-            science.prepare_t1_fluxdep_export, plan=plan, data_root=paths.data_root
+        request=host.FluxdepExportRequest(
+            snapshot=snapshot,
+            prepare=partial(
+                science.prepare_t1_fluxdep_export, plan=plan, data_root=paths.data_root
+            ),
+            layout=layout,
+            ledger=ledger,
+            origin="gui",
+            saved_at=SAVED_AT,
         ),
-        layout=layout,
-        ledger=ledger,
-        origin="gui",
-        saved_at=SAVED_AT,
     )
     assert report.outputs[0].status == "saved"
     assert report.outputs[0].path == paths.data_root / "merged.h5"
-    assert load_run_data(report.outputs[0].path).payload.variables[
+    assert load_run_data(paths.data_root / "merged.h5").payload.variables[
         DataVariable("signal")
     ].z.shape == (4, 3)
     assert report.outputs[1].path is None
@@ -301,6 +312,8 @@ def test_labber_allocation_failure_keeps_native_and_full_ledger_record(
     assert event.payload.outputs[0].path == str(report.outputs[0].path)
     entry = ledger.get(event.id)
     assert entry.record is not None
-    assert entry.record["outputs"][1]["path"] is None
-    assert entry.record["outputs"][1]["error"] == report.outputs[1].error
+    assert entry.record["outputs"] == [
+        {"format": "data_h5", "path": str(paths.data_root / "merged.h5"), "status": "saved", "error": None},
+        {"format": "labber", "path": None, "status": "failed", "error": report.outputs[1].error},
+    ]
     assert list(outside.iterdir()) == []
