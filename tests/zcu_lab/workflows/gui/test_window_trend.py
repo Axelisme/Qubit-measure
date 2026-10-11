@@ -6,7 +6,7 @@ from threading import RLock
 
 import numpy as np
 import pytest
-from qtpy.QtTest import QTest
+from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import InvalidRunState, RunIdentity, RunPaths
@@ -59,7 +59,9 @@ def test_live_and_terminal_include_commits_and_reject_active_reopen(
         return status is not None and status.committed_seq == 1
 
     wait_owner(qapp, first_commit)
-    QTest().qWait(100)
+    loop = QEventLoop()
+    QTimer.singleShot(100, loop.quit)
+    loop.exec()
     assert "overnight_trend" in window.figure_names("trend-live")
     first_png = window.figure_png("trend-live", "overnight_trend")
     root = sim_session.entry.result_path / "workflows/trend-live"
