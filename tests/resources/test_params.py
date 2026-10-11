@@ -428,11 +428,12 @@ def test_raw_serialization_failure_preserves_persisted_json(tmp_path) -> None:
     params = QubitParams(path)
     original = {"future_section": {"label": "old", "values": [1, 2, 3]}}
     params.replace_raw(original)
+    original_text = path.read_text(encoding="utf-8")
 
     with pytest.raises(TypeError):
         params.replace_raw({"future_section": {"values": {1, 2, 3}}})
 
-    assert json.loads(path.read_text(encoding="utf-8")) == original
+    assert path.read_text(encoding="utf-8") == original_text
     assert QubitParams(path, readonly=True).to_raw() == original
 
 
