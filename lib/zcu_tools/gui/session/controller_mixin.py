@@ -47,7 +47,7 @@ inside the concrete controllers.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.event_bus import BaseEventBus, EventSubscriptions
 from zcu_tools.gui.session.events import ConnectionFinishedPayload
@@ -65,7 +65,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
     from zcu_tools.gui.session.types import SocCfgHandle
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class SessionControllerMixin:
@@ -91,32 +90,6 @@ class SessionControllerMixin:
     # --- setup dialog: project settings ----------------------------------
     def get_left_panel_width(self) -> int:
         return self._settings_svc.get_left_panel_width()
-
-    # --- setup dialog: context switching ---------------------------------
-    def use_context(self, label: str) -> None:
-        self._ctx_svc.use_context(label)
-
-    def new_context(
-        self,
-        bind_device: str | None = None,
-        clone_from: str | None = None,
-    ) -> None:
-        """Create a new flux context, optionally bound to a flux device.
-
-        ``bind_device`` (a connected device name) decides the flux unit/value: the
-        unit comes from the device-type whitelist (Fast-Fail if the device is
-        unknown or its type is not whitelisted) and the value is *read* from the
-        device's current state (never set). ``bind_device=None`` makes an unbound
-        context (unit="none", no value). ``clone_from`` is the label of an existing
-        context to clone its ml/md from. The new context's label is derived
-        automatically by ``ContextManager`` — callers cannot name it directly.
-        """
-        if bind_device is not None:
-            unit = self._dev_svc.get_device_unit_strict(bind_device)
-            value = self._dev_svc.get_device_value_for_new_context(bind_device)
-        else:
-            unit, value = "none", None
-        self._ctx_svc.new_context(value=value, unit=unit, clone_from=clone_from)
 
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
         return self._ctx_svc.list_value_sources()
@@ -159,31 +132,3 @@ class SessionControllerMixin:
     # --- setup dialog: device list/unit lookup ----------------------------
     def list_devices(self) -> list[DeviceEntry]:
         return self._dev_svc.list_devices()
-
-    # --- inspect dialog: md edit + ml view/rename/delete ------------------
-    def get_current_md(self) -> MetaDict:
-        return self._ctx_svc.get_current_md()
-
-    def get_current_ml(self) -> ModuleLibrary:
-        return self._ctx_svc.get_current_ml()
-
-    def coerce_md_value(self, key: str, text: str) -> Any:
-        return self._ctx_svc.coerce_md_value(key, text)
-
-    def set_md_attr(self, key: str, value: Any) -> None:
-        self._ctx_svc.set_md_attr(key, value)
-
-    def del_md_attr(self, key: str) -> None:
-        self._ctx_svc.del_md_attr(key)
-
-    def rename_ml_module(self, old: str, new: str) -> None:
-        self._ctx_svc.rename_ml_module(old, new)
-
-    def rename_ml_waveform(self, old: str, new: str) -> None:
-        self._ctx_svc.rename_ml_waveform(old, new)
-
-    def del_ml_module(self, name: str) -> None:
-        self._ctx_svc.del_ml_module(name)
-
-    def del_ml_waveform(self, name: str) -> None:
-        self._ctx_svc.del_ml_waveform(name)

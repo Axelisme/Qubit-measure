@@ -9,9 +9,9 @@ from typing import Any, cast
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtCore import QEvent, QObject, Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QHideEvent, QKeyEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, QObject, Qt
+from qtpy.QtGui import QHideEvent, QKeyEvent
+from qtpy.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
@@ -266,7 +266,7 @@ def make_flux_pick_frontend(
     del plots
     return FluxPickFrontend(
         plugin,
-        cast(Session[FluxPickState], session),
+        session,
         env,
         request_finish,
         request_cancel,

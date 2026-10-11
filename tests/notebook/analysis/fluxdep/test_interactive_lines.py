@@ -33,7 +33,9 @@ def test_interactive_lines_forwards_selection_and_drag(monkeypatch) -> None:
     picker.set_picked_half_flux(None)
     picker.onmove(
         SimpleNamespace(
-            inaxes=picker.picker._ax_main,
+            inaxes=next(
+                axes for axes in picker.fig.axes if picker.picker.is_main_axes(axes)
+            ),
             xdata=half0 + 0.5,
             ydata=float(freqs[len(freqs) // 2]),
         )
@@ -53,7 +55,9 @@ def test_interactive_lines_ignores_loss_axes_motion(monkeypatch) -> None:
     picker.set_picked_half_flux(None)
     picker.onmove(
         SimpleNamespace(
-            inaxes=picker.picker._ax_loss,
+            inaxes=next(
+                axes for axes in picker.fig.axes if not picker.picker.is_main_axes(axes)
+            ),
             xdata=before[0] + 1.0,
             ydata=float(freqs[len(freqs) // 2]),
         )

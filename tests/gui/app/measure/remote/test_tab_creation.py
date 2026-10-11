@@ -27,10 +27,10 @@ def test_remote_creation_allows_empty_source_and_keeps_global_aliases(
         assert ctrl.list_tab_ids() == [tab_id]
         interaction = ctrl.get_tab_snapshot(tab_id).interaction
         assert interaction is not None and not interaction.has_context
+        assert ctrl.context_control.get_alias_rows() == rows
         ctrl.setup_control.new_entry(EntryRequest("entry"))
         interaction = ctrl.get_tab_snapshot(tab_id).interaction
         assert interaction is not None and interaction.has_context
-        assert ctrl.context_control.get_alias_rows() == rows
         assert ctrl.list_tab_ids() == [tab_id]
     finally:
         assert background.quiesce()

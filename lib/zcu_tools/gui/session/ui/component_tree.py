@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, get_args
 
 import yaml
@@ -26,6 +27,9 @@ from zcu_tools.resources.entry import component_registry, document_fields
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
+
+
+logger = logging.getLogger(__name__)
 
 
 class ComponentTreeWidget(QWidget):
@@ -110,7 +114,8 @@ class ComponentTreeWidget(QWidget):
         """
         try:
             self._control.add_component(name, kind, fields, setup=setup)
-        except Exception as exc:  # noqa: BLE001 — UI isolates and displays command failures
+        except Exception as exc:
+            logger.exception("Component addition failed")
             self._error.setText(str(exc))
             return False
         self._error.clear()
@@ -127,7 +132,8 @@ class ComponentTreeWidget(QWidget):
             else:
                 capture = self._control.read_context()
                 self._control.set_parameter(capture.target, path, value)
-        except Exception as exc:  # noqa: BLE001 — UI isolates and displays command failures
+        except Exception as exc:
+            logger.exception("Parameter edit failed")
             self._error.setText(str(exc))
             return False
         self._error.clear()

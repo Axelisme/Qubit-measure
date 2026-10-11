@@ -78,7 +78,6 @@ def test_load_retains_request_and_history_without_foreign_analysis_fallback(
     captured = None if context_free else q1
     tab = state.get_tab(tab_id)
     state.update_tab_result(tab_id, object(), parameters=q2, source_operation_id=91)
-    tab.parameters = q2
     state.set_context(replace(state.session_env, parameters=captured))
     loaded: RunRecord[ExpCfgModel, object] = RunRecord(cfg=None, result=object())
     metadata = historical_metadata()

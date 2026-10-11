@@ -18,9 +18,9 @@ class IRLinker:
 
     def link(
         self, inst_list: list[Instruction]
-    ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
+    ) -> tuple[list[dict[str, object]], dict[str, str], list[dict[str, Any]], IRCursor]:
         """Link a flat instruction list into QICK-compatible dicts."""
-        prog_list: list[dict] = []
+        prog_list: list[dict[str, object]] = []
         labels: dict[str, str] = {}
         meta_infos: list[dict[str, Any]] = []
 
@@ -79,7 +79,7 @@ class IRLinker:
             raise ValueError(msg)
 
         # Group tracked markers by p_addr
-        markers_by_addr: dict[int, list[dict]] = defaultdict(list)
+        markers_by_addr: dict[int, list[dict[str, object]]] = defaultdict(list)
         for m in meta_infos:
             markers_by_addr[m["p_addr"]].append(m)
 
@@ -89,28 +89,7 @@ class IRLinker:
             p_addr = d["P_ADDR"]
 
             # 1. Insert tracked markers from meta_infos for this index
-            for m in markers_by_addr.get(p_addr, []):
-                if m["kind"] == "label":
-                    logical_insts.append(
-                        LabelInst.from_dict(
-                            {
-                                "kind": "label",
-                                "name": m["name"],
-                                "can_remove": m.get("can_remove", False),
-                            }
-                        )
-                    )
-                elif m["kind"] == "meta":
-                    logical_insts.append(
-                        MetaInst.from_dict(
-                            {
-                                "kind": "meta",
-                                "type": m["type"],
-                                "name": m["name"],
-                                "info": m.get("info", {}),
-                            }
-                        )
-                    )
+            self._append_markers(logical_insts, markers_by_addr.get(p_addr, []))
 
             # Remove from markers_by_addr so we don't process it again for trailing
             if p_addr in markers_by_addr:
@@ -127,30 +106,37 @@ class IRLinker:
         # order, so an interleaved label+meta at the same address keeps its
         # relative order.
         for _p_addr, markers in sorted(markers_by_addr.items()):
-            for m in markers:
-                if m["kind"] == "label":
-                    logical_insts.append(
-                        LabelInst.from_dict(
-                            {
-                                "kind": "label",
-                                "name": m["name"],
-                                "can_remove": m.get("can_remove", False),
-                            }
-                        )
-                    )
-                elif m["kind"] == "meta":
-                    logical_insts.append(
-                        MetaInst.from_dict(
-                            {
-                                "kind": "meta",
-                                "type": m["type"],
-                                "name": m["name"],
-                                "info": m.get("info", {}),
-                            }
-                        )
-                    )
+            self._append_markers(logical_insts, markers)
 
         return logical_insts
+
+    @staticmethod
+    def _append_markers(
+        logical_insts: list[Instruction], markers: list[dict[str, object]]
+    ) -> None:
+        """Append tracked label/meta markers in their original order."""
+        for m in markers:
+            if m["kind"] == "label":
+                logical_insts.append(
+                    LabelInst.from_dict(
+                        {
+                            "kind": "label",
+                            "name": m["name"],
+                            "can_remove": m.get("can_remove", False),
+                        }
+                    )
+                )
+            elif m["kind"] == "meta":
+                logical_insts.append(
+                    MetaInst.from_dict(
+                        {
+                            "kind": "meta",
+                            "type": m["type"],
+                            "name": m["name"],
+                            "info": m.get("info", {}),
+                        }
+                    )
+                )
 
     @staticmethod
     def _parse_label_addr(label_name: str, label_addr: Any) -> int:

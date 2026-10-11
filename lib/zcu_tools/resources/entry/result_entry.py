@@ -21,6 +21,7 @@ from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
+from .aliases import EntryAliases, load_entry_aliases, save_entry_aliases
 from .errors import DestinationExistsError, RenameRecoveryError
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -143,6 +144,25 @@ class ResultEntry:
     def database_path(self) -> Path:
         """Return this entry's exact Database directory, not the parent root."""
         return self._database_path
+
+    def load_aliases(self) -> EntryAliases | None:
+        """Read the entry-authored table, or None only when its file is absent.
+
+        Preserve order, empty bindings and raw $ links. Accept zcu.aliases 1.x;
+        header/schema/YAML and I/O errors propagate without preset fallback.
+        No component lookup or writes occur. Syntax validation belongs to the
+        caller\'s alias table owner.
+        """
+        return load_entry_aliases(self._result_path / "aliases.yaml")
+
+    def save_aliases(self, aliases: EntryAliases) -> None:
+        """Atomically save this named authored table as zcu.aliases 1.0.
+
+        Strict string validation precedes sibling-temp replacement. Failure
+        retains the old file and propagates its storage error. No point, setup,
+        ledger or preferences change; no multiwriter/crash guarantee is offered.
+        """
+        save_entry_aliases(self._result_path / "aliases.yaml", aliases)
 
     @property
     def ledger(self) -> RecordsLedger:

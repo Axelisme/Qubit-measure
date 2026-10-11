@@ -60,7 +60,7 @@ class Controller(BaseController[DispersiveState, EventBus]):
         # PredictService is bound to one (params, flux-axis); rebuilt lazily when
         # the preprocessing result or fit inputs change (see _predictor).
         self._predict: PredictService | None = None
-        self._predict_key: tuple | None = None
+        self._predict_key: tuple[tuple[float, float, float], int] | None = None
 
     # --- project ---------------------------------------------------------
 

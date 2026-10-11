@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -240,13 +241,19 @@ class T2EchoAdapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2EchoCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> T2EchoCfg:
         cfg = super().build_exp_cfg(strip_detune_ratio(raw_cfg), req)
         cfg.detune = resolve_detune(detune_ratio_of(raw_cfg), cfg.sweep.length.step)
         return cfg
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> T2EchoRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = self.exp_cls().run(cfg, context=context)

@@ -12,7 +12,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 
 from ._recipe_actual_support import cfg_sweep, cfg_value
-from ._recipe_support import PNG, LookbackGui, scalar, section
+from ._recipe_support import PNG, LookbackGui, publish_reference_locks, scalar, section
 from ._support import MeasureClient, full_execution_reply, make_client
 
 RAW_REPORT = SaveReport(
@@ -78,16 +78,21 @@ class TimeRabiGui(LookbackGui):
             length={
                 "kind": "sweep",
                 "valid": True,
+                "readonly": False,
                 "inputs": {
                     key: scalar(value)["input"]
                     for key, value in {"start": 0.04, "stop": 0.8, "expts": 61}.items()
                 },
             }
         )
-        tree["modules"]["children"]["readout"]["ref"] = "<Custom:Pulse Readout>"
+        tree["modules"]["children"]["readout"].update(
+            ref="<Custom:Pulse Readout>", mode="inline"
+        )
         tree["modules"]["children"]["qub_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
+            "mode": "inline",
             "ref": "<Custom:Pulse>",
             "error": None,
             "children": {
@@ -211,15 +216,16 @@ class DriveGui(TimeRabiGui):
             "fwhm_err": 0.2,
         }
         self.library_modules["R1.readout.direct"] = {"type": "readout/direct"}
-        self.publication["tree"]["children"]["modules"]["children"]["readout"][
-            "ref"
-        ] = "<Custom:Pulse Readout>"
+        self.publication["tree"]["children"]["modules"]["children"]["readout"].update(
+            ref="<Custom:Pulse Readout>", mode="inline"
+        )
         self.publication["tree"]["children"].update(
             reps=scalar(17),
             sweep=section(
                 freq={
                     "kind": "sweep",
                     "valid": True,
+                    "readonly": False,
                     "inputs": {
                         key: scalar(value)["input"]
                         for key, value in {
@@ -234,6 +240,8 @@ class DriveGui(TimeRabiGui):
         self.publication["tree"]["children"]["modules"]["children"]["qub_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
+            "mode": None,
             "ref": None,
             "error": None,
             "children": {
@@ -287,6 +295,7 @@ class DriveGui(TimeRabiGui):
                     "readout"
                 ]
                 readout["children"] = {"ro_freq": scalar(7100.0)}
+                publish_reference_locks(readout)
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "tab.new":
@@ -404,6 +413,7 @@ class AmplitudeRabiGui(TimeRabiGui):
             gain={
                 "kind": "sweep",
                 "valid": True,
+                "readonly": False,
                 "inputs": {
                     key: scalar(value)["input"]
                     for key, value in {"start": -0.2, "stop": 0.7, "expts": 43}.items()
@@ -543,6 +553,7 @@ def test_rabi_frequency_precedence_preserves_gui_defaults(
         drive["children"]["freq"] = scalar(
             6280.0 if source != "invalid_library" else None
         )
+        publish_reference_locks(drive)
     if source == "explicit":
         arguments["frequency_mhz"] = 6150.0
     with recipe_client(tmp_path, gui) as client:
@@ -1081,6 +1092,7 @@ def test_twotone_preserves_valid_library_leaf_and_fills_missing_leaf(tmp_path):
     readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
     readout["ref"] = "R1.readout.calibrated"
     readout["children"]["ro_cfg"]["children"]["ro_freq"] = scalar(None)
+    publish_reference_locks(readout)
     with recipe_client(tmp_path, gui) as client:
         reply = full_execution_reply(
             client,

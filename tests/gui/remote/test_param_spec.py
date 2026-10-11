@@ -234,3 +234,25 @@ def test_non_json_schema_property_keeps_its_type():
     # The other kinds still render a concrete "type" (only JSON goes untyped).
     assert schema_property(ParamSpec("n", JsonType.NUMBER)).get("type") == "number"
     assert schema_property(ParamSpec("b", JsonType.BOOLEAN)).get("type") == "boolean"
+
+
+@pytest.mark.parametrize(
+    ("params", "message"),
+    [
+        ({"mode": "other"}, "missing 'first'"),
+        ({"first": 7, "mode": "other"}, "'first' must be a string, got int"),
+    ],
+    ids=["missing", "wrong-type"],
+)
+def test_validation_keeps_first_spec_failure_before_later_enum(
+    params: dict[str, object], message: str
+):
+    specs = (
+        ParamSpec("first", JsonType.STRING),
+        ParamSpec("mode", JsonType.STRING, enum=("fast", "careful")),
+    )
+    with pytest.raises(RemoteError) as error:
+        validate_params(specs, params)
+    assert error.value.code is ErrorCode.INVALID_PARAMS
+    assert error.value.message == message
+    assert error.value.__cause__ is None

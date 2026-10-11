@@ -130,7 +130,7 @@ def calculate_system_n_oper_vs_flux(
     from scqubits.core.fluxonium import Fluxonium
 
     def get_n_oper(
-        paramsweep: ParameterSweep, paramindex_tuple: tuple[int, int], **kwargs
+        paramsweep: ParameterSweep, paramindex_tuple: tuple[int, int], **_kwargs
     ) -> NDArray[np.complex128]:
         from scqubits.utils.spectrum_utils import identity_wrap
 

@@ -114,10 +114,7 @@ class LoadValue(Module):
         # fetched packed word. addr_reg is reused for shift once word is loaded.
         temp_reg_num = 2 if self._is_compressed else 1
         with prog.acquire_temp_reg(temp_reg_num) as (addr_reg, *other_regs):
-            if self._is_compressed:
-                word_reg = other_regs[0]
-            else:
-                word_reg = ""  # not use
+            word_reg = other_regs[0] if self._is_compressed else ""  # not use
 
             if not self._is_compressed:
                 # Use the index register plus the optional offset as the address.

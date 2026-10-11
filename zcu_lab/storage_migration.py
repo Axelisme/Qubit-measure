@@ -12,7 +12,7 @@ from typing import Literal
 from zcu_tools.datafile import VariableSchema
 from zcu_tools.resources.storage_migration import KeyRule, MigrationMapping, ModuleRule
 
-# Reviewed decisions: D120-D129, D133-D134, D337/D342. Changes to any rules, seeds,
+# Explicit legacy mappings preserve working units and fixed roots. Changes to rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
 _KIND_REVISIONS = {"qubit/fluxonium": "1.6", "qubit/transmon": "1.7"}
@@ -100,7 +100,7 @@ _REMOVED = (
 
 # Candidates follow existing role_table Lib priority, not source YAML order.
 # Each legacy reset name keeps its fixed root without guessing module.reset.
-# D337/D342 use ext scalars for calibration, not per-scheme module slots.
+# Calibration uses ext scalars, not per-scheme module slots.
 _MODULE_NAMES = (
     ("qub_probe", "Q1.pulses.qub_probe", "Q1.module.probe"),
     ("res_probe", "R1.pulses.res_probe", "R1.module.probe"),
@@ -208,7 +208,7 @@ def build_mapping(
                 old_name=name,
                 target_path=target,
                 reference_path=reference,
-                reason="D337/D342: fixed reset root; downstream selection unchanged"
+                reason="Fixed reset root; downstream selection unchanged"
                 if name in ("reset_10", "reset_120", "reset_bath", "reset_bath_e")
                 else "D156: named legacy candidate",
             )

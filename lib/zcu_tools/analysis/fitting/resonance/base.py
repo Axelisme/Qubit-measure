@@ -214,24 +214,10 @@ def _find_edelay_branch(
     return float(candidates[best_index])
 
 
-def find_edelay_branch(
-    freqs: NDArray[np.float64],
-    signals: NDArray[np.complex128],
-    *,
-    search_radius: float | None = None,
-    max_search_radius: float | None = None,
+def _validate_edelay_branch_inputs(
+    freqs: NDArray[np.float64], signals: NDArray[np.complex128]
 ) -> float:
-    """Return a global electrical-delay branch seed for one or more signal rows.
-
-    ``signals`` may be a single trace or a row stack sharing ``freqs``. With no
-    explicit ``search_radius``, the search covers two alias periods of an equivalent
-    uniform grid with the same span and sample count. The radius uses the inverse unit
-    of ``freqs``. Uniform-grid row aliases are aggregated circularly over ``1/|df|``.
-    ``max_search_radius`` opt-in enables geometric expansion when the best candidate
-    reaches the current boundary. It caps expansion but never shrinks the initial
-    search. Invalid, boundary-limited, or oversized searches raise ``ValueError``; an
-    ambiguous nonuniform maximum emits ``RuntimeWarning``.
-    """
+    """Validate branch-search arrays in input-error order and return their span."""
     if freqs.ndim != 1 or signals.ndim not in (1, 2):
         raise ValueError(
             "electrical-delay branch search expects a one-dimensional frequency "
@@ -257,6 +243,28 @@ def find_edelay_branch(
             "electrical-delay branch search requires distinct frequencies with a "
             "positive span"
         )
+    return span
+
+
+def find_edelay_branch(
+    freqs: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+    *,
+    search_radius: float | None = None,
+    max_search_radius: float | None = None,
+) -> float:
+    """Return a global electrical-delay branch seed for one or more signal rows.
+
+    ``signals`` may be a single trace or a row stack sharing ``freqs``. With no
+    explicit ``search_radius``, the search covers two alias periods of an equivalent
+    uniform grid with the same span and sample count. The radius uses the inverse unit
+    of ``freqs``. Uniform-grid row aliases are aggregated circularly over ``1/|df|``.
+    ``max_search_radius`` opt-in enables geometric expansion when the best candidate
+    reaches the current boundary. It caps expansion but never shrinks the initial
+    search. Invalid, boundary-limited, or oversized searches raise ``ValueError``; an
+    ambiguous nonuniform maximum emits ``RuntimeWarning``.
+    """
+    span = _validate_edelay_branch_inputs(freqs, signals)
 
     signal_rows = signals[None, :] if signals.ndim == 1 else signals
     rough_edelays = np.asarray(

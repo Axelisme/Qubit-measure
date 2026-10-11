@@ -55,14 +55,12 @@ import matplotlib
 # never display them (the autouse _close_matplotlib_figures fixture cleans up).
 matplotlib.use("Agg")
 
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from contextlib import contextmanager
-from threading import Event
 from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.device.base import BaseDevice
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
@@ -577,7 +575,7 @@ def test_t1_interrupted_acquire_returns_partial_result(
     plots.release()
 
 
-def test_t1_setup_failure_leaves_caller_config_unchanged(
+def test_t1_acquisition_failure_leaves_caller_config_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
@@ -585,26 +583,14 @@ def test_t1_setup_failure_leaves_caller_config_unchanged(
     original = cfg.model_copy(deep=True)
     plots = Plots(NonPresentingHost())
 
-    def fail_setup(
-        config: T1Cfg,
-        devices: Mapping[str, BaseDevice[Any]],
-        *,
-        progress: bool,
-        cancel_signal: Event,
-    ) -> None:
-        config.reps = 999
-        raise RuntimeError("setup failed")
+    def fail_acquisition(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("acquisition failed")
 
-    monkeypatch.setattr(
-        "zcu_lab.v2.twotone.time_domain.t1.core.setup_devices", fail_setup
-    )
-    with pytest.raises(RuntimeError, match="setup failed"):
-        T1Exp().run(
-            cfg,
-            context=RunContext(
-                soc, soccfg, plots, devices={}, cancel_signal=StopSignal()
-            ),
-        )
+    monkeypatch.setattr(soc, "start_readout", fail_acquisition)
+    context = RunContext(soc, soccfg, plots, devices={}, cancel_signal=StopSignal())
+    T1Exp().run(cfg, context=context)
+    with pytest.raises(RuntimeError, match="acquisition failed"):
+        context.cancel_signal.raise_if_error()
     plots.finish(present=False)
     assert cfg == original
     plots.release()
@@ -854,7 +840,7 @@ def test_singleshot_t1_tone_sweep_uniform_compiles_and_acquires(
 
 
 @pytest.mark.parametrize("uniform", [False, True])
-def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
+def test_singleshot_t1_tone_sweep_zero_length_fails_before_acquisition(
     uniform: bool, monkeypatch: pytest.MonkeyPatch, singleshot_context
 ) -> None:
     soc, soccfg = make_mock_soc(sim=_SIM)
@@ -863,9 +849,9 @@ def test_singleshot_t1_tone_sweep_zero_length_fails_before_device_setup(
     )
 
     monkeypatch.setattr(
-        singleshot_t1_tone_sweep,
-        "setup_devices",
-        lambda *_args, **_kwargs: pytest.fail("device setup must not run"),
+        soc,
+        "start_readout",
+        lambda *_args, **_kwargs: pytest.fail("acquisition must not run"),
     )
 
     with pytest.raises(ValueError, match="strictly positive"):

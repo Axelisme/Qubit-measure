@@ -58,6 +58,40 @@ from ...operands import Register, SrcKeyword
 from ..base import DATAFLOW_TRANSPARENT_INSTS, BlockChunkPass
 
 
+def _release_read_writes(
+    reads: frozenset[str],
+    inst_pending_regs: dict[int, set[str]],
+    reg_to_inst: dict[str, int],
+) -> None:
+    """Stop tracking all outputs of any writer whose output has been read."""
+    for reg in reads:
+        if reg in reg_to_inst:
+            prev_idx = reg_to_inst[reg]
+            if prev_idx in inst_pending_regs:
+                # This instruction is now "live" because at least one of
+                # its outputs is read. Remove it from tracking.
+                for r in inst_pending_regs.pop(prev_idx):
+                    reg_to_inst.pop(r, None)
+
+
+def _shadow_pending_writes(
+    writes: frozenset[str],
+    inst_pending_regs: dict[int, set[str]],
+    reg_to_inst: dict[str, int],
+    dead: set[int],
+) -> None:
+    """Mark a writer dead only after every pending output has been shadowed."""
+    for reg in writes:
+        if reg in reg_to_inst:
+            prev_idx = reg_to_inst[reg]
+            if prev_idx in inst_pending_regs:
+                inst_pending_regs[prev_idx].remove(reg)
+                if not inst_pending_regs[prev_idx]:
+                    # ALL outputs of prev_idx are now shadowed.
+                    dead.add(prev_idx)
+                    del inst_pending_regs[prev_idx]
+
+
 class DeadWriteEliminationPass(BlockChunkPass):
     """Remove overwritten register writes in free BasicBlockNode chunks."""
 
@@ -99,15 +133,7 @@ class DeadWriteEliminationPass(BlockChunkPass):
             reads = inst.reg_read
             writes = inst.reg_write
 
-            # 1. Process Reads: any read makes the source instruction "not dead".
-            for reg in reads:
-                if reg in reg_to_inst:
-                    prev_idx = reg_to_inst[reg]
-                    if prev_idx in inst_pending_regs:
-                        # This instruction is now "live" because at least one of
-                        # its outputs is read. Remove it from tracking.
-                        for r in inst_pending_regs.pop(prev_idx):
-                            reg_to_inst.pop(r, None)
+            _release_read_writes(reads, inst_pending_regs, reg_to_inst)
 
             # 2. Process Side-effects: only plain REG_WR instructions are DCE
             # candidates. Memory/port/timing/control instructions may expose
@@ -121,16 +147,7 @@ class DeadWriteEliminationPass(BlockChunkPass):
                 and not any(Register(w).is_volatile_reg() for w in writes)
             )
 
-            # 3. Process Writes: shadowing previous writes.
-            for reg in writes:
-                if reg in reg_to_inst:
-                    prev_idx = reg_to_inst[reg]
-                    if prev_idx in inst_pending_regs:
-                        inst_pending_regs[prev_idx].remove(reg)
-                        if not inst_pending_regs[prev_idx]:
-                            # ALL outputs of prev_idx are now shadowed.
-                            dead.add(prev_idx)
-                            del inst_pending_regs[prev_idx]
+            _shadow_pending_writes(writes, inst_pending_regs, reg_to_inst, dead)
 
             # 4. Track this instruction if it's a candidate for DCE.
             if can_be_dead and writes:

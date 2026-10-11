@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QScrollArea, QTreeWidget
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
@@ -46,7 +47,7 @@ class LedgerAdapter(FakeFreqAdapter):
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, object],
+        raw_cfg: Mapping[str, ExperimentCfgValue],
         *,
         context: RunContext,
     ) -> FakeFreqRunResult:

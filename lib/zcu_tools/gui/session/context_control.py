@@ -239,6 +239,18 @@ class ContextControlPort(Protocol):
         """
         ...
 
+    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Confirm the ordered table on the owner thread.
+
+        Validate syntax/order, then atomically save to the opened entry before
+        memory/event installation. EMPTY is memory-only. InvalidInputError or
+        storage errors propagate, retaining old rows, versions and file. Saved
+        empty rows are authoritative on reopen. Identical rows still save but
+        emit no change; successful confirmation disables default initialization.
+        No point, ledger or preferences write occurs.
+        """
+        ...
+
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
         """Describe the cached registered session values."""
         ...
@@ -371,6 +383,10 @@ class ContextControlFacet(ContextControlPort):
     def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Commit the dialog's ordered rows through the owning service."""
         self._context.set_alias_rows(rows)
+
+    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Confirm rows using the port\'s validate/save/install contract."""
+        self._context.apply_alias_rows(rows)
 
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
         return self._context.list_value_sources()

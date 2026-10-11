@@ -146,8 +146,8 @@ class _WritebackRow(QFrame):
     ) -> None:
         super().__init__()
         self.setObjectName("writebackRow")
-        self.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)  # type: ignore[attr-defined]
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._cb = cb
         self._cur = current
         self._arrow = QLabel("\u2192")
@@ -616,7 +616,7 @@ class WritebackWidget(QWidget):
                 QMessageBox.critical(dialog, "Validation Error", str(exc))
 
         save_btn.clicked.connect(save)
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.open()
 
     def _edit_cfg_item(
@@ -697,7 +697,7 @@ class WritebackWidget(QWidget):
                 form_widget.detach()
             self._refresh_cfg_item_preview(item, valid=draft.is_valid())
 
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.finished.connect(_on_finished)
         dialog.open()
 

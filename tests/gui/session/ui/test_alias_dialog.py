@@ -1,6 +1,7 @@
 """Ordered alias drafts commit atomically through the real session owner."""
 
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QDialogButtonBox, QLabel, QPushButton, QTableWidget
@@ -17,6 +18,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
+from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -174,3 +176,92 @@ def test_toolbar_and_named_dialog_use_the_same_alias_owner(
         assert background.quiesce()
         window.deleteLater()
         qapp.processEvents()
+
+
+@pytest.fixture
+def entry_editor(
+    qapp, tmp_path: Path
+) -> Generator[tuple[AliasDialog, ContextControlFacet, ResultEntry]]:
+    entry = ResultEntry.create(
+        "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
+    service = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+        alias_rows=(AliasRow("qubit", "Q1"),),
+    )
+    service.install_entry(entry)
+    control = ContextControlFacet(context=service)
+    dialog = AliasDialog(control)
+    dialog.show()
+    try:
+        yield dialog, control, entry
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_apply_persists_and_cancel_only_discards_later_draft(entry_editor) -> None:
+    dialog, control, entry = entry_editor
+    table = dialog.findChild(QTableWidget)
+    buttons = dialog.findChild(QDialogButtonBox)
+    assert table is not None and buttons is not None
+    value = table.item(0, 1)
+    assert value is not None
+    apply = buttons.button(QDialogButtonBox.StandardButton.Apply)
+    cancel = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+    assert apply is not None and cancel is not None
+    value.setText("Q2")
+    apply.click()
+    assert dialog.isVisible()
+    fresh = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+    )
+    fresh.install_entry(entry)
+    assert fresh.get_alias_rows() == (AliasRow("qubit", "Q2"),)
+    value.setText("Q3")
+    cancel.click()
+    fresh.install_entry(entry)
+    assert (
+        fresh.get_alias_rows() == control.get_alias_rows() == (AliasRow("qubit", "Q2"),)
+    )
+
+
+def test_storage_error_keeps_dialog_draft_and_installed_table_for_retry(
+    entry_editor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dialog, control, entry = entry_editor
+    table = dialog.findChild(QTableWidget)
+    buttons = dialog.findChild(QDialogButtonBox)
+    assert table is not None and buttons is not None
+    value = table.item(0, 1)
+    assert value is not None
+    apply = buttons.button(QDialogButtonBox.StandardButton.Apply)
+    assert apply is not None
+    value.setText("Q2")
+
+    def fail_replace(source: Path, destination: Path) -> Path:
+        raise OSError("synthetic disk failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail_replace)
+        apply.click()
+    assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
+    assert dialog.findChildren(QLabel)[-1].text() == "synthetic disk failure"
+    assert value.text() == "Q2"
+    assert dialog.isVisible()
+    apply.click()
+    assert control.get_alias_rows() == (AliasRow("qubit", "Q2"),)
+    assert dialog.findChildren(QLabel)[-1].text() == ""
+    assert dialog.isVisible()
+    fresh = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+    )
+    fresh.install_entry(entry)
+    assert fresh.get_alias_rows() == (AliasRow("qubit", "Q2"),)

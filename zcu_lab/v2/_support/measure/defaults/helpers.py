@@ -16,19 +16,10 @@ from zcu_tools.gui.cfg import (
     ScalarValue,
 )
 
-from zcu_lab.v2._support.measure.defaults.module_defaults import (
-    NamedModuleValue,
-    select_named_module_value,
-    select_named_waveform_value,
-)
-
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
 
 __all__ = [
-    "select_named_module_value",
-    "select_named_waveform_value",
-    "NamedModuleValue",
     "patch_pulse_fields",
     "patch_ro_cfg_fields",
     "make_trig_offset",

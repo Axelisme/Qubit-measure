@@ -109,6 +109,10 @@ class RecipeFieldState:
     ]
     valid: bool
     children: tuple[str, ...] = ()
+    # Reference mode is inline/ref, or None for disabled/non-reference nodes.
+    mode: Literal["inline", "ref"] | None = None
+    # Owner-imposed lock, including ref ancestors and static locked leaves.
+    readonly: bool = False
     reference: str | None = None
     error: str | None = None
     input: RecipeInputState | None = None
@@ -611,10 +615,27 @@ def _field_state(node: dict[str, object]) -> RecipeFieldState:
     valid = node.get("valid")
     if not isinstance(valid, bool):
         raise GuiRpcError("Invalid GUI field validity", reason="incompatible_wire")
+    readonly = node.get("readonly")
+    if not isinstance(readonly, bool):
+        raise GuiRpcError(
+            "Invalid GUI field readonly state", reason="incompatible_wire"
+        )
+    raw_mode = node.get("mode")
+    mode: Literal["inline", "ref"] | None
+    if raw_mode == "inline":
+        mode = "inline"
+    elif raw_mode == "ref":
+        mode = "ref"
+    elif raw_mode is None:
+        mode = None
+    else:
+        raise GuiRpcError("Invalid GUI reference mode", reason="incompatible_wire")
     if kind == "section" or kind == "reference":
         return RecipeFieldState(
             kind="section" if kind == "section" else "reference",
             valid=valid,
+            readonly=readonly,
+            mode=mode,
             children=tuple(_cfg_object(node.get("children", {}))),
             reference=_wire_text(node.get("ref")) if kind == "reference" else None,
             error=_wire_text(node.get("error")) if kind == "reference" else None,
@@ -623,12 +644,14 @@ def _field_state(node: dict[str, object]) -> RecipeFieldState:
         return RecipeFieldState(
             kind="scalar" if kind == "scalar" else "literal",
             valid=valid,
+            readonly=readonly,
             input=_input_state(node.get("input")),
         )
     if kind == "sweep" or kind == "centered_sweep":
         return RecipeFieldState(
             kind="sweep" if kind == "sweep" else "centered_sweep",
             valid=valid,
+            readonly=readonly,
             inputs={
                 key: _input_state(value)
                 for key, value in _cfg_object(node.get("inputs")).items()
@@ -1056,7 +1079,10 @@ class RecipeTab:
     def use_library(
         self, field: str, name: str | None, *, required: str | None = None
     ) -> None:
-        """Select name for a module field; None retains its current GUI value.
+        """Select a readonly library ref for a module/waveform field.
+
+        None retains its current GUI value. Ref child edits require explicit
+        owner conversion to inline first; this operation never copies content.
 
         required requires membership in the captured library even for explicit
         names. It names the missing tool parameter when no usable GUI reference
