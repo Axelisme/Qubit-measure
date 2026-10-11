@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，named aliases、Run admission 與 native Load 來源
+**Last updated:** 2026-10-11，caller-owned alias preset 與 session runner／progress
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -256,10 +256,19 @@ ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
 
-Measure composition 在一處宣告 session-memory alias 初值：qubit 留空，resonator
-保存 `$qubit.resonator`。ContextService 在第一份非空元件 snapshot 以 registry
-的唯一候選填 qubit，不硬編 component kind。之後切 point 不重設表。參數捕捉
-經 `read_alias_context`，不再從 GUI focus 或 adapter 的 via 推論 alias。
+Composition 建立 runner／progress 後交給 `build_session_services()`。
+Run、Analyze、PostAnalyze 從回傳的 `SessionServices.runner` 取用同一 lifecycle
+機制。Operation control 與 app bundle 從 `SessionServices.progress` 取用同一
+progress owner。這個入口不改 operation policy、hardware exclusion、取消或
+owner-thread delivery，也不另建 infrastructure bundle。
+
+Measure launcher 從使用者套件取得有序 alias preset，以 `alias_preset` 經
+`MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 session。
+框架不宣告領域初值。獨立 caller 可提供自己的 rows，省略或空 tuple 都建立空表。
+ContextService 保留 authored softlinks 與空列，在第一份非空元件 snapshot 以
+role registry 的唯一 focus 候選填 primary 空列。之後切 point 不重設表，明確
+提交表後不再初始化。Preset 不查裝置或 cache。參數捕捉經 `read_alias_context`，
+不再從 GUI focus 或 adapter 的 via 推論 alias。
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,

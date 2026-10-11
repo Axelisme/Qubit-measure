@@ -113,15 +113,22 @@ or stale_version. Inspect current state and confirmed files before deciding.
 Use global status for GUI operations, non-terminal executions and terminal count.
 Keep known execution IDs for later queries; global status does not embed history.
 status(execution) returns the shared execution summary without reconnecting.
-Read actual conditions, Primary/Post estimates, native summary and invalid paths,
+Read recipe-filled actual conditions, Primary/Post estimates, native summary and invalid paths,
 and every writeback candidate with its destination. run_id is the original Run
 identity from the captured Save report, including when all outputs fail. It is
 null only without a captured report; output status/error determines save success.
 Readonly tab snapshots keep confirmed identity: null until a persistent output
 succeeds. A Run or analysis step marked unknown may have started even without a
 returned handle.
-Use status(execution, detail="full") for captured native detail without new RPCs
-or guard observations. Artifacts preserve producer sections, names, every member
+Recipe actual is a flat mapping of summary names to value/source/unit. Explicit
+scalar inputs and sweeps with all three sources explicit are omitted; mixed sweeps
+keep their full values and sources. All-explicit actual is {}. Summary and full
+use the same captured mapping and expose no cfg_ref, publication or raw input.
+Twotone requires center_mhz/span_mhz/points; flux surveys require flux_range and
+flux_points as well as explicit flux_device/flux_unit. Resonator frequency defaults
+use current frequency/linewidth to write numeric endpoints, without live formulas.
+Use status(execution, detail="full") for captured analysis/writeback detail without
+new RPCs or guard observations. Artifacts preserve producer sections, names, every member
 and all output paths, formats, statuses and errors. Synchronous tab.save_data and
 tab.save_artifacts return the complete current report, not a Save handle. No Save
 await or snapshot reread is needed. Reserved destinations are not saved files.

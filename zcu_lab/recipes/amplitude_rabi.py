@@ -12,6 +12,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import set_frequency
+
 
 def _validate_inputs(
     references: tuple[tuple[str, str | None], ...],
@@ -94,18 +96,21 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
     # Preserve the complete missing-source list rather than failing on its first item.
     missing: list[MissingParameter] = []
     try:
-        tab.set_frequency(
+        set_frequency(
+            tab,
             "modules.qub_pulse.freq",
             frequency_mhz,
-            calibration="qubit",
+            calibration="$qubit.freq",
             required="frequency_mhz",
-            source="frequency_mhz",
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
     try:
-        tab.set_frequency(
-            "modules.readout", calibration="resonator", required="readout_ref"
+        set_frequency(
+            tab,
+            "modules.readout",
+            calibration="$resonator.freq",
+            required="readout_ref",
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
@@ -117,13 +122,11 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
         start=gain_range[0] if gain_range is not None else None,
         stop=gain_range[1] if gain_range is not None else None,
         expts=points,
-        sources={"start": "gain_range", "stop": "gain_range", "expts": "points"},
+        sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    tab.set(
-        "modules.qub_pulse.waveform.length", pulse_length_us, source="pulse_length_us"
-    )
-    tab.set("reps", reps, source="reps")
-    tab.set("rounds", rounds, source="rounds")
+    tab.set("modules.qub_pulse.waveform.length", pulse_length_us, source="explicit")
+    tab.set("reps", reps, source="explicit")
+    tab.set("rounds", rounds, source="explicit")
 
     run, status = yield tab.run()
     if status == "cancelled":

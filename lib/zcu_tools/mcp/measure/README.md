@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-11, complete device RPC and bounded partial setup
+**Last updated:** 2026-10-11, complete device RPC, bounded partial setup, generic recipe cfg operations and filtered actual
 
 # `zcu_tools/mcp/measure/`
 
@@ -30,7 +30,11 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核心或 cfg defaults。參數來源、缺參數與分析分支由個別 recipe 宣告。首次呼叫等待最多 300 秒；缺參數、失敗或互動需求會提早交付。仍執行時回傳 execution，背景接續不因等待逾時而停止。
 
-`onetone_spectrum_over_flux` 必填 `flux_device` 與 `flux_unit`，不從 GUI 選擇預設裝置或單位。`flux_unit` 必須符合 GUI 裝置的實體單位，不換算數字。FakeDevice 的 snapshot unit=`none`，caller 必須明確傳 `native`。Recipe 確認裝置後使用 native 座標，回覆保留此單位標記。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。
+`onetone_spectrum_over_flux` 必填 `flux_device`、`flux_unit`、`flux_range` 與 `flux_points`，都不能為 null。Range 保留兩個 native endpoints，不換算數字。Unit 必須與 cached device snapshot 相同，native 也必須明填。Helper 成功後寫 cfg 的 dev.flux_dev 與独立 flux_unit，不把 unit 附在 sweep 上。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。
+
+`twotone_spectrum` 的 center_mhz／span_mhz／points 必填。三個 resonator spectrum 可省略 frequency range，domain helper 讀目前 frequency／linewidth 後寫數字 endpoints。正式 freq／power／flux 的 full-span 倍率為 3／3／2，省略 count 保留 GUI 值。四個 spectrum 摘要只保 sweep，不另計 center／span。Frequency／flux／unit policy 由 zcu_lab.recipes.helpers 擁有。
+
+`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields 與 set_sweep。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗證，再以一次 edit_cfg 寫入；None 保留值並標 gui_default。Retain_source 只記 caller 選好的 scalar／sweep label，不發 RPC、不改 cfg 或 revision。Framework 不解讀 calibration、角色或 linewidth。
 
 Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server 同步處理請求，首次等待期間不保證同連線的另一控制請求立即處理。Client timeout 不等於取消，不可因此自動重跑。
 
@@ -40,7 +44,7 @@ Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server �
 
 `finish_early` 對 recipe 停止採集，有可用結果就先保存 raw，再繼續分析及保存。`cancel` 優先，停止後續分析與保存；已啟動且不可取消的保存仍等真實結果。Registered analysis 的 cancel 也不再啟動新的結果讀取。GUI cancellation 回覆獨立放在 `gui_cancel`，不能拿它覆寫 execution 的既有 terminal outcome。未註冊的 `cancel(op)` 沿用直接 GUI hook。
 
-Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` 的流程先確認可用，再 reset、套本次 cfg 與 Run。`RecipeSession.open_tab` 接收 caller-owned `aliases`，以 alias 名稱指定當次覆寫，並複製這份 mapping。省略 aliases、None 與 {} 等價，不觸發 temporary preview 或重新 lowering。非空 mapping 讓參數／library 查詢、cfg preview 與 Run 使用同一份覆寫。新 tab 與 reuse tab 都不保存覆寫，tab.new/reset 不收這份 mapping。Zcu_lab recipes 保留 target 參數，明確對到 qubit alias，沒有 target 就不覆寫。Temporary preview 必須使用原 observed ref。Source 變更造成 stale 時拒絕，不換成新 ref 或重試。Execution 的 resolved conditions 捕捉這份 preview，不冒用全域 publication。關閉由 `tab_close` 明確指定。
+Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` 的流程先確認可用，再 reset、套本次 cfg 與 Run。`RecipeSession.open_tab` 接收 caller-owned `aliases`，以 alias 名稱指定當次覆寫，並複製這份 mapping。省略 aliases、None 與 {} 等價，不觸發 temporary preview 或重新 lowering。非空 mapping 讓參數／library 查詢、cfg preview 與 Run 使用同一份覆寫。新 tab 與 reuse tab 都不保存覆寫，tab.new/reset 不收這份 mapping。Zcu_lab recipes 保留 target 參數，明確對到 qubit alias，沒有 target 就不覆寫。Temporary preview 必須使用原 observed ref。Source 變更造成 stale 時拒絕，不換成新 ref 或重試。Execution 的 declared summary facts 捕捉這份 preview，不冒用全域 publication。關閉由 `tab_close` 明確指定。
 
 Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與該 Run 的 run_id，全部輸出失敗亦保留這個 ID。Author handle 使用這份保存契約。沒有 SaveReport 時 steps.raw_save 為 null，不推論 not_started、unknown 或 Save 是否已送出。save_raw 的傳輸與 admission 失敗照常拋出，recipe 回覆的原因只在 error；不加 requested 旗標。
 
@@ -67,7 +71,7 @@ Analysis-only 沒有 recipe 身分。摘要使用注入 definitions 已宣告的
 
 Recipe、`tab_analyze`、`wait(execution)` 與 `tab_interact(done)` 使用同一 execution 摘要。摘要列出 Run 前捕捉的 resolved 條件與來源、Primary/Post scalar estimates、原生 summary 與 invalid、全部候選及 destination 身分。Run 或分析已送出而 receipt 未確認時保留 unknown，不從缺少 handle 推斷未啟動。`run_id` 取已捕捉 Save report 的原 Run 身分，全部輸出失敗也保留同一 ID。沒有捕捉到 report 時才為 null。各 output 的 status/error 表示保存結果。這與 readonly tab snapshot 的 confirmed run_id 不同，後者在尚無持久輸出成功時仍為 null。Execution ID 仍是 session-local。
 
-`status(execution, detail="full")` 保留該 execution 已捕捉的 native 資料，包括完整 cfg publication、raw expressions、source_basis、analysis results 與 writeback proposals。查詢不新增 RPC 或 guard 觀察。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
+Recipe 的 actual 是平面 mapping，key 沿 summary_parameters.name，每項保 value／source／unit。Scalar source=explicit 或 sweep 三個 component 全為 explicit 時省略，mixed sweep 整項保留；全部明填時回 {}。Recipe/helper 把 agent 明填值標 explicit，通用 API 仍接受 custom label。Summary 與 `status(execution, detail="full")` 使用同一份固定 actual。Run 內部只保 cfg_ref 與宣告摘要 facts，不保存 publication、input 或 source_basis 副本。Cfg_ref 供內部 Run／writeback 使用，actual 與 candidate 都不顯示它。Full 仍保 captured analysis results 與 writeback proposals。查詢不新增 RPC 或 guard 觀察。Artifact 沿用 producer 的 section、名稱與完整 members，每個 member 保留全部路徑、format、status 與 error。Reserved 不代表已保存。Partial 保留當次成功與失敗輸出；resave 以當次 report 取代選中 artifact 的輸出，不累積跨次成功路徑。
 
 當次工具回覆可附記憶體中的 MCP image content，不落地 session 暫存 PNG。之後要看圖，用 `tab.get_figure` 取得 GUI 當下圖像，不保證是先前回覆的圖。`status` 不附圖片，也不重新擷取圖像。
 
