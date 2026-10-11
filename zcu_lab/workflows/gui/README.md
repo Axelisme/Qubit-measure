@@ -1,6 +1,6 @@
 # workflows/gui — Workflow form attachments
 
-**Last updated:** 2026-10-11，共用 alias preset 與字串 expression
+**Last updated:** 2026-10-12，明確 terminal fluxdep 匯出動作
 
 這個 package 擁有具體 workflow 的表單、明寫的 to_cfg 與 Qt panel attachment，不實作通用 editor 或 Engine。Native workflow definitions 不依賴這些 GUI attachments。
 
@@ -13,6 +13,10 @@ T1WorkflowWindow 的 Start 從當次固定 capture 驗證輸入，以 validated 
 Pause/Resume 的公開 controls 與按鈕使用同一 native run。Pause 保留 operation、RUN lease、plan/input capture 與 Plots lifetime，Resume 不讀裝置，以同 token 提交 worker；Start 表單直接使用公開 typed cached native mapping，不做 live read。Device 實際值只由每次 env.run 在 worker 捕捉，SessionDevices 已接 live typed cfg、完整 selected-model setup 與 native capture helper。每次 env.run 在保留的 RUN lease 下、callback 前讀取，Save 使用固定 evidence。整個 run 終止才解除 plan/input 鎖定。
 
 T1WorkflowWindow.create_remote_service以同一Window、session bus與owner組裝T1RemoteControlAdapter。RPC提供partial-input Start、native status及明填run_id的Pause／Resume／Stop，不另存run或重做target核對。Start的plan／tunables各送path-array／value batch，只送與defaults不同的欄位，空batch用當次capture的defaults。Host用既有FormState.write一次套用，不寫GUI draft或做tree overlay。Invalid回既有FormErrors path/message且不改panels；成功用既有reset(base)顯示實際提交input。GUI不傳batch時仍讀自己的panels及local parse errors。Pending token不代表worker接受，transport stop不取消native run。
+
+`T1WorkflowWindow.export_fluxdep(run_id, origin='gui')` 與 `Export merged/Labber` 動作呼同一 Controller public entry。動作的 objectName 為 workflow.run.export_fluxdep，只在 done、stopped、failed、aborted enable；nonterminal/pending/stale target 由共同 admission 拒絕。Start 固定 native plan、identity/provenance、entry storage 與 ledger，terminal delivery 不自動匯出。每次匯出建立新的 SaveLayout，native 原子覆寫 workflow data_root/merged.h5，Labber 新增日期樹檔案。訊息列每個輸出的 path/status/error，未分配的 Labber 顯示 unallocated，ledger_error 另列。GUI 只提供功能動作，位置與呈現另由 UIUX 持有。
+
+RPC `workflow.export_fluxdep` 必填 run_id，回 native/Labber outputs 與 ledger_error，未分配 path 投影為 null。MCP `workflows_workflow_export_fluxdep` 只送一次 RPC，不預讀、不重試，origin 為 mcp。GUI、wire 與 MCP 版本均為 2，沒有舊版本 fallback。Native public reader 與 Labber public grouped reader 已驗證 Signal/Time 2D 及 T1 Flux 1D；這不代表實際 Labber Log Browser 能開此版面，仍需另外驗收。
 
 Records／具名圖 RPC 讀同一 Window 的 native run。Records 直接投影 Engine 已提交的 records，保留 commit cursor 與 captured revision，不從圖反推數值。圖名與 PNG 由 Window 持有的 Plots 提供，PNG 沿 shared renderer 在 Qt owner 產生；status-only 不渲染。Pending acceptance 明確失敗，terminal 圖保留至新 Start 或 close；close 成功釋放後不再提供舊圖。MCP forwarding 已接同一 GUI RPC。
 

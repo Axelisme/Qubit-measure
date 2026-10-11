@@ -36,6 +36,33 @@ class RunTarget(TypedDict):
     run_id: str
 
 
+class FluxdepOutputReply(TypedDict):
+    """One current output attempt, not a measurement outcome.
+
+    format names the native data_h5 or Labber writer. path is its allocated
+    local destination as text, or null only on failed Labber allocation.
+    status is saved/failed; error is null on success and a nonempty diagnostic
+    on failure. Earlier calls' successful paths are not merged into this reply.
+    """
+
+    format: Literal["data_h5", "labber"]
+    path: str | None
+    status: Literal["saved", "failed"]
+    error: str | None
+
+
+class FluxdepExportReply(RunTarget):
+    """Latest terminal export report for the explicitly targeted run_id.
+
+    outputs lists native then Labber attempts, including allocation failures.
+    ledger_error is null after saved-event append, otherwise its diagnostic;
+    it does not erase successful file paths or change the workflow outcome.
+    """
+
+    outputs: list[FluxdepOutputReply]
+    ledger_error: str | None
+
+
 class RecordsParams(RunTarget):
     """Native records cursor: since is a nonnegative commit_seq, default 0."""
 
@@ -299,6 +326,9 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
                     self._resume, METHOD_SPECS["workflow.resume"]
                 ),
                 "workflow.stop": BoundMethod(self._stop, METHOD_SPECS["workflow.stop"]),
+                "workflow.export_fluxdep": BoundMethod(
+                    self._export_fluxdep, METHOD_SPECS["workflow.export_fluxdep"]
+                ),
             },
             event_serializers={},
             wire_event_name=str,
@@ -477,6 +507,27 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             "run_id": controller.run_id,
             "operation_id": operation_id,
             "status": _project_status(controller.status()),
+        }
+
+    def _export_fluxdep(
+        self, _adapter: RemoteControlServiceBase, params: RunTarget
+    ) -> FluxdepExportReply:
+        try:
+            report = self.ctrl.export_fluxdep(params["run_id"], origin="mcp")
+        except (RunMismatch, InvalidRunState) as exc:
+            raise _project_control_error(exc) from exc
+        return {
+            "run_id": report.run_id,
+            "outputs": [
+                {
+                    "format": out.format,
+                    "path": None if out.path is None else str(out.path),
+                    "status": out.status,
+                    "error": out.error,
+                }
+                for out in report.outputs
+            ],
+            "ledger_error": report.ledger_error,
         }
 
     def _stop(
