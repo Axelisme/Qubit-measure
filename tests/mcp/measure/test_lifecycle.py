@@ -4,6 +4,7 @@ import json
 import socket
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
@@ -62,8 +63,8 @@ class LoopbackExchange(TypedDict):
     """
 
     attempt: int
-    request: dict[str, object]
-    reply: dict[str, object] | None
+    request: Mapping[str, object]
+    reply: Mapping[str, object] | None
     delivered: bool
 
 
@@ -159,7 +160,11 @@ class LoopbackGui:
         if method == "wire.version":
             result = {"wire_version": self._catalog["wire"], "gui_version": 83}
         elif method in {"control.connect", "control.status"}:
-            expected = {"label": "agent", "mode": "owner"} if method == "control.connect" else {}
+            expected = (
+                {"label": "agent", "mode": "owner"}
+                if method == "control.connect"
+                else {}
+            )
             if params != expected:
                 raise AssertionError(f"Unexpected {method} params: {params}")
             result = {
@@ -193,6 +198,107 @@ class LoopbackGui:
         self._server.close()
         self._thread.join(timeout=2)
         assert not self._thread.is_alive()
+
+
+def assert_loopback_exchanges(
+    exchanges: Sequence[LoopbackExchange],
+    requests: Sequence[tuple[str, Mapping[str, object]]],
+    replies: Sequence[Mapping[str, object]],
+) -> None:
+    """Compare a complete attempt's method/params, reply envelopes and delivery.
+
+    Expected replies omit the request id; each reply must match its own request.
+    """
+    assert [
+        (exchange["request"]["method"], exchange["request"]["params"])
+        for exchange in exchanges
+    ] == requests
+    assert len(exchanges) == len(replies)
+    for exchange, reply in zip(exchanges, replies, strict=True):
+        assert exchange["reply"] == {"id": exchange["request"]["id"], **reply}
+        assert exchange["delivered"] is True
+
+
+def assert_auth_transcript(
+    initial: Sequence[LoopbackExchange],
+    restarted: Sequence[LoopbackExchange],
+    *,
+    wire_version: int,
+    catalog: object,
+) -> None:
+    """Check this real socket composition's denied and successful auth attempts.
+
+    The bridge and session each read wire.version; neither read is projected out.
+    The initial valid attempt includes the connect tool's seven status reads.
+    """
+    assert {exchange["attempt"] for exchange in initial} == {1, 2, 3}
+    assert {exchange["attempt"] for exchange in restarted} == {1}
+    no_token, wrong_token, valid_token = (
+        [exchange for exchange in initial if exchange["attempt"] == attempt]
+        for attempt in (1, 2, 3)
+    )
+    wire = {
+        "ok": True,
+        "result": {"wire_version": wire_version, "gui_version": 83},
+    }
+    unauthorized = {
+        "ok": False,
+        "error": {"code": "unauthorized", "message": "auth required"},
+    }
+    identity = ("control.connect", {"label": "agent", "mode": "owner"})
+    assert_loopback_exchanges(
+        no_token,
+        [("wire.version", {}), ("wire.version", {}), identity],
+        [wire, wire, unauthorized],
+    )
+    assert_loopback_exchanges(
+        wrong_token, [("auth", {"token": "wrong"})], [unauthorized]
+    )
+    handshake = [
+        ("auth", {"token": "test-secret"}),
+        ("wire.version", {}),
+        ("wire.version", {}),
+        identity,
+        ("rpc.catalog", {}),
+    ]
+    handshake_replies = [
+        {"ok": True, "result": {}},
+        wire,
+        wire,
+        {
+            "ok": True,
+            "result": {
+                "holder": "rpc:agent",
+                "locked": False,
+                "online": True,
+                "me": True,
+            },
+        },
+        {"ok": True, "result": {"methods": catalog}},
+    ]
+    status_reads = [
+        "state.has_project",
+        "state.has_active_context",
+        "state.has_soc",
+        "tab.snapshot",
+        "context.active",
+        "device.list",
+        "operation.active",
+    ]
+    status_replies = [
+        {"ok": True, "result": overview_rpc(method, {})} for method in status_reads[:-1]
+    ] + [
+        {
+            "ok": True,
+            "result": {"operations": [{"op": 1, "tab": None, "kind": "device"}]},
+        }
+    ]
+    assert_loopback_exchanges(
+        valid_token,
+        handshake + [(method, {}) for method in status_reads],
+        handshake_replies + status_replies,
+    )
+    assert_loopback_exchanges(restarted, handshake, handshake_replies)
 
 
 CATALOG = [
@@ -389,8 +495,12 @@ def test_token_protected_gui_attach_rejects_bad_credentials_and_reauthenticates_
         assert client.call("rpc_list", {"domain": "adapter"})["methods"]
         assert gui_b.sent.count("auth") == 1
         assert gui_b.sent.count("rpc.catalog") == 1
-        assert rejected_catalog_count == 1, json.dumps(
-            {"initial": gui_a.exchanges, "restarted": gui_b.exchanges}, indent=2
+        assert rejected_catalog_count == 0
+        assert_auth_transcript(
+            gui_a.exchanges,
+            gui_b.exchanges,
+            wire_version=client.context.config.wire_version,
+            catalog=catalog["methods"],
         )
     finally:
         client.context.bridge.disconnect()
