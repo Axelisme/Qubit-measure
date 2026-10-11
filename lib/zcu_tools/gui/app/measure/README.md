@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，named aliases、Run admission 與 native Load 來源
+**Last updated:** 2026-10-11，device 名稱預覽與 Run 固定 alias
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -557,6 +557,12 @@ and reads historical fixed names without expanding current alias links.
 fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
+
+String cfg 的 `$flux_dev` 保留 authored expression。Preview、refresh 與 Run
+使用各自固定的 alias capture，顯示例如 `= "yoko1"`。未綁或缺列發布 Invalid
+並指名 alias；無 context 或來源故障不沿用舊名稱。Alias 與 preview 不查 device
+可用性，實際使用名稱時由實驗 device owner 報錯。RunMetadata 與 data.h5 保存
+當次的 `flux_dev → yoko1`；Analyze、WB 與 Save 不重新讀取目前 alias 表。
 
 generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
 `zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter提供固定

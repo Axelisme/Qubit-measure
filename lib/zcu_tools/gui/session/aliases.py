@@ -20,8 +20,8 @@ class AliasRow:
     """One authored row in the ordered global alias table.
 
     alias is a public identifier, such as qubit or resonator. value is a
-    concrete component identifier, an empty string for unbound, or a dotted
-    reference beginning with $, such as $qubit.resonator. References may name
+    concrete component or device identifier, an empty string for unbound, or a
+    dotted reference beginning with $, such as $qubit.resonator. References may name
     only an earlier row. AliasTable validates names, values and ordering as
     one batch; constructing a row alone does not validate a table.
     """
@@ -71,8 +71,8 @@ class AliasTable:
 
         Names and dotted reference segments must be public identifiers. Empty
         values are unbound. A $ reference needs an alias and at least one field;
-        it may refer only to a preceding row. Unknown concrete component names
-        are reported at read time, so replacing rows requires no point snapshot.
+        it may refer only to a preceding row. Concrete names are not checked
+        against point or device catalogs; replacing rows needs no snapshot.
         Raises InvalidInputError(alias_invalid) without modifying the old rows.
         """
         candidate = tuple(rows)
@@ -107,8 +107,8 @@ class AliasTable:
 
         Replace an existing row in place or append a previously absent alias.
         Dependent $ rows retain their authored links. Empty or malformed
-        component identifiers raise InvalidInputError(alias_invalid); component
-        existence and consumer kind are checked by resolve, not here.
+        component/device identifiers raise InvalidInputError(alias_invalid).
+        Field readability and optional consumer kind are checked by resolve.
         The original table is never changed.
         """
         if not _public_identifier(component):
@@ -127,11 +127,12 @@ class AliasTable:
     def resolve(
         self, alias: str, point: PointDocument, *, kind: str | None = None
     ) -> str:
-        """Read an alias's concrete component name from this fixed point.
+        """Read an alias's component or device name from this fixed point.
 
+        Concrete names need not belong to point.components or a device catalog.
         Follow only this row's earlier-row dependency chain. kind optionally
-        requires the final component kind to match a fnmatch pattern. Unknown
-        aliases, unbound links, missing components/fields, non-string link
+        requires a component matching a fnmatch pattern for component consumers.
+        Unknown aliases, unbound links, unreadable fields, non-name link
         targets and wrong kinds raise RoleResolutionError naming the requested
         alias. No same-named concrete component substitutes for an alias.
         """
@@ -179,10 +180,6 @@ class AliasTable:
         if not value:
             return None
         name = value
-        if name not in point.components:
-            raise RoleResolutionError(
-                alias, None, None, f"Alias targets missing component {name!r}"
-            )
         for referring_alias, suffix in reversed(links):
             try:
                 target = document_value(point, f"{name}.{suffix}")
@@ -193,15 +190,18 @@ class AliasTable:
                     None,
                     f"Unreadable link for {referring_alias!r}: {name}.{suffix}",
                 ) from cause
-            if not isinstance(target, str) or target not in point.components:
+            if not isinstance(target, str) or not _public_identifier(target):
                 raise RoleResolutionError(
                     alias,
                     None,
                     None,
-                    f"Link for {referring_alias!r} must name an existing component",
+                    f"Link for {referring_alias!r} must name a component or device",
                 )
             name = target
-        if kind is not None and not fnmatchcase(point.components[name].kind, kind):
+        component = point.components.get(name)
+        if kind is not None and (
+            component is None or not fnmatchcase(component.kind, kind)
+        ):
             raise RoleResolutionError(
                 alias, None, kind, f"Alias targets wrong-kind component {name!r}"
             )

@@ -32,7 +32,8 @@ def test_name_and_softlink_resolve_without_component_or_device_catalog() -> None
     assert evaluate_scalar_expr("$flux_dev", captured) == "yoko1"
     assert evaluate_scalar_expr("$qubit.rate * 2", captured) == 8.0
     assert AliasTable(rows).names(base.document(), {}) == {
-        "qubit": "Q1", "flux_dev": "yoko1"
+        "qubit": "Q1",
+        "flux_dev": "yoko1",
     }
     assert captured.resolved_aliases()[1].resolved == "yoko1"
     with pytest.raises(ExpressionError, match="numeric|number"):
@@ -46,7 +47,9 @@ def test_name_and_softlink_resolve_without_component_or_device_catalog() -> None
 def test_missing_or_unbound_name_reports_alias_without_concrete_fallback(
     rows: tuple[AliasRow, ...],
 ) -> None:
-    captured = parameter_capture({"flux_dev": LinkedComponent(kind="alias/test")}).bind_aliases(rows, {})
+    captured = parameter_capture(
+        {"flux_dev": LinkedComponent(kind="alias/test")}
+    ).bind_aliases(rows, {})
     with pytest.raises(RoleResolutionError, match="flux_dev"):
         captured.value("$flux_dev")
     with pytest.raises(ExpressionError, match="flux_dev"):
@@ -62,14 +65,18 @@ def test_changed_table_and_temporary_override_leave_old_name_capture_fixed() -> 
     assert evaluate_scalar_expr("$flux_dev", temporary) == "yoko2"
     assert table.rows == (AliasRow("flux_dev", "yoko1"),)
     table.replace((AliasRow("flux_dev", "yoko3"),))
-    assert evaluate_scalar_expr("$flux_dev", base.bind_aliases(table.rows, {})) == "yoko3"
+    assert (
+        evaluate_scalar_expr("$flux_dev", base.bind_aliases(table.rows, {})) == "yoko3"
+    )
     assert evaluate_scalar_expr("$flux_dev", old) == "yoko1"
 
 
 def test_historical_names_remain_readable_without_point_membership() -> None:
     base = parameter_capture()
     historical = ParameterContext(
-        point=base.document(), library=base.library, target=base.target,
+        point=base.document(),
+        library=base.library,
+        target=base.target,
         roles=RoleBinding(None, {}, {"flux_dev": "yoko1"}),
     )
     assert historical.value("$flux_dev") == "yoko1"
@@ -78,12 +85,20 @@ def test_historical_names_remain_readable_without_point_membership() -> None:
         historical.value("$flux_dev.value")
 
 
-def test_unavailable_name_capture_propagates_source_fault_instead_of_old_names() -> None:
+def test_unavailable_name_capture_propagates_source_fault_instead_of_old_names() -> (
+    None
+):
     base = parameter_capture()
-    fault = ContextSourceFault("point", Path("point.yaml"), "OSError", "Unreadable point")
+    fault = ContextSourceFault(
+        "point", Path("point.yaml"), "OSError", "Unreadable point"
+    )
     captured = ParameterContext(
-        point=base.document(), library=base.library, target=base.target,
-        roles=RoleBinding(None, {}, {"flux_dev": "yoko1"}, aliases=(AliasRow("flux_dev", "yoko1"),)),
+        point=base.document(),
+        library=base.library,
+        target=base.target,
+        roles=RoleBinding(
+            None, {}, {"flux_dev": "yoko1"}, aliases=(AliasRow("flux_dev", "yoko1"),)
+        ),
         source_faults=(fault,),
     )
     with pytest.raises(ContextSourceUnavailableError):

@@ -1159,19 +1159,37 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         adapter = SnapshotAdapter()
         state.get_tab("tab").adapter = adapter
         schema = CfgSchema(
-            CfgSectionSpec(fields={"dev": CfgSectionSpec(fields={"flux_dev": ScalarSpec("Flux", str, choices_source="devices")})}),
-            CfgSectionValue(fields={"dev": CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev")})}),
+            CfgSectionSpec(
+                fields={
+                    "dev": CfgSectionSpec(
+                        fields={
+                            "flux_dev": ScalarSpec(
+                                "Flux", str, choices_source="devices"
+                            )
+                        }
+                    )
+                }
+            ),
+            CfgSectionValue(
+                fields={
+                    "dev": CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev")})
+                }
+            ),
         )
         bindings = MeasureCfgBindings(PublishedHost(state))
         state.get_tab("tab").cfg = CfgResource(
             lambda: schema,
-            resolution=lambda: bindings.snapshot((), captured_values={}, parameters=captured),
+            resolution=lambda: bindings.snapshot(
+                (), captured_values={}, parameters=captured
+            ),
         )
         service, _gate, background, handles = _make_run_service(state, devices={})
         inputs = replace(
             _make_inputs(state, "tab", adapter),
             parameters=captured,
-            snapshot=replace(session.metadata.snapshot, roles=captured.capture_storage().roles),
+            snapshot=replace(
+                session.metadata.snapshot, roles=captured.capture_storage().roles
+            ),
             experiment_tag=adapter.experiment_tag,
         )
         token = service.start_run(inputs, plots=_plots())
@@ -1186,7 +1204,11 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         metadata = state.get_tab("tab").run.metadata
         assert metadata is not None and metadata.snapshot.roles["flux_dev"] == "yoko1"
         report = session.save()
-        path = next(item.output.path for item in report.outputs if item.output.format == "data_h5")
+        path = next(
+            item.output.path
+            for item in report.outputs
+            if item.output.format == "data_h5"
+        )
         restored = load_run_data(path)
         assert restored.metadata.snapshot.roles["flux_dev"] == "yoko1"
         assert restored.cfg.values["dev"] == {"flux_dev": "yoko1"}

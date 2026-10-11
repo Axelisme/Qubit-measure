@@ -131,16 +131,25 @@ def test_resource_form_shows_device_name_preview_and_unbound_diagnostic(qapp) ->
     state = State(SessionEnv(parameters=current, soc=None, soccfg=None))
     bindings = MeasureCfgBindings(PublishedHost(state))
     schema = CfgSchema(
-        CfgSectionSpec(fields={"flux_dev": ScalarSpec("Flux", str, choices_source="devices")}),
+        CfgSectionSpec(
+            fields={"flux_dev": ScalarSpec("Flux", str, choices_source="devices")}
+        ),
         CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev")}),
     )
-    resource = CfgResource(lambda: schema, resolution=lambda: bindings.snapshot((), captured_values={}, parameters=current))
+    resource = CfgResource(
+        lambda: schema,
+        resolution=lambda: bindings.snapshot(
+            (), captured_values={}, parameters=current
+        ),
+    )
     form = ResourceCfgFormWidget()
     try:
         form.attach(resource)
         assert form.is_valid()
         assert any(label.text() == '= "yoko1"' for label in form.findChildren(QLabel))
-        line = next(line for line in form.findChildren(QLineEdit) if line.text() == "$flux_dev")
+        line = next(
+            line for line in form.findChildren(QLineEdit) if line.text() == "$flux_dev"
+        )
         line.setText("$unknown")
         assert not form.is_valid()
         assert "unknown" in (form.first_invalid_reason() or "")

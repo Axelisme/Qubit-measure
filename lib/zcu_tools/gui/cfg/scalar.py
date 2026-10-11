@@ -31,8 +31,19 @@ def validate_direct_scalar(spec: ScalarSpec, value: DirectValue) -> None:
 
 
 def coerce_scalar_result(
-    value: int | float | complex, type_: type
-) -> int | float | complex:
+    value: int | float | complex | str, type_: type
+) -> int | float | complex | str:
+    """Coerce a finite numeric result or an exact string to its field type.
+
+    Strings target only str; numeric-looking names are never parsed as numbers.
+    A mismatched result or unsupported target type raises RuntimeError.
+    """
+    if type_ is str:
+        if isinstance(value, str):
+            return value
+        raise RuntimeError("Expression result must be a name string")
+    if isinstance(value, str):
+        raise RuntimeError("String expression result cannot target a numeric field")
     if isinstance(value, bool):
         raise RuntimeError("Expression evaluator returned bool instead of a number")
     if type_ is complex:
