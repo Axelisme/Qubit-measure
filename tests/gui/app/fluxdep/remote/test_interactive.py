@@ -34,6 +34,7 @@ from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.plotting.fluxdep.cross_selection import make_cross_selection_figure
 from zcu_tools.plotting.fluxdep.twotone import make_twotone_pick_figure
 
+from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
 
 
@@ -549,7 +550,8 @@ def test_render_failure_does_not_rollback_successful_finish_or_refresh_seen(
 def test_route_agent_facts_drive_native_gui_and_reads_do_not_switch(
     one_route: RouteHarness, qapp
 ):
-    window = MainWindow(one_route.ctrl)
+    dialogs = RecordingDialogPresenter(confirm_answers=[True])
+    window = MainWindow(one_route.ctrl, dialog_presenter=dialogs)
     try:
         link = one_route.client()
         context = _open_picker(one_route, link, "one", "line")
@@ -569,6 +571,7 @@ def test_route_agent_facts_drive_native_gui_and_reads_do_not_switch(
         window.close()
         window.deleteLater()
         qapp.processEvents()
+    assert dialogs.messages("confirm"), "Remote cleanup must ask before close"
 
 
 def test_literal_picker_name_does_not_guard_same_prefix_neighbor(
