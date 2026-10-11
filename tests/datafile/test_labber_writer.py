@@ -279,3 +279,84 @@ def test_export_rejects_complex_coordinates_instead_of_discarding_them(
     )
     with pytest.raises(ValueError, match="imaginary"):
         write_labber(tmp_path / "invalid.export", payload, cfg=_cfg())
+
+
+def test_independent_workflow_export_preserves_ranks_times_and_metadata(
+    tmp_path: Path,
+) -> None:
+    """Explicit heterogeneous workflow layout keeps 2D traces and 1D fit values."""
+    import h5py
+
+    axes = [Axis("Time Index", "", np.arange(3)), Axis("Flux", "native", [1, 2])]
+    variables = {
+        DataVariable("signal"): LabberPayload(
+            ("Signal", "a.u.", np.array([[1 + 2j, 2, np.nan], [3, 4, 5]])),
+            axes,
+            timestamps=np.array([1760000001.0, 1760000003.0]),
+        ),
+        DataVariable("time"): LabberPayload(
+            ("Time", "s", np.array([[0, 1e-6, np.nan], [0, 2e-6, 4e-6]])),
+            axes,
+            timestamps=np.array([1760000002.0, 1760000004.0]),
+        ),
+        DataVariable("t1"): LabberPayload(
+            ("T1", "s", np.array([20e-6, np.nan])),
+            axes[1:],
+            timestamps=np.array([1760000005.0]),
+        ),
+    }
+    metadata = LabberMetadata(
+        comment="fixed workflow",
+        tags=["workflow"],
+        project="chip",
+        user="offline",
+        creation_time=1760000000.0,
+    )
+    payload = ExperimentPayload(
+        variables=variables, metadata=metadata, representation="grouped"
+    )
+    path = tmp_path / "heterogeneous.hdf5"
+    write_labber(path, payload, cfg=_cfg(), grouped_layout="independent")
+    loaded = load_grouped_labber_data(str(path), required_variables=tuple(variables))
+    for key, original in variables.items():
+        actual = loaded.variables[key]
+        np.testing.assert_array_equal(actual.z, original.z)
+        assert [(a.name, a.unit) for a in actual.axes] == [
+            (a.name, a.unit) for a in original.axes
+        ]
+        for a, b in zip(actual.axes, original.axes, strict=True):
+            np.testing.assert_array_equal(a.values, b.values)
+        assert (actual.data.name, actual.data.unit) == (
+            original.data.name,
+            original.data.unit,
+        )
+        np.testing.assert_array_equal(actual.timestamps, original.timestamps)
+    assert (
+        loaded.metadata.tags,
+        loaded.metadata.project,
+        loaded.metadata.user,
+        loaded.metadata.creation_time,
+    ) == (metadata.tags, metadata.project, metadata.user, metadata.creation_time)
+    comment = decode_labber_comment(loaded.metadata.comment)
+    assert comment.cfg == _cfg().values and comment.comment == "fixed workflow"
+    with h5py.File(path) as file:
+        assert bool(file.attrs["zcu_tools.streaming_finalized"])
+    with pytest.raises(FileExistsError):
+        write_labber(path, payload, cfg=_cfg(), grouped_layout="independent")
+
+
+@pytest.mark.parametrize(
+    "layout,representation", [("unknown", "grouped"), ("independent", "single")]
+)
+def test_invalid_workflow_layout_fails_before_file_creation(
+    tmp_path: Path, layout: str, representation: Literal["single", "grouped"]
+) -> None:
+    payload = ExperimentPayload(
+        variables={DataVariable("signal"): _signal()},
+        metadata=LabberMetadata(),
+        representation=representation,
+    )
+    destination = tmp_path / "invalid.hdf5"
+    with pytest.raises(ValueError, match="layout|grouped"):
+        write_labber(destination, payload, cfg=_cfg(), grouped_layout=layout)
+    assert not destination.exists()
