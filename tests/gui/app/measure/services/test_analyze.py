@@ -362,13 +362,11 @@ def _start_onetone_plugin(
 ) -> tuple[AnalyzeService, PluginDefinition[Any, Any], int]:
     adapter = state.get_tab(tab_id).adapter
     assert isinstance(adapter, OneToneFluxDepAdapter)
-    ctx = state.session_env
     plugin = adapter.make_interactive_plugin(
         AnalyzeRequest(
             source,
             FluxPickParams(),
             state.get_tab(tab_id).run.parameters,
-            ctx.predictor,
         ),
         plots=plots,
     )

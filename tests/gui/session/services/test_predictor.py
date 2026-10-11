@@ -87,11 +87,15 @@ def test_qubit_params_use_concrete_current_point_not_alias(
     context: ContextService,
 ) -> None:
     svc = PredictorService(context, components.params_for)
-    assert svc.params_for_qubit("Q1").EJ == 5.0
+    initial_params = svc.params_for_qubit("Q1")
+    assert isinstance(initial_params, predict.FluxoniumParams)
+    assert initial_params.EJ == 5.0
     assert svc.params_for_qubit("Q2").missing() == ("EL",)
     capture = context.read_context()
     context.set_parameter(capture.target, "Q1.EJ", 6.0)
-    assert svc.params_for_qubit("Q1").EJ == 6.0
+    updated_params = svc.params_for_qubit("Q1")
+    assert isinstance(updated_params, predict.FluxoniumParams)
+    assert updated_params.EJ == 6.0
     assert capture.value("Q1.EJ") == 5.0
     with pytest.raises(ValueError, match="qubit"):
         svc.params_for_qubit("$qubit")
