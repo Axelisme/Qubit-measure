@@ -245,7 +245,7 @@ def test_remote_gates_existing_and_new_writable_dialogs(control_ui, name, dialog
 
 def test_remote_measurement_stop_reclaims_and_cancels(control_ui, qapp):
     ui = control_ui
-    handle = ui.controller.start_run(ui.tab_id, ui.tab.cfg_form.current_ref())
+    handle = ui.controller.start_run(ui.tab_id)
     ui.connect()
     assert ui.tab.run_btn.text() == "Stop" and ui.tab.run_btn.isEnabled()
     ui.tab.run_btn.click()
