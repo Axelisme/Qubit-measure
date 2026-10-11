@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
+    SampleWriteback,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -159,7 +160,9 @@ class T2RamseyAdapter(
             "also proposes qubit.freq (MHz): source pi/2 frequency + realized "
             "detune - fitted fringe detune. A pure decay fit or a loaded "
             "source without realized detune proposes only qubit.t2r. "
-            "No module writeback; later focus changes do not retarget it."
+            "No module writeback; later focus changes do not retarget it. An "
+            "independent t2r_us/t2r_err_us sample uses the captured Run bias "
+            "when device evidence is available."
         ),
         recommended=(
             "Enable Fit phase offset to fit a free fringe phase; it defaults to "
@@ -276,7 +279,12 @@ class T2RamseyAdapter(
         it is omitted for decay fits, cfg=None or unknown realized detune.
         Non-scalar source frequency raises ValueError. WritebackService resolves
         destinations on req.ctx.parameters and rejects missing captures/unbound
-        roles. No live calibration lookup or write occurs here.
+        roles. With a capture, also propose t2r_us/t2r_err_us for the Run's
+        resolved $qubit; an unbound alias raises RoleResolutionError. Without
+        a capture, retain parameter proposals only so loaded data can still be
+        analyzed. The service adds bias coordinates or omits the sample with a
+        public reason. This Run leaves devices fixed; no live calibration lookup,
+        device access or write occurs here.
         """
         result = req.analyze_result
         items: list[WritebackItem] = [
@@ -310,6 +318,18 @@ class T2RamseyAdapter(
                 )
             )
 
+        parameters = req.ctx.parameters
+        if parameters is not None:
+            items.append(
+                SampleWriteback(
+                    target_name=parameters.resolve_path("$qubit"),
+                    description="T2 Ramsey sample at the captured bias",
+                    proposed_value={
+                        "t2r_us": result.t2r,
+                        "t2r_err_us": result.t2r_err,
+                    },
+                )
+            )
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

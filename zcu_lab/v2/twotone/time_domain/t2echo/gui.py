@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
+    SampleWriteback,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -155,7 +156,9 @@ class T2EchoAdapter(
         typical_writeback=(
             "Proposes fitted qubit.t2e (us) to the captured qubit and working "
             "point, including analysis of a source without cfg. No frequency "
-            "or module writeback; later focus changes do not retarget it."
+            "or module writeback; later focus changes do not retarget it. An "
+            "independent t2e_us/t2e_err_us sample uses the captured Run bias "
+            "when device evidence is available."
         ),
         recommended=(
             "Enable Fit phase offset to fit a free fringe phase; it defaults to "
@@ -273,21 +276,38 @@ class T2EchoAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[T2EchoRunResult, T2EchoAnalyzeResult]
     ) -> Sequence[WritebackItem]:
-        """Propose the fitted T2E in us at captured qubit.t2e.
+        """Propose fitted T2E in us and a sample for the Run's resolved $qubit.
 
         req supplies the result and its captured context; source.cfg may be None.
         WritebackService resolves the role and destination on req.ctx.parameters
-        and rejects a missing capture or unbound role. No live focus lookup,
-        frequency/module update, or write occurs here.
+        and rejects a missing capture or unbound role. Without a capture,
+        retain parameter proposals only so loaded data can still be analyzed.
+        With a capture, unbound $qubit raises RoleResolutionError. The service
+        adds bias coordinates or omits the sample with a public reason. This
+        Run leaves devices fixed; no live lookup, device access, frequency/module
+        update or write occurs here.
         """
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             ParameterWriteback(
                 target_name="$qubit.t2e",
                 description="T2 Echo time (us)",
                 proposed_value=result.t2e,
             ),
         ]
+        parameters = req.ctx.parameters
+        if parameters is not None:
+            items.append(
+                SampleWriteback(
+                    target_name=parameters.resolve_path("$qubit"),
+                    description="T2 Echo sample at the captured bias",
+                    proposed_value={
+                        "t2e_us": result.t2e,
+                        "t2e_err_us": result.t2e_err,
+                    },
+                )
+            )
+        return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_t2echo_{time.strftime('%m%d')}"

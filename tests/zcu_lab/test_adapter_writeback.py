@@ -1,6 +1,7 @@
 """Recipe adapters propose calibrations for the captured Run environment."""
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 import numpy as np
 import pytest
@@ -369,20 +370,28 @@ def test_fixed_bias_adapter_accepts_sample_from_run_capture(
         }
         row = session.entry.samples("Q1").latest("run-sample")
         assert row is not None
+        sample_at = row["at"]
+        assert isinstance(sample_at, str)
+        sample_time = datetime.fromisoformat(sample_at)
+        accepted_time = datetime.fromisoformat(event.at)
+        assert sample_time == accepted_time
+        assert sample_time.utcoffset() == accepted_time.utcoffset() == timedelta(0)
         assert row == fields | {
             "dev_value": 0.00125,
             "dev_unit": unit,
             "run_id": "run-sample",
             "point": "run-point",
             "source": event.id,
-            "at": event.at,
+            "at": sample_at,
         }
         sample_path = session.entry.result_path / "samples" / "Q1.jsonl"
         assert sample_path.is_file()
         assert len(sample_path.read_text(encoding="utf-8").splitlines()) == 1
         assert session.entry.samples("Q2").latest("run-sample") is None
         assert session.control.read_context().value("$qubit") == "Q2"
-        assert session.control.read_target(captured.target).value("Q1.freq") is None
+        assert (
+            not session.control.read_target(captured.target).lookup("Q1.freq").present
+        )
     finally:
         draft.teardown()
 
@@ -403,9 +412,11 @@ def test_fixed_bias_adapter_without_capture_keeps_parameters_and_rejects_apply(
         )
     )
     assert all(isinstance(item, ParameterWriteback) for item in proposals)
-    assert {item.target_name: item.proposed_value for item in proposals} == (
-        calibration.scalars
-    )
+    assert {
+        item.target_name: item.proposed_value
+        for item in proposals
+        if isinstance(item, ParameterWriteback)
+    } == calibration.scalars
     draft = session.service.create_draft(
         proposals, parameters=None, experiment_name=name, run_id="loaded-run"
     )
