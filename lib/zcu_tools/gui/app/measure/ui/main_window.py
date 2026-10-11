@@ -9,7 +9,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (
     QDialog,
