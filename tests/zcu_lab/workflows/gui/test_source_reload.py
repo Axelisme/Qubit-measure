@@ -295,6 +295,9 @@ def test_app_injects_bounded_loader_and_reloads_without_rebuilding_session(
 ) -> None:
     # Reload mutates Python's owned module cache. Restore originals after this
     # integration observation so test selection/order never changes declarations.
+    from zcu_lab import workflows as original_workflows
+
+    original_overnight = original_workflows.overnight
     original = {
         name: module
         for name, module in sys.modules.items()
@@ -321,3 +324,6 @@ def test_app_injects_bounded_loader_and_reloads_without_rebuilding_session(
             parent, _, leaf = name.rpartition(".")
             if parent in sys.modules:
                 setattr(sys.modules[parent], leaf, module)
+        # The public callable shares a name with its module; parent relinking
+        # must not replace the package's pre-reload callable with that module.
+        original_workflows.overnight = original_overnight
