@@ -26,6 +26,7 @@ from zcu_tools.experiment.workflows import (
     TunableChange,
     WorkflowEnv,
 )
+from zcu_tools.experiment.workflows import artifacts as artifact_io
 from zcu_tools.experiment.workflows.artifacts import RunArtifacts
 from zcu_tools.experiment.workflows.encoding import encode_record
 from zcu_tools.experiment.workflows.journal import (
@@ -47,6 +48,7 @@ from zcu_tools.experiment.workflows.journal import (
 )
 from zcu_tools.experiment.workflows.models import (
     Actor,
+    CommittedRecord,
     Completed,
     RunIdentity,
     RunPaths,
@@ -304,6 +306,70 @@ def test_journal_round_trips_all_outcomes_in_append_order(
     assert "ValueError: original cause" in lines[6]["error"]["traceback"]
     assert "result" not in lines[2]
     assert all(line["format_version"] == 1 for line in lines)
+
+
+def test_read_committed_records_uses_only_journal_commits(
+    artifacts: RunArtifacts,
+) -> None:
+    assert artifact_io.read_committed_records(artifacts.paths.metadata_root) == ()
+    iteration = artifacts.new_iteration(1)
+    artifacts.append(IterationStarted(1, 0, 0, iteration.iteration_dir))
+    committed = StepCommitted(
+        1, 1, 0, encode_record({"t1_us": 30.0}), iteration.iteration_dir, ()
+    )
+    artifacts.append(committed)
+    artifacts.append(StepDiscarded(2, 0, "iter/000002", (), "stop"))
+    artifacts.append(
+        StepFailed(3, 0, "iter/000003", (), describe_error(ValueError("failed")))
+    )
+    # A best-effort summary cannot create or erase a journal commit.
+    iteration.save_record({"uncommitted": True})
+    (iteration.files_dir.parent / "record.json").unlink()
+    (artifacts.paths.data_root / "uncommitted.h5").write_bytes(b"not a point")
+    expected = (
+        CommittedRecord(1, 1, 0, committed.encoded_record, iteration.iteration_dir, ()),
+    )
+    assert artifact_io.read_committed_records(artifacts.paths.metadata_root) == expected
+    with artifacts.journal_path.open("ab") as writer:
+        writer.write(b'{"kind":"step_committed","seq":')
+    assert artifact_io.read_committed_records(artifacts.paths.metadata_root) == expected
+
+
+@pytest.mark.parametrize(
+    "damage", ["bad_json", "identity", "sequence", "version", "path", "schema"]
+)
+def test_read_committed_records_rejects_complete_corrupt_lines(
+    artifacts: RunArtifacts, damage: str
+) -> None:
+    artifacts.append(
+        StepCommitted(1, 1, 0, encode_record({"t1_us": 30}), "iter/000001", ())
+    )
+    lines = artifacts.journal_path.read_text(encoding="utf-8").splitlines()
+    payload = json.loads(lines[1])
+    if damage == "identity":
+        payload["run_id"] = "another-run"
+    elif damage == "sequence":
+        payload["seq"] = 7
+    elif damage == "version":
+        payload["format_version"] = 2
+    elif damage == "path":
+        payload["iteration_dir"] = "../outside"
+    elif damage == "schema":
+        del payload["encoded_record"]
+    lines[1] = "broken JSON" if damage == "bad_json" else json.dumps(payload)
+    artifacts.journal_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        artifact_io.read_committed_records(artifacts.paths.metadata_root)
+
+
+def test_read_committed_records_rejects_missing_and_empty_journals(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(FileNotFoundError):
+        artifact_io.read_committed_records(tmp_path)
+    (tmp_path / "journal.jsonl").touch()
+    with pytest.raises(ValueError):
+        artifact_io.read_committed_records(tmp_path)
 
 
 def test_lifecycle_manifest_replaces_only_on_change(
