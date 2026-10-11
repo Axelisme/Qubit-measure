@@ -8,8 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import Qt, QTimer
-from qtpy.QtTest import QTest
+from qtpy.QtCore import QEvent, Qt, QTimer
+from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
@@ -148,12 +148,22 @@ def test_remote_filter_keyboard_navigation_cannot_cancel_session(window):
     active = ctrl.interactive.inspect()
     assert active is not None and active.kind == "selection"
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    QTest.keyClick(tabs, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier)
+    QApplication.sendEvent(
+        tabs,
+        QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
+        ),
+    )
     assert panel.current_tab == "filter"
     assert ctrl.interactive.inspect() == active
     assert ctrl.control_identity.status().holder == "rpc:flux-agent"
     indicator(view).click()
-    QTest.keyClick(tabs, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier)
+    QApplication.sendEvent(
+        tabs,
+        QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
+        ),
+    )
     assert panel.current_tab == "search"
     assert ctrl.interactive.inspect() is None
 
