@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -26,7 +26,6 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
@@ -160,13 +159,6 @@ class FreqAdapter(
         result = FreqExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the global aliases used by this adapter."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-        }
-
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
@@ -223,12 +215,12 @@ class FreqAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.freq",
                 description="Qubit frequency (MHz)",
                 proposed_value=result.freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.kappa",
                 description="Qubit linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,

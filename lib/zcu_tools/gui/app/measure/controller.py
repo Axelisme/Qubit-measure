@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
@@ -30,7 +31,7 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.services.device import ActiveDeviceOperation
-from zcu_tools.gui.session.types import ParameterContext, RoleBinding
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from .adapter import SessionEnv
@@ -67,6 +68,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
+    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
@@ -250,7 +252,19 @@ class Controller(SessionControllerMixin):
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
+        *,
+        alias_preset: tuple[AliasRow, ...] = (),
     ) -> None:
+        """Compose services for state/registry with an optional view and adapters.
+
+        ``alias_preset`` is the ordered caller-owned initial alias table, empty
+        when omitted. Softlinks and empty bindings stay authored. The session
+        uses the role registry's unique focus candidate once for the primary
+        empty row on the first nonempty component snapshot; later point changes
+        do not reset rows. Explicit table edits disable that initialization.
+        Invalid syntax, duplicates or forward links raise
+        InvalidInputError(alias_invalid). No device or cache is used to bind rows.
+        """
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
         # under. The entry script injects the repo root (Path(__file__).parent...)
@@ -306,6 +320,7 @@ class Controller(SessionControllerMixin):
             owner_scheduler=owner_scheduler,
             project_root=self._project_root,
             catalog_loader=catalog_loader,
+            alias_preset=alias_preset,
         )
         self._services = services
         self._operation_gate = services.operation_gate
@@ -684,13 +699,13 @@ class Controller(SessionControllerMixin):
         return self._state.version.snapshot()
 
     def start_run(
-        self, tab_id: str, expected: CfgRef, *, target: str | None = None
+        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
     ) -> int:
         """Start observed cfg inputs with an optional single-Run alias override.
 
         See RunAnalyzeControlFacet.start_run for admission and failure semantics.
         """
-        return self._run_analyze_control.start_run(tab_id, expected, target=target)
+        return self._run_analyze_control.start_run(tab_id, expected, aliases=aliases)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         return self._run_analyze_control.load_tab_result(tab_id, data_path)
@@ -858,9 +873,18 @@ class Controller(SessionControllerMixin):
     # Context / IO (ContextService)
     # ------------------------------------------------------------------
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        """Capture published sources with fixed roles; EMPTY/source errors propagate."""
-        return self._context_control.read_context(roles=roles)
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix point/library/storage and aliases through the context owner.
+
+        aliases maps alias names to temporary concrete components, preserving
+        authored dependent links without changing global state. Reads perform
+        no I/O or kind checks and retain no live callback. Missing/unbound $
+        aliases fail by name on use; EMPTY/source/invalid override errors
+        propagate. See ContextControlPort.read_context for the full contract.
+        """
+        return self._context_control.read_context(aliases=aliases)
 
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange
@@ -904,8 +928,9 @@ class Controller(SessionControllerMixin):
 
         Kind must match the template; the concrete name must be nonempty and
         unused in its library family. Factory, capture, schema, conflict and I/O
-        failures propagate without a write. No current-focus role resolution
-        happens after the capture.
+        failures propagate without a write. Factory SessionEnv.parameters and
+        lowering use the same fixed alias-aware capture, with no consumer kind
+        checks or later current-source lookup.
         """
         if not name:
             raise FailedPreconditionError("Entry name must not be empty.")
@@ -926,7 +951,7 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError(
                 f"A {item_kind} named {name!r} already exists."
             )
-        ctx = self.get_session_env()
+        ctx = replace(self.get_session_env(), parameters=parameters)
         ref = entry.make_value(ctx)
         schema = CfgSchema(spec=entry.shape(), value=ref.value)
         self.apply_library_change(

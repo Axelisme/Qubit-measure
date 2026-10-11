@@ -32,12 +32,29 @@ STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
 MODE_MAPS_INV = {v: k for k, v in MODE_MAPS.items()}
 
 
+def _yoko_value_unit(mode: object) -> Literal["A", "V"]:
+    if mode == "current":
+        return "A"
+    if mode == "voltage":
+        return "V"
+    raise ValueError("value unit requires current or voltage mode")
+
+
+def _default_value_unit(data: dict[str, object]) -> Literal["A", "V"]:
+    if "mode" not in data:
+        # Pydantic already reports missing mode, so construction fails and this value never enters a model.
+        return "V"
+    return _yoko_value_unit(data["mode"])
+
+
 class YOKOGS200Info(BaseDeviceInfo):
     """Validated GS200 setup and readback within fixed output limits.
 
-    Value and rampstep use V in voltage mode and A in current mode. Invalid
-    numeric values, non-positive steps/limits, and values or steps outside the
-    active mode's output/rampstep limits raise Pydantic ValidationError.
+    Construction requires address and mode. Omitted value_unit is generated
+    from mode and stored: current uses A, voltage uses V. Explicit conflicting
+    units raise Pydantic ValidationError. Dumps always include value_unit.
+    Value and rampstep use that unit. Invalid numeric values, non-positive
+    steps, and values or steps outside fixed mode limits raise ValidationError.
     """
 
     type: Literal["YOKOGS200"] = "YOKOGS200"
@@ -45,8 +62,11 @@ class YOKOGS200Info(BaseDeviceInfo):
         default="off", description="Output enable state."
     )
     mode: Literal["voltage", "current"] = Field(
-        default="voltage",
-        description="Source mode; determines value and rampstep units.",
+        description="Required source mode; determines value and rampstep units.",
+    )
+    value_unit: Literal["A", "V"] = Field(
+        default_factory=_default_value_unit,
+        description="Stored value/rampstep unit: A for current, V for voltage.",
     )
     value: float = Field(
         default=0.0, allow_inf_nan=False, description="Output level in V or A."
@@ -70,6 +90,12 @@ class YOKOGS200Info(BaseDeviceInfo):
         return data
 
     @model_validator(mode="after")
+    def _validate_value_unit(self) -> Self:
+        if self.value_unit != _yoko_value_unit(self.mode):
+            raise ValueError("value unit does not match source mode")
+        return self
+
+    @model_validator(mode="after")
     def _validate_output_limit(self) -> Self:
         limit = MAX_VOLTAGE if self.mode == "voltage" else MAX_CURRENT
         if abs(self.value) > limit:
@@ -90,14 +116,6 @@ class YOKOGS200Info(BaseDeviceInfo):
                 "bool and strings are not accepted"
             )
         return value
-
-    def set_flux(self, value: float) -> None:
-        """Set the output level in the active mode's units, enforcing its limit.
-
-        ValidationError leaves the previous level unchanged.
-        """
-        updated = self.with_updates(value=value)
-        self.value = updated.value
 
 
 class YOKOGS200(BaseDevice[YOKOGS200Info]):
@@ -356,6 +374,11 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
             raise ValueError(f"Unknown mode {cur_mode} in device {self.address}")
 
     def get_info(self) -> YOKOGS200Info:
+        """Read output, mode and level once each; Info stores the mode's unit.
+
+        The rampstep comes from driver memory. I/O errors and Info validation
+        failures propagate; this readback does not change any device setting.
+        """
         return YOKOGS200Info(
             address=self.address,
             output=self.get_output(),

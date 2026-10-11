@@ -12,8 +12,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -29,7 +29,6 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.schema_builder import (
@@ -191,13 +190,6 @@ class AmpRabiAdapter(
         ),
     )
 
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the global aliases used by this adapter."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-        }
-
     def run(
         self,
         req: RunRequest,
@@ -335,14 +327,14 @@ class AmpRabiAdapter(
                 )
             )
             items.append(
-                MetaDictWriteback(
+                ParameterWriteback(
                     target_name=slot,
                     description=f"{description} slot",
                     proposed_value=key,
                 )
             )
         items.append(
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.pi_product",
                 description="Pi pulse gain times length (a.u. * us)",
                 proposed_value=result.pi_gain * length,

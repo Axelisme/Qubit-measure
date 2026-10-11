@@ -23,7 +23,7 @@ from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    MetaDictWriteback,
+    ParameterWriteback,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactSectionSnapshot,
@@ -32,7 +32,6 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
 )
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import TabSnapshot
-from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -74,9 +73,7 @@ def _mock_ctrl() -> MagicMock:
     ctrl = MagicMock()
     configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
-    ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
-        "": WritebackValues("r_f", None, 6100.0, None)
-    }
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value.__getitem__.return_value.actual_path = "r_f"
     return ctrl
 
 
@@ -105,6 +102,7 @@ def _apply_window_defaults(ctrl: MagicMock) -> MagicMock:
     ctrl.get_active_context_label.return_value = None
     ctrl.has_draft_context.return_value = False
     ctrl.has_project.return_value = False
+    ctrl.context_control.get_alias_rows.return_value = ()
     ctrl.get_session_env.return_value = SessionEnv(
         parameters=None, soc=None, soccfg=None
     )
@@ -358,7 +356,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
         ),
     )
     tab.update_writeback_items(
-        [MetaDictWriteback("r_f", "freq", proposed_value=6100.0)]
+        [ParameterWriteback("r_f", "freq", proposed_value=6100.0)]
     )
     tab.update_interaction_state(
         _snapshot(
@@ -501,7 +499,7 @@ def test_exp_tab_draft_context_allows_analysis_but_disables_run_and_save(qapp):
     assert snap.capabilities is not None
     tab = ExpTabWidget("tab-1", _mock_ctrl(), snap.capabilities)
     tab.update_writeback_items(
-        [MetaDictWriteback("r_f", "freq", proposed_value=6100.0)]
+        [ParameterWriteback("r_f", "freq", proposed_value=6100.0)]
     )
     tab.update_interaction_state(snap)
 
@@ -700,8 +698,8 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp)
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     ctrl.apply_writeback_for_pane.return_value = {
-        "applied_ids": ["md-1"],
-        "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []},
+        "applied_ids": ["param-1"],
+        "written": {"parameter": ["r_f"], "ml_modules": [], "ml_waveforms": []},
     }
     window = MainWindow(ctrl)
     window._tab_widgets["tab-1"] = MagicMock()
@@ -712,7 +710,7 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp)
 
     ctrl.apply_writeback_for_pane.assert_called_once_with("tab-1", "analysis")
     window.refresh_tab_writeback.assert_not_called()
-    window.show_status_message.assert_called_once_with("Writeback applied: md-1")
+    window.show_status_message.assert_called_once_with("Writeback applied: param-1")
 
 
 def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):
@@ -1370,11 +1368,30 @@ def test_exp_tab_detach_preserves_resource_for_later_views(qapp):
     assert other.cfg_form.is_valid() == (after.status.value == "Valid")
 
 
+@pytest.fixture
+def library_components():
+    from tests.resources.entry.fakes import (
+        register_fakes,
+        registry_state,
+        restore_registry,
+    )
+
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        yield
+        assert registry_state() == installed
+    finally:
+        restore_registry(before)
+
+
 def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
-    qapp, request: pytest.FixtureRequest
+    qapp, library_components
 ):
+
     from qtpy.QtWidgets import QComboBox, QWidget
-    from zcu_tools.cfg_model import module_spec_from_raw
+    from zcu_tools.cfg_model import PulseSpec
     from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
     from zcu_tools.gui.app.measure.specs import make_pulse_spec
     from zcu_tools.gui.cfg import (
@@ -1384,15 +1401,12 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
         ReferenceSpec,
         ReferenceValue,
     )
-    from zcu_tools.resources.entry import ComponentSchema, component_registry
 
     from tests.gui.app.measure.remote._helpers import Fixture
     from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
-    component_registry.register("test/ui-linked", ComponentSchema)
-    request.addfinalizer(lambda: component_registry.unregister("test/ui-linked"))
     fx = Fixture(headless=True)
-    fx.ctrl.context_control.add_component("Q1", "test/ui-linked", {})
+    fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     raw = {
         "type": "pulse",
         "waveform": {"style": "const", "length": 1.0},
@@ -1414,13 +1428,13 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
         CfgSectionValue({"drive": ReferenceValue("Q1.pulses.drive", value)}),
     )
 
-    class LinkedAdapter(FakeAdapter):
-        def make_default_cfg(self, ctx):
+    class LibraryAdapter(FakeAdapter):
+        def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
             return schema
 
-    fx.registry.register("linked", LinkedAdapter)
-    tab_id = fx.ctrl.new_tab("linked")
-    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
+    fx.registry.register("library-ui-test", LibraryAdapter)
+    tab_id = fx.ctrl.tab_control.new_tab("library-ui-test")
+    cfg = fx.state.get_tab(tab_id).cfg
     tab = ExpTabWidget(tab_id, fx.ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     snapshot = _snapshot(tab_id, has_run_result=False)
 
@@ -1432,11 +1446,10 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
     tab.attach(snapshot, GateActions())
     assert not tab.cfg_form.is_valid()
     assert not tab.run_btn.isEnabled()
-    context = fx.ctrl.context_control
-    context.set_module(
-        context.read_context().target,
+    fx.ctrl.context_control.set_module(
+        fx.ctrl.context_control.read_context().target,
         "Q1.pulses.drive",
-        module_spec_from_raw(raw),
+        PulseSpec.model_validate(raw),
     )
     widget = tab.cfg_form.findChild(QWidget, "cfgInput:drive")
     assert widget is not None

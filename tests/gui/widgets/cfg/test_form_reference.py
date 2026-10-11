@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from qtpy.QtWidgets import QComboBox, QLineEdit
+from zcu_tools.cfg_model import ModuleCfgFactory
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
@@ -16,10 +17,11 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
 )
+from zcu_tools.gui.cfg.binding import CfgDraft, ResolvedReference
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
 from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
-from zcu_tools.resources.context import ModuleLibrary
 
+from tests.gui.cfg.binding._fakes import BindingPorts
 from tests.gui.widgets.cfg._form_support import attach_draft, section_schema
 from tests.gui.widgets.cfg._tree_support import tree_item, tree_widget
 
@@ -122,7 +124,7 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
             )
         },
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -138,22 +140,30 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
 
 
 def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
-    ml = ModuleLibrary()
-    ml.register_module(
-        my_pulse={
-            "type": "readout/direct",
-            "ro_ch": 0,
-            "ro_length": 1.0,
-            "ro_freq": 7000.0,
-        }
+    lib_spec, lib_value = module_cfg_to_value(
+        ModuleCfgFactory.from_raw(
+            {
+                "type": "readout/direct",
+                "ro_ch": 0,
+                "ro_length": 1.0,
+                "ro_freq": 7000.0,
+            }
+        )
     )
-    ctrl.get_current_ml.return_value = ml
-    lib_spec, lib_value = module_cfg_to_value(ml.get_module("my_pulse"))
+    catalog = BindingPorts()
+    catalog.references[("module", "my_pulse")] = ResolvedReference(
+        lib_spec.label, lib_value
+    )
     schema = section_schema(
         {"mod": ReferenceSpec(kind="module", allowed=[lib_spec], label="Module")},
         {"mod": ReferenceValue(chosen_key="my_pulse", value=lib_value)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = CfgDraft(
+        schema,
+        evaluate_expression=catalog.evaluate,
+        provide_options=catalog.provide,
+        references=catalog,
+    )
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -174,7 +184,19 @@ def test_module_ref_edit_survives_refresh_and_can_revert(qapp, ctrl):
         entry.setText("8000.0")
         assert combo.currentText() == "Lib: my_pulse (modified)"
 
-        ml.update_module("my_pulse", {"ro_freq": 7500.0})
+        _, updated_value = module_cfg_to_value(
+            ModuleCfgFactory.from_raw(
+                {
+                    "type": "readout/direct",
+                    "ro_ch": 0,
+                    "ro_length": 1.0,
+                    "ro_freq": 7500.0,
+                }
+            )
+        )
+        catalog.references[("module", "my_pulse")] = ResolvedReference(
+            lib_spec.label, updated_value
+        )
         draft.refresh_references("module")
         draft.refresh_expressions()
         modified = form.read_values().fields["mod"]
@@ -236,7 +258,7 @@ def test_optional_module_ref_can_enable_from_none(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
     draft = MeasureCfgBindings(ctrl).new_draft(
-        _make_optional_module_ref_schema(enabled=False)
+        _make_optional_module_ref_schema(enabled=False), parameters=None
     )
     form = CfgFormWidget()
     try:
@@ -280,7 +302,7 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
     from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
     draft = MeasureCfgBindings(ctrl).new_draft(
-        _make_optional_module_ref_schema(enabled=True)
+        _make_optional_module_ref_schema(enabled=True), parameters=None
     )
     form = CfgFormWidget()
     try:
@@ -320,7 +342,9 @@ def test_optional_module_ref_select_none_disables_sub(qapp, ctrl):
 def test_missing_module_reference_is_invalid_and_shows_hint(qapp, ctrl):
     from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
-    from zcu_tools.resources.context import ModuleLibrary
+
+    from tests.gui.app.measure._cfg_fakes import parameter_capture
+    from zcu_lab.components import QubitSchema, ResonatorSchema
 
     pulse_spec = CfgSectionSpec(
         label="Pulse",
@@ -333,15 +357,21 @@ def test_missing_module_reference_is_invalid_and_shows_hint(qapp, ctrl):
         {"pulse": ReferenceSpec(kind="module", label="Pulse", allowed=[pulse_spec])},
         {
             "pulse": ReferenceValue(
-                chosen_key="missing_pulse",
+                chosen_key="Q1.pulses.missing_pulse",
                 value=CfgSectionValue(
                     fields={"type": DirectValue("pulse"), "gain": DirectValue(0.2)}
                 ),
             )
         },
     )
-    ctrl.get_current_ml.return_value = ModuleLibrary()
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator"),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
+    ctrl.read_context.return_value = parameters
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=parameters)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -349,10 +379,10 @@ def test_missing_module_reference_is_invalid_and_shows_hint(qapp, ctrl):
         assert not draft.is_valid()
         missing = form.read_values().fields["pulse"]
         assert isinstance(missing, ReferenceValue)
-        assert missing.chosen_key == "missing_pulse"
+        assert missing.chosen_key == "Q1.pulses.missing_pulse"
         hint = form.findChild(QLabel, "missingRefHint")
         assert hint is not None and hint.isVisible()
-        assert "missing_pulse" in hint.text()
+        assert "Q1.pulses.missing_pulse" in hint.text()
     finally:
         form.detach()
         form.close()

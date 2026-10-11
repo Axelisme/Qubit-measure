@@ -12,6 +12,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import set_frequency
+
 
 def _validate_inputs(
     references: tuple[tuple[str, str | None], ...],
@@ -69,7 +71,11 @@ def t1(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         points,
     )
 
-    tab = session.open_tab("twotone/t1", target=target, reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "twotone/t1",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     if use_reset is None:
         tab.disable_library("modules.reset")
     else:
@@ -79,8 +85,11 @@ def t1(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     # Report every absent calibration before Run, as the existing tool does.
     missing: list[MissingParameter] = []
     try:
-        tab.set_frequency(
-            "modules.readout", calibration="resonator", required="readout_ref"
+        set_frequency(
+            tab,
+            "modules.readout",
+            calibration="$resonator.freq",
+            required="readout_ref",
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
@@ -95,10 +104,10 @@ def t1(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         "sweep.length",
         stop=max_delay_us,
         expts=points,
-        sources={"start": "explicit", "stop": "max_delay_us", "expts": "points"},
+        sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    tab.set("reps", reps, source="reps")
-    tab.set("rounds", rounds, source="rounds")
+    tab.set("reps", reps, source="explicit")
+    tab.set("rounds", rounds, source="explicit")
 
     run, status = yield tab.run()
     if status == "cancelled":

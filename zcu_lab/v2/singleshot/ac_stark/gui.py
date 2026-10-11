@@ -12,8 +12,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -26,7 +26,6 @@ from zcu_tools.gui.cfg import (
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
@@ -35,7 +34,9 @@ from zcu_lab.v2._support.measure.schema_builder import (
 )
 from zcu_lab.v2._support.measure.seeds import custom
 from zcu_lab.v2._support.measure.singleshot_shared import (
+    read_analysis_float,
     read_chi_kappa,
+    read_confusion_matrix,
     readout_probe_freq,
 )
 from zcu_lab.v2.singleshot.ac_stark.core import (
@@ -148,10 +149,6 @@ class SsAcStarkAdapter(
         ),
     )
 
-    def parameter_roles(self) -> dict[str, RoleSpec]:
-        """Declare qubit/resonator kinds without inferring alias destinations."""
-        return {"qubit": RoleSpec("qubit/*"), "resonator": RoleSpec("resonator")}
-
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
@@ -258,14 +255,11 @@ class SsAcStarkAdapter(
     def analyze(
         self, req: AnalyzeRequest[SsAcStarkRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> SsAcStarkAnalyzeResult:
-        # ``chi`` / ``kappa`` (= md 'rf_w', the resonator linewidth) are required
-        # fit inputs read from md — fast-fail if either is missing. The domain
-        # derives eta = kappa²/(kappa²+chi²) internally. ``confusion_matrix``
-        # (readout correction) and ``cutoff`` (drop high gains before fitting) are
-        # optional md inputs, never user knobs; absent → domain defaults.
-        chi, kappa = read_chi_kappa(req.md)
-        confusion = req.md.get("confusion_matrix")
-        cutoff = req.md.get("cutoff")
+        # Required chi/kappa and optional readout correction/cutoff use this
+        # Run's fixed capture. The core derives eta and owns fit defaults.
+        chi, kappa = read_chi_kappa(req.parameters)
+        confusion = read_confusion_matrix(req.parameters)
+        cutoff = read_analysis_float(req.parameters, "$qubit.ext.cutoff")
         analysis = AcStarkExp().analyze(
             req.run_result,
             AcStarkAnalyzeOptions(
@@ -281,7 +275,7 @@ class SsAcStarkAdapter(
     ) -> Sequence[WritebackItem]:
         # Key ``ac_stark_coeff`` per single_qubit.md:3329.
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="ac_stark_coeff",
                 description="AC-Stark coefficient (photon number per gain²)",
                 proposed_value=req.analyze_result.ac_stark_coeff,

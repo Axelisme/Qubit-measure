@@ -7,8 +7,8 @@ import pytest
 from pydantic import Field
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     WaveformWriteback,
 )
 from zcu_tools.gui.app.measure.cfg_schemas import (
@@ -21,6 +21,7 @@ from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding.fields import ScalarField
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
@@ -83,30 +84,30 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
         )
         draft = service.create_draft(
             [
-                MetaDictWriteback(
+                ParameterWriteback(
                     "driver.frequency", "Frequency", proposed_value=20.09, stderr=0.18
                 )
             ],
             parameters=captured,
         )
         try:
-            initial = service.preview_values(draft, session_id="md-1")["md-1"]
+            initial = service.preview_values(draft, session_id="param-1")["param-1"]
             assert (initial.actual_path, initial.unit) == ("U1.frequency", "MHz")
             assert (initial.current, initial.proposed) == (19.8, 20.09)
             control.set_parameter(target, "U1.frequency", 21.5)
             entry.new_point("b")
             control.use_point(PointUseRequest("b"))
             control.add_component("Q2", "fake/drive/a", {})
-            control.set_component_focus("Q2")
-            refreshed = service.preview_values(draft)["md-1"]
+            control.set_alias_rows((AliasRow("driver", "Q2"),))
+            refreshed = service.preview_values(draft)["param-1"]
             assert (refreshed.actual_path, refreshed.unit) == ("U1.frequency", "MHz")
             assert (refreshed.current, refreshed.proposed) == (21.5, 20.09)
-            draft.edit("md-1", target_name="driver.duration")
-            unset = service.preview_values(draft)["md-1"]
+            draft.edit("param-1", target_name="driver.duration")
+            unset = service.preview_values(draft)["param-1"]
             assert (unset.actual_path, unset.unit) == ("U1.duration", "us")
             assert (unset.current, unset.proposed) == (None, 20.09)
-            draft.edit("md-1", target_name="general.ext.value")
-            ext = service.preview_values(draft)["md-1"]
+            draft.edit("param-1", target_name="general.ext.value")
+            ext = service.preview_values(draft)["param-1"]
             assert (ext.actual_path, ext.unit) == ("general.ext.value", None)
             assert (ext.current, ext.proposed) == (None, 20.09)
             assert draft.items[0].stderr == 0.18
@@ -121,10 +122,10 @@ def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(ses
     control.set_parameter(target, "general.ext.value", [1, 2])
     capture = control.read_context()
     draft = service.create_draft(
-        [MetaDictWriteback("general.ext.value", "d", proposed_value=[3, 4])],
+        [ParameterWriteback("general.ext.value", "d", proposed_value=[3, 4])],
         parameters=capture,
     )
-    first = service.preview_values(draft)["md-1"]
+    first = service.preview_values(draft)["param-1"]
     assert first.actual_path == "general.ext.value"
     assert first.current == [1, 2]
     assert first.proposed == [3, 4]
@@ -132,19 +133,19 @@ def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(ses
     assert first.current == [1, 2]
     assert isinstance(first.proposed, list)
     first.proposed.append(99)
-    assert service.preview_values(draft)["md-1"].proposed == [3, 4]
-    assert service.preview_values(draft)["md-1"].current == [1, 2, 5]
-    draft.edit("md-1", target_name="general.ext.other")
-    assert service.preview_values(draft)["md-1"].current is None
+    assert service.preview_values(draft)["param-1"].proposed == [3, 4]
+    assert service.preview_values(draft)["param-1"].current == [1, 2, 5]
+    draft.edit("param-1", target_name="general.ext.other")
+    assert service.preview_values(draft)["param-1"].current is None
     control.set_parameter(target, "general.ext.other", 7)
-    assert service.preview_values(draft)["md-1"].current == 7
+    assert service.preview_values(draft)["param-1"].current == 7
     entry.new_point("b")
     control.use_point(PointUseRequest("b"))
     control.set_parameter(control.read_context().target, "general.ext.other", 8)
-    retargeted = service.preview_values(draft)["md-1"]
+    retargeted = service.preview_values(draft)["param-1"]
     assert retargeted.actual_path == "general.ext.other"
     assert retargeted.current == 7
-    assert service.get_all_applied(draft) == {"md-1": False}
+    assert service.get_all_applied(draft) == {"param-1": False}
     assert draft.items[0].selected is True
 
 
@@ -274,7 +275,7 @@ def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session,
 def test_preview_without_context_fails_instead_of_claiming_missing_targets():
     service = WritebackService(MagicMock(), MagicMock(), entry_ledger=MagicMock())
     draft = service.create_draft(
-        [MetaDictWriteback("general.ext.value", "d", proposed_value=1)],
+        [ParameterWriteback("general.ext.value", "d", proposed_value=1)],
         parameters=None,
     )
     with pytest.raises(FailedPreconditionError):

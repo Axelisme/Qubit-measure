@@ -9,10 +9,10 @@ import pytest
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
-    DeviceSnapshot,
     Done,
     EnginePorts,
     InvalidRunState,
+    Next,
     RunIdentity,
     RunMismatch,
     RunPaths,
@@ -51,7 +51,6 @@ from ._start_fakes import StartHarness
 def identity(run_id: str = "run") -> RunIdentity:
     return RunIdentity(
         run_id,
-        DeviceSnapshot({}),
         SoftwareProvenance(
             software_versions={},
             git_commit=None,
@@ -108,6 +107,75 @@ def declare(rig: Rig):
         return finish(env, plan, tun, state)
 
     return workflow("example", plan=Plan, tunables=Tunables, init=rig.init)(invoke)
+
+
+@pytest.mark.parametrize("stop_pending", [False, True])
+def test_resume_without_device_callback_retains_handle_lease_records_and_bar(
+    tmp_path: Path,
+    stop_pending: bool,
+) -> None:
+    harness, rig = StartHarness(), Rig(tmp_path)
+    controller = create_controller(harness, rig, lambda _status, _error: None)
+
+    @workflow("snapshotless-resume", plan=Plan, tunables=Tunables, init=rig.init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        del plan
+        env.pbar("points", 2).set_progress(state.index)
+        yield from env.wait_until(env.started_at)
+        if state.index == 1:
+            return Done()
+        state.index += 1
+        controller.pause("run")
+        return Next(tun.value, state)
+
+    token = controller.start(
+        step,
+        plan=Plan(),
+        tunables=Tunables(),
+        ports=EnginePorts(
+            rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+        ),
+        binding=create_binding(),
+        paths=rig.paths,
+        identity=identity(),
+    )
+    harness.complete_segment()
+    engine = controller.engine
+    assert engine is not None
+    records = engine.records("run")
+    assert len(records) == 1
+    bars = harness.progress.bars_for_owner("example")
+    assert len(bars) == 1 and harness.gate.snapshot()
+    with pytest.raises(RunMismatch):
+        controller.resume("old")
+    harness.background.fail_submit = True
+    with pytest.raises(OSError, match="submit failed"):
+        controller.resume("run")
+    paused = controller.status()
+    assert paused is not None and paused.lifecycle == "paused"
+    assert controller.operation_id == token and harness.gate.snapshot()
+    assert harness.progress.bars_for_owner("example") == bars
+    assert harness.handles.known_outcome(token) is None
+    harness.background.fail_submit = False
+    assert controller.resume("run") == token
+    with pytest.raises(InvalidRunState):
+        controller.resume("run")
+    assert engine.records("run") == records
+    if stop_pending:
+        controller.stop("run")
+    assert harness.gate.snapshot() and harness.handles.known_outcome(token) is None
+    harness.background.execute()
+    harness.owner.pump_all()
+    assert harness.gate.snapshot() and controller.has_pending_segment
+    harness.background.deliver()
+    assert harness.handles.known_outcome(token) == OperationOutcome(
+        "cancelled" if stop_pending else "finished"
+    )
+    assert len(rig.initialized) == 1 and engine.records("run") == records
+    assert not harness.gate.snapshot() and controller.operation_id is None
+    assert not harness.progress.bars_for_owner("example")
 
 
 def test_target_check_is_available_before_acceptance_without_changing_admission(
@@ -579,7 +647,6 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
     harness, rig = StartHarness(), Rig(tmp_path)
     controller = create_controller(harness, rig, lambda _status, _error: None)
     attempts: list[int] = []
-    owner_thread = get_ident()
 
     @workflow("paused-progress", plan=Plan, tunables=Tunables, init=rig.init)
     def step(
@@ -615,7 +682,7 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
     handle, model = bars[0]
     assert model.n == 1
     with pytest.raises(InvalidRunState):
-        controller.resume("run", devices=lambda: DeviceSnapshot({}))
+        controller.resume("run")
     harness.background.deliver()
     assert harness.gate.snapshot() and controller.operation_id == token
     assert harness.handles.known_outcome(token) is None
@@ -629,12 +696,7 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
         actor=Actor("user", "offline"),
     )
 
-    def capture() -> DeviceSnapshot:
-        assert harness.gate.snapshot()
-        assert get_ident() == owner_thread
-        return DeviceSnapshot({})
-
-    second = controller.resume("run", devices=capture)
+    second = controller.resume("run")
     assert second == token
     harness.background.execute()
     harness.owner.pump_all()
@@ -643,7 +705,7 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
     harness.background.deliver()
     assert progress_calls == ([token], [])
 
-    third = controller.resume("run", devices=capture)
+    third = controller.resume("run")
     harness.complete_segment()
     terminal = controller.status()
     assert terminal is not None and terminal.lifecycle == "done"
@@ -704,7 +766,7 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
         controller.stop("run")
         assert len(finished) == 2
     else:
-        resumed = controller.resume("run", devices=lambda: DeviceSnapshot({}))
+        resumed = controller.resume("run")
         harness.background.execute()
         harness.owner.pump_all()
         harness.background.deliver()
@@ -870,13 +932,11 @@ def test_active_tunables_failure_waits_for_producer_and_preserves_native_outcome
     assert progress_calls == ([token], [token])
 
 
-@pytest.mark.parametrize("failure", ["capture", "submit"])
 @pytest.mark.parametrize("view_error", [False, True])
 def test_resume_failed_tunables_unwind_finishes_once_without_a_producer(
     tmp_path: Path,
     progress_calls: tuple[list[int], list[int]],
     caplog: pytest.LogCaptureFixture,
-    failure: str,
     view_error: bool,
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
@@ -911,13 +971,12 @@ def test_resume_failed_tunables_unwind_finishes_once_without_a_producer(
         identity=identity(),
     )
     harness.complete_segment()
-    capture_error = ValueError("flux live snapshot failed during Resume")
     journal = rig.paths.metadata_root / "journal.jsonl"
     original = journal.read_bytes()
     journal.unlink()
     journal.mkdir()
 
-    def capture() -> DeviceSnapshot:
+    def during_submit() -> None:
         try:
             controller.apply_tunables(
                 "run", {("value",): 2}, actor=Actor("agent", "rpc")
@@ -932,23 +991,17 @@ def test_resume_failed_tunables_unwind_finishes_once_without_a_producer(
                 len(finished),
             )
         )
-        if failure == "capture":
-            raise capture_error
-        return DeviceSnapshot({})
 
-    harness.background.fail_submit = failure == "submit"
+    harness.background.on_submit = during_submit
+    harness.background.fail_submit = True
     try:
-        with pytest.raises(ValueError if failure == "capture" else OSError) as raised:
-            controller.resume("run", devices=capture)
+        with pytest.raises(OSError, match="submit failed"):
+            controller.resume("run")
     finally:
+        harness.background.on_submit = None
         journal.rmdir()
         journal.write_bytes(original)
     assert len(native_errors) == 1 and observed == [(True, True, 1)]
-    assert (
-        raised.value is capture_error
-        if failure == "capture"
-        else str(raised.value) == "submit failed"
-    )
     failed = controller.status()
     assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
     assert finished[-1] == (failed, native_errors[0]) and len(finished) == 2
@@ -963,11 +1016,9 @@ def test_resume_failed_tunables_unwind_finishes_once_without_a_producer(
     assert ("failed view notification" in caplog.text) == view_error
 
 
-@pytest.mark.parametrize("failure", ["capture", "submit"])
 def test_resume_admission_failure_keeps_paused_run_and_progress(
     tmp_path: Path,
     progress_calls: tuple[list[int], list[int]],
-    failure: str,
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     controller = create_controller(harness, rig, lambda _status, _error: None)
@@ -1002,23 +1053,10 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
     harness.background.deliver()
     before = controller.status()
     bars = harness.progress.bars_for_owner("example")
-    captured: list[str] = []
-
-    def capture() -> DeviceSnapshot:
-        assert harness.gate.snapshot()
-        captured.append(failure)
-        if failure == "capture":
-            raise ValueError("cached snapshot unavailable")
-        return DeviceSnapshot({})
-
-    if failure == "submit":
-        harness.background.fail_submit = True
-        expected = OSError
-    else:
-        expected = ValueError
+    harness.background.fail_submit = True
     try:
-        with pytest.raises(expected):
-            controller.resume("run", devices=capture)
+        with pytest.raises(OSError, match="submit failed"):
+            controller.resume("run")
         assert controller.status() == before
         assert controller.operation_id == token
         assert harness.handles.live_count() == 1
@@ -1026,17 +1064,16 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
         assert harness.gate.snapshot()
         assert harness.progress.bars_for_owner("example") == bars
         assert progress_calls == ([token], [])
-        assert captured == [failure]
     finally:
         harness.background.fail_submit = False
-    resumed = controller.resume("run", devices=lambda: DeviceSnapshot({}))
+    resumed = controller.resume("run")
     harness.background.execute()
     harness.background.deliver()
     assert harness.handles.known_outcome(resumed) == OperationOutcome("finished")
     assert progress_calls == ([token], [token])
 
 
-def test_stop_during_resume_capture_does_not_restart_paused_step(
+def test_stop_during_resume_submission_does_not_restart_paused_step(
     tmp_path: Path,
     progress_calls: tuple[list[int], list[int]],
 ) -> None:
@@ -1070,11 +1107,12 @@ def test_stop_during_resume_capture_does_not_restart_paused_step(
     harness.owner.pump_all()
     harness.background.deliver()
 
-    def capture() -> DeviceSnapshot:
+    def during_submit() -> None:
         controller.stop("run")
-        return DeviceSnapshot({})
 
-    resumed = controller.resume("run", devices=capture)
+    harness.background.on_submit = during_submit
+    resumed = controller.resume("run")
+    harness.background.on_submit = None
     assert harness.gate.snapshot()
     harness.background.execute()
     harness.background.deliver()
@@ -1086,7 +1124,7 @@ def test_stop_during_resume_capture_does_not_restart_paused_step(
     assert not harness.gate.snapshot()
 
 
-def test_resume_capture_stop_waits_for_owner_terminal_delivery(
+def test_resume_submission_stop_waits_for_owner_terminal_delivery(
     tmp_path: Path,
     progress_calls: tuple[list[int], list[int]],
 ) -> None:
@@ -1124,7 +1162,7 @@ def test_resume_capture_stop_waits_for_owner_terminal_delivery(
     assert paused is not None and paused.lifecycle == "paused"
     notifications: list[tuple[int, bool, bool]] = []
 
-    def capture() -> DeviceSnapshot:
+    def during_submit() -> None:
         controller.stop("run")
         notifications.append(
             (
@@ -1133,9 +1171,10 @@ def test_resume_capture_stop_waits_for_owner_terminal_delivery(
                 controller.has_pending_segment,
             )
         )
-        return DeviceSnapshot({})
 
-    resumed = controller.resume("run", devices=capture)
+    harness.background.on_submit = during_submit
+    resumed = controller.resume("run")
+    harness.background.on_submit = None
     assert resumed == token
     assert notifications == [(1, True, True)]
     assert controller.has_pending_segment
@@ -1154,11 +1193,9 @@ def test_resume_capture_stop_waits_for_owner_terminal_delivery(
     assert len(finished) == 2
 
 
-@pytest.mark.parametrize("failure", ["capture", "submit"])
 def test_resume_stop_rejection_finishes_without_a_producer(
     tmp_path: Path,
     progress_calls: tuple[list[int], list[int]],
-    failure: str,
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
@@ -1190,21 +1227,14 @@ def test_resume_stop_rejection_finishes_without_a_producer(
         identity=identity(),
     )
     harness.complete_segment()
-    capture_error = ValueError("cached snapshot failed after Stop")
 
-    def capture() -> DeviceSnapshot:
+    def during_submit() -> None:
         controller.stop("run")
-        if failure == "capture":
-            raise capture_error
-        return DeviceSnapshot({})
 
-    harness.background.fail_submit = failure == "submit"
-    with pytest.raises(ValueError if failure == "capture" else OSError) as raised:
-        controller.resume("run", devices=capture)
-    if failure == "capture":
-        assert raised.value is capture_error
-    else:
-        assert str(raised.value) == "submit failed"
+    harness.background.on_submit = during_submit
+    harness.background.fail_submit = True
+    with pytest.raises(OSError, match="submit failed"):
+        controller.resume("run")
     status = controller.status()
     assert status is not None and status.lifecycle == "stopped"
     assert len(finished) == 2 and finished[-1] == (status, None)
@@ -1237,7 +1267,7 @@ def test_pause_resume_reject_pending_start_without_accepting_native_run(
     with pytest.raises(RuntimeError, match="accepted"):
         controller.pause("run")
     with pytest.raises(RuntimeError, match="paused"):
-        controller.resume("run", devices=lambda: DeviceSnapshot({}))
+        controller.resume("run")
     assert not rig.paths.metadata_root.exists()
     controller.stop("run")
     harness.complete_segment()
@@ -1255,22 +1285,17 @@ def test_control_without_attached_target_rejects_before_side_effects(
     controller = create_controller(
         harness, rig, lambda status, error: finished.append((status, error))
     )
-    captured: list[str] = []
-
-    def capture() -> DeviceSnapshot:
-        captured.append("devices")
-        return DeviceSnapshot({})
 
     assert controller.run_id is None
     commands: dict[str, Callable[[], object]] = {
         "pause": lambda: controller.pause("old"),
-        "resume": lambda: controller.resume("old", devices=capture),
+        "resume": lambda: controller.resume("old"),
         "stop": lambda: controller.stop("old"),
     }
     with pytest.raises(RunMismatch) as raised:
         commands[command]()
     assert (raised.value.expected, raised.value.actual) == ("old", None)
-    assert captured == finished == []
+    assert finished == []
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
     # A rejected unattached Stop must not poison the next real Start.
     controller.start(
@@ -1301,17 +1326,12 @@ def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
         harness, rig, lambda status, error: finished.append((status, error))
     )
     seen: list[str | None] = []
-    captured: list[str] = []
-
-    def capture() -> DeviceSnapshot:
-        captured.append("devices")
-        return DeviceSnapshot({})
 
     def notified() -> None:
         seen.append(controller.run_id)
         for invoke in (
             lambda: controller.pause("old"),
-            lambda: controller.resume("old", devices=capture),
+            lambda: controller.resume("old"),
             lambda: controller.stop("old"),
         ):
             with pytest.raises(RunMismatch) as raised:
@@ -1343,7 +1363,7 @@ def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
         )
     finally:
         detach()
-    assert seen == ["run"] and captured == []
+    assert seen == ["run"]
     assert not rig.paths.metadata_root.exists()
     assert not rig.paths.data_root.exists()
     assert progress_calls == ([token], [])
@@ -1432,7 +1452,7 @@ def test_replacement_notifications_observe_new_pending_host_without_editing_old_
 
 
 @pytest.mark.parametrize("phase", ["running", "pausing", "paused"])
-def test_accepted_old_controls_preserve_native_state_progress_and_capture(
+def test_accepted_old_controls_preserve_native_state_progress_and_journal(
     tmp_path: Path,
     phase: str,
     progress_calls: tuple[list[int], list[int]],
@@ -1442,12 +1462,7 @@ def test_accepted_old_controls_preserve_native_state_progress_and_capture(
     controller = create_controller(
         harness, rig, lambda status, error: finished.append((status, error))
     )
-    captured: list[str] = []
     checked: list[str] = []
-
-    def capture() -> DeviceSnapshot:
-        captured.append("devices")
-        return DeviceSnapshot({})
 
     def reject_old_controls() -> None:
         before = controller.status()
@@ -1458,7 +1473,7 @@ def test_accepted_old_controls_preserve_native_state_progress_and_capture(
         events = rig.events()
         for invoke in (
             lambda: controller.pause("old"),
-            lambda: controller.resume("old", devices=capture),
+            lambda: controller.resume("old"),
             lambda: controller.stop("old"),
         ):
             with pytest.raises(RunMismatch) as raised:
@@ -1471,7 +1486,7 @@ def test_accepted_old_controls_preserve_native_state_progress_and_capture(
             )
             assert harness.progress.bars_for_owner("example") == bars
             assert rig.events() == events
-        assert captured == [] and progress_calls[1] == []
+        assert progress_calls[1] == []
         checked.append(phase)
 
     @workflow("target-controls", plan=Plan, tunables=Tunables, init=rig.init)

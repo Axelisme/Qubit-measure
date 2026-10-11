@@ -5,57 +5,60 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from zcu_tools.device import DeviceInfo
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.datafile import JsonObject
+from zcu_tools.device import BaseDeviceInfo
+from zcu_tools.experiment.acquisition import capture_device_snapshot
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.utils.device import setup_devices
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.services.device import DeviceService
 
 
 class SessionDevices:
-    """Forward native workflow device effects through the owning session.
+    """Access borrowed session drivers in the workflow worker under its RUN lease.
 
-    This adapter borrows DeviceService; it owns no drivers or registry and never
-    connects, disconnects, clamps or retries. Calls run on the workflow worker
-    under its shared RUN lease. Device drivers own validation and hard limits.
+    No connection lifecycle, GUI cache writes, retry or clamping occurs here.
+    The selected driver's model owns full cfg validation; its setup owns limits
+    and I/O. Every error propagates with its original cause.
     """
 
     def __init__(self, service: DeviceService) -> None:
         """Borrow the session's public driver facet without lifecycle ownership."""
         self._service = service
 
-    def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
-        """Apply absolute flux in native units with cooperative cancellation.
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Live-read a detached actual Info subclass; unknown names raise ValueError.
 
-        Read the selected registered driver's native info, use its set_flux
-        setter, and apply through the existing experiment setup_devices owner.
-        Unknown/disconnected names, unsupported flux, limits and I/O raise with
-        the native cause. Do not use the Start-time cached snapshot as live info.
+        Call in the workflow worker, not through owner-thread cache facades.
+        Unknown or disconnected errors identify name. Read errors propagate.
         """
         devices = self._service.get_connected_devices()
         if name not in devices:
-            raise ValueError(f"Devices not found: {name}")
-        info = devices[name].get_info()
-        info.set_flux(value)
-        setup_devices(
-            ExpCfgModel.model_validate({"dev": {name: info}}),
-            devices,
-            cancel_signal=cancel_signal,
-        )
+            raise ValueError(f"Device not connected: {name!r}")
+        return devices[name].get_info().model_copy(deep=True)
 
-    def setup(
-        self, settings: Mapping[str, DeviceInfo], cancel_signal: StopSignal
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo, cancel_signal: StopSignal
     ) -> None:
-        """Delegate ordered native settings to existing experiment setup_devices.
+        """Validate complete cfg with the selected model before any driver setup.
 
-        Reuse the session's registered drivers and native name/address/model
-        validation. Pass the same StopSignal; cancellation returns normally.
-        This adapter does not expand the batch setup policy slated for removal.
+        Revalidate dumped fields because Pydantic model_copy can bypass validators.
+        Preserve all selected-model fields, including its stored units. Driver
+        setup receives the original StopSignal's Event, never a replacement.
+        Unknown/disconnected names raise ValueError naming name; validation,
+        limits, address and I/O failures propagate without retries or fallback.
         """
-        setup_devices(
-            ExpCfgModel(dev=settings),
-            self._service.get_connected_devices(),
-            cancel_signal=cancel_signal,
-        )
+        devices = self._service.get_connected_devices()
+        if name not in devices:
+            raise ValueError(f"Device not connected: {name!r}")
+        driver = devices[name]
+        validated = driver.info_model.model_validate(cfg.model_dump(mode="python"))
+        driver.setup(validated, progress=False, stop_event=cancel_signal.event)
+
+    def capture_snapshot(self) -> Mapping[str, JsonObject]:
+        """Capture all connected drivers before each env.run; zero devices returns {}.
+
+        Worker-only read under the retained RUN lease; no GUI State update.
+        Native read/serialization errors propagate before the callback runs.
+        """
+        return capture_device_snapshot(self._service.get_connected_devices())

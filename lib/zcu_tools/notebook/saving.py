@@ -110,6 +110,7 @@ class SavedRun(Generic[CfgT, ResultT]):
                 roles=dict(self._storage.roles),
             ),
             provenance=deepcopy(acquisition.provenance),
+            device_snapshot=deepcopy(acquisition.device_snapshot),
         )
         self._figures: dict[str, Figure] = {}
         self._analysis: tuple[AnalysisDocument, ...] = ()

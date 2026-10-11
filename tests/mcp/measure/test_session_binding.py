@@ -155,7 +155,7 @@ def test_status_received_discovery_reply_survives_eof(
                     "written": [
                         {
                             "id": "x",
-                            "kind": "metadict",
+                            "kind": "parameter",
                             "target": "frequency",
                             "before": 1,
                             "after": 2,
@@ -257,7 +257,7 @@ def test_assembled_multistep_tools_do_not_cross_connections(
                     "written": [
                         {
                             "id": "x",
-                            "kind": "metadict",
+                            "kind": "parameter",
                             "target": "frequency",
                             "before": 1,
                             "after": 2,

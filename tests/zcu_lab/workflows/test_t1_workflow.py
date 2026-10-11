@@ -8,11 +8,12 @@ from time import perf_counter
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from pydantic import ValidationError
 from zcu_tools.datafile import SoftwareProvenance, load_run_data
+from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import (
     Actor,
-    DeviceSnapshot,
     Engine,
     EnginePorts,
     RunIdentity,
@@ -33,7 +34,7 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainExp
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.workflows.calibration import Calibrated, CalibrationTunables
-from zcu_lab.workflows.t1 import T1Tunables, t1_fluxdep
+from zcu_lab.workflows.t1 import T1Plan, T1Tunables, t1_fluxdep
 
 from ._sim_inputs import Inputs, make_plan, make_snapshot, seed_from_inputs
 
@@ -44,6 +45,8 @@ def start_t1(
     tun: T1Tunables,
     devices: RecordingDevices,
     plots: Plots,
+    *,
+    plan: T1Plan | None = None,
 ) -> Engine[Calibrated]:
     """Start the shipped declaration with real acquisitions and isolated offline ports."""
     engine = Engine(
@@ -59,12 +62,11 @@ def start_t1(
     )
     engine.start(
         t1_fluxdep,
-        plan=make_plan(inputs),
+        plan=make_plan(inputs) if plan is None else plan,
         tunables=tun,
         paths=RunPaths(root / "metadata", root / "data"),
         identity=RunIdentity(
             "workflow",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -114,7 +116,6 @@ def test_native_t1_checks_ports_before_hardware_effects(
         paths=paths,
         identity=RunIdentity(
             "workflow",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -132,6 +133,33 @@ def test_native_t1_checks_ports_before_hardware_effects(
     assert len(plots) == 0
     assert engine.records("workflow") == ()
     assert not tuple(paths.data_root.glob("iter/*/runs/*.h5"))
+
+
+@pytest.mark.parametrize("unit", ["A", "V", "native", None, "mA"])
+def test_native_t1_requires_flux_unit_and_forwards_it_before_acquisition(
+    inputs: Inputs, tmp_path: Path, unit: str | None
+) -> None:
+    data = make_plan(inputs).model_dump(mode="python")
+    data.pop("flux_unit", None)
+    if unit is not None:
+        data["flux_unit"] = unit
+    if unit not in ("A", "V", "native"):
+        with pytest.raises(ValidationError, match="flux_unit"):
+            T1Plan.model_validate(data)
+        return
+    plan = T1Plan.model_validate(data)
+    if unit != "native":
+        return  # Valid plan coordinates; Fake mismatch has separate refusal proof.
+    devices, plots = RecordingDevices(), Plots(NonPresentingHost())
+    engine = start_t1(inputs, tmp_path, tunables(), devices, plots, plan=plan)
+    devices.on_set = lambda _signal: engine.pause("workflow")
+    status = engine.execute("workflow")
+    assert status.lifecycle == "paused", status.reason
+    assert devices.values == [("flux", 1.0)]
+    assert devices.configs[0].model_dump()["value_unit"] == unit
+    assert devices.signals[0].is_set()
+    assert engine.records("workflow") == ()
+    assert not tuple((tmp_path / "data").glob("iter/*/runs/*"))
 
 
 def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
@@ -247,6 +275,8 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
     inputs: Inputs, tmp_path: Path
 ) -> None:
     devices, plots = RecordingDevices(), Plots(NonPresentingHost())
+    driver = FakeDevice(fast_mode=True)
+    devices.drivers["flux"] = driver
     fluxes = tuple(inputs.flux_value + offset for offset in (0.0, 0.01, 0.02))
     plan = make_plan(inputs).model_copy(update={"fluxes": fluxes})
     roots = workflow_roots(
@@ -275,7 +305,6 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
         paths=RunPaths(roots.result, roots.database),
         identity=RunIdentity(
             "flux-bound",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -286,7 +315,7 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
             ),
         ),
     )
-    inputs.soc.set_flux_source(lambda: devices.values[-1][1])
+    inputs.soc.set_flux_source(lambda: driver.value)
     try:
         status = engine.execute("flux-bound")
     finally:
@@ -303,9 +332,10 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
         assert point["reason"] is None
         assert point["lifetime_us"] == pytest.approx(20.0, rel=0.2)
         path = roots.database / record.iteration_dir / record.run_files[-1]
-        source, _metadata = load_run_with_metadata(
-            path, spec=T1Exp().persistence_spec()
-        )
+        source, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
+        assert metadata.device_snapshot is not None
+        assert metadata.device_snapshot["flux"]["value"] == flux
+        assert metadata.device_snapshot["flux"]["value_unit"] == "native"
         assert source.cfg is not None
         frequency = source.cfg.modules.pi_pulse.freq
         assert isinstance(frequency, float)
@@ -411,7 +441,7 @@ def test_pause_during_native_acquisition_discards_step_then_uses_new_revision(
         expected_revision=0,
         actor=Actor("user", "operator"),
     )
-    engine.resume("workflow", devices=DeviceSnapshot({}))
+    engine.resume("workflow")
     status = engine.execute("workflow")
     assert status.lifecycle == "done", status.reason
     records = engine.records("workflow")
@@ -466,3 +496,19 @@ def test_stop_during_native_acquisition_preserves_only_prior_committed_point(
     source, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
     assert source.cfg is not None and np.isfinite(source.result.signals).all()
     assert metadata.completion == "complete"
+
+
+@pytest.mark.parametrize("unit", ["A", "V"])
+def test_flux_unit_mismatch_fails_before_setup_or_acquisition(
+    inputs: Inputs, tmp_path: Path, unit: str
+) -> None:
+    plan = make_plan(inputs).model_copy(update={"flux_unit": unit})
+    devices, plots = RecordingDevices(), Plots(NonPresentingHost())
+    engine = start_t1(inputs, tmp_path, tunables(), devices, plots, plan=plan)
+    devices.on_set = lambda _signal: engine.pause("workflow")
+    status = engine.execute("workflow")
+    assert status.lifecycle == "failed", status.reason
+    assert status.reason is not None and "unit" in status.reason
+    assert devices.values == []
+    assert engine.records("workflow") == ()
+    assert not tuple((tmp_path / "data").glob("iter/*/runs/*"))

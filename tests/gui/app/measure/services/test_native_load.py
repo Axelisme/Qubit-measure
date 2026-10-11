@@ -13,7 +13,7 @@ from zcu_tools.datafile import load_run_data
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    MetaDictWriteback,
+    ParameterWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -51,7 +51,6 @@ from zcu_tools.resources.entry import (
     AcceptedPayload,
     ResultEntry,
     RoleResolutionError,
-    RoleSpec,
     SavedPayload,
 )
 
@@ -74,10 +73,8 @@ def _native_controls(
 ) -> tuple[RunAnalyzeControlFacet, WritebackControlFacet]:
     """Compose real admission/load/analysis/WB owners; no Run is executed."""
 
-    def capture(
-        declarations: Mapping[str, RoleSpec], target: str | None
-    ) -> ParameterContext | None:
-        return session.context.read_alias_context(declarations, target=target)
+    def capture(aliases: Mapping[str, str] | None) -> ParameterContext | None:
+        return session.capture_parameters(aliases)
 
     def resolve(parameters: ParameterContext | None) -> CfgResolution:
         return cfg_resolution(session.state, parameters)
@@ -152,8 +149,6 @@ def role_load_session(
     with native_save_session(tmp_path, qapp) as session:
         control = ContextControlFacet(context=session.context)
         tab = session.state.get_tab("tab")
-        declarations = {"source_qubit": RoleSpec("run-source/qubit")}
-        monkeypatch.setattr(tab.adapter, "parameter_roles", lambda: declarations)
         control.add_component("Q1", "run-source/qubit", {"rate": 1.0})
         control.add_component("Q2", "run-source/qubit", {"rate": 2.0})
         session.context.set_alias_rows(
@@ -162,7 +157,7 @@ def role_load_session(
                 AliasRow("custom", "Q2"),
             )
         )
-        captured = session.context.read_alias_context(declarations)
+        captured = session.context.read_context()
         assert captured is not None and captured.roles is not None
         session.metadata = replace(
             session.metadata,
@@ -204,7 +199,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
         MagicMock(),
         provide_options=lambda _: (),
         context=control,
-        captured_parameters=session.context.read_alias_context,
+        captured_parameters=session.capture_parameters,
     )
 
     service.load_result("tab", str(path))
@@ -232,7 +227,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
         request: WritebackRequest[object, PaneSummary],
     ) -> list[WritebackItem]:
         assert request.ctx.parameters is loaded
-        return [MetaDictWriteback("$source_qubit.rate", "Rate", proposed_value=12.0)]
+        return [ParameterWriteback("$source_qubit.rate", "Rate", proposed_value=12.0)]
 
     monkeypatch.setattr(tab.adapter, "analyze", analyze)
     monkeypatch.setattr(tab.adapter, "get_writeback_items", proposals)
@@ -258,12 +253,12 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     assert isinstance(draft, WritebackDraft)
     assert draft.parameters is loaded
     assert draft.run_id == session.metadata.run_id
-    assert writeback.preview_values(draft)["md-1"].current == 10.0
+    assert writeback.preview_values(draft)["param-1"].current == 10.0
     assert writeback.write_draft(
         draft,
-        (WritebackEdit("md-1"),),
+        (WritebackEdit("param-1"),),
         origin=CommandOrigin("mcp"),
-    ) == [WritebackWritten("md-1", "md", "Q1.rate", 10.0, 12.0)]
+    ) == [WritebackWritten("param-1", "parameter", "Q1.rate", 10.0, 12.0)]
     event = session.entry.ledger.events()[-1]
     assert (
         isinstance(event.payload, AcceptedPayload)
@@ -305,7 +300,7 @@ def test_native_load_historical_source_failure_preserves_previous_result(
         MagicMock(),
         provide_options=lambda _: (),
         context=ContextControlFacet(context=session.context),
-        captured_parameters=session.context.read_alias_context,
+        captured_parameters=session.capture_parameters,
     )
     error = FileNotFoundError if failure == "missing_point" else RoleResolutionError
 
@@ -384,7 +379,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     assert session.entry.ledger.events() == events
     writeback.teardown_draft(draft)
     rejected = writeback.create_draft(
-        [MetaDictWriteback("Q1.rate", "rate", 99.0)],
+        [ParameterWriteback("Q1.rate", "rate", 99.0)],
         parameters=None,
         run_id=session.metadata.run_id,
     )
@@ -417,7 +412,7 @@ def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
     )
     _, wb = _native_controls(session, writeback, control)
     draft = writeback.create_draft(
-        [MetaDictWriteback("$source_qubit.rate", "rate", 99.0)],
+        [ParameterWriteback("$source_qubit.rate", "rate", 99.0)],
         parameters=parameters,
         run_id=session.metadata.run_id,
     )
@@ -474,7 +469,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
         outcome = service.load_result("tab", str(path))
         original_capture = session.state.get_tab("tab").run.parameters
@@ -533,7 +528,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
         service.load_result("tab", str(source))
         assert tab.run.confirmed_run_id is None
@@ -649,7 +644,7 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
         service.load_result("tab", str(source))
         assert tab.run.metadata == load_run_data(source).metadata
@@ -712,7 +707,7 @@ def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
 
         outcome = service.load_result("tab", str(path))
@@ -765,7 +760,7 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
 
         with pytest.raises(LoadDataError) as error:
@@ -787,7 +782,7 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
             MagicMock(),
             provide_options=lambda _: (),
             context=ContextControlFacet(context=session.context),
-            captured_parameters=session.context.read_alias_context,
+            captured_parameters=session.capture_parameters,
         )
 
         with pytest.raises(LoadDataError) as error:

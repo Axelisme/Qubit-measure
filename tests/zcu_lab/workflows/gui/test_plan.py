@@ -343,3 +343,23 @@ def test_captured_asset_directory_reaches_native_acquisition_without_global_scop
         finally:
             plots.finish(present=False)
             plots.release()
+
+
+@pytest.mark.parametrize("unit", [None, "native", "A", "V"])
+def test_explicit_flux_unit_is_required_and_reaches_native_plan(
+    inputs: Inputs, unit: str | None
+) -> None:
+    data = inline_input(inputs).data
+    data.pop("flux_unit", None)
+    if unit is not None:
+        data["flux_unit"] = unit
+    env = FormEnv()
+    result = FormState(FormInput(T1PlanForm, data)).result(env)
+    if unit is None:
+        assert isinstance(result, FormErrors)
+        assert ("flux_unit",) in result.messages
+    else:
+        assert isinstance(result, T1PlanForm)
+        native = result.to_cfg(env, make_plan(inputs).snapshot)
+        assert isinstance(native, T1Plan)
+        assert native.flux_unit == unit

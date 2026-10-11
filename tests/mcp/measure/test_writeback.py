@@ -20,7 +20,7 @@ def apply_writeback_client(tmp_path):
                     "target_name": f"{params['subtab_id']}.{item_id}",
                     "selected": selected,
                 }
-                for item_id, selected in (("md-1", False), ("wf-1", True))
+                for item_id, selected in (("param-1", False), ("wf-1", True))
             ],
             "destination_context": {},
         },
@@ -31,7 +31,9 @@ def apply_writeback_client(tmp_path):
             "written": [
                 {
                     "id": item["id"],
-                    "kind": "md" if item["id"].startswith("md-") else "waveform",
+                    "kind": "parameter"
+                    if item["id"].startswith("param-")
+                    else "waveform",
                     "target": params["subtab_id"],
                     "before": None,
                     "after": {"value": 2},
@@ -76,7 +78,7 @@ def test_apply_writeback_writes_whole_drafts_despite_low_fit_quality(
     assert [
         (stage["stage"], [item["id"] for item in stage["written"]])
         for stage in result["completed"]
-    ] == [("primary", ["md-1", "wf-1"]), ("post", ["md-1", "wf-1"])]
+    ] == [("primary", ["param-1", "wf-1"]), ("post", ["param-1", "wf-1"])]
 
 
 def test_apply_writeback_writes_all_ids_in_each_pane_without_hidden_reads(
@@ -97,7 +99,10 @@ def test_apply_writeback_writes_all_ids_in_each_pane_without_hidden_reads(
                         "before": None,
                         "after": {"value": 2},
                     }
-                    for item_id, kind in (("md-1", "md"), ("wf-1", "waveform"))
+                    for item_id, kind in (
+                        ("param-1", "parameter"),
+                        ("wf-1", "waveform"),
+                    )
                 ],
             }
             for stage, pane in (("primary", "analysis"), ("post", "post_analysis"))
@@ -120,7 +125,7 @@ def test_apply_writeback_writes_all_ids_in_each_pane_without_hidden_reads(
             {
                 "tab_id": "t",
                 "subtab_id": "analysis",
-                "write": [{"id": "md-1"}, {"id": "wf-1"}],
+                "write": [{"id": "param-1"}, {"id": "wf-1"}],
             },
         ),
         (
@@ -128,7 +133,7 @@ def test_apply_writeback_writes_all_ids_in_each_pane_without_hidden_reads(
             {
                 "tab_id": "t",
                 "subtab_id": "post_analysis",
-                "write": [{"id": "md-1"}, {"id": "wf-1"}],
+                "write": [{"id": "param-1"}, {"id": "wf-1"}],
             },
         ),
     ]
@@ -323,7 +328,7 @@ def test_apply_writeback_uses_current_results_and_drafts_on_each_call(
         "ok": True,
         "result": {
             "has_draft": True,
-            "items": [{"id": "md-new", "target_name": "new_frequency"}],
+            "items": [{"id": "param-new", "target_name": "new_frequency"}],
             "destination_context": {},
         },
     }
@@ -333,8 +338,8 @@ def test_apply_writeback_uses_current_results_and_drafts_on_each_call(
         (params["subtab_id"], params["write"])
         for method, params in apply_writeback_client.transport.sent
         if method == "tab.writeback_write"
-    ] == [("analysis", [{"id": "md-new"}])]
-    assert result["completed"][0]["written"][0]["id"] == "md-new"
+    ] == [("analysis", [{"id": "param-new"}])]
+    assert result["completed"][0]["written"][0]["id"] == "param-new"
 
 
 def test_apply_writeback_does_not_swallow_unexpected_errors(apply_writeback_client):
@@ -368,7 +373,8 @@ def test_apply_writeback_rejects_invalid_arguments_before_transport(
 
 
 @pytest.mark.parametrize(
-    "items", [None, [], ["analysis.md-1"], ["post_analysis.wf-1", "analysis.md-1"]]
+    "items",
+    [None, [], ["analysis.param-1"], ["post_analysis.wf-1", "analysis.param-1"]],
 )
 def test_apply_writeback_selects_stable_names_in_pane_order(
     apply_writeback_client, items
@@ -377,12 +383,12 @@ def test_apply_writeback_selects_stable_names_in_pane_order(
         "apply_writeback", {"tab": "t", "items": items}
     )
     expected = {
-        "primary": ["md-1", "wf-1"]
+        "primary": ["param-1", "wf-1"]
         if items is None
-        else [item for item in ("md-1", "wf-1") if f"analysis.{item}" in items],
-        "post": ["md-1", "wf-1"]
+        else [item for item in ("param-1", "wf-1") if f"analysis.{item}" in items],
+        "post": ["param-1", "wf-1"]
         if items is None
-        else [item for item in ("md-1", "wf-1") if f"post_analysis.{item}" in items],
+        else [item for item in ("param-1", "wf-1") if f"post_analysis.{item}" in items],
     }
     assert result["status"] == "finished"
     assert result["not_started"] == []
@@ -440,7 +446,7 @@ def test_apply_writeback_keeps_selected_confirmed_prefix_on_post_failure(
         "apply_writeback",
         {
             "tab": "t",
-            "items": ["analysis.md-1", "post_analysis.wf-1"],
+            "items": ["analysis.param-1", "post_analysis.wf-1"],
         },
     )
     assert result["status"] == "failed"
@@ -451,14 +457,14 @@ def test_apply_writeback_keeps_selected_confirmed_prefix_on_post_failure(
     assert [
         (stage["stage"], [item["id"] for item in stage["written"]])
         for stage in result["completed"]
-    ] == [("primary", ["md-1"])]
+    ] == [("primary", ["param-1"])]
     assert uncertain_effects == [{"id": "wf-1"}]
     assert [
         (params["subtab_id"], params["write"])
         for method, params in apply_writeback_client.transport.sent
         if method == "tab.writeback_write"
     ] == [
-        ("analysis", [{"id": "md-1"}]),
+        ("analysis", [{"id": "param-1"}]),
         ("post_analysis", [{"id": "wf-1"}]),
     ]
 

@@ -9,23 +9,11 @@ from typing import Protocol
 
 from qick import QickConfig
 
-from ...device import DeviceInfo
+from ...datafile import JsonObject
+from ...device import BaseDeviceInfo
 from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from ..stop_signal import StopSignal
-
-
-@dataclass(frozen=True)
-class DeviceSnapshot:
-    """Provenance at start/resume, captured by the engine as detached data.
-
-    ``items`` maps connected-device names to native typed DeviceInfo models in
-    setup order; an empty mapping means no devices. Models contain the driver
-    identity, settings, and native units defined by their device owner.
-    This snapshot does not assert that hardware stays unchanged afterwards.
-    """
-
-    items: Mapping[str, DeviceInfo]
 
 
 class DevicePort(Protocol):
@@ -35,24 +23,34 @@ class DevicePort(Protocol):
     Neither the adapter nor the engine declares or checks device limits.
     """
 
-    def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
-        """Set an absolute value in native device units, or raise on failure.
+    def capture_snapshot(self) -> Mapping[str, JsonObject]:
+        """Read all connected drivers once into detached JSON, or raise.
 
-        Observe ``cancel_signal`` between cooperative work segments. Unknown or
-        disconnected names, driver-limit violations, and I/O failures must raise.
+        Called in the workflow worker before each experiment callback, under
+        the host's RUN lease. Reuse capture_device_snapshot and the public
+        driver mapping; do not read GUI cache or update GUI state. An explicitly
+        empty mapping means no connected devices. Read/serialization errors
+        propagate, without retries or cached fallbacks.
         """
         ...
 
-    def setup(
-        self, settings: Mapping[str, DeviceInfo], cancel_signal: StopSignal
-    ) -> None:
-        """Apply native DeviceInfo models in mapping order, or raise on failure.
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Live-read detached settings retaining the actual driver Info subclass.
 
-        Keys name connected devices. Reuse the native device owner for name,
-        address, model, and setting validation; retain its original failures.
-        Pass cancel_signal.event to cooperative native setup and return when
-        cancelled. The engine decides whether to discard the step. It does not
-        connect devices, repair settings, or retry this operation.
+        Synchronous worker read, not an effect or cached GUI mapping. Unknown or
+        disconnected errors identify name; native I/O failures propagate.
+        """
+        ...
+
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo, cancel_signal: StopSignal
+    ) -> None:
+        """Revalidate complete cfg through the selected driver's Info model.
+
+        Do not rely on model_validate(instance) to revalidate unchecked copies.
+        Pass the same StopSignal through this seam and its original Event to
+        native setup. Unknown/disconnected names identify name; model validation,
+        driver limits and I/O errors propagate without retries or clamping.
         """
         ...
 

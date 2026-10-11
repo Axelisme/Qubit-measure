@@ -34,6 +34,8 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 
+from .devices import set_flux
+
 
 @dataclass(frozen=True)
 class DemoContext:
@@ -45,10 +47,17 @@ class DemoContext:
 
 
 class FluxPlan(BaseModel):
-    """Ordered device setpoints and fixed per-curve sample count."""
+    """Ordered absolute setpoints, explicit A/V/native unit and sample count.
+
+    flux_unit is required and forwarded unchanged; the host rejects a mismatch
+    with driver units. No conversion, hardware inference or default is applied.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     flux_dev: str = Field(min_length=1, description="Connected flux device name")
+    flux_unit: Literal["A", "V", "native"] = Field(
+        description="Explicit setpoint unit: A, V or native (Fake); no conversion"
+    )
     fluxes: tuple[float, ...] = Field(
         description="Ordered absolute setpoints in device units"
     )
@@ -475,7 +484,7 @@ def t2echo_fluxdep(
     if not state.remaining:
         return Done()
     flux = state.remaining.pop(0)
-    yield from env.set_device(plan.flux_dev, flux)
+    yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
     cal = yield from calibrate(env, tun.cal, flux, state.cal)
     if isinstance(cal, CalibrationFailed):
         return Next(T2EchoPoint(index, flux, cal, None, cal.reason), state)
@@ -519,13 +528,18 @@ def t2echo_fluxdep(
 class OvernightPlan(BaseModel):
     """Fixed overnight plan.
 
-    flux_dev names the device; flux is its native setpoint. period_s separates
+    flux_dev names the device; flux is an absolute setpoint in required flux_unit
+    (A, V or native for Fake). The host rejects mismatched driver units without
+    conversion or mode changes. period_s separates
     scheduled starts from the original UTC start. rounds counts outer steps;
     points is samples per decay curve.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     flux_dev: str = Field(min_length=1)
+    flux_unit: Literal["A", "V", "native"] = Field(
+        description="Explicit setpoint unit: A, V or native (Fake); no conversion"
+    )
     flux: float = Field(description="Absolute setpoint in the device's native units")
     period_s: float = Field(
         default=600.0, gt=0, description="Interval between scheduled starts"
@@ -615,7 +629,7 @@ def t1_overnight(
     state.index += 1
     yield from env.wait_until(state.start + timedelta(seconds=index * plan.period_s))
     if index == 0:
-        yield from env.set_device(plan.flux_dev, plan.flux)
+        yield from set_flux(env, plan.flux_dev, plan.flux, unit=plan.flux_unit)
 
     cal = state.cal
     if cal is None:

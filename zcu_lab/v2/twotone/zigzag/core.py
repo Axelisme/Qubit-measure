@@ -18,7 +18,6 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.program.v2 import (
     BathResetCfg,
@@ -142,13 +141,6 @@ class ZigZagExp(PersistableExperiment[ZigZagResult, ZigZagCfg]):
     def run(self, cfg: ZigZagCfg, *, context: RunContext) -> ZigZagResult:
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
 
         times = np.arange(0, cfg.n_times + 1)
 

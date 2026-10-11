@@ -28,7 +28,13 @@ def test_frequency_trace_uses_native_coordinates_and_isolated_cfg(
     inputs: Inputs,
 ) -> None:
     original = inputs.freq.model_copy(deep=True)
-    run = Run(inputs.freq, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        inputs.freq,
+        StopSignal(),
+        soc=inputs.soc,
+        soccfg=inputs.soccfg,
+        device_snapshot={"unused": {"value": 0.125}},
+    )
     before = datetime.now(UTC)
     result = run_qubit_freq(run)
     assert (
@@ -37,6 +43,7 @@ def test_frequency_trace_uses_native_coordinates_and_isolated_cfg(
         <= result.evidence.finished_at
         <= datetime.now(UTC)
     )
+    assert result.evidence.device_snapshot == {"unused": {"value": 0.125}}
     assert result.evidence.completion == "complete"
     expected = sweep2array(
         inputs.freq.sweep.freq,
@@ -54,7 +61,13 @@ def test_frequency_trace_uses_native_coordinates_and_isolated_cfg(
 
 
 def test_rabi_trace_uses_native_time_coordinates(inputs: Inputs) -> None:
-    run = Run(inputs.rabi, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        inputs.rabi,
+        StopSignal(),
+        soc=inputs.soc,
+        soccfg=inputs.soccfg,
+        device_snapshot={"unused": {"value": 0.125}},
+    )
     before = datetime.now(UTC)
     result = run_len_rabi(run)
     assert (
@@ -63,6 +76,7 @@ def test_rabi_trace_uses_native_time_coordinates(inputs: Inputs) -> None:
         <= result.evidence.finished_at
         <= datetime.now(UTC)
     )
+    assert result.evidence.device_snapshot == {"unused": {"value": 0.125}}
     assert result.evidence.completion == "complete"
     expected = sweep2array(
         inputs.rabi.sweep.length,
@@ -78,7 +92,13 @@ def test_rabi_trace_uses_native_time_coordinates(inputs: Inputs) -> None:
 
 
 def test_readout_landscape_keeps_native_axis_order_and_real_snr(inputs: Inputs) -> None:
-    run = Run(inputs.readout, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        inputs.readout,
+        StopSignal(),
+        soc=inputs.soc,
+        soccfg=inputs.soccfg,
+        device_snapshot={"unused": {"value": 0.125}},
+    )
     before = datetime.now(UTC)
     result = run_ro_landscape(run)
     assert (
@@ -87,6 +107,7 @@ def test_readout_landscape_keeps_native_axis_order_and_real_snr(inputs: Inputs) 
         <= result.evidence.finished_at
         <= datetime.now(UTC)
     )
+    assert result.evidence.device_snapshot == {"unused": {"value": 0.125}}
     assert result.evidence.completion == "complete"
     env = {
         "soccfg": inputs.soccfg,
@@ -110,7 +131,13 @@ def test_t1_trace_preserves_native_units_and_acquisition_history(
     inputs: Inputs,
 ) -> None:
     before = datetime.now(UTC)
-    run = Run(inputs.t1, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        inputs.t1,
+        StopSignal(),
+        soc=inputs.soc,
+        soccfg=inputs.soccfg,
+        device_snapshot={"unused": {"value": 0.125}},
+    )
     result = run_t1(run)
     after = datetime.now(UTC)
     assert isinstance(result, T1Result)
@@ -126,6 +153,7 @@ def test_t1_trace_preserves_native_units_and_acquisition_history(
     )
     assert run.outcome.status == "completed"
     assert before <= result.evidence.started_at <= result.evidence.finished_at <= after
+    assert result.evidence.device_snapshot == {"unused": {"value": 0.125}}
     assert result.evidence.completion == "complete"
 
 
@@ -134,7 +162,7 @@ def test_preexisting_stop_keeps_native_partial_result_and_stopped_history(
 ) -> None:
     stop = StopSignal()
     stop.set()
-    run = Run(inputs.t1, stop, soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(inputs.t1, stop, soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={})
     result = run_t1(run)
     assert run.outcome.status == "stopped"
     assert np.isnan(result.signals).all()
@@ -145,7 +173,9 @@ def test_invalid_rabi_pulse_keeps_native_schedule_failure(inputs: Inputs) -> Non
     cfg = inputs.rabi.model_copy(deep=True)
     # Coordinates are valid, but the first pulse is shorter than the generator minimum.
     cfg.sweep.length = SweepCfg(start=0.0, stop=1.2, expts=31, step=1.2 / 30)
-    run = Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={}
+    )
     result = run_len_rabi(run)
     outcome = run.outcome
     assert outcome.status == "failed"
@@ -161,12 +191,20 @@ def test_rabi_rejects_waveforms_outside_flat_sweep_contract(inputs: Inputs) -> N
     cfg = inputs.rabi.model_copy(deep=True)
     cfg.modules.qub_pulse.waveform = GaussWaveformCfg(length=0.4, sigma=0.1)
     with pytest.raises(ValueError, match="const|flat_top"):
-        run_len_rabi(Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg))
+        run_len_rabi(
+            Run(
+                cfg,
+                StopSignal(),
+                soc=inputs.soc,
+                soccfg=inputs.soccfg,
+                device_snapshot={},
+            )
+        )
 
 
 def test_t1_requires_native_soc_capability(inputs: Inputs) -> None:
     with pytest.raises(MissingCapability, match="soc"):
-        run_t1(Run(inputs.t1, StopSignal()))
+        run_t1(Run(inputs.t1, StopSignal(), device_snapshot={}))
 
 
 @pytest.mark.parametrize("uniform", [True, False])
@@ -178,4 +216,12 @@ def test_t1_rejects_modes_outside_uniform_sweep_contract(
     if uniform:
         cfg.sweep.length = [0.0, 1.0]
     with pytest.raises(ValueError, match="uniform"):
-        run_t1(Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg))
+        run_t1(
+            Run(
+                cfg,
+                StopSignal(),
+                soc=inputs.soc,
+                soccfg=inputs.soccfg,
+                device_snapshot={},
+            )
+        )

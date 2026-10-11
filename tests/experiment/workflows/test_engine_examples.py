@@ -4,11 +4,10 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     CommittedRecord,
-    DeviceSnapshot,
     Engine,
     EnginePorts,
     RunIdentity,
@@ -60,7 +59,6 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
         paths=RunPaths(root / "metadata", root / "data"),
         identity=RunIdentity(
             "example",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -82,6 +80,47 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
     assert len(tuple((root / "data/iter").iterdir())) == len(records) + 1
     assert not tuple((root / "data").glob("iter/*/runs/.*.tmp.h5"))
     return records, clock, devices
+
+
+@pytest.mark.parametrize("name", ["echo", "overnight"])
+@pytest.mark.parametrize("unit", ["A", "V", "native", None, "mA"])
+def test_v0_plan_requires_explicit_flux_unit_and_forwards_it(
+    tmp_path: Path, name: str, unit: str | None
+) -> None:
+    data: dict[str, object] = {"flux_dev": "flux", "points": 7}
+    if unit is not None:
+        data["flux_unit"] = unit
+    if name == "echo":
+        data["fluxes"] = (0.1, 0.2)
+        if unit not in ("A", "V", "native"):
+            with pytest.raises(ValidationError, match="flux_unit"):
+                FluxPlan.model_validate(data)
+            return
+        plan = FluxPlan.model_validate(data)
+        if unit != "native":
+            return  # A/V are valid plan coordinates, not Fake success paths.
+        _, _, devices = execute_example(
+            tmp_path, t2echo_fluxdep, plan, T2EchoTunables()
+        )
+        assert devices.values == [("flux", 0.1), ("flux", 0.2)]
+        assert [cfg.model_dump()["value_unit"] for cfg in devices.configs] == [
+            unit,
+            unit,
+        ]
+    else:
+        data.update(flux=0.2, rounds=1)
+        if unit not in ("A", "V", "native"):
+            with pytest.raises(ValidationError, match="flux_unit"):
+                OvernightPlan.model_validate(data)
+            return
+        overnight = OvernightPlan.model_validate(data)
+        if unit != "native":
+            return  # A/V are valid plan coordinates, not Fake success paths.
+        _, _, devices = execute_example(
+            tmp_path, t1_overnight, overnight, OvernightTunables()
+        )
+        assert devices.values == [("flux", 0.2)]
+        assert [cfg.model_dump()["value_unit"] for cfg in devices.configs] == [unit]
 
 
 @pytest.mark.parametrize("name", ["echo", "overnight"])
@@ -109,7 +148,6 @@ def test_demo_workflows_check_ports_before_effects(
     paths = RunPaths(tmp_path / "metadata", tmp_path / "data")
     identity = RunIdentity(
         "example",
-        DeviceSnapshot({}),
         SoftwareProvenance(
             software_versions={},
             git_commit=None,
@@ -122,7 +160,7 @@ def test_demo_workflows_check_ports_before_effects(
     if name == "echo":
         engine.start(
             t2echo_fluxdep,
-            plan=FluxPlan(flux_dev="flux", fluxes=(0.1,), points=7),
+            plan=FluxPlan(flux_dev="flux", flux_unit="native", fluxes=(0.1,), points=7),
             tunables=T2EchoTunables(),
             paths=paths,
             identity=identity,
@@ -131,7 +169,12 @@ def test_demo_workflows_check_ports_before_effects(
         engine.start(
             t1_overnight,
             plan=OvernightPlan(
-                flux_dev="flux", flux=0.2, period_s=10, rounds=1, points=7
+                flux_dev="flux",
+                flux_unit="native",
+                flux=0.2,
+                period_s=10,
+                rounds=1,
+                points=7,
             ),
             tunables=OvernightTunables(),
             paths=paths,
@@ -153,7 +196,7 @@ def test_t2echo_fluxdep_uses_the_same_core_with_its_own_typed_record(
     records, _, _ = execute_example(
         tmp_path,
         t2echo_fluxdep,
-        FluxPlan(flux_dev="flux", fluxes=(0.1, 0.2), points=7),
+        FluxPlan(flux_dev="flux", flux_unit="native", fluxes=(0.1, 0.2), points=7),
         T2EchoTunables(),
     )
     assert len(records) == 2
@@ -171,7 +214,14 @@ def test_overnight_waits_absolute_round_deadlines_and_reuses_calibration(
     records, clock, devices = execute_example(
         tmp_path,
         t1_overnight,
-        OvernightPlan(flux_dev="flux", flux=0.2, period_s=10, rounds=3, points=7),
+        OvernightPlan(
+            flux_dev="flux",
+            flux_unit="native",
+            flux=0.2,
+            period_s=10,
+            rounds=3,
+            points=7,
+        ),
         OvernightTunables(),
     )
     assert [len(record.run_files) for record in records] == [4, 1, 1]
@@ -186,7 +236,14 @@ def test_overnight_retries_unaccepted_calibration_on_next_round(tmp_path: Path) 
     records, _, _ = execute_example(
         tmp_path,
         t1_overnight,
-        OvernightPlan(flux_dev="flux", flux=0.2, period_s=10, rounds=2, points=7),
+        OvernightPlan(
+            flux_dev="flux",
+            flux_unit="native",
+            flux=0.2,
+            period_s=10,
+            rounds=2,
+            points=7,
+        ),
         OvernightTunables(cal=CalTunables(min_snr=50)),
     )
     assert [len(record.run_files) for record in records] == [3, 3]

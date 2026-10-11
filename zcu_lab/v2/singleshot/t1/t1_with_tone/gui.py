@@ -11,8 +11,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -25,14 +25,16 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_has_key
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, custom, scaled_md
-from zcu_lab.v2._support.measure.singleshot_shared import readout_probe_freq
+from zcu_lab.v2._support.measure.seeds import SweepDefault, custom, scaled_path_seed
+from zcu_lab.v2._support.measure.singleshot_shared import (
+    read_confusion_matrix,
+    readout_probe_freq,
+)
 from zcu_lab.v2.singleshot.t1.t1_with_tone.core import (
     T1WithToneAnalyzeOptions,
     T1WithToneCfg,
@@ -44,11 +46,8 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone.core import (
 SsT1ToneRunResult: TypeAlias = RunRecord[T1WithToneCfg, T1WithToneResult]
 
 
-def _sweep_stop_default(ctx: SessionEnv) -> float | EvalValue:
-    key = "t1_with_tone" if md_has_key(ctx, "t1_with_tone") else "t1"
-    if md_has_key(ctx, key):
-        return EvalValue(expr=f"5.0 * {key}")
-    return 500.0
+def _sweep_stop_default(_ctx: SessionEnv) -> EvalValue:
+    return EvalValue("5.0 * $qubit.ext.t1_with_tone")
 
 
 @dataclass
@@ -130,7 +129,9 @@ class SsT1ToneAdapter(
                 },
             )
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
+            )
             .sweep(
                 "length",
                 label="Delay (us)",
@@ -146,17 +147,17 @@ class SsT1ToneAdapter(
             .field(
                 "g_center",
                 spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("g_center"),
+                default=EvalValue("$qubit.ext.readout_cal.g_center"),
             )
             .field(
                 "e_center",
                 spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("e_center"),
+                default=EvalValue("$qubit.ext.readout_cal.e_center"),
             )
             .field(
                 "radius",
                 spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("ge_radius"),
+                default=EvalValue("$qubit.ext.readout_cal.radius"),
             )
             .bool("uniform", label="Uniform (linear) sweep", default=False)
             .reps(1000)
@@ -174,7 +175,7 @@ class SsT1ToneAdapter(
         self, req: AnalyzeRequest[SsT1ToneRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> SsT1ToneAnalyzeResult:
         # ``confusion_matrix`` is the GE 3×3 readout-correction matrix from md.
-        confusion = req.md.get("confusion_matrix")
+        confusion = read_confusion_matrix(req.parameters)
         result = T1WithToneExp().analyze(
             req.run_result,
             T1WithToneAnalyzeOptions(confusion_matrix=confusion),
@@ -188,7 +189,7 @@ class SsT1ToneAdapter(
     ) -> Sequence[WritebackItem]:
         # Key ``t1_with_tone`` per single_qubit.md:3079.
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="t1_with_tone",
                 description="T1 with probe tone (us)",
                 proposed_value=req.analyze_result.t1,

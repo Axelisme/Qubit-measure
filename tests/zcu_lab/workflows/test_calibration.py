@@ -13,7 +13,6 @@ from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
     Completed,
-    DeviceSnapshot,
     Done,
     Engine,
     EnginePorts,
@@ -178,7 +177,6 @@ class Rig:
             paths=RunPaths(self.root / "metadata", self.root / "data"),
             identity=RunIdentity(
                 "calibration",
-                DeviceSnapshot({}),
                 SoftwareProvenance(
                     software_versions={},
                     git_commit=None,
@@ -231,7 +229,6 @@ def test_native_calibration_timing_uses_workflow_estimate(
     )
     for cfg, default in zip((frequency, rabi, readout), native_defaults, strict=True):
         assert cfg.initial_delay == default.initial_delay
-        assert cfg.dev == default.dev
 
 
 def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
@@ -412,7 +409,7 @@ def test_pause_discards_calibration_and_resume_uses_new_tunables(
         expected_revision=0,
         actor=Actor("user", "operator"),
     )
-    rig.engine.resume("calibration", devices=DeviceSnapshot({}))
+    rig.engine.resume("calibration")
     status = rig.engine.execute("calibration")
     assert status.lifecycle == "done", status.reason
     assert tuple(source.cfg.reps for source in rig.frequencies) == (100, 200)

@@ -34,7 +34,6 @@ from .models import (
 from .ports import (
     Clock,
     DevicePort,
-    DeviceSnapshot,
     EnginePorts,
     ProgressFactory,
 )

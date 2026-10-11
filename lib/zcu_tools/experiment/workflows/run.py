@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 from pydantic import BaseModel
 from qick import QickConfig
 
-from ...device import DeviceInfo
+from ...datafile import JsonObject
 from ..stop_signal import StopSignal
 from ..v2.runtime import Schedule, SignalBuffer
 from ..v2.runtime.schedule import ScheduleOutcome
@@ -36,7 +36,9 @@ class Run[Cfg]:
     soc/soccfg/devices raise MissingCapability when their ports are absent.
     outcome retains the first non-completed Schedule result. Constructor
     soc/soccfg/devices arguments are native handles or None, never copied or
-    connected here. Construction does not set up devices, acquire, or save.
+    connected here. device_snapshot is required detached JSON captured by the
+    caller; use {} only when no devices are connected. Construction does not
+    read drivers, set up devices, acquire, or save.
     """
 
     def __init__(
@@ -44,6 +46,7 @@ class Run[Cfg]:
         cfg: Cfg,
         cancel_signal: StopSignal,
         *,
+        device_snapshot: Mapping[str, JsonObject],
         soc: object | None = None,
         soccfg: QickConfig | None = None,
         devices: DevicePort | None = None,
@@ -54,6 +57,7 @@ class Run[Cfg]:
             raise TypeError(
                 "Experiment cfg must be a dataclass or Pydantic BaseModel instance"
             )
+        self._device_snapshot = deepcopy(dict(device_snapshot))
         self.cfg: Cfg = deepcopy(cfg)
         self.cancel_signal = cancel_signal
         self._soc = soc
@@ -63,6 +67,15 @@ class Run[Cfg]:
         self._buffers: list[tuple[SignalBuffer, tuple[NDArray[np.float64], ...]]] = []
         self._live: LiveUpdate | None = None
         self._live_error: BaseException | None = None
+
+    @property
+    def device_snapshot(self) -> Mapping[str, JsonObject]:
+        """Return detached fixed JSON captured by the caller before acquisition.
+
+        Construction and access never read drivers. Mutating an input or a
+        returned mapping cannot change this Run's acquisition facts.
+        """
+        return deepcopy(self._device_snapshot)
 
     @property
     def soc(self) -> object:
@@ -84,25 +97,6 @@ class Run[Cfg]:
         if self._devices is None:
             raise MissingCapability("devices")
         return self._devices
-
-    @property
-    def device_setup(self) -> Mapping[str, DeviceInfo] | None:
-        """Return the native cfg.dev mapping, or None when absent/disabled.
-
-        The mapping belongs to this Run's cfg copy and preserves setup order.
-        Keys must be strings and values must be native typed DeviceInfo models;
-        other inputs raise TypeError before the device adapter is invoked.
-        Driver-specific validation and setup belong to the device owner.
-        """
-        settings = getattr(self.cfg, "dev", None)
-        if settings is None:
-            return None
-        if not isinstance(settings, Mapping) or not all(
-            isinstance(name, str) and isinstance(info, DeviceInfo)
-            for name, info in settings.items()
-        ):
-            raise TypeError("cfg.dev must be Mapping[str, DeviceInfo] or None")
-        return settings
 
     @property
     def live_error(self) -> BaseException | None:

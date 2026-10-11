@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import RetiredPaneResources, State
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.parameters import ParameterContext
-    from zcu_tools.resources.entry import RoleSpec
 
     from .ports import WritebackLifecyclePort
 
@@ -70,7 +69,7 @@ class LoadService:
         provide_options: Callable[[str], Sequence[object]],
         context: ContextControlPort,
         captured_parameters: Callable[
-            [Mapping[str, RoleSpec], str | None], ParameterContext | None
+            [Mapping[str, str] | None], ParameterContext | None
         ],
     ) -> None:
         """Inject fixed current-source capture and cfg backfill option lookup.
@@ -117,14 +116,15 @@ class LoadService:
                 "This tab does not support loading data files.",
                 reason_code="unsupported_load",
             )
-        declarations = tab.adapter.parameter_roles()
         request = LoadDataRequest(
             data_path=data_path,
-            parameters=self._captured_parameters(declarations, None),
+            parameters=self._captured_parameters(None),
         )
         # Native history owns aliases; Save needs only the Load-time entry capability.
         storage = (
-            None if request.parameters is None else self._context.read_context().storage
+            None
+            if request.parameters is None
+            else request.parameters.bind_aliases((), {}).storage
         )
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
@@ -154,7 +154,7 @@ class LoadService:
         ):
             parameters = self._context.read_target(
                 SavedPoint(entry_id=str(history.entry_id), point=history.point),
-                roles=RoleBinding(None, declarations, history.roles),
+                roles=RoleBinding(None, {}, history.roles),
             )
         snapshot = getattr(result, "cfg", None)
         retired = self._state.update_tab_loaded_result(

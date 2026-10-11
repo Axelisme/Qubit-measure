@@ -55,7 +55,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from zcu_lab.definitions import register_all
+from zcu_lab.definitions import ALIAS_PRESET, register_all
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
@@ -173,6 +173,7 @@ class Fixture:
         self.bus = EventBus()
         fixture_root = str(_context_root()) if project_root is None else project_root
         self.ctrl = Controller(
+            alias_preset=ALIAS_PRESET,
             state=self.state,
             registry=self.registry,
             view=self.view,
@@ -209,7 +210,17 @@ class Fixture:
     ) -> CfgResource:
         """Install a custom test tab through the application lifetime owner."""
         resources = cast(TabCfgResources, self.ctrl.cfg_resources)
-        cfg = resources.create(tab_id, lambda: schema, initial=schema)
+        from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+
+        parameters = self.ctrl.read_context()
+        cfg = resources.create(
+            tab_id,
+            lambda: schema,
+            initial=schema,
+            resolution=lambda: MeasureCfgBindings(self.ctrl).snapshot_from_state(
+                self.state, captured_values={}, parameters=parameters
+            ),
+        )
         self.state.add_tab(
             tab_id, Session(adapter_name=adapter_name, adapter=adapter, cfg=cfg)
         )

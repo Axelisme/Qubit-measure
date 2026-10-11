@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -28,7 +28,6 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
@@ -181,13 +180,6 @@ class RoOptFreqGainAdapter(
         ),
     )
 
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the global aliases used by this adapter."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-        }
-
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
@@ -270,12 +262,12 @@ class RoOptFreqGainAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_ro_freq",
                 description="Optimal readout frequency (MHz)",
                 proposed_value=result.best_freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_ro_gain",
                 description="Optimal readout gain (a.u.)",
                 proposed_value=result.best_gain,

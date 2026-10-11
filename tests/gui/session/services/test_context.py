@@ -8,6 +8,7 @@ from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     ContextSourceBinding,
@@ -25,11 +26,7 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
-from zcu_tools.resources.entry import (
-    ResultEntry,
-    RoleResolutionError,
-    RoleSpec,
-)
+from zcu_tools.resources.entry import ResultEntry, RoleResolutionError
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import (
@@ -128,7 +125,7 @@ def test_alias_defaults_initialize_once_without_resetting_on_point_changes(
     context.set_alias_rows((AliasRow("driver", ""), AliasRow("sense", "$driver.sense")))
     context.new_point(_new_request("second"))
     assert context.get_alias_rows()[0].value == ""
-    capture = context.read_alias_context({"driver": RoleSpec("fake/drive/*")})
+    capture = context.read_context()
     assert capture is not None
     with pytest.raises(RoleResolutionError, match="driver"):
         capture.value("$driver.rate")
@@ -154,7 +151,7 @@ def test_alias_defaults_use_an_already_published_snapshot_without_binding_assets
         alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
     )
     assert installed.get_alias_rows()[0] == AliasRow("driver", "Q1")
-    captured = installed.read_alias_context({"driver": RoleSpec("fake/drive/*")})
+    captured = installed.read_context()
     assert captured is not None
     assert captured.value("$driver.rate") == 4300.0
 
@@ -162,7 +159,9 @@ def test_alias_defaults_use_an_already_published_snapshot_without_binding_assets
 def test_empty_alias_submission_before_a_point_prevents_default_rebinding(
     context: ContextService, tmp_path: Path
 ) -> None:
-    assert context.read_alias_context({"driver": RoleSpec("fake/drive/*")}) is None
+    with pytest.raises(FailedPreconditionError) as caught:
+        context.read_context()
+    assert caught.value.reason_code == "no_context"
     context.set_alias_rows(context.get_alias_rows())
     entry = _entry(tmp_path)
     entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0)
@@ -215,17 +214,13 @@ def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fi
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("first"))
     assert context.get_alias_rows()[0].value == ""
-    declarations = {
-        "driver": RoleSpec("fake/drive/*"),
-        "sense": RoleSpec("fake/sensor"),
-    }
     context.set_alias_rows(
         (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
     )
-    first = context.read_alias_context(declarations)
+    first = context.read_context()
     assert first is not None
     context.set_parameter(target, "Q1.rate", 4400.0)
-    current = context.read_alias_context(declarations)
+    current = context.read_context()
     assert current is not None
     assert first.value("$driver.rate") == 4300.0
     assert current.value("$driver.rate") == 4400.0
@@ -233,7 +228,7 @@ def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fi
     context.set_alias_rows(
         (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
     )
-    second = context.read_alias_context(declarations)
+    second = context.read_context()
     assert second is not None
     assert second.value("$driver.rate") == 5100.0
     assert first.target == target
@@ -259,11 +254,7 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     context.new_point(_new_request("first"))
     before = context.get_alias_rows()
     version = state.version.snapshot()
-    declarations = {
-        "driver": RoleSpec("fake/drive/*"),
-        "sense": RoleSpec("fake/sensor"),
-    }
-    temporary = context.read_alias_context(declarations, "Q2")
+    temporary = context.read_context(aliases={"driver": "Q2"})
     assert temporary is not None
     assert temporary.value("$driver.rate") == 5100.0
     assert temporary.roles is not None
@@ -271,7 +262,7 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     assert temporary.capture_storage().roles == temporary.roles.names
     assert context.get_alias_rows() == before
     assert state.version.snapshot() == version
-    current = context.read_alias_context(declarations)
+    current = context.read_context()
     assert current is not None
     assert current.roles is not None
     assert current.roles.names == {}
@@ -281,7 +272,7 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     assert temporary.value("$driver.rate") == 5100.0
 
 
-@pytest.mark.parametrize("target", ["", "missing", "R1"])
+@pytest.mark.parametrize("target", ["", "missing"])
 def test_bad_one_run_target_keeps_the_global_table(
     context: ContextService,
     rich_entry: ResultEntry,
@@ -291,7 +282,7 @@ def test_bad_one_run_target_keeps_the_global_table(
     context.new_point(_new_request("first"))
     before = context.get_alias_rows()
     with pytest.raises((InvalidInputError, RoleResolutionError)):
-        context.read_alias_context({"driver": RoleSpec("fake/drive/*")}, target)
+        context.read_context(aliases={"driver": target}).value("$driver.rate")
     assert context.get_alias_rows() == before
 
 
@@ -304,11 +295,7 @@ def test_historical_target_reads_keep_resolved_alias_names_when_point_links_chan
     context.set_alias_rows(
         (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
     )
-    declarations = {
-        "driver": RoleSpec("fake/drive/*"),
-        "sense": RoleSpec("fake/sensor"),
-    }
-    captured = context.read_alias_context(declarations)
+    captured = context.read_context()
     assert captured is not None
     fixed_names = captured.roles
     assert fixed_names is not None
@@ -316,23 +303,32 @@ def test_historical_target_reads_keep_resolved_alias_names_when_point_links_chan
     context.set_parameter(target, "Q1.sense", "R2")
     historical = context.read_target(target, roles=fixed_names)
     assert historical.resolve_path("$sense.rate") == "R1.rate"
-    current = context.read_alias_context(declarations)
+    current = context.read_context()
     assert current is not None
     assert current.resolve_path("$sense.rate") == "R2.rate"
     assert captured.value("$driver.sense") == "R1"
 
 
-def test_target_requires_a_point_and_a_declared_alias(
+def test_temporary_aliases_require_parameter_context(
     context: ContextService,
     rich_entry: ResultEntry,
 ) -> None:
     with pytest.raises(FailedPreconditionError) as caught:
-        context.read_alias_context({"driver": RoleSpec("fake/drive/*")}, "Q1")
+        context.read_context(aliases={"driver": "Q1"})
     assert caught.value.reason_code == "no_context"
+
+
+def test_parameter_write_preserves_global_aliases(
+    context: ContextService,
+    rich_entry: ResultEntry,
+) -> None:
     context.install_entry(rich_entry)
-    context.new_point(_new_request("first"))
-    with pytest.raises(InvalidInputError, match="declared alias"):
-        context.read_alias_context({}, "Q1")
+    target = context.new_point(_new_request("a"))
+    context.set_alias_rows((AliasRow("driver", "Q1"),))
+    rows = context.get_alias_rows()
+    context.set_parameter(target, "Q1.rate", 4500.0)
+    assert context.get_alias_rows() == rows
+    assert context.read_context().value("Q1.rate") == 4500.0
 
 
 def test_empty_queries_have_no_entry_point_or_component_selection(
@@ -343,6 +339,10 @@ def test_empty_queries_have_no_entry_point_or_component_selection(
     assert not context.is_active_context()
     assert context.get_entry_info() is None
     assert context.list_points() == ()
+    assert context.get_alias_rows() == (
+        AliasRow("driver", ""),
+        AliasRow("sense", "$driver.sense"),
+    )
 
 
 def test_empty_read_rejects_instead_of_returning_default_parameters(
@@ -363,8 +363,21 @@ def test_entry_commands_without_entry_fail_explicitly(
 
 
 def test_install_entry_publishes_empty_draft_and_preserves_nonparameter_capabilities(
-    context: ContextService, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
+    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
+    predictor = FluxoniumPredictor(
+        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
+    )
+    context = ContextService(
+        SessionState(
+            SessionEnv(parameters=None, soc=None, soccfg=None, predictor=predictor)
+        ),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+    )
     entry = _entry(tmp_path)
     old = context.get_session_env()
     info = context.install_entry(entry)
@@ -374,6 +387,7 @@ def test_install_entry_publishes_empty_draft_and_preserves_nonparameter_capabili
     assert info.database_path == entry.database_path
     assert current.readiness is ContextReadiness.DRAFT
     assert current.soc is old.soc and current.values is old.values
+    assert current.predictor is predictor
     assert current.parameters is not None
     assert current.parameters.roles is None
     assert context.read_context().target == EntryDraft(entry_id=entry.entry_id)
@@ -468,6 +482,113 @@ def test_new_point_uses_seed_or_clone_and_request_description(
     assert {point.label for point in context.list_points()} == {"source", "destination"}
 
 
+@pytest.mark.parametrize("clone", [None, "source"], ids=["setup", "clone"])
+def test_duplicate_point_is_typed_input_error_without_side_effects(
+    tmp_path: Path, clone: str | None
+) -> None:
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    context = ContextControlFacet(context=service)
+    entry = _entry(tmp_path)
+    for label in ("copy", "source"):
+        entry.new_point(label, description="retained")
+    service.install_entry(entry)
+    target = context.use_point(PointUseRequest("source"))
+    before = context.read_context().document()
+    version = state.version.snapshot()
+    ledger = entry.ledger.events()
+    files = {
+        path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+        for path in tmp_path.rglob("*")
+    }
+    facts: list[ContextSwitchedPayload] = []
+    subscription = bus.subscribe(ContextSwitchedPayload, facts.append)
+    try:
+        with pytest.raises((FileExistsError, InvalidInputError)) as caught:
+            context.new_point(_new_request("copy", clone=clone))
+        assert isinstance(caught.value, InvalidInputError)
+        assert "exist" in str(caught.value)
+        assert context.read_context().target == target
+        assert context.read_context().document() == before
+        assert [point.label for point in context.list_points()] == ["copy", "source"]
+        assert state.version.snapshot() == version
+        assert entry.ledger.events() == ledger
+        assert facts == []
+        assert {
+            path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+            for path in tmp_path.rglob("*")
+        } == files
+    finally:
+        subscription.unsubscribe()
+
+
+@pytest.mark.parametrize("clone", [None, "source"])
+@pytest.mark.parametrize(
+    "label",
+    [
+        "../escape",
+        "",
+        ".",
+        "..",
+        "nested/point",
+        r"nested\point",
+        "\x00",
+        "C:point",
+        "/absolute",
+    ],
+    ids=[
+        "escape",
+        "empty",
+        "dot",
+        "parent",
+        "posix",
+        "windows",
+        "nul",
+        "drive",
+        "absolute",
+    ],
+)
+def test_unsafe_point_label_is_typed_input_error_without_side_effects(
+    tmp_path: Path, label: str, clone: str | None
+) -> None:
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    context = ContextControlFacet(context=service)
+    entry = _entry(tmp_path)
+    entry.new_point("source", description="retained")
+    service.install_entry(entry)
+    target = context.use_point(PointUseRequest("source"))
+    before = context.read_context().document()
+    version = state.version.snapshot()
+    ledger = entry.ledger.events()
+    files = {
+        path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+        for path in tmp_path.rglob("*")
+    }
+    facts: list[ContextSwitchedPayload] = []
+    subscription = bus.subscribe(ContextSwitchedPayload, facts.append)
+    try:
+        with pytest.raises((ValueError, InvalidInputError)) as caught:
+            context.new_point(_new_request(label, clone=clone))
+        assert isinstance(caught.value, InvalidInputError)
+        assert caught.value.reason_code == "point_label_invalid"
+        assert "single path component" in str(caught.value)
+        assert context.read_context().target == target
+        assert context.read_context().document() == before
+        assert [point.label for point in context.list_points()] == ["source"]
+        assert state.version.snapshot() == version
+        assert entry.ledger.events() == ledger
+        assert facts == []
+        assert {
+            path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+            for path in tmp_path.rglob("*")
+        } == files
+    finally:
+        subscription.unsubscribe()
+
+
 def test_created_point_binding_failure_retains_point_and_previous_binding(
     tmp_path: Path,
 ) -> None:
@@ -496,7 +617,7 @@ def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
     context.install_entry(entry)
     ledger = context.entry_ledger(entry.entry_id)
     assert ledger.events() == before
-    context.read_alias_context({})
+    context.read_context()
     assert entry.ledger.events() == before
 
 
@@ -562,7 +683,9 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
         assert state.version.get("context") == 0 and observations == []
         info = context.install_entry(rich_entry)
         context.use_point(PointUseRequest("first"))
+        assert state.version.get("context") == 2
         context.new_point(_new_request("second"))
+        assert state.version.get("context") == 3
         context.clear_context()
         assert [version for version, *_ in observations] == [1, 2, 3, 4]
         for version, env, entry_info, sources in observations:
@@ -570,7 +693,8 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
                 assert env.readiness is ContextReadiness.EMPTY
                 assert env.parameters is None and entry_info is None and sources is None
                 continue
-            assert entry_info == info and env.parameters is not None
+            assert entry_info == info
+            assert env.parameters is not None
             expected = (
                 EntryDraft(entry_id=info.entry_id)
                 if version == 1
@@ -588,13 +712,6 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
             assert env.readiness is (
                 ContextReadiness.DRAFT if version == 1 else ContextReadiness.ACTIVE
             )
-            if version != 1:
-                assert set(env.parameters.document().components) == {
-                    "Q1",
-                    "Q2",
-                    "R1",
-                    "R2",
-                }
     finally:
         subscription.unsubscribe()
 

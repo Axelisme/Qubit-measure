@@ -67,12 +67,6 @@ def test_analyze_params_wire_describes_live_adapter_before_run(fx):
         sock.close()
 
 
-def test_event_requery_hints_point_to_registered_methods():
-    assert "device.active_operations" in METHOD_REGISTRY
-    assert "context.md_get_attr" in METHOD_REGISTRY
-    assert "context.ml_get" in METHOD_REGISTRY
-
-
 def test_device_setup_started_and_finished_push(fx):
     sock = open_client(fx.service.port)
     try:
@@ -579,8 +573,8 @@ def test_device_setup_spec_lists_settable_fields_with_current(fx):
 
 def test_device_setup_spec_exposes_literal_choices(fx):
     # A driver with Literal enum fields (YOKO output/mode) → choices surfaced.
-    fx.service.device_control.get_device_info = MagicMock(  # type: ignore[method-assign]
-        return_value=YOKOGS200Info(address="x", type="YOKOGS200")
+    fx.service.device_control.get_device_info = MagicMock(
+        return_value=YOKOGS200Info(address="x", type="YOKOGS200", mode="voltage")
     )
     sock = open_client(fx.service.port)
     try:
@@ -790,38 +784,6 @@ def test_device_mutation_error_path_is_precondition_failed(fx):
         resp = call(sock, "device.disconnect", {"name": "missing"})
         assert resp["ok"] is False
         assert resp["error"]["code"] == "precondition_failed"
-    finally:
-        sock.close()
-
-
-def test_context_md_write_and_delete(fx):
-    md = fx.state.session_env.md
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "context.md_set_attr", {"key": "bias", "value": 0.25})
-        assert resp["ok"] is True
-        assert md.bias == 0.25
-
-        resp = call(sock, "context.md_del_attr", {"key": "bias"}, rid="2")
-        assert resp["ok"] is True
-        assert not hasattr(md, "bias")
-    finally:
-        sock.close()
-
-
-def test_context_ml_delete_delegates(fx):
-    # ADR-0006: there is no raw-dict context.set_ml_* RPC anymore (ml entries are
-    # built/edited via the editor session). Delete still delegates to the context
-    # control facet, not the wider controller.
-    fx.service.context_control.del_ml_module = MagicMock()  # type: ignore[method-assign]
-    fx.service.context_control.del_ml_waveform = MagicMock()  # type: ignore[method-assign]
-    sock = open_client(fx.service.port)
-    try:
-        assert call(sock, "context.ml_del_module", {"name": "m"})["ok"]
-        fx.service.context_control.del_ml_module.assert_called_once_with("m")
-
-        assert call(sock, "context.ml_del_waveform", {"name": "w"}, rid="2")["ok"]
-        fx.service.context_control.del_ml_waveform.assert_called_once_with("w")
     finally:
         sock.close()
 

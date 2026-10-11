@@ -7,19 +7,20 @@ guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
 from matplotlib.figure import Figure
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -28,9 +29,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
-from zcu_lab.v2._support.measure.jpa_shared import lower_jpa_rf_power_dev
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -119,14 +118,6 @@ class JpaPowerAdapter(
         ),
     )
 
-    def parameter_roles(self) -> dict[str, RoleSpec]:
-        """Declare consumer kinds; bindings come only from the global alias table."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-            "jpa": RoleSpec("amplifier/jpa"),
-        }
-
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
@@ -155,17 +146,12 @@ class JpaPowerAdapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> PowerCfg:
-        cfg_raw = dict(raw_cfg)
-        cfg_raw["dev"] = lower_jpa_rf_power_dev(cfg_raw, req.device_snapshot)
-        return super().build_exp_cfg(cfg_raw, req)
-
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
-        # Pure preflight over the detached request snapshot.
-        lower_jpa_rf_power_dev(raw_cfg, req.device_snapshot)
-
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> JpaPowerRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         return RunRecord(cfg, PowerExp().run(cfg, context=context))
@@ -181,7 +167,7 @@ class JpaPowerAdapter(
         self, req: WritebackRequest[JpaPowerRunResult, JpaPowerAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=req.analyze_result.best_power,

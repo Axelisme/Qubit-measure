@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    MetaDictWriteback,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -135,6 +135,13 @@ class FluxDepAdapter(
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
+            .choice(
+                "flux_unit",
+                label="Flux unit",
+                choices=("A", "V", "native"),
+                default="A",
+                tooltip="Working unit for the selected flux driver; no conversion.",
+            )
             .reset(optional=True)
             .pulse(
                 "qub_pulse",
@@ -219,39 +226,22 @@ class FluxDepAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.flux_half",
                 description="Half-flux (Φ₀/2) sweet-spot device value",
                 proposed_value=result.flx_half,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.flux_int",
                 description="Integer-flux sweet-spot device value",
                 proposed_value=result.flx_int,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.flux_period",
                 description="Flux period (device units) = 2·|flx_int − flx_half|",
                 proposed_value=result.flx_period,
             ),
         ]
-
-    def build_exp_cfg(
-        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
-    ) -> FreqFluxCfg:
-        cfg_raw = dict(raw_cfg)
-        dev_raw = cfg_raw.pop("dev")
-        if not isinstance(dev_raw, dict):
-            raise RuntimeError("FluxDep dev section must lower to a dict")
-        dev_patch: dict[str, dict[str, str]] = {}
-        for label_key, device_name in dev_raw.items():
-            if not isinstance(device_name, str) or not device_name:
-                raise RuntimeError(
-                    f"FluxDep dev.{label_key} must be a non-empty device name"
-                )
-            dev_patch[device_name] = {"label": label_key}
-        cfg_raw["dev"] = dev_patch
-        return super().build_exp_cfg(cfg_raw, req)
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_qubit_flux"

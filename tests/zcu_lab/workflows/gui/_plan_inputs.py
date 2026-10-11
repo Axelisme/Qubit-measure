@@ -18,6 +18,7 @@ def inline_input(inputs: Inputs) -> FormInput[T1PlanForm]:
         T1PlanForm,
         {
             "flux_dev": "flux",
+            "flux_unit": "native",
             "fluxes": {"kind": "list", "values": [1.0, 1.1]},
             "points": 21,
             "pi_length_us": 0.4,

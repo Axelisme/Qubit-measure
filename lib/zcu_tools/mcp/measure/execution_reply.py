@@ -17,6 +17,13 @@ ReplyDetail = Literal["summary", "full"]
 
 @dataclass(frozen=True)
 class SummaryParameter:
+    """One recipe-owned cfg fact selected for fixed Run capture and public summary.
+
+    name is the public actual mapping key. field is the dotted cfg field captured
+    when the recipe prepared it. unit is its native unit label, or None for no
+    declared label. It never requests a value conversion.
+    """
+
     name: str
     field: str
     unit: str | None = None
@@ -24,6 +31,13 @@ class SummaryParameter:
 
 @dataclass(frozen=True)
 class SummaryEstimate:
+    """One scalar analysis estimate declared by the recipe owner.
+
+    name is its public key; value_key/error_key select native summary values.
+    error_key=None means no uncertainty field. unit labels the native value, or
+    None when the recipe declares no unit. No conversion occurs.
+    """
+
     name: str
     value_key: str
     error_key: str | None = None
@@ -73,27 +87,25 @@ def _actual(
 ) -> dict[str, Any]:
     fields = captured["fields"] if captured is not None else {}
     parameters: dict[str, ParameterReply] = {}
-    modules: dict[str, ParameterReply] = {}
     for parameter in definition.summary_parameters if definition else ():
         fact = fields.get(parameter.field)
         if fact is None:
             continue
+        source = fact.get("source")
+        if source == "explicit" or (
+            isinstance(source, dict)
+            and all(source.get(key) == "explicit" for key in ("start", "stop", "expts"))
+        ):
+            continue
         projected: ParameterReply = {
             "value": deepcopy(fact["value"]),
-            "source": deepcopy(fact.get("source")),
+            "source": deepcopy(source),
         }
         unit = fact.get("unit", parameter.unit)
         if unit is not None:
             projected["unit"] = unit
-        if parameter.field.startswith("modules.") and parameter.field.count(".") == 1:
-            modules[parameter.field.split(".", 1)[1]] = projected
-        else:
-            parameters[parameter.name] = projected
-    return {
-        "cfg_ref": captured["cfg_ref"] if captured is not None else None,
-        "parameters": parameters,
-        "modules": modules,
-    }
+        parameters[parameter.name] = projected
+    return parameters
 
 
 def _summary_estimates(
@@ -194,10 +206,10 @@ def _changed_paths(
     return paths
 
 
-def _candidate(item: dict[str, Any], cfg_ref: dict[str, Any] | None) -> dict[str, Any]:
+def _candidate(item: dict[str, Any]) -> dict[str, Any]:
     candidate: dict[str, Any] = {
         "id": item["id"],
-        "kind": "parameter" if item.get("kind") == "metadict" else item.get("kind"),
+        "kind": item.get("kind"),
         "target": item.get("target_name"),
         "resolved_target": item.get("resolved_target"),
         "proposed": deepcopy(item.get("proposed", item.get("proposed_value"))),
@@ -207,7 +219,6 @@ def _candidate(item: dict[str, Any], cfg_ref: dict[str, Any] | None) -> dict[str
         proposed = candidate["proposed"]
         current = candidate["current"]
         candidate.update(
-            cfg_ref=deepcopy(cfg_ref),
             proposed=_module_summary(proposed),
             current=_module_summary(current),
             changes=_changed_paths(proposed, current)
@@ -234,14 +245,13 @@ def _destination(native: dict[str, Any] | None) -> dict[str, Any]:
 def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:
     primary = snapshot.get("writeback") or {}
     post = snapshot.get("post_writeback") or {}
-    cfg_ref = (snapshot.get("actual") or {}).get("cfg_ref")
     return {
         "destination": _destination(
             primary.get("destination_context") or post.get("destination_context")
         ),
         "stages": {
-            "primary": [_candidate(item, cfg_ref) for item in primary.get("items", [])],
-            "post": [_candidate(item, cfg_ref) for item in post.get("items", [])],
+            "primary": [_candidate(item) for item in primary.get("items", [])],
+            "post": [_candidate(item) for item in post.get("items", [])],
         },
         "requires": primary.get("requires", []) + post.get("requires", []),
         "receipts": snapshot.get("written", ()),
@@ -306,7 +316,10 @@ def project_execution(
     recipes supplies the owning session declarations for analysis-only estimates.
     definition selects one recipe's actual/estimate fields; None means standalone
     analysis. Conflicting present estimate keys raise ValueError. detail selects
-    the operator summary or a detached full native capture. Each analysis pane
+    the operator summary or detached native detail. Both expose recipe actual as
+    a flat summary-name mapping of value/source/unit, omitting scalar explicit
+    values and sweeps whose three sources are explicit. Mixed sweeps remain
+    complete. Internal cfg refs never appear in actual or candidates. Each analysis pane
     exposes params, declared scalar estimates, unchanged native summary and
     unchanged native invalid entries. No fit_quality interpretation occurs.
     artifacts preserves each captured native Save report's section/member/output
@@ -317,7 +330,10 @@ def project_execution(
     Queries perform no RPC, image read, filesystem check or guard refresh.
     """
     if detail == "full":
-        return deepcopy(snapshot)
+        full = deepcopy(snapshot)
+        if "recipe" in snapshot:
+            full["actual"] = _actual(snapshot.get("actual"), definition)
+        return full
     if "recipe" not in snapshot:
         snapshot = _analysis_envelope(snapshot)
     primary_execution = snapshot.get("analysis")

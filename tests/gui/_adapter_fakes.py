@@ -13,8 +13,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     LoadDataRequest,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     PostWritebackRequest,
     RunRequest,
     SaveDataRequest,
@@ -23,7 +23,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 
 class DummyExp:
@@ -59,11 +58,6 @@ class DummyAdapter:
 
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
     exp_cls = DummyExp
-
-    @classmethod
-    def parameter_roles(cls) -> dict[str, RoleSpec]:
-        """This structural fake performs context-free calculations."""
-        return {}
 
     @classmethod
     def guide(cls) -> AdapterGuide:
@@ -123,7 +117,7 @@ class DummyAdapter:
     def get_writeback_items(
         self,
         req: WritebackRequest[object, DummyAnalyzeResult],
-    ) -> Sequence[MetaDictWriteback]:
+    ) -> Sequence[ParameterWriteback]:
         del req
         return []
 
@@ -150,7 +144,7 @@ class DummyAdapter:
     def get_post_writeback_items(
         self,
         req: PostWritebackRequest[object, DummyAnalyzeResult, DummyAnalyzeResult],
-    ) -> Sequence[MetaDictWriteback]:
+    ) -> Sequence[ParameterWriteback]:
         del req
         return []
 

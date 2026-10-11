@@ -78,7 +78,7 @@ def _write(
         path
         if path is not None
         else {
-            "parameter": "general.flux_value",
+            "parameter": "general.ext.flux_value",
             "module": "Q1.pulses.pi",
             "waveform": "Q1.waveforms.base",
         }[kind]
@@ -102,7 +102,7 @@ def _write(
 
 def _value(capture: ParameterContext, kind: Kind) -> YamlValue:
     if kind == "parameter":
-        return capture.value("general.flux_value")
+        return capture.value("general.ext.flux_value")
     if kind == "module":
         return capture.library.entry_value("Q1.pulses.pi", kind="module")["gain"]
     return capture.library.entry_value("Q1.waveforms.base", kind="waveform")["length"]
@@ -110,7 +110,7 @@ def _value(capture: ParameterContext, kind: Kind) -> YamlValue:
 
 def _meta(capture: ParameterContext, kind: Kind) -> Provenance | None:
     path = {
-        "parameter": "general.flux_value",
+        "parameter": "general.ext.flux_value",
         "module": "Q1.pulses.pi.gain",
         "waveform": "Q1.waveforms.base.length",
     }[kind]
@@ -148,8 +148,8 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
 
 def test_read_target_draft_rejects_replaced_memory_context(session: _Session) -> None:
     draft = session.control.read_context().target
-    session.control.set_parameter(draft, "general.flux_value", 0.2)
-    assert session.control.read_target(draft).value("general.flux_value") == 0.2
+    session.control.set_parameter(draft, "general.ext.flux_value", 0.2)
+    assert session.control.read_target(draft).value("general.ext.flux_value") == 0.2
     selected = _select(session, "a")
     with pytest.raises(FailedPreconditionError) as error:
         session.control.read_target(draft)
@@ -183,7 +183,7 @@ def _source(entry: ResultEntry) -> Provenance:
             entry_id=entry.entry_id,
             origin="gui",
             payload=AcceptedPayload(
-                writes=(AcceptedWrite(path="general.flux_value", value=0.2),),
+                writes=(AcceptedWrite(path="general.ext.flux_value", value=0.2),),
                 analysis_summary={},
             ),
         )
@@ -193,7 +193,7 @@ def _source(entry: ResultEntry) -> Provenance:
 
 def _persisted(entry: ResultEntry, target: SavedPoint, kind: Kind) -> YamlValue:
     if kind == "parameter":
-        return snapshot(entry.use_point(target.point)).general.flux_value
+        return snapshot(entry.use_point(target.point)).general.ext["flux_value"]
     library = entry.module_library(
         target.point,
         assets=ArbWaveformDatabase.info_at(entry.database_path / "arb_waveforms"),
@@ -374,7 +374,7 @@ def test_detached_description_write_updates_cache_without_changing_selected_sour
     before = session.control.read_context()
     version = session.state.version.get("context")
     binding = session.control.get_source_binding()
-    aliases = session.control.get_alias_rows()
+    rows = session.control.get_alias_rows()
     descriptions = {
         info.label: info.description for info in session.control.list_points()
     }
@@ -400,7 +400,7 @@ def test_detached_description_write_updates_cache_without_changing_selected_sour
     assert after.library.document() == before.library.document()
     assert session.state.version.get("context") == version
     assert session.control.get_source_binding() == binding
-    assert session.control.get_alias_rows() == aliases
+    assert session.control.get_alias_rows() == rows
     assert events == []
 
 
@@ -435,7 +435,7 @@ def test_parameter_conflict_propagates_without_publishing_candidate(
     session: _Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = _select(session, "a")
-    session.control.set_parameter(target, "general.flux_value", 0.1)
+    session.control.set_parameter(target, "general.ext.flux_value", 0.1)
     capture = session.control.read_context()
     version = session.state.version.get("context")
     other = session.entry.use_point("a")
@@ -446,14 +446,14 @@ def test_parameter_conflict_propagates_without_publishing_candidate(
         with original(view) as draft:
             yield draft
             with original(other) as external:
-                external.set("general.flux_value", 0.3)
+                external.set("general.ext.flux_value", 0.3)
 
     monkeypatch.setattr(PointView, "edit", interleaved)
     with pytest.raises(ConflictError):
-        session.control.set_parameter(target, "general.flux_value", 0.2)
+        session.control.set_parameter(target, "general.ext.flux_value", 0.2)
     assert session.control.read_context().document() == capture.document()
     assert session.state.version.get("context") == version
-    assert snapshot(session.entry.use_point("a")).general.flux_value == 0.3
+    assert snapshot(session.entry.use_point("a")).general.ext["flux_value"] == 0.3
 
 
 @pytest.mark.parametrize("kind", KINDS)

@@ -224,7 +224,7 @@ GUI application服務以共用CfgDraft模型依序修改並逐項寫入library�
 
 **`writeback(tab, stage = "primary" | "post", write?)`**
 
-- 不帶 `write`：回傳 `{destination, items: [{id, kind: "md" | "module" | "waveform", target, description, current, proposed}]}`。md 項目為值；module／waveform 項目為 cfg，目標不存在時 `current` 為 `null`。
+- 不帶 `write`：回傳 `{destination, items: [{id, kind: "parameter" | "module" | "waveform", target, description, current, proposed}]}`。parameter 項目為值；module／waveform 項目為 cfg，目標不存在時 `current` 為 `null`。
 - `write = [{id, target?, value?, edits?}]`：只寫入列出的項目。`target` 改寫入名稱，`value` 改 md 值，`edits` 以 cfg 編輯語法修改 module／waveform。先依序修改草稿，遇錯即停並保留已完成的草稿修改，不開始 context apply。全部成功後，以既有 ContextWritePort 一次提交指定 IDs 到目前的 active context，不暫改 GUI 勾選，也不承諾跨檔 atomic。
 - 寫入成功回傳 `{written: [{id, kind, target, before, after}]}`。每項包含完整的實際寫入前後值；`kind` 為 `md`、`module` 或 `waveform`。不同 kind 可使用同名 target，因此結果以項目列表表示，不以 target 作為唯一 key。
 
@@ -305,7 +305,7 @@ wait(2)                                               → finished
 tab_analyze("t1")                                     → q_f = 845.1 MHz
 tab_analyze("t1", params={model_type: "sinc"})        → 比較後決定採用哪次結果
 writeback("t1")                                       → 檢視 current 與 proposed
-writeback("t1", write=[{id: "md-1"}])
+writeback("t1", write=[{id: "param-1"}])
 tab_save("t1", comment="q_f = 845.1 MHz")
 tab_close("t1")
 ```

@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from ...device import BaseDeviceInfo
 from ...progress_bar import use_pbar_factory
 from ..stop_signal import ScheduleOutcomeError, StopSignal
 from .artifacts import IterationArtifacts, RunArtifacts
@@ -19,6 +20,7 @@ from .effects import RunEffect, dispatch_effect
 from .encoding import encode_record
 from .env import Displays, InitEnv, WorkflowEnv
 from .journal import (
+    DeviceSetup,
     ExperimentFailed,
     IterationStarted,
     Paused,
@@ -52,7 +54,7 @@ from .models import (
     TunableChange,
     TunablesSnapshot,
 )
-from .ports import DeviceSnapshot, EnginePorts
+from .ports import EnginePorts
 from .run import Run
 from .tunables import TunableValues
 
@@ -364,19 +366,20 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         iteration, _ = self._current_iteration()
         self._run_no += 1
         try:
+            devices = self._ports.devices
+            if devices is None:
+                raise MissingCapability("devices")
+            device_snapshot = devices.capture_snapshot()
             run = Run(
                 request.cfg,
                 signal,
                 soc=self._ports.soc,
                 soccfg=self._ports.soccfg,
-                devices=self._ports.devices,
+                devices=devices,
+                device_snapshot=device_snapshot,
             )
             if request.live is not None:
                 run.bind_live(request.live)
-            settings = run.device_setup
-            if request.setup_devices and settings is not None:
-                run.devices.setup(settings, signal)
-                self._check_cancel()
             try:
                 result = request.experiment(run)
             except ScheduleOutcomeError as error:
@@ -440,13 +443,14 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         )
         return Failed(reason)
 
-    def set_device(self, name: str, value: float) -> None:
-        """Apply an absolute setpoint through the device port and current signal."""
+    def setup_device(self, name: str, cfg: BaseDeviceInfo) -> None:
+        """Forward complete settings with the active signal and journal the cfg."""
         signal = self._new_signal()
         try:
             if self._ports.devices is None:
                 raise MissingCapability("devices")
-            self._ports.devices.set_value(name, value, signal)
+            self._ports.devices.setup_device(name, cfg, signal)
+            self._artifacts.append(DeviceSetup(name, cfg))
             self._check_cancel()
         finally:
             self._clear_signal(signal)
@@ -480,14 +484,12 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             raise
         return self.status()
 
-    def resume(self, devices: DeviceSnapshot) -> RunStatus:
-        """Resume only after paused segment return, with detached provenance."""
+    def resume(self) -> RunStatus:
+        """Resume only after paused segment return under the retained lease."""
         if self._lifecycle != "paused" or self._executing:
             raise InvalidRunState("resume", self._lifecycle)
         try:
-            self._artifacts.append(
-                Resumed(self._commit_seq, self._tunables.revision, deepcopy(devices))
-            )
+            self._artifacts.append(Resumed(self._commit_seq, self._tunables.revision))
             self._artifacts.set_lifecycle("running")
             self._lifecycle = "running"
         except Exception as error:

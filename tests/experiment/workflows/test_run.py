@@ -8,7 +8,6 @@ import pytest
 from numpy.typing import NDArray
 from pydantic import Field
 from qick import QickConfig
-from zcu_tools.device import DeviceInfo, FakeDeviceInfo
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import SignalBuffer
@@ -19,7 +18,6 @@ from zcu_tools.experiment.workflows import MissingCapability, Run
 class Cfg:
     value: float = 1.0
     nested: list[float] = field(default_factory=lambda: [2.0])
-    dev: object = None
 
 
 class ModelCfg(ExpCfgModel):
@@ -33,7 +31,7 @@ def test_run_cfg_and_schedule_cfg_are_independent_copies(
 ) -> None:
     original = make_cfg()
     signal = StopSignal()
-    run = Run(original, signal)
+    run = Run(original, signal, device_snapshot={})
     buffer = run.buffer((2,), axes=(np.array([0.0, 1.0]),))
 
     run.cfg.nested.append(3.0)
@@ -50,49 +48,8 @@ def test_run_cfg_and_schedule_cfg_are_independent_copies(
     np.testing.assert_array_equal(buffer.array, [1.0 + 2.0j, 3.0 + 4.0j])
 
 
-@pytest.mark.parametrize("make_cfg", [Cfg, ModelCfg], ids=["dataclass", "native-model"])
-def test_device_setup_preserves_native_models_order_and_copy_isolation(
-    make_cfg: Callable[..., Cfg | ModelCfg],
-) -> None:
-    first = FakeDeviceInfo(address="none", value=0.1)
-    settings: dict[str, DeviceInfo] = {
-        "z": first,
-        "a": FakeDeviceInfo(address="none", value=0.2),
-    }
-    run = Run(make_cfg(dev=settings), StopSignal())
-    first.value = 0.9
-    settings.clear()
-
-    copied = run.device_setup
-    assert copied is not None
-    assert list(copied) == ["z", "a"]
-    info = copied["z"]
-    assert isinstance(info, FakeDeviceInfo)
-    assert info is not first
-    assert info.value == 0.1
-
-
-@pytest.mark.parametrize("cfg", [Cfg(), ModelCfg()])
-def test_device_setup_none_means_disabled(cfg: Cfg | ModelCfg) -> None:
-    assert Run(cfg, StopSignal()).device_setup is None
-
-
-def test_empty_device_mapping_is_not_disabled() -> None:
-    assert Run(ModelCfg(dev={}), StopSignal()).device_setup == {}
-
-
-@pytest.mark.parametrize(
-    "settings",
-    [(), [], "flux", {1: FakeDeviceInfo(address="none")}, {"flux": {"value": 0.1}}],
-)
-def test_device_setup_rejects_non_native_inputs(settings: object) -> None:
-    run = Run(Cfg(dev=settings), StopSignal())
-    with pytest.raises(TypeError, match="Mapping"):
-        _ = run.device_setup
-
-
 def test_absent_capabilities_fail_at_access() -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     with pytest.raises(MissingCapability, match="soc"):
         _ = run.soc
     with pytest.raises(MissingCapability, match="soc"):
@@ -104,13 +61,13 @@ def test_absent_capabilities_fail_at_access() -> None:
 def test_soc_and_config_are_the_original_injected_handles() -> None:
     soc = object()
     soccfg = QickConfig({})
-    run = Run(Cfg(), StopSignal(), soc=soc, soccfg=soccfg)
+    run = Run(Cfg(), StopSignal(), soc=soc, soccfg=soccfg, device_snapshot={})
     assert run.soc is soc
     assert run.soccfg is soccfg
 
 
 def test_buffer_starts_complex_with_unfilled_nan_slots() -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     buffer = run.buffer(
         (2, 3),
         axes=(np.array([0.0, 1.0]), np.array([1.0, 2.0, 3.0])),
@@ -122,7 +79,7 @@ def test_buffer_starts_complex_with_unfilled_nan_slots() -> None:
 
 @pytest.mark.parametrize("shape", [(), (0,), (-1,), (True,)])
 def test_invalid_buffer_dimensions_are_rejected(shape: tuple[int, ...]) -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     with pytest.raises(ValueError, match="positive integers"):
         run.buffer(shape, axes=tuple(np.ones(1) for _ in shape))
 
@@ -141,21 +98,21 @@ def test_invalid_buffer_dimensions_are_rejected(shape: tuple[int, ...]) -> None:
 def test_buffer_axes_require_matching_finite_float64_vectors(
     axes: tuple[NDArray[np.float64], ...],
 ) -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     with pytest.raises(ValueError, match="axes"):
         run.buffer((2,), axes=axes)
 
 
 def test_schedule_rejects_another_runs_buffer() -> None:
-    first = Run(Cfg(), StopSignal())
-    other = Run(Cfg(), StopSignal())
+    first = Run(Cfg(), StopSignal(), device_snapshot={})
+    other = Run(Cfg(), StopSignal(), device_snapshot={})
     buffer = other.buffer((1,), axes=(np.array([0.0]),))
     with pytest.raises(ValueError, match="belong to this Run"), first.schedule(buffer):
         pass
 
 
 def test_schedule_body_errors_propagate_unchanged() -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     buffer = run.buffer((1,), axes=(np.array([0.0]),))
     cause = ValueError("experiment body failed")
     with (
@@ -167,7 +124,7 @@ def test_schedule_body_errors_propagate_unchanged() -> None:
 
 
 def test_first_failed_schedule_is_not_erased_by_later_completed_schedule() -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     buffer = run.buffer((1,), axes=(np.array([0.0]),))
     cause = OSError("acquisition failed")
 
@@ -190,7 +147,7 @@ def test_first_failed_schedule_is_not_erased_by_later_completed_schedule() -> No
 
 
 def test_interrupted_schedule_retains_the_original_interrupt() -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     buffer = run.buffer((1,), axes=(np.array([0.0]),))
     interrupt = KeyboardInterrupt()
 
@@ -206,7 +163,7 @@ def test_interrupted_schedule_retains_the_original_interrupt() -> None:
 
 def test_cancel_signal_is_explicit_and_produces_stopped_outcome() -> None:
     signal = StopSignal()
-    run = Run(Cfg(), signal)
+    run = Run(Cfg(), signal, device_snapshot={})
     buffer = run.buffer((1,), axes=(np.array([0.0]),))
     signal.set()
     with run.schedule(buffer) as schedule:
@@ -218,11 +175,11 @@ def test_cancel_signal_is_explicit_and_produces_stopped_outcome() -> None:
 @pytest.mark.parametrize("cfg", [1.0, Cfg, ModelCfg])
 def test_cfg_requires_a_dataclass_or_pydantic_instance(cfg: object) -> None:
     with pytest.raises(TypeError, match="dataclass or Pydantic BaseModel instance"):
-        Run(cfg, StopSignal())
+        Run(cfg, StopSignal(), device_snapshot={})
 
 
 def test_external_buffer_is_rejected() -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     buffer = SignalBuffer((1,))
     with pytest.raises(ValueError, match="belong to this Run"), run.schedule(buffer):
         pass

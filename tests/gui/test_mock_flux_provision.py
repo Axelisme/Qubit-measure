@@ -30,6 +30,8 @@ from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.program.v2.mocksoc import MockQickSoc
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+from zcu_lab.definitions import ALIAS_PRESET
+
 
 @pytest.fixture
 def state() -> State:
@@ -44,6 +46,7 @@ def make_controller(qapp: object) -> Iterator[Callable[[State], Controller]]:
         view = MagicMock()
         view.make_run_container.return_value = None
         controller = Controller(
+            alias_preset=ALIAS_PRESET,
             state=state,
             registry=Registry(),
             io_manager=IOManager(),
@@ -112,7 +115,7 @@ def test_environment_publishes_bound_source_and_matching_predictor(
     assert _reader(state)() == FAKE_FLUX_INITIAL_VALUE
     snapshot = ctrl.device_control.get_device_snapshot(FAKE_FLUX_DEVICE_NAME)
     assert snapshot is not None and snapshot.status == DeviceStatus.CONNECTED
-    assert ctrl.get_device_unit(FAKE_FLUX_DEVICE_NAME) == "none"
+    assert ctrl.get_device_unit(FAKE_FLUX_DEVICE_NAME) == "native"
     soc = state.session_env.soc
     assert isinstance(soc, MockQickSoc) and soc.sim_params is not None
     predictor = state.session_env.predictor

@@ -113,20 +113,6 @@ def test_native_accessors_return_injected_handles_without_operating(
     assert devices.values == []
 
 
-@pytest.mark.parametrize(
-    ("name", "value"),
-    [("", 1.0), (" ", 1.0), ("flux", np.nan), ("flux", np.inf)],
-)
-def test_invalid_setpoint_is_rejected_before_suspension(
-    env: WorkflowEnv[str],
-    name: str,
-    value: float,
-) -> None:
-    request = env.set_device(name, value)
-    with pytest.raises(ValueError, match="finite absolute value"):
-        next(request)
-
-
 def test_wait_rejects_naive_target_before_suspension(env: WorkflowEnv[str]) -> None:
     request = env.wait_until(datetime(2026, 10, 6))
     with pytest.raises(ValueError, match="timezone-aware"):

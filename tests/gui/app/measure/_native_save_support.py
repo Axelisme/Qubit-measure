@@ -45,6 +45,7 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
 from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry
@@ -147,6 +148,14 @@ class NativeSaveSession:
     artifact_completions: list[SaveArtifactsFinishedPayload]
     background: BackgroundRunner
 
+    def capture_parameters(
+        self, aliases: Mapping[str, str] | None
+    ) -> ParameterContext | None:
+        """Use current aliases, retaining EMPTY deferred reads without overrides."""
+        if self.state.session_env.parameters is None and not aliases:
+            return None
+        return self.context.read_context(aliases=aliases)
+
     def save(self, *, origin: CommandOrigin = GUI_ORIGIN) -> SaveReport:
         """Observe native writes and State publication before the public call returns."""
         report = self.control.save_data("tab", comment="first note", origin=origin)
@@ -167,7 +176,7 @@ def native_save_session(
     tmp_path: Path, qapp: QApplication
 ) -> Generator[NativeSaveSession]:
     entry = ResultEntry.create(
-        "original", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
+        "original", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
     entry.new_point("p")
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
@@ -219,7 +228,7 @@ def native_save_session(
         state=state,
         guard=GuardService(
             state,
-            captured_parameters=context.read_alias_context,
+            captured_parameters=lambda aliases: context.read_context(aliases=aliases),
             cfg_resolution=lambda parameters: MeasureCfgBindings(
                 MagicMock()
             ).snapshot_from_state(state, captured_values={}, parameters=parameters),

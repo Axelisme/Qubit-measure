@@ -17,7 +17,6 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
@@ -91,13 +90,6 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
                 "reps will be overwritten by singleshot measurement shots", stacklevel=2
             )
         cfg.reps = cfg.shots
-
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
 
         signals_buffer = SignalBuffer((cfg.shots,))
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:

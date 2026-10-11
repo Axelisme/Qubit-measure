@@ -26,7 +26,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_path_seed
 from zcu_lab.v2._support.measure.singleshot_rabi import rabi_calibration_writeback
 from zcu_lab.v2.singleshot.amp_rabi.core import (
     AmpRabiAnalyzeOptions,
@@ -90,24 +90,26 @@ class SsAmpRabiAdapter(
                 label="Gain (a.u.)",
                 default=SweepDefault(
                     start=-0.3,
-                    stop=scaled_md("pi_gain", factor=4.0, fallback_value=1.0),
+                    stop=scaled_path_seed(
+                        "$qubit.module.x180.gain", factor=4.0, fallback_value=1.0
+                    ),
                     expts=51,
                 ),
             )
             .field(
                 "g_center",
                 spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("g_center"),
+                default=EvalValue("$qubit.ext.readout_cal.g_center"),
             )
             .field(
                 "e_center",
                 spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("e_center"),
+                default=EvalValue("$qubit.ext.readout_cal.e_center"),
             )
             .field(
                 "radius",
                 spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("ge_radius"),
+                default=EvalValue("$qubit.ext.readout_cal.radius"),
             )
             .reps(1000)
             .rounds(1)

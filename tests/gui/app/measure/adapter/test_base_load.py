@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar, TypeAlias
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -170,7 +169,7 @@ def test_base_adapter_load_preserves_constructor_internal_type_error() -> None:
 
 @pytest.mark.parametrize("missing_cfg", [False, True])
 def test_base_adapter_save_passes_explicit_record_to_override(
-    tmp_path: Path, missing_cfg: bool
+    tmp_path: Path, missing_cfg: bool, qapp: QApplication
 ) -> None:
     received: list[tuple[_LoadedRecord, Path, str | None]] = []
 
@@ -192,19 +191,16 @@ def test_base_adapter_save_passes_explicit_record_to_override(
         result=_LoadedResult(path=tmp_path / "source.hdf5"),
     )
     destination = tmp_path / "exact.hdf5"
-    request = SaveDataRequest(
-        run_result=source,
-        data_path=str(destination),
-        md=MagicMock(),
-        ml=MagicMock(),
-        chip_name="chip",
-        qub_name="qubit",
-        res_name="resonator",
-        active_label="data",
-        comment="override metadata",
-    )
+    with native_save_session(tmp_path, qapp) as native:
+        request = SaveDataRequest(
+            run_result=source,
+            data_path=str(destination),
+            parameters=native.state.get_tab("tab").run.parameters,
+            storage=native.context.read_context().capture_storage(),
+            comment="override metadata",
+        )
 
-    Adapter().save(request)
+        Adapter().save(request)
 
     assert received == [(source, destination, "override metadata")]
     assert received[0][0] is source

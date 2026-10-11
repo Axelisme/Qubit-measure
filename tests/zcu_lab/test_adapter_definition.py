@@ -10,6 +10,7 @@ import pytest
 from zcu_tools.cfg_model import NoneResetCfg, PulseReadoutSpec, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    AnalyzeRequest,
     ExpAdapterProtocol,
     SessionEnv,
 )
@@ -19,12 +20,13 @@ from zcu_tools.gui.app.measure.cfg_binding import (
     MeasureCfgBindings,
 )
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.gui.cfg import CfgSectionSpec, EvalValue, SweepValue
 from zcu_tools.gui.cfg.binding.observation import CfgNodeObservation
-from zcu_tools.gui.cfg.resource import CfgResource, CfgStatus
+from zcu_tools.gui.cfg.resource import CfgEdit, CfgResource, CfgStatus
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
@@ -34,12 +36,117 @@ from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from zcu_lab.components import JpaSchema, QubitSchema, ResonatorSchema
 from zcu_lab.definitions import register_all
+from zcu_lab.v2.singleshot.mist.power.core import PowerExp
+
+
+@pytest.mark.parametrize("log_scale", [False, True])
+def test_registry_analysis_input_controls_mist_power_scale(
+    monkeypatch, log_scale: bool
+) -> None:
+    adapter = _registry().create("singleshot/mist/power")
+    environment = _ctx(rich=True)
+    params = adapter.get_analyze_params(object(), environment)
+    assert getattr(params, "log_scale", None) is False
+    selected = replace(params, log_scale=log_scale)
+    analyze = MagicMock()
+    monkeypatch.setattr(PowerExp, "analyze", analyze)
+    adapter.analyze(
+        AnalyzeRequest(
+            run_result=object(),
+            analyze_params=selected,
+            parameters=environment.parameters,
+            predictor=None,
+        ),
+        plots=Plots(NonPresentingHost()),
+    )
+    options = analyze.call_args.args[1]
+    assert options.log_scale is log_scale
 
 
 def _registry() -> Registry:
     registry = Registry()
     register_all(registry)
     return registry
+
+
+def _flux_adapter_names() -> list[str]:
+    registry = _registry()
+    names = []
+    for name in registry.list_names():
+        adapter = registry.create(name)
+        assert isinstance(adapter, BaseAdapter)
+        dev = type(adapter).cfg_definition().spec.fields.get("dev")
+        if isinstance(dev, CfgSectionSpec) and {
+            "flux_dev",
+            "jpa_flux_dev",
+        }.intersection(dev.fields):
+            names.append(name)
+    return names
+
+
+@pytest.mark.parametrize("name", _flux_adapter_names())
+def test_registered_flux_cfg_requires_explicit_unit(name: str) -> None:
+    adapter = _registry().create(name)
+    assert isinstance(adapter, BaseAdapter)
+    cfg_model = adapter.exp_cls().persistence_spec().cfg_type
+    with pytest.raises(ValueError, match="flux_unit"):
+        cfg_model.model_validate({})
+
+
+@pytest.mark.parametrize("name", _flux_adapter_names())
+def test_registered_flux_form_edits_unit_without_device_observations(name: str) -> None:
+    adapter = _registry().create(name)
+    environment = _ctx(rich=True)
+    parameters = environment.parameters
+    assert parameters is not None
+    point = parameters.document()
+    point.components["R1"] = point.components["R1"].model_copy(
+        update={"ext": {"time_of_fly": 0.45, "default_probe_length": 1.0}}
+    )
+    environment = replace(
+        environment,
+        parameters=ParameterContext(
+            point=point,
+            library=parameters.library,
+            target=parameters.target,
+            roles=None,
+        ).bind_aliases(
+            (
+                AliasRow("qubit", "Q1"),
+                AliasRow("resonator", "$qubit.resonator"),
+                AliasRow("jpa", "$resonator.amplifier"),
+            ),
+            {},
+        ),
+    )
+    host = MagicMock(spec=MeasureCfgBindingHost)
+    host.list_device_names.return_value = ["flux_yoko"]
+    host.arb_waveforms.list_data_keys.return_value = []
+    bindings = MeasureCfgBindings(host)
+    resource = CfgResource(
+        defaults=lambda: adapter.make_default_cfg(environment),
+        resolution=lambda: bindings.snapshot(
+            (),
+            captured_values={"device.flux.name": "flux_yoko"},
+            parameters=environment.parameters,
+        ),
+    )
+    try:
+        observed = resource.observe()
+        accepted = resource.accept(observed.ref.revision)
+        assert accepted.values.get("flux_unit") == "A"
+        dev = accepted.values.get("dev")
+        for unit in ("V", "native"):
+            observed = resource.edit(
+                observed.ref.revision, (CfgEdit(("flux_unit",), unit),)
+            )
+            accepted = resource.accept(observed.ref.revision)
+            assert accepted.values["flux_unit"] == unit
+            assert accepted.values.get("dev") == dev
+        invalid = resource.edit(observed.ref.revision, (CfgEdit(("flux_unit",), "mA"),))
+        assert invalid.status is CfgStatus.INVALID
+    finally:
+        resource.revoke()
 
 
 def _pulse_raw(*, freq: float, gain: float) -> dict[str, object]:
@@ -162,8 +269,7 @@ def _specified_defaults() -> list[str]:
     return [
         name
         for name in registry.list_names()
-        if "jpa" in registry.create(name).parameter_roles()
-        or name == "singleshot/ac_stark"
+        if name.startswith("jpa/") or name == "singleshot/ac_stark"
     ]
 
 
@@ -239,7 +345,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
         )
         environment = replace(
             environment,
-            parameters=parameters.bind_aliases(rows, adapter.parameter_roles()),
+            parameters=parameters.bind_aliases(rows, {}),
         )
         calibrated = resource.refresh(missing.ref.revision)
         assert calibrated.status is CfgStatus.VALID, calibrated.diagnostics
@@ -260,7 +366,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
             library=parameters.library,
             target=parameters.target,
             roles=None,
-        ).bind_aliases(rows, adapter.parameter_roles())
+        ).bind_aliases(rows, {})
         environment = replace(environment, parameters=updated_parameters)
         updated = resource.refresh(calibrated.ref.revision)
         assert updated.status is CfgStatus.VALID, updated.diagnostics
@@ -275,7 +381,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
                     AliasRow("resonator", "$qubit.resonator"),
                     AliasRow("jpa", "$resonator.amplifier"),
                 ),
-                adapter.parameter_roles(),
+                {},
             ),
         )
         unbound = resource.refresh(updated.ref.revision)
@@ -300,7 +406,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
                 library=parameters.library,
                 target=parameters.target,
                 roles=None,
-            ).bind_aliases(rows, adapter.parameter_roles()),
+            ).bind_aliases(rows, {}),
         )
         uncalibrated = resource.refresh(rebound.ref.revision)
         assert uncalibrated.status is CfgStatus.INVALID

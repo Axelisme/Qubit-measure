@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, TypeAlias, cast
 
@@ -13,7 +13,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
@@ -30,7 +30,6 @@ from zcu_tools.gui.cfg import (
     make_custom_reference_key,
     make_default_value,
 )
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.schema_builder import (
@@ -195,13 +194,6 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         ),
     )
 
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the global aliases used by this adapter."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-        }
-
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         """Declare static shape and fresh defaults on the supplied capture.
@@ -309,22 +301,22 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         result.validate_calibration()
         # AcceptedWrite owns native complex conversion; producers keep numbers.
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.fidelity",
                 description="Single-shot assignment fidelity",
                 proposed_value=result.fidelity,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.sigma",
                 description="Single-shot IQ cluster width (s)",
                 proposed_value=result.ge_s,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.g_center",
                 description="Single-shot |g> IQ cluster centre (complex)",
                 proposed_value=result.g_center,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.e_center",
                 description="Single-shot |e> IQ cluster centre (complex)",
                 proposed_value=result.e_center,
@@ -337,12 +329,12 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
     ) -> Sequence[WritebackItem]:
         result = cast(GEPostAnalyzeResult, req.post_analyze_result)
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.radius",
                 description="Single-shot classification radius",
                 proposed_value=result.ge_radius,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.confusion_matrix",
                 description="Single-shot 3x3 confusion matrix (prepared->measured)",
                 proposed_value=result.confusion,

@@ -11,43 +11,37 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ModuleWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.cfg import CfgSchema, EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import custom, md
-from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
+from zcu_lab.v2._support.measure.seeds import custom, path_seed
 from zcu_lab.v2.twotone.reset.single_tone.freq.core import FreqCfg, FreqExp, FreqResult
 
 SingleToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
-def _reset_freq_range(ctx: SessionEnv) -> SweepValue:
-    """Build this sideband-reset scan around its calibrated frequency."""
-    center = md_get_float(ctx, "reset_f", 3000.0)
-    if md_has_key(ctx, "reset_f") and md_has_key(ctx, "resetf_w"):
-        start: float | EvalValue = EvalValue(expr="reset_f - 1.5 * resetf_w")
-        stop: float | EvalValue = EvalValue(expr="reset_f + 1.5 * resetf_w")
-    elif md_has_key(ctx, "reset_f"):
-        start = EvalValue(expr="reset_f - 50.0")
-        stop = EvalValue(expr="reset_f + 50.0")
-    else:
-        start = center - 50.0
-        stop = center + 50.0
-    return SweepValue(start=start, stop=stop, expts=201)
+def _reset_freq_range(_ctx: SessionEnv) -> SweepValue:
+    """Store the calibrated sideband frequency ± 1.5 FWHM in MHz."""
+    return SweepValue(
+        start=EvalValue("$qubit.ext.reset_f - 1.5 * $qubit.ext.reset_fwhm"),
+        stop=EvalValue("$qubit.ext.reset_f + 1.5 * $qubit.ext.reset_fwhm"),
+        expts=201,
+    )
 
 
 @dataclass
@@ -77,29 +71,28 @@ class SingleToneFreqAdapter(
             "sideband at which the reset pulse dumps the excitation."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'reset_f' — the sideband "
-            "reset frequency (= r_f - q_f), the sweep centre; 'resetf_w' — its "
-            "linewidth, setting the half-span as 1.5*resetf_w. Absent "
-            "'resetf_w' → a fixed ±50 MHz span around 'reset_f'; absent "
-            "'reset_f' → centred on 0 MHz. The tested reset and init pulse "
-            "pull 'q_f' / 'qub_ch' for their drive defaults."
+            "Requires $qubit.ext.reset_f and $qubit.ext.reset_fwhm for the "
+            "sweep centre and half-span of 1.5 FWHM. Missing, null or invalid "
+            "values fail cfg lowering. Drive defaults use the captured qubit "
+            "frequency and wiring; post-delay uses $resonator.kappa."
         ),
         expects_ml=(
-            "Needs a pulse-reset module (the tested reset) and a readout "
+            "Builds the tested pulse reset inline and needs a readout "
             "module. Optionally references a calibrated upstream reset and an "
             "init pulse (a library pi pulse when present) — both disabled when "
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the fitted sideband frequency into MetaDict 'reset_f' "
-            "and the fitted linewidth (FWHM) into 'resetf_w'. No ModuleLibrary "
-            "writeback — registering the calibrated reset module is left to "
-            "the user once both the frequency and the length are dialled in."
+            "Proposes fitted frequency and FWHM to $qubit.ext.reset_f and "
+            "$qubit.ext.reset_fwhm. With Run cfg and capture, proposes "
+            "$qubit.reset.reset_10 from tested_reset, replacing only its "
+            "frequency with this analysis. All other tested fields remain. "
+            "An optional $qubit.module.reset row selects the concrete root."
         ),
         recommended=(
             "A sweep of ~201 points spanning a couple of linewidths around "
             "the expected sideband captures the dip cleanly; widen the span "
-            "if 'reset_f' is only a rough r_f - q_f estimate. The reset-pulse "
+            "if reset_f is only a rough resonator-minus-qubit estimate. The reset-pulse "
             "length is held fixed here — sweep it separately afterwards."
         ),
     )
@@ -120,15 +113,15 @@ class SingleToneFreqAdapter(
                 overrides={
                     "pulse_cfg.gain": 0.3,
                     "pulse_cfg.waveform.length": 5.0,
-                    "pulse_cfg.post_delay": md(
-                        "rf_w",
-                        expr="5.0 / (2 * 3.141592653589793 * rf_w)",
+                    "pulse_cfg.post_delay": path_seed(
+                        "$resonator.kappa",
+                        expr="5.0 / (2 * 3.141592653589793 * $resonator.kappa)",
                         fallback=0.8,
                     ),
                 },
             )
             .readout()
-            .relax_delay(md("t1", expr="1.0 * t1", fallback=30.5))
+            .relax_delay(path_seed("$qubit.t1", expr="1.0 * $qubit.t1", fallback=30.5))
             .sweep(
                 "freq",
                 label="Freq (MHz)",
@@ -165,29 +158,44 @@ class SingleToneFreqAdapter(
         self,
         req: WritebackRequest[SingleToneFreqRunResult, SingleToneFreqAnalyzeResult],
     ) -> Sequence[WritebackItem]:
+        """Propose ext scalars and the Run-tested reset with fitted frequency.
+
+        None cfg or capture retains only scalars. Capture resolution and
+        materialization failures propagate; no calibration is reread.
+        """
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
-                target_name="reset_f",
+            ParameterWriteback(
+                target_name="$qubit.ext.reset_f",
                 description="Sideband reset frequency (MHz)",
                 proposed_value=result.freq,
             ),
-            MetaDictWriteback(
-                target_name="resetf_w",
+            ParameterWriteback(
+                target_name="$qubit.ext.reset_fwhm",
                 description="Reset sideband linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,
             ),
         ]
-        # Gated per-experiment 'reset_10' proposal: when md carries the calibrated
-        # sideband freq, register the calibrated single-pulse reset built from this
-        # run's tested_reset template (md overwrites its freq).
-        items.extend(
-            reset_module_writeback_items(
-                req.ctx,
-                req.run_result.cfg,
-                target="reset_10",
-                field_md_map=[("pulse_cfg.freq", "reset_f")],
-                desc="Reset with one pulse from 1 to 0",
+        cfg = req.run_result.cfg
+        parameters = req.ctx.parameters
+        if cfg is None or parameters is None:
+            return items
+
+        root = parameters.resolve_path("$qubit.reset.reset_10")
+        spec, value = module_cfg_to_value(cfg.modules.tested_reset)
+        value.with_field("pulse_cfg.freq", result.freq)
+        items.append(
+            ModuleWriteback(
+                target_name="$qubit.reset.reset_10",
+                description="Reset with one pulse from 1 to 0",
+                edit_schema=CfgSchema(spec=spec, value=value),
+            )
+        )
+        items.append(
+            ParameterWriteback(
+                target_name="$qubit.module.reset",
+                description="Select single-tone reset for downstream experiments",
+                proposed_value=root,
             )
         )
         return items

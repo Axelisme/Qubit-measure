@@ -1,11 +1,7 @@
-"""Shared helper for gated, per-experiment reset module writeback.
+"""Shared pulse-readout proposal mechanics and existing DPM calibration policy.
 
-Each reset calibration adapter proposes its final reset library module the same
-way: gate on whether every calibration md key the module needs is present, then
-build the module from *this* run's ``cfg_snapshot.modules.tested_reset`` template
-and overwrite the calibration fields from md. The user's reset calibration runs
-are unordered and repeatable, so the proposal is keyed on md completeness — not on
-being "the last step" — letting any run that has the full calibration emit it.
+Reset finishers live in their adapters and materialize the Run-tested cfg
+without reading calibration values from the capture.
 """
 
 from __future__ import annotations
@@ -19,30 +15,10 @@ from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.program.v2.modules import PulseReadoutCfg
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
+from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-
-
-class _HasTestedReset(Protocol):
-    # Read-only property (not a bare attr) so the Protocol is covariant: a concrete
-    # ``modules`` whose ``tested_reset`` is a specific ResetCfg subtype still
-    # matches ``object`` (a mutable attr would be invariant and reject it).
-    @property
-    def tested_reset(self) -> object: ...
-
-
-class _HasModules(Protocol):
-    """Structural surface of any reset cfg snapshot: a ``modules.tested_reset``.
-
-    Every reset calibration cfg carries the run's tested reset under
-    ``modules.tested_reset``; this is the only attribute this helper reads, so the
-    Protocol stays as narrow as the access (no whole-cfg type dependency).
-    """
-
-    @property
-    def modules(self) -> _HasTestedReset: ...
 
 
 class _HasReadout(Protocol):
@@ -67,9 +43,12 @@ def _resolve_readout_dpm_values(
         if key in proposed:
             values.append(float(proposed[key]))
             continue
-        if not md_has_key(ctx, key):
+        if ctx.parameters is None:
             return None
-        values.append(md_get_float(ctx, key, float("nan")))
+        calibrated = optional_parameter_float(ctx.parameters, f"$qubit.ext.{key}")
+        if calibrated is None:
+            return None
+        values.append(calibrated)
 
     best_ro_freq, best_ro_gain, best_ro_length = values
     if not all(math.isfinite(value) for value in values):
@@ -136,43 +115,3 @@ def readout_dpm_writeback_items(
         ),
         role_id="readout_dpm",
     )
-
-
-def reset_module_writeback_items(
-    ctx: SessionEnv,
-    cfg_snapshot: _HasModules | None,
-    *,
-    target: str,
-    field_md_map: Sequence[tuple[str, str]],
-    desc: str,
-) -> list[ModuleWriteback]:
-    """A gated ``ModuleWriteback`` proposing the calibrated reset library module.
-
-    ``field_md_map`` pairs a dotted field path inside ``tested_reset`` (e.g.
-    ``"pulse_cfg.freq"``) with the md key holding its calibrated value (e.g.
-    ``"reset_f"``). The proposal is emitted only when *every* md key is present
-    (``md_has_key``) and a ``cfg_snapshot`` exists; otherwise it returns ``[]`` so
-    the experiment offers only its plain md writeback. When emitted, the module is
-    built from ``cfg_snapshot.modules.tested_reset`` (this run's calibrated
-    template) and each mapped field is overwritten from md.
-    """
-    if cfg_snapshot is None:
-        return []
-    if not all(md_has_key(ctx, md_key) for _, md_key in field_md_map):
-        return []
-
-    tested_reset = cfg_snapshot.modules.tested_reset
-    spec, value = module_cfg_to_value(tested_reset)
-    for field_path, md_key in field_md_map:
-        # md_has_key gated every key above, so md_get_float's default is unreachable;
-        # pass NaN so a regression (a missing key slipping through) fails loudly
-        # downstream rather than silently writing a plausible 0.0.
-        value.with_field(field_path, md_get_float(ctx, md_key, float("nan")))
-
-    return [
-        ModuleWriteback(
-            target_name=target,
-            description=desc,
-            edit_schema=CfgSchema(spec=spec, value=value),
-        )
-    ]

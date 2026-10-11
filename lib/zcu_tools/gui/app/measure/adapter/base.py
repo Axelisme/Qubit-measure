@@ -48,7 +48,6 @@ from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
 from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.interactive import PluginDefinition, Session
-from zcu_tools.resources.entry import RoleSpec
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
@@ -310,8 +309,9 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     ) -> T_Cfg:
         """Build experiment config from the flat GUI raw dict.
 
-        Materialize resolved module dictionaries without a live library, using
-        only the request's device snapshot. An adapter must set ``ExpCfg_cls``
+        Materialize resolved fields with the request's fixed library/assets
+        capability. Device selections remain role-to-name strings; this method
+        neither reads nor configures hardware. An adapter must set ExpCfg_cls
         or override this method.
         """
         if self.ExpCfg_cls is None:
@@ -322,7 +322,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
             ExperimentCfgInput(raw_cfg),
             self.ExpCfg_cls,
             context=req.cfg_context,
-            device_snapshot=req.device_snapshot,
         )
 
     def validate_run_request(
@@ -450,15 +449,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         )
 
     # -- shared implementation (provided once) -----------------------------
-
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare ordered used aliases and their required component kinds.
-
-        Empty means no declared aliases. Global authored rows determine names;
-        RoleSpec.via is notebook-only and ignored by GUI. Cfg refresh and Run
-        admission each capture the current table, never a tab birth binding.
-        """
-        return {}
 
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         """Instantiate fresh defaults and validate their static input contract.

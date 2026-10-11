@@ -5,8 +5,8 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.utils.device import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
     SignalBuffer,
@@ -82,22 +82,25 @@ class InterruptedCore(SavingCore):
     """Saveable three-point scan interrupted in its body or program acquire.
 
     mode selects software-body, scalar program, completed-round program, or
-    pre-Schedule device setup. context retains the latest RunContext for public signal observation.
+    pre-Schedule device operation. context retains the latest RunContext for public signal observation.
     """
 
     def __init__(
-        self, mode: Literal["software", "program", "program-round", "setup"]
+        self, mode: Literal["software", "program", "program-round", "device"]
     ) -> None:
         self.mode = mode
         self.context: RunContext | None = None
 
     def run(self, config: SavingCfg, *, context: RunContext | None) -> SavingResult:
-        """Acquire through the real runtime; setup failure precedes its scope."""
+        """Acquire through the real runtime; device failure precedes its scope."""
         if context is None:
             raise ValueError("RunContext required")
         self.context = context
-        if self.mode == "setup":
-            setup_devices(config, context.devices, cancel_signal=context.cancel_signal)
+        if self.mode == "device" and config.dev is not None:
+            device = context.devices[config.dev["probe"]]
+            if not isinstance(device, FakeDevice):
+                raise TypeError("This synthetic experiment requires FakeDevice")
+            device.set_value(0.5)
         buffer = SignalBuffer(3)
         with Schedule(config, buffer, stop=context.cancel_signal) as sched:
             if self.mode == "program-round":

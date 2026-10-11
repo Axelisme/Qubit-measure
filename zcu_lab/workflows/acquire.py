@@ -141,6 +141,7 @@ def run_qubit_freq(run: Run[FreqCfg]) -> FrequencyAcquisition:
         finished_at=datetime.now(UTC),
         completion="stopped" if run.cancel_signal.is_set() else "complete",
         provenance=provenance,
+        device_snapshot=run.device_snapshot,
     )
     return FrequencyAcquisition(freqs=freqs, signals=buffer.array, evidence=evidence)
 
@@ -189,6 +190,7 @@ def run_len_rabi(run: Run[LenRabiCfg]) -> RabiAcquisition:
         finished_at=datetime.now(UTC),
         completion="stopped" if run.cancel_signal.is_set() else "complete",
         provenance=provenance,
+        device_snapshot=run.device_snapshot,
     )
     return RabiAcquisition(lengths=lengths, signals=buffer.array, evidence=evidence)
 
@@ -243,6 +245,7 @@ def run_ro_landscape(run: Run[FreqGainCfg]) -> ReadoutAcquisition:
         finished_at=datetime.now(UTC),
         completion="stopped" if run.cancel_signal.is_set() else "complete",
         provenance=provenance,
+        device_snapshot=run.device_snapshot,
     )
     return ReadoutAcquisition(
         freqs=freqs, gains=gains, signals=np.abs(buffer.array), evidence=evidence
@@ -292,6 +295,7 @@ def run_t1(run: Run[T1Cfg]) -> T1Acquisition:
         finished_at=datetime.now(UTC),
         completion="stopped" if run.cancel_signal.is_set() else "complete",
         provenance=provenance,
+        device_snapshot=run.device_snapshot,
     )
     return T1Acquisition(times=times, signals=buffer.array, evidence=evidence)
 
@@ -344,6 +348,7 @@ def run_t2echo(run: Run[T2EchoCfg]) -> T2EchoAcquisition:
         finished_at=datetime.now(UTC),
         completion="stopped" if run.cancel_signal.is_set() else "complete",
         provenance=provenance,
+        device_snapshot=run.device_snapshot,
     )
     return T2EchoAcquisition(
         times=times,

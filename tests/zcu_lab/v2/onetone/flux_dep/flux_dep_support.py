@@ -40,6 +40,7 @@ def make_cfg() -> FluxDepCfg:
         reps=1,
         rounds=1,
         dev={},
+        flux_unit="A",
         modules=FluxDepModuleCfg(
             readout=PulseReadoutCfg(
                 pulse_cfg=pulse,

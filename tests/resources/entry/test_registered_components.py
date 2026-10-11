@@ -105,7 +105,7 @@ def test_registered_legacy_rename_preserves_source_until_explicit_acceptance(
         component = stored["components"]["N1"]
         component["legacy"] = component.pop("modern")
         if version == "1.2":
-            component["future"] = {"quality": "next"}
+            stored["future"] = {"quality": "next"}
         yaml.dump(stored, source)
         before = source.read_bytes()
         reopened = ResultEntry.open(
@@ -126,7 +126,7 @@ def test_registered_legacy_rename_preserves_source_until_explicit_acceptance(
         assert saved["components"]["N1"]["modern"] == 7
         assert "legacy" not in saved["components"]["N1"]
         if version == "1.2":
-            assert saved["components"]["N1"]["future"] == {"quality": "next"}
+            assert saved["future"] == {"quality": "next"}
         assert loaded.meta("N1.modern") == original_source
         assert loaded.meta("N1.legacy") is None
         with loaded.edit() as draft:

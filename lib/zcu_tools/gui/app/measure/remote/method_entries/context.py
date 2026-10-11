@@ -56,41 +56,27 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:h_context_snapshot",
         MethodSpec(
             15.0,
-            "Explicit full read of the published parameter context: {target, point, "
-            "library}. target is the existing entry_draft or saved_point locator. "
+            "Read the published parameter context: {target, point, library, aliases}. "
+            "aliases contains ordered {alias, value, resolved} rows; failed rows have "
+            "resolved=null and error. All come from one fixed capture without kind checks. "
+            "target is the existing entry_draft or saved_point locator. "
             "point and library are complete working-unit native documents, including "
             "components and provenance; library contains Specs without asset materialization. "
             "Complex numbers use {__complex__: [real, imag]}. May return large or sensitive data; "
-            "use rpc_call only when you need to re-snapshot the whole context "
-            "before a guarded mutation. Unsupported values fail the entire read.",
-        ),
-        agent=AgentMethodPolicy(reveals=("context",)),
-    ),
-    method_entry(
-        "context.md_get",
-        "context:h_context_md_get",
-        MethodSpec(
-            5.0,
-            "List MetaDict keys; summaries=true also returns {values} with scalars "
-            "and descriptions, never full non-scalar contents.",
+            "summaries=true preserves dict trees and scalars and describes array/list leaves. "
+            "path selects a complete subtree, takes priority over summaries, and returns "
+            "{target, aliases, path, value}. Dotted paths start with target/point/library/aliases; "
+            "list indices must be canonical nonnegative decimals. Invalid paths name the first bad segment. "
+            "Only omitting both parameters establishes context observation before guarded writes; "
+            "explicit summaries=false or path='' remains partial and does not refresh the guard. "
+            "Unsupported values fail the entire read in every mode.",
             (
-                ParamSpec(
-                    "summaries",
-                    JsonType.BOOLEAN,
-                    required=False,
-                    default=False,
-                    description="Include compact value summaries",
-                ),
+                ParamSpec("summaries", JsonType.BOOLEAN, required=False, default=False),
+                optional_string("path"),
             ),
         ),
-    ),
-    method_entry(
-        "context.md_get_attr",
-        "context:h_context_md_get_attr",
-        MethodSpec(
-            5.0,
-            "Read one MetaDict attribute",
-            (required_string("key", "MetaDict key"),),
+        agent=AgentMethodPolicy(
+            reveals=("context",), reveals_without=("summaries", "path")
         ),
     ),
     method_entry(
@@ -121,108 +107,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-    ),
-    method_entry(
-        "context.ml_get",
-        "context:h_context_ml_get",
-        MethodSpec(
-            5.0,
-            "List ModuleLibrary modules/waveforms as {modules, waveforms}, each "
-            "entry carrying name, discriminator kind/style and description. "
-            "With name, return {name, kind: 'module'|'waveform', cfg} for the "
-            "named stored cfg without opening an editor. Require kind if the "
-            "same name exists in both collections; unknown names fail with "
-            "available options.",
-            (
-                optional_string("name", "Entry to read; omit for the index"),
-                optional_string("kind", "module or waveform when names collide"),
-            ),
-        ),
-    ),
-    method_entry(
-        "context.md_set_attr",
-        "context:h_context_md_set_attr",
-        MethodSpec(
-            5.0,
-            "Set one MetaDict attribute; receipt=true returns its actual "
-            "{before, after} from the owner turn.",
-            (
-                required_string("key", "MetaDict key"),
-                required_json("value", "JSON-safe value"),
-                ParamSpec(
-                    "receipt",
-                    JsonType.BOOLEAN,
-                    required=False,
-                    default=False,
-                    description="Return actual before/after values",
-                ),
-            ),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
-        "context.md_del_attr",
-        "context:h_context_md_del_attr",
-        MethodSpec(
-            5.0,
-            "Delete one MetaDict attribute",
-            (required_string("key", "MetaDict key"),),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
-        "context.ml_del_module",
-        "context:h_context_ml_del_module",
-        MethodSpec(
-            5.0,
-            "Delete one ModuleLibrary module. Echoes {deleted: name}. LINKED cfg refs "
-            "keep the missing key and become invalid until it returns or is edited; "
-            "MODIFIED refs retain their inline Custom value.",
-            (required_string("name", "Module name"),),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
-        "context.ml_del_waveform",
-        "context:h_context_ml_del_waveform",
-        MethodSpec(
-            5.0,
-            "Delete one ModuleLibrary waveform. Echoes {deleted: name}. LINKED cfg refs "
-            "keep the missing key and become invalid until it returns or is edited; "
-            "MODIFIED refs retain their inline Custom value.",
-            (required_string("name", "Waveform name"),),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
-        "context.ml_rename_module",
-        "context:h_context_ml_rename_module",
-        MethodSpec(
-            5.0,
-            "Rename a ModuleLibrary module old→new (clash fails fast). Echoes "
-            "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
-            "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
-            (
-                required_string("old", "Current module name"),
-                required_string("new", "New module name"),
-            ),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
-        "context.ml_rename_waveform",
-        "context:h_context_ml_rename_waveform",
-        MethodSpec(
-            5.0,
-            "Rename a ModuleLibrary waveform old→new (clash fails fast). Echoes "
-            "{renamed: new}. LINKED cfg refs keep the missing 'old' key and become "
-            "invalid until it returns or is edited; MODIFIED refs retain inline Custom.",
-            (
-                required_string("old", "Current waveform name"),
-                required_string("new", "New waveform name"),
-            ),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_list_roles",

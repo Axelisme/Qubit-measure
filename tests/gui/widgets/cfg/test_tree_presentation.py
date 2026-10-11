@@ -43,7 +43,9 @@ from zcu_tools.gui.widgets.cfg import (
 from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget, SweepWidget
 from zcu_tools.resources.context import MetaDict
 
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.widgets.cfg._tree_support import click_row, tree_item, tree_widget
+from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
 @pytest.fixture()
@@ -65,7 +67,7 @@ def _attached_form(
     ctrl: MagicMock,
     decoration_provider: FieldDecorationProvider | None = None,
 ) -> Generator[tuple[CfgFormWidget, CfgDraft]]:
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=ctrl.read_context())
     form = CfgFormWidget(decoration_provider=decoration_provider)
     try:
         form.attach(draft)
@@ -126,7 +128,7 @@ def _complex_schema() -> CfgSchema:
     )
     pulse_val = CfgSectionValue(
         fields={
-            "freq": EvalValue("r_f", resolved=6000.0),
+            "freq": EvalValue("R1.freq", resolved=6000.0),
             "waveform": ReferenceValue(chosen_key="<Custom:Gaussian>", value=gauss_val),
             "sweep": SweepValue(start=0.0, stop=1.0, expts=11),
             "csweep": CenteredSweepValue(center=0.5, span=1.0, expts=11),
@@ -149,13 +151,18 @@ def _complex_schema() -> CfgSchema:
 
 
 def test_tree_renders_and_edits_same_observable_behavior(qapp, ctrl):
-    ctrl.get_current_md.return_value.r_f = 6000.0
+    ctrl.read_context.return_value = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     with _attached_form(_complex_schema(), ctrl) as (form, draft):
         values = form.read_values()
         assert values.fields["reps"] == DirectValue(42)
         nested = values.fields["nested"]
         assert isinstance(nested, CfgSectionValue)
-        assert nested.fields["freq"] == EvalValue("r_f", resolved=6000.0)
+        assert nested.fields["freq"] == EvalValue("R1.freq", resolved=6000.0)
         assert nested.fields["sweep"] == SweepValue(start=0.0, stop=1.0, expts=11)
 
         draft.set_target("reps", 999)
@@ -324,7 +331,7 @@ def test_tree_detach_attach_preserves_draft(qapp, ctrl):
         assert len(snapshots) == 1
         assert snapshots[0].value.fields["reps"] == DirectValue(11)
 
-        other = MeasureCfgBindings(ctrl).new_draft(_simple_schema())
+        other = MeasureCfgBindings(ctrl).new_draft(_simple_schema(), parameters=None)
         try:
             form.detach()
             form.attach(other)

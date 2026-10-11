@@ -2,18 +2,18 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Never
+from typing import Literal, Never
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import BaseModel
+from zcu_tools.device import FakeDeviceInfo, YOKOGS200Info
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 from zcu_tools.experiment.workflows import (
     Aborted,
     Actor,
     Completed,
-    DeviceSnapshot,
     Done,
     Failed,
     Next,
@@ -32,6 +32,44 @@ from ._engine_fakes import Cfg, Plan, Rig, State, Tunables, save_integer
 @pytest.fixture
 def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path)
+
+
+@pytest.mark.parametrize("unit", ["A", "V", "native"])
+@pytest.mark.parametrize("pause", [False, True], ids=["complete", "pause"])
+def test_complete_cfg_reaches_port_with_engine_owned_stop_signal(
+    rig: Rig, unit: Literal["A", "V", "native"], pause: bool
+) -> None:
+    observed: list[StopSignal] = []
+    cfg = (
+        FakeDeviceInfo(address="memory", value=0.25)
+        if unit == "native"
+        else YOKOGS200Info(
+            address="memory", mode="current" if unit == "A" else "voltage", value=0.001
+        )
+    )
+
+    def operate(signal: StopSignal) -> None:
+        observed.append(signal)
+        assert not signal.is_set()
+        if pause:
+            rig.engine.pause("run")
+            assert signal.is_set()
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        yield from env.setup_device("bias", cfg)
+        return Done()
+
+    rig.devices.on_set = operate
+    rig.start(step)
+    status = rig.engine.execute("run")
+    assert status.lifecycle == ("paused" if pause else "done"), status.reason
+    assert rig.devices.values == [("bias", cfg.value)]
+    assert rig.devices.configs[0].model_dump() == cfg.model_dump()
+    assert len(observed) == 1
+    assert rig.devices.signals[0] is observed[0]
+    assert rig.devices.signals[0].is_set() == pause
 
 
 def run_value(run: Run[Cfg]) -> int:
@@ -255,7 +293,7 @@ def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
             return Done()
         yield from env.run(run_value, Cfg(), save=save_integer)
         observed.append(1)
-        yield from env.set_device("flux", 0.2)
+        yield from env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.2))
         state.index = 1
         return Next(1, state)
 
@@ -268,7 +306,7 @@ def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
     assert discarded["run_files"] == ["runs/01-run_value.h5"]
     assert rig.engine.records("run") == ()
     rig.devices.on_set = None
-    rig.engine.resume("run", devices=DeviceSnapshot({}))
+    rig.engine.resume("run")
     assert rig.engine.execute("run").lifecycle == "done"
     assert observed == [1, 1]
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))) == 2
@@ -310,6 +348,68 @@ def test_unlink_failure_keeps_final_but_does_not_deliver_completed(
     assert failed["run_files"] == ["runs/01-run_value.h5"]
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/.*.tmp.h5"))) == 1
+
+
+@pytest.mark.parametrize("use_device", [False, True])
+def test_run_resolves_role_names_only_when_experiment_uses_device(
+    rig: Rig, use_device: bool
+) -> None:
+    original = Cfg(value=7, dev={"selected": "missing", "unused": "disconnected"})
+    observed: list[Completed[Cfg, int] | Failed] = []
+    entered: list[bool] = []
+    cause = OSError("Device 'missing' is disconnected")
+
+    def unavailable(_signal: StopSignal) -> None:
+        raise cause
+
+    rig.devices.on_set = unavailable
+
+    def acquire(run: Run[Cfg]) -> int:
+        entered.append(True)
+        if use_device:
+            dev = run.cfg.dev
+            if dev is None:
+                raise ValueError("This experiment requires device roles")
+            run.devices.setup_device(
+                dev["selected"],
+                FakeDeviceInfo(address="memory", value=0.5),
+                run.cancel_signal,
+            )
+        buffer = run.buffer((1,), axes=(np.array([0.0]),))
+        with run.schedule(buffer):
+            buffer.set(np.array([1 + 0j]))
+        run.cfg.value = 9
+        return 11
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if state.index:
+            return Done()
+        observed.append((yield from env.run(acquire, original, save=save_integer)))
+        state.index = 1
+        return Next(1, state)
+
+    rig.start(step)
+    status = rig.engine.execute("run")
+    if use_device:
+        assert status.lifecycle == "failed"
+        assert status.reason == "OSError: Device 'missing' is disconnected"
+        assert rig.devices.values == [("missing", 0.5)]
+        assert observed == []
+        assert rig.engine.records("run") == ()
+        assert not tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))
+    else:
+        assert status.lifecycle == "done"
+        assert rig.devices.values == []
+        assert observed == [Completed(Cfg(value=9, dev=original.dev), 11)]
+        assert rig.engine.records("run")[0].run_files == ("runs/01-acquire.h5",)
+        final = rig.paths.data_root / "iter/000001/runs/01-acquire.h5"
+        assert final.read_text(encoding="utf-8") == "9:11"
+    assert entered == [True]
+    assert original == Cfg(
+        value=7, dev={"selected": "missing", "unused": "disconnected"}
+    )
 
 
 @pytest.mark.parametrize("rethrow", [False, True])
@@ -593,6 +693,34 @@ def test_analysis_error_after_completed_effect_retains_file_but_never_commits(
     assert failed["error"]["type"] == "builtins.ValueError"
     assert "raise ValueError" in str(failed["error"]["traceback"])
     assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
+
+
+def test_device_operation_error_is_not_recoverable_schedule_failure(rig: Rig) -> None:
+    observed: list[int] = []
+
+    def operate(_signal: StopSignal) -> None:
+        rig.engine.pause("run")
+        raise OSError("Device 'flux' failed")
+
+    def acquire(_run: Run[Cfg]) -> int:
+        observed.append(1)
+        return 1
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
+    ) -> Step[State, int]:
+        yield from env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.1))
+        yield from env.run(acquire, Cfg(), save=save_integer)
+        return Next(1, state)
+
+    rig.devices.on_set = operate
+    rig.start(step)
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "failed"
+    assert "Device 'flux' failed" in str(status.reason)
+    assert observed == []
+    assert "experiment_failed" not in rig.kinds()
+    assert "step_discarded" not in rig.kinds()
 
 
 def test_active_update_journal_failure_cancels_then_reports_original_cause(

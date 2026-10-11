@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    MetaDictWriteback,
     ModuleWriteback,
     NoAnalysisResult,
+    ParameterWriteback,
     WaveformWriteback,
     require_soc_handles,
 )
@@ -34,8 +34,9 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict
 
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+from zcu_lab.components import QubitSchema, ResonatorSchema, WiringSchema
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -64,9 +65,7 @@ def test_require_soc_handles_is_framework_request_validation() -> None:
     from zcu_tools.gui.app.measure.adapter import RunRequest
 
     with pytest.raises(RuntimeError, match="soc is required"):
-        require_soc_handles(
-            RunRequest(soc=None, soccfg=MagicMock(), device_snapshot={})
-        )
+        require_soc_handles(RunRequest(soc=None, soccfg=MagicMock(), cfg_context=None))
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +78,7 @@ def test_scalar_int():
         {"reps": ScalarSpec(label="Reps", type=int)},
         {"reps": DirectValue(100)},
     )
-    assert schema_to_raw_dict(s, None, _make_ml()) == {"reps": 100}
+    assert schema_to_raw_dict(s, None) == {"reps": 100}
 
 
 def test_scalar_str():
@@ -87,7 +86,7 @@ def test_scalar_str():
         {"name": ScalarSpec(label="Name", type=str)},
         {"name": DirectValue("hello")},
     )
-    assert schema_to_raw_dict(s, None, _make_ml())["name"] == "hello"
+    assert schema_to_raw_dict(s, None)["name"] == "hello"
 
 
 def test_scalar_editable_false_still_included():
@@ -95,15 +94,21 @@ def test_scalar_editable_false_still_included():
         {"freq": ScalarSpec(label="Freq", type=float, editable=False)},
         {"freq": DirectValue(6.0)},
     )
-    assert schema_to_raw_dict(s, None, _make_ml())["freq"] == pytest.approx(6.0)
+    assert schema_to_raw_dict(s, None)["freq"] == pytest.approx(6.0)
 
 
 def test_scalar_eval_value_uses_resolved_snapshot():
     s = _schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
-        {"freq": EvalValue(expr="r_f - rf_w", resolved=5998.0)},
+        {"freq": EvalValue(expr="R1.freq - R1.kappa", resolved=5998.0)},
     )
-    assert schema_to_raw_dict(s, None, _make_ml())["freq"] == pytest.approx(5998.0)
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0, kappa=2.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
+    assert schema_to_raw_dict(s, parameters)["freq"] == pytest.approx(5998.0)
 
 
 def test_scalar_eval_value_unresolved_raises():
@@ -119,12 +124,15 @@ def test_scalar_eval_value_resolves_against_md_when_no_snapshot():
     """An EvalValue built without a snapshot is resolved by lowering against md."""
     s = _schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
-        {"freq": EvalValue(expr="r_f - rf_w")},
+        {"freq": EvalValue(expr="R1.freq - R1.kappa")},
     )
-    md = MetaDict()
-    md.r_f = 6000.0
-    md.rf_w = 2.0
-    assert schema_to_raw_dict(s, md, _make_ml())["freq"] == pytest.approx(5998.0)
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0, kappa=2.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
+    assert schema_to_raw_dict(s, parameters)["freq"] == pytest.approx(5998.0)
 
 
 def test_scalar_eval_snapshot_drift_warns_but_keeps_snapshot(caplog):
@@ -132,13 +140,16 @@ def test_scalar_eval_snapshot_drift_warns_but_keeps_snapshot(caplog):
     lowering keeps the snapshot but logs a drift warning (commit cross-check)."""
     s = _schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
-        {"freq": EvalValue(expr="r_f - rf_w", resolved=5998.0)},
+        {"freq": EvalValue(expr="R1.freq - R1.kappa", resolved=5998.0)},
     )
-    md = MetaDict()
-    md.r_f = 7000.0  # md changed after the snapshot was taken
-    md.rf_w = 2.0
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=7000.0, kappa=2.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     with caplog.at_level("WARNING"):
-        out = schema_to_raw_dict(s, md, _make_ml())
+        out = schema_to_raw_dict(s, parameters)
     # snapshot still wins
     assert out["freq"] == pytest.approx(5998.0)
     assert any(
@@ -149,13 +160,16 @@ def test_scalar_eval_snapshot_drift_warns_but_keeps_snapshot(caplog):
 def test_scalar_eval_snapshot_consistent_no_warn(caplog):
     s = _schema(
         {"freq": ScalarSpec(label="Freq", type=float)},
-        {"freq": EvalValue(expr="r_f - rf_w", resolved=5998.0)},
+        {"freq": EvalValue(expr="R1.freq - R1.kappa", resolved=5998.0)},
     )
-    md = MetaDict()
-    md.r_f = 6000.0
-    md.rf_w = 2.0  # fresh eval == snapshot
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0, kappa=2.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     with caplog.at_level("WARNING"):
-        schema_to_raw_dict(s, md, _make_ml())
+        schema_to_raw_dict(s, parameters)
     assert not any("differs" in r.message for r in caplog.records)
 
 
@@ -163,11 +177,15 @@ def test_scalar_eval_value_int_spec_coerces_to_int():
     """An int-typed ScalarSpec resolves an EvalValue to int, not float."""
     s = _schema(
         {"ro_ch": ScalarSpec(label="RO ch", type=int)},
-        {"ro_ch": EvalValue(expr="ro_ch")},
+        {"ro_ch": EvalValue(expr="R1.wiring.ro_ch")},
     )
-    md = MetaDict()
-    md.ro_ch = 2
-    out = schema_to_raw_dict(s, md, _make_ml())["ro_ch"]
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", wiring=WiringSchema(ro_ch=2)),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
+    out = schema_to_raw_dict(s, parameters)["ro_ch"]
     assert out == 2
     assert isinstance(out, int) and not isinstance(out, bool)
 
@@ -176,12 +194,16 @@ def test_scalar_eval_value_int_spec_non_integer_raises():
     """A non-integer eval result against an int spec fails fast."""
     s = _schema(
         {"ro_ch": ScalarSpec(label="RO ch", type=int)},
-        {"ro_ch": EvalValue(expr="r_f")},
+        {"ro_ch": EvalValue(expr="R1.freq")},
     )
-    md = MetaDict()
-    md.r_f = 6000.5
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.5),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     with pytest.raises(RuntimeError, match="not an integer"):
-        schema_to_raw_dict(s, md, _make_ml())
+        schema_to_raw_dict(s, parameters)
 
 
 def test_scalar_missing_in_value_skipped():
@@ -194,7 +216,7 @@ def test_scalar_missing_in_value_skipped():
         {"reps": DirectValue(5)},
     )
     with pytest.raises(RuntimeError, match="x"):
-        schema_to_raw_dict(s, None, _make_ml())
+        schema_to_raw_dict(s, None)
 
 
 def test_extra_value_fields_raise():
@@ -203,7 +225,7 @@ def test_extra_value_fields_raise():
         {"reps": DirectValue(5), "extra": DirectValue(1)},
     )
     with pytest.raises(RuntimeError, match="extra"):
-        schema_to_raw_dict(s, None, _make_ml())
+        schema_to_raw_dict(s, None)
 
 
 # ---------------------------------------------------------------------------
@@ -241,32 +263,28 @@ def test_sweepvalue_auto_norm_skips_evalvalue_bounds():
 
 
 def test_sweep_produces_sweep_cfg():
-    from zcu_tools.program.v2 import SweepCfg
-
     s = _schema(
         {"sweep": SweepSpec(label="Freq")},
         {"sweep": SweepValue(start=1.0, stop=2.0, expts=11)},
     )
-    result = schema_to_raw_dict(s, None, _make_ml())
+    result = schema_to_raw_dict(s, None)
     sweep = result["sweep"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.start == pytest.approx(1.0)
-    assert sweep.stop == pytest.approx(2.0)
-    assert sweep.expts == 11
+    assert isinstance(sweep, dict)
+    assert sweep["start"] == pytest.approx(1.0)
+    assert sweep["stop"] == pytest.approx(2.0)
+    assert sweep["expts"] == 11
 
 
 def test_sweep_step_mode():
-    from zcu_tools.program.v2 import SweepCfg
-
     s = _schema(
         {"sweep": SweepSpec()},
         {"sweep": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
-    result = schema_to_raw_dict(s, None, _make_ml())
+    result = schema_to_raw_dict(s, None)
     sweep = result["sweep"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.expts == 11
-    assert sweep.step == pytest.approx(0.1)
+    assert isinstance(sweep, dict)
+    assert sweep["expts"] == 11
+    assert sweep["step"] == pytest.approx(0.1)
 
 
 def test_sweep_eval_edges_use_resolved_value():
@@ -306,24 +324,26 @@ def test_sweep_eval_unresolved_fails_fast():
 
 def test_sweep_eval_edges_resolve_against_md_when_no_snapshot():
     """Sweep edges built without a snapshot are resolved by lowering against md."""
-    from zcu_tools.program.v2 import SweepCfg
-
     s = _schema(
         {"sweep": SweepSpec()},
         {
             "sweep": SweepValue(
-                start=EvalValue(expr="r_f - 10"),
-                stop=EvalValue(expr="r_f + 10"),
+                start=EvalValue(expr="R1.freq - 10"),
+                stop=EvalValue(expr="R1.freq + 10"),
                 expts=11,
             )
         },
     )
-    md = MetaDict()
-    md.r_f = 6000.0
-    sweep = schema_to_raw_dict(s, md, _make_ml())["sweep"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.start == pytest.approx(5990.0)
-    assert sweep.stop == pytest.approx(6010.0)
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
+    sweep = schema_to_raw_dict(s, parameters)["sweep"]
+    assert isinstance(sweep, dict)
+    assert sweep["start"] == pytest.approx(5990.0)
+    assert sweep["stop"] == pytest.approx(6010.0)
 
 
 # ---------------------------------------------------------------------------
@@ -337,33 +357,29 @@ def test_centered_sweepvalue_auto_norm_derives_step_from_span():
 
 
 def test_centered_sweep_produces_sweep_cfg():
-    from zcu_tools.program.v2 import SweepCfg
-
     s = _schema(
         {"sweep": CenteredSweepSpec(label="Freq")},
         {"sweep": CenteredSweepValue(center=10.0, span=4.0, expts=5)},
     )
-    result = schema_to_raw_dict(s, None, _make_ml())
+    result = schema_to_raw_dict(s, None)
     sweep = result["sweep"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.start == pytest.approx(8.0)
-    assert sweep.stop == pytest.approx(12.0)
-    assert sweep.expts == 5
+    assert isinstance(sweep, dict)
+    assert sweep["start"] == pytest.approx(8.0)
+    assert sweep["stop"] == pytest.approx(12.0)
+    assert sweep["expts"] == 5
 
 
 def test_centered_sweep_single_point_lowers_to_center():
-    from zcu_tools.program.v2 import SweepCfg
-
     s = _schema(
         {"sweep": CenteredSweepSpec(label="Freq")},
         {"sweep": CenteredSweepValue(center=10.0, span=4.0, expts=1)},
     )
-    result = schema_to_raw_dict(s, None, _make_ml())
+    result = schema_to_raw_dict(s, None)
     sweep = result["sweep"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.start == pytest.approx(10.0)
-    assert sweep.stop == pytest.approx(10.0)
-    assert sweep.expts == 1
+    assert isinstance(sweep, dict)
+    assert sweep["start"] == pytest.approx(10.0)
+    assert sweep["stop"] == pytest.approx(10.0)
+    assert sweep["expts"] == 1
 
 
 def test_centered_sweep_rejects_zero_span_multi_point():
@@ -373,7 +389,7 @@ def test_centered_sweep_rejects_zero_span_multi_point():
     )
 
     with pytest.raises(RuntimeError, match="span must be greater than 0"):
-        schema_to_raw_dict(s, None, _make_ml())
+        schema_to_raw_dict(s, None)
 
 
 def test_centered_sweep_locked_center_rejects_mismatch():
@@ -383,28 +399,30 @@ def test_centered_sweep_locked_center_rejects_mismatch():
     )
 
     with pytest.raises(RuntimeError, match="locked to 0.0"):
-        schema_to_raw_dict(s, None, _make_ml())
+        schema_to_raw_dict(s, None)
 
 
 def test_centered_sweep_eval_center_resolves_against_md_when_no_snapshot():
-    from zcu_tools.program.v2 import SweepCfg
-
     s = _schema(
         {"sweep": CenteredSweepSpec()},
         {
             "sweep": CenteredSweepValue(
-                center=EvalValue(expr="r_f"),
+                center=EvalValue(expr="R1.freq"),
                 span=4.0,
                 expts=5,
             )
         },
     )
-    md = MetaDict()
-    md.r_f = 6000.0
-    sweep = schema_to_raw_dict(s, md, _make_ml())["sweep"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.start == pytest.approx(5998.0)
-    assert sweep.stop == pytest.approx(6002.0)
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
+    sweep = schema_to_raw_dict(s, parameters)["sweep"]
+    assert isinstance(sweep, dict)
+    assert sweep["start"] == pytest.approx(5998.0)
+    assert sweep["stop"] == pytest.approx(6002.0)
 
 
 # ---------------------------------------------------------------------------
@@ -413,9 +431,12 @@ def test_centered_sweep_eval_center_resolves_against_md_when_no_snapshot():
 
 
 def test_module_ref_named_key_without_library_entry_raises():
-    ml = _make_ml()
-    ml.modules = {}
-    ml.waveforms = {}
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator"),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     inner_spec = CfgSectionSpec(
         label="Direct Readout",
         fields={"ro_ch": ScalarSpec(label="RO ch", type=int)},
@@ -424,13 +445,13 @@ def test_module_ref_named_key_without_library_entry_raises():
         {"readout": ReferenceSpec(kind="module", allowed=[inner_spec])},
         {
             "readout": ReferenceValue(
-                chosen_key="readout_rf",
+                chosen_key="R1.readout.readout_rf",
                 value=CfgSectionValue(fields={"ro_ch": DirectValue(99)}),
             )
         },
     )
     with pytest.raises(RuntimeError, match="Unknown module reference"):
-        schema_to_raw_dict(s, None, ml)
+        schema_to_raw_dict(s, parameters)
 
 
 def test_module_ref_custom_key_resolves_by_label():
@@ -447,7 +468,7 @@ def test_module_ref_custom_key_resolves_by_label():
             )
         },
     )
-    result = schema_to_raw_dict(s, None, _make_ml())
+    result = schema_to_raw_dict(s, None)
     assert result["ro"] == {"gain": pytest.approx(0.5)}
 
 
@@ -461,7 +482,7 @@ def test_nested_section_is_recursed():
         {"inner": CfgSectionSpec(fields={"x": ScalarSpec(label="X", type=int)})},
         {"inner": CfgSectionValue(fields={"x": DirectValue(42)})},
     )
-    assert schema_to_raw_dict(s, None, _make_ml()) == {"inner": {"x": 42}}
+    assert schema_to_raw_dict(s, None) == {"inner": {"x": 42}}
 
 
 # ---------------------------------------------------------------------------
@@ -513,13 +534,13 @@ def test_make_default_value_module_ref():
 # ---------------------------------------------------------------------------
 
 
-def test_meta_dict_writeback_requires_proposed_value():
+def test_parameter_writeback_requires_proposed_value():
     with pytest.raises(TypeError):
-        MetaDictWriteback(target_name="k", description="d")  # type: ignore[call-arg]
+        ParameterWriteback(target_name="k", description="d")  # type: ignore[call-arg]
 
 
-def test_meta_dict_writeback_valid():
-    item = MetaDictWriteback(target_name="freq", description="d", proposed_value=1)
+def test_parameter_writeback_valid():
+    item = ParameterWriteback(target_name="freq", description="d", proposed_value=1)
     assert item.target_name == "freq"
     assert item.proposed_value == 1
     # session_id is stamped by the service, not the adapter; editor identity is
@@ -584,7 +605,7 @@ def test_optional_module_ref_omitted_when_disabled():
     # (the key is present), and lowering omits it from the raw cfg.
     outer_val = CfgSectionValue(fields={"module": None, "reps": DirectValue(100)})
     s = CfgSchema(spec=outer_spec, value=outer_val)
-    result = schema_to_raw_dict(s, None, _make_ml())
+    result = schema_to_raw_dict(s, None)
 
     assert "module" not in result
     assert result["reps"] == 100
@@ -606,7 +627,7 @@ def test_optional_module_ref_included_when_enabled():
         }
     )
     s = CfgSchema(spec=outer_spec, value=outer_val)
-    result = schema_to_raw_dict(s, None, _make_ml())
+    result = schema_to_raw_dict(s, None)
 
     assert result["reps"] == 100
     assert cast(dict, result["module"])["ch"] == 3
@@ -618,7 +639,7 @@ def test_non_optional_missing_raises():
     s = CfgSchema(spec=outer_spec, value=outer_val)
 
     with pytest.raises(RuntimeError, match="reps.*missing"):
-        schema_to_raw_dict(s, None, _make_ml())
+        schema_to_raw_dict(s, None)
 
 
 # ---------------------------------------------------------------------------
@@ -639,7 +660,7 @@ def test_device_selector_normal_path_produces_device_name():
     )
     val = CfgSectionValue(fields={"dev": DirectValue("lo_device")})
     s = CfgSchema(spec=spec, value=val)
-    result = schema_to_raw_dict(s, None, _make_ml())
+    result = schema_to_raw_dict(s, None)
     assert result["dev"] == "lo_device"
 
 
@@ -658,7 +679,7 @@ def test_device_selector_required_empty_raises():
     val = CfgSectionValue(fields={"dev": DirectValue(value="")})
     s = CfgSchema(spec=spec, value=val)
     with pytest.raises(RuntimeError, match="required and must not be empty"):
-        schema_to_raw_dict(s, None, _make_ml())
+        schema_to_raw_dict(s, None)
 
 
 def test_device_selector_empty_string_raises():
@@ -675,7 +696,7 @@ def test_device_selector_empty_string_raises():
     val = CfgSectionValue(fields={"dev": DirectValue(value="")})
     s = CfgSchema(spec=spec, value=val)
     with pytest.raises(RuntimeError, match="required and must not be empty"):
-        schema_to_raw_dict(s, None, _make_ml())
+        schema_to_raw_dict(s, None)
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +714,7 @@ def test_custom_key_missing_close_bracket_raises():
         value=CfgSectionValue(fields={"ref": ref_val}),
     )
     with pytest.raises(RuntimeError, match="Invalid custom reference key"):
-        schema_to_raw_dict(schema, None, None)
+        schema_to_raw_dict(schema, None)
 
 
 def test_custom_key_unknown_label_raises():
@@ -706,7 +727,7 @@ def test_custom_key_unknown_label_raises():
         value=CfgSectionValue(fields={"ref": ref_val}),
     )
     with pytest.raises(RuntimeError, match="Unknown custom reference label"):
-        schema_to_raw_dict(schema, None, None)
+        schema_to_raw_dict(schema, None)
 
 
 # ---------------------------------------------------------------------------
@@ -714,36 +735,23 @@ def test_custom_key_unknown_label_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_sweep_edge_unresolved_eval_raises():
-    spec = CfgSectionSpec(fields={"sweep": SweepSpec()})
-    val = CfgSectionValue(
-        fields={
-            "sweep": SweepValue(
-                start=EvalValue(expr="r_f", resolved=None, error=None),
-                stop=1.0,
-                expts=11,
-            )
-        }
-    )
-    s = CfgSchema(spec=spec, value=val)
-    with pytest.raises(RuntimeError, match="unresolved"):
-        schema_to_raw_dict(s, None, None)
-
-
 def test_resolve_sweep_edge_non_numeric_resolved_raises():
+    parameters = parameter_capture(
+        {"R1": ResonatorSchema(kind="resonator", freq=6000.0)}
+    )
     spec = CfgSectionSpec(fields={"sweep": SweepSpec()})
     val = CfgSectionValue(
         fields={
             "sweep": SweepValue(
-                start=EvalValue(expr="r_f", resolved="not_a_number", error=None),
+                start=EvalValue(expr="R1.freq", resolved="not_a_number", error=None),
                 stop=1.0,
                 expts=11,
             )
         }
     )
     s = CfgSchema(spec=spec, value=val)
-    with pytest.raises(RuntimeError, match="non-numeric"):
-        schema_to_raw_dict(s, None, None)
+    with pytest.raises(ValueError, match="not_a_number"):
+        schema_to_raw_dict(s, parameters)
 
 
 # ---------------------------------------------------------------------------
@@ -820,8 +828,13 @@ def test_base_adapter_get_analyze_params_returns_noparams_when_no_params():
     # base get_analyze_params, which returns the empty params instance — no
     # per-adapter boilerplate override needed.
     adapter = _make_concrete_adapter()
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
+
     assert isinstance(
-        adapter.get_analyze_params(MagicMock(), _make_ctx()), NoAnalyzeParams
+        adapter.get_analyze_params(
+            MagicMock(), SessionEnv(parameters=None, soc=None, soccfg=None)
+        ),
+        NoAnalyzeParams,
     )
 
 
@@ -865,8 +878,7 @@ def test_base_adapter_analyze_raises_by_default():
     req = AnalyzeRequest(
         run_result=MagicMock(),
         analyze_params=NoAnalyzeParams(),
-        md=MagicMock(),
-        ml=MagicMock(),
+        parameters=None,
         predictor=None,
     )
     with pytest.raises(NotImplementedError, match="analyze"):
@@ -876,37 +888,6 @@ def test_base_adapter_analyze_raises_by_default():
 # ---------------------------------------------------------------------------
 # BaseAdapter — default build_exp_cfg via ExpCfg_cls
 # ---------------------------------------------------------------------------
-
-
-def test_base_adapter_build_exp_cfg_uses_explicit_snapshot():
-    """Materialization receives detached device settings and no live library."""
-
-    class _Cfg:
-        pass
-
-    class _Adapter(BaseAdapter):
-        capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
-        exp_cls = MagicMock()
-        ExpCfg_cls = _Cfg
-
-        @classmethod
-        def cfg_definition(cls) -> MeasureCfgDefinition:
-            return _empty_cfg_definition()
-
-        def make_filename_stem(self, ctx):
-            return "stem"
-
-    req = MagicMock()
-    sentinel = object()
-    with patch(
-        "zcu_tools.gui.app.measure.adapter.base.assemble_experiment_cfg",
-        return_value=sentinel,
-    ) as make_cfg:
-        out = _Adapter().build_exp_cfg({"reps": 1}, req)
-    make_cfg.assert_called_once_with(
-        {"reps": 1}, _Cfg, ml=None, device_snapshot=req.device_snapshot
-    )
-    assert out is sentinel
 
 
 def test_base_adapter_build_exp_cfg_raises_without_expcfg_cls():

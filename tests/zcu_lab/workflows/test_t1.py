@@ -62,7 +62,9 @@ def test_generated_cfg_acquires_t1_with_calibrated_drive_and_native_readout(
     assert readout.ro_cfg.ro_freq == cal.readout_freq_mhz
     assert readout.pulse_cfg.gain == cal.readout_gain
 
-    run = Run(cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg)
+    run = Run(
+        cfg, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={}
+    )
     result = run_t1(run)
     assert run.outcome.status == "completed"
     np.testing.assert_array_equal(

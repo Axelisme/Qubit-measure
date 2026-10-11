@@ -36,14 +36,16 @@ from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.resources.entry import (
     ResultEntry,
+    RoleResolutionError,
     RoleSpec,
     component_registry,
     role_registry,
 )
 
 from tests.gui._completion_helpers import on_device_connected
+from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.resources.entry.fakes import registry_state, restore_registry
-from zcu_lab.components import QubitSchema
+from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
 from zcu_lab.workflows.gui.plan import T1PlanForm
 from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
@@ -61,6 +63,7 @@ def qapp() -> QApplication:
 def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior]:
     before = registry_state()
     component_registry.register("qubit/workflow-app-test", QubitSchema)
+    component_registry.register("resonator/workflow-app-test", ResonatorSchema)
     try:
         role_registry.get("qubit")
     except ValueError:
@@ -118,9 +121,51 @@ def open_point(
     app.services.context_control.set_alias_rows((AliasRow("qubit", "Q1"),))
     app.window.setup_dialog.close()
     qapp.processEvents()
-    captured = app.services.context.read_alias_context({"qubit": RoleSpec("qubit/*")})
-    assert captured is not None and captured.resolve_path("$qubit.kind") == "Q1.kind"
+    captured = app.services.context.read_context()
+    assert captured.resolve_path("$qubit.kind") == "Q1.kind"
     return entry
+
+
+@pytest.mark.parametrize("embedded", [False, True])
+def test_window_parent_and_close_callback_retry(
+    qapp: QApplication, embedded: bool
+) -> None:
+    harness = StartHarness()
+    parent = QWidget() if embedded else None
+    attempts: list[int] = []
+
+    def on_close() -> None:
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            raise RuntimeError("session close refused")
+
+    window = T1WorkflowWindow(
+        harness.state,
+        harness.services,
+        harness.owner,
+        parent=parent,
+        on_close=on_close,
+    )
+    try:
+        assert window.parentWidget() is parent
+        assert window.isWindow() is (not embedded)
+        if parent is not None:
+            parent.show()
+        window.show()
+        assert not window.close()
+        assert window.isVisible()
+        message = window.findChild(QLabel, "workflow.run.message")
+        assert message is not None and message.text() == "session close refused"
+        assert attempts == [1]
+        assert window.close()
+        assert not window.isVisible()
+        assert attempts == [1, 2]
+    finally:
+        window.close()
+        window.deleteLater()
+        if parent is not None:
+            parent.deleteLater()
+        qapp.processEvents()
 
 
 def test_empty_assembly_uses_one_native_owner_without_source(
@@ -302,11 +347,85 @@ def test_capture_failure_preserves_both_panels_and_local_input(
     edit.editingFinished.emit()
     before = knobs.state.input.data
     app.services.settings.open_entry(EntryRequest("sample"))
-    with pytest.raises(FailedPreconditionError):
+    with pytest.raises(RoleResolutionError, match="qubit"):
         app.window.prepare_forms()
     assert app.window.plan_panel is plan and app.window.tunables_panel is knobs
     assert knobs.state.input.data == before
     assert edit.text() == "1+" and knobs.editor.local_parse_errors() is not None
+
+
+@pytest.mark.parametrize("rows", [(), (AliasRow("qubit", ""),)])
+def test_prepare_missing_or_unbound_qubit_names_alias_and_preserves_panels(
+    app: WorkflowsGuiBehavior,
+    tmp_path: Path,
+    qapp: QApplication,
+    rows: tuple[AliasRow, ...],
+) -> None:
+    app.assemble(None)
+    open_point(app, tmp_path, qapp)
+    window = app.window
+    window.prepare_forms()
+    plan, knobs = window.plan_panel, window.tunables_panel
+    knobs.state.write({("guess_us",): 17.0}, knobs.env)
+    before = knobs.state.input.data
+    app.services.context_control.set_alias_rows(rows)
+    with pytest.raises(RoleResolutionError, match="qubit"):
+        window.prepare_forms()
+    assert window.plan_panel is plan and window.tunables_panel is knobs
+    assert knobs.state.input.data == before
+
+
+def test_prepare_accepts_other_component_kind_and_reports_consuming_field_error(
+    app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication
+) -> None:
+    app.assemble(None)
+    open_point(app, tmp_path, qapp)
+    control = app.services.context_control
+    control.add_component("R1", "resonator/workflow-app-test", {})
+    control.set_alias_rows((AliasRow("qubit", "R1"),))
+    window = app.window
+    old_plan = window.plan_panel
+    button(window, "workflow.source.use").click()
+    assert window.plan_panel is not old_plan
+    assert "pi_length_us" not in window.plan_panel.state.input.data
+    reply = window.inspect_form(
+        "plan", batch={("pi_length_us",): {"expr": "$qubit.resonator"}}
+    )
+    assert not isinstance(reply, FormErrors)
+    error = next(e for e in reply["errors"] if e["path"] == ["pi_length_us"])
+    assert "$qubit.resonator" in error["message"]
+    assert "missing parameter" in error["message"]
+
+
+def test_prepare_captures_all_alias_rows_without_live_rebinding(
+    app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication
+) -> None:
+    app.assemble(None)
+    open_point(app, tmp_path, qapp)
+    context = app.services.context
+    context.add_component("Q2", "qubit/workflow-app-test", {})
+    target = context.read_context().target
+    context.set_parameter(target, "Q1.ext.pi", 0.12)
+    context.set_parameter(target, "Q2.ext.pi", 0.24)
+    context.set_alias_rows((AliasRow("qubit", "Q1"), AliasRow("probe", "Q1")))
+    app.window.prepare_forms()
+    context.set_alias_rows((AliasRow("qubit", "Q2"), AliasRow("probe", "Q2")))
+    context.set_parameter(target, "Q1.ext.pi", 0.99)
+    reply = app.window.inspect_form(
+        "plan", batch={("pi_length_us",): {"expr": "$probe.ext.pi"}}
+    )
+    assert not isinstance(reply, FormErrors)
+    assert {tuple(v["path"]): v["value"] for v in reply["values"]}[
+        ("pi_length_us",)
+    ] == 0.12
+    app.window.prepare_forms()
+    reply = app.window.inspect_form(
+        "plan", batch={("pi_length_us",): {"expr": "$probe.ext.pi"}}
+    )
+    assert not isinstance(reply, FormErrors)
+    assert {tuple(v["path"]): v["value"] for v in reply["values"]}[
+        ("pi_length_us",)
+    ] == 0.24
 
 
 def test_composition_rpc_reads_same_draft_without_socket(

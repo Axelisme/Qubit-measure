@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -25,13 +25,11 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
-from zcu_lab.v2._support.measure.reset_bath import bath_reset_writeback_items
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import Seed, custom, scaled_md
+from zcu_lab.v2._support.measure.seeds import Seed, custom, scaled_path_seed
 from zcu_lab.v2.twotone.reset.bath.freq.core import (
     FreqGainAnalyzeOptions,
     FreqGainCfg,
@@ -48,25 +46,12 @@ _PI2_PHASE_OFFSET_DEG: float = 90.0
 
 
 def _cavity_freq_range(expts: int) -> Seed[SweepValue]:
-    """Cavity-tone frequency sweep range: ``r_f - rabi_f`` centred.
+    """Store cavity frequency minus 0.8–1.2 times calibrated Rabi frequency."""
 
-    Mirrors the notebook span ``[r_f - 1.2*rabi_f, r_f - 0.8*rabi_f]``. When both
-    md keys exist each edge stays an EvalValue (the GUI re-derives if md
-    changes); otherwise a fixed fallback span around the available centre.
-    """
-
-    def resolve(ctx: SessionEnv) -> SweepValue:
-        r_f = md_get_float(ctx, "r_f", 6000.0)
-        rabi_f = md_get_float(ctx, "rabi_f", 20.0)
-        if md_has_key(ctx, "r_f") and md_has_key(ctx, "rabi_f"):
-            return SweepValue(
-                start=EvalValue(expr="r_f - 1.2 * rabi_f"),
-                stop=EvalValue(expr="r_f - 0.8 * rabi_f"),
-                expts=expts,
-            )
+    def resolve(_ctx: SessionEnv) -> SweepValue:
         return SweepValue(
-            start=r_f - 1.2 * rabi_f,
-            stop=r_f - 0.8 * rabi_f,
+            start=EvalValue("$resonator.freq - 1.2 * $qubit.ext.rabi_freq"),
+            stop=EvalValue("$resonator.freq - 0.8 * $qubit.ext.rabi_freq"),
             expts=expts,
         )
 
@@ -107,22 +92,24 @@ class BathFreqGainAdapter(
             "dumps the excitation into the cavity bath. Runs on real hardware."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' / 'rabi_f' — the "
-            "resonator frequency and bath Rabi frequency centring the cavity "
-            "freq sweep at 'r_f - rabi_f' (absent → a fixed span); 'q_f' / "
-            "'qub_ch' / 'res_ch' seed the bath-reset tone drive defaults."
+            "Requires $resonator.freq and $qubit.ext.rabi_freq for the "
+            "cavity sweep from resonator frequency minus 1.2 Rabi frequency "
+            "to minus 0.8 Rabi frequency. Other drive defaults use captured "
+            "qubit/resonator frequency and wiring. Missing, null or invalid "
+            "seed values fail cfg lowering."
         ),
         expects_ml=(
-            "Needs a bath-reset module (the tested reset, with cavity / qubit / "
-            "pi-2 tones) and a readout module. Optionally references a "
-            "calibrated upstream reset and an init pulse (a library pi pulse "
-            "when present) — both disabled when no library entry exists."
+            "Builds the tested bath-reset cfg with cavity, qubit and pi/2 "
+            "tones from captured defaults and needs a readout module. "
+            "Optionally references an upstream reset and an init pulse "
+            "(a library pi pulse when present), both disabled when no "
+            "library entry exists."
         ),
         typical_writeback=(
-            "Proposes the best cavity gain into MetaDict 'bathreset_gain' and "
-            "frequency into 'bathreset_freq'. No ModuleLibrary writeback — these "
-            "seed the final 'reset_bath' registration done after the length and "
-            "phase steps (D2(a))."
+            "Proposes the best cavity gain and frequency to "
+            "$qubit.ext.reset_bath_gain and $qubit.ext.reset_bath_freq only. "
+            "BathPhase proposes the tested ground/excited reset modules; "
+            "length analysis has no automatic writeback."
         ),
         recommended=(
             "Analysis denoises the 2D map before picking the peak; wavelet "
@@ -151,7 +138,7 @@ class BathFreqGainAdapter(
             )
             .readout()
             .relax_delay(
-                scaled_md("t1", factor=5.0, fallback_value=30.5),
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5),
             )
             .sweep(
                 "freq",
@@ -195,20 +182,20 @@ class BathFreqGainAdapter(
         self,
         req: WritebackRequest[BathFreqGainRunResult, BathFreqGainAnalyzeResult],
     ) -> Sequence[WritebackItem]:
+        """Propose this analysis's cavity gain then frequency to qubit ext."""
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
-                target_name="bathreset_gain",
+            ParameterWriteback(
+                target_name="$qubit.ext.reset_bath_gain",
                 description="Bath-reset cavity gain (a.u.)",
                 proposed_value=result.gain,
             ),
-            MetaDictWriteback(
-                target_name="bathreset_freq",
+            ParameterWriteback(
+                target_name="$qubit.ext.reset_bath_freq",
                 description="Bath-reset cavity frequency (MHz)",
                 proposed_value=result.freq,
             ),
         ]
-        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg))
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

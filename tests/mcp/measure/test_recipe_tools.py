@@ -11,6 +11,7 @@ from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeRun, RecipeSessi
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._analyze_support import call_stdio, stdio_data
+from ._recipe_actual_support import cfg_value
 from ._recipe_analysis_support import AnalysisRecipeGui
 from ._recipe_execution_support import ControlledRunGui, definition
 from ._support import make_client
@@ -79,7 +80,7 @@ class WritebackGui(AnalysisRecipeGui):
                 "written": [
                     {
                         "id": item["id"],
-                        "kind": "md",
+                        "kind": "parameter",
                         "target": "frequency",
                         "before": {"value": 1.0},
                         "after": {"value": 2.0},
@@ -442,15 +443,17 @@ def test_production_lookback_preserves_sources_and_only_writes_after_answer(tmp_
             },
         )
         assert question.data["status"] == "awaiting_answer"
-        actual = question.data["actual"]["parameters"]
-        for name in (
-            "frequency_mhz",
-            "readout_length_us",
-            "trigger_offset_us",
-            "rounds",
+        for field, value in (
+            ("modules.readout.pulse_cfg.freq", 5100.0),
+            ("modules.readout.ro_cfg.ro_length", 4.0),
+            ("modules.readout.ro_cfg.trig_offset", 0.25),
+            ("rounds", 7),
         ):
-            assert actual[name]["source"] == name
-        assert actual["frequency_mhz"]["value"] == 5100.0
+            assert cfg_value(gui.publication, field) == value
+        assert question.data["actual"]["use_reset"] == {
+            "value": None,
+            "source": "disabled",
+        }
         assert gui.raw_saved and gui.writes == []
         result = client.call(
             "answer", {"recipe": question.data["execution"], "decision": "accepted"}

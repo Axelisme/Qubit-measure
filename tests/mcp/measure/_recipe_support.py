@@ -5,6 +5,15 @@ from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
 
+from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.expression import evaluate_scalar_expr
+from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+
+from zcu_lab.components import QubitSchema, ResonatorSchema
+
 from ._support import make_client
 
 PNG = base64.b64decode(
@@ -74,6 +83,53 @@ class LookbackGui:
         self.ran = False
         self.raw_saved = False
         self.md: dict[str, Any] = {}
+        self.library: dict[str, Any] = {}
+
+    def evaluate_expression(self, expression: str) -> int | float | complex:
+        """Evaluate GUI formulas with native models and a fixed public context.
+
+        The recording parameter-read wire below deliberately retains malformed
+        values for caller rejection coverage; it does not claim native admission.
+        Formula evaluation, unlike that wire, uses the real numeric owner.
+        Direct native model construction requires no process-global registry.
+        """
+        resonator = ResonatorSchema.model_validate(
+            {
+                "kind": "resonator",
+                **{
+                    name: self.md[f"$resonator.{name}"]
+                    for name in ("freq", "kappa")
+                    if f"$resonator.{name}" in self.md
+                },
+            }
+        )
+        qubit = QubitSchema.model_validate(
+            {
+                "kind": "qubit/transmon",
+                **{
+                    name: self.md[f"$qubit.{name}"]
+                    for name in ("freq", "kappa", "flux_half", "flux_int")
+                    if f"$qubit.{name}" in self.md
+                },
+            }
+        )
+        parameters = ParameterContext(
+            point=PointDocument.model_construct(
+                format="zcu.parameter-container",
+                format_version="1.0",
+                general=PointGeneral(created_at="2026-10-09T00:00:00Z"),
+                components={"R1": resonator, "Q1": qubit},
+            ),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library",
+                    format_version="1.0",
+                )
+            ),
+            target=EntryDraft(entry_id="recipe-entry"),
+            roles=None,
+        ).bind_aliases((AliasRow("resonator", "R1"), AliasRow("qubit", "Q1")), {})
+        return evaluate_scalar_expr(expression, parameters)
 
     def _observations(self) -> dict[str, dict[str, Any]]:
         return {
@@ -125,6 +181,16 @@ class LookbackGui:
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         observations = self._observations()
+        if method == "tab.parameter_read":
+            observations[method] = {
+                "values": {
+                    path: deepcopy(self.md.get(path)) for path in params["paths"]
+                },
+                "modules": {
+                    reference: reference if reference in self.library else None
+                    for reference in params["module_refs"]
+                },
+            }
         if method in observations:
             expected = {
                 "tab.new": {"adapter_name": "lookback"},
@@ -247,8 +313,8 @@ class LookbackGui:
                 "has_draft": True,
                 "items": [
                     {
-                        "id": "md-1",
-                        "kind": "metadict",
+                        "id": "param-1",
+                        "kind": "parameter",
                         "target_name": "trigger_offset",
                         "selected": False,
                         "proposed": 0.24,

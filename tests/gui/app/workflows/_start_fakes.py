@@ -21,6 +21,7 @@ class DeferredBackground:
 
     def __init__(self) -> None:
         self.fail_submit = False
+        self.on_submit: Callable[[], None] | None = None
         self.work: Callable[[], object] | None = None
         self.on_done: Callable[[object], None] | None = None
         self.on_error: Callable[[Exception], None] | None = None
@@ -35,6 +36,9 @@ class DeferredBackground:
         on_done: Callable[[object], None],
         on_error: Callable[[Exception], None],
     ) -> None:
+        # Observe continuation admission before a producer exists.
+        if self.on_submit is not None:
+            self.on_submit()
         if self.fail_submit:
             raise OSError("submit failed")
         if self.work is not None:

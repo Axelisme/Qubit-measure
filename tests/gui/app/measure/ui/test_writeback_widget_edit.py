@@ -1,10 +1,41 @@
 from unittest.mock import MagicMock, patch
 
 from qtpy.QtWidgets import QCheckBox, QDialog, QLineEdit, QPushButton
-from zcu_tools.gui.app.measure.adapter import MetaDictWriteback, ModuleWriteback
+from zcu_tools.gui.app.measure.adapter import ModuleWriteback, ParameterWriteback
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+
+
+def _preview(item: ParameterWriteback | ModuleWriteback) -> dict[str, WritebackValues]:
+    return {
+        item.session_id: WritebackValues(
+            actual_path=item.target_name,
+            current=None,
+            proposed=item.proposed_value
+            if isinstance(item, ParameterWriteback)
+            else {},
+            unit=None,
+        )
+    }
+
+
+def _widget(item: ParameterWriteback | ModuleWriteback, ctrl=None) -> WritebackWidget:
+    if ctrl is None:
+        ctrl = MagicMock()
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (
+        lambda *args, **kwargs: _preview(item)
+    )
+    widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
+    widget.populate([item], _preview(item))
+    return widget
+
+
+def _edit_button(widget: WritebackWidget) -> QPushButton:
+    return next(
+        button for button in widget.findChildren(QPushButton) if button.text() == "Edit"
+    )
 
 
 def _find_open_dialog(title_prefix: str) -> QDialog:
@@ -26,17 +57,14 @@ def _find_open_dialog(title_prefix: str) -> QDialog:
 
 
 def test_edit_md_item_can_change_target_name(qapp):
-    """The metadict Edit dialog exposes an editable apply-as (target_name)."""
-    item = MetaDictWriteback(
+    """The parameter Edit dialog exposes an editable apply-as (target_name)."""
+    item = ParameterWriteback(
         target_name="r_f", description="freq", proposed_value=6000.0
     )
-    item.session_id = "md-1"
+    item.session_id = "param-1"
 
-    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
-    widget.populate([item])
-
-    cb = QCheckBox()
-    widget._edit_md_item(item, cb)
+    widget = _widget(item)
+    _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Value:")
     try:
         line_edits = dialog.findChildren(QLineEdit)
@@ -54,22 +82,19 @@ def test_edit_md_item_can_change_target_name(qapp):
         assert item.target_name == "r_f_tuned"
         assert item.proposed_value == 6100.0
         # session_id (the stable id) is untouched by a retarget.
-        assert item.session_id == "md-1"
+        assert item.session_id == "param-1"
     finally:
         dialog.close()
 
 
 def test_edit_md_item_rejects_blank_target_name(qapp):
-    item = MetaDictWriteback(
+    item = ParameterWriteback(
         target_name="r_f", description="freq", proposed_value=6000.0
     )
-    item.session_id = "md-1"
+    item.session_id = "param-1"
 
-    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
-    widget.populate([item])
-
-    cb = QCheckBox()
-    widget._edit_md_item(item, cb)
+    widget = _widget(item)
+    _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Value:")
     try:
         name_edit = dialog.findChildren(QLineEdit)[0]
@@ -92,16 +117,13 @@ def test_edit_md_item_rejects_blank_target_name(qapp):
 
 def test_edit_md_item_parses_complex_value(qapp):
     """A complex md value coerces the user's "re+imj" input to complex (not str)."""
-    item = MetaDictWriteback(
+    item = ParameterWriteback(
         target_name="g_center", description="|g> centre", proposed_value=complex(1, 2)
     )
-    item.session_id = "md-1"
+    item.session_id = "param-1"
 
-    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
-    widget.populate([item])
-
-    cb = QCheckBox()
-    widget._edit_md_item(item, cb)
+    widget = _widget(item)
+    _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Value:")
     try:
         value_edit = dialog.findChildren(QLineEdit)[1]
@@ -119,16 +141,13 @@ def test_edit_md_item_parses_complex_value(qapp):
 
 def test_edit_md_item_rejects_unparseable_complex(qapp):
     """An unparseable complex input fast-fails and leaves the original value."""
-    item = MetaDictWriteback(
+    item = ParameterWriteback(
         target_name="g_center", description="|g> centre", proposed_value=complex(1, 2)
     )
-    item.session_id = "md-1"
+    item.session_id = "param-1"
 
-    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
-    widget.populate([item])
-
-    cb = QCheckBox()
-    widget._edit_md_item(item, cb)
+    widget = _widget(item)
+    _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Value:")
     try:
         value_edit = dialog.findChildren(QLineEdit)[1]
@@ -154,12 +173,12 @@ def test_edit_cfg_item_reports_draft_resolution_failure(qapp):
     item.session_id = "ml-1"
     ctrl = MagicMock()
     ctrl.get_writeback_item_draft_for_pane.side_effect = RuntimeError("draft closed")
-    widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
+    widget = _widget(item, ctrl)
 
     with patch(
         "zcu_tools.gui.app.measure.ui.writeback_widget.QMessageBox.critical"
     ) as critical:
-        widget._edit_cfg_item(item, QCheckBox())
+        _edit_button(widget).click()
 
     critical.assert_called_once_with(widget, "Unable to edit writeback", "draft closed")
 
@@ -177,15 +196,14 @@ def test_edit_cfg_item_can_change_target_name(qapp):
         CfgSchema(
             spec=CfgSectionSpec(fields={}),
             value=CfgSectionValue(fields={}),
-        )
+        ),
+        parameters=None,
     )
     ctrl.get_writeback_item_draft_for_pane.return_value = draft
     ctrl.get_writeback_applied_for_pane.return_value = {"ml-1": True}
-    widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
-    widget.populate([item])
-
-    cb = QCheckBox()
-    widget._edit_cfg_item(item, cb)
+    widget = _widget(item, ctrl)
+    cb = widget.findChildren(QCheckBox)[0]
+    _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Config:")
     try:
         name_edit = dialog.findChildren(QLineEdit)[0]

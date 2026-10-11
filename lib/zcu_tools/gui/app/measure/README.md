@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-09，全域 alias、Run admission 與 native Load 來源
+**Last updated:** 2026-10-11，caller-owned alias preset 與 session runner／progress
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -256,10 +256,19 @@ ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
 
-Measure composition 在一處宣告 session-memory alias 初值：qubit 留空，resonator
-保存 `$qubit.resonator`。ContextService 在第一份非空元件 snapshot 以 registry
-的唯一候選填 qubit，不硬編 component kind。之後切 point 不重設表。參數捕捉
-經 `read_alias_context`，不再從 GUI focus 或 adapter 的 via 推論 alias。
+Composition 建立 runner／progress 後交給 `build_session_services()`。
+Run、Analyze、PostAnalyze 從回傳的 `SessionServices.runner` 取用同一 lifecycle
+機制。Operation control 與 app bundle 從 `SessionServices.progress` 取用同一
+progress owner。這個入口不改 operation policy、hardware exclusion、取消或
+owner-thread delivery，也不另建 infrastructure bundle。
+
+Measure launcher 從使用者套件取得有序 alias preset，以 `alias_preset` 經
+`MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 session。
+框架不宣告領域初值。獨立 caller 可提供自己的 rows，省略或空 tuple 都建立空表。
+ContextService 保留 authored softlinks 與空列，在第一份非空元件 snapshot 以
+role registry 的唯一 focus 候選填 primary 空列。之後切 point 不重設表，明確
+提交表後不再初始化。Preset 不查裝置或 cache。參數捕捉經 `read_alias_context`，
+不再從 GUI focus 或 adapter 的 via 推論 alias。
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
@@ -544,10 +553,15 @@ renders each publication after submitting an input change:
 
 Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
 remains valid. Run admission captures the current global `ParameterContext`, not tab birth sources.
-A single-use target resolves the same inputs against its temporary capture without
-changing the tab publication or global aliases. Recipe source queries also capture
-current globals through TabService. Targeted preview requires the original full
-CfgRef and returns a temporary observation without replacing it or publishing.
+Nonempty caller-owned `aliases` maps alias names to concrete components and
+resolves the same inputs against its temporary capture. It changes neither tab
+publication nor global rows. Omission, None and {} use cached acceptance.
+Recipe parameter/library queries and cfg preview use the same named overrides.
+Temporary preview requires the original full CfgRef and returns an observation
+without replacing it or publishing. Adapters do not declare parameter roles.
+EMPTY app captures without overrides retain deferred None; nonempty overrides
+reject no_context. Native Load takes Save storage from that one Load-time capture
+and reads historical fixed names without expanding current alias links.
 `schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
 fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves
@@ -585,7 +599,7 @@ ModuleLibrary reference enumeration只以`experiment.cfg_editing.program_shape_f
 不normalize typed cfg或建立Spec/Value。resolve才呼main materializer façade一次。Experiment
 composition把fresh canonical shape factory與eval-aware value factory一起註冊到immutable `TemplateEntry`；catalog
 registration只驗shape/kind，Controller create依序取得value與fresh shape並直接組`CfgSchema`，不從
-value sniff discriminator。既有 role_id／roles wire metadata 與 blank template 順序保持不變。
+value sniff discriminator。Create 先取得 alias-aware `read_context()`，將同一固定 capture 放進 factory 的 `SessionEnv.parameters` 並交 library write lowering；後來的來源或 selection 修改不改該次建立值與目的地。TemplateEntry 不要求 consumer roles。既有 role_id／roles wire metadata 與 blank template 順序保持不變。
 
 ModuleLibrary 新建唯一走 template catalog 的 `create_from_template`；`CfgEditorService.open`
 只以 required `from_name` 開啟既有 module/waveform 的 modify session，不提供

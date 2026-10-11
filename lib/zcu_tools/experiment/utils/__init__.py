@@ -1,22 +1,20 @@
 from .comment import make_comment, make_labber_cfg_snapshot, parse_comment
 from .device import (
-    get_labeled_device_cfg,
-    set_flux_in_dev_cfg,
-    set_freq_in_dev_cfg,
-    set_output_in_dev_cfg,
-    set_power_in_dev_cfg,
-    setup_devices,
+    check_flux_unit,
+    set_flux,
+    set_output,
+    set_rf_frequency,
+    set_rf_power,
 )
 from .sweep import format_sweep1D, get_single_sweep_name, make_sweep
 
 __all__ = [
     # device
-    "get_labeled_device_cfg",
-    "set_flux_in_dev_cfg",
-    "set_freq_in_dev_cfg",
-    "set_output_in_dev_cfg",
-    "set_power_in_dev_cfg",
-    "setup_devices",
+    "check_flux_unit",
+    "set_flux",
+    "set_rf_frequency",
+    "set_rf_power",
+    "set_output",
     # sweep
     "format_sweep1D",
     "get_single_sweep_name",

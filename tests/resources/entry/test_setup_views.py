@@ -568,11 +568,7 @@ def write_forward_setup(path: Path) -> None:
     document["format_version"] = "1.7"
     document["future_top"] = {"next": [1, "two"]}
     document["general"]["future_general"] = "next metadata"
-    document["components"]["R1"]["future_physical"] = 7.5e9
-    document["components"]["R1"]["wiring"] = {
-        "delay": 1.2,
-        "future_wiring": {"channel": 3},
-    }
+    document["components"]["R1"]["wiring"] = {"delay": 1.2}
     with path.open("w", encoding="utf-8") as stream:
         YAML(typ="rt").dump(document, stream)
 

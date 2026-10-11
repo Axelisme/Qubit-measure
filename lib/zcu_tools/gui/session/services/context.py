@@ -44,7 +44,12 @@ from zcu_tools.resources.context.library import (
     ModuleLibrary,
     ModuleLibraryDocument,
 )
-from zcu_tools.resources.entry import snapshot, source_path
+from zcu_tools.resources.entry import (
+    DestinationExistsError,
+    snapshot,
+    source_path,
+    validate_path_segment,
+)
 from zcu_tools.resources.entry.roles import role_registry
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
@@ -71,7 +76,6 @@ if TYPE_CHECKING:
         ComponentSchema,
         PointView,
         ResultEntry,
-        RoleSpec,
         SetupView,
     )
     from zcu_tools.resources.entry.ledger import RecordsLedger
@@ -218,23 +222,37 @@ class ContextService:
         """Create from setup or a same-entry clone, then install ACTIVE.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
-        and origin unchanged to ResultEntry.new_point; never copy DRAFT. Resource errors
-        propagate. Post-creation binding failure raises PointBindingError from
-        its cause, retaining the point and old binding without retry/deletion.
+        and origin unchanged to ResultEntry.new_point; never copy DRAFT. An unsafe
+        label raises InvalidInputError(point_label_invalid) before source reads or
+        writes, preserving binding, files, ledger and versions. Label safety follows
+        the entry owner's single path component rule. An existing destination
+        raises InvalidInputError with the entry owner's FileExistsError message,
+        preserving the same state. Other resource errors propagate. Post-creation
+        binding failure raises PointBindingError from its cause, retaining the
+        point and old binding without retry/deletion.
         """
         self._owner.assert_owner()
         entry = self._require_open_entry()
+        try:
+            validate_path_segment(request.label, field="label")
+        except ValueError as exc:
+            raise InvalidInputError(
+                str(exc), reason_code="point_label_invalid"
+            ) from exc
         clone = (
             entry.use_point(request.clone_from)
             if request.clone_from is not None
             else None
         )
-        point = entry.new_point(
-            request.label,
-            clone_from=clone,
-            description=request.description,
-            origin=request.origin.origin,
-        )
+        try:
+            point = entry.new_point(
+                request.label,
+                clone_from=clone,
+                description=request.description,
+                origin=request.origin.origin,
+            )
+        except DestinationExistsError as exc:
+            raise InvalidInputError(str(exc)) from exc
         try:
             parameters, library, sources, info = self._prepare_point(
                 entry, request.label, point
@@ -299,7 +317,7 @@ class ContextService:
                 )
             self._setup.add_component(name, kind=kind, **fields)
             return
-        parameters = self.read_context()
+        parameters = self._published_parameters()
         if isinstance(parameters.target, EntryDraft):
             document = self._entry.updated_component(
                 parameters.document(), name, kind, fields
@@ -334,12 +352,20 @@ class ContextService:
         with self._setup.edit() as draft:
             draft.set(path, value)
 
-    def read_context(self, *, roles: RoleBinding | None = None) -> ParameterContext:
-        """Capture published point/library on the owner sequence without I/O.
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Capture published point/library/storage and all current alias rows.
 
-        roles=None allows direct component/general paths only. Supplied names
-        stay fixed; missing/wrong-kind destinations raise RoleResolutionError.
-        EMPTY raises FailedPreconditionError(no_context). Necessary source
+        aliases optionally maps alias names to temporary concrete component
+        names. Overrides retain dependent authored links and change only this
+        capture, never global rows, versions, publication or selection. Invalid
+        identifiers raise InvalidInputError(alias_invalid). $alias.path reads
+        resolve lazily without consumer declarations or kind checks; missing or
+        unbound aliases raise RoleResolutionError naming the alias, with no
+        concrete-name fallback. Bare concrete paths remain independent.
+        The capture never follows later source or alias edits and performs no
+        I/O. EMPTY raises FailedPreconditionError(no_context). Necessary source
         faults raise ContextSourceUnavailableError, never returning old values.
         """
         self._owner.assert_owner()
@@ -348,14 +374,10 @@ class ContextService:
             raise FailedPreconditionError(
                 "No parameter context is installed", reason_code="no_context"
             )
-        return ParameterContext(
-            point=parameters.document(),
-            library=parameters.library,
-            target=parameters.target,
-            roles=roles,
-            source_faults=parameters.source_faults,
-            storage=parameters.storage,
-        )
+        table = self._aliases
+        for alias, component in (aliases or {}).items():
+            table = table.with_override(alias, component)
+        return parameters.bind_aliases(table.rows, {})
 
     def get_alias_rows(self) -> tuple[AliasRow, ...]:
         """Read immutable authored global rows without expanding links or I/O."""
@@ -379,42 +401,6 @@ class ContextService:
         if self._aliases.rows != previous:
             self._state.version.bump("context")
             self._bus.emit(AliasesChangedPayload(rows=self._aliases.rows))
-
-    def read_alias_context(
-        self,
-        declarations: Mapping[str, RoleSpec],
-        target: str | None = None,
-    ) -> ParameterContext | None:
-        """Capture current point/library/storage and authored global aliases.
-
-        Consumer declarations constrain kinds, never focus/via inference. No
-        target means lazy bindings: unbound aliases fail only when read. EMPTY
-        returns None for deferred cfg construction. Unavailable sources raise.
-        A target temporarily binds the first declared alias; its component and
-        kind must resolve now. Empty declarations/target raise InvalidInputError;
-        target with EMPTY raises FailedPreconditionError(no_context). Neither
-        global rows, source versions nor publications are changed by a target.
-        Returned captures retain no live callback and never follow later edits.
-        """
-        self._owner.assert_owner()
-        parameters = self._state.session_env.parameters
-        if parameters is None:
-            if target is not None:
-                raise FailedPreconditionError(
-                    "No parameter context is installed", reason_code="no_context"
-                )
-            return None
-        table = self._aliases
-        if target is not None:
-            if not declarations:
-                raise InvalidInputError("target requires a declared alias")
-            alias = next(iter(declarations))
-            table = table.with_override(alias, target)
-        captured = parameters.bind_aliases(table.rows, declarations)
-        if target is not None:
-            # Validate the one-use destination without copying or reading its fields.
-            captured.resolve_path(f"${next(iter(declarations))}.kind")
-        return captured
 
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.
@@ -440,7 +426,14 @@ class ContextService:
         self._owner.assert_owner()
         entry = self._require_write_target(target)
         if isinstance(target, EntryDraft):
-            return self.read_context(roles=roles)
+            parameters = self._published_parameters()
+            return ParameterContext(
+                point=parameters.document(),
+                library=parameters.library,
+                target=target,
+                roles=roles,
+                storage=parameters.storage,
+            )
         point = entry.use_point(target.point)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(target.point, assets=assets)

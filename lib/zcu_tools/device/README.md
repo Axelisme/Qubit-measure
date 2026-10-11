@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-08 — YOKO setup validation
+**Last updated:** 2026-10-11 — D326 stored flux value units
 
 這份筆記整理 `lib/zcu_tools/device` 的設計：以 VISA（pyvisa）為底層，抽出 `BaseDevice` + `BaseDeviceInfo` 的通用契約，再由 `DeviceManager` 管理 caller 明確建立的 registry。內建裝置包含 `YOKOGS200`（電流/電壓源）、`RohdeSchwarzSGS100A`（微波訊號源）與 `FakeDevice`（mock 測試）。
 
@@ -8,7 +8,7 @@
 
 ## 架構一覽（一句話版）
 
-`BaseDevice` 封裝 pyvisa session；各硬體子類負責 SCPI 字串；`BaseDeviceInfo`（Pydantic model，繼承 `ConfigBase`）作為 setup/readback 的序列化結構；`DeviceInfo` 是 Union TypeAlias 匯總所有已知子類型；`DeviceManager` 以名稱為 key 管理已連線的裝置實例，方便實驗 config（YAML/JSON）直接驅動硬體。
+`BaseDevice` 封裝 pyvisa session；各硬體子類負責 SCPI 字串；`BaseDeviceInfo`（Pydantic model，繼承 `ConfigBase`）作為 setup/readback 的序列化結構；`DeviceInfo` 是 Union TypeAlias 匯總所有已知子類型；`DeviceManager` 以名稱為 key 管理已連線的裝置實例，供 caller 明確設定、讀回與釋放資源。
 
 ```text
 BaseDeviceInfo (Pydantic ConfigBase)
@@ -31,6 +31,14 @@ DeviceInfo = Union[
 ```
 
 ---
+
+## 實驗控制與 acquisition snapshot
+
+實驗 cfg 自行宣告 `dev`，只保存角色到 device 名稱的 mapping。`ExpCfgModel` 不宣告這個欄位。Core 在實際使用時從 `RunContext.devices[name]` 取得 driver，不預查名稱，也不對全部裝置自動 setup。
+
+`DeviceInfo` 描述設定與讀回結果，不提供實驗旋鈕 setters。`experiment.utils` 的 `set_flux`、`set_rf_frequency`、`set_rf_power`、`set_output` 直接操作已選取的 driver。Flux 明示 A、V 或 native，helper 不切模式、步長或 output。`experiment.utils.check_flux_unit(cfg, unit)` 只比對 Info 儲存的 `value_unit`，不換算、不讀硬體、不修改 cfg。YOKO 和 Fake 以外的 Info 不支援 flux 設定。
+
+GUI 在既有操作 lease 後、core 前，Notebook 在建立 caller-owned `RunContext` 後、core 前，各讀所有 connected drivers 一次。固定 snapshot 進入 `RunMetadata.device_snapshot`，Save 不刷新硬體。`DeviceManager.setup_devices` 與 GUI 手動設定仍是獨立的明確操作。
 
 ## `BaseDeviceInfo`（`base.py:15`）
 
@@ -170,7 +178,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 ### `YOKOGS200`（`yoko.py:34`）— DC 電流／電壓源
 
-**Info 欄位**：`output ∈ {on, off} = "off"`、`mode ∈ {voltage, current} = "voltage"`、`value: float = 0.0`。`rampstep` 依 mode 預設為 1e-3 V 或 1e-6 A，必須為正且有限。上限都是 module 常數，不可由 setup 設定：步長上限 `MAX_RAMPSTEP` 為 1e-2 V 與 1e-5 A，輸出絕對值上限 `MAX_VOLTAGE`＝20 V 與 `MAX_CURRENT`＝20 mA。
+**Info 欄位**：`output ∈ {on, off} = "off"`、必填 `mode ∈ {voltage, current}`、`value: float = 0.0`。`value_unit ∈ {A, V}` 是儲存欄位；省略時由 Info 依 mode 產生，current 為 A，voltage 為 V。顯式矛盾單位或缺 mode 在 model boundary 拋 `ValidationError`。Model dump 與完整 cfg round-trip 保留 `value_unit`。`rampstep` 依 mode 預設為 1e-3 V 或 1e-6 A，必須為正且有限。上限都是 module 常數，不可由 setup 設定：步長上限 `MAX_RAMPSTEP` 為 1e-2 V 與 1e-5 A，輸出絕對值上限 `MAX_VOLTAGE`＝20 V 與 `MAX_CURRENT`＝20 mA。
 
 **SCPI 對應**：
 
@@ -190,6 +198,8 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 2. **不自動切模式**：cfg mode 與當前不一致直接 `RuntimeError`，明示「切模式要手動先歸零」。
 3. 採用 cfg 的 rampstep。
 4. 照 mode 呼叫 `set_voltage` / `set_current`（smart ramp，透傳 `stop_event`）。
+
+**`get_info`**：output、mode 與 level 各讀一次，Info 依這次 mode 產生並保存單位，不增加硬體查詢。GUI snapshot 讀有效 cached Info 的 `value_unit`，不另推導 mode。
 
 **`get_voltage` / `get_current`**：呼叫 `get_mode()` 檢查 mode 是否符合（否則 raise），然後直接讀 `_get_level()`（即 `:SOURce:LEVel?`），無 re-write 副作用。
 
@@ -215,7 +225,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 `FakeDevice` 用於本地流程測試，不需要真實儀器連線：
 
 - **`__init__(fast_mode=False)` 不接受 `rm` 參數**；它呼叫 `BaseDevice.__init__("none", rm=None)`，並由 `_open_session()` override 回傳 `None`。因此 Fake 不開 pyvisa session、不呼叫 `connect_message()`，但仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`（加速測試）。
-- `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`。
+- `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`、`value_unit: Literal["native"] = "native"`。Native 是未換算的工作座標，其他單位在 model boundary 拒絕；dump 與 GUI snapshot 保留 native。RF 裝置的 Hz／dBm 量各有固定單位，不新增 `value_unit`。
 - 提供 `get_output/set_output/output_on/output_off` 與 `get_value/set_value` 方法（記憶體狀態操作）。
 - `_set_value_smart(value, progress, stop_event=None)`：以 `_rampstep` 為實際步長，透過同一個 private ramp helper 做 `np.linspace` stepping + make_pbar；Fake 保留跳過起始點的 mock 行為，每步前 check `stop_event.is_set()`，協作中止。
 - `_setup(cfg, *, progress, stop_event)` 呼叫 `set_output` + 更新 `_rampstep` + `_set_value_smart`（透傳 `stop_event`）。

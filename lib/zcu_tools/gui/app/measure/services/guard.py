@@ -5,10 +5,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter
-
 from zcu_tools.datafile import RunSnapshot
-from zcu_tools.device import DeviceInfo
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ExpAdapterProtocol,
@@ -18,7 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.cfg.resource import AcceptedConfig, CfgResolution, CfgRevision
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
-from zcu_tools.resources.entry import PointStorageBinding, RoleSpec
+from zcu_tools.resources.entry import PointStorageBinding
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +42,7 @@ class RunInputs:
 
     tab_id identifies the admitted tab. adapter_name is its registered adapter
     name; adapter is the instance that executes this Run. request holds the
-    observed SoC handles, device settings and fixed cfg context. accepted_cfg is
+    observed SoC handles and fixed cfg context. accepted_cfg is
     the exact accepted publication with detached resolved values and provenance.
     RunService never re-reads these inputs from State or re-lowers a schema.
     snapshot fixes the current saved entry/point and every resolved alias at
@@ -95,14 +92,14 @@ class GuardService:
         state: State,
         *,
         captured_parameters: Callable[
-            [Mapping[str, RoleSpec], str | None], ParameterContext | None
+            [Mapping[str, str] | None], ParameterContext | None
         ],
         cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
     ) -> None:
         """Use owner-sequence captures for preview-independent Run admission.
 
         captured_parameters freezes current point/library/storage and aliases;
-        its optional target overrides only this capture. cfg_resolution must
+        its optional named aliases overrides affect only this capture. cfg_resolution must
         resolve cfg using exactly the supplied capture and published caches.
         Neither callback may poll hardware or retain live sources in its result.
         """
@@ -136,53 +133,36 @@ class GuardService:
         tab_id: str,
         *,
         expected_revision: CfgRevision,
-        target: str | None = None,
+        aliases: Mapping[str, str] | None = None,
     ) -> RunInputs:
         """Check tab_id and capture the exact cfg revision and observed inputs.
 
         Requires ACTIVE context and the adapter's Run preconditions, including
-        SoC when declared. Unknown tab, readiness, device settings and adapter
-        validation failures raise GuardError; stale or invalid publications keep
-        their cfg errors. Device settings are cached observations, not live reads.
+        SoC when declared. Unknown tab, readiness and adapter validation failures
+        raise GuardError; stale or invalid publications keep their cfg errors.
+        Cached device settings do not participate in admission.
         Captures current global parameters once for cfg context and all resolved
-        alias names. target overrides this Run's first declared alias, never
-        global rows or tab cfg publication. Temporary acceptance uses that same
-        capture, can resolve Invalid inputs, and retains revision guards.
+        alias names. Nonempty aliases maps names to concrete components for
+        this Run, never changing global rows or tab cfg publication. None and {}
+        use cached acceptance. Temporary acceptance uses that same capture,
+        can resolve Invalid inputs, and retains revision guards.
         Current saved-point storage supplies entry/point/description. No Run,
-        lease, file or ledger write starts; source and target errors propagate.
+        lease, file or ledger write starts; source and alias errors propagate.
         """
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "run")
 
         ctx = self._state.session_env
-        parameters = self._captured_parameters(tab.adapter.parameter_roles(), target)
-        # Temporary target resolution does not publish or change global aliases.
+        parameters = self._captured_parameters(aliases)
+        # Temporary alias resolution does not publish or change global aliases.
         accepted = tab.cfg.accept(
             expected_revision,
-            resolution=None if target is None else self._cfg_resolution(parameters),
+            resolution=self._cfg_resolution(parameters) if aliases else None,
         )
-        try:
-            raw_cfg = accepted.values
-            device_snapshot: dict[str, DeviceInfo] = {}
-            info_type = TypeAdapter(DeviceInfo)
-            for device in self._state.list_devices():
-                if device.is_live():
-                    if device.info is None:
-                        raise ValueError(
-                            f"Device {device.name!r} has no observed settings"
-                        )
-                    device_snapshot[device.name] = info_type.validate_python(
-                        device.info
-                    )
-        except Exception as exc:
-            raise GuardError(
-                f"Config invalid: {exc}", reason_code="invalid_cfg"
-            ) from exc
-
+        raw_cfg = accepted.values
         req = RunRequest(
             soc=ctx.soc,
             soccfg=ctx.soccfg,
-            device_snapshot=device_snapshot,
             cfg_context=None
             if parameters is None
             else parameters.library.validation_context(),

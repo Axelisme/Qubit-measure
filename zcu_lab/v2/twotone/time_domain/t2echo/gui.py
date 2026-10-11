@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -26,7 +26,6 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import RoleSpec
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.detune import (
@@ -174,13 +173,6 @@ class T2EchoAdapter(
         ),
     )
 
-    def parameter_roles(self) -> Mapping[str, RoleSpec]:
-        """Declare the global aliases used by this adapter."""
-        return {
-            "qubit": RoleSpec("qubit/*"),
-            "resonator": RoleSpec("resonator"),
-        }
-
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         """Declare static shape and defaults resolved on the supplied capture.
@@ -290,7 +282,7 @@ class T2EchoAdapter(
         """
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="$qubit.t2e",
                 description="T2 Echo time (us)",
                 proposed_value=result.t2e,

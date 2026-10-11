@@ -10,7 +10,6 @@ from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Completed,
-    DeviceSnapshot,
     Done,
     Engine,
     EnginePorts,
@@ -31,6 +30,7 @@ from ._engine_fakes import (
     ManualClock,
     Plan,
     RecordingBar,
+    RecordingDevices,
     State,
     Tunables,
     save_integer,
@@ -50,7 +50,7 @@ def plots() -> Generator[Plots, None, None]:
 def test_run_live_supplies_captured_axes_and_latest_complex_samples(
     plots: Plots,
 ) -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     viewer = plots.liveplot_1d("trace", "Time", "Signal")
     seen: list[NDArray[np.complex128]] = []
 
@@ -76,7 +76,7 @@ def test_run_live_supplies_captured_axes_and_latest_complex_samples(
 def test_two_dimensional_live_callback_preserves_axis_order_and_partial_nan(
     plots: Plots,
 ) -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     viewer = plots.liveplot_2d("grid", "Frequency", "Gain")
     run.bind_live(lambda axes, samples: viewer.update(axes[0], axes[1], samples.real))
     xs, ys = np.array([1.0, 2.0]), np.array([3.0, 4.0, 5.0])
@@ -89,7 +89,7 @@ def test_two_dimensional_live_callback_preserves_axis_order_and_partial_nan(
 
 
 def test_live_ambiguity_retains_original_failure() -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     run.bind_live(lambda _axes, _samples: None)
     run.buffer((2,), axes=(np.array([0.0, 1.0]),))
     with pytest.raises(ValueError, match="unambiguous buffer") as caught:
@@ -98,11 +98,11 @@ def test_live_ambiguity_retains_original_failure() -> None:
 
 
 def test_live_must_bind_once_before_buffer_creation() -> None:
-    run = Run(Cfg(), StopSignal())
+    run = Run(Cfg(), StopSignal(), device_snapshot={})
     run.bind_live(lambda _axes, _samples: None)
     with pytest.raises(ValueError, match="once before buffer"):
         run.bind_live(lambda _axes, _samples: None)
-    late = Run(Cfg(), StopSignal())
+    late = Run(Cfg(), StopSignal(), device_snapshot={})
     late.buffer((1,), axes=(np.array([0.0]),))
     with pytest.raises(ValueError, match="once before buffer"):
         late.bind_live(lambda _axes, _samples: None)
@@ -120,7 +120,6 @@ def _start(
         paths=RunPaths(tmp_path / "metadata", tmp_path / "data"),
         identity=RunIdentity(
             "run",
-            DeviceSnapshot({}),
             SoftwareProvenance(
                 software_versions={},
                 git_commit=None,
@@ -166,7 +165,11 @@ def test_engine_live_failure_is_not_recoverable_acquisition_failure(
             observed.append(result)
         return Next(1, state)
 
-    engine = Engine(EnginePorts(plots, RecordingBar, ManualClock(), context=7))
+    engine = Engine(
+        EnginePorts(
+            plots, RecordingBar, ManualClock(), context=7, devices=RecordingDevices()
+        )
+    )
     _start(engine, step, tmp_path)
     status = engine.execute("run")
     assert status.lifecycle == "failed"
@@ -209,7 +212,11 @@ def test_engine_reuses_injected_plots_across_steps_and_saves_live_figure(
         state.index += 1
         return Next(result.result, state)
 
-    engine = Engine(EnginePorts(plots, RecordingBar, ManualClock(), context=7))
+    engine = Engine(
+        EnginePorts(
+            plots, RecordingBar, ManualClock(), context=7, devices=RecordingDevices()
+        )
+    )
     _start(engine, step, tmp_path)
     status = engine.execute("run")
     assert status.lifecycle == "done"

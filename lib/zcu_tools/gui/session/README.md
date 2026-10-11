@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-09，全域 alias、固定參數投影、entry/point Setup、同 token continuation 與 Inspect 元件樹
+**Last updated:** 2026-10-11，caller-owned alias preset、SessionServices runner／progress 與 cached Info flux 單位
 
 # gui/session/ — 量測 session core
 
@@ -14,8 +14,9 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 ## Context、session environment 與 Run snapshot
 
 - **Entry 與 point** 的持久資源由 [`resources.entry`](../../resources/entry/README.md) 管理，module library 由 [`resources.context`](../../resources/context/README.md) 管理。Session 不重建文件版面，也不在清除選取時刪除資源。
-- **ParameterContext** 是隔離的 point/library/storage 投影，`EntryDraft` 與 `SavedPoint` 標識來源。`bind_aliases` 固定當次有序 rows 與 consumer kind declarations。`$alias.path` 只沿這份表解析，bare concrete paths 使用獨立 namespace。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，包括 adapter 未宣告的自訂 alias；空列略過，consumer declarations 只限制其列的 kind。
-- **全域 alias 表** 由 `ContextService` 持有，只留在 session memory。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列，讀取才解析元件和 kind。App composition 宣告初值，第一份非空元件 snapshot 以 registry 的唯一候選填 primary row。此初值只初始化一次；明確提交表後不再覆蓋。`set_alias_rows` 安裝後才發布變更 fact。`read_alias_context` 每次固定目前資料，單次 target 只替換回傳 capture 的表，不改全域 rows 或版本。Notebook 的 role resolver 與 via 保留原契約。
+- **ParameterContext** 是隔離的 point/library/storage 投影，`EntryDraft` 與 `SavedPoint` 標識來源。`bind_aliases` 固定當次有序 rows。GUI callers 使用空 declarations，Notebook 保留自己的 role kind 契約。`$alias.path` 只沿這份表解析，bare concrete paths 使用獨立 namespace。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，也包含自訂 alias。空列略過。歷史 fixed names 即使沒有 declarations，也必須指向來源 point 中存在的元件。
+- **Alias 瀏覽投影** 使用 `ParameterContext.resolved_aliases()`，回傳有序 `ResolvedAliasRow(alias, value, resolved, error)`。它保留 authored softlinks，對固定 point 使用既有 resolver，不沿用 consumer kind 限制。只有單列 `RoleResolutionError` 變成 resolved=None 與 error；source/readability 失敗仍拒絕整個讀取，不從 live 表或檔案补值。
+- **全域 alias 表** 由 `ContextService` 持有，只留在 session memory。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列，讀取才解析元件和 kind。Caller 提供有序初值，Measure composition 以 `alias_preset` 傳入，省略或空 tuple 建立空表。Session 不宣告領域 preset，也不從裝置或 cache 填列。第一份非空元件 snapshot 以 registry 的唯一候選填 primary 空列。此初值只初始化一次；明確提交表後不再覆蓋。`set_alias_rows` 安裝後才發布變更 fact。公開 `read_context(aliases=None)` 每次固定 point/library/storage 與全表，GUI 不要求 consumer declarations 或 kind 檢查。`aliases={"qubit": "Q2"}` 只覆寫該次 capture 的具名列，保留 dependent authored links，不改全域 rows、版本或 selection。EMPTY 沿 `no_context` 失敗，缺或未綁定的 `$alias` 在讀取時指名報錯。歷史 `read_target(target, roles=...)` 使用已固定的 names，不展開目前全表。GUI adapter 不宣告角色，Tab、Run 與 Load 直接使用 alias-aware capture。App 的 EMPTY 無 override 讀取回 None，保留 context-free 與 deferred 路徑；非空 overrides 仍拒絕 no_context。省略 overrides、None 與 {} 等價。Notebook 的 role resolver 與 via 保留原契約。
 - **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，DRAFT／ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC、predictor 與 cached value sources 保持各自 owner。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。
 
@@ -56,7 +57,7 @@ session/
 │   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經typed `ConnectionFinishedPayload`，無Qt）
 │   ├── predictor.py    — PredictorService（predictor load/set_model_params〔typed EJ/EC/EL→FluxoniumPredictor，走 install_predictor in-memory seam〕/clear/install + calibrate_flux_bias〔用當前 predictor 由單點 transition 頻率反推並安裝 flux_bias〕+ predict_freq + 批次曲線計算 predict_freq_curve/predict_matrix_element_curve〔委派 simulate `FluxoniumPrediction` engine 的 affine/array paths〕；get_predictor_info 含 EJ/EC/EL；純函式 read_fluxdep_fit_params〔經 resources.qubit_params.QubitParams 讀 params.json→typed model query〕；純計算，無 Qt signal/runner/gate，擁有 session_env.predictor 寫 seam，見本目錄服務分工）
 │   ├── context.py      — ContextService：owner-thread entry/point binding、固定 read/role capture、focus、source facts 與目前 entry 的 ledger capability
-│   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳；connect/disconnect終局用`DeviceOperationFinishedPayload`，setup重用`DeviceSetupFinishedPayload`，無Qt）；`_mode_dependent_unit(dev)` module-level helper 集中 YOKOGS200 voltage/current→V/A 判斷（`get_device_unit` + `get_device_unit_strict` 共用，消除逐字重複）；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/connect/disconnect skip，setup/ramp 允許 current-value refresh；單次讀失敗吞掉，不寫 State 於 worker）
+│   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳；connect/disconnect終局用`DeviceOperationFinishedPayload`，setup重用`DeviceSetupFinishedPayload`，無Qt）；`get_device_unit` 讀有效 YOKO／Fake cached Info 的 `value_unit`，分別為 A／V 與 native；缺 Info 的 UI／snapshot 標 none，不按 type 推測單位；strict binding 缺 Info 拋指名 device 的 `DeviceRegistrationError`，這些查詢不讀硬體、不改 connected／offline 狀態；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/connect/disconnect skip，setup/ramp 允許 current-value refresh；單次讀失敗吞掉，不寫 State 於 worker）
 │   ├── project_settings.py — ProjectSettingsService：以明確 result/Database roots 呼叫 ResultEntry.open/create，再交 ContextService.install_entry；記住的 entry/connection/device preferences 不證明來源已開啟
 │   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，壞 listener 會 detach，不阻斷其他 listener 或 terminal cleanup）
 │   ├── shutdown.py     — ShutdownCoordinator（Qt-free cancel-all + poll state machine，吃 OperationHandles，ADR-0066；QTimer driver 在 adapters/）
@@ -77,6 +78,8 @@ session/
 ```
 
 `Use Simulate Env` 是明確的環境組裝入口，不是 `SOC_CHANGED` 的副作用。它只在啟用時斷開真實 devices，允許之後混用。任一斷線失敗就停止並回報部分成果，不自動重連、歸零或 RF off。低層 SoC connect 不建立 FakeDevice；重複啟用保留有效 mock 的資源與數值。
+
+Device panel 保留原 mode 顯示與 output／value／rampstep 控制，不提供獨立 `value_unit` 編輯。完整 cfg 的單位由 Info 驗證，snapshot 與 recipe 沿同一儲存事實。
 
 ## Analysis-only operations
 
@@ -114,7 +117,15 @@ introduced.
   value-lookup expected leaves攜帶typed category。`ValueLookupError` parent、`ProviderError`、
   SoC/device async terminal與registration failures保持unexpected，不因共同ancestry被降級
   （ADR-0068）。
-- **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ runtime-specific `BackgroundExecutor` 各自建；Qt composition 使用 `session/adapters/qt_background.py` 的 `BackgroundRunner`，headless composition 使用注入 `ManualOwnerScheduler` 的 `ThreadPoolBackgroundExecutor`。兩者都保留 shared-pool / dedicated-worker 語意，terminal callback 一律回 owner thread；具體 owner 可在 teardown 呼 `quiesce()` 等待 worker 與 terminal delivery。`tests/gui/session/test_headless_composition.py` 以subprocess阻擋Qt imports，穿過正式`build_session_services`與offline MockSoc success/cancel lifecycle，作為無`QApplication` composition的可執行邊界。`ProgressService`/`IOManager`/`QtProgressTransport`/`QtShutdownDriver` 是共用 session service/adapter。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`（只宣告 `submit`，`quiesce` 不進 port）/`ProgressHub`/`ProjectIOPort` port。
+- **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ runtime-specific `BackgroundExecutor` 各自建；Qt composition 使用 `session/adapters/qt_background.py` 的 `BackgroundRunner`，headless composition 使用注入 `ManualOwnerScheduler` 的 `ThreadPoolBackgroundExecutor`。兩者都保留 shared-pool / dedicated-worker 語意，terminal callback 一律回 owner thread；具體 owner 可在 teardown 呼 `quiesce()` 等待 worker 與 terminal delivery。
+  `SessionServices.runner: OperationRunner` 與 `SessionServices.progress: ProgressService`
+  保留 build 輸入的同一 instances。共用 session 的 operation caller 從這份 bundle
+  取用，不另傳 runner／progress。Composition root 仍建立基礎物件並注入 build。
+  Operation policy、exclusion 與 owner-thread 契約不變。
+  `tests/gui/session/test_headless_composition.py` 在同一程序穿過正式 build 與
+  offline MockSoc success/cancel lifecycle，驗證無 `QApplication` 的 owner-thread、
+  progress 與 exclusion 行為。`ProgressService`、`QtProgressTransport` 與
+  `QtShutdownDriver` 是共用 session service/adapter。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure `RUN`）用 wire 字串比較，故兩 enum 同一 gate。共享硬體互斥規則住在 `RunBlocksHardwareGate`，app-local gate 只保留 RUN kind 與 import boundary。
 - **app 繼承/實作**：measure `State(SessionState)`；Controller 暴露 `setup_control: SetupControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 facets。
 - **Inspect 元件樹**：`ComponentTreeWidget` 透過 context facet 讀取 point／setup 文件並提交元件與參數命令。`ContextService` 擁有驗證、記憶體 DRAFT 與資源交易，widget 不寫檔。Setup 範本編輯不改現有 point 或焦點。Measure Inspect 的 Parameters 使用元件樹；Modules 保留 app-owned cfg editor，dirty selection／close 仍須顯式 Apply、Discard 或 Cancel。Modules mutation caller 的新容器接線尚待整合。

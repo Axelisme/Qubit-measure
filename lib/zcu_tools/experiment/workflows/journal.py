@@ -7,10 +7,10 @@ from datetime import datetime
 from traceback import TracebackException
 from typing import Literal
 
-from pydantic import JsonValue
+from pydantic import JsonValue, SerializeAsAny
 
+from ...device import BaseDeviceInfo
 from .models import Actor, CommittedRecord, RunIdentity, RunPaths
-from .ports import DeviceSnapshot
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,19 @@ class IterationStarted:
     revision: int
     iteration_dir: str
     kind: Literal["iteration_started"] = field(default="iteration_started", init=False)
+
+
+@dataclass(frozen=True)
+class DeviceSetup:
+    """One completed setup attempt: requested name and all typed cfg fields.
+
+    cfg retains the selected Info subclass in its JSON projection; the journal
+    does not interpret settings, units, limits or hardware readback.
+    """
+
+    name: str
+    cfg: SerializeAsAny[BaseDeviceInfo]
+    kind: Literal["device_setup"] = field(default="device_setup", init=False)
 
 
 @dataclass(frozen=True)
@@ -209,15 +222,13 @@ class Paused:
 
 @dataclass(frozen=True)
 class Resumed:
-    """Segment resume provenance after the host acquired its device lease.
+    """Continuation of a paused run under the host's retained RUN lease.
 
     commit_seq counts existing commits; revision is the next call's version.
-    devices is the detached host-supplied current device snapshot.
     """
 
     commit_seq: int
     revision: int
-    devices: DeviceSnapshot
     kind: Literal["resumed"] = field(default="resumed", init=False)
 
 
@@ -240,6 +251,7 @@ type JournalPayload = (
     RunStarted
     | IterationStarted
     | ExperimentFailed
+    | DeviceSetup
     | StepCommitted
     | StepFinished
     | StepDiscarded

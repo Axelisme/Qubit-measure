@@ -12,7 +12,7 @@ from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
-    MetaDictWriteback,
+    ParameterWriteback,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
@@ -32,22 +32,28 @@ from zcu_tools.gui.app.measure.state import (
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedErrorCategory
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 from zcu_tools.resources.entry import ArtifactKey
 
 from tests.gui._progress_fakes import DirectProgressTransport
-from tests.gui.app.measure._cfg_fakes import cfg_resources, make_cfg
+from tests.gui.app.measure._cfg_fakes import (
+    cfg_resolution,
+    cfg_resources,
+    make_cfg,
+    parameter_capture,
+)
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     PaneSummary,
     PostSummary,
     native_save_session,
 )
+from zcu_lab.components import QubitSchema
 from zcu_lab.v2.singleshot.ge.core import GE_Cfg, GE_Exp, GE_Result
 from zcu_lab.v2.singleshot.ge.gui import (
     GEAdapter,
@@ -108,8 +114,7 @@ class _Bg:
 
 def _state() -> tuple[State, str, MagicMock, SessionEnv]:
     ctx = SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
+        parameters=parameter_capture(),
         soc=MagicMock(),
         soccfg=MagicMock(),
         database_path="/db",
@@ -127,7 +132,7 @@ def _state() -> tuple[State, str, MagicMock, SessionEnv]:
             cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
         ),
     )
-    state.update_tab_result("tab", "run")
+    state.update_tab_result("tab", "run", parameters=ctx.parameters)
     return state, "tab", adapter, ctx
 
 
@@ -304,8 +309,10 @@ def test_named_panes_project_paths_and_retire_original_collections(
     newer.release()
 
 
-def test_primary_swap_returns_all_retired_dependents_and_invalidates_post() -> None:
-    state, tab_id, _adapter, _ctx = _state()
+def test_primary_swap_returns_all_retired_dependents_and_invalidates_post(
+    native_session: NativeSaveSession,
+) -> None:
+    state, tab_id = native_session.state, "tab"
     old_primary = object()
     old_post = object()
     old_primary_draft = object()
@@ -368,7 +375,7 @@ def test_post_swap_does_not_replace_primary() -> None:
 
 
 def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
-    state, tab_id, adapter, ctx = _state()
+    state, tab_id, adapter, _ctx = _state()
     old_primary_draft = _Draft(())
     old_post_draft = _Draft(())
     state.replace_analysis_pane(
@@ -377,14 +384,16 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
     state.replace_post_analysis_pane(
         tab_id, result="old-post", plots=None, writeback_draft=old_post_draft
     )
-    adapter.get_writeback_items.return_value = [MetaDictWriteback("new", "new", 1.0)]
+    adapter.get_writeback_items.return_value = [ParameterWriteback("new", "new", 1.0)]
     writeback = _Writeback()
     service, bg = _analyze_service(state, writeback)
     plots = Plots(NonPresentingHost())
     plots.subplots("fit")
+    captured_run_parameters = state.get_tab(tab_id).run.parameters
+    assert captured_run_parameters is not None
     service.start_analyze(tab_id, "params", plots=plots)
 
-    new_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    new_ctx = SessionEnv(parameters=parameter_capture(), soc=None, soccfg=None)
     state.set_context(new_ctx)
     state.get_tab(tab_id).run.result = "changed-after-start"
     result = object()
@@ -392,7 +401,7 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
 
     request = adapter.get_writeback_items.call_args.args[0]
     assert request.run_result == "run"
-    assert request.ctx is ctx
+    assert request.ctx.parameters is captured_run_parameters
     assert state.get_tab(tab_id).analysis.result is result
     assert state.get_tab(tab_id).analysis.plots is plots
     assert tuple(plots) == ("fit",)
@@ -415,6 +424,20 @@ def _ge_source_with_excited_initial_state() -> RunRecord[GE_Cfg, GE_Result]:
     )
 
 
+def _ge_capture(original: ParameterContext | None) -> ParameterContext:
+    if original is None:
+        raise RuntimeError("Native fixture must retain its Run parameter capture")
+    return ParameterContext(
+        point=original.document().model_copy(
+            update={"components": {"Q1": QubitSchema(kind="qubit/fluxonium")}}
+        ),
+        library=original.library,
+        target=original.target,
+        roles=None,
+        storage=original.storage,
+    ).bind_aliases((AliasRow("qubit", "Q1"),), {})
+
+
 def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     native_session: NativeSaveSession,
 ) -> None:
@@ -427,7 +450,7 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
         metadata=replace(
             native_session.metadata, experiment=GE_Exp().persistence_spec().tag
         ),
-        parameters=None,
+        parameters=_ge_capture(state.get_tab(tab_id).run.parameters),
     )
     bus = EventBus()
     writeback = WritebackService(
@@ -448,10 +471,10 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     primary_draft = tab.analysis.writeback_draft
     assert isinstance(primary_draft, WritebackDraft)
     assert {item.target_name for item in writeback.preview_draft(primary_draft)} == {
-        "qubit.ext.readout_cal.fidelity",
-        "qubit.ext.readout_cal.sigma",
-        "qubit.ext.readout_cal.g_center",
-        "qubit.ext.readout_cal.e_center",
+        "$qubit.ext.readout_cal.fidelity",
+        "$qubit.ext.readout_cal.sigma",
+        "$qubit.ext.readout_cal.g_center",
+        "$qubit.ext.readout_cal.e_center",
     }
     # The post operation must use the adopted primary, not the later form edit.
     params.initial_state = "ground"
@@ -478,8 +501,8 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
     post_draft = tab.post_analysis.writeback_draft
     assert isinstance(post_draft, WritebackDraft)
     assert {item.target_name for item in writeback.preview_draft(post_draft)} == {
-        "qubit.ext.readout_cal.radius",
-        "qubit.ext.readout_cal.confusion_matrix",
+        "$qubit.ext.readout_cal.radius",
+        "$qubit.ext.readout_cal.confusion_matrix",
     }
     snapshot = TabService(
         state,
@@ -586,7 +609,13 @@ def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
 
     adapter = DisabledAdapter()
     state.get_tab(tab_id).adapter = adapter  # type: ignore[assignment]
-    load = LoadService(state, MagicMock(), provide_options=lambda _kind: [])
+    load = LoadService(
+        state,
+        MagicMock(),
+        provide_options=lambda _kind: [],
+        context=MagicMock(),
+        captured_parameters=lambda _aliases: state.session_env.parameters,
+    )
 
     with pytest.raises(LoadDataError) as exc_info:
         load.load_result(tab_id, "/tmp/x")
@@ -605,5 +634,9 @@ def test_guard_and_load_accept_enabled_concrete_adapter() -> None:
             return object()
 
     state.get_tab(tab_id).adapter = EnabledAdapter()  # type: ignore[assignment]
-    GuardService(state).check_load(tab_id)
+    GuardService(
+        state,
+        captured_parameters=lambda _aliases: state.session_env.parameters,
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+    ).check_load(tab_id)
     assert state.get_tab(tab_id).run.result == "run"

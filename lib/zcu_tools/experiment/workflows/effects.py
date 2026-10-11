@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from math import isfinite
 from pathlib import Path
 from re import fullmatch
 from typing import Protocol
 
+from ...device import BaseDeviceInfo
 from .models import Completed, Effect, Failed
 from .run import LiveUpdate, Run
 
@@ -28,13 +28,13 @@ class EffectExecutor(Protocol):
     ) -> Completed[Cfg, Result] | Failed:
         """Execute request and save before returning its typed outcome.
 
-        request contains validated name, experiment, cfg, saver, optional live,
-        and setup_devices. Failures and cancellation never produce Completed.
+        request contains validated name, experiment, cfg, saver and optional
+        live. Failures and cancellation never produce Completed.
         """
         ...
 
-    def set_device(self, name: str, value: float) -> None:
-        """Set a connected device's absolute native value, or raise."""
+    def setup_device(self, name: str, cfg: BaseDeviceInfo) -> None:
+        """Apply complete connected-device settings, or raise."""
         ...
 
     def wait_until(self, target: datetime) -> None:
@@ -44,7 +44,7 @@ class EffectExecutor(Protocol):
 
 @dataclass
 class RunEffect[Cfg, Result](Effect):
-    """Internal request; experiment/cfg/save/live/setup_devices match env.run.
+    """Internal request; experiment/cfg/save/live match env.run.
 
     name is the validated ASCII function-name stem used for run files.
     outcome is absent until successful dispatch, then Completed or Failed.
@@ -55,7 +55,6 @@ class RunEffect[Cfg, Result](Effect):
     cfg: Cfg
     save: Callable[[Completed[Cfg, Result], Path], None]
     live: LiveUpdate | None
-    setup_devices: bool
     name: str = field(init=False)
     outcome: Completed[Cfg, Result] | Failed | None = field(default=None, init=False)
 
@@ -76,23 +75,17 @@ class RunEffect[Cfg, Result](Effect):
 
 @dataclass
 class DeviceEffect(Effect):
-    """Internal absolute setpoint request; done is true after adapter return."""
+    """Internal full-settings request; done is true after adapter return."""
 
     name: str
-    value: float
+    cfg: BaseDeviceInfo
     done: bool = field(default=False, init=False)
 
-    def __post_init__(self) -> None:
-        if not self.name.strip() or not isfinite(self.value):
-            raise ValueError(
-                "Device setpoint requires a name and finite absolute value"
-            )
-
     def execute(self, executor: EffectExecutor) -> None:
-        """Apply name/value once; propagate cancellation and device errors."""
+        """Apply name/cfg once; propagate cancellation and device errors."""
         if self.done:
             raise RuntimeError("Device effect has already completed")
-        executor.set_device(self.name, self.value)
+        executor.setup_device(self.name, self.cfg)
         self.done = True
 
 

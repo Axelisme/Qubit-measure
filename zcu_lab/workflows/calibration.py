@@ -385,7 +385,7 @@ def calibrate(
     Each stage builds its native cfg from the selected modules and this call's
     tunables/history. Frequency relax_delay is 1 µs; Rabi/readout relax_delay
     is 5 * t1_estimate_us. initial_delay and dev use native cfg defaults;
-    the caller sets flux through env.set_device, not cfg.dev. Frequency/Rabi
+    the caller sets flux through the workflow set_flux tool, not cfg.dev. Frequency/Rabi
     resolutions are fixed at 101/51; readout scans a fixed 10 MHz/51-point
     frequency window around the current accepted center.
 

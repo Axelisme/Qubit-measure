@@ -1,18 +1,18 @@
 """Deterministic host ports for public Engine seam tests."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
-from zcu_tools.datafile import SoftwareProvenance
-from zcu_tools.device import DeviceInfo, DeviceManager
+from zcu_tools.datafile import JsonObject, SoftwareProvenance
+from zcu_tools.device import BaseDeviceInfo, FakeDevice, FakeDeviceInfo
+from zcu_tools.experiment.acquisition import capture_device_snapshot
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Completed,
-    DeviceSnapshot,
     Engine,
     EnginePorts,
     InitEnv,
@@ -48,30 +48,38 @@ class ManualClock:
 
 
 class RecordingDevices:
-    """Record native setpoints and setup calls without touching hardware."""
+    """Record requested native setpoints without touching hardware."""
 
     def __init__(self) -> None:
         self.values: list[tuple[str, float]] = []
-        self.settings: list[Mapping[str, DeviceInfo]] = []
-        self.manager: DeviceManager | None = None
         self.on_set: Callable[[StopSignal], object] | None = None
-        self.on_setup: Callable[[StopSignal], object] | None = None
+        self.configs: list[BaseDeviceInfo] = []
+        self.signals: list[StopSignal] = []
+        self.drivers: dict[str, FakeDevice] = {}
+        self.captures = 0
 
-    def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
+    def capture_snapshot(self) -> dict[str, JsonObject]:
+        self.captures += 1
+        return capture_device_snapshot(self.drivers)
+
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        if name in self.drivers:
+            return self.drivers[name].get_info().model_copy(deep=True)
+        return FakeDeviceInfo(address="memory")
+
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo, cancel_signal: StopSignal
+    ) -> None:
+        value = cfg.model_dump()["value"]
         self.values.append((name, value))
+        self.configs.append(cfg.model_copy(deep=True))
+        self.signals.append(cancel_signal)
         if self.on_set is not None:
             self.on_set(cancel_signal)
-
-    def setup(
-        self, settings: Mapping[str, DeviceInfo], cancel_signal: StopSignal
-    ) -> None:
-        self.settings.append(settings)
-        if self.on_setup is not None:
-            self.on_setup(cancel_signal)
-        if self.manager is not None:
-            self.manager.setup_devices(
-                settings, progress=False, cancel_signal=cancel_signal.event
-            )
+        if name in self.drivers:
+            driver = self.drivers[name]
+            validated = driver.info_model.model_validate(cfg.model_dump(mode="python"))
+            driver.setup(validated, progress=False, stop_event=cancel_signal.event)
 
 
 class RecordingBar(TQDMProgressBar):
@@ -111,10 +119,10 @@ class State:
 
 @dataclass
 class Cfg:
-    """Mutable experiment config and optional native device setup."""
+    """Mutable experiment value and optional role-to-device-name mapping."""
 
     value: int = 1
-    dev: Mapping[str, DeviceInfo] | None = None
+    dev: dict[str, str] | None = None
 
 
 def save_integer(source: Completed[Cfg, int], path: Path) -> None:
@@ -157,7 +165,6 @@ class Rig:
         step: Callable[[WorkflowEnv[int], Plan, Tunables, State], Step[State, int]],
         *,
         plan: Plan | None = None,
-        devices: DeviceSnapshot | None = None,
     ) -> None:
         # A fresh declared wrapper avoids mutating shared module-level callables.
         def invoke(
@@ -178,7 +185,6 @@ class Rig:
             paths=self.paths,
             identity=RunIdentity(
                 "run",
-                DeviceSnapshot({}) if devices is None else devices,
                 SoftwareProvenance(
                     software_versions={},
                     git_commit=None,

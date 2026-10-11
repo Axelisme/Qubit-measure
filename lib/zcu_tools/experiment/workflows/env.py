@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
 
+from ...device import BaseDeviceInfo
 from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from .effects import DeviceEffect, RunEffect, WaitEffect
@@ -147,7 +148,6 @@ class WorkflowEnv[C](InitEnv[C]):
         *,
         save: Callable[[Completed[Cfg, Result], Path], None],
         live: LiveUpdate | None = None,
-        setup_devices: bool = True,
     ) -> Generator[Effect, None, Completed[Cfg, Result] | Failed]:
         """Execute and save an experiment; return its typed Completed or Failed.
 
@@ -161,24 +161,37 @@ class WorkflowEnv[C](InitEnv[C]):
         dimension order, and complex128 samples of the buffer shape, including
         partial NaNs. Do not mutate or retain these arrays; use Plots handles to
         copy/dispatch real projected values to the host owner. Callback failures
-        fail the workflow even when Schedule catches them. setup_devices=False skips
-        automatic cfg.dev setup. Outer, live, saver, and deepcopy errors
-        propagate; Schedule failures return Failed without data or a run file.
+        fail the workflow even when Schedule catches them. The experiment owns
+        device operations; the engine does not inspect cfg.dev or apply settings.
+        Outer, live, saver, and deepcopy errors propagate; Schedule failures
+        return Failed without data or a run file.
         Cancellation discards the step and never returns a cancellation value.
         """
-        request = RunEffect(experiment, cfg, save, live, setup_devices)
+        request = RunEffect(experiment, cfg, save, live)
         yield request
         if request.outcome is None:
             raise RuntimeError("Engine did not complete the run effect")
         return request.outcome
 
-    def set_device(self, name: str, value: float) -> Generator[Effect, None, None]:
-        """Set a finite absolute native-device value, or propagate adapter failure.
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Synchronously live-read detached device settings in the worker.
 
-        Empty names and nonfinite values raise ValueError. The adapter enforces
-        connectivity and limits. Cancellation discards the entire step.
+        This read is not an effect. The host returns the actual Info subclass;
+        unknown/disconnected names identify name and read failures propagate.
+        Missing devices raises MissingCapability('devices') at use.
         """
-        request = DeviceEffect(name, value)
+        return self.devices.get_device_cfg(name)
+
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo
+    ) -> Generator[Effect, None, None]:
+        """Apply complete typed settings with the engine's cooperative signal.
+
+        The host revalidates all fields with the selected driver's Info model.
+        Limits, validation and I/O failures propagate; no conversion, retries or
+        clamping occurs. Cancellation discards the entire step.
+        """
+        request = DeviceEffect(name, cfg)
         yield request
         if not request.done:
             raise RuntimeError("Engine did not complete the device effect")

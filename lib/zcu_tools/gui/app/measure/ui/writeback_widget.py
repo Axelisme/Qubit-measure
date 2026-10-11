@@ -27,8 +27,8 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.app.measure.adapter import (
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     WaveformWriteback,
     WritebackItem,
 )
@@ -382,7 +382,7 @@ class WritebackWidget(QWidget):
         self, item: WritebackItem, fact: WritebackValues
     ) -> tuple[QLabel, QTableWidget | None]:
         proposed_label = QLabel(self._display_proposed(item))
-        is_matrix = isinstance(item, MetaDictWriteback) and _is_matrix_value(
+        is_matrix = isinstance(item, ParameterWriteback) and _is_matrix_value(
             fact.proposed
         )
         if is_matrix:
@@ -412,7 +412,7 @@ class WritebackWidget(QWidget):
             button.setFixedSize(56, 26)
             button.clicked.connect(lambda _=False, it=item: self._edit_item(it))
             return button
-        if isinstance(item, MetaDictWriteback) and not _is_scalar_md_value(
+        if isinstance(item, ParameterWriteback) and not _is_scalar_md_value(
             fact.proposed
         ):
             button = QPushButton("Copy")
@@ -466,7 +466,7 @@ class WritebackWidget(QWidget):
         self.apply_requested.emit()
 
     def _is_editable(self, item: WritebackItem) -> bool:
-        if isinstance(item, MetaDictWriteback):
+        if isinstance(item, ParameterWriteback):
             # Scalar md values are hand-editable; a non-scalar (list/matrix, e.g.
             # the singleshot confusion matrix) is a derived value applied verbatim
             # — shown read-only, no Edit dialog (the scalar coercion can't parse a
@@ -553,12 +553,12 @@ class WritebackWidget(QWidget):
         self._refresh_item_preview(item)
 
     def _edit_item(self, item: WritebackItem) -> None:
-        if isinstance(item, MetaDictWriteback):
+        if isinstance(item, ParameterWriteback):
             self._edit_md_item(item)
         elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
             self._edit_cfg_item(item)
 
-    def _edit_md_item(self, item: MetaDictWriteback) -> None:
+    def _edit_md_item(self, item: ParameterWriteback) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Edit Value: {item.target_name}")
         layout = QVBoxLayout(dialog)
