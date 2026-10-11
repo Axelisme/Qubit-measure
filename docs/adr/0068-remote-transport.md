@@ -40,17 +40,23 @@ MCP 不保存第二份 seen，也不用 wire expected-version table 或隱藏預
 
 ## Workflows 的同一 run
 
-`scripts/run_workflows_gui.py` 經共用 runtime 組裝獨立 app，具體 owner 在 `zcu_lab.workflows.gui.app`。一份 EMPTY session、一個 top-level T1WorkflowWindow 與固定 WorkflowController 同時服務 GUI 和 RPC。Shared Setup 非 modal 開啟，global qubit alias 由 shared AliasDialog 修改；Prepare forms 以一次固定 capture 替換 defaults，不是 reload。啟動不還原 input 或連硬體。共用 framework 不反向依賴 zcu_lab，依賴方向由 C16 約束；共用 mcp.core 只消費 GUI remote 的依賴邊界由 C13 約束。
+`scripts/run_workflows_gui.py` 經共用 runtime 組裝獨立 app，具體 owner 在 `zcu_lab.workflows.gui.app`。App 建立一份 EMPTY session，將同一份 SessionServices 交給 T1WorkflowWindow。Window constructor 為 `(state, services, owner, *, on_close=None, parent=None)`，runner 與 progress 取自 services。`parent=None` 時 Window 為 top-level，指定 QWidget 時嵌入該 Qt parent。GUI 和 RPC 使用同一 Window 與固定 WorkflowController。
+
+App 直接重用 `zcu_lab.ALIAS_PRESET`，交給 shared `build_session_services(alias_rows=...)`。Preset 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列，不由 framework 選裝置。Shared Setup 非 modal 開啟，global alias 表由 shared AliasDialog 修改。Prepare forms 用 `read_context()` 固定當次 alias 表與來源，不宣告角色或檢查 kind。π defaults 在同一 capture 用 `resolve_path('$qubit.module.x180.waveform.length')` 產生具體元件路徑 expression，不可讀時留空。Prepare 整份替換 defaults，不是 reload。啟動不還原 input 或連硬體。共用 framework 不反向依賴 zcu_lab，依賴方向由 C16 約束；共用 mcp.core 只消費 GUI remote 的依賴邊界由 C13 約束。
 
 `scripts/run_workflows_mcp.py` 啟動 stdio MCP attachment。Workflow tools 由同一份 app method declarations 產生，lifecycle tools 明確 launch／connect／disconnect。MCP 不持 Engine、hardware session、operation registry 或另一份 draft。Start 用當次 defaults 加 path/value batch，不讀 GUI draft；tunables edit 則提交同一 Host 的完整當前 input。Form batch preview 只在呼叫內求值，不提交。Engine journal 只記普通值，expression 留在 FormInput，過渡期不檢查 holder 或 GUI draft revision。
 
-Start／Resume 回 operation receipt，不代表 native acceptance。Pause／Stop 回控制請求，不代表 producer 已停止。Caller 明填 run_id，stale target 拒絕，不重送。一個 run 從 Start 到 terminal 只有一個 operation／handle。Pause 後 worker 返回但 handle 不 settle，保留本程序 RUN lease；Resume 重用原 handle。每次 Start／Resume 都同步讀所有 connected devices，任一失敗拒絕該次 admission，不使用 cached fallback。這是本程序互斥，不是跨程序硬體仲裁。Run 與 operation 分工見 [[0062]]、[[0066]]。
+Start／Resume 回 operation receipt，不代表 native acceptance。Pause／Stop 回控制請求，不代表 producer 已停止。Caller 明填 run_id，stale target 拒絕，不重送。一個 run 從 Start 到 terminal 只有一個 operation／handle。Pause 後 worker 返回但 handle 不 settle，保留本程序 RUN lease；Resume 重用原 handle。Start／Resume 不做 all-device live read，也不在 journal 記錄 device snapshot。這是本程序互斥，不是跨程序硬體仲裁。Run 與 operation 分工見 [[0062]]、[[0066]]。
+
+每次 `env.run` 在同一 RUN lease 下、experiment callback 前，透過 DevicePort.capture_snapshot 讀取所有 connected drivers。Host 在 worker 重用 native capture helper，不更新 GUI State。讀取失敗會使 run failed，不執行該 callback，也不以 cache 代替。缺少 devices port 時，env.run 在 callback 前拋出 `MissingCapability('devices')`；真正零 device 的 host 明確提供 `{}` snapshot。Run constructor 要求 caller 傳入已捕捉的 device_snapshot，不另讀硬體。固定 snapshot 經 Run、AcquisitionEvidence 與 RunMetadata 原樣保存到 native `/device` JSON，後續 Save 不刷新。
+
+Device 設定使用完整 cfg。同步 `env.get_device_cfg(name)` 在 worker live 讀 get_info，回 detached 的實際 BaseDeviceInfo 子類 model。`yield from env.setup_device(name, cfg)` 透過 selected driver.info_model 驗完整 cfg，再呼叫 `driver.setup(cfg, stop_event=cancel_signal.event)`。Env、effect 與 DevicePort 傳遞同一個 engine-owned StopSignal，native driver 接其原有的 threading.Event，不另建 signal 或 event。Journal 記 name 與 cfg。`zcu_lab.workflows.devices.set_flux` 組合讀 cfg、共用 check_flux_unit、model_copy 改 value 與完整 setup；framework 不認識 flux 或單位。GUI／MCP plan 的 flux_unit 必填，Fake 明填 native，YOKO 明填 A 或 V。未知或斷線 device 在實際使用時指名報錯，driver limits 與 I/O 錯誤原樣傳播，不 retry 或 clamp。
 
 Status 與 records 讀 Engine facts，不從 artists 反推數值。圖名來自同一 Window 的 Plots，PNG 在 owner thread 由 shared renderer 讀原生 Figure。QtPlotHost 只收合 presentation，每次 owner 同步更新 artists，final refresh 立即 flush。MCP 驗證 PNG 並附 image content，不保存 preview 檔或序列化 Figure。Status-only 不渲染，terminal 圖保留到新 Start 或成功 close。Timeout／斷線不取消 run，也不證明命令沒有副作用。
 
 Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<run_id>/`，native acquisition 與圖在條目 Database 的 `workflows/<run_id>/iter/`。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
 
-Source reload S4 與 input 保存還原 U7 尚未實作，由 workflows-p3 承接。S1–S3 有真 in-process simulator 證據，env.set_device driver limits 已驗，cfg.dev setup 半邊仍待上游介面變更後重核。Startup-failure scenario 14 未完成完整驗證。這些軟體證據不代表使用者已接受 CP-B，不授權硬體或真實資料。
+B4 12 的共用 alias preset、16 的 SessionServices 與 workflows 05 組裝已接入。B4 29 尚未正式交付裸 alias 名稱求值，T1 flux_dev 表單目前仍填明確 device 名稱，尚未接入 `$flux_dev` default。Source reload S4 與 input 保存還原 U7 未做，由 workflows-p3 承接。S1–S3 的既有 in-process simulator 證據與 D322 bounded 接受紀錄保留，但不代表完整 integration 或使用者 CP-B 驗收。Startup-failure scenario 14 未完成完整驗證。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成，不授權硬體或真實資料。
 
 ## 事件與錯誤
 
