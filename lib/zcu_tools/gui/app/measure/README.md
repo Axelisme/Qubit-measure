@@ -731,7 +731,7 @@ pane figure details stay internal to `MainWindowEventCoordinator`. The wire even
 name and payload are not the internal fact enum. Context/value/md/ml RPC handlers use
 the controller-exposed `ContextControlPort` facet; device RPC handlers use
 `DeviceControlPort` for device lifecycle/query/progress; predictor RPC handlers
-use `PredictorControlPort` for predictor load/query/compute. SoC handlers remain
+use `PredictorControlPort` for independent read-only predictor queries with explicit parameters. SoC handlers remain
 on the app controller façade for connection policy. Entry list/info/new/open RPCs
 use `SetupControlPort` and explicit entry names; there is no project identity mapping.
 

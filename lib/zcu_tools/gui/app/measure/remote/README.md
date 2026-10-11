@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-11, stored device flux units
+**Last updated:** 2026-10-11, independent predictor RPC sources
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -246,7 +246,11 @@ The wire surface is grouped by ownership:
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
 - `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc. Predictor is not part of simulation readiness. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
-- `predictor.predict`／`predictor.calibrate`／`predictor.info`：read-only simulator queries. This slice requires a concrete `qubit` name; independent parameter wire inputs are added in the MCP contract slice. Info returns named parameters and missing fields. Calibrate returns a candidate bias without writing the component or dialog. No installed model or load/set/clear commands.
+- `predictor.predict`／`predictor.calibrate`／`predictor.info`：read-only simulator queries with exactly one source, `qubit` or `params`. A concrete `qubit` such as Q2 reads the currently selected point through the injected params_for. It is not an alias or a path. Direct `params` has `model="fluxonium"` and named EJ, EC, EL, flux_half, flux_period, flux_bias fields. Energies use GHz; affine inputs and device_value use the source's native device units. Returned frequencies use MHz. Info returns `{model, params, missing}` and preserves unknown fields as null. Predict and Calibrate require complete valid inputs. Calibrate returns `{flux_bias_before, flux_bias_after}` without changing the component, dialog or source parameters. Queries never read hardware, dialog/cache or an installed model. No target or load/set/clear commands.
+
+Predictor requests with neither source or both sources return `invalid_params` with reason `invalid_predictor_source`. Invalid concrete names return `invalid_predictor_qubit`; malformed direct inputs or invalid physics return `invalid_predictor_params`. Missing computation inputs return `missing_predictor_params`, a message naming the fields and `data.missing`. Info can inspect incomplete inputs without building a model. A missing component provider or context is a failed precondition, not an empty/default model.
+
+For example, `predictor.predict` accepts `{"qubit":"Q2","device_value":1.80}` or `{"params":{"model":"fluxonium","EJ":5,"EC":1,"EL":0.5,"flux_half":0,"flux_period":1,"flux_bias":0},"device_value":0.1}`. The device coordinate is not flux quanta. Both calculation methods accept from_level and to_level, defaulting to 0 and 1. Calibrate additionally requires frequency_mhz and increasing nonnegative levels. Numerical root failure follows the model's warning/fallback contract; a returned bias does not certify a fit.
 
 The `tab.get_figure` subtab locator is required and closed
 (`run|analysis|post_analysis`). It may bind a Run preview to
