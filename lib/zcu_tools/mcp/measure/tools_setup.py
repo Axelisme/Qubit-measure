@@ -5,8 +5,8 @@ partial snapshots stay visible. No stage attaches, launches or reconnects a GUI.
 Native wire views retain opaque payloads and extra keys without domain conversion.
 """
 
-import math
 from collections.abc import Callable
+from copy import deepcopy
 from functools import partial
 from typing import Any, Literal, NotRequired, TypedDict
 
@@ -56,11 +56,17 @@ class SetupStep(TypedDict):
     error: NotRequired[SetupError]
 
 
-class _Steps(TypedDict):
+class SetupSteps(TypedDict):
+    """Four workflow stages; completed is not an operation-success claim."""
+
     pre_read: SetupStep
+    """Before acquisition and candidate preparation; failure prevents submission."""
     start: SetupStep
+    """Submission; completed means a confirmed handle, not driver completion."""
     wait: SetupStep
+    """Bounded native wait; running retains the handle without cancellation."""
     post_read: SetupStep
+    """After acquisition; completed does not prove the requested value was reached."""
 
 
 class _SocSnapshot(TypedDict, total=False):
@@ -68,24 +74,44 @@ class _SocSnapshot(TypedDict, total=False):
     cfg: _JsonValue
 
 
-class _DeviceField(TypedDict, total=False):
+class DeviceFieldWire(TypedDict, total=False):
+    """Native cached field projection; missing fields are not filled in."""
+
     name: str
+    """Info field name."""
+    type: str
+    """Native scalar/enum description."""
+    current: _JsonValue
+    """Cached value, including native null; not a fresh hardware read."""
     settable: bool
+    """Owner's editing flag, not an additional full-cfg validator."""
+    choices: list[_JsonValue]
+    """Optional native enum choices, in their original order."""
 
 
-class _DeviceInfo(TypedDict, total=False):
-    value: _JsonValue
+type DeviceSetupCfg = _JsonObject
+"""Info field names mapped to recursive JSON values; validity belongs to Info."""
 
 
-class _DeviceSnapshot(TypedDict, total=False):
+class DeviceSnapshotWire(TypedDict, total=False):
+    """Native cached snapshot, retaining opaque extra keys without conversion."""
+
     name: str
+    """Native registry name, never filled from requested.name."""
     type_name: str
+    """Native driver name; not a local model registry key."""
     address: str
+    """Native snapshot connection address."""
     status: str
+    """Cached device lifecycle status, not an operation outcome."""
     unit: str
+    """Native unit string; no conversion or none compatibility rule."""
     error: _JsonValue
-    info: _DeviceInfo | None
-    fields: list[_DeviceField]
+    """Opaque native error or null."""
+    info: DeviceSetupCfg | None
+    """Complete cached Info object or null; fields never substitute for Info."""
+    fields: list[DeviceFieldWire]
+    """Native field projections, preserving order and optional keys."""
 
 
 class _DeviceListEntry(TypedDict):
@@ -102,57 +128,77 @@ class _PredictorSnapshot(TypedDict, total=False):
 
 class _SimulationFacts(TypedDict):
     soc: _SocSnapshot | None
-    devices: list[_DeviceSnapshot] | None
+    devices: list[DeviceSnapshotWire] | None
     predictor: _PredictorSnapshot | None
 
 
-class _DeviceFacts(TypedDict):
-    device: _DeviceSnapshot | None
+class DeviceSetupFacts(TypedDict):
+    """Facts acquired in one setup phase, not evidence of absent side effects."""
+
+    device: DeviceSnapshotWire | None
+    """Native snapshot or null when this phase has not acquired it."""
 
 
 class _SimulationRequest(TypedDict):
     pass
 
 
-class _DeviceRequest(TypedDict):
+class DeviceSetupRequest(TypedDict):
+    """Requested target and full candidate, not a claim of model admission."""
+
     name: str
-    value: int | float
-    unit: str
+    """Nonempty caller-specified registry name."""
+    cfg: DeviceSetupCfg | None
+    """Null until before-read and merge finish; then the complete candidate."""
 
 
 class _SimulationVerification(TypedDict):
     ready: bool
 
 
-class _DeviceVerification(TypedDict):
-    actual: _JsonValue
-    exact_match: bool
+class NativeSetupOperationError(TypedDict, total=False):
+    """Native operation diagnostic, retaining missing versus null fields."""
 
-
-class _NativeOperationError(TypedDict, total=False):
     code: str | None
+    """Native code or null, when supplied."""
     reason: str | None
+    """Native reason or null, when supplied."""
     message: str
+    """Native diagnostic text."""
     request_rejected: bool
+    """Native admission fact; false does not prove no side effects."""
 
 
-class _Operation(TypedDict):
+class NativeSetupOperation(TypedDict):
     """Native wait reply, not a second operation-completion policy."""
 
     status: _Outcome
+    """Native pending/finished/failed/cancelled/running/unknown outcome."""
     elapsed_s: float
-    error: NotRequired[_NativeOperationError | None]
+    """Nonnegative time measured by wait, not guaranteed hardware duration."""
+    error: NotRequired[NativeSetupOperationError | None]
+    """Optional native error or null; missing is not filled in."""
     feedback: NotRequired[_JsonValue]
+    """Opaque native feedback, not a physical-success interpretation."""
     progress: NotRequired[list[_JsonObject]]
+    """Optional native progress objects, retained without conversion."""
     eta_s: NotRequired[float]
+    """Optional native estimated remaining seconds."""
 
 
 class _Progress(TypedDict):
+    """Shared workflow receipt fields, inherited by both setup results."""
+
     op: int | None
+    """Opaque MCP handle, preserved once known; null does not prove no mutation."""
     status: _Outcome
-    steps: _Steps
-    operation: _Operation | None
+    """Workflow outcome, distinct from native operation.status."""
+    steps: SetupSteps
+    """Four stage receipts; each retains its own failure or uncertainty."""
+    operation: NativeSetupOperation | None
+    """Native wait reply, or null until one is acquired."""
     error: SetupError | None
+    """First workflow error, not erased by a later read failure."""
 
 
 class _SimulationResult(_Progress):
@@ -163,15 +209,20 @@ class _SimulationResult(_Progress):
     verification: _SimulationVerification | None
 
 
-class _DeviceResult(_Progress):
-    tool: Literal["device_set_value"]
-    before: _DeviceFacts
-    after: _DeviceFacts
-    requested: _DeviceRequest
-    verification: _DeviceVerification | None
+class DeviceSetupResult(_Progress):
+    """Setup workflow receipt; native operation and cached facts stay separate."""
+
+    tool: Literal["device_setup"]
+    """Fixed tool name."""
+    before: DeviceSetupFacts
+    """Detached cached facts acquired before submission."""
+    after: DeviceSetupFacts
+    """Detached post-read facts, never substituted with before facts."""
+    requested: DeviceSetupRequest
+    """Full candidate after merge; failure does not clear it."""
 
 
-type SetupResult = _SimulationResult | _DeviceResult
+type SetupResult = _SimulationResult | DeviceSetupResult
 
 
 class _RecipeGuideResult(TypedDict):
@@ -208,44 +259,39 @@ def simulation_initialize(
     return _run_setup(ctx, result, timeout, _read_simulation, _verify_simulation)
 
 
-def device_set_value(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
-    """Set one device value once on ctx's existing GUI connection.
+def device_setup(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
+    """Apply a partial Info cfg once to name on ctx's already connected GUI.
 
-    arguments requires nonempty name and unit strings and a finite non-bool
-    int/float value. Optional timeout defaults to 60 seconds and accepts finite
-    non-bool numbers in 0..300. unit must match the native snapshot; FakeDevice
-    unit=none requires native. No conversion, tolerance, or output/mode/rampstep
-    change is performed. The caller needs authorization to change that device.
+    arguments requires a nonempty name and cfg object, with no timeout argument.
+    Before Info is read and merged with cfg. A YOKO patch containing value must
+    explicitly contain value_unit; a before unit never supplies caller intent.
+    All model-required, extra, mode/unit and limit validation belongs to the RPC
+    Info model. Connected admission belongs to the GUI device service.
 
-    Returns a ToolReply with requested value, op, native operation, four steps,
-    before/after device facts and verification.actual/exact_match. Invalid input
-    raises ValueError before GUI access. Disconnected/unsettable devices, unit
-    mismatch and native failures return an error reply retaining known facts.
-    Timeout never cancels, reconnects, retries or proves absence of side effects.
+    Returns DeviceSetupResult in ToolReply.data: four stages, requested full
+    candidate (null before merge), known MCP op, native operation and detached
+    before/after cached snapshots. Wait is bounded to 300 seconds. Timeout
+    returns running with the handle, never cancels; use wait(op) to continue.
+    Native rejection/driver errors and unknown receipts retain their facts.
+    Invalid argument shape raises ValueError before GUI access. No conversion,
+    verification, retry, reconnect or rollback is performed.
     """
     name = arguments.get("name")
-    value = arguments.get("value")
-    unit = arguments.get("unit")
+    patch = arguments.get("cfg")
     if not isinstance(name, str) or not name.strip():
         raise ValueError("name must be a nonempty string")
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-    ):
-        raise ValueError("value must be a finite number")
-    if not isinstance(unit, str) or not unit.strip():
-        raise ValueError("unit must be a nonempty string")
-    timeout = wait_timeout(arguments)
-    result: _DeviceResult = {
+    if not isinstance(patch, dict):
+        raise ValueError("cfg must be an object")
+    if set(arguments) - {"name", "cfg"}:
+        raise ValueError("device_setup accepts only name and cfg")
+    result: DeviceSetupResult = {
         **_initial_progress(),
-        "tool": "device_set_value",
+        "tool": "device_setup",
         "before": {"device": None},
         "after": {"device": None},
-        "requested": {"name": name, "value": value, "unit": unit},
-        "verification": None,
+        "requested": {"name": name, "cfg": None},
     }
-    return _run_setup(ctx, result, timeout, _read_device, _verify_device)
+    return _run_setup(ctx, result, 300.0, partial(_read_device, patch=patch))
 
 
 def recipe_guide(
@@ -315,7 +361,7 @@ def _run_setup[ResultT: SetupResult](
     result: ResultT,
     timeout: float,
     read_facts: Callable[[MeasureToolContext, ResultT, _Phase], None],
-    verify: Callable[[ResultT], None],
+    verify: Callable[[ResultT], None] | None = None,
 ) -> ToolReply:
     try:
         ctx = ctx.bound(require_connected=True)
@@ -339,7 +385,8 @@ def _run_setup[ResultT: SetupResult](
     else:
         result["steps"]["post_read"] = {"status": "completed"}
         try:
-            verify(result)
+            if verify is not None:
+                verify(result)
         except GuiRpcError as exc:
             _record_error(result, "post_read", exc, "failed")
             result["status"] = "failed"
@@ -357,7 +404,7 @@ def _start_setup(ctx: MeasureToolContext, result: SetupResult) -> bool:
     else:
         requested = result["requested"]
         method = "device.setup"
-        params = {"name": requested["name"], "updates": {"value": requested["value"]}}
+        params = {"name": requested["name"], "cfg": requested["cfg"]}
     try:
         receipt = ctx.send_gui_rpc(method, params)
         handle = receipt.get("handle")
@@ -375,7 +422,9 @@ def _start_setup(ctx: MeasureToolContext, result: SetupResult) -> bool:
 
 def _wait_setup(ctx: MeasureToolContext, result: SetupResult, timeout: float) -> None:
     try:
-        operation = _Operation(**wait(ctx, {"op": result["op"], "timeout": timeout}))
+        operation = NativeSetupOperation(
+            **wait(ctx, {"op": result["op"], "timeout": timeout})
+        )
     except GuiRpcError as exc:
         result["status"] = "unknown"
         _record_error(result, "wait", exc, "unknown")
@@ -407,7 +456,7 @@ def _read_simulation(
     listing = _DeviceListReply(**ctx.send_gui_rpc("device.list", {}))
     facts["devices"] = []
     for device in listing["devices"]:
-        snapshot = _DeviceSnapshot(
+        snapshot = DeviceSnapshotWire(
             **ctx.send_gui_rpc("device.snapshot", {"name": device["name"]})["snapshot"]
         )
         facts["devices"].append(snapshot)
@@ -438,69 +487,39 @@ def _verify_simulation(result: _SimulationResult) -> None:
         raise GuiRpcError("native facts do not confirm simulation readiness")
 
 
-def _read_device(ctx: MeasureToolContext, result: _DeviceResult, phase: _Phase) -> None:
+def _read_device(
+    ctx: MeasureToolContext,
+    result: DeviceSetupResult,
+    phase: _Phase,
+    *,
+    patch: DeviceSetupCfg,
+) -> None:
     requested = result["requested"]
-    snapshot = _DeviceSnapshot(
-        **ctx.send_gui_rpc("device.snapshot", {"name": requested["name"]})["snapshot"]
+    snapshot = DeviceSnapshotWire(
+        **deepcopy(
+            ctx.send_gui_rpc("device.snapshot", {"name": requested["name"]})["snapshot"]
+        )
     )
     result[phase]["device"] = snapshot
-    if phase == "before":
-        _validate_device(snapshot, requested)
-
-
-def _validate_device(snapshot: _DeviceSnapshot, requested: _DeviceRequest) -> None:
-    if (
-        snapshot.get("name") != requested["name"]
-        or snapshot.get("status") != "connected"
-    ):
-        raise GuiRpcError("requested device is not connected")
-    if not any(
-        field.get("name") == "value" and field.get("settable") is True
-        for field in snapshot.get("fields", [])
-    ):
-        raise GuiRpcError("device does not support setting value")
-    if snapshot.get("unit") == "none":
-        valid_unit = (
-            snapshot.get("type_name") == "FakeDevice" and requested["unit"] == "native"
-        )
-    else:
-        valid_unit = snapshot.get("unit") == requested["unit"]
-    if not valid_unit:
-        raise GuiRpcError("unit does not match the device's native coordinate")
-
-
-def _verify_device(result: _DeviceResult) -> None:
-    before = result["before"]["device"]
-    after = result["after"]["device"]
-    if before is None or after is None:
-        raise GuiRpcError("native device facts were not acquired")
-    info = after.get("info")
-    actual = info.get("value") if info is not None else None
-    result["verification"] = {
-        "actual": actual,
-        "exact_match": actual == result["requested"]["value"],
-    }
-    if result["status"] != "finished":
+    if phase != "before":
         return
+    info = snapshot.get("info")
+    if info is None:
+        raise GuiRpcError("before snapshot has no Info to merge")
     if (
-        after.get("status") != "connected"
-        or any(
-            key not in before or key not in after or before.get(key) != after.get(key)
-            for key in ("name", "type_name", "address", "unit")
-        )
-        or info is None
-        or "value" not in info
+        snapshot.get("type_name") == "YOKOGS200"
+        and "value" in patch
+        and "value_unit" not in patch
     ):
-        raise GuiRpcError(
-            "native facts do not confirm the connected device identity/value"
-        )
+        raise GuiRpcError("YOKO value patch requires explicit value_unit")
+    requested["cfg"] = {**deepcopy(info), **deepcopy(patch)}
 
 
 def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
     """Build three fixed setup tools over ctx, without connecting or performing setup.
 
     ctx supplies the application's configured MCP session. Returned handlers
-    accept the simulation_initialize, device_set_value and recipe_guide argument
+    accept the simulation_initialize, device_setup and recipe_guide argument
     objects documented above; callers must explicitly connect before invocation.
     """
     timeout_schema = {"type": "number", "minimum": 0, "maximum": 300, "default": 60.0}
@@ -517,21 +536,19 @@ def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
                 "additionalProperties": False,
             },
         },
-        "device_set_value": {
-            "handler": partial(device_set_value, ctx),
-            "description": "Set only a connected device working value. Unit must match its GUI "
-            "snapshot; FakeDevice unit=none requires explicit native. No unit conversion, "
-            "output/mode/rampstep change, retry or rollback. Reports requested and actual values "
-            "without hardware tolerance. Wait timeout does not cancel; inspect partial progress.",
+        "device_setup": {
+            "handler": partial(device_setup, ctx),
+            "description": "Merge partial cfg with before Info and submit complete cfg once. "
+            "YOKO value patches require explicit value_unit. RPC Info owns model validation; "
+            "GUI service owns connected admission. Wait up to 300 seconds, without cancellation, "
+            "conversion, retry or rollback. Inspect stages, native operation and cached snapshots.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "minLength": 1},
-                    "value": {"type": "number"},
-                    "unit": {"type": "string", "minLength": 1},
-                    "timeout": timeout_schema,
+                    "cfg": {"type": "object"},
                 },
-                "required": ["name", "value", "unit"],
+                "required": ["name", "cfg"],
                 "additionalProperties": False,
             },
         },
