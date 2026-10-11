@@ -306,7 +306,9 @@ def test_left_panel_toggle_is_attached_to_tab_bar(control_factory, qapp):
     tab.show()
     QApplication.processEvents()
 
-    corner = tab._left_tabs.cornerWidget(Qt.TopLeftCorner)  # type: ignore[attr-defined]
+    left_tabs = tab.findChild(QTabWidget)
+    assert left_tabs is not None
+    corner = left_tabs.cornerWidget(Qt.Corner.TopLeftCorner)
     assert corner is None
     assert tab._left_edge_handle.isVisible() is True
 
