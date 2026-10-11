@@ -42,6 +42,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
+from zcu_lab.v2.twotone.time_domain.detune import actual_detune
+
 
 @dataclass(frozen=True)
 class T2EchoResult:
@@ -107,22 +109,13 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
             cfg.sweep.length, "time", {"soccfg": soccfg, "scaler": 0.5}
         )
 
-        # calculate true scanned detune based on rounding lengths
-        if detune != 0.0:
-            detune_lengths = sweep2array(
-                cfg.sweep.length,
-                "phase",
-                {
-                    "soccfg": soccfg,
-                    "gen_ch": cfg.modules.pi2_pulse.ch,
-                    "scaler": 360 * detune,
-                },
-            )
-            mask = lengths > 0
-            detune_ratio = np.mean(detune_lengths[mask] / lengths[mask]).item()
-            true_detune = detune * detune_ratio
-        else:
-            true_detune = 0.0
+        true_detune = actual_detune(
+            cfg.sweep.length,
+            detune=detune,
+            gen_ch=cfg.modules.pi2_pulse.ch,
+            soccfg=soccfg,
+            time_scaler=0.5,
+        )
 
         viewer = context.plots.liveplot_1d(
             "measurement",

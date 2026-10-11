@@ -32,6 +32,7 @@ from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg, PowerDepRes
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiResult
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainCfg, FreqGainResult
+from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Result
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoResult
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg, T2RamseyResult
@@ -106,8 +107,8 @@ class T2RamseyAcquisition(T2RamseyResult):
     """Native Ramsey IQ trace with acquisition-time evidence.
 
     times is the native rounded delay vector in microseconds; signals is
-    complex IQ with the same shape. true_activate_detune is the requested
-    MHz phase-ramp frequency, before phase quantization. evidence retains
+    complex IQ with the same shape. true_activate_detune is the actual MHz
+    phase-ramp frequency after native time/phase quantization. evidence retains
     acquisition UTC boundaries, provenance and the Run device snapshot.
     """
 
@@ -163,7 +164,13 @@ def run_t2ramsey(run: Run[T2RamseyCfg]) -> T2RamseyAcquisition:
     return T2RamseyAcquisition(
         times=times,
         signals=buffer.array,
-        true_activate_detune=cfg.detune,
+        true_activate_detune=actual_detune(
+            cfg.sweep.length,
+            detune=cfg.detune,
+            gen_ch=cfg.modules.pi2_pulse.ch,
+            soccfg=soccfg,
+            time_scaler=1.0,
+        ),
         evidence=evidence,
     )
 
@@ -482,6 +489,12 @@ def run_t2echo(run: Run[T2EchoCfg]) -> T2EchoAcquisition:
     return T2EchoAcquisition(
         times=times,
         signals=buffer.array,
-        true_activate_detune=0.0,
+        true_activate_detune=actual_detune(
+            cfg.sweep.length,
+            detune=cfg.detune,
+            gen_ch=cfg.modules.pi2_pulse.ch,
+            soccfg=soccfg,
+            time_scaler=0.5,
+        ),
         evidence=evidence,
     )

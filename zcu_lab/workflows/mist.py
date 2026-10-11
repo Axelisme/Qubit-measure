@@ -102,11 +102,14 @@ class MISTState:
     remaining is the unattempted absolute flux sequence; cal retains only
     all-success native calibrations. traces is the raw IQ map, one row per
     attempted flux, with NaN rows for calibration/acquisition failures.
+    gains is the display coordinate: requested grid before any acquisition,
+    then the actual native rounded gain grid for the committed traces.
     """
 
     remaining: list[float]
     cal: CalCarry
     traces: NDArray[np.complex128]
+    gains: NDArray[np.float64]
 
 
 @dataclass(frozen=True)
@@ -135,6 +138,7 @@ def init_mist(env: InitEnv[Calibrated], plan: MISTPlan) -> MISTState:
         list(plan.fluxes),
         CalCarry(env.context),
         np.full((len(plan.fluxes), plan.gain_points), complex(np.nan, np.nan)),
+        np.linspace(plan.gain_start, plan.gain_stop, plan.gain_points),
     )
 
 
@@ -183,13 +187,8 @@ def _draw_map(env: WorkflowEnv[Calibrated], plan: MISTPlan, state: MISTState) ->
         ax = figure.subplots()
         if plan.fluxes:
             projected = np.array([mist_signal2real(trace) for trace in state.traces])
-            ax.imshow(
-                projected,
-                origin="lower",
-                aspect="auto",
-                extent=(plan.gain_start, plan.gain_stop, 0, len(plan.fluxes)),
-            )
-        ax.set(xlabel="MIST gain (a.u.)", ylabel="Flux index")
+            ax.pcolormesh(state.gains, plan.fluxes, projected, shading="nearest")
+        ax.set(xlabel="MIST gain (a.u.)", ylabel=f"Flux ({plan.flux_unit})")
 
     env.plots.draw(name, draw)
 
@@ -254,5 +253,6 @@ def mist_fluxdep(
     if isinstance(outcome, Failed):
         return Next(MISTPoint(index, flux, cal, False, outcome.reason), state)
     state.traces[index] = outcome.result.signals
+    state.gains = outcome.result.gains.copy()
     env.plots.save(name, env.iter_dir / "gain.png")
     return Next(MISTPoint(index, flux, cal, True, None), state)
