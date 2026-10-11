@@ -653,15 +653,12 @@ def test_moduleref_tagged_key_passes_through(qapp):
 
 def _fluxdep_root(device_names: list[str]):
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
     cfg = OneToneFluxDepAdapter().make_default_cfg(ctx)
     ctrl = MagicMock()
-    ctrl.get_current_ml.return_value = ctx.ml
-    ctrl.get_current_md.return_value = ctx.md
     ctrl.list_device_names.return_value = list(device_names)
     return _make_draft(ctrl, cfg.spec, cfg.value)
 

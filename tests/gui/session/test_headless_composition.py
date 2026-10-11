@@ -40,7 +40,6 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     from zcu_tools.gui.session.ports import ProgressEvent
     from zcu_tools.gui.session.services.build import build_session_services
     from zcu_tools.gui.session.services.connection import ConnectMockRequest
-    from zcu_tools.gui.session.services.io_manager import IOManager
     from zcu_tools.gui.session.services.progress import ProgressService
     from zcu_tools.gui.session.state import (
         DeviceState,
@@ -49,7 +48,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
         SessionState,
     )
     from zcu_tools.gui.session.types import SessionEnv
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
+    from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
     owner_id = threading.get_ident()
     owner = ManualOwnerScheduler()
@@ -107,8 +106,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
 
     state = SessionState(
         SessionEnv(
-            md=MetaDict(),
-            ml=ModuleLibrary(),
+            parameters=None,
             soc=None,
             soccfg=None,
         )
@@ -144,7 +142,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
         handles=handles,
         background=background,
         progress=progress,
-        io_manager=IOManager(),
+        bind_assets=ArbWaveformDatabase.info_at,
         runner=runner,
         driver_factory=unexpected_driver_factory,
         device_registry=registry,
@@ -198,7 +196,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
         terminal_threads.append(threading.get_ident())
         if not result.ok or result.result != "cancelled":
             raise AssertionError(f"unexpected cancel result: {result!r}")
-        state.set_preferences(SessionPreferences(chip_name="cancelled"))
+        state.set_preferences(SessionPreferences(entry_name="cancelled"))
         settle(OperationOutcome("cancelled"))
 
     cancel_token = runner.begin(
@@ -228,7 +226,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     assert cancel_outcome is not None and cancel_outcome.status == "cancelled"
     awaited = handles.await_outcome(cancel_token, timeout=0.0)
     assert awaited is not None and awaited.feedback == "headless stop"
-    assert state.preferences.chip_name == "cancelled"
+    assert state.preferences.entry_name == "cancelled"
     assert progress.bars_for_operation(cancel_token) == ()
     assert gate.snapshot() == ()
     assert handles.live_count() == 0

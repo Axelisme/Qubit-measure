@@ -18,7 +18,6 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.session.services.io_manager import IOManager
 from zcu_tools.gui.session.services.predictor_from_sim import (
     build_predictor_from_simparams,
 )
@@ -28,12 +27,11 @@ from zcu_tools.gui.session.services.simulated_environment import (
 )
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.program.v2.mocksoc import MockQickSoc
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 @pytest.fixture
 def state() -> State:
-    return State(SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None))
+    return State(SessionEnv(parameters=None, soc=None, soccfg=None))
 
 
 @pytest.fixture
@@ -46,7 +44,6 @@ def make_controller(qapp: object) -> Iterator[Callable[[State], Controller]]:
         controller = Controller(
             state=state,
             registry=Registry(),
-            io_manager=IOManager(),
             view=view,
             bus=BaseEventBus(),
         )
@@ -159,9 +156,7 @@ def test_separate_controllers_do_not_share_device_registry(
     ctrl: Controller, state: State, make_controller: Callable[[State], Controller]
 ) -> None:
     _start(ctrl)
-    other_state = State(
-        SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-    )
+    other_state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     other = make_controller(other_state)
     _start(other)
     _set_value(ctrl, 0.25)

@@ -95,7 +95,6 @@ def waveform_resource(
     return CfgResource(
         lambda: schema,
         resolution=catalog.snapshot,
-        make_range=lambda start, stop, *, expts: (start, stop, expts),
     )
 
 
