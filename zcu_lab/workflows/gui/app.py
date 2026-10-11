@@ -56,6 +56,7 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
         Run on the QApplication's owner thread once per behavior. control=None
         omits RPC; otherwise create an inert adapter via window.create_remote_service.
         Assembly.controller is window.controller, not a wrapper controller.
+        Window borrows runner/progress from services and has no Qt parent.
         Bind entry waveform assets using ArbWaveformDatabase.info_at. No socket,
         entry or hardware is opened. Source/Qt construction failures propagate.
         Window close invokes shutdown before accepting close.
@@ -88,9 +89,7 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
         self.window = T1WorkflowWindow(
             self.state,
             self.services,
-            self._runner,
             self._owner,
-            self._progress,
             on_close=self.shutdown,
         )
         self._adapter = (
