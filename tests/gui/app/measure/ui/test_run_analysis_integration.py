@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -36,6 +37,7 @@ from zcu_tools.gui.cfg import (
     IntSpec,
     ScalarSpec,
 )
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -50,20 +52,30 @@ def _parameters():
     ).bind_aliases((AliasRow("resonator", "R1"),), {})
 
 
-def make_ctrl():
-    ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
-    ctrl.get_left_panel_width.return_value = 500
-    ctrl.get_tab_adapter_name.return_value = "fake"
-    ctrl.get_adapter_guide.return_value = {}
-    ctrl.progress_control.attach_progress.return_value = lambda: None
-    ctrl.progress_control.progress_bars.return_value = []
-    parameters = _parameters()
-    ctrl.read_context.return_value = parameters
-    ctrl.get_session_env.return_value = SessionEnv(
-        parameters=parameters, soc=None, soccfg=None
-    )
-    return ctrl
+@pytest.fixture
+def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
+    # Retain every authority through the test's owned view detach/close sequence.
+    owners: list[ControlIdentity] = []
+
+    def create() -> MagicMock:
+        ctrl = MagicMock()
+        authority = ControlIdentity()
+        owners.append(authority)
+        ctrl.control_identity = authority
+        configure_cfg_lookup(ctrl)
+        ctrl.get_left_panel_width.return_value = 500
+        ctrl.get_tab_adapter_name.return_value = "fake"
+        ctrl.get_adapter_guide.return_value = {}
+        ctrl.progress_control.attach_progress.return_value = lambda: None
+        ctrl.progress_control.progress_bars.return_value = []
+        parameters = _parameters()
+        ctrl.read_context.return_value = parameters
+        ctrl.get_session_env.return_value = SessionEnv(
+            parameters=parameters, soc=None, soccfg=None
+        )
+        return ctrl
+
+    yield create
 
 
 def make_snapshot(tab_id, *, plots: Plots, analysis=AnalysisMode.FIT, post=False):
@@ -152,7 +164,9 @@ def exp_tab_widget(qapp):
     return ExpTabWidget
 
 
-def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget, snapshots):
+def test_A1_Run_mounts_tree_with_visual_and_folding(
+    qapp, exp_tab_widget, snapshots, make_ctrl
+):
     """Run keeps its tree presentation, Reset, editing lock and busy state."""
     from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
@@ -174,7 +188,7 @@ def test_A1_Run_mounts_tree_with_visual_and_folding(qapp, exp_tab_widget, snapsh
         assert tree.isHeaderHidden()
         assert tree.indentation() == 10
         assert tree.font().pixelSize() == 13
-        assert tab.reset_btn.isEnabled() is True
+        assert tab.reset_btn.isEnabled() is True, ctrl.control_identity.status()
         tab.cfg_form.set_editing_enabled(False)
         tab.cfg_form.set_editing_enabled(True)
         assert isinstance(tab.reset_btn.toolTip(), str)
@@ -208,7 +222,7 @@ def _click_header(qapp: QApplication, header: QWidget) -> None:
 
 
 def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(
-    qapp, exp_tab_widget, snapshots
+    qapp, exp_tab_widget, snapshots, make_ctrl
 ):
     """Analysis uses a 13 px ledger, whole-header folding and inline Analyze."""
     ctrl = make_ctrl()
@@ -265,7 +279,7 @@ def test_A2_Analysis_ledger_single_column_folding_and_fixed_bar(
         qapp.processEvents()
 
 
-def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
+def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
     """Native preview facts retain selection, editing and Apply interactions."""
     from zcu_tools.cfg_model import DirectReadoutCfg
     from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
@@ -364,11 +378,11 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp):
     finally:
         if md_dialog is not None:
             md_dialog.close()
-        widget.close()
+        widget.deleteLater()
         qapp.processEvents()
 
 
-def test_writeback_baseline_captured_via_service(qapp):
+def test_writeback_baseline_captured_via_service(qapp, make_ctrl):
     """The service captures baseline summaries from a fixed ParameterContext."""
     from zcu_tools.cfg_model import DirectReadoutCfg
     from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
