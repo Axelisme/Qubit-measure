@@ -1,5 +1,6 @@
 """Concrete T1 GUI composition behind the shared process runtime."""
 
+from pathlib import Path
 from typing import ClassVar
 
 from zcu_tools.device.manager import DeviceManager
@@ -12,6 +13,7 @@ from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTrans
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.persistence import SingleFileCaretaker
 from zcu_tools.gui.session.services.build import SessionServices, build_session_services
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.state import SessionState
@@ -20,6 +22,11 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from zcu_lab import ALIAS_PRESET
 
+from .persistence import (
+    WorkflowInputCodec,
+    WorkflowInputRestoreReport,
+    WorkflowInputSnapshot,
+)
 from .window import T1WorkflowWindow
 
 
@@ -28,8 +35,9 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
 
     state and services are the shared session owners created by assemble.
     window is its sole T1WorkflowWindow, also used by the optional RPC adapter.
-    Keep this behavior alive through Qt shutdown. No preferences/input files
-    are restored and construction does not connect instruments.
+    Keep this behavior alive through Qt shutdown. Parsed plan/knobs input is
+    restored before display and flushed on close. Construction never connects
+    instruments or restores native runs, session sources or hardware.
     """
 
     spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
@@ -42,14 +50,28 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
     services: SessionServices
     window: T1WorkflowWindow
 
-    def __init__(self, *, project_root: str = "") -> None:
-        """Anchor entry result/Database roots at project_root; no I/O yet.
+    def __init__(
+        self,
+        *,
+        project_root: str = "",
+        clean: bool = False,
+        cache_dir: Path | None = None,
+    ) -> None:
+        """Configure roots and input restoration without I/O or Qt construction.
 
-        An empty root means the launch cwd. Component definitions must already
-        be explicitly registered by the launcher before Setup opens an entry.
-        Requires an existing QApplication before assemble, not before this call.
+        Empty project_root means the launch cwd. clean skips reading the previous
+        input file, but successful close still flushes current input. cache_dir
+        overrides the shared user-cache directory, for embedding or isolated tests.
+        Component definitions must be registered before Setup opens an entry.
+        An existing QApplication is required for assemble, not for this call.
         """
         self._project_root = project_root
+        self._clean = clean
+        self._cache_dir = cache_dir
+        self._caretaker: (
+            SingleFileCaretaker[WorkflowInputSnapshot, WorkflowInputRestoreReport]
+            | None
+        ) = None
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         """Build one session/Qt infrastructure and return its native owners.
@@ -91,8 +113,16 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
             self.state,
             self.services,
             self._owner,
-            on_close=self.shutdown,
+            on_close=self._close,
         )
+        self._caretaker = SingleFileCaretaker(
+            self.window,
+            codec=WorkflowInputCodec(),
+            filename="t1_workflow_state_v1.json",
+            cache_dir=self._cache_dir,
+        )
+        outcome = self._caretaker.restore_all(load=not self._clean)
+        self.window.show_input_restore_message(outcome.report, outcome.load_error)
         self._adapter = (
             self.window.create_remote_service(control, self._bus)
             if control is not None
@@ -113,6 +143,12 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
         if assembly.window is not self.window:
             raise ValueError("Setup requires this behavior's Window")
         self.window.open_setup()
+
+    def _close(self) -> None:
+        if self._caretaker is None:
+            raise RuntimeError("Workflow input persistence is not assembled")
+        self._caretaker.flush()
+        self.shutdown()
 
     def shutdown(self) -> None:
         """Close executor admission, cancel handles, drain and release resources.

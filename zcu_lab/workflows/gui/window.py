@@ -55,6 +55,7 @@ from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
+from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
@@ -69,6 +70,7 @@ from zcu_tools.resources.entry.save_layout import workflow_roots
 from ..calibration import Calibrated
 from ..t1 import T1Plan, t1_fluxdep
 from .panel import T1PlanPanel, T1TunablesPanel
+from .persistence import WorkflowInputRestoreReport, WorkflowInputSnapshot
 from .plan import T1PlanForm
 from .remote import FormInspectionReply, T1RemoteControlAdapter
 from .tunables import T1TunablesForm
@@ -386,6 +388,71 @@ class T1WorkflowWindow(QWidget):
             panel.deleteLater()
         plan_panel.show()
         tunables_panel.show()
+
+    def capture_persisted_state(self) -> WorkflowInputSnapshot:
+        """Capture parsed plan/knobs input on the owner thread, without I/O.
+
+        Expressions stay as entered, not their evaluated values. Plan comes
+        from the Start panel. Once a run is attached, knobs come from its unique
+        Controller binding, including unsubmitted parsed edits. Renderer-local
+        incomplete text, native values and journal/hardware state are excluded.
+        """
+        binding = self.controller.binding
+        knobs = (
+            binding.state.input.data
+            if binding is not None
+            else self.tunables_panel.state.input.data
+        )
+        return WorkflowInputSnapshot(plan=self.plan_panel.state.input.data, knobs=knobs)
+
+    def restore_persisted_state(
+        self, state: WorkflowInputSnapshot
+    ) -> WorkflowInputRestoreReport:
+        """Overlay saved state on fresh defaults, resetting both panel bases.
+
+        Call on the owner thread after construction, before starting a run.
+        Pending/running/paused ownership raises InvalidRunState before edits.
+        FormState owns compatibility and returns discarded model-field paths;
+        expressions remain input even when their result is invalid. Defaults or
+        source failures propagate without publishing either candidate. Successful
+        restoration refreshes both editors and clears renderer-local text.
+        """
+        self._ensure_can_start()
+        plan = FormState(T1PlanForm.default_input(self.plan_panel.env))
+        knobs = FormState(T1TunablesForm.default_input(self.tunables_panel.env))
+        report = WorkflowInputRestoreReport(
+            plan_dropped=plan.write_compatible(state.plan, self.plan_panel.env),
+            knobs_dropped=knobs.write_compatible(state.knobs, self.tunables_panel.env),
+        )
+        self.plan_panel.state.reset(plan.input)
+        self.tunables_panel.state.reset(knobs.input)
+        for panel in (self.plan_panel, self.tunables_panel):
+            panel.editor.refresh(panel.env)
+            panel.editor.discard_local_text()
+        return report
+
+    def show_input_restore_message(
+        self,
+        report: WorkflowInputRestoreReport,
+        load_error: PersistenceError | None = None,
+    ) -> None:
+        """Present read failure or discarded fields in the existing owner label.
+
+        report is the completed restore outcome. load_error is the caretaker's
+        read/decode failure, if any, which already selected fresh defaults.
+        No dialog, retry, state mutation or I/O occurs. Empty successful outcomes
+        clear this label. Call only on the GUI owner thread.
+        """
+        messages = [str(load_error)] if load_error is not None else []
+        for form, paths in (
+            ("plan", report.plan_dropped),
+            ("knobs", report.knobs_dropped),
+        ):
+            messages.extend(
+                f"Discarded {form}: {'.'.join(str(part) for part in path)}"
+                for path in paths
+            )
+        self._message.setText("; ".join(messages))
 
     def _capture_env(self, devices: Mapping[str, DeviceInfo]) -> FormEnv:
         context = self._services.context

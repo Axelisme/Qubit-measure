@@ -1,6 +1,6 @@
 # workflows/gui — Workflow form attachments
 
-**Last updated:** 2026-10-11，共用 alias preset 與字串 expression
+**Last updated:** 2026-10-12，workflow input 保存
 
 這個 package 擁有具體 workflow 的表單、明寫的 to_cfg 與 Qt panel attachment，不實作通用 editor 或 Engine。Native workflow definitions 不依賴這些 GUI attachments。
 
@@ -16,7 +16,7 @@ T1WorkflowWindow.create_remote_service以同一Window、session bus與owner組�
 
 Records／具名圖 RPC 讀同一 Window 的 native run。Records 直接投影 Engine 已提交的 records，保留 commit cursor 與 captured revision，不從圖反推數值。圖名與 PNG 由 Window 持有的 Plots 提供，PNG 沿 shared renderer 在 Qt owner 產生；status-only 不渲染。Pending acceptance 明確失敗，terminal 圖保留至新 Start 或 close；close 成功釋放後不再提供舊圖。MCP forwarding 已接同一 GUI RPC。
 
-獨立 GUI app 已接線，B4 12 的共用 alias preset 已接入。App 直接重用 `zcu_lab.ALIAS_PRESET`，交給 shared `build_session_services(alias_rows=...)`。Preset 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列，不複製 workflow-local preset。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。S4 source reload 與 U7 input 保存／還原未做。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成。
+獨立 GUI app 已接線，B4 12 的共用 alias preset 已接入。App 直接重用 `zcu_lab.ALIAS_PRESET`，交給 shared `build_session_services(alias_rows=...)`。Preset 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列，不複製 workflow-local preset。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。App 開窗透過 SingleFileCaretaker 還原 plan／knobs 的原始 FormInput，保留 expression；不相容欄位由 FormState 丟棄並顯示 path。讀檔失敗提示並回到目前 defaults。正常關窗在 terminal delivery 後 flush；--clean 只略過開窗讀檔，關窗仍保存。已附 run 的 knobs 取 Controller binding 的唯一 draft，不保存 renderer-local 尚未 parse 文字、journal 或硬體狀態。S4 source reload 尚未接線。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成。
 
 App 組裝一份 SessionServices，Window constructor 為 `(state, services, owner, *, on_close=None, parent=None)`。Window 的 runner 與 progress 取自 services，GUI 與 MCP 操作同一 Window／Controller。parent=None 建立 top-level Window，指定 QWidget 時嵌入該 Qt parent。關窗先等待 run 終止，再呼叫 on_close；callback 失敗拒絕關窗，保留資源供重試。這個介面遷移不代表 CP-B 驗收。
 
