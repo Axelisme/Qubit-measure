@@ -56,6 +56,17 @@ def window(qapp, cross_controller):
     qapp.processEvents()
 
 
+def test_closed_window_stops_indicator_authority_projection(window):
+    view, ctrl = window
+    display = indicator(view)
+    assert display.text() == "Local"
+    assert view.close()
+
+    ctrl.control_identity.connect("retired-view", "flux-agent", "owner")
+
+    assert display.text() == "Local"
+
+
 def test_indicator_projects_online_offline_reclaim_lock_and_unlock(window):
     view, ctrl = window
     lamp = indicator(view)
@@ -530,9 +541,17 @@ def test_remote_close_decline_has_no_lifecycle_effect_accept_waits_for_search(
     assert not view.close(), "Remote close must ask before beginning shutdown"
     assert seen and "flux-agent" in seen[0]
     assert view.isVisible() and ctrl.search.active_token == token
+    ctrl.control_identity.disconnect("a")
+    assert indicator(view).text().endswith("offline")
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    assert indicator(view).text().endswith("online")
     answer_close(True, seen)
     assert not view.close(), "Accepted close must retain the pending search owner"
     assert ctrl.control_identity.status().holder == "rpc:flux-agent"
+    ctrl.control_identity.disconnect("a")
+    assert indicator(view).text().endswith("offline")
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    assert indicator(view).text().endswith("online")
     background.complete_cancel()
     assert ctrl.search.outcome(token).status == "cancelled"
     assert panel.figures == {}
