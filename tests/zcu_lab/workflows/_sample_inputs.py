@@ -106,7 +106,7 @@ def sample_engine[R](
 
     @workflow("samples", plan=type(plan), tunables=SampleTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: P, tun: SampleTunables, state: int
+        env: WorkflowEnv[Calibrated], plan: BaseModel, tun: SampleTunables, state: int
     ) -> Step[int, R]:
         del plan, tun
         if state == 3:
