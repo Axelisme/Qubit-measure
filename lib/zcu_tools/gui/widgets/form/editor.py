@@ -34,7 +34,7 @@ class FormEditor[F: FormModel](QWidget):
     form.input.<path> is a QLineEdit for text, numeric, complex, expression or
     whole-container input; a QCheckBox for bool; or a QComboBox for choices and
     discriminators. Combo item data is the ordinary input value.
-    form.mode.<path> is a numeric/complex QComboBox with data "direct" and "expr".
+    form.mode.<path> is a numeric/complex/string QComboBox with data "direct" and "expr".
     Discriminators offer only ordinary typed tags and have no expression mode.
     Empty choices keep the current branch visible without changing its input.
     form.enabled.<path> is a nullable-model activation QCheckBox.

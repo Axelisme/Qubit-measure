@@ -56,7 +56,7 @@ Status 與 records 讀 Engine facts，不從 artists 反推數值。圖名來自
 
 Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<run_id>/`，native acquisition 與圖在條目 Database 的 `workflows/<run_id>/iter/`。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
 
-共用 alias preset 與 Window 的 SessionServices 組裝已接入。公共 expression evaluator 已提供裸 alias 名稱求值，但共用 FormState 仍只解碼數值 expression。T1 flux_dev 的 `$flux_dev` default 尚未完成表單接線，目前仍填明確 device 名稱。Source reload S4 與 input 保存還原 U7 未做，由 workflows-p3 承接。S1–S3 的既有 in-process simulator 證據與完整 device cfg 的 bounded 接受紀錄保留，但不代表完整 integration 或使用者 CP-B 驗收。Startup-failure scenario 14 未完成完整驗證。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成，不授權硬體或真實資料。
+共用 alias preset 與 Window 的 SessionServices 組裝已接入。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。Source reload S4 與 input 保存還原 U7 未做，由 workflows-p3 承接。S1–S3 的既有 in-process simulator 證據與完整 device cfg 的 bounded 接受紀錄保留，但不代表完整 integration 或使用者 CP-B 驗收。Startup-failure scenario 14 未完成完整驗證。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成，不授權硬體或真實資料。
 
 ## 事件與錯誤
 

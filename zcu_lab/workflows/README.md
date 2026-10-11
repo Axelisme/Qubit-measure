@@ -1,6 +1,6 @@
 # `zcu_lab.workflows` — 使用者 workflow
 
-**Last updated:** 2026-10-11，共用 alias preset 與字串 expression 接線邊界
+**Last updated:** 2026-10-11，共用 alias preset 與字串 expression
 
 本 package 擁有具體 workflow 的校準、cfg 組裝、分析、record 與 state。通用迭代、取消、提交與保存路徑由 `zcu_tools.experiment.workflows` 負責。宿主建立 catalog，再明確注入框架；import 不啟動 run。宣告只列 name、plan、tunables、init。T1 在步驟開頭檢查 soc／devices／context，v0 檢查 devices／context，缺少時明確失敗。這是定義者的選擇，不是框架的 admission 保證；硬體操作仍經 effect。
 
@@ -20,6 +20,6 @@ Workflow 透過 `env.plots` 的 typed handles 更新 live trace，buffer 回呼�
 
 `saving` 的四個具體 writer 使用各 experiment 的既有 persistence declaration 與 native `save_run`。Writer 接 Engine 的 exact path，不決定 entry layout，也不捕捉 live context。Acquisition evidence 提供 run_id、時間、completion 與 software provenance；caller 的 RunSnapshot 提供當時的 entry／point／roles。保存不以 workflow run_id 或保存時間覆寫 acquisition facts。Saver 原樣將已提供的 `AcquisitionEvidence.device_snapshot` 交給 native metadata；`{}` 表示無 device，`None` 保留舊資料未記錄的語意。Sweep 與再次 Save 不刷新這份資料。每次 `env.run` 在 callback 前捕捉 connected drivers，五個 native callback 將 Run 的固定 snapshot 交給 acquisition evidence。直接建 Run 的 caller 明填已捕捉的 snapshot，確知無 device 時填 `{}`。GUI host 在 worker 重用 native capture helper，Resume 本身不讀 device；下一次 env.run 再捕捉。這些接線不代表完整 CP-B 或 04 全綠。Window 已從同一份 SessionServices 取 runner／progress，保留 optional Qt parent，獨立 app 已接線。
 
-GUI app 直接從 zcu_lab 取得 ALIAS_PRESET，交給 shared build_session_services 的 generic alias_rows 參數。它不複製 preset，也不提前載入 adapter catalog。Session 的可編輯表與 preset 分開，qubit 保留首次唯一候選初始化，resonator 保留 $qubit.resonator 軟連結，flux_dev 初值留空。Prepare forms 透過 read_context() 固定當次 alias 快照，不宣告角色或檢查 kind。公共 expression evaluator 已提供裸 alias 名稱求值，但 FormState 尚未解碼字串 expression。T1 flux_dev 的 $flux_dev default 尚未完成表單接線，目前仍填明確 device 名稱。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成。S4 source reload 與 U7 input 保存／還原未做。
+GUI app 直接從 zcu_lab 取得 ALIAS_PRESET，交給 shared build_session_services 的 generic alias_rows 參數。它不複製 preset，也不提前載入 adapter catalog。Session 的可編輯表與 preset 分開，qubit 保留首次唯一候選初始化，resonator 保留 $qubit.resonator 軟連結，flux_dev 初值留空。Prepare forms 透過 read_context() 固定當次 alias 快照，不宣告角色或檢查 kind。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成。S4 source reload 與 U7 input 保存／還原未做。
 
 `tests/experiment/workflows/` 驗證通用 Engine 契約。`tests/zcu_lab/workflows/` 由具體 callback、calibration 與 native T1 的 Engine seam，驗證真實 simulator、typed native load、完整與拒絕路徑、pause 新 revision 重做及 stop 保留 prior commit。不測宿主腳本或文件內容。

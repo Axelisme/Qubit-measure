@@ -38,6 +38,26 @@ def alternatives(annotation: object) -> tuple[object, ...]:
     return (annotation,)
 
 
+def accepts_expression(annotation: object) -> bool:
+    """Accept numeric and string value annotations, including string choices.
+
+    Literal strings and string Enum values still undergo Pydantic validation
+    after evaluation. Nullable wrappers do not change expression support.
+    """
+    return any(
+        item is int
+        or item is float
+        or item is complex
+        or item is str
+        or (
+            get_origin(item) is Literal
+            and any(isinstance(tag, str) for tag in get_args(item))
+        )
+        or (isinstance(item, type) and issubclass(item, str) and issubclass(item, Enum))
+        for item in alternatives(annotation)
+    )
+
+
 def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
     """Return BaseModel branches from an annotation without instantiating them."""
     return tuple(
@@ -310,13 +330,9 @@ def _compatible(info: FieldInfo, value: JsonValue) -> bool:
     types = alternatives(info.annotation)
     if value is None:
         return type(None) in types
-    if isinstance(value, dict) and any(
-        t is int or t is float or t is complex for t in types
-    ):
+    if isinstance(value, dict) and accepts_expression(info.annotation):
         if set(value) == {"expr"}:
-            return isinstance(value["expr"], str) and any(
-                t is int or t is float or t is complex for t in types
-            )
+            return isinstance(value["expr"], str)
         if set(value) == {"__complex__"} and complex in types:
             from zcu_tools.gui.cfg.codec import decode_complex
 

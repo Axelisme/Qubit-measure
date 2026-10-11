@@ -19,7 +19,7 @@ class FieldView:
     path is the canonical model-field path. kind selects a Qt representation.
     label, description, unit and placeholder are display text; collapsed is
     the initial model-group fold hint. nullable permits null; active identifies
-    an enabled nullable model. expression permits numeric Expr input. options
+    an enabled nullable model. expression permits scalar Expr input. options
     is current choice data, or None for free input (empty means no choices).
     raw is current JSON or a schema static default when present is False.
     value is the ordinary preview leaf when has_value is True; otherwise None
@@ -64,7 +64,7 @@ def _text(schema: dict[str, JsonValue], key: str) -> str:
 
 
 def _variants(schema: dict[str, JsonValue]) -> tuple[dict[str, JsonValue], ...]:
-    # Nullable numeric fields wrap another numeric/Expr anyOf. Flatten only
+    # Nullable scalar fields wrap another scalar/Expr anyOf. Flatten only
     # alternatives, not model properties/container items; retain outer metadata.
     branches = _objects(schema.get("anyOf"))
     if not branches:
@@ -76,7 +76,7 @@ def _variants(schema: dict[str, JsonValue]) -> tuple[dict[str, JsonValue], ...]:
 
 
 def _direct(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    # Numeric selector constraints are inside the ordinary Expr alternative.
+    # Value constraints are inside the ordinary Expr alternative.
     return next(
         (
             node

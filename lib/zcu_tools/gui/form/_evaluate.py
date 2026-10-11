@@ -12,7 +12,14 @@ from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_ex
 
 from ._json import default_json
 from ._sources import check_sources, error_path
-from ._structure import alternatives, discriminator, leaves, selected, unwrap
+from ._structure import (
+    accepts_expression,
+    alternatives,
+    discriminator,
+    leaves,
+    selected,
+    unwrap,
+)
 from .model import FormEnv, FormErrors, FormModel, FormPath, FormPreview, FormValue
 
 
@@ -30,16 +37,22 @@ def _decode(
     annotation = unwrap(types[0]) if len(types) == 1 else unwrap(info.annotation)
     child = selected(info, value)
     if child is not None and isinstance(value, dict):
-        if (tag_key := discriminator(info)) is not None:
-            tag = value.get(tag_key)
-            if isinstance(tag, str):
-                tags[path] = tag
-        return _decode_model(child, value, env, path, errors, tags)
+        tag_key = discriminator(info)
+        tag = value.get(tag_key) if tag_key is not None else None
+        if isinstance(tag, str):
+            tags[path] = tag
+        # Selectors determine shape before any value-leaf evaluation.
+        fields = {key: item for key, item in value.items() if key != tag_key}
+        ordinary = _decode_model(child, fields, env, path, errors, tags)
+        if tag_key is not None and tag_key in value:
+            ordinary[tag_key] = _ordinary(value[tag_key])
+        return ordinary
     types = alternatives(annotation)
-    if isinstance(value, dict) and any(
-        item is int or item is float or item is complex for item in types
+    numeric = any(item is int or item is float or item is complex for item in types)
+    if isinstance(value, dict) and (
+        (accepts_expression(annotation) and "expr" in value) or numeric
     ):
-        return _scalar(value, env, path, errors)
+        return _scalar(value, env, path, errors, numeric=numeric)
     if get_origin(annotation) in (dict, Mapping) and isinstance(value, dict):
         args = get_args(annotation)
         item_info = FieldInfo.from_annotation(args[1])
@@ -78,11 +91,14 @@ def _scalar(
     env: FormEnv,
     path: FormPath,
     errors: dict[FormPath, str],
+    *,
+    numeric: bool,
 ) -> FormValue:
     try:
         if "expr" in value:
             if set(value) != {"expr"} or not isinstance(value["expr"], str):
-                raise ValueError("Numeric expression requires {expr: text}")
+                kind = "Numeric" if numeric else "String"
+                raise ValueError(f"{kind} expression requires {{expr: text}}")
             return evaluate_scalar_expr(value["expr"], env.parameters)
         if "__complex__" in value:
             return decode_complex(value)

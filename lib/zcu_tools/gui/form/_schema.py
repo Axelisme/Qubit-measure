@@ -105,7 +105,7 @@ def _partial(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
                 _partial(branch) if isinstance(branch, dict) else branch
                 for branch in branches
             ]
-    if node.get("type") in ("integer", "number"):
+    if node.get("type") in ("integer", "number", "string"):
         return {"anyOf": [node, copy_object(_EXPR)]}
     return node
 
@@ -208,11 +208,9 @@ def _child_nodes(
     node = _non_null(target)
     _inline_ref(node, root)
     models = model_types(info.annotation)
-    if len(models) == 1:
-        return ((models[0], node),)
     variants = node.get("oneOf")
     if isinstance(variants, list):
-        if discriminator(info) is not None:
+        if (tag_key := discriminator(info)) is not None:
             children: list[tuple[type[BaseModel], dict[str, JsonValue]]] = []
             for variant in variants:
                 if not isinstance(variant, dict):
@@ -220,6 +218,25 @@ def _child_nodes(
                 tags = variant.get("x-form-discriminator-values")
                 if not isinstance(tags, list):
                     raise ValueError("Tagged schema branch lacks intrinsic identities")
+                _inline_ref(variant, root)
+                properties = variant.get("properties")
+                selector = (
+                    properties.get(tag_key) if isinstance(properties, dict) else None
+                )
+                if isinstance(selector, dict):
+                    branches = selector.get("anyOf")
+                    if isinstance(branches, list):
+                        ordinary = [branch for branch in branches if branch != _EXPR]
+                        # Selectors determine shape before value evaluation.
+                        if len(ordinary) == 1 and isinstance(ordinary[0], dict):
+                            metadata = {
+                                key: value
+                                for key, value in selector.items()
+                                if key != "anyOf"
+                            }
+                            selector.clear()
+                            selector.update(ordinary[0])
+                            selector.update(metadata)
                 children.append((schema_branch_model(info, tags), variant))
             return tuple(children)
         return tuple(
@@ -227,6 +244,8 @@ def _child_nodes(
             for model, variant in zip(models, variants, strict=False)
             if isinstance(variant, dict)
         )
+    if len(models) == 1:
+        return ((models[0], node),)
     return tuple(
         pair
         for child_info, child_target in _container_nodes(info, target)

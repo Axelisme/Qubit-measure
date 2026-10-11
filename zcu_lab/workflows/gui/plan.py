@@ -32,7 +32,8 @@ from zcu_lab.workflows.t1 import T1Plan
 class T1PlanForm(FormModel):
     """Start-time setpoints and two shared module reference/inline selections.
 
-    flux_dev names the host device; required flux_unit declares A, V or native.
+    flux_dev is the resolved host device name; its input defaults to $flux_dev
+    in the fixed alias capture. Required flux_unit declares A, V or native.
     fluxes contain absolute values in that coordinate; no conversion occurs.
     points >= 5 controls runtime T1 delay resolution. qub_pulse selects the
     shared pulse drive; readout selects a pulse-backed readout because native
@@ -60,8 +61,11 @@ class T1PlanForm(FormModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Prefill the required pi estimate from the fixed x180 module capture.
+        """Prefill the device alias expression and captured x180 pi estimate.
 
+        Keep $flux_dev as an expression for shared preview/Start evaluation.
+        Missing captures or bindings produce an alias-naming field error, not
+        a device fallback. Device membership is checked only when used.
         On initial input only, resolve $qubit.module.x180.waveform.length in
         the fixed alias capture and retain its concrete path as an expression
         if readable and non-null. No capture, absent/null values or
@@ -71,6 +75,7 @@ class T1PlanForm(FormModel):
         No live selection, YAML refresh or device access occurs.
         """
         data = super().defaults(env, previous)
+        data["flux_dev"] = {"expr": "$flux_dev"}
         if previous or env.parameters is None:
             return data
         try:

@@ -4,6 +4,8 @@ status: draft
 
 # Pydantic 表單、輸入與宿主提交
 
+**Last updated:** 2026-10-11，字串 expression 與結構 selector
+
 ## 脈絡與範圍
 
 Workflow plan 與 tunables 需要 sequence、nullable、tagged union、typed mapping、expression 和 library module reference。新表單用 Pydantic 表示普通值，用獨立的 input JSON 保存未填與 expression。它不擴充 CfgSchema，也不遷移 Measure。
@@ -26,7 +28,7 @@ Workflow plan 與 tunables 需要 sequence、nullable、tagged union、typed map
 
 ## 輸入與普通值
 
-FormInput 配對表單型別與可不完整的 JSON tree。缺 key 表示未填，null 表示明確的 null。Numeric 與 complex 欄位接受 `{"expr": "..."}`。普通字串仍是普通字串，不支援字串求值。Complex 直接值使用 `{"__complex__": [re, im]}`。Model 實例只含求值後的普通值。
+FormInput 配對表單型別與可不完整的 JSON tree。缺 key 表示未填，null 表示明確的 null。Numeric、complex 與所有字串 value leaves 接受 `{"expr": "..."}`，包含 `Literal[str]` 與 str Enum。只有顯式 envelope 求值，普通字串包含 `$` 開頭的內容仍是 literal。Preview 與 result 使用共用 evaluator，再遵守 choices 與 Pydantic 約束。Input schema 與 compatible restore 保留 expression 原文，editor 使用同一 schema 與 preview，不自行求值。Complex 直接值使用 `{"__complex__": [re, im]}`。Model 實例只含求值後的普通值。
 
 FormState 持有隔離的 input 與 base，不持 Engine revision。
 
@@ -45,7 +47,7 @@ Write paths 是 model-field tuples，不進入 sequence index 或 mapping key。
 
 `defaults(env, previous)` 是唯一 defaults hook。`default_input(env)` 是 final 組裝入口，依序呼叫 `defaults(env, {})`、檢查來源並建立 FormInput。Defaults 可以包含 expression 與 complex tags。Required keys 沒有預設時保持未填。
 
-Branch switch 先呼叫新分支的 defaults，previous 是舊分支的隔離 input。接著沿用同名欄位，明送內容最後覆蓋。Discriminator 使用新分支的值。沒有 branch factory registry。
+Branch switch 先呼叫新分支的 defaults，previous 是舊分支的隔離 input。接著沿用同名欄位，明送內容最後覆蓋。Discriminator 使用新分支的普通 typed tag。它是結構 selector，決定子 model 的形狀與 branch defaults，不是延後求值的 value leaf。Core schema 不提供 expression envelope，editor 不提供 expression mode，字串與 numeric selector 遵守同一規則。沒有 branch factory registry。
 
 T1TunablesForm 只在 previous 為空時預填 lifetime expression。Captured point 的 `general.ext.guess_us` 存在時保留引用，即使它是 null 或無效值。缺 leaf 或沒有 capture 時使用暫定普通值。無效引用在 guess_us 回報錯誤，不降級為 fallback。
 

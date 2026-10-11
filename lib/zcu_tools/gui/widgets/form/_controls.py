@@ -277,9 +277,10 @@ class FieldRow:
         self._displaying = True
         try:
             self._display_input(local, editable=editable)
-            self.value.setText(
-                str(field.value) if field.has_value and local is None else ""
-            )
+            shown = str(field.value) if field.has_value and local is None else ""
+            if shown and _expression(field) and isinstance(field.value, str):
+                shown = f"{_input_text(field)} = {json.dumps(field.value, ensure_ascii=False)}"
+            self.value.setText(shown)
         finally:
             self._displaying = False
 
