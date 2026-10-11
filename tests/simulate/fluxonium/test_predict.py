@@ -114,6 +114,30 @@ def test_predict_freq_golden() -> None:
     assert p.predict_freq(0.1, (1, 2)) == pytest.approx(3416.7599127277226, abs=1e-7)
 
 
+def test_predictor_queries_frequency_curves_in_mhz() -> None:
+    """The neutral query surface returns flux coordinates and transition rows."""
+    predictor = FluxoniumPredictor((5.0, 1.0, 0.5), 0.0, 1.0, 0.0)
+    fluxs, frequencies = predictor.predict_frequencies_mhz(
+        np.array([0.1], dtype=np.float64), ((0, 1), (1, 2))
+    )
+    np.testing.assert_allclose(fluxs, [0.6])
+    np.testing.assert_allclose(
+        frequencies, [[1707.3748654723192], [3416.7599127277226]], atol=1e-7
+    )
+
+
+def test_predictor_queries_matrix_curves_above_level_one() -> None:
+    """Batch matrix queries retain the engine's higher-transition support."""
+    predictor = FluxoniumPredictor((5.0, 1.0, 0.5), 0.0, 1.0, 0.0)
+    fluxs, magnitudes = predictor.predict_matrix_elements(
+        np.array([0.1, 0.2], dtype=np.float64), ((0, 1), (0, 3)), "n"
+    )
+    np.testing.assert_allclose(fluxs, [0.6, 0.7])
+    assert magnitudes.shape == (2, 2)
+    assert np.all(magnitudes > 0)
+    assert magnitudes[0, 0] == pytest.approx(0.05111118894415298, abs=1e-9)
+
+
 def test_predict_freq_reverse_transition_keeps_signed_contract() -> None:
     p = _make_predictor(PARAMS[0])
     forward = p.predict_freq(0.13, (0, 1))
