@@ -1151,3 +1151,28 @@ def test_predictor_params_row_keeps_full_control_height(qapp):
             assert widget.height() >= widget.sizeHint().height()
     finally:
         dialog.close()
+
+
+def test_transition_value_columns_fit_their_text(qapp):
+    from qtpy.QtWidgets import QTableWidget
+
+    dialog = PredictorDialog(_make_ctrl(has_predictor=True, path="/p.json"))
+    dialog.show()
+    qapp.processEvents()
+    try:
+        table = dialog.findChild(QTableWidget)
+        assert table is not None and table.rowCount() > 0
+        metrics = table.fontMetrics()
+        for column in range(table.columnCount() - 1):
+            needed = max(
+                metrics.horizontalAdvance(item.text())
+                for row in range(table.rowCount())
+                if (item := table.item(row, column)) is not None
+            )
+            assert table.columnWidth(column) >= needed, column
+        header = table.horizontalHeader()
+        assert header is not None
+        used = sum(table.columnWidth(c) for c in range(table.columnCount()))
+        assert used >= table.viewport().width() - 1
+    finally:
+        dialog.close()
