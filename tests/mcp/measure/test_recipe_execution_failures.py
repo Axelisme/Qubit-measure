@@ -9,6 +9,7 @@ from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeRun, RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from ._recipe_actual_support import cfg_value
 from ._recipe_analysis_support import AnalysisRecipeGui
 from ._recipe_execution_support import ControlledRunGui, definition, registry
 from ._recipe_support import LookbackGui, recipe_client
@@ -83,7 +84,7 @@ def test_unyielded_run_start_failure_retains_fixed_conditions(tmp_path, uncertai
         execution = executions.start(client.context, "sample", {})
         reply = execution.wait(5)
         assert reply.data["status"] == "failed"
-        assert reply.data["actual"]["fields"]["rounds"]["value"] == 8
+        assert cfg_value(gui.publication, "rounds") == 8
         assert reply.data["run_op"] is None
         assert reply.data["run_start"]["status"] == (
             "unknown" if uncertain else "not_started"

@@ -4,25 +4,38 @@ from copy import deepcopy
 from threading import Event
 
 import pytest
+from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     RecipeRun,
     RecipeSession,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from ._recipe_support import LookbackGui, recipe_client, scalar
+from zcu_lab.recipes.helpers import set_frequency
+
+from ._recipe_support import LookbackGui, recipe_client
 
 
 def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_path):
     gui = LookbackGui()
-    gui.md["r_f"] = 6100.0
+    gui.md["$resonator.freq"] = 6100.0
     gui.publication["source_basis"] = [{"key": "r_f", "revision": "7"}]
     with recipe_client(tmp_path, gui) as client:
-        tab = RecipeSession(client.context).open_tab("lookback")
+        tab = RecipeSession(
+            client.context,
+            summary_parameters=(
+                SummaryParameter("rounds", "rounds"),
+                SummaryParameter("reset", "modules.reset"),
+                SummaryParameter("frequency", "modules.readout.pulse_cfg.freq"),
+            ),
+        ).open_tab("lookback")
         tab.set("rounds", 7)
         tab.disable_library("modules.reset")
-        tab.set_frequency(
-            "modules.readout", calibration="resonator", required="frequency_mhz"
+        set_frequency(
+            tab,
+            "modules.readout",
+            calibration="$resonator.freq",
+            required="frequency_mhz",
         )
         expected = deepcopy(gui.publication["cfg_ref"])
         operation = tab.run()
@@ -36,20 +49,15 @@ def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_pa
         assert before.actual["fields"]["rounds"] == {
             "value": 7,
             "source": "explicit",
-            "input": scalar(7)["input"],
         }
         assert before.actual["fields"]["modules.reset"] == {
             "value": None,
             "source": "disabled",
         }
-        expected_frequency = scalar(6100.0)["input"]
-        expected_frequency.update(mode="expression", raw="r_f")
         assert before.actual["fields"]["modules.readout.pulse_cfg.freq"] == {
             "value": 6100.0,
-            "source": "r_f",
-            "input": expected_frequency,
+            "source": "$resonator.freq",
         }
-        assert before.actual["source_basis"] == [{"key": "r_f", "revision": "7"}]
         gui.publication["source_basis"].clear()
         tab.set("rounds", 11)
         before.actual["fields"]["rounds"]["value"] = -1
@@ -59,7 +67,6 @@ def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_pa
         assert captured is not None
         assert captured.actual["fields"]["rounds"]["value"] == 7
         assert captured.actual["cfg_ref"] == expected
-        assert captured.actual["source_basis"] == [{"key": "r_f", "revision": "7"}]
         assert captured.result_state == {
             "available": True,
             "revision": 1,
@@ -182,9 +189,11 @@ def test_between_yield_cancel_suppresses_only_one_start_not_fast_edits(tmp_path)
         return False
 
     with recipe_client(tmp_path, gui) as client:
-        tab = RecipeSession(client.context, consume_cancel=consume_cancel).open_tab(
-            "lookback"
-        )
+        tab = RecipeSession(
+            client.context,
+            consume_cancel=consume_cancel,
+            summary_parameters=(SummaryParameter("rounds", "rounds"),),
+        ).open_tab("lookback")
         pending.set()
         tab.set("rounds", 8)
         assert pending.is_set()
@@ -225,7 +234,10 @@ def test_cancel_at_native_start_admission_does_not_send_run(tmp_path):
 def test_start_rejection_retains_the_attempted_cfg_without_retry(tmp_path):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
-        recipe = RecipeSession(client.context)
+        recipe = RecipeSession(
+            client.context,
+            summary_parameters=(SummaryParameter("rounds", "rounds"),),
+        )
         tab = recipe.open_tab("lookback")
         tab.set("rounds", 6)
         client.transport.replies["tab.run_start"] = {

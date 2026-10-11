@@ -20,7 +20,8 @@ from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
-from .errors import RenameRecoveryError
+from .aliases import EntryAliases, load_entry_aliases, save_entry_aliases
+from .errors import DestinationExistsError, RenameRecoveryError
 from .ledger import RecordsLedger
 from .ledger_models import (
     AnalyzedPayload,
@@ -39,6 +40,7 @@ from .schema import (
     SetupDocument,
     is_forward_minor,
 )
+from .storage import bind_sample_table
 from .views import (
     SetupView,
     validate_view_components,
@@ -53,7 +55,7 @@ def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -
     root_path = Path(root)
     path = root_path / name
     if new_destination and (path.exists() or path.is_symlink()):
-        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(path))
+        raise DestinationExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(path))
     if path.resolve().parent != root_path.resolve():
         raise ValueError(f"{path}: entry escapes its root")
     return path
@@ -140,6 +142,25 @@ class ResultEntry:
         """Return this entry's exact Database directory, not the parent root."""
         return self._database_path
 
+    def load_aliases(self) -> EntryAliases | None:
+        """Read the entry-authored table, or None only when its file is absent.
+
+        Preserve order, empty bindings and raw $ links. Accept zcu.aliases 1.x;
+        header/schema/YAML and I/O errors propagate without preset fallback.
+        No component lookup or writes occur. Syntax validation belongs to the
+        caller\'s alias table owner.
+        """
+        return load_entry_aliases(self._result_path / "aliases.yaml")
+
+    def save_aliases(self, aliases: EntryAliases) -> None:
+        """Atomically save this named authored table as zcu.aliases 1.0.
+
+        Strict string validation precedes sibling-temp replacement. Failure
+        retains the old file and propagates its storage error. No point, setup,
+        ledger or preferences change; no multiwriter/crash guarantee is offered.
+        """
+        save_entry_aliases(self._result_path / "aliases.yaml", aliases)
+
     @property
     def ledger(self) -> RecordsLedger:
         """Bind this entry's records directory and UUID without caching events.
@@ -196,11 +217,7 @@ class ResultEntry:
         read. Unsafe names and symlinks escaping this entry raise ValueError.
         The returned table owns append, latest-per-run read and CSV export.
         """
-        validate_path_segment(component, field="component")
-        path = self._result_path / "samples" / f"{component}.jsonl"
-        if not path.resolve().is_relative_to(self._result_path.resolve()):
-            raise ValueError(f"{path}: samples escape their entry")
-        return JsonlSampleTable(path)
+        return bind_sample_table(self._result_path, component)
 
     def list_points(self) -> list[str]:
         """Return sorted labels of directories containing both point files.
@@ -227,7 +244,8 @@ class ResultEntry:
     ) -> PointView:
         """Create an independent complete point and return its validated view.
 
-        label is a safe single path segment; existing destinations are rejected.
+        label is a safe single path segment; existing destinations raise
+        DestinationExistsError before writes.
         Without clone_from, copy the latest setup components and provenance.
         clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
         PointView using the same resolved result/database roots. Reload published

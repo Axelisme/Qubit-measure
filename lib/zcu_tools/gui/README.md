@@ -180,15 +180,25 @@ it does not select a process-wide Matplotlib backend.
 
 ## Project / Result Scope
 
-`ResultScopeManager` scans `result/**/params.json` under the project root and
-treats each hit as a selectable result scope. Measurement-session setup dialogs
-(measure) use that scope to apply a project; analysis dialogs
-(fluxdep/dispersive) use the same discovery in `widgets.ProjectDialog` as a
-dropdown picker only, leaving typed paths and Browse flows available.
-Measurement-session discovery is snapshot-cached: ordinary dialog reopen/apply
-paths reuse the last scan, while an explicit refresh requests a new scan. Applying
-a previously selected scope validates against the snapshot first and only rescans
-when the selected scope is absent.
+Measure 的 shared SetupDialog 使用 `ProjectSettingsService` 開啟或建立 Result Entry，
+再透過 ContextService 選取或建立 Working Point。Entry discovery 由 resources owner
+列出含 setup.yaml 的條目，普通查詢重用 cache，明確 refresh 才重讀。開啟 entry
+不自選 point，不連硬體，也不從 chip／qubit／resonator 名稱推導路徑。
+
+`ResultScopeManager` 仍供 `widgets.ProjectDialog` 的 analysis path picker 使用。
+它掃描 project root 下的 `result/**/params.json`，提供 result scope 候選；
+fluxdep／dispersive 保留 typed path 和 Browse。這不是 Measure 的 entry binding。
+
+## Shared session dialogs (`session/ui/`)
+
+`SetupDialog`、`AliasDialog`、`InspectDialogBase`、`DeviceDialog` 與
+`PredictorDialog` 由 shared session UI 擁有，依賴各 domain 的窄 control facet。
+`session/ui/alias_dialog.py` 的 AliasDialog 編輯元件與 device 共用的有序 alias 表。
+Apply 先驗表，再由 entry owner 原子保存，成功後才安裝 memory 並發布 fact。
+EMPTY 只改 memory；失敗保舊表、舊檔與 draft。Apply 不關閉，Cancel 不撤已 Apply 的表。
+開 entry 載入自己的表，無檔才重設 caller preset；切 point 不換表。
+Measure 與 workflows 直接 import 同一 owner，不留 app-local re-export 或 wrapper。
+App 保留 dialog lifecycle 與呈現政策，shared dialog 不反向 import app。
 
 ## Dialogs — always non-blocking
 

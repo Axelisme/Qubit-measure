@@ -1,5 +1,5 @@
 """Point-local typed module library."""
 
-from .library import ModuleLibrary
+from .library import LibrarySnapshot, ModuleLibrary
 
-__all__ = ["ModuleLibrary"]
+__all__ = ["LibrarySnapshot", "ModuleLibrary"]

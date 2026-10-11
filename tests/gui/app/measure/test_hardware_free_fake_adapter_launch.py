@@ -1,121 +1,151 @@
-"""Hardware-free fake-adapter production-path launch preparation (A6 non-claim).
-
-Reproducible entry point for Orchestrator A6 observation: launch the shipped
-measure-gui composition with a fake adapter (requires_soc=False) via the normal
-Controller/MainWindow composition path and verify the approved Run tree and
-Analysis ledger are mounted without hardware.
-
-Run with:
-  PYTHONPATH=lib QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/gui/app/measure/test_hardware_free_fake_adapter_launch.py -xvs
-"""
+"""Hardware-free fake-adapter Run tree and native writeback ledger presentation."""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
+
 import pytest
-from qtpy.QtWidgets import QApplication, QCheckBox, QLabel
-from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from qtpy.QtCore import QEventLoop, QTimer
+from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QScrollArea, QTreeWidget
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.gui.app.measure.adapter import (
+    ParameterWriteback,
+    RunRequest,
+    SessionEnv,
+    WritebackItem,
+    WritebackRequest,
+)
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services import create_persistence_caretaker
+from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
+from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
+from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
+from zcu_tools.resources.entry.registry import component_registry
+
+from tests.gui.app.measure.remote._helpers import FixtureController
+from zcu_lab.components import ResonatorSchema
+from zcu_lab.templates import register_all_templates
+from zcu_lab.v2.fake.freq.gui import (
+    FakeFreqAdapter,
+    FakeFreqAnalyzeResult,
+    FakeFreqRunResult,
+)
+
+
+class LedgerAdapter(FakeFreqAdapter):
+    """Keep the real experiment; supply the fixture's fixed native proposal."""
+
+    def run(
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
+    ) -> FakeFreqRunResult:
+        return super().run(req, dict(raw_cfg), context=context)
+
+    def get_writeback_items(
+        self, req: WritebackRequest[FakeFreqRunResult, FakeFreqAnalyzeResult]
+    ) -> Sequence[WritebackItem]:
+        return [
+            ParameterWriteback(
+                target_name="R1.freq", description="freq", proposed_value=6100.0
+            )
+        ]
 
 
 @pytest.fixture
 def hw_fixture(qapp, tmp_path):
-    """Real Controller + MainWindow via shipped composition, no hardware."""
-    from unittest.mock import MagicMock
-
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.gui.app.measure.app import _build_window
-    from zcu_tools.gui.app.measure.registry import Registry
-    from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
-    from zcu_tools.gui.session.services.io_manager import IOManager
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
-
-    from zcu_lab.definitions import register_all
-    from zcu_lab.templates import register_all_templates
-
-    state = State(SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None))
-    registry = Registry()
-    register_all(registry)
-    template_catalog = TemplateCatalog()
-    register_all_templates(template_catalog)
-    io_manager = IOManager()
-    ctrl, window = _build_window(
-        state, registry, template_catalog, io_manager, project_root=str(tmp_path)
+    """Compose real Qt/domain owners over an isolated entry, without hardware."""
+    before = component_registry.kinds()
+    added = "resonator" not in before
+    if added:
+        component_registry.register("resonator", ResonatorSchema)
+    registry, templates = Registry(), TemplateCatalog()
+    registry.register("fake/freq", LedgerAdapter)
+    register_all_templates(templates)
+    state, bus = (
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        BaseEventBus(),
     )
-    # Attach a no-op caretaker so MainWindow close does not assert (production
-    # attaches it in MeasureGuiBehavior.before_show, which we do not run here).
-    ctrl.attach_caretaker(MagicMock())
+    ctrl = FixtureController(
+        state=state,
+        registry=registry,
+        template_catalog=templates,
+        view=None,
+        bus=bus,
+        project_root=str(tmp_path),
+    )
+    window = MainWindow(ctrl)
+    ctrl.add_view(window)
+    caretaker = create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
+    ctrl.attach_caretaker(caretaker)
+    ctrl.setup_control.new_entry(EntryRequest("lab"))
+    ctrl.setup_control.new_point(PointCreateRequest("ctx001", "", CommandOrigin("gui")))
+    ctrl.context_control.add_component(
+        "R1",
+        "resonator",
+        {
+            "freq": 6000.0,
+            "kappa": 1.0,
+            "wiring": {"ch": 0, "ro_ch": 0},
+            "ext": {"time_of_fly": 0.5},
+        },
+    )
+    ctrl.context_control.set_alias_rows((AliasRow("resonator", "R1"),))
     window.show()
-    QApplication.processEvents()
-    QApplication.processEvents()
-    yield ctrl, window
-    # Join workers and drain queued delivery before releasing Qt resources.
-    ctrl._background_svc.quiesce()
-    window.deleteLater()
-    QApplication.processEvents()
-    QApplication.processEvents()
+    qapp.processEvents()
+    try:
+        yield ctrl, window
+    finally:
+        ctrl.quiesce()
+        window.deleteLater()
+        qapp.processEvents()
+        if added:
+            component_registry.unregister("resonator")
+        assert component_registry.kinds() == before
 
 
 def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
-    """Shipped composition path: fake/freq opens without SoC and shows validated layouts."""
+    """Public tab creation mounts the tree and native 6100 MHz writeback ledger."""
     ctrl, window = hw_fixture
-
-    # Verify fake/freq is available and hardware-free
-    from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
-
-    caps = FakeFreqAdapter.capabilities
-    assert caps.requires_soc is False
-    assert caps.analysis is not AnalysisMode.NONE
     assert "fake/freq" in ctrl.get_adapter_names()
-
-    # Open tab via normal Controller path (not direct ExpTabWidget instantiation)
-    # This goes through the production TabAddedPayload -> MainWindow.add_tab_widget path,
-    # with MainWindow as the RenderHost (via ctrl.add_view(window) done in _build_window).
     assert ctrl.get_session_env().soc is None
     tab_id = ctrl.new_tab("fake/freq")
     QApplication.processEvents()
-    QApplication.processEvents()
-
-    # MainWindow should have created the ExpTabWidget via TabAddedPayload
-    assert tab_id in window._tab_widgets
-    tab = window._tab_widgets[tab_id]
-    # Controller's RenderHost should be the MainWindow, not a MagicMock
-    assert ctrl._render_host is window  # type: ignore[attr-defined]
-    assert window in ctrl._diag_sinks  # type: ignore[attr-defined]
-
-    # The production form renders the caller-owned cfg publication.
-    from qtpy.QtWidgets import QTreeWidget
-    from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
-
-    assert isinstance(tab.cfg_form, ResourceCfgFormWidget)
+    (tab,) = window.findChildren(ExpTabWidget)
     tree = tab.cfg_form.findChild(QTreeWidget)
     assert tree is not None
     assert tree.isHeaderHidden()
     assert tree.indentation() == 10
     assert tree.font().pixelSize() == 13
-
-    # A2/A4: ledger with Analyze between params and writeback (not fixed bar)
-    from qtpy.QtWidgets import QScrollArea
-    from zcu_tools.gui.app.measure.ui.exp_tab_widget import _LedgerSection
-
-    assert isinstance(tab._analyze_section, _LedgerSection)
     assert tab.analyze_form.font().pixelSize() == 13
-    # Verify Analyze is inside scroll area between params and writeback
-    scroll = tab._analysis_panel.findChild(QScrollArea)
-    assert scroll is not None
-    inner = scroll.widget()
-    assert inner is not None
 
-    # Check Analyze is descendant of inner (scroll content) not fixed bar
     def is_descendant(widget, ancestor):
-        cur = widget
-        while cur is not None:
-            if cur is ancestor:
+        current = widget
+        while current is not None:
+            if current is ancestor:
                 return True
-            cur = cur.parent()
+            current = current.parent()
         return False
 
+    scroll = next(
+        scroll
+        for scroll in tab.findChildren(QScrollArea)
+        if is_descendant(tab.analyze_btn, scroll)
+    )
+    inner = scroll.widget()
+    assert inner is not None
     assert is_descendant(tab.analyze_btn, inner)
-    # Verify ordering: params < analyze < writeback
     layout = inner.layout()
     assert layout is not None
     widgets = [
@@ -123,61 +153,54 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
         for i in range(layout.count())
         if layout.itemAt(i).widget() is not None
     ]
-    idx_params = widgets.index(tab._analyze_section)
-    # Find container holding analyze_btn
-    idx_analyze = None
-    for idx, w in enumerate(widgets):
-        if is_descendant(tab.analyze_btn, w):
-            idx_analyze = idx
-            break
-    assert idx_analyze is not None
+    idx_params = next(
+        i for i, widget in enumerate(widgets) if is_descendant(tab.analyze_form, widget)
+    )
+    idx_analyze = next(
+        i for i, widget in enumerate(widgets) if is_descendant(tab.analyze_btn, widget)
+    )
     idx_writeback = widgets.index(tab.writeback_section)
     assert idx_params < idx_analyze < idx_writeback
-    # Post-Analysis should remain baseline CollapsibleSection (not ledger)
-    # fake/freq does not have post_analysis, so post widgets should not exist
-    assert not hasattr(tab, "post_writeback_widget") or tab._has_post is False
 
-    # Populate writeback via service projection (S2) and verify ledger columns
-    from zcu_tools.gui.app.measure.adapter import ParameterWriteback
+    from zcu_tools.gui.cfg.resource import CfgEdit
 
-    # Use the controller's writeback service to create a draft so summaries are
-    # captured in the service-owned model (not on the public WritebackItem).
-    svc = ctrl._writeback_svc  # type: ignore[attr-defined]
+    cfg = ctrl.cfg_resources.lookup(tab_id)
+    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("rounds",), 1),))
+    ctrl.start_run(tab_id, cfg.observe().ref)
 
-    md_item = ParameterWriteback(
-        target_name="r_f", description="freq", proposed_value=6100.0
-    )
-    draft = svc.create_draft([md_item])
-    items = svc.preview_draft(draft)
+    def wait_for(predicate: Callable[[], bool]) -> None:
+        loop = QEventLoop()
+        deadline, poll = QTimer(loop), QTimer(loop)
+        deadline.setSingleShot(True)
+        deadline.timeout.connect(loop.quit)
+        poll.timeout.connect(lambda: loop.quit() if predicate() else None)
+        deadline.start(20000)
+        poll.start(5)
+        loop.exec()
+        poll.stop()
+        deadline.stop()
+        assert predicate()
+
+    wait_for(lambda: ctrl.get_tab_snapshot(tab_id).run.result is not None)
+    wait_for(lambda: not ctrl.get_tab_snapshot(tab_id).interaction.is_running)
+    ctrl.analyze(tab_id, tab.analyze_form.read_params())
+    wait_for(lambda: ctrl.get_tab_snapshot(tab_id).analysis.has_writeback_draft)
+    items = ctrl.get_tab_snapshot(tab_id).analysis.writeback_items
     assert len(items) == 1
-    session_id = items[0].session_id
-    cur, prop = svc.get_summaries(draft, session_id)
-    assert cur is not None
-    assert prop is not None
-    # Now set this draft as the tab's analysis draft (simulate analyze completion)
-    ctrl._state.update_tab_analyze(  # type: ignore[attr-defined]
-        tab_id,
-        object(),
-        None,
-        writeback_draft=draft,
-        analyze_params_instance=tab.analyze_form.read_params()
-        if tab.has_analyze_params()
-        else object(),
-    )
-    # Refresh the tab's writeback widget via MainWindow path
-    snapshot = ctrl.get_tab_snapshot(tab_id)
-    window.refresh_tab_writeback(tab_id, snapshot)
+    current, proposed = ctrl.get_writeback_summaries_for_pane(tab_id, "analysis")[
+        items[0].session_id
+    ]
+    assert current is not None and proposed is not None
+    window.refresh_tab_writeback(tab_id, ctrl.get_tab_snapshot(tab_id))
     QApplication.processEvents()
-    # Now widget should show current/proposed via service projection
-    cur_labels = tab.writeback_widget.findChildren(QLabel, "writebackCurrent")
-    prop_labels = tab.writeback_widget.findChildren(QLabel, "writebackProposed")
-    assert len(cur_labels) >= 1
-    assert len(prop_labels) >= 1
-    assert any(cur in lbl.text() for lbl in cur_labels)  # type: ignore[arg-type]
-    assert any(prop in lbl.text() for lbl in prop_labels)  # type: ignore[arg-type]
-    checks = tab.writeback_widget.findChildren(QCheckBox)
-    assert len(checks) >= 1
-
-    # Cleanup: teardown draft via state removal will be handled by fixture quiesce
+    current_labels = tab.writeback_widget.findChildren(QLabel, "writebackCurrent")
+    proposed_labels = tab.writeback_widget.findChildren(QLabel, "writebackProposed")
+    assert len(current_labels) >= 1
+    assert len(proposed_labels) >= 1
+    assert any(current in label.text() for label in current_labels)
+    assert any(proposed in label.text() for label in proposed_labels)
+    assert len(tab.writeback_widget.findChildren(QCheckBox)) >= 1
+    ctrl.apply_writeback_for_pane(tab_id, "analysis")
+    assert ctrl.read_context().value("R1.freq") == 6100.0
     ctrl.close_tab(tab_id)
     QApplication.processEvents()

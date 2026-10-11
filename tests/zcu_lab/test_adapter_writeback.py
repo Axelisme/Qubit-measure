@@ -1,9 +1,7 @@
 """Recipe adapters propose calibrations for the captured Run environment."""
 
-from collections.abc import Generator
 from dataclasses import dataclass
-from pathlib import Path
-from unittest.mock import MagicMock
+from datetime import datetime, timedelta
 
 import numpy as np
 import pytest
@@ -11,25 +9,19 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeResult,
+    ParameterWriteback,
     PostWritebackRequest,
+    SampleWriteback,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
-from zcu_tools.gui.app.measure.services.writeback import WritebackService
-from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.resources.entry import ResultEntry, component_registry
-from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+from zcu_tools.resources.entry.ledger_models import AcceptedPayload, JsonObject
 
-from tests.resources.entry.fakes import registry_state, restore_registry
-from zcu_lab.components import QubitSchema, ResonatorSchema
-from zcu_lab.definitions import register_all
+from tests.zcu_lab._writeback_support import WritebackSession
+from tests.zcu_lab._writeback_support import writeback_registry as _registry
 from zcu_lab.recipes import RECIPES
 from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickResult
 from zcu_lab.v2.lookback.core import LookbackResult
@@ -54,12 +46,6 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg, T2RamseyRe
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAnalyzeResult
 
 
-def _registry() -> Registry:
-    registry = Registry()
-    register_all(registry)
-    return registry
-
-
 def _recipe_adapters() -> list[str]:
     registry = _registry()
     return [
@@ -68,60 +54,6 @@ def _recipe_adapters() -> list[str]:
         if registry.create(recipe.adapter_name).capabilities.analysis
         != AnalysisMode.NONE
     ]
-
-
-@dataclass
-class WritebackSession:
-    control: ContextControlFacet
-    context: ContextService
-    service: WritebackService
-
-
-@pytest.fixture
-def session(tmp_path: Path) -> Generator[WritebackSession]:
-    before = registry_state()
-    try:
-        for kind, model in [
-            ("qubit/transmon", QubitSchema),
-            ("resonator", ResonatorSchema),
-        ]:
-            if kind not in component_registry.kinds():
-                component_registry.register(kind, model)
-        installed = registry_state()
-        entry = ResultEntry.create(
-            "entry",
-            result_root=tmp_path / "results",
-            database_root=tmp_path / "Database",
-        )
-        entry.new_point("run-point")
-        entry.new_point("later-point")
-        bus = BaseEventBus()
-        context = ContextService(
-            SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
-            bus,
-            bind_assets=ArbWaveformDatabase.info_at,
-        )
-        context.install_entry(entry)
-        control = ContextControlFacet(context=context)
-        for point in ("run-point", "later-point"):
-            control.use_point(PointUseRequest(point))
-            for index in (1, 2):
-                control.add_component(f"R{index}", "resonator", {})
-                control.add_component(
-                    f"Q{index}",
-                    "qubit/transmon",
-                    {"resonator": f"R{index}", "ext": {"readout_cal": {}}},
-                )
-        control.use_point(PointUseRequest("run-point"))
-        control.set_alias_rows(
-            (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
-        )
-        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
-        yield WritebackSession(control, context, service)
-        assert registry_state() == installed
-    finally:
-        restore_registry(before)
 
 
 @dataclass(frozen=True)
@@ -296,6 +228,7 @@ def _calibration(name: str) -> Calibration:
 @pytest.mark.parametrize(
     "change_point", [False, True], ids=["rebind", "rebind-and-point"]
 )
+@pytest.mark.io
 def test_recipe_writeback_keeps_run_component_after_environment_change(
     session: WritebackSession, name: str, change_point: bool
 ) -> None:
@@ -335,9 +268,11 @@ def test_recipe_writeback_keeps_run_component_after_environment_change(
             }
         )
     assert {
-        item.target_name for item in proposals
+        item.target_name for item in proposals if not isinstance(item, SampleWriteback)
     } == scalars.keys() | calibration.modules.keys()
-    draft = session.service.create_draft(proposals, parameters=captured)
+    draft = session.service.create_draft(
+        proposals, parameters=captured, experiment_name="test/writeback"
+    )
     try:
         receipt = draft.apply()
         destination = session.control.read_target(captured.target)
@@ -363,5 +298,134 @@ def test_recipe_writeback_keeps_run_component_after_environment_change(
         assert not any(
             key.startswith(("Q2.", "R2.")) for key in current.library.module_keys()
         )
+    finally:
+        draft.teardown()
+
+
+@pytest.mark.parametrize(
+    ("name", "fields", "unit"),
+    [
+        ("twotone/t1", {"t1_us": 12.0, "t1_err_us": 0.2}, "A"),
+        ("twotone/t2ramsey", {"t2r_us": 10.0, "t2r_err_us": 0.1}, "V"),
+        ("twotone/t2echo", {"t2e_us": 15.0, "t2e_err_us": 0.2}, "native"),
+        ("twotone/freq", {"freq_mhz": 4300.0, "freq_err_mhz": 0.1}, "A"),
+    ],
+    ids=["t1", "t2ramsey", "t2echo", "freq"],
+)
+def test_fixed_bias_adapter_accepts_sample_from_run_capture(
+    session: WritebackSession, name: str, fields: JsonObject, unit: str
+) -> None:
+    adapter = _registry().create(name)
+    calibration = _calibration(name)
+    session.control.set_alias_rows(
+        (
+            AliasRow("qubit", "Q1"),
+            AliasRow("resonator", "$qubit.resonator"),
+            AliasRow("flux_dev", "run_bias"),
+        )
+    )
+    captured = session.control.read_context()
+    run_env = SessionEnv(parameters=captured, soc=None, soccfg=None, qub_name="Q2")
+    # A later selection and alias edit must not redirect the sample or its bias.
+    session.control.use_point(PointUseRequest("later-point"))
+    session.control.set_alias_rows(
+        (AliasRow("qubit", "Q2"), AliasRow("flux_dev", "later_bias"))
+    )
+    proposals = adapter.get_writeback_items(
+        WritebackRequest(calibration.source, calibration.analysis, run_env)
+    )
+    samples = [item for item in proposals if isinstance(item, SampleWriteback)]
+    assert len(samples) == 1, f"{name} must offer its fitted sample"
+    assert samples[0].target_name == "Q1"
+    assert samples[0].proposed_value == fields
+
+    snapshot: dict[str, JsonObject] = {
+        "run_bias": {"value": 0.00125, "value_unit": unit},
+        "later_bias": {"value": 9.0, "value_unit": "native"},
+    }
+    draft = session.service.create_draft(
+        proposals,
+        parameters=captured,
+        experiment_name=name,
+        run_id="run-sample",
+        device_snapshot=snapshot,
+    )
+    try:
+        # The draft owns its Run snapshot, not the caller's mutable mapping.
+        snapshot["run_bias"]["value"] = 7.0
+        assert draft.unavailable_reasons == ()
+        for item in draft.items:
+            draft.edit(item.session_id, selected=isinstance(item, SampleWriteback))
+        receipt = draft.apply()
+        assert receipt["written"]["samples"] == ["Q1"]
+        assert receipt["written"]["parameter"] == []
+        event = session.entry.ledger.events()[-1]
+        assert isinstance(event.payload, AcceptedPayload)
+        assert event.kind == "accepted"
+        assert event.payload.run_id == "run-sample"
+        assert [write.path for write in event.payload.writes] == ["Q1"]
+        assert event.payload.writes[0].value == fields | {
+            "dev_value": 0.00125,
+            "dev_unit": unit,
+        }
+        row = session.entry.samples("Q1").latest("run-sample")
+        assert row is not None
+        sample_at = row["at"]
+        assert isinstance(sample_at, str)
+        sample_time = datetime.fromisoformat(sample_at)
+        accepted_time = datetime.fromisoformat(event.at)
+        assert sample_time == accepted_time
+        assert sample_time.utcoffset() == accepted_time.utcoffset() == timedelta(0)
+        assert row == fields | {
+            "dev_value": 0.00125,
+            "dev_unit": unit,
+            "run_id": "run-sample",
+            "point": "run-point",
+            "source": event.id,
+            "at": sample_at,
+        }
+        sample_path = session.entry.result_path / "samples" / "Q1.jsonl"
+        assert sample_path.is_file()
+        assert len(sample_path.read_text(encoding="utf-8").splitlines()) == 1
+        assert session.entry.samples("Q2").latest("run-sample") is None
+        assert session.control.read_context().value("$qubit") == "Q2"
+        assert (
+            not session.control.read_target(captured.target).lookup("Q1.freq").present
+        )
+    finally:
+        draft.teardown()
+
+
+@pytest.mark.parametrize(
+    "name", ["twotone/t1", "twotone/t2ramsey", "twotone/t2echo", "twotone/freq"]
+)
+def test_fixed_bias_adapter_without_capture_keeps_parameters_and_rejects_apply(
+    session: WritebackSession, name: str
+) -> None:
+    adapter = _registry().create(name)
+    calibration = _calibration(name)
+    proposals = adapter.get_writeback_items(
+        WritebackRequest(
+            calibration.source,
+            calibration.analysis,
+            SessionEnv(parameters=None, soc=None, soccfg=None),
+        )
+    )
+    assert all(isinstance(item, ParameterWriteback) for item in proposals)
+    assert {
+        item.target_name: item.proposed_value
+        for item in proposals
+        if isinstance(item, ParameterWriteback)
+    } == calibration.scalars
+    draft = session.service.create_draft(
+        proposals, parameters=None, experiment_name=name, run_id="loaded-run"
+    )
+    events = session.entry.ledger.events()
+    try:
+        assert draft.unavailable_reasons == ()
+        with pytest.raises(FailedPreconditionError, match="captured context"):
+            draft.apply()
+        assert session.entry.ledger.events() == events
+        assert session.entry.samples("Q1").latest("loaded-run") is None
     finally:
         draft.teardown()

@@ -298,8 +298,14 @@ class RunService:
         """Start the admitted Run and return its asynchronous operation token.
 
         inputs must come from GuardService.capture_run_inputs and fix the exact
-        cfg, device settings, source and saved-point storage. plots is this Run's
-        owned host. Call on State's owner thread after admission.
+        cfg, source, alias names and saved-point storage. Guard does not read
+        hardware. After the operation acquires its hardware lease, the worker
+        reads get_info once for every connected device before adapter.run.
+        Any snapshot read failure prevents adapter execution, without hardware
+        writes or cache fallback; no devices produces {}. The fixed snapshot
+        stays with this Run's metadata for Save, not later sweep settings.
+        plots is this Run's owned host. Call on State's owner thread after
+        admission.
         origin attributes acquired to the initiating gui/mcp frontend. A usable
         native result publishes to State before terminal appends acquired,
         without Save or creating a run folder. Missing storage/native evidence

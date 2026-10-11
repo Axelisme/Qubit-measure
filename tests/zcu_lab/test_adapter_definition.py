@@ -115,6 +115,7 @@ def test_registered_flux_form_edits_unit_without_device_observations(name: str) 
                 AliasRow("qubit", "Q1"),
                 AliasRow("resonator", "$qubit.resonator"),
                 AliasRow("jpa", "$resonator.amplifier"),
+                AliasRow("flux_dev", "flux_yoko"),
             ),
             {},
         ),
@@ -127,7 +128,7 @@ def test_registered_flux_form_edits_unit_without_device_observations(name: str) 
         defaults=lambda: adapter.make_default_cfg(environment),
         resolution=lambda: bindings.snapshot(
             (),
-            captured_values={"device.flux.name": "flux_yoko"},
+            captured_values={},
             parameters=environment.parameters,
         ),
     )
@@ -345,6 +346,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
             AliasRow("qubit", "Q1"),
             AliasRow("resonator", "$qubit.resonator"),
             AliasRow("jpa", "$resonator.amplifier"),
+            AliasRow("flux_dev", "flux_yoko"),
         )
         environment = replace(
             environment,
@@ -383,6 +385,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
                     AliasRow("qubit", ""),
                     AliasRow("resonator", "$qubit.resonator"),
                     AliasRow("jpa", "$resonator.amplifier"),
+                    AliasRow("flux_dev", "flux_yoko"),
                 ),
                 {},
             ),

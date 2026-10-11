@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
     QInputDialog,
@@ -317,17 +317,19 @@ def test_working_point_switch_uses_label_and_displays_description(
 
 
 @pytest.mark.parametrize("description", ["new description", ""])
+@pytest.mark.parametrize("source_label", ["source", "src"])
 def test_working_point_create_clones_source_and_replaces_description(
     entry_dialog: tuple[SetupDialog, Controller, State],
     description: str,
+    source_label: str,
 ) -> None:
     dialog, controller, state = entry_dialog
     source = controller.setup_control.new_point(
-        PointCreateRequest("source", "source description", CommandOrigin("gui"))
+        PointCreateRequest(source_label, "source description", CommandOrigin("gui"))
     )
     controller.context_control.set_parameter(source, "general.ext.flux_value", 0.27)
     clone = point_combo(dialog, "clone_from")
-    clone.setCurrentIndex(clone.findData("source"))
+    clone.setCurrentIndex(clone.findData(source_label))
     point_field(dialog, "point_label").setText("cloned")
     point_field(dialog, "point_description").setText(description)
     entry_button(dialog, "Create").click()
@@ -337,7 +339,7 @@ def test_working_point_create_clones_source_and_replaces_description(
     assert capture.document().general.description == description
     assert {p.label: p.description for p in controller.setup_control.list_points()} == {
         "cloned": description,
-        "source": "source description",
+        source_label: "source description",
     }
     assert state.session_env.readiness == ContextReadiness.ACTIVE
 
@@ -462,7 +464,7 @@ def test_working_point_create_without_entry_shows_owner_failure(
         qapp.processEvents()
 
 
-@pytest.mark.parametrize("cached", [None, 0.0035])
+@pytest.mark.parametrize("cached", [None, 0.0035, 0.005])
 def test_working_point_device_suggestion_is_cached_and_preserves_manual_text(
     entry_dialog: tuple[SetupDialog, Controller, State],
     monkeypatch: pytest.MonkeyPatch,

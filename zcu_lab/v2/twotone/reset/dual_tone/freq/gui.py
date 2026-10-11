@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -25,13 +26,11 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.reset_dual_tone import RESET_120_FIELD_MD_MAP
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
 from zcu_lab.v2._support.measure.seeds import Seed, custom, path_seed
-from zcu_lab.v2._support.measure.writeback_helpers import reset_module_writeback_items
 from zcu_lab.v2.twotone.reset.dual_tone.freq.core import (
     FreqAnalyzeOptions,
     FreqCfg,
@@ -43,10 +42,10 @@ DualToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
 def _reset_freq_axis(
-    pulse: Literal["pulse1_cfg", "pulse2_cfg"],
+    parameter: Literal["reset_f1", "reset_f2"],
 ) -> Seed[SweepValue]:
     """Store a 201-point ±50 MHz window around a calibrated dual-tone center."""
-    path = f"$qubit.module.dual_tone.{pulse}.freq"
+    path = f"$qubit.ext.{parameter}"
 
     def resolve(_ctx: SessionEnv) -> SweepValue:
         return SweepValue(
@@ -92,23 +91,23 @@ class DualToneFreqAdapter(
             "hardware in hard-sweep mode (both axes are QICK register sweeps)."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'reset_f1' / 'reset_f2' — "
-            "the two sideband reset frequencies centring each sweep axis "
-            "(absent → centred on 0 MHz); 'reset_gain1' / 'reset_gain2' seed "
-            "the two tested-reset pulse gains; 'q_f' / 'qub_ch' seed the "
-            "tested-reset and init-pulse drive defaults."
+            "Requires $qubit.ext.reset_f1/reset_f2 for the sweep centres "
+            "and $qubit.ext.reset_gain1/reset_gain2 for the tested gains. "
+            "Each frequency axis spans centre +/-50 MHz with 201 points. "
+            "Missing, null or invalid values fail cfg lowering. Other drive "
+            "defaults use captured qubit frequency and wiring."
         ),
         expects_ml=(
-            "Needs a two-pulse-reset module (the tested reset) and a readout "
-            "module. Optionally references a calibrated upstream reset and an "
+            "Builds the tested two-pulse-reset cfg from captured defaults and "
+            "needs a readout module. Optionally references an upstream reset and an "
             "init pulse (a library pi pulse when present) — both disabled when "
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the two fitted sideband frequencies into parameter context "
-            "'reset_f1' and 'reset_f2'. No ModuleLibrary writeback — "
-            "registering the calibrated 'reset_120' module is left to the final "
-            "length step once frequency, gain and length are all dialled in."
+            "Proposes the fitted frequencies to $qubit.ext.reset_f1 and "
+            "$qubit.ext.reset_f2 only. DualTonePower proposes the tested "
+            "reset module after analysing gains; length analysis has no "
+            "automatic writeback."
         ),
         recommended=(
             "Keep each axis a tight span (a few MHz) around the predicted "
@@ -132,10 +131,10 @@ class DualToneFreqAdapter(
                 locked={"pulse1_cfg.freq": 0.0, "pulse2_cfg.freq": 0.0},
                 overrides={
                     "pulse1_cfg.gain": path_seed(
-                        "$qubit.module.dual_tone.pulse1_cfg.gain", fallback=1.0
+                        "$qubit.ext.reset_gain1", fallback=1.0
                     ),
                     "pulse2_cfg.gain": path_seed(
-                        "$qubit.module.dual_tone.pulse2_cfg.gain", fallback=1.0
+                        "$qubit.ext.reset_gain2", fallback=1.0
                     ),
                 },
             )
@@ -144,24 +143,30 @@ class DualToneFreqAdapter(
             .sweep(
                 "freq1",
                 label="Freq 1 (MHz)",
-                default=_reset_freq_axis("pulse1_cfg"),
+                default=_reset_freq_axis("reset_f1"),
             )
             .sweep(
                 "freq2",
                 label="Freq 2 (MHz)",
-                default=_reset_freq_axis("pulse2_cfg"),
+                default=_reset_freq_axis("reset_f2"),
             )
             .reps(100)
             .rounds(1000)
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> FreqCfg:
         cfg = super().build_exp_cfg(raw_cfg, req)
         return cfg.with_updates(method="hard")
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> DualToneFreqRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FreqExp().run(cfg, context=context)
@@ -187,28 +192,20 @@ class DualToneFreqAdapter(
         self,
         req: WritebackRequest[DualToneFreqRunResult, DualToneFreqAnalyzeResult],
     ) -> Sequence[WritebackItem]:
+        """Propose this analysis's two frequencies to captured qubit ext."""
         result = req.analyze_result
         items: list[WritebackItem] = [
             ParameterWriteback(
-                target_name="reset_f1",
+                target_name="$qubit.ext.reset_f1",
                 description="Dual-tone reset frequency 1 (MHz)",
                 proposed_value=result.freq1,
             ),
             ParameterWriteback(
-                target_name="reset_f2",
+                target_name="$qubit.ext.reset_f2",
                 description="Dual-tone reset frequency 2 (MHz)",
                 proposed_value=result.freq2,
             ),
         ]
-        items.extend(
-            reset_module_writeback_items(
-                req.ctx,
-                req.run_result.cfg,
-                target="reset_120",
-                field_md_map=RESET_120_FIELD_MD_MAP,
-                desc="Reset with two pulse from 1 to 2 to 0",
-            )
-        )
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

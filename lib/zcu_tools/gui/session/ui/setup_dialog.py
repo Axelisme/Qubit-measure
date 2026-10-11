@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QShowEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QShowEvent
+from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,

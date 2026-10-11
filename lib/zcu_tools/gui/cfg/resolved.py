@@ -28,12 +28,26 @@ def lower_resolved_cfg(schema: CfgSchema) -> dict[str, LoweredData]:
     This does not change the live-context contract of ``lower_finished_cfg``.
     """
     frozen = deepcopy(schema)
-    _freeze_value(frozen.value, "")
+    value = freeze_resolved_value(schema.value)
+    if not isinstance(value, CfgSectionValue):
+        raise RuntimeError("Resolved cfg requires a root section")
+    frozen.value = value
     return lower_finished_cfg(
         frozen,
         resolve_expression=None,
         resolve_reference=None,
     )
+
+
+def freeze_resolved_value(value: CfgNodeValue | None) -> CfgNodeValue | None:
+    """Detach a currently valid, resolved publication as editable actual values.
+
+    Freeze nested references to same-shape Custom keys, expressions to direct
+    results, and range controls to their published values. None stays disabled.
+    Unresolved values or error diagnostics raise RuntimeError; callers must
+    reject Invalid/Unavailable publications before invoking this operation.
+    """
+    return _freeze_value(deepcopy(value), "")
 
 
 def _freeze_value(value: CfgNodeValue | None, path: str) -> CfgNodeValue | None:
@@ -73,7 +87,7 @@ def _resolved_scalar(value: ScalarValue, path: str) -> DirectValue:
     if error is not None:
         raise RuntimeError(f"Config field '{path}': {error}")
     if isinstance(value, DirectValue):
-        return value
+        return DirectValue(deepcopy(value.value))
     if value.resolved is None:
         raise RuntimeError(
             f"Config field '{path}' expression {value.expr!r} is unresolved"

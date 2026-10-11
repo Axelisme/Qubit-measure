@@ -8,7 +8,9 @@
 
 `library.py` 擁有 `module_cfg.yaml` 的文件、查詢、編輯與來源。文件格式是 `zcu.module-library` 1.0。Header-only 文件表示合法空 library。
 
-- `ModuleLibraryDocument.components` 依元件存放 pulses、readout、reset 與 waveforms。實際 key 是 `Q1.pulses.pi` 這類三段路徑，不是角色或隱藏 namespace。
+Library 的設計是「元件 → 分組 → pydantic model」，分組名稱不是封閉清單。pulses、readout、reset 與 waveforms 是目前使用的四個分組。
+
+- 現行 `ModuleLibraryDocument.components` 與 `library_key_kind` 仍只接受這四個分組。日後需要第五種分組時再放寬實作限制，不另改設計。實際 key 是 `Q1.pulses.pi` 這類三段路徑，不是角色或隱藏 namespace。
 - 文件存 `ModuleSpec`／`WaveformSpec`。Spec 保留 inline child 或具體 key 引用，不存 provider、asset bytes 或 runtime object。
 - `LibrarySnapshot` 是不讀檔的隔離投影，也是 core factory 的 `ModuleResolver`。Spec 查詢不展開引用。成品查詢以固定 snapshot 與顯式 asset capability materialize cfg。
 - `entry_value` 提供未 materialize 的工作單位 Spec mapping。`entry_state` 同時提供相對 leaf 的原始來源，供固定 proposal 比對，不補缺失來源。

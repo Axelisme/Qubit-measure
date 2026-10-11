@@ -237,7 +237,6 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     writeback = WritebackService(
         editor,
         write_port=control,
-        entry_ledger=session.context.entry_ledger,
     )
     runner = OperationRunner(
         None, session.handles, None, session.background, session.bus
@@ -271,21 +270,13 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     writeback.teardown_draft(draft)
 
 
-@pytest.mark.parametrize("failure", ["missing_point", "missing_alias"])
 def test_native_load_historical_source_failure_preserves_previous_result(
     role_load_session: NativeSaveSession,
-    failure: str,
 ) -> None:
     session = role_load_session
     tab = session.state.get_tab("tab")
     history = session.metadata.snapshot
-    broken = replace(
-        history,
-        point="missing" if failure == "missing_point" else history.point,
-        roles={"source_qubit": "missing"}
-        if failure == "missing_alias"
-        else history.roles,
-    )
+    broken = replace(history, point="missing")
     session.state.update_tab_result(
         "tab",
         tab.run.result,
@@ -302,9 +293,7 @@ def test_native_load_historical_source_failure_preserves_previous_result(
         context=ContextControlFacet(context=session.context),
         captured_parameters=session.capture_parameters,
     )
-    error = FileNotFoundError if failure == "missing_point" else RoleResolutionError
-
-    with pytest.raises(error):
+    with pytest.raises(FileNotFoundError):
         service.load_result(
             "tab",
             str(
@@ -316,6 +305,49 @@ def test_native_load_historical_source_failure_preserves_previous_result(
         )
 
     assert tab.run is previous
+    assert session.entry.ledger.events() == events
+
+
+def test_native_load_keeps_unknown_historical_name_until_component_field_read(
+    role_load_session: NativeSaveSession,
+) -> None:
+    session = role_load_session
+    tab = session.state.get_tab("tab")
+    previous = tab.run
+    history = replace(session.metadata.snapshot, roles={"source_qubit": "missing"})
+    metadata = replace(session.metadata, snapshot=history)
+    session.state.update_tab_result(
+        "tab", previous.result, metadata=metadata, parameters=previous.parameters
+    )
+    session.save()
+    saved_metadata = tab.run.metadata
+    events = session.entry.ledger.events()
+    rows = session.context.get_alias_rows()
+    service = LoadService(
+        session.state,
+        MagicMock(),
+        provide_options=lambda _: (),
+        context=ContextControlFacet(context=session.context),
+        captured_parameters=session.capture_parameters,
+    )
+
+    service.load_result(
+        "tab",
+        str(session.entry.database_path / "runs" / metadata.run_id / "data.h5"),
+    )
+
+    loaded = tab.run.parameters
+    assert loaded is not None and loaded is not previous.parameters
+    assert tab.run.metadata == saved_metadata
+    assert loaded.roles is not None and loaded.roles.names == history.roles
+    assert loaded.value("$source_qubit") == "missing"
+    with pytest.raises(RoleResolutionError) as error:
+        loaded.value("$source_qubit.rate")
+    assert error.value.role == "missing"
+    assert previous.parameters is not None
+    assert previous.parameters.value("$source_qubit.rate") == 1.0
+    assert loaded.value("Q1.rate") == 7.0
+    assert session.context.get_alias_rows() == rows
     assert session.entry.ledger.events() == events
 
 
@@ -356,9 +388,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     editor = CfgEditorService(
         MagicMock(), control, MagicMock(), MagicMock(), session.bus
     )
-    writeback = WritebackService(
-        editor, write_port=control, entry_ledger=session.context.entry_ledger
-    )
+    writeback = WritebackService(editor, write_port=control)
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
     assert loaded.has_analyze_params
@@ -382,6 +412,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
         [ParameterWriteback("Q1.rate", "rate", 99.0)],
         parameters=None,
         run_id=session.metadata.run_id,
+        experiment_name="test/writeback",
     )
     tab.analysis.writeback_draft = rejected
     selection = control.get_source_binding()
@@ -407,14 +438,13 @@ def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
     editor = CfgEditorService(
         MagicMock(), control, MagicMock(), MagicMock(), session.bus
     )
-    writeback = WritebackService(
-        editor, write_port=control, entry_ledger=session.context.entry_ledger
-    )
+    writeback = WritebackService(editor, write_port=control)
     _, wb = _native_controls(session, writeback, control)
     draft = writeback.create_draft(
         [ParameterWriteback("$source_qubit.rate", "rate", 99.0)],
         parameters=parameters,
         run_id=session.metadata.run_id,
+        experiment_name="test/writeback",
     )
     session.state.update_tab_analyze("tab", PaneSummary(), None, writeback_draft=draft)
     other = ResultEntry.create(

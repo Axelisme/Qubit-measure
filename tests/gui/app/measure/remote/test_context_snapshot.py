@@ -121,20 +121,7 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
         "target": captured.target.model_dump(),
         "point": captured.document().model_dump(serialize_as_any=True),
         "library": captured.library.document().model_dump(serialize_as_any=True),
-        "aliases": [
-            {
-                "alias": "qubit",
-                "value": "",
-                "resolved": None,
-                "error": "Role 'qubit' requires kind None; focus=None: Alias is not bound",
-            },
-            {
-                "alias": "resonator",
-                "value": "$qubit.resonator",
-                "resolved": None,
-                "error": "Role 'resonator' requires kind None; focus=None: Alias is not bound",
-            },
-        ],
+        "aliases": [],
     }
     wire_point = result["point"]
     assert isinstance(wire_point, dict)
@@ -371,18 +358,19 @@ def test_snapshot_alias_rows_isolate_unbound_and_invalid_links(
         {"alias": "drive", "value": "Q1", "resolved": "Q1"},
         {"alias": "sensor", "value": "$drive.sense", "resolved": "S1"},
     ]
+    assert len(rows) == 5
+    assert rows[3] == {"alias": "missing", "value": "Absent", "resolved": "Absent"}
     for row, alias, value in zip(
-        rows[2:],
-        ("unbound", "missing", "bad_link"),
-        ("", "Absent", "$drive.rate"),
+        (rows[2], rows[4]),
+        ("unbound", "bad_link"),
+        ("", "$drive.rate"),
         strict=True,
     ):
         assert row["alias"] == alias and row["value"] == value
         assert row["resolved"] is None
         assert alias in str(row["error"])
     assert "Alias is not bound" in str(rows[2]["error"])
-    assert "missing component" in str(rows[3]["error"])
-    assert "existing component" in str(rows[4]["error"])
+    assert "must name a component or device" in str(rows[4]["error"])
 
 
 def test_snapshot_summary_keeps_scalars_and_complete_aliases(

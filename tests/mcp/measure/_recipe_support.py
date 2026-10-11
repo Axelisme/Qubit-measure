@@ -5,6 +5,16 @@ from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
 
+from zcu_tools.gui.cfg.reference_key import is_custom_reference_key
+from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.expression import evaluate_scalar_expr
+from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+
+from zcu_lab.components import QubitSchema, ResonatorSchema
+
 from ._support import make_client
 
 PNG = base64.b64decode(
@@ -26,6 +36,7 @@ def scalar(value: object) -> dict[str, Any]:
     return {
         "kind": "scalar",
         "valid": True,
+        "readonly": False,
         "input": {
             "mode": "direct",
             "raw": value,
@@ -37,7 +48,43 @@ def scalar(value: object) -> dict[str, Any]:
 
 
 def section(**children: dict[str, Any]) -> dict[str, Any]:
-    return {"kind": "section", "valid": True, "children": children}
+    return {"kind": "section", "valid": True, "readonly": False, "children": children}
+
+
+def publish_reference_locks(node: object, *, readonly: bool = False) -> None:
+    """Update modes and locks in a recording cfg subtree, in place.
+
+    ``node`` is an observation dict with a boolean ``readonly`` and optional
+    ``children`` dict of observations. Reference nodes carry a string or None
+    ``ref``: library references use ref mode, custom references use inline mode,
+    and None disables the reference. ``readonly`` carries an ancestor lock.
+    Descendants of library references, literals and existing static locks stay
+    readonly. These recording trees do not simulate conversion back to inline.
+    Raise TypeError for malformed nodes, references or children.
+    """
+    if not isinstance(node, dict):
+        raise TypeError("Recording cfg nodes must be mappings")
+    locked = node.get("readonly")
+    if not isinstance(locked, bool):
+        raise TypeError("Recording cfg nodes must declare readonly")
+    child_readonly = readonly or locked or node.get("kind") == "literal"
+    node["readonly"] = child_readonly
+    if node.get("kind") == "reference":
+        reference = node.get("ref")
+        if reference is not None and not isinstance(reference, str):
+            raise TypeError("Recording references must be strings or None")
+        mode = (
+            ("inline" if is_custom_reference_key(reference) else "ref")
+            if reference is not None
+            else None
+        )
+        node["mode"] = mode
+        child_readonly = child_readonly or mode == "ref"
+    children = node.get("children", {})
+    if not isinstance(children, dict):
+        raise TypeError("Recording cfg children must be mappings")
+    for child in children.values():
+        publish_reference_locks(child, readonly=child_readonly)
 
 
 class LookbackGui:
@@ -52,11 +99,22 @@ class LookbackGui:
             "tree": section(
                 rounds=scalar(3),
                 modules=section(
-                    reset={"kind": "reference", "valid": True, "ref": None},
-                    init_pulse={"kind": "reference", "valid": True, "ref": None},
+                    reset={
+                        "kind": "reference",
+                        "valid": True,
+                        "readonly": False,
+                        "ref": None,
+                    },
+                    init_pulse={
+                        "kind": "reference",
+                        "valid": True,
+                        "readonly": False,
+                        "ref": None,
+                    },
                     readout={
                         "kind": "reference",
                         "valid": True,
+                        "readonly": False,
                         "ref": None,
                         "error": None,
                         "children": {
@@ -74,6 +132,54 @@ class LookbackGui:
         self.ran = False
         self.raw_saved = False
         self.md: dict[str, Any] = {}
+        self.library: dict[str, Any] = {}
+
+    def evaluate_expression(self, expression: str) -> int | float | complex | str:
+        """Evaluate GUI formulas with native models and a fixed public context.
+
+        The recording parameter-read wire below deliberately retains malformed
+        values for caller rejection coverage; it does not claim native admission.
+        Formula evaluation, unlike that wire, uses the real scalar expression owner.
+        Bare aliases return resolved names; arithmetic returns numeric values.
+        Direct native model construction requires no process-global registry.
+        """
+        resonator = ResonatorSchema.model_validate(
+            {
+                "kind": "resonator",
+                **{
+                    name: self.md[f"$resonator.{name}"]
+                    for name in ("freq", "kappa")
+                    if f"$resonator.{name}" in self.md
+                },
+            }
+        )
+        qubit = QubitSchema.model_validate(
+            {
+                "kind": "qubit/transmon",
+                **{
+                    name: self.md[f"$qubit.{name}"]
+                    for name in ("freq", "kappa", "flux_half", "flux_int")
+                    if f"$qubit.{name}" in self.md
+                },
+            }
+        )
+        parameters = ParameterContext(
+            point=PointDocument.model_construct(
+                format="zcu.parameter-container",
+                format_version="1.0",
+                general=PointGeneral(created_at="2026-10-09T00:00:00Z"),
+                components={"R1": resonator, "Q1": qubit},
+            ),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library",
+                    format_version="1.0",
+                )
+            ),
+            target=SavedPoint(entry_id="recipe-entry", point="working"),
+            roles=None,
+        ).bind_aliases((AliasRow("resonator", "R1"), AliasRow("qubit", "Q1")), {})
+        return evaluate_scalar_expr(expression, parameters)
 
     def _observations(self) -> dict[str, dict[str, Any]]:
         return {
@@ -113,6 +219,7 @@ class LookbackGui:
                 node = node["children"][part]
             if node["kind"] == "reference":
                 node["ref"] = edit["value"]["__ref"]
+                publish_reference_locks(node)
             else:
                 value = edit["value"]
                 if isinstance(value, dict) and "__expr" in value:
@@ -125,6 +232,16 @@ class LookbackGui:
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         observations = self._observations()
+        if method == "tab.parameter_read":
+            observations[method] = {
+                "values": {
+                    path: deepcopy(self.md.get(path)) for path in params["paths"]
+                },
+                "modules": {
+                    reference: reference if reference in self.library else None
+                    for reference in params["module_refs"]
+                },
+            }
         if method in observations:
             expected = {
                 "tab.new": {"adapter_name": "lookback"},

@@ -6,6 +6,12 @@
 
 `create` 建立 setup、points、records 與同名 Database 條目目錄。任一目的地已存在就拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 要求完整的新格式條目，不猜測 legacy 格式。
 
+## 條目 alias 表
+
+`ResultEntry.load_aliases` 與 `save_aliases` 使用具名 `EntryAliases`，保存 entry 的 authored 有序表。`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。Mapping 保留空字串、原始 `$` link 與順序。空 mapping 是明確空表，只有檔案不存在才回 `None`。格式、結構與非字串值錯誤直接回報，不退回 preset。
+
+Resources 只保存與驗證資料表示。Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。這不是 point、setup、ledger 或 memento，也不提供跨檔交易、multiwriter merge 或掉電恢復。
+
 ## 文件與 seed
 
 Setup 是元件範本。Point 自帶 kind、元件、來源與 general。General 的固定欄位只有身分（setup 的 entry_id）、created_at、description 與 ext。Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux，ext 沿既有 YAML 值契約保存原值，不提供 flux 專用型別、驗證或單位換算。`new_point` 複製建立當下 setup 的 components 與 provenance，使用新的 created_at，並建立只有標頭的 module_cfg。General 不從 setup 繼承。New point 的 description=None 保留 seed／clone 描述，字串明確設定描述，包括空字串。設定在本次建立與失敗清理範圍內完成。Setup 與 point 的修改、引用與快照互不影響。
@@ -62,7 +68,7 @@ ResultEntry 管理的 store 在 use、refresh 與 edit 時也檢查遮蔽，失�
 
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與來源。Point commit 失敗時 accepted 可以保留，值與來源仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
 
-`writeback` 提供共用 parameter／module／waveform 項目與 `apply_writeback`。Caller 傳入 captured point、storage binding、已解析的具體路徑，以及具名 evidence（實驗／分析 kind、run_id、origin 與可選 source）。流程追加一筆 accepted 後沿項目順序各自提交，首錯停止並原樣傳出，前項保留。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨項交易或回復框架。Notebook 使用此入口；GUI 的固定 capture 與命令編排見 [session owner](../../gui/session/README.md)。
+`writeback` 提供共用 parameter／module／waveform／sample 項目與 `apply_writeback`。SampleWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、point、accepted 時間與事件 source；dev 欄位選填，原值與 caller 單位不轉換。Caller 傳入固定 SavedPoint 的 write target、已解析的具體路徑，以及具名 evidence，包含實驗名稱、run_id、origin 與可選 source。流程追加一筆 accepted 後沿項目順序各自提交，首錯停止。項目失敗拋 `WritebackApplyError(event_id, applied)`，原始錯誤為 cause，前項與事件保留。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨項交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開 setters 並發布成功前綴；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
 
 ## 輸出位置
 
@@ -90,12 +96,17 @@ List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。
 
 ## 角色與失敗
 
+以下是 Notebook `PointView.resolve` 的角色契約。GUI 使用 ContextService 的
+同一張元件／device alias 表，Dialog Apply 才保存 entry，普通 set 只改 memory。
+公開 `read_context` 不要求 GUI consumer roles 或 kind 檢查。Tab 不固定角色或環境，
+Run 記錄當次固定 names。Notebook 不讀 aliases.yaml，MCP temporary overrides 不寫它。
+
 `PointView.resolve` 只使用 bound point 的快照。Sequence 取 role registry 的 RoleSpec，Mapping 可覆寫 kind pattern 與 via。未傳角色表時使用 caller 設定的有序 shorthand，沒有設定就報錯。
 
-解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色；RoleRegistry.default_focus 集中選取符合 focus kind patterns 的唯一候選，roles resolver 與 session focus 共用它。
+解析依序使用 explicit、匹配焦點、已解析元件的角色同名欄位或 via。Via 首段是已解析角色，其餘是元件內路徑。路徑的字串值視為目標元件名稱，缺少目標在 resolve 報錯，普通載入不預檢整圖引用。焦點只填一個角色；RoleRegistry.default_focus 集中選取符合 focus kind patterns 的唯一候選，Notebook roles resolver 與 GUI primary alias 的首次初始化共用唯一候選判定，但 GUI 不使用這套 focus／via 推論角色。
 
 Explicit 的 None 明確不綁該角色，不改用焦點或 via；讀取時指名 RoleResolutionError。省略 explicit key 才允許自動推論。自動推論缺引用或多個候選時省略該角色；via 的來源角色未綁時也省略衍生角色。未知角色、多餘 explicit、明確指定不存在的元件、實際 dangling 引用或 kind 不符仍以 RoleResolutionError 回報。RoleView 保留同次宣告，讀取已宣告未綁角色（包括 hasattr）時指名 RoleResolutionError；未知 attribute 仍為 AttributeError。RoleResolutionError 是 ValueError，工具不能把未綁角色視為不存在的 attribute。RoleView 固定解析當下的名稱映射與 owning point 來源，元件值仍跟隨 PointView，回傳映射不可修改。來源由 PointView.resolve 捕捉；存檔 caller 只交給 capture_point_storage 驗證，不比較 callback 或讀 private binding。
 
 `rename_entry` 移動兩個目錄，不改檔案內容。第二次移動失敗時復原第一次。復原也失敗時，RenameRecoveryError 回報兩個路徑與原始 I/O 原因，不承諾跨檔掉電保證。
 
-Entry／point 提供隔離的 publication 與 read binding。ResultEntry.list_names 只列含 setup.yaml 的直屬目錄，不解析文件或尋找 legacy 參數。Notebook 直接使用 ResultEntry、PointView 與 RoleView。GUI／MCP 經 ContextService 的固定 ParameterContext 讀取與命令入口操作，不使用舊具名 context 目錄或 metadata store。Acquisition、save 與 accept 的 producer 契約見 notebook、experiment 與 GUI owner 文件。
+Entry／point 提供隔離的 publication 與 read binding。ResultEntry.list_names 只列含 setup.yaml 的直屬目錄，不解析文件或尋找 legacy 參數。ContextService 與 Notebook 沿公開 capability 讀寫 entry；GUI／MCP accept 由 context owner 接共用 writeback，不私取 point handles。

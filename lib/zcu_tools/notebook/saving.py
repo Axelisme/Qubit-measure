@@ -38,7 +38,9 @@ from zcu_tools.resources.entry import (
     ModuleWriteback,
     ParameterWriteback,
     PointView,
+    PointWritebackTarget,
     RoleView,
+    SampleWriteback,
     SaveLayout,
     WaveformWriteback,
     WritebackEvidence,
@@ -225,27 +227,30 @@ class SavedRun(Generic[CfgT, ResultT]):
         waveform: Mapping[str, WaveformSpec] | None = None,
         samples: Mapping[str, JsonObject] | None = None,
     ) -> str:
-        """Accept results into this run's captured point and library.
+        """Accept results into this run's captured point, library and samples.
 
         parameter maps dotted point paths to working-unit JSON/complex values
         or (value, stderr) pairs; stderr is finite, non-negative or None for
         unknown. module and waveform map library keys to named persistent Specs,
-        not raw dictionaries. All paths expand only their first segment using
-        this run's captured roles. At least one mapping must be nonempty.
-        samples is reserved for sample writeback and currently raises
-        NotImplementedError whenever supplied, including an empty mapping.
+        not raw dictionaries. Parameter and library paths expand only their
+        first segment using this run's captured roles. At least one mapping
+        must be nonempty.
+        samples maps concrete component names (not role aliases) to JSON field
+        dictionaries. Device fields and units are optional and preserved as
+        provided; the caller owns their consistency. Only run_id, point, UTC at
+        and source are set automatically, overriding these keys if supplied.
+        No live aliases, device state or cfg are consulted for sample values.
 
-        Append one accepted event, then apply parameter, module and waveform
-        in that order, preserving each mapping's iteration order. Each item
-        commits separately. The first schema, ledger, conflict or I/O error
-        propagates unchanged and stops later writes; prior successful items
+        Append one accepted event, then apply parameter, module, waveform and
+        samples in that order, preserving each mapping's iteration order.
+        Each item commits separately. An item failure raises WritebackApplyError
+        with event_id/applied and the original cause; ledger append fails unchanged.
+        The first failure stops later writes; prior successful items
         and the event remain. No cross-item rollback or retry is provided.
         Provenance kind is this run's experiment name, never caller-supplied.
         Return the accepted event ID after all items succeed.
         """
-        if samples is not None:
-            raise NotImplementedError("samples writeback is not supported yet")
-        if not parameter and not module and not waveform:
+        if not parameter and not module and not waveform and not samples:
             raise ValueError("accept requires at least one nonempty mapping")
         document = snapshot(self._point)
         items: list[WritebackItem] = []
@@ -262,10 +267,11 @@ class SavedRun(Generic[CfgT, ResultT]):
         for path, spec in (waveform or {}).items():
             actual_path = resolve_path(document, path, roles=self._storage.roles)
             items.append(WaveformWriteback(actual_path, spec))
+        for component, fields in (samples or {}).items():
+            items.append(SampleWriteback(component, fields))
         return apply_writeback(
             tuple(items),
-            point=self._point,
-            storage=self._storage,
+            target=PointWritebackTarget(self._point, self._storage),
             evidence=WritebackEvidence(
                 kind=self._metadata.experiment,
                 run_id=self.run_id,

@@ -23,9 +23,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.gui.session.types import ParameterContext, RoleBinding
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
+    from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.provenance import Provenance
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
     from zcu_tools.resources.entry.storage import PointStorageBinding
+    from zcu_tools.resources.entry.writeback import WritebackEvidence, WritebackItem
 
 
 class ContextControlPort(Protocol):
@@ -100,6 +102,35 @@ class ContextControlPort(Protocol):
         """
         ...
 
+    def read_sample(
+        self, target: ContextTarget, component: str, run_id: str
+    ) -> JsonObject | None:
+        """Read the latest entry sample for a run through the sample owner.
+
+        No selection/publication changes occur. Target admission, unsafe names,
+        invalid run_id, corrupt history and I/O failures propagate. A missing row
+        returns None. SavedPoint reads entry JSONL history.
+        """
+        ...
+
+    def apply_writeback(
+        self,
+        target: ContextTarget,
+        items: tuple[WritebackItem, ...],
+        *,
+        evidence: WritebackEvidence,
+    ) -> str:
+        """Accept at the fixed target through the context owner and shared loop.
+
+        Nonempty writes require a captured SavedPoint in the opened entry.
+        SavedPoint parameter/library values persist and samples append to entry
+        JSONL. Successful prefix writes publish before later failures. Item failure raises
+        WritebackApplyError with accepted event_id, applied count and original
+        cause. Target admission and ledger append errors propagate unchanged.
+        No implicit point creation, saving, rollback or retry is provided.
+        """
+        ...
+
     def set_parameter(
         self,
         target: ContextTarget,
@@ -169,7 +200,16 @@ class ContextControlPort(Protocol):
         ...
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
-        """Create from setup/clone and select, preserving attribution/errors."""
+        """Create from setup/clone and select, preserving attribution/errors.
+
+        Existing destination raises InvalidInputError with the entry owner's
+        exists message before writes, preserving binding, files and versions.
+        Unsafe label raises InvalidInputError(point_label_invalid) before source
+        reads or writes, preserving selection, files, ledger and versions.
+        The entry owner defines safe single path segments. Other resource errors
+        propagate; a created point with binding failure is retained and reported
+        as PointBindingError. No entry raises FailedPreconditionError(no_entry).
+        """
         ...
 
     def get_source_binding(self) -> ContextSourceBinding | None:
@@ -193,6 +233,18 @@ class ContextControlPort(Protocol):
         Changed rows publish AliasesChangedPayload after installation; identical
         submissions publish nothing. Either submission disables later default
         initialization. No files, preferences or ledger records are written.
+        """
+        ...
+
+    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Confirm the ordered table on the owner thread.
+
+        Validate syntax/order, then atomically save to the opened entry before
+        memory/event installation. EMPTY is memory-only. InvalidInputError or
+        storage errors propagate, retaining old rows, versions and file. Saved
+        empty rows are authoritative on reopen. Identical rows still save but
+        emit no change; successful confirmation disables default initialization.
+        No point, ledger or preferences write occurs.
         """
         ...
 
@@ -243,6 +295,22 @@ class ContextControlFacet(ContextControlPort):
     ) -> ParameterContext:
         """Read a captured target using ContextControlPort's current-value policy."""
         return self._context.read_target(target, roles=roles)
+
+    def read_sample(
+        self, target: ContextTarget, component: str, run_id: str
+    ) -> JsonObject | None:
+        """Use the context owner's entry JSONL read contract."""
+        return self._context.read_sample(target, component, run_id)
+
+    def apply_writeback(
+        self,
+        target: ContextTarget,
+        items: tuple[WritebackItem, ...],
+        *,
+        evidence: WritebackEvidence,
+    ) -> str:
+        """Use ContextControlPort's ordered acceptance and prefix contract."""
+        return self._context.apply_writeback(target, items, evidence=evidence)
 
     def set_parameter(
         self,
@@ -312,6 +380,10 @@ class ContextControlFacet(ContextControlPort):
     def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Commit the dialog's ordered rows through the owning service."""
         self._context.set_alias_rows(rows)
+
+    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Confirm rows using the port\'s validate/save/install contract."""
+        self._context.apply_alias_rows(rows)
 
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
         return self._context.list_value_sources()

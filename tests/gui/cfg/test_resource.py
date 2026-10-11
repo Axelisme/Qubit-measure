@@ -635,7 +635,7 @@ class ExpressionSources:
         )
         fail_evaluation = self.fail_evaluation
 
-        def evaluate(expression: str) -> int | float | complex:
+        def evaluate(expression: str) -> int | float | complex | str:
             self.evaluation_reads.append(expression)
             if fail_evaluation:
                 raise RuntimeError("resolver defect")
@@ -909,7 +909,7 @@ def test_range_intent_preserves_unexpected_source_fault() -> None:
         fail = broken
         source = sources.read()
 
-        def evaluate(expression: str) -> int | float | complex:
+        def evaluate(expression: str) -> int | float | complex | str:
             if fail:
                 raise defect
             return source.evaluate_expression(expression)
@@ -1139,7 +1139,7 @@ def test_group_refresh_publishes_individual_fault_before_any_notification() -> N
     sources.values = {"frequency": 8.0, "other": 9.0}
     stable = sources.read()
 
-    def evaluate(expression: str) -> int | float | complex:
+    def evaluate(expression: str) -> int | float | complex | str:
         if expression == "other":
             raise RuntimeError("second cfg resolver defect")
         return stable.evaluate_expression(expression)

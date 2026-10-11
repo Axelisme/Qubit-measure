@@ -26,7 +26,7 @@ def _make_expression_resolver(
 ) -> ExpressionResolver:
     from zcu_tools.gui.session.expression import evaluate_scalar_expr
 
-    def resolve_expression(expr: str, /) -> int | float | complex:
+    def resolve_expression(expr: str, /) -> int | float | complex | str:
         return evaluate_scalar_expr(expr, parameters)
 
     return resolve_expression
@@ -59,8 +59,7 @@ def _make_reference_resolver(parameters: ParameterContext) -> ReferenceResolver:
 def validate_schema(schema: CfgSchema, parameters: ParameterContext | None) -> None:
     """Validate authored cfg input against a fixed role-aware capture.
 
-    parameters=None supplies no reference resolver. Linked, non-overridden
-    empty payloads may await resolution; other references require a valid
+    parameters=None supplies no reference resolver. Linked empty payloads may await resolution; other references require a valid
     shape. Malformed input and resolver failures propagate. Static validation
     alone does not authorize Run or replace finished-cfg lowering.
     """
@@ -86,7 +85,9 @@ def schema_to_raw_dict(
     """Lower using fixed captured roles and pure-data sweep ranges.
 
     None allows pure calculation but parameter/library expressions fail.
-    Finished-value, reference and source errors propagate without writes.
+    Standalone $alias names use this capture, not old resolved strings; numeric
+    fields never coerce names into numbers. Finished-value, reference and source
+    errors propagate without writes.
     """
     validate_reference_kinds(schema, _REFERENCE_KINDS)
     return lower_finished_cfg(

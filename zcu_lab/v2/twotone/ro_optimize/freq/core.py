@@ -139,7 +139,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                     **(acquire_kwargs or {}),
                 )
             )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return FreqResult(freqs, signals)
 

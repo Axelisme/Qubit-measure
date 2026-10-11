@@ -95,7 +95,10 @@ class ProjectDialog(QDialog):
         refresh_scopes_btn = QPushButton("↻")
         refresh_scopes_btn.setFixedWidth(28)
         refresh_scopes_btn.setToolTip("Refresh result scopes")
-        refresh_scopes_btn.clicked.connect(self._refresh_result_scopes)
+        # Qt's clicked check state is not a refresh option.
+        refresh_scopes_btn.clicked.connect(
+            lambda _checked: self._refresh_result_scopes()
+        )
         scope_row.addWidget(refresh_scopes_btn)
         form.addRow("Result scope", scope_row)
 
@@ -149,9 +152,7 @@ class ProjectDialog(QDialog):
             self._database_edit.setText(default_database_root(chip, qub, self._root))
         self._update_scope_options(chip, qub)
 
-    def _refresh_result_scopes(
-        self, _checked: bool = False, *, silent: bool = False
-    ) -> None:
+    def _refresh_result_scopes(self, *, silent: bool = False) -> None:
         try:
             self._result_scopes = ResultScopeManager(self._root or ".").list_scopes()
         except Exception as exc:  # noqa: BLE001 - scope discovery is best-effort UI.
@@ -183,6 +184,26 @@ class ProjectDialog(QDialog):
                 userData=scope.scope_id,
             )
 
+        idx = self._preferred_scope_index(prev_scope_id, current_result, chip, qub)
+        if idx >= 0:
+            self._scope_combo.setCurrentIndex(idx)
+        elif has_names:
+            self._scope_combo.setCurrentIndex(generated_index)
+        elif self._result_scopes:
+            self._scope_combo.setCurrentIndex(0)
+        else:
+            self._scope_combo.addItem("(no result scopes found)", userData=None)
+
+        self._scope_combo.blockSignals(False)
+
+    def _preferred_scope_index(
+        self, prev_scope_id: object, current_result: str, chip: str, qub: str
+    ) -> int:
+        """Match previous selection, result path, then names in the rebuilt combo.
+
+        Return Qt's negative findData index when no available scope matches;
+        the UI owner chooses the generated/unnamed fallback.
+        """
         idx = -1
         if prev_scope_id:
             idx = self._scope_combo.findData(prev_scope_id)
@@ -194,22 +215,12 @@ class ProjectDialog(QDialog):
                 ):
                     idx = self._scope_combo.findData(scope.scope_id)
                     break
-        if idx < 0 and has_names:
+        if idx < 0 and chip and qub:
             for scope in self._result_scopes:
                 if (scope.chip_name, scope.qub_name) == (chip, qub):
                     idx = self._scope_combo.findData(scope.scope_id)
                     break
-
-        if idx >= 0:
-            self._scope_combo.setCurrentIndex(idx)
-        elif has_names:
-            self._scope_combo.setCurrentIndex(generated_index)
-        elif self._result_scopes:
-            self._scope_combo.setCurrentIndex(0)
-        else:
-            self._scope_combo.addItem("(no result scopes found)", userData=None)
-
-        self._scope_combo.blockSignals(False)
+        return idx
 
     def _current_scope(self) -> ResultScope | None:
         scope_id = self._scope_combo.currentData()

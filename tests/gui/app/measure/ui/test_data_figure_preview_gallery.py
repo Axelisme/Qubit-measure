@@ -18,7 +18,7 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     QSize,
 )
 from qtpy.QtGui import QColor, QPixmap  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QApplication,
     QLabel,
     QPushButton,

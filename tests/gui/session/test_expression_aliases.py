@@ -66,7 +66,7 @@ def test_missing_alias_does_not_read_a_same_named_component() -> None:
 
 @pytest.mark.parametrize(
     "expression",
-    ["$qubit", "$qubit..rate", "$ qubit.rate", "$qubit.rate[0]", "$qubit.rate()"],
+    ["$qubit..rate", "$ qubit.rate", "$qubit.rate[0]", "$qubit.rate()"],
 )
 def test_invalid_alias_expression_is_rejected(expression: str) -> None:
     with pytest.raises(ExpressionError):

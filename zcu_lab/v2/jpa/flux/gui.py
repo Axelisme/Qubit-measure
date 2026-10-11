@@ -34,7 +34,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import custom
+from zcu_lab.v2._support.measure.seeds import custom, literal
 from zcu_lab.v2.jpa.flux.core import FluxCfg, FluxExp, FluxResult
 
 JpaFluxRunResult: TypeAlias = RunRecord[FluxCfg, FluxResult]
@@ -148,7 +148,7 @@ class JpaFluxAdapter(
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
-                default="",
+                default=literal(EvalValue("$flux_dev")),
                 required=False,
             )
             .sweep(

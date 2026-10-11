@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 from qick.asm_v2 import AsmInst, WriteReg
 from qick.tprocv2_assembler import Assembler
@@ -29,6 +31,7 @@ class _Prog:
             "gens": [{"tproc_ch": 7}],
             "readouts": [{"tproc_ctrl": 9}],
         }
+        self.instructions: list[tuple[dict[str, str], int]] = []
 
     def _get_reg(self, name: str) -> str:
         return {
@@ -36,7 +39,12 @@ class _Prog:
             "gain_word": "s2",
             "idx": "r1",
             "addr": "r2",
+            "runtime_time": "r3",
+            "s_out_time": "s14",
         }.get(name, name)
+
+    def _add_asm(self, inst: dict[str, str], addr_inc: int) -> None:
+        self.instructions.append((inst, addr_inc))
 
 
 def _compile_instruction(inst: AsmInst) -> list[int]:
@@ -112,7 +120,33 @@ def test_pulse_from_regs_compiles_like_qick_wave_register_write() -> None:
     actual = _pulse_macro(freq_reg="freq_word").expand(prog)[1]
     oracle = WriteReg(dst="w0", src="freq_word").expand(prog)[0]
 
+    assert isinstance(actual, AsmInst)
     assert _compile_instruction(actual) == _compile_instruction(oracle)
+
+
+@pytest.mark.parametrize(("kind", "port"), [("pulse", 7), ("readout", 9)])
+def test_wave_from_regs_translates_register_time_before_playback(
+    kind: Literal["pulse", "readout"], port: int
+) -> None:
+    prog = _Prog(["readout_wave"])
+    macro = (
+        _pulse_macro(freq_reg="freq_word")
+        if kind == "pulse"
+        else _readout_macro(freq_reg="freq_word")
+    )
+    macro.t_regs["t"] = "runtime_time"
+
+    macro.translate(prog)
+
+    assert prog.instructions == [
+        ({"CMD": "REG_WR", "DST": "s14", "SRC": "op", "OP": "r3"}, 1),
+        ({"CMD": "REG_WR", "DST": "r_wave", "SRC": "wmem", "ADDR": "&4"}, 1),
+        ({"CMD": "REG_WR", "DST": "w0", "SRC": "op", "OP": "s1"}, 1),
+        ({"CMD": "WPORT_WR", "DST": str(port), "SRC": "r_wave"}, 1),
+    ]
+    time_write = AsmInst(inst=prog.instructions[0][0], addr_inc=1)
+    oracle = WriteReg(dst="s_out_time", src="runtime_time").expand(prog)[0]
+    assert _compile_instruction(time_write) == _compile_instruction(oracle)
 
 
 def test_patch_wmem_from_regs_persists_without_port_write() -> None:

@@ -24,13 +24,17 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 `NotebookAdapter()(core)` 可離線 load／analyze。同步 analyze 的 options 仍必傳，只有 source 可以省略。`analyze(options, *, source=None)` 與 `save(destination, *, source=None, ...)` 預設最近成功 run／load 的 last_run，沒有 record 就拒絕。處理歷史資料時顯式傳 source；分析歷史來源不改 last_run，也不改下一次 save 的預設來源。Save 只處理本機路徑，unique=True 才選新檔名並回傳實際 Path；cfg 要求與禁止覆寫由核心 saver 守住。
 
-`save_run(ctx, source=record, ...)` 是綁定 PointView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口捕捉 cached context 與 acquisition evidence，保存 native、Labber、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
+`save_run(ctx, source=record, ...)` 是綁定 PointView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口從 bound point 捕捉 cached context 與 storage capability，量測身分、時間與 provenance 沿 adapter 的 acquisition evidence。可選的 RoleView 必須來自同一 point，省略代表沒有角色對應。入口保存正規 `data.h5`、Labber 衍生輸出、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
 
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
 
-`SavedRun.accept(parameter=..., module=..., waveform=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, stderr)` 帶有限非負的誤差。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空；目前傳入 samples 明確拒絕，樣本接線由後續切片完成。Role 首段沿保存時固定的映射展開，provenance kind 自動使用該 run 的實驗名稱。
+`SavedRun.accept(parameter=..., module=..., waveform=..., samples=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, stderr)` 帶有限非負的誤差。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Samples 是具體元件名到 JSON 欄位 dict；流程只補 run_id、point、at 與 accepted source。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，samples 不解析角色。Provenance kind 自動使用該 run 的實驗名稱。
 
-流程先追加一筆 typed accepted 事件，再依 parameter → module → waveform 及各 mapping 的迭代順序逐項提交。第一個錯誤直接傳播並停止後項，已成功前項及事件保留，不提供跨項回復、retry 或恢復流程。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI WritebackService 尚未改接此流程。
+流程先追加一筆 typed accepted 事件，再依 parameter → module → waveform → samples 及各 mapping 的迭代順序逐項提交。項目失敗拋出 `WritebackApplyError`，帶 accepted `event_id`、成功前綴項數 `applied` 與原始 `__cause__`，並停止後項。已成功前項及事件保留，不提供跨項回復、retry 或恢復流程。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
+
+Notebook 不讀 entry 的 GUI `aliases.yaml`，也不使用 Measure 的 alias preset。
+Caller 明確提供自己的 bindings，RoleView 保留顯式 kind／via 契約。
+GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 
 ## 工作家族
 
@@ -49,11 +53,15 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 ## 共用責任與目前邊界
 
-Cfg 組裝使用 `experiment.cfg_assembler.CfgEnv(ml=library.snapshot(), device_manager=...)`。Notebook 從 PointView 或 RoleView 讀取具體值，再放進 raw cfg；CfgEnv 不接收參數容器或解析 expression。Notebook 顯式呼叫 `make_cfg(raw_cfg, CfgModel, env, overrides=...)` 時使用固定的 library validation context，不讀取或設定裝置，失敗直接報錯；底層 assembler 與 GUI 同樣使用 caller 給定的 snapshot。CfgEnv 不執行 setup，也不關閉資源。切換 point 或更新 library 後重新捕捉 snapshot 並建立 CfgEnv。Run 不重做 make_cfg、不刷新 cfg、不重連或自動補裝置。Driver mapping 只固定名稱到 instance，不是資源 lease，driver guards 與既有 owner 不變。
+Cfg 組裝使用 `experiment.cfg_assembler` 的 CfgEnv 與 make_cfg。Cfg.dev 只保存角色到 device 名稱的對應，使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Caller 必須明示 unit，不提供隱含 default。Run 不預查 cfg.dev 名稱是否存在，cfg 格式與必填 unit 的驗證仍保留。Core 實際以 `context.devices[cfg.dev[role]]` 選 driver 時，缺名即報錯並指名 device。Core 使用實驗層 helpers 設 flux／RF／output，不把 DeviceInfo 當設定命令，也不對未使用的 device 套 setup patch。單位換算由 caller 負責，RF helpers 接 Hz／dBm。RunContext 不提供 setters。CfgEnv 不執行 setup、不解析 md expression，也不關閉資源。切換參數／library 來源後由 caller 重建 CfgEnv。Run 不重做 make_cfg、不刷新 cfg、不重連或自動補裝置；make_cfg 的裝置讀取不能當成 Run snapshot。
+
+Notebook Run 在使用者的程序內同步執行，資源由 caller 擁有。入口只借用 drivers，不新增 lease、lock 或 registry。Driver mapping 只固定名稱到 instance，不是資源 lease。Hardware lease 後的 snapshot 時機只適用 GUI。
+
+Notebook 在建立 RunContext 後、core.run 前，對全部已連線 device 各讀一次 get_info 作為 snapshot。這一步只讀不寫。任一台失敗拒絕 Run，不進 core、不以 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，後續 sweep 不覆寫。保存沿 RunMetadata.device_snapshot 到既有 data.h5 `/device`，Save 不重讀硬體或取下一輪值。
 
 `acquisition_for(source)` 只接受此 NotebookExperiment 最近成功 run 的同一 RunRecord，回傳隔離的 run identity、UTC 開始／結束時間、complete／stopped 與 software provenance。Run 在 core acquire 前捕捉 software evidence，正常返回且 StopSignal 錯誤檢查通過後結束計時，不包含 plots.finish、analyze 或 save。Presentation 成功後才成組發布 record 與 evidence。Analyze 與所有失敗保留 evidence，下一次成功 run 取代它，成功 load 清除它。Loaded、手組、另一 adapter 或過期 record 不能取得此 acquisition evidence。Schedule 會接住 scope 內的一次 KeyboardInterrupt，保留 buffer 與 interrupted signal。Notebook 將這種正常返回發布為 stopped record，已完成點與其餘 NaN 可沿 save_run 保存。Adapter 不另加 cancellation 入口。
 
-NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run 在提交前檢查 StopSignal 的失敗原因。Failed 仍拋錯，interrupted 視為使用者停止，與無錯誤的 stopped partial 一樣可提交。Schedule 外的 KeyboardInterrupt（例如 setup_devices）直接傳播，保留舊成果。GUI／MCP 的 raise_if_error 政策不變。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。Notebook 的 run、同步分析與 GE post 共用失敗呈現的收尾，保留 producer 與 cleanup 錯誤，只釋放本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
+NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run 在提交前檢查 StopSignal 的失敗原因。Failed 仍拋錯，interrupted 視為使用者停止，與無錯誤的 stopped partial 一樣可提交。Schedule 外的 KeyboardInterrupt（例如實驗 helper 的儀器操作）直接傳播，保留舊成果。GUI／MCP 的 raise_if_error 政策不變。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。Notebook 的 run、同步分析與 GE post 共用失敗呈現的收尾，保留 producer 與 cleanup 錯誤，只釋放本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
 
 明確 Notebook host 同步執行 caller 的操作，caller 負責順序。Host 在發布前完成
 widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。

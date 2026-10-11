@@ -13,7 +13,10 @@ lifecycle-only triggers；disk mechanism 使用 `gui.session.persistence.SingleF
 RunInputs 固定 admission 的 entry／point、alias、storage capability 與 adapter 的 persistence tag。
 `RunService` 在 worker submission 前固定 UTC started_at 和 run ID。
 Worker 在 acquisition 前捕捉 software provenance，完成後補 finished_at／completion。
-當次已捕捉的 device settings 投影成 JSON metadata，native Save 寫入 `/device`，不查 live hardware。
+Run 框架在 hardware lease 後、adapter.run 前讀取全部已連線 device 的 get_info，各一次。
+任一讀取失敗拒絕 Run，不寫設定、不進 adapter/core、不以 State cache 補值，無 device 記 `{}`。
+這份實驗前 snapshot 沿 RunMetadata.device_snapshot 保存，不被後續 sweep 改寫。
+Native Save 寫入既有 `/device`，不查 live hardware；實際 sweep 值由 cfg 與 persisted axes 記錄。
 可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
 再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
 但不建立 run 資料夾。未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
@@ -60,7 +63,7 @@ Tab cfg edit batch 在完整候選準備成功後一次發布，拒絕不改舊 
 Run、Qt 與 remote 的資源契約現況見 Cfg ADR；library conversion、selected Apply
 與其他 app 的剩餘目標見 [cfg draft](../../../../../docs/adr/draft/cfg-editing-boundaries.md)。
 
-`State` 保存可觀察的 app 資料，`ContextService` 寫入 md／ml；services
+`State` 保存可觀察的 app 資料，`ContextService` 寫入參數容器／library；services
 依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
 版本由資源 owner 發布，不以每次 emit 必然 bump 推導：
 `SessionState.refresh_device_info_cache()` 在 driver info 與快取相同時不 bump，
@@ -230,8 +233,7 @@ Shared layers:
 - `zcu_tools.gui.session`：context、SoC、device、project settings、predictor、operation
   handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
-- `zcu_tools.gui.plotting`：explicit figure host、container、export
-  substrate。
+- `zcu_tools.gui.plotting`：explicit figure host、container 與 export。
 - `zcu_tools.mcp.measure`：agent-facing MCP policy layer and tool surface。
 
 ## Composition Root
@@ -256,10 +258,26 @@ ports. `Controller` is a facade over the service bundle; UI and remote code use
 the controller for app-specific workflow and the exposed session control facets
 for setup/context/device/predictor/progress domains.
 
-Measure composition 在一處宣告 session-memory alias 初值：qubit 留空，resonator
-保存 `$qubit.resonator`。ContextService 在第一份非空元件 snapshot 以 registry
-的唯一候選填 qubit，不硬編 component kind。之後切 point 不重設表。參數捕捉
-經 `read_alias_context`，不再從 GUI focus 或 adapter 的 via 推論 alias。
+Composition 建立 runner／progress 後交給 `build_session_services()`。
+Run、Analyze、PostAnalyze 從回傳的 `SessionServices.runner` 取用同一 lifecycle
+機制。Operation control 與 app bundle 從 `SessionServices.progress` 取用同一
+progress owner。這個入口不改 operation policy、hardware exclusion、取消或
+owner-thread delivery，也不另建 infrastructure bundle。
+
+Measure launcher 從使用者套件的 `ALIAS_PRESET` 取得唯一的有序初值表，以
+`alias_preset` 經 `MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 session。
+框架不宣告領域初值。獨立 caller 可提供自己的 rows，省略或空 tuple 都建立空表。
+ContextService 保留 authored softlinks 與空列，在第一份非空元件 snapshot 以
+role registry 的唯一候選填 primary 空列。每次開 entry 有 `aliases.yaml` 就載入。
+無檔才重設 preset，重新啟用 primary 初始化。已保存的空表與空列不自填。切 point 不重讀檔或換表，明確
+提交表後不再初始化，直到下次開 entry。Preset 的 flux_dev 空列不猜裝置，也不從 cache 填值。
+參數捕捉經 `read_context(aliases=...)` 固定當次 point、library、storage 與有序表。
+GUI adapter 不宣告角色，捕捉不從 GUI focus 或 adapter 的 via 推論 alias。
+Shared `session.ui.alias_dialog.AliasDialog` 是 Measure 與 workflows 的同一 owner。
+Dialog Apply 先驗整表，再由 entry owner 原子保存，成功才安裝 memory 並發布 event。
+EMPTY 時只改 memory。失敗保留舊表、舊檔與 draft，dialog 保持開啟可 retry。
+Apply 不關閉 dialog，Cancel 不撤回已 Apply 的內容。`set_alias_rows` 仍只改 memory。
+Tab 不顯示角色列，也不持有自己的 alias 表。
 
 App-local driving-adapter facets mirror the shared session control pattern.
 `TabControlPort` / `TabControlFacet` expose the tab resource surface (lifecycle,
@@ -377,18 +395,24 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 3. `Controller.start_run(tab_id, expected)` requires the observed `CfgRef`.
    Qt supplies the form's displayed ref; remote callers supply their observed ref.
    A different cfg identity or revision rejects Run without refresh or fallback.
-   `GuardService.capture_run_inputs` accepts that exact Valid revision and captures RunInputs with
-   `AcceptedConfig` provenance and detached State-owned device settings. Missing observed
-   settings for a live device reject admission without querying hardware.
-   `RunRequest` carries only SoC handles and that device snapshot, not md/ml.
-4. RunService fixes started_at and run_id before worker submission. It projects
-   the admitted device settings into RunMetadata.device_snapshot; native saving
-   stores them at `/device`, not in tab preferences. A failed Run with no data
+   `GuardService.capture_run_inputs` accepts that exact Valid revision and captures
+   RunInputs with AcceptedConfig provenance, fixed ParameterContext and storage.
+   Cfg.dev stores role-to-device names, not State-owned settings or setup patches.
+   Cached observations used for cfg sources or remote guards are not the Run snapshot.
+4. RunService fixes started_at and run_id before worker submission. After the hardware
+   lease and before adapter.run, the Run framework reads get_info once from every
+   connected device. Any read failure rejects Run without entering the adapter/core,
+   writing settings or falling back to cache. No devices produce an empty snapshot.
+   Run does not precheck whether cfg.dev names exist. Cfg format and required unit
+   validation remain. RunService creates a fresh RunContext with borrowed drivers,
+   operation plots and one StopSignal, without instrument setters.
+   The adapter passes this context to the core. Core selects context.devices[cfg.dev[role]]
+   when using a device; a missing name raises an error naming that device.
+   Core uses experiment helpers; flux cfg requires flux_unit. Only progress remains ambient.
+   Driver lookup does not refresh accepted cfg. RunMetadata.device_snapshot retains the
+   pre-experiment settings even after a sweep. Native Save stores them at `/device`,
+   not in tab preferences, and does not read hardware. A failed Run with no data
    publishes no metadata or ledger event. Usable stopped data retains its evidence.
-   RunService captures borrowed drivers and creates a fresh RunContext with
-   operation plots and one StopSignal. The adapter passes this context to the core;
-   Schedule uses its StopSignal and device setup uses the same signal's event.
-   Only progress remains ambient. Driver lookup does not refresh accepted cfg.
 5. `BackgroundRunner` executes blocking work off the Qt main thread and marshals
    terminal callbacks back to the main thread.
 6. RunService uses State directly for busy checks and atomic result/evidence
@@ -402,7 +426,12 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    convert values. Draft-local retarget refreshes the destination facts and unit.
    Module/waveform items show bounded change summaries without units and keep
    full cfg editing in `Edit`. Primary and post workflows own proposal timing;
-   the Writeback service remains stage-free.
+   the Writeback service remains stage-free. Sample proposals name a concrete
+   component and producer JSON fields. GUI adds dev_value/dev_unit from the
+   Run-fixed $flux_dev binding and device snapshot. Missing binding, device,
+   value or unit omits the sample with a public unavailable_reasons entry.
+   Preview and write receipts read the latest entry JSONL row for that run.
+   Only adapters whose Run does not change that device provide sample proposals.
 
    Primary FIT and interactive operations capture the source `RunMetadata.run_id`
    at start and pass it to the opaque draft. Post captures the Primary draft's
@@ -497,13 +526,12 @@ Viewport-driven mosaic reflow (gallery's own width vs two-minimum-width-cards
 threshold) is presentation-only and never moves figure ownership, adds a second
 canvas, or changes ADR-0067 reactions. No competing state owner is introduced.
 
-## Tab Lifecycle And Ordering
+## Tab lifecycle and ordering
 
-Tab 角色列只呈現該 tab 的固定 capture；改綁不讀目前 session 的焦點或工作點。
-手動指定（包含清空）保留在 capture，其他角色依開啟時焦點與手動選擇重新推論。
-逐角色重設只移除該角色的手動選擇。改綁限本 tab idle，保留 cfg resource、輸入
-與既有 Run/Analyze/WB/artifact；cfg 與下一次 Run 使用新的角色，歷史結果仍使用
-當次來源。角色列、標題與完整 tooltip 由同一 committed fact 更新，不重畫結果。
+Tab 不保存另一張 alias 表或 tab birth 環境。Cfg refresh／reset 與下一次 Run
+使用當次全域表的固定 capture。非空 caller `aliases` 只覆寫該次 preview／Run，
+不保存到 tab 或全域表。已有 Run／Analyze／WB／artifact 保留原結果來源，
+不因目前 alias 改綁而重新解析。
 
 New tabs are pure GUI configuration surfaces: creating one builds the adapter's
 default cfg from the current context but does not start hardware work. The toolbar
@@ -517,6 +545,10 @@ remote tab views, and captured sessions all use the same tab order as the Qt tab
 bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config Model
+
+GUI flux adapter 表單的 `flux_unit` 是 A／V／native 三選一，初始 A，使用者可改。
+這是表單初始值，不從 cached DeviceInfo 推測。Core 與 Notebook cfg 仍必填
+`flux_unit`，不提供隱含 default，cfg 格式與 unit 驗證不變。
 
 Measure Config uses `ResourceCfgFormWidget` and a State-owned cfg resource.
 The form submits every input change at once, so it always shows the published
@@ -543,7 +575,7 @@ renders each publication after submitting an input change:
 
 Resource acceptance rejects unresolved or invalid cfg. Legal optional `None`
 remains valid. Run admission captures the current global `ParameterContext`, not tab birth sources.
-Nonempty caller-owned `aliases` maps alias names to concrete components and
+Nonempty caller-owned `aliases` maps alias names to concrete names and
 resolves the same inputs against its temporary capture. It changes neither tab
 publication nor global rows. Omission, None and {} use cached acceptance.
 Recipe parameter/library queries and cfg preview use the same named overrides.
@@ -553,9 +585,17 @@ EMPTY app captures without overrides retain deferred None; nonempty overrides
 reject no_context. Native Load takes Save storage from that one Load-time capture
 and reads historical fixed names without expanding current alias links.
 `schema_to_raw_dict(schema, parameters)` lowers independent drafts with their
-fixed ParameterContext, not the currently selected point or focus. `CfgSchema` stores shared spec/value data and `CfgDraft`
+fixed ParameterContext, not the currently selected point or global aliases. `CfgSchema` stores shared spec/value data and `CfgDraft`
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
+
+五個有 flux device 的 Measure adapter 使用 `$flux_dev` 作為初始名稱 expression，
+包括 JPA 的 jpa_flux_dev 欄位。明確 caller 設定不被 preset 覆蓋。
+String cfg 的 `$flux_dev` 保留 authored expression。Preview、refresh 與 Run
+使用各自固定的 alias capture，顯示例如 `= "yoko1"`。未綁或缺列發布 Invalid
+並指名 alias；無 context 或來源故障不沿用舊名稱。Alias 與 preview 不查 device
+可用性，實際使用名稱時由實驗 device owner 報錯。RunMetadata 與 data.h5 保存
+當次的 `flux_dev → yoko1`；Analyze、WB 與 Save 不重新讀取目前 alias 表。
 
 generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
 `zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter提供固定
@@ -573,8 +613,9 @@ Tab 的每次 cfg refresh／reset 從目前全域 alias 表與 point／library �
 `ParameterContext`。它不讀 tab birth capture。`MeasureCfgBindings.snapshot_from_state`
 使用這份投影，擷取 options 與已發布的 values，並記錄 context、device set
 及每個 device 的 source basis。
-Bare capture 從同一 `ParameterContext` 解析。
-Dotted capture 只讀 `ValueSourceBinder` 已發布的 detached cache，不查 live provider 或硬體。
+`@{key}` 先讀 `ValueSourceBinder` 已發布的 detached cache；未命中時，
+再沿同一固定 `ParameterContext` 查參數路徑。不查 live provider 或硬體。
+`$alias.path` 保持動態 alias 引用，不使用這條 resolve-once capture 路徑。
 Source 更新先準備及安裝所有 tab 的新 publication，再通知任何 subscriber。
 來源故障發布 Unavailable，不保留舊 Valid。通知期間拒絕 cfg mutation、acceptance 和 tab lifetime mutation。
 
@@ -589,7 +630,11 @@ ModuleLibrary reference enumeration只以`experiment.cfg_editing.program_shape_f
 不normalize typed cfg或建立Spec/Value。resolve才呼main materializer façade一次。Experiment
 composition把fresh canonical shape factory與eval-aware value factory一起註冊到immutable `TemplateEntry`；catalog
 registration只驗shape/kind，Controller create依序取得value與fresh shape並直接組`CfgSchema`，不從
-value sniff discriminator。Create 先取得 alias-aware `read_context()`，將同一固定 capture 放進 factory 的 `SessionEnv.parameters` 並交 library write lowering；後來的來源或 selection 修改不改該次建立值與目的地。TemplateEntry 不要求 consumer roles。既有 role_id／roles wire metadata 與 blank template 順序保持不變。
+value sniff discriminator。
+Create 先取得 alias-aware `read_context()`，將同一固定 capture 放進 factory 的
+`SessionEnv.parameters` 並交 library write lowering。後來的來源或 selection 修改
+不改該次建立值與目的地。TemplateEntry 不要求 consumer roles。
+既有 role_id／roles wire metadata 與 blank template 順序保持不變。
 
 ModuleLibrary 新建唯一走 template catalog 的 `create_from_template`；`CfgEditorService.open`
 只以 required `from_name` 開啟既有 module/waveform 的 modify session，不提供
@@ -604,12 +649,14 @@ the search window editable. Sweep editors render as two balanced label+input
 columns per row, so start/stop or center/span share the available width evenly
 inside a full-width form row.
 
-Linked module / waveform reference fields preserve their embedded value snapshot
-when the library key is missing. The field stays library-keyed and invalid so
-re-adding the same key relinks it, while persistence can still serialize the snapshot without consulting
-`ModuleLibrary`. Restored overridden refs whose key is missing can instead
-retain their overridden inline input without depending on the old key. Nested linked
-references keep their own dependencies; explicit relink restores this layer's dependency.
+Module and pulse waveform references directly select library names in ref mode.
+Ref contents follow library publication and remain readonly. The cfg owner's
+`convert_reference_to_inline` copies the valid published actual values into the
+same shape, recursively freezing nested refs and expressions. Inline values no
+longer depend on the old library or aliases. Missing/Invalid refs cannot convert;
+re-adding the missing key restores ref mode. Optional None remains disabled.
+The shared Qt header preserves shape/library/None selection and adds the explicit
+conversion button. Run acceptance still fixes actual values; slot writeback is unchanged.
 
 Adapter cfg authoring lives in the user experiment package as a context-free
 `MeasureCfgDefinition`. A single `MeasureCfgBuilder` declaration fixes static shape,
@@ -685,9 +732,9 @@ controlled fields.
 
 Cancellation is operation-specific through the registered cancel hook. Each run
 owns a fresh RunContext and StopSignal. Adapters pass that context to the core;
-Schedule roots receive its cancel_signal explicitly. Device setup
-receives context.devices and cancel_signal.event, so ramps observe the same stop
-request without ambient scopes or a global registry. Run terminal policy treats the cancel hook as
+Schedule roots receive its cancel_signal explicitly. Experiment set_flux helpers
+receive the selected driver and the same cancel_signal, so YOKO ramps observe the
+same stop request without ambient scopes or a global registry. Run terminal policy treats the cancel hook as
 the source of user cancellation intent; `Schedule` may also set the same stop flag
 for internal failed/interrupted outcomes, and those are surfaced as failed
 operation outcomes instead of cancelled.
@@ -727,7 +774,7 @@ guard, editor lifecycle, and diagnostics.
 It projects internal tab interaction/content facts to the coarse
 `{tab_id, requery:["tab.snapshot"]}` event envelope; GUI refresh masks and
 pane figure details stay internal to `MainWindowEventCoordinator`. The wire event
-name and payload are not the internal fact enum. Context/value/md/ml RPC handlers use
+name and payload are not the internal fact enum. Context/value/parameter/library RPC handlers use
 the controller-exposed `ContextControlPort` facet; device RPC handlers use
 `DeviceControlPort` for device lifecycle/query/progress; predictor RPC handlers
 use `PredictorControlPort` for predictor load/query/compute. SoC handlers remain
@@ -738,6 +785,13 @@ use `SetupControlPort` and explicit entry names; there is no project identity ma
 short waits and live catalog. The GUI remote adapter owns per-connection seen
 and operation outcomes; MCP only maps opaque agent handles to GUI operation IDs.
 New GUI RPC methods that should be agent-accessible need a live catalog policy and tests.
+
+`set_frequency`、`set_frequency_sweep`、`set_flux_sweep` 與 `use_flux_device` 的
+領域政策由 `zcu_lab.recipes.helpers` 擁有。`RecipeTab` 只提供通用 parameter／library／
+cfg field／device 讀取與 set／set_fields／set_sweep，框架不推論 calibration 或 linewidth。
+`zcu_lab.recipes.helpers.use_flux_device` 使用通用 `RecipeTab.read_device` 讀 cached
+snapshot，caller 明填 unit 必須完全匹配，包括 native。驗證成功後才寫 dev.flux_dev
+與獨立 cfg.flux_unit，不換算、不連線或 setup，也不改 recipe policy 或 alias capture。
 
 ## Dialog Rules
 
@@ -756,7 +810,7 @@ remote named-dialog surface delegate reference retention and `finished` /
 `InspectDialog` adapts the measure controller into the shared
 `InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
 controller only for measure-only CfgEditor and template-catalog actions. Measure owns
-the dense two-column Parameters property grid and a separate Modules composition:
+the Parameters component tree and a separate Modules composition:
 the Modules tree exposes only New/Delete collection actions, while the right pane
 embeds the service-owned `CfgFormWidget` with Name, Saved/Unsaved, Revert, and
 Apply on one row (there is no Raw pane or Modify/Rename action). Selecting an entry
@@ -764,10 +818,9 @@ opens one `gc=False` editor session; field and Name edits stay in that draft.
 Apply calls the replacement write interface, which validates and lowers before the
 single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
 the resulting selection. Collision, invalid, or lowering failures leave the live
-entry and draft intact. Each existing-entry editor retains its source
-ModuleLibrary identity and fast-fails replacement after a context switch, leaving
-that draft for explicit Revert/Discard. A pending refresh is consumed after a
-dirty selection transaction so the tree reflects the resulting names. Revert
+entry and draft intact. Editor 固定開啟時的 ParameterContext。同 entry 切換 point
+不改目的地；跨 entry 或失效 DRAFT 拒絕提交，保留 draft 供 Revert／Discard。
+Dirty selection transaction 後套用 pending refresh，讓 tree 顯示提交後的名稱。 Revert
 reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
 New remains a retained non-blocking template catalog dialog; the Modules tree Delete
 key is direct only at the tree focus boundary, while the button confirms.
@@ -831,15 +884,20 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
 
 ## Adapter-Facing Rules
 
-- `ContextService` 擁有 md／ml 內容提交、`context` version bump 與變更事件。
-  Measure 的 `ContextWritePort` 從 cfg schema 產生 app-side lowering callbacks，
-  交給共用 service 在寫入時呼叫；`CfgEditorService` 只交未 lower 的 schema。
-  Writeback 選出的 md／ml entries 交給一次 `apply_ml_writes()`，每批至多
-  bump 一次、每種變更事件至多送一次。整批 lower／register 先在隔離候選
-  完成，後項可讀前項候選，但不能改 live md／ml。準備失敗保留舊內容與版本。
-  成功後一次套用內容、更新版本並通知，最後保存。保存失敗明確回報已套用
-  但未保存，不 rollback 或自動重試。寫入與 crash durability 是不同責任，
-  磁碟保存見 ADR-0063。
+- `ContextService` owns parameter/library commits, versions and change facts.
+  The library editor supplies an unlowered schema and fixed ParameterContext.
+  App-injected callbacks prepare the Spec before a single structure change.
+- `ContextService.apply_writeback` owns fixed-target admission, resource binding
+  and publication. It accepts only SavedPoint. Application admission requires a
+  selected working point before append; selection does not replace the captured destination.
+  `WritebackService` lowers selected proposals to concrete resource items in
+  proposal order, not grouped by kind. The shared executor appends accepted,
+  commits each item and stops at the first failure. The context publishes each
+  successful prefix item. GUI marks that prefix applied and re-raises the original
+  cause, preserving its existing wire category. No cross-file rollback or retry
+  is provided. Persistence and crash durability remain separate, see ADR-0063.
+- `ParameterWriteback` uses wire kind `parameter`, draft-local `param-<n>` IDs
+  and parameter paths in `written.parameter` receipts.
 - `ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。`AdapterCapabilities`
   宣告 SoC 需求、analysis、post-analysis、load 的支援範圍；`requires_soc` 不代表
   SoC 已連線。Run guard 檢查 context、cfg、SoC 與 preflight；operation owner 另
@@ -866,8 +924,8 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
 - `WritebackService.create_draft()` accepts those candidates and returns an opaque,
   service-owned draft. Item-local cfg-editor sessions and their identities stay
   inside the service; draft creation cleans every session on failure, teardown is
-  idempotent, and `apply_draft()` sends selected entries through one
-  `ContextWritePort` batch. `WritebackWidget` is pane-bound and the Qt-only
+  idempotent, and `apply_draft()` sends ordered concrete items through the
+  context owner's shared writeback entry. `WritebackWidget` is pane-bound and the Qt-only
   `Controller`/`WritebackControl` pane-qualified forwarding (`*_for_pane` with
   `pane` in `analysis|post_analysis`) resolves the pane's opaque draft before
   calling the stage-agnostic service. Remote/MCP writeback operations use the same

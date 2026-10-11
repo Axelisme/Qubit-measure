@@ -156,11 +156,7 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
         bus,
     )
 
-    def ledger(entry_id: str):
-        control.read_target(SavedPoint(entry_id=entry_id, point="a"))
-        return entry_resource(application).ledger
-
-    service = WritebackService(editor, write_port=control, entry_ledger=ledger)
+    service = WritebackService(editor, write_port=control)
     guard = GuardService(
         application.state,
         captured_parameters=lambda aliases: control.read_context(aliases=aliases),
@@ -178,6 +174,7 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
     draft = service.create_draft(
         [ParameterWriteback("general.ext.flux_value", "Flux", proposed_value=2.0)],
         parameters=captured,
+        experiment_name="test/point-admission",
     )
     application.state.update_tab_analyze(tab_id, object(), None, writeback_draft=draft)
     application.controller.setup_control.open_entry(EntryRequest("entry"))

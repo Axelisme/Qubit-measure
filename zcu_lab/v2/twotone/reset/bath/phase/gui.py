@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
+    ModuleWriteback,
     NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
@@ -19,12 +21,13 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
+    CfgSchema,
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.reset_bath import bath_reset_writeback_items
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -61,26 +64,25 @@ class BathPhaseAdapter(
             "hardware. Run last, to fix the pi/2 phase of the reset module."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'bathreset_freq' / "
-            "'bathreset_gain' — the calibrated cavity frequency and gain so the "
-            "cfg snapshot carries the fully calibrated reset forward for "
-            "registration; 'q_f' / 'qub_ch' / 'res_ch' seed the bath-reset "
-            "tone drive defaults."
+            "Requires $qubit.ext.reset_bath_freq and "
+            "$qubit.ext.reset_bath_gain for the tested cavity tone. Missing, "
+            "null or invalid values fail cfg lowering. Other drive defaults "
+            "use captured qubit/resonator frequency and wiring."
         ),
         expects_ml=(
-            "Needs a bath-reset module (the tested reset) and a readout "
-            "module. Optionally references a calibrated upstream reset and an "
+            "Builds the tested bath-reset cfg from captured defaults and "
+            "needs a readout module. Optionally references an upstream reset and an "
             "init pulse (a library pi pulse when present) — both disabled when "
             "no library entry exists."
         ),
         typical_writeback=(
-            "Proposes the ground-reset phase into parameter context "
-            "'bathreset_max_phase' and the excited-reset phase into "
-            "'bathreset_min_phase'. Also proposes two ModuleLibrary modules: "
-            "'reset_bath' (the calibrated tested reset with pi/2 phase set to "
-            "the max/ground phase) and 'reset_bath_e' (pi/2 phase set to the "
-            "min/excited phase) — both skipped when no source cfg is "
-            "available (e.g. loaded from file) (D2(a))."
+            "Proposes phases to $qubit.ext.reset_bath_max_phase and "
+            "$qubit.ext.reset_bath_min_phase. With Run cfg and capture, "
+            "proposes $qubit.reset.reset_bath and $qubit.reset.reset_bath_e "
+            "from tested_reset, replacing only pi/2 phase with max/ground "
+            "and min/excited respectively. Tested cavity frequency, gain "
+            "and all other fields remain. An optional $qubit.module.reset "
+            "row selects ground by default; it can be edited to excited."
         ),
         recommended=(
             "A full -360..360 deg sweep captures a clean cosine; the fit picks "
@@ -103,10 +105,10 @@ class BathPhaseAdapter(
                 locked={"pi2_cfg.phase": 0.0},
                 overrides={
                     "cavity_tone_cfg.freq": path_seed(
-                        "$qubit.module.bath_g.cavity_tone_cfg.freq", fallback=0.0
+                        "$qubit.ext.reset_bath_freq", fallback=0.0
                     ),
                     "cavity_tone_cfg.gain": path_seed(
-                        "$qubit.module.bath_g.cavity_tone_cfg.gain", fallback=0.1
+                        "$qubit.ext.reset_bath_gain", fallback=0.1
                     ),
                 },
             )
@@ -126,7 +128,11 @@ class BathPhaseAdapter(
     # BaseAdapter return the empty params instance and reflect the type.
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> BathPhaseRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = PhaseExp().run(cfg, context=context)
@@ -147,25 +153,52 @@ class BathPhaseAdapter(
         self,
         req: WritebackRequest[BathPhaseRunResult, BathPhaseAnalyzeResult],
     ) -> Sequence[WritebackItem]:
+        """Propose ext phases, independent tested variants and a ground slot.
+
+        None cfg or capture retains only scalars. Each variant copies this
+        Run's tested_reset and changes only pi2_cfg.phase. Capture resolution
+        and materialization failures propagate; ext is not reread.
+        """
         result = req.analyze_result
         items: list[WritebackItem] = [
             ParameterWriteback(
-                target_name="bathreset_max_phase",
+                target_name="$qubit.ext.reset_bath_max_phase",
                 description="Bath-reset pi/2 phase for ground reset (deg)",
                 proposed_value=result.max_phase,
             ),
             ParameterWriteback(
-                target_name="bathreset_min_phase",
+                target_name="$qubit.ext.reset_bath_min_phase",
                 description="Bath-reset pi/2 phase for excited reset (deg)",
                 proposed_value=result.min_phase,
             ),
         ]
 
-        # Gated per-experiment 'reset_bath' / 'reset_bath_e' proposals: each variant
-        # is the calibrated tested_reset with cavity freq/gain and its pi/2 phase
-        # overwritten from md (max-phase → ground, min-phase → excited). Emitted
-        # only when the matching md keys are present.
-        items.extend(bath_reset_writeback_items(req.ctx, req.run_result.cfg))
+        cfg = req.run_result.cfg
+        parameters = req.ctx.parameters
+        if cfg is None or parameters is None:
+            return items
+
+        ground_root = parameters.resolve_path("$qubit.reset.reset_bath")
+        for target, phase, description in (
+            ("$qubit.reset.reset_bath", result.max_phase, "Bath reset to ground"),
+            ("$qubit.reset.reset_bath_e", result.min_phase, "Bath reset to excited"),
+        ):
+            spec, value = module_cfg_to_value(cfg.modules.tested_reset)
+            value.with_field("pi2_cfg.phase", phase)
+            items.append(
+                ModuleWriteback(
+                    target_name=target,
+                    description=description,
+                    edit_schema=CfgSchema(spec=spec, value=value),
+                )
+            )
+        items.append(
+            ParameterWriteback(
+                target_name="$qubit.module.reset",
+                description="Select bath reset for downstream experiments",
+                proposed_value=ground_root,
+            )
+        )
 
         return items
 

@@ -22,10 +22,12 @@ only in which outer sweep they declare + its default.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -167,7 +169,11 @@ class _SsT1ToneSweepBase(
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> SsT1ToneSweepRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         return RunRecord(cfg, T1WithToneSweepExp().run(cfg, context=context))

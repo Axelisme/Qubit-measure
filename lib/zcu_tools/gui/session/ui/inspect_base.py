@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Never
 
 import yaml
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QFont  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QInputDialog,
@@ -35,6 +35,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     MdChangedPayload,
@@ -44,14 +45,23 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.session.context_control import ContextControlPort
+    from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.context.library import LibrarySnapshot
 
 logger = logging.getLogger(__name__)
 
 _MONO_FONT = QFont("Monospace")
 _MONO_FONT.setStyleHint(QFont.StyleHint.Monospace)
+
+
+def _unexpected_library_lowering(
+    _schema: CfgSchema, _parameters: ParameterContext
+) -> Never:
+    # Structural rename/delete never lower schemas; accidental use is an invariant failure.
+    raise RuntimeError("Inspect library rename/delete must not lower schemas")
 
 
 class InspectDialogBase(QDialog):
@@ -183,7 +193,7 @@ class InspectDialogBase(QDialog):
         # Remember current selection to restore after rebuild
         prev_item = self._ml_tree.currentItem()
         prev_data = (
-            prev_item.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+            prev_item.data(0, Qt.ItemDataRole.UserRole)
             if prev_item is not None
             else None
         )
@@ -208,11 +218,11 @@ class InspectDialogBase(QDialog):
                 continue
             group_item = QTreeWidgetItem(self._ml_tree, [group_label])
             group_item.setFont(0, bold)
-            group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # type: ignore[attr-defined]
+            group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             group_item.setExpanded(True)
             for name in store:
                 child = QTreeWidgetItem(group_item, [name])
-                child.setData(0, Qt.ItemDataRole.UserRole, (group_label, name))  # type: ignore[attr-defined]
+                child.setData(0, Qt.ItemDataRole.UserRole, (group_label, name))
                 if prev_data == (group_label, name):
                     restore_item = child
 
@@ -279,10 +289,14 @@ class InspectDialogBase(QDialog):
         if ans != QMessageBox.StandardButton.Yes:
             return
 
-        if group == "modules":
-            self._ctrl.del_ml_module(name)
-        else:
-            self._ctrl.del_ml_waveform(name)
+        self._ctrl.apply_library_change(
+            self._ctrl.read_context(),
+            LibraryChange(
+                "module" if group == "modules" else "waveform", "delete", name
+            ),
+            lower_module=_unexpected_library_lowering,
+            lower_waveform=_unexpected_library_lowering,
+        )
 
     def _on_rename_ml_clicked(self) -> None:
         data = self._current_ml_item_data()
@@ -296,10 +310,14 @@ class InspectDialogBase(QDialog):
         if not ok or not new or new == name:
             return
         try:
-            if group == "modules":
-                self._ctrl.rename_ml_module(name, new)
-            else:
-                self._ctrl.rename_ml_waveform(name, new)
+            self._ctrl.apply_library_change(
+                self._ctrl.read_context(),
+                LibraryChange(
+                    "module" if group == "modules" else "waveform", "rename", name, new
+                ),
+                lower_module=_unexpected_library_lowering,
+                lower_waveform=_unexpected_library_lowering,
+            )
         except Exception as exc:  # noqa: BLE001 — surface failure to the user
             QMessageBox.critical(self, "Rename failed", str(exc))
 

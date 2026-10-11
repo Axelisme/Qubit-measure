@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-10，canonical defaults 與 Run analysis calibration
+**Last updated:** 2026-10-11，reset ext seed 與 Run-tested finisher
 
 # Measure domain support
 
@@ -25,5 +25,11 @@ core不得反向 import measure domain。
 `flux_pick_plugin.py` 把 onetone/twotone flux picker 的 shared typed actions、ParamSpec commands 與 Auto Align single-flight 放在同一個 plugin instance。GUI frontend 維持本地 preview；remote 從同一個 service-owned session 讀取 committed state，worker 回覆只在 owner loop 提交，Done/cancel 後忽略晚到結果。move_line 的 role enum 來自 domain FluxLineRole，共用 ParamSpec 負責 schema 與 request 驗證，typed Action 仍保留 domain 驗證。兩個 concrete adapters 都指定終止 result builder。終止 renderer 重用 Qt-free kernel 與原生圖 builder，產生 GUI-owned FluxPickResult 和 `pick` 圖。OneTone 明確拆開 RunRecord，TwoTone 的 bare factory 入口保持不變。
 
 package facade 只 re-export concrete adapters 實際共用的 authoring vocabulary。單一 adapter 的
-range recipe與 writeback policy不經 facade 轉送；共用 writeback helper只負責依 caller 傳入的
-target、description、field updates與role建立 module proposal。
+range recipe 與 writeback policy 不經 facade 轉送。共用 readout writeback helper 依 caller 傳入的
+target、description、field updates 與 role 建立 proposal，保留既有 DPM 校準政策。
+
+Reset adapter 從固定 capture 的 qubit ext 建立 default cfg。`path_seed` 與 custom range 保存
+EvalValue，數值、missing/null 與 finite 驗證由既有 expression/lowering owner 處理。
+SingleToneFreq、DualTonePower 與 BathPhase 各自擁有 finisher。它們直接 materialize 該 Run
+的完整 tested_reset，只換本次分析欄位，不重讀 ext 或方案 slot。三個 length adapter
+不擬合參數，返回空 proposal collection。框架與本 support package 不檢查 reset 校準是否齊全。

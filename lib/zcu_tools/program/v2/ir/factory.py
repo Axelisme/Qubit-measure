@@ -113,7 +113,11 @@ class IRParser:
         self._parse_block(items, pos, root, end_markers=frozenset())
         return root
 
-    def _check_sese(self, items: list[BasicBlockNode | MetaInst]) -> None:
+    @staticmethod
+    def _collect_sese_regions(
+        items: list[BasicBlockNode | MetaInst],
+    ) -> list[tuple[str, str, set[int], set[str]]]:
+        """Validate marker nesting and collect each region's blocks and labels."""
         start_to_end = {
             "LOOP_START": "LOOP_END",
             "BRANCH_START": "BRANCH_END",
@@ -158,6 +162,10 @@ class IRParser:
         if region_stack:
             raise ValueError("IRParser: unbalanced structural META markers")
 
+        return regions
+
+    def _check_sese(self, items: list[BasicBlockNode | MetaInst]) -> None:
+        regions = self._collect_sese_regions(items)
         if not any(label_names for _mt, _name, _indices, label_names in regions):
             return
 
@@ -455,82 +463,7 @@ class IRParser:
                 MetaInst(type="LOOP_END", name=node.name),
             ]
         if isinstance(node, IRBranch):
-            n = len(node.cases)
-            case_entry_labels = [
-                make_label(f"{node.name}_case_entry_{i}", self.allocated)
-                for i in range(n)
-            ]
-            end_label = make_label(f"{node.name}_end", self.allocated)
-            dispatch_node = IRDispatch(
-                name=node.name,
-                value_reg=node.compare_reg,
-                target_labels=case_entry_labels,
-            )
-            result_branch: list[BasicBlockNode | MetaInst] = [
-                MetaInst(
-                    type="BRANCH_START",
-                    name=node.name,
-                    info=dict(compare_reg=node.compare_reg.name),
-                ),
-                MetaInst(type="DISPATCH_START", name=node.name),
-                *self._lower_dispatch(dispatch_node),
-                MetaInst(type="DISPATCH_END", name=node.name),
-            ]
-            for idx, case in enumerate(node.cases):
-                is_last = idx == n - 1
-                result_branch.append(MetaInst(type="BRANCH_CASE_START", name=str(idx)))
-                case_items = self._unparse_node(case)
-                first_block_attached = False
-                for item in case_items:
-                    if not first_block_attached and isinstance(item, BasicBlockNode):
-                        result_branch.append(
-                            BasicBlockNode(
-                                labels=[
-                                    LabelInst(
-                                        name=case_entry_labels[idx], can_remove=True
-                                    ),
-                                    *item.labels,
-                                ],
-                                insts=list(item.insts),
-                                branch=item.branch,
-                                disable_opt=item.disable_opt,
-                            )
-                        )
-                        first_block_attached = True
-                    else:
-                        result_branch.append(item)
-                if not first_block_attached:
-                    result_branch.append(
-                        BasicBlockNode(
-                            labels=[
-                                LabelInst(name=case_entry_labels[idx], can_remove=True)
-                            ]
-                        )
-                    )
-                if not is_last:
-                    if needs_big_jump(self.pmem_size):
-                        result_branch.append(
-                            BasicBlockNode(
-                                insts=[
-                                    RegWriteInst(
-                                        dst=Register("s15"),
-                                        src=SrcKeyword.LABEL,
-                                        label=LabelRef(end_label),
-                                    )
-                                ],
-                                branch=JumpInst(addr=Register("s15")),
-                            )
-                        )
-                    else:
-                        result_branch.append(
-                            BasicBlockNode(branch=JumpInst(label=LabelRef(end_label)))
-                        )
-                result_branch.append(MetaInst(type="BRANCH_CASE_END", name=str(idx)))
-            result_branch.append(MetaInst(type="BRANCH_END", name=node.name))
-            result_branch.append(
-                BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)])
-            )
-            return result_branch
+            return self._unparse_branch(node)
         if isinstance(node, IRDispatch):
             flat_dispatch = self._lower_dispatch(node)
             return [
@@ -541,6 +474,80 @@ class IRParser:
         raise TypeError(
             f"IRParser._unparse_node: unexpected node type {type(node).__name__}"
         )
+
+    def _unparse_branch(self, node: IRBranch) -> list[BasicBlockNode | MetaInst]:
+        """Emit branch dispatch, case-entry labels and fallthrough end jumps."""
+        n = len(node.cases)
+        case_entry_labels = [
+            make_label(f"{node.name}_case_entry_{i}", self.allocated) for i in range(n)
+        ]
+        end_label = make_label(f"{node.name}_end", self.allocated)
+        dispatch_node = IRDispatch(
+            name=node.name,
+            value_reg=node.compare_reg,
+            target_labels=case_entry_labels,
+        )
+        result_branch: list[BasicBlockNode | MetaInst] = [
+            MetaInst(
+                type="BRANCH_START",
+                name=node.name,
+                info=dict(compare_reg=node.compare_reg.name),
+            ),
+            MetaInst(type="DISPATCH_START", name=node.name),
+            *self._lower_dispatch(dispatch_node),
+            MetaInst(type="DISPATCH_END", name=node.name),
+        ]
+        for idx, case in enumerate(node.cases):
+            is_last = idx == n - 1
+            result_branch.append(MetaInst(type="BRANCH_CASE_START", name=str(idx)))
+            case_items = self._unparse_node(case)
+            first_block_attached = False
+            for item in case_items:
+                if not first_block_attached and isinstance(item, BasicBlockNode):
+                    result_branch.append(
+                        BasicBlockNode(
+                            labels=[
+                                LabelInst(name=case_entry_labels[idx], can_remove=True),
+                                *item.labels,
+                            ],
+                            insts=list(item.insts),
+                            branch=item.branch,
+                            disable_opt=item.disable_opt,
+                        )
+                    )
+                    first_block_attached = True
+                else:
+                    result_branch.append(item)
+            if not first_block_attached:
+                result_branch.append(
+                    BasicBlockNode(
+                        labels=[LabelInst(name=case_entry_labels[idx], can_remove=True)]
+                    )
+                )
+            if not is_last:
+                if needs_big_jump(self.pmem_size):
+                    result_branch.append(
+                        BasicBlockNode(
+                            insts=[
+                                RegWriteInst(
+                                    dst=Register("s15"),
+                                    src=SrcKeyword.LABEL,
+                                    label=LabelRef(end_label),
+                                )
+                            ],
+                            branch=JumpInst(addr=Register("s15")),
+                        )
+                    )
+                else:
+                    result_branch.append(
+                        BasicBlockNode(branch=JumpInst(label=LabelRef(end_label)))
+                    )
+            result_branch.append(MetaInst(type="BRANCH_CASE_END", name=str(idx)))
+        result_branch.append(MetaInst(type="BRANCH_END", name=node.name))
+        result_branch.append(
+            BasicBlockNode(labels=[LabelInst(name=end_label, can_remove=True)])
+        )
+        return result_branch
 
     def _unparse_block_node(self, block: BlockNode) -> list[BasicBlockNode | MetaInst]:
         result: list[BasicBlockNode | MetaInst] = []

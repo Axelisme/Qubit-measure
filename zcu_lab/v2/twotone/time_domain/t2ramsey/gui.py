@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -15,6 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
+    SampleWriteback,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -159,7 +161,9 @@ class T2RamseyAdapter(
             "also proposes qubit.freq (MHz): source pi/2 frequency + realized "
             "detune - fitted fringe detune. A pure decay fit or a loaded "
             "source without realized detune proposes only qubit.t2r. "
-            "No module writeback; later focus changes do not retarget it."
+            "No module writeback; later focus changes do not retarget it. An "
+            "independent t2r_us/t2r_err_us sample uses the captured Run bias "
+            "when device evidence is available."
         ),
         recommended=(
             "Enable Fit phase offset to fit a free fringe phase; it defaults to "
@@ -231,13 +235,19 @@ class T2RamseyAdapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> T2RamseyCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> T2RamseyCfg:
         cfg = super().build_exp_cfg(strip_detune_ratio(raw_cfg), req)
         cfg.detune = resolve_detune(detune_ratio_of(raw_cfg), cfg.sweep.length.step)
         return cfg
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> T2RamseyRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = self.exp_cls().run(cfg, context=context)
@@ -276,7 +286,12 @@ class T2RamseyAdapter(
         it is omitted for decay fits, cfg=None or unknown realized detune.
         Non-scalar source frequency raises ValueError. WritebackService resolves
         destinations on req.ctx.parameters and rejects missing captures/unbound
-        roles. No live calibration lookup or write occurs here.
+        roles. With a capture, also propose t2r_us/t2r_err_us for the Run's
+        resolved $qubit; an unbound alias raises RoleResolutionError. Without
+        a capture, retain parameter proposals only so loaded data can still be
+        analyzed. The service adds bias coordinates or omits the sample with a
+        public reason. This Run leaves devices fixed; no live calibration lookup,
+        device access or write occurs here.
         """
         result = req.analyze_result
         items: list[WritebackItem] = [
@@ -310,6 +325,18 @@ class T2RamseyAdapter(
                 )
             )
 
+        parameters = req.ctx.parameters
+        if parameters is not None:
+            items.append(
+                SampleWriteback(
+                    target_name=parameters.resolve_path("$qubit"),
+                    description="T2 Ramsey sample at the captured bias",
+                    proposed_value={
+                        "t2r_us": result.t2r,
+                        "t2r_err_us": result.t2r_err,
+                    },
+                )
+            )
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

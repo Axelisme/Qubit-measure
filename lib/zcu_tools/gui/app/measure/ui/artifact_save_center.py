@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt, QUrl
 from qtpy.QtGui import QDesktopServices
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,

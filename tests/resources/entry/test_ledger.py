@@ -45,7 +45,6 @@ def _accepted(entry_id: str, *, event_id: str | None = None) -> LedgerEvent:
         origin="notebook",
         payload=AcceptedPayload(
             writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
-            analysis_summary={"frequency": 5300.0},
         ),
     )
 
@@ -67,7 +66,6 @@ def test_accepted_complex_uses_tag_in_payload_and_persisted_ledger(
                 {"path": "Q1.ext.readout_cal.fidelity", "value": 0.93},
                 {"path": "Q1.ext.readout_cal.confusion_matrix", "value": [[1, 0]]},
             ],
-            "analysis_summary": {},
         }
     )
     assert [item.value for item in payload.writes] == [tag, 0.93, [[1, 0]]]
@@ -343,7 +341,6 @@ def test_payload_rejects_non_json_values(value: object) -> None:
         AcceptedPayload.model_validate(
             {
                 "writes": [{"path": "Q1.rate", "value": value}],
-                "analysis_summary": {},
             }
         )
 
@@ -369,11 +366,10 @@ def test_saved_output_status_requires_consistent_error(
 
 def test_accepted_payload_requires_writes_and_allows_explicit_source() -> None:
     with pytest.raises(ValueError, match="writes"):
-        AcceptedPayload(writes=(), analysis_summary={})
+        AcceptedPayload(writes=())
     source = SourceReference(kind="event", id=str(uuid4()))
     payload = AcceptedPayload(
         writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
-        analysis_summary={},
         run_id="run-1",
         source=source,
     )

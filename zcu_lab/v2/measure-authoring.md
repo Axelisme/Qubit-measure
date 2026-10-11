@@ -276,15 +276,15 @@ review 後執行，不屬於 adapter code。
 
 ## Reset 校準實驗群（`twotone/reset/`）
 
-對應 notebook `single_qubit.md` 的三種 reset 校準流程，每種一條多步 adapter 鏈。
-每個校準實驗都可能提供最終 reset module；使用者各參數實驗不照順序、會重複跑。
+對應 notebook `single_qubit.md` 的三種 reset 校準流程。使用者可以重複或不按順序執行。
+五個參數實驗把本次分析值累積到 qubit ext。只有指定 finisher 提出模組。
 
-| 流程 | 步驟 adapter | 最終 reset module |
-| --- | --- | --- |
-| single-tone（sideband） | `freq` → `length` | `reset_10` |
-| dual-tone | `freq` → `power` → `length` | `reset_120` |
-| bath（cavity-assisted） | `freq_gain` → `length` → `phase` | `reset_bath` / `reset_bath_e` |
-| 共用驗證 | `check`（RabiCheck，三型共用，contrast / residual analysis） | — |
+| 流程 | 校準 adapter | Finisher | 固定 library root |
+| --- | --- | --- | --- |
+| single-tone sideband | `freq`、`length` | `freq` | `$qubit.reset.reset_10` |
+| dual-tone | `freq`、`power`、`length` | `power` | `$qubit.reset.reset_120` |
+| bath cavity-assisted | `freq_gain`、`length`、`phase` | `phase` | `$qubit.reset.reset_bath` / `reset_bath_e` |
+| 共用驗證 | `check`，RabiCheck，contrast / residual analysis | 無 | 無 |
 
 `reset/check`的analysis以reset前分支決定共同IQ投影與Rabi基頻，擬合三條gain sweep
 分支；最後一條包含二次諧波。摘要提供前後半峰對峰振幅、相對contrast、相位差、
@@ -304,57 +304,59 @@ IQ centers與confusion matrix。Amp固定無衰減／零相位，提供Initial S
 頻率與pi/pi2 gain摘要；四項校準writeback與Len Rabi共用有效性檢查。
 舊population-only檔案不符合raw-IQ axes契約，無法據此重建shots或執行joint fit。
 
-### cfg → writeback 的兩種產出
+### cfg seed 與純量累積
 
-- **校準純量**：校準掃描的純量結果經 `ParameterWriteback` 寫回 md（如 `reset_f`、
-  `reset_f1/2`、`reset_gain1/2`、`bathreset_freq/gain`、`bathreset_max/min_phase`）。
-- **reset module**：除了既有 md writeback，每個校準實驗在校準 md 齊時額外 emit
-  `ModuleWriteback`，把校準好的 reset module 註冊回 ModuleLibrary（撞名覆寫，沿用
-  `register_module` 語意）。
+Run cfg 建立時，七個 default readers 從固定 capture 的 `$qubit.ext.*` 降低 seed。
+SingleToneFreq 用 reset_f ±1.5 reset_fwhm 建立 201 點頻率窗。SingleToneLength 用
+reset_f。DualToneFreq 用 reset_gain1/2 和 reset_f1/2，兩個頻率軸各為中心 ±50 MHz、
+201 點。DualToneLength 用兩頻率及兩 gain，DualTonePower 用兩頻率。
+BathLength 與 BathPhase 用 reset_bath_freq/gain。BathFreqGain 保留 resonator.freq 與
+qubit.ext.rabi_freq 的原 seed。Missing、null 或 invalid scalar 沿既有 lowering 失敗，
+不代用 fallback 數字。
 
-> 領域層只產 `ParameterWriteback` / `ModuleWriteback` 兩種 item，**不產**
-> `WaveformWriteback`（GUI attachments 零使用，備查）。波形寫回沒有校準 adapter 需要。
+本次分析值直接形成 `ParameterWriteback`。五個 caller 保留以下順序：
 
-### reset module 組裝流程（gated per-experiment）
+| Caller | `$qubit.ext.*` targets |
+| --- | --- |
+| SingleToneFreq | `reset_f`、`reset_fwhm` |
+| DualToneFreq | `reset_f1`、`reset_f2` |
+| DualTonePower | `reset_gain1`、`reset_gain2` |
+| BathFreqGain | `reset_bath_gain`、`reset_bath_freq` |
+| BathPhase | `reset_bath_max_phase`、`reset_bath_min_phase` |
 
-機制由 `_support/measure/writeback_helpers.py` 的 `reset_module_writeback_items` 統一：
-每個校準 adapter 在 `get_writeback_items` 內呼它，傳入該 reset 型別的 `field_md_map`
-（dotted 欄位 path ↔ md key）與 `target`/`desc`。
+### Run-tested finisher
 
-- **gate**：該 module 需要的 md key **全部齊**（`md_has_key`）且 `source.cfg` 非 None
-  才提供；否則回 `[]`（只剩既有 md item）。
-- **組裝**：齊了就以**這次** `source.cfg.modules.tested_reset` 為模板，經
-  `module_cfg_to_value` 建成 `(spec, value)`，把每個校準欄位**從 md 覆寫**
-  （`value.with_field(path, float(md[key]))`），包成
-  `ModuleWriteback(edit_schema=CfgSchema(spec, value))`。
+SingleToneFreq、DualTonePower 與 BathPhase 使用該 Run 的完整
+`source.cfg.modules.tested_reset`。`module_cfg_to_value` 建立隔離的 Spec/Value，adapter
+只替換本次分析欄位，再提出 `ModuleWriteback`。不讀 ext、舊 module 或目前 point/alias
+補欄位。手動修改後實際測過的頻率、gain、波形與其他 schema 欄位都保留。
 
-各型 `field_md_map`：
+- SingleToneFreq 只換 `pulse_cfg.freq`。FWHM 只寫 ext，不是 reset module 欄位。
+- DualTonePower 只換 `pulse1_cfg.gain` 和 `pulse2_cfg.gain`，保留實測兩頻率。
+- BathPhase 分別 materialize ground/excited 兩棵獨立樹，只換 `pi2_cfg.phase`。
+  Ground 用 max_phase，excited 用 min_phase；兩者保留實測 cavity frequency/gain。
 
-- **single-tone**（`freq` / `length`）→ `reset_10`：`pulse_cfg.freq ← reset_f`。
-- **dual-tone**（`freq` / `power` / `length`）→ `reset_120`：`pulse1/2_cfg.freq ←
-  reset_f1/2`、`pulse1/2_cfg.gain ← reset_gain1/2`（共用常數
-  `_support/measure/reset_dual_tone.py::RESET_120_FIELD_MD_MAP`）。
-- **bath**（`freq_gain` / `length` / `phase`）→ **兩個 variant**（共用
-  `_support/measure/reset_bath.py::bath_reset_writeback_items`）：`cavity_tone_cfg.freq/gain ←
-  bathreset_freq/gain` + `pi2_cfg.phase ← bathreset_max_phase`（`reset_bath`，reset
-  到 ground）/ `bathreset_min_phase`（`reset_bath_e`，reset 到 excited）；兩 variant
-  各自獨立 gate。
-- **`check`** 不提供（驗證步，`tested_reset` 是 ref 非校準型）。
+Module targets 使用表中的固定 roots，不經方案 slot 選目的地。已有 root 更新，缺則建立。
+Finisher 在 module rows 後提出 `$qubit.module.reset` 的 `ParameterWriteback`。
+值由同份 capture 的 `resolve_path` 轉為具體 root，例如 `Q1.reset.reset_10`。
+Bath 預設 ground，使用者可以在 draft 中改選 excited。使用者也可以只 Apply library rows，
+不選 slot row。逐列 Apply 沿既有 accepted 與成功前綴政策，不新增聯動選取或跨檔交易。
 
-被掃描的欄位（如 single freq 的 `pulse_cfg.freq`、dual power 的 gain）在 cfg 是
-`lock_literal 0.0`，snapshot 取到 scalar，md 覆寫即可——所以順序無關、可重跑，不依賴
-「最後一步」或中間步驟的 md-link 攜帶。
+### 實驗責任與不足契約
 
-### 設計決策
+三個 length adapter 不擬合參數，返回合法空 proposal collection。它們不提出
+cfg-only module。DualToneFreq 與 BathFreqGain 只提出純量。框架不提供累積或齊全檢查。
+完整合法 tested_reset 不因 ext 缺少而略過 module。公開 nullable cfg/capture 為 None
+時，finisher 只返回純量，不讀目前全域來源。Source、alias、lowering、I/O 與 Apply
+錯誤仍傳播，不轉成空 proposal 或原因列。
 
-- **gated per-experiment**：reset module 提供條件是「校準 md 齊」而非「跑到最後一步」，
-  配合使用者亂序、重複跑各校準實驗的工作流；同一校準齊時不論跑哪個實驗都提供。
-- **D3**：bath `freq_gain` 透過單路徑 GUI save pipeline 寫入 single-role 3D HDF5；
-  tomography phase 是同一 Result 的內部 sweep axis，不再拆成四個 phase-resolved sidecar
-  檔，也不再 `save` fast-fail。
-- **D5**：length / 部分掃描是「看曲線」型，analyze 只渲圖、不抽純量 → 無 md writeback。
-- **graceful without snapshot**：`source.cfg is None`（如從檔載入）時，module
-  writeback 全略過，只剩既有 md item。
+保留 downstream 的 reset/readout/x180/x90/probe slots。Reset 校準不讀
+sideband/dual_tone/bath_g/bath_e 方案 slots。Migration profile 將舊 reset 純量映到上述
+ext 名稱，resetf_w 映到 reset_fwhm；舊 reset modules 映到四個固定 roots，不猜
+module.reset 的目前方案。Mapping revisions 為 fluxonium 1.6、transmon 1.7。
+
+Bath `freq_gain` 保留 single-role 3D HDF5。Tomography phase 是同一 Result 的內部
+sweep axis，不拆成四個 phase-resolved sidecar，也不改 Save 政策。
 
 三個 singleshot 分析（ge / len_rabi / amp_rabi）皆提供 `Initial State`，表示 probe / swept drive pulse 之前的主要狀態；Rabi 描述 pulse 前狀態，不是第一個掃描點；啟用 phase offset 時也不等同於模型外推的零 length population。此參數只影響分析，不改量測 cfg 或 raw-IQ persistence。GE primary result 保存使用的初態，Post-Analysis 的 radius、confusion matrix 與繪圖均沿用該 snapshot，不讀取尚未重新分析的表單值。
 

@@ -10,7 +10,6 @@ from typing import (
     NotRequired,
     TypeAlias,
     TypedDict,
-    cast,
 )
 
 import numpy as np
@@ -31,7 +30,7 @@ from zcu_tools.core.waveform_format import decode_npz
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
-    from zcu_tools.resources.context import ModuleLibrary
+    from zcu_tools.resources.context import LibrarySnapshot
 
 
 class AbsWaveformCfg(ConfigBase, ABC):
@@ -169,7 +168,8 @@ def resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
     if isinstance(value, str):
         if info.context is None:
             raise ValueError("ModuleLibrary context not found")
-        return cast("ModuleLibrary", info.context["ml"]).get_waveform(value)
+        library: LibrarySnapshot = info.context["ml"]
+        return library.get_waveform(value)
     return value
 
 
@@ -237,15 +237,19 @@ class WaveformCfgFactory:
     def from_raw(
         raw: str | dict[str, Any] | AbsWaveformCfg,
         *,
-        ml: ModuleLibrary | None = None,
+        ml: LibrarySnapshot | None = None,
     ) -> WaveformCfg:
         if isinstance(raw, str):
             if ml is None:
                 raise ValueError(
                     f"Got waveform name '{raw}' but ModuleLibrary is not provided"
                 )
-            raw = ml.get_waveform(raw)
-        return TypeAdapter(WaveformCfg).validate_python(raw, context={"ml": ml})
+            resolved_raw = ml.get_waveform(raw)
+        else:
+            resolved_raw = raw
+        return TypeAdapter(WaveformCfg).validate_python(
+            resolved_raw, context={"ml": ml}
+        )
 
 
 def _raise_from_core(

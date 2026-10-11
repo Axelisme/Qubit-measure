@@ -21,7 +21,7 @@ from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_ex
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import ComponentSchema, RoleSpec, component_registry
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import PointDocument
 
 
 class Driver(ComponentSchema):
@@ -33,11 +33,13 @@ def parameters() -> Generator[ParameterContext]:
     before = component_registry.kinds()
     component_registry.register("lowering/driver", Driver)
     try:
-        point = PointDocument(
-            format="zcu.parameter-container",
-            format_version="1.0",
-            general=PointGeneral(created_at="2026-10-08T00:00:00Z"),
-            components={"Q1": {"kind": "lowering/driver", "rate": 4300.0}},
+        point = PointDocument.model_validate(
+            {
+                "format": "zcu.parameter-container",
+                "format_version": "1.0",
+                "general": {"created_at": "2026-10-08T00:00:00Z"},
+                "components": {"Q1": {"kind": "lowering/driver", "rate": 4300.0}},
+            }
         )
         library = LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")

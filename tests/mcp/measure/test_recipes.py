@@ -4,15 +4,15 @@ import base64
 from copy import deepcopy
 from dataclasses import asdict
 from threading import Event, Thread, current_thread
-from time import sleep
 from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
-from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
+from zcu_tools.mcp.measure.session import GuiRpcError
 
+from ._recipe_actual_support import cfg_value
 from ._recipe_support import PNG, LookbackGui, recipe_client
 from ._support import full_execution_reply, make_client
 
@@ -102,13 +102,13 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
         initial = replies[0].data
         assert initial["status"] == "running"
         execution = initial["execution"]
-        initial["actual"]["fields"].clear()
+        initial["actual"].clear()
         before = len(client.transport.sent)
         status = client.call("status", {"execution": execution, "detail": "full"})
         waiting = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 0})
         )
-        assert status["actual"]["fields"]
+        assert status["actual"]
         assert waiting.data["execution"] == execution
         assert waiting.data["status"] == "running"
         assert len(client.transport.sent) == before
@@ -434,10 +434,10 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("save_succeeds", [True, False])
-def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
-    tmp_path, monkeypatch, save_succeeds
-):
+@pytest.fixture(params=[True, False], ids=["saved", "incomplete"])
+def admitted_raw_save(tmp_path, monkeypatch, request):
+    """Hold a real recipe at its admitted raw-save transport until released."""
+    save_succeeds = request.param
     gui = LookbackGui()
     expected_report = asdict(RAW_REPORT)
     if not save_succeeds:
@@ -467,65 +467,84 @@ def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
             client, client.call("lookback", {"frequency_mhz": 6020.0})
         )
         assert saving.wait(1)
-        execution = initial.data["execution"]
-        with pytest.raises(GuiRpcError) as rejected:
-            client.call("finish_early", {"execution": execution})
-        assert rejected.value.reason == "not_running"
-        cancelled = client.call("cancel", {"execution": execution})
-        assert cancelled.data["gui_cancel"]["status"] == "not_needed"
-        assert cancelled.data["cancel_requested"]
-        during_save = client.call("status", {"execution": execution, "detail": "full"})
-        assert during_save["raw_save"] is None
-        saving_summary = client.call("status", {"execution": execution})
-        assert saving_summary["steps"]["raw_save"] is None
-        assert saving_summary["artifacts"] == {}
-        release_save.set()
-        final = full_execution_reply(
-            client, client.call("wait", {"execution": execution, "timeout": 2})
+        yield (
+            client,
+            initial.data["execution"],
+            expected_report,
+            release_save,
+            save_succeeds,
         )
-        assert not final.is_error  # Successful query, even when execution failed.
-        assert final.data["status"] == "cancelled"
-        assert final.data["raw_save"] == expected_report
-        assert final.data["error"] is None
-        summary = client.call("status", {"execution": execution})
-        assert summary["status"] == final.data["status"]
-        assert not summary["cancel_requested"]
-        assert summary["steps"]["raw_save"]["status"] == (
-            "saved" if save_succeeds else "incomplete"
-        )
-        assert summary["artifacts"]["raw"] == expected_report["artifacts"]["raw"]
-        assert summary["error"] == final.data["error"]
-        methods = [method for method, _ in client.transport.sent]
-        assert methods.count("tab.save_data") == 1
-        assert "operation.cancel" not in methods
-        assert "tab.analyze" not in methods
     finally:
         release_save.set()
         client.context.session.close()
 
 
-@pytest.mark.parametrize("outcome", ["cancelled", "failed"])
-def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
-    tmp_path, monkeypatch, outcome
+def test_lookback_cancel_during_raw_save_has_no_report_until_save_completes(
+    admitted_raw_save,
 ):
-    gui = LookbackGui()
-    handoff_waiting = Event()
-    release_handoff = Event()
-    allow_terminal = Event()
-    original_send = MeasureMcpSession.GuiConnection.send_gui_rpc
+    client, execution, _report, _release_save, _save_succeeds = admitted_raw_save
+    with pytest.raises(GuiRpcError) as rejected:
+        client.call("finish_early", {"execution": execution})
+    assert rejected.value.reason == "not_running"
+    cancelled = client.call("cancel", {"execution": execution})
+    assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+    assert cancelled.data["cancel_requested"]
+    during_save = client.call("status", {"execution": execution, "detail": "full"})
+    assert during_save["raw_save"] is None
+    saving_summary = client.call("status", {"execution": execution})
+    assert saving_summary["steps"]["raw_save"] is None
+    assert saving_summary["artifacts"] == {}
 
-    def delay_handoff(self, method, params, *args, **kwargs):
-        # Schedule the public connection call before its real admission check.
-        if method == "tab.interact":
-            handoff_waiting.set()
-            assert release_handoff.wait(2)
-        return original_send(self, method, params, *args, **kwargs)
+
+def test_lookback_cancel_during_raw_save_waits_for_the_true_save_outcome(
+    admitted_raw_save,
+):
+    client, execution, expected_report, release_save, save_succeeds = admitted_raw_save
+    cancelled = client.call("cancel", {"execution": execution})
+    assert cancelled.data["gui_cancel"]["status"] == "not_needed"
+    assert cancelled.data["cancel_requested"]
+    release_save.set()
+    final = full_execution_reply(
+        client, client.call("wait", {"execution": execution, "timeout": 2})
+    )
+    assert not final.is_error  # Successful query, even when execution failed.
+    assert final.data["status"] == "cancelled"
+    assert final.data["raw_save"] == expected_report
+    assert final.data["error"] is None
+    summary = client.call("status", {"execution": execution})
+    assert summary["status"] == final.data["status"]
+    assert not summary["cancel_requested"]
+    assert summary["steps"]["raw_save"]["status"] == (
+        "saved" if save_succeeds else "incomplete"
+    )
+    assert summary["artifacts"]["raw"] == expected_report["artifacts"]["raw"]
+    assert summary["error"] == final.data["error"]
+    methods = [method for method, _ in client.transport.sent]
+    assert methods.count("tab.save_data") == 1
+    assert "operation.cancel" not in methods
+    assert "tab.analyze" not in methods
+
+
+@pytest.mark.parametrize("outcome", ["cancelled", "failed"])
+def test_recipe_cancel_after_analysis_admission_joins_the_true_outcome(
+    tmp_path, outcome
+):
+    # Replaces the retired pre-handoff timing projection, not its scheduling.
+    gui = LookbackGui()
+    stopped = Event()
 
     def respond(method, params):
         if method == "tab.analyze":
             return {**gui(method, params), "interactive": True}
+        if method == "tab.interact":
+            return {
+                "operation_id": 93,
+                "figure": None,
+                "state": {},
+                "commands": [{"name": "done"}],
+            }
         if method == "operation.await" and params["operation_id"] == 93:
-            if allow_terminal.is_set():
+            if stopped.is_set():
                 return {
                     "reason": "completed",
                     "status": outcome,
@@ -534,32 +553,25 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
             return {"reason": "timeout"}
         if method == "operation.cancel":
             assert params == {"operation_id": 93}
+            stopped.set()
             return {"status": "cancelling"}
         return gui(method, params)
 
     client = make_client(tmp_path, respond)
-    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
-    monkeypatch.setattr(MeasureMcpSession.GuiConnection, "send_gui_rpc", delay_handoff)
     try:
         initial = full_execution_reply(
             client, client.call("lookback", {"frequency_mhz": 6020.0})
         )
-        assert handoff_waiting.wait(1)
+        assert initial.data["status"] == "interactive"
         execution = initial.data["execution"]
         (analysis_receipt,) = client.context.session.executions.snapshots()
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["cancel_requested"]
         assert cancelled.data["gui_cancel"]["status"] == "requested"
-        release_handoff.set()
-        allow_terminal.set()
-        terminal = initial
-        for _ in range(100):
-            terminal = full_execution_reply(
-                client, client.call("wait", {"execution": execution, "timeout": 0.01})
-            )
-            if terminal.data["phase"] == "terminal":
-                break
-            sleep(0.01)
+        terminal = full_execution_reply(
+            client, client.call("wait", {"execution": execution, "timeout": 2})
+        )
+        assert terminal.data["phase"] == "terminal"
         assert terminal.data["status"] == outcome
         assert terminal.data["analysis"]["execution"] == analysis_receipt.execution
         assert terminal.data["analysis"]["op"] == analysis_receipt.op
@@ -575,15 +587,13 @@ def test_recipe_cancel_before_initial_handoff_joins_the_true_analysis_outcome(
             for method in ("tab.run_start", "tab.analyze", "operation.cancel")
         )
         assert not {
-            "tab.interact",
             "tab.get_analyze_result",
             "tab.save_artifacts",
             "tab.get_figure",
             "tab.writeback_preview",
         }.intersection(methods)
     finally:
-        release_handoff.set()
-        allow_terminal.set()
+        stopped.set()
         client.context.session.close()
 
 
@@ -1020,9 +1030,6 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         ]
         assert reply.images[0].data == PNG
         assert data["elapsed_s"] >= 0
-        actual = data["actual"]
-        assert actual["cfg_ref"] == gui.publication["cfg_ref"]
-        fields = actual["fields"]
         for path, value in {
             "modules.readout.pulse_cfg.freq": 6020.0,
             "modules.readout.ro_cfg.ro_freq": 6020.0,
@@ -1030,8 +1037,8 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
             "modules.readout.ro_cfg.trig_offset": expected[1],
             "rounds": 7,
         }.items():
-            assert fields[path]["value"] == value
-            assert type(fields[path]["value"]) is type(value)
+            assert cfg_value(gui.publication, path) == value
+            assert type(cfg_value(gui.publication, path)) is type(value)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.reset_cfg") == int(reuse)
@@ -1067,8 +1074,11 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
     publication = gui.publication
 
     def respond(method: str, params: dict[str, Any]) -> dict[str, Any]:
-        if method == "context.snapshot":
-            return {"label": "sample", "md": {}, "ml": {"modules": {}, "waveforms": {}}}
+        if method == "tab.parameter_read":
+            return {
+                "values": {path: None for path in params["paths"]},
+                "modules": {reference: None for reference in params["module_refs"]},
+            }
         if method == "tab.new":
             return {"tab_id": tab}
         if method == "tab.snapshot":
@@ -1112,24 +1122,23 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
     tmp_path, source
 ):
     gui = LookbackGui()
-    gui.md["r_f"] = 6500.0
+    gui.md["$resonator.freq"] = 6500.0
     readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
     pulse = readout["children"]["pulse_cfg"]["children"]["freq"]
     adc = readout["children"]["ro_cfg"]["children"]["ro_freq"]
     pulse["input"]["resolved"] = 6100.0
     adc["input"]["resolved"] = 6110.0
-    arguments = {} if source == "r_f" else {"readout_ref": "calibrated"}
+    arguments = {} if source == "r_f" else {"readout_ref": "R1.readout.calibrated"}
     if source == "library_error":
         pulse["input"]["error"] = "unresolved"
     if source == "library_invalid":
         pulse["valid"] = False
         pulse["input"]["validation_error"] = "outside range"
 
+    gui.library = {"R1.readout.calibrated": {}}
+
     def respond(method, params):
-        response = gui(method, params)
-        if method == "context.snapshot":
-            response["ml"]["modules"] = {"calibrated": {}}
-        return response
+        return gui(method, params)
 
     with recipe_client(tmp_path, respond) as client:
         reply = full_execution_reply(client, client.call("lookback", arguments))
@@ -1139,17 +1148,24 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
         )
         assert answered.data["status"] == "finished"
         assert not answered.data["writeback"]["receipts"]
-        fields = reply.data["actual"]["fields"]
+        fields = reply.data["actual"]
         expected_pulse = 6100.0 if source == "library" else 6500.0
         expected_adc = 6500.0 if source == "r_f" else 6110.0
-        assert fields["modules.readout.pulse_cfg.freq"]["value"] == expected_pulse
-        assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == expected_adc
-        assert fields["modules.readout.pulse_cfg.freq"]["source"] == (
-            "library:calibrated" if source == "library" else "r_f"
+        assert (
+            cfg_value(gui.publication, "modules.readout.pulse_cfg.freq")
+            == expected_pulse
         )
-        assert fields["modules.readout.ro_cfg.ro_length"]["value"] == 2.0
-        assert fields["modules.readout.ro_cfg.trig_offset"]["value"] == 0.1
-        assert fields["rounds"]["value"] == 3
+        assert (
+            cfg_value(gui.publication, "modules.readout.ro_cfg.ro_freq") == expected_adc
+        )
+        assert fields["frequency_mhz"]["source"] == (
+            "library:R1.readout.calibrated"
+            if source == "library"
+            else "$resonator.freq"
+        )
+        assert cfg_value(gui.publication, "modules.readout.ro_cfg.ro_length") == 2.0
+        assert cfg_value(gui.publication, "modules.readout.ro_cfg.trig_offset") == 0.1
+        assert cfg_value(gui.publication, "rounds") == 3
 
 
 @pytest.mark.parametrize(
@@ -1172,7 +1188,7 @@ def test_lookback_invalid_explicit_inputs_never_fall_back_or_create_tab(
     tmp_path, arguments
 ):
     gui = LookbackGui()
-    gui.md["r_f"] = 6500.0
+    gui.md["$resonator.freq"] = 6500.0
     with recipe_client(tmp_path, gui) as client:
         reply = client.call("lookback", arguments)
         assert reply.is_error
@@ -1221,7 +1237,7 @@ def test_explicit_invalid_library_reference_is_not_disabled_or_replaced(
     tmp_path, argument, module
 ):
     gui = LookbackGui()
-    gui.md["r_f"] = 6500.0
+    gui.md["$resonator.freq"] = 6500.0
     gui.publication["tree"]["children"]["modules"]["children"][module].update(
         valid=False, error="missing library entry"
     )

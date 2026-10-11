@@ -61,28 +61,41 @@ def test_fake_device_connect_set_disconnect_reconnect_and_forget(device_client) 
         assert fields["value"]["current"] == 0.0
         assert fields["address"]["settable"] is False
         assert fields["output"]["choices"] == ["on", "off"]
-        for updates, field in [
-            ({"address": "evil"}, "address"),
-            ({"output": "unknown"}, "output"),
-        ]:
-            with pytest.raises(GuiRpcError, match=field):
-                invoke(
-                    "rpc_call",
-                    {
-                        "method": "device.setup",
-                        "params": {
-                            "name": "bias",
-                            "updates": updates,
-                        },
+        rejected_address = invoke(
+            "rpc_call",
+            {
+                "method": "device.setup",
+                "params": {
+                    "name": "bias",
+                    "cfg": {**connected["info"], "address": "evil"},
+                },
+            },
+        )
+        failed = invoke("wait", {"op": rejected_address["handle"], "timeout": 3})
+        assert failed["status"] == "failed"
+        assert "address" in str(failed)
+        unchanged = invoke(
+            "rpc_call", {"method": "device.snapshot", "params": {"name": "bias"}}
+        )["snapshot"]
+        assert unchanged["info"] == connected["info"]
+        with pytest.raises(GuiRpcError, match="output"):
+            invoke(
+                "rpc_call",
+                {
+                    "method": "device.setup",
+                    "params": {
+                        "name": "bias",
+                        "cfg": {**connected["info"], "output": "unknown"},
                     },
-                )
+                },
+            )
         applied = invoke(
             "rpc_call",
             {
                 "method": "device.setup",
                 "params": {
                     "name": "bias",
-                    "updates": {"value": 0.02, "output": "on"},
+                    "cfg": {**connected["info"], "value": 0.02, "output": "on"},
                 },
             },
         )
@@ -198,7 +211,7 @@ def test_long_fake_ramp_returns_cancellable_opaque_operation(device_client) -> N
                 "method": "device.setup",
                 "params": {
                     "name": "ramp",
-                    "updates": {"value": 0.25, "rampstep": 0.00001},
+                    "cfg": {**before["info"], "value": 0.25, "rampstep": 0.00001},
                 },
             },
         )
@@ -310,3 +323,32 @@ def test_connect_wait_timeout_does_not_cancel_operation(
         invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
         == "finished"
     )
+
+
+def test_fake_device_snapshot_reports_stored_native_unit(device_client) -> None:
+    invoke = device_client
+    started = invoke(
+        "rpc_call",
+        {
+            "method": "device.connect",
+            "params": {"name": "bias", "type_name": "FakeDevice", "address": "none"},
+        },
+    )
+    try:
+        assert (
+            invoke("wait", {"op": started["handle"], "timeout": 3})["status"]
+            == "finished"
+        )
+        snapshot = invoke(
+            "rpc_call", {"method": "device.snapshot", "params": {"name": "bias"}}
+        )["snapshot"]
+        assert snapshot["unit"] == "native"
+        assert snapshot["info"]["value_unit"] == "native"
+    finally:
+        disconnected = invoke(
+            "rpc_call", {"method": "device.disconnect", "params": {"name": "bias"}}
+        )
+        assert (
+            invoke("wait", {"op": disconnected["handle"], "timeout": 3})["status"]
+            == "finished"
+        )
