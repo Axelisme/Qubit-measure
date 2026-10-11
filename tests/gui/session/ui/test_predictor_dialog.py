@@ -1170,9 +1170,9 @@ def test_transition_value_columns_fit_their_text(qapp):
                 if (item := table.item(row, column)) is not None
             )
             assert table.columnWidth(column) >= needed, column
-        header = table.horizontalHeader()
-        assert header is not None
+        viewport = table.viewport()
+        assert viewport is not None
         used = sum(table.columnWidth(c) for c in range(table.columnCount()))
-        assert used >= table.viewport().width() - 1
+        assert used >= viewport.width() - 1
     finally:
         dialog.close()
