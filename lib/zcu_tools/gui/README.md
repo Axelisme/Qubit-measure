@@ -1,10 +1,14 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-12，entry alias 表、shared session owner、workflows 獨立 app 與 terminal admission
+**Last updated:** 2026-10-12，shared source catalog loading 與 workflow admission
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
 `plotting`, `remote`, `session`, `widgets`) are shared by every app.
+
+## Source catalogs (`catalog_loader.py`)
+
+`SourceCatalogLoader[CatalogT]` 共用 bounded prepare/load、namespace inventory、preserved/fixed source 與 restart 契約。App 注入零參數 typed builder，負責 catalog validation 和發布；loader 不認識 measure Registry 或具體 workflow。SourcePackage、PreparedCatalogReload 與 CatalogReloadError 位於同一 shared owner。Measure 保留原 loader 簽名的 registration adapter，workflows 以 typed callable/form/panel pairing 取代舊 import。Import 並非任意 Python 副作用交易；fixed-source integrity 失敗要求重啟。App 仍擁有 active admission、draft recovery 與呈現政策（ADR-0067）。
 
 ## Owner-loop execution (`session/adapters/`)
 

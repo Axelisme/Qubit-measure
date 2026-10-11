@@ -118,7 +118,7 @@ def build_catalog() -> WorkflowCatalog:
     )
 
 
-def _build_export_binding(
+def build_export_binding(
     plan: T1Plan,
     storage: PointStorageBinding,
     run_id: str,
@@ -128,8 +128,12 @@ def _build_export_binding(
 ) -> FluxdepExportBinding | None:
     """Detach native plan and bind this Start's catalog callback and exact storage.
 
-    None prepare_export leaves export unsupported. Fix identity/paths/UTC start
-    time and historical snapshot without writes or source/hardware reads. Native
+    App-internal assembly helper, not an export entry. plan is the validated
+    native plan; storage is Start's exact entry/point paths and scoped ledger.
+    run_id/provenance identify this run; roots are its exact workflow directories.
+    catalog is the current science/attachment pairing. None prepare_export leaves
+    export unsupported. Fix identity/paths/UTC start time and historical snapshot
+    without writes or source/hardware reads. Native
     validation errors propagate; Controller owns the returned run binding. Later
     reload/draft changes cannot rebind this callback's plan/root or ledger.
     """

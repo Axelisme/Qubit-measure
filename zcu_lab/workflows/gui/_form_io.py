@@ -27,7 +27,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 from .remote import FormInspectionReply
 
 
-def _prepare_start_form[F: FormModel](
+def prepare_start_form[F: FormModel](
     model: type[F],
     state: FormState[F],
     editor: FormEditor[F],
@@ -36,8 +36,13 @@ def _prepare_start_form[F: FormModel](
 ) -> tuple[F, FormInput[F]] | FormErrors:
     """Select draft or captured defaults, returning validated values and input.
 
-    Explicit batches never read the editor or draft. Native directed default/write
-    errors retain their field path; undirected structural errors use ().
+    model is the catalog's current form type; state/editor are its shared parsed
+    GUI draft and local text view. batch=None reads them. An explicit batch uses
+    fresh model defaults in env and never reads the editor/draft. env is the
+    caller's fixed evaluation capture. Return ordinary model and original input,
+    or directed FormErrors without editing the supplied state/editor. Native
+    directed default/write errors retain their field path; undirected structural
+    errors use (). Unexpected/default source failures propagate; no I/O occurs.
     """
     if batch is None:
         errors = editor.local_parse_errors()
@@ -75,7 +80,7 @@ def _encode_form_value(value: FormValue) -> JsonValue:
     return value
 
 
-def _inspect_form_input(
+def inspect_form_input(
     input: FormInput[FormModel],
     env: FormEnv,
     batch: Mapping[FormWritePath, JsonValue] | None,
@@ -84,10 +89,15 @@ def _inspect_form_input(
 ) -> FormInspectionReply | FormErrors:
     """Project input/candidate and partial ordinary values without publication.
 
-    env/revision are fixed owner observations, not sources to refresh. A batch
-    uses the core's write contract in this call-local state. local_errors are
-    supplied only for current GUI reads. Translate directed/structural write
-    errors as Start does; declaration and unexpected failures propagate.
+    input is the parsed current FormInput, including expression original text.
+    env/revision are fixed owner observations, not sources to refresh; revision
+    may be None before Start. batch=None reads input; an explicit batch previews
+    edits via the core's write contract in call-local state. local_errors is the
+    editor's parse report for reads, or None for batch preview. Return the typed
+    schema/input/ordinary leaves/errors projection or directed FormErrors for
+    rejected writes, without changing input/base/editor/Engine. Declaration and
+    unexpected failures propagate; nonfinite ordinary values raise ValueError.
+    No source capture, I/O or hardware access occurs.
     """
     state = FormState(input)
     if batch is not None:

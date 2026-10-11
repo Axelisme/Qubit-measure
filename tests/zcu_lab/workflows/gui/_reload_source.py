@@ -41,12 +41,18 @@ class ReloadSource:
         """Import the app builder at call time, never retain a prior declaration."""
         return importlib.import_module("workflow_reload_fixture.declaration").build()
 
-    def write(self, version: int, *, failure: str = "") -> None:
+    def write(self, version: int, *, failure: str = "", wait: bool = False) -> None:
         """Replace one trusted declaration; failure is executable import failure."""
+        wait_step = (
+            "yield from env.wait_until(env.started_at + timedelta(seconds=60))"
+            if wait
+            else "yield from ()"
+        )
         fields = "legacy: int = 4" if version == 1 else "new_field: int = 9"
         knobs = "legacy_knob: int = 5" if version == 1 else "new_knob: int = 10"
         (self.root / "declaration.py").write_text(
             f"""from dataclasses import replace
+from datetime import timedelta
 from zcu_tools.experiment.workflows import Done, workflow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables, init_t1
 from zcu_lab.workflows.gui.catalog import build_catalog
@@ -69,7 +75,7 @@ class KnobsPanel(T1TunablesPanel):
 
 @workflow("reload-v{version}", plan=T1Plan, tunables=T1Tunables, init=init_t1)
 def step(env, plan, tun, state):
-    yield from ()
+    {wait_step}
     return Done()
 
 def prepare(*, plan, data_root, records):

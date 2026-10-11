@@ -1,6 +1,6 @@
 # workflows/gui — Workflow form attachments
 
-**Last updated:** 2026-10-12，workflow input 保存與明確 terminal fluxdep 匯出動作
+**Last updated:** 2026-10-12，輸入保存、shared source reload 與 terminal 匯出
 
 這個 package 擁有具體 workflow 的表單、明寫的 to_cfg 與 Qt panel attachment，不實作通用 editor 或 Engine。Native workflow definitions 不依賴這些 GUI attachments。
 
@@ -20,11 +20,17 @@ RPC `workflow.export_fluxdep` 必填 run_id，回 native/Labber outputs 與 ledg
 
 Records／具名圖 RPC 讀同一 Window 的 native run。Records 直接投影 Engine 已提交的 records，保留 commit cursor 與 captured revision，不從圖反推數值。圖名與 PNG 由 Window 持有的 Plots 提供，PNG 沿 shared renderer 在 Qt owner 產生；status-only 不渲染。Pending acceptance 明確失敗，terminal 圖保留至新 Start 或 close；close 成功釋放後不再提供舊圖。MCP forwarding 已接同一 GUI RPC。
 
-獨立 GUI app 已接線，B4 12 的共用 alias preset 已接入。App 直接重用 `zcu_lab.ALIAS_PRESET`，交給 shared `build_session_services(alias_rows=...)`。Preset 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列，不複製 workflow-local preset。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。App 開窗透過 SingleFileCaretaker 還原 plan／knobs 的原始 FormInput，保留 expression；不相容欄位由 FormState 丟棄並顯示 path。讀檔失敗提示並回到目前 defaults。正常關窗在 terminal delivery 後 flush；--clean 只略過開窗讀檔，關窗仍保存。已附 run 的 knobs 取 Controller binding 的唯一 draft，不保存 renderer-local 尚未 parse 文字、journal 或硬體狀態。S4 source reload 尚未接線。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成。
+獨立 GUI app 已接線，B4 12 的共用 alias preset 已接入。App 直接重用 `zcu_lab.ALIAS_PRESET`，交給 shared `build_session_services(alias_rows=...)`。Preset 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列，不複製 workflow-local preset。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。App 開窗透過 SingleFileCaretaker 還原 plan／knobs 的原始 FormInput，保留 expression；不相容欄位由 FormState 丟棄並顯示 path。讀檔失敗提示並回到目前 defaults。正常關窗在 terminal delivery 後 flush；--clean 只略過開窗讀檔，關窗仍保存。已附 run 的 knobs 取 Controller binding 的唯一 draft，不保存 renderer-local 尚未 parse 文字、journal 或硬體狀態。Source reload 共用 framework loader，僅替換目前 catalog 與表單附件。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成。
 
-App 組裝一份 SessionServices，Window constructor 為 `(state, services, owner, *, on_close=None, parent=None)`。Window 的 runner 與 progress 取自 services，GUI 與 MCP 操作同一 Window／Controller。parent=None 建立 top-level Window，指定 QWidget 時嵌入該 Qt parent。關窗先等待 run 終止，再呼叫 on_close；callback 失敗拒絕關窗，保留資源供重試。這個介面遷移不代表 CP-B 驗收。
+App 組裝一份 SessionServices，Window constructor 為 `(state, services, owner, *, catalog=None, loader=None, on_close=None, parent=None)`。catalog 省略時建立目前 T1 pairing；loader 省略時不監控 source。Window 的 runner 與 progress 取自 services，GUI 與 MCP 操作同一 Window／Controller。parent=None 建立 top-level Window，指定 QWidget 時嵌入該 Qt parent。關窗先等待 run 終止，再呼叫 on_close；callback 失敗拒絕關窗，保留資源供重試。這個介面遷移不代表 CP-B 驗收。
 
-workflow.form 讀同一 Window 的 plan／knobs schema、input、普通求值 leaves、path errors 與 native revision。未 Start 讀 constructor captures；已附 run 必須明填 run_id，改用 Controller binding 的固定 env 與唯一 knobs state，pending acceptance 明確拒絕。Optional batch 只在 call-local FormState 套用目前 parsed input 加修改，不提交、不改 GUI draft/base、accepted input、local text 或 Engine。Read 包含 local parse errors；batch 預覽不把尚未 parse 的文字當成候選。Complex 沿既有 codec tag，whole tuple 在 JSON 為 array；values 不代表可提交。Panel 的 env 是 constructor capture，不是 source reload。
+workflow.form 讀同一 Window 的 plan／knobs schema、input、普通求值 leaves、path errors 與 native revision。未 Start 讀 constructor captures；已附 run 必須明填 run_id，改用 Controller binding 的固定 env 與唯一 knobs state，pending acceptance 明確拒絕。Optional batch 只在 call-local FormState 套用目前 parsed input 加修改，不提交、不改 GUI draft/base、accepted input、local text 或 Engine。Read 包含 local parse errors；batch 預覽不把尚未 parse 的文字當成候選。Complex 沿既有 codec tag，whole tuple 在 JSON 為 array；values 不代表可提交。Panel 的 env 是固定 capture；source reload 保留此 capture，不重新選取 session 來源。
+
+`WorkflowCatalog` 配對 native callable、plan/knobs model、panel constructors、seed 與 science export preparer。固定 builder 在 reload 範圍內重新 import 宣告，以 WorkflowRegistry 驗名字，不新增 lookup 或 listing RPC。Start、preview、表單 GUI/RPC 與新 run 的 export preparer 都讀目前 pairing。Start 將 detached native plan/root 綁定 preparer；舊 terminal run 的 export binding 留在原 Controller run，不因 reload 或 draft 改動重建。
+
+App 使用 `SourceCatalogLoader` 監控 zcu_tools/zcu_lab。Reload scope 是 zcu_lab.workflows；app/window/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 接縫固定，其餘 framework、components 與實驗 source 固定。`reload_source()` 僅在 owner thread 呼叫；pending/running/paused 在 prepare/import 前拒絕。成功替換兩個 panels，保留 compatible parsed draft、重設 bases 並顯示 dropped paths，不重建 session/services/controller/hardware，也不讀 journal。未標 tag 的 inline union 由 shared FormState 唯一結構相容規則還原，不由 Window 補資料。
+
+Import 或 panel replacement 失敗保留原 panels 與 RAM parsed draft，但 Start 不可用，直到 retry 成功。Fixed source 改變要求重啟。Bounded import 可能已有副作用，不宣稱 rollback，也不以舊 catalog fallback 啟動。Reload source 動作只提供功能，不處理 UIUX 美化。
 
 Start 同步提交失敗時沒有 producer。Window 先結束本次 Plots operation，再釋放呈現並清除 reference，保留原提交錯誤與固定 Controller。GUI 與 RPC 使用相同清理路徑，失敗後視窗仍可關閉。
 
