@@ -113,8 +113,7 @@ def guess_dual_gauss_params(
 
     if x_c1 < x_c2:  # make first peak left
         return yscale1, x_c1, sigma1, yscale2, x_c2, sigma2
-    else:
-        return yscale2, x_c2, sigma2, yscale1, x_c1, sigma1
+    return yscale2, x_c2, sigma2, yscale1, x_c1, sigma1
 
 
 def fit_dual_gauss(

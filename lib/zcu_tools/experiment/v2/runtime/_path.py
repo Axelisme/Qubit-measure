@@ -46,7 +46,12 @@ def set_target(target: Any, value: Any) -> None:
 
 
 def _indexed_array_value(array: NDArray[Any], index: tuple[Any, ...]) -> object:
-    """Return an array view, copy, or scalar without NumPy's ndarray-only inference."""
+    """Return the NumPy item, which may be an array view, copy, or scalar.
+
+    NumPy indexing stubs infer an ndarray even for scalar integer indices.
+    This boundary preserves the actual result for runtime shape discrimination.
+    NumPy indexing failures propagate unchanged.
+    """
     return array[index]
 
 

@@ -142,10 +142,10 @@ class ResourceCfgFormWidget(QWidget):
         layout.addWidget(self._error)
         self.setFont(self._tree.font())
         self._tree.itemExpanded.connect(
-            lambda item: self._remember_expanded(item, True)
+            lambda item: self._remember_expanded(item, expanded=True)
         )
         self._tree.itemCollapsed.connect(
-            lambda item: self._remember_expanded(item, False)
+            lambda item: self._remember_expanded(item, expanded=False)
         )
 
     def attach(self, editor: CfgEditing) -> None:
@@ -254,7 +254,7 @@ class ResourceCfgFormWidget(QWidget):
             for path, parent, node in _visible_rows(observation.tree)
         )
 
-    def _remember_expanded(self, item: QTreeWidgetItem, expanded: bool) -> None:  # noqa: FBT001 - Qt signal
+    def _remember_expanded(self, item: QTreeWidgetItem, *, expanded: bool) -> None:
         path = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(path, tuple):
             self._expanded[path] = expanded

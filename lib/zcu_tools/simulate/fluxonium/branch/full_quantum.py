@@ -102,9 +102,7 @@ def calc_branch_population(
         )
     ).reshape(len(branchs), upto)
 
-    populations = dict(zip(branchs, populations))
-
-    return populations
+    return dict(zip(branchs, populations, strict=False))
 
 
 def calc_branch_population_over_flux(
@@ -129,7 +127,7 @@ def calc_branch_population_over_flux(
     fluxonium, _resonator = hilbertspace.subsystem_list
 
     def update_hilbertspace(flux: float) -> None:
-        fluxonium.flux = flux  # type: ignore
+        fluxonium.flux = flux  # pyright: ignore[reportAttributeAccessIssue]
 
     bra_array = make_bra_array(hilbertspace, qub_dim, res_dim)
 
@@ -162,7 +160,7 @@ def calc_branch_population_over_flux(
                 )
                 return calc_population(bra_array, evecs[dressed_idx].full())
 
-            populations = np.array(
+            return np.array(
                 Parallel(n_jobs=-1, prefer="threads")(
                     delayed(_calc_population)(b, n)
                     for b in branchs
@@ -170,12 +168,8 @@ def calc_branch_population_over_flux(
                 )
             ).reshape(len(branchs), upto)
 
-            return populations
-
         sweep.add_sweep(_calc_branch_populations, sweep_name="branch_populations")
 
         populations_list.append(sweep["branch_populations"])
 
-    populations = np.concatenate(populations_list)
-
-    return populations
+    return np.concatenate(populations_list)

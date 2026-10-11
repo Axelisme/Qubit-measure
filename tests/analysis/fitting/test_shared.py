@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 import zcu_tools.analysis.fitting as fitting
@@ -163,3 +165,60 @@ def test_variance_rejects_unknown_parameter() -> None:
 
     with pytest.raises(KeyError, match="missing"):
         result.variance("missing")
+
+
+@pytest.mark.parametrize(
+    ("initial", "limits", "expected_error"),
+    [
+        (0.0, (1.0, 2.0), "initial value for 'slope' is below its limit"),
+        (3.0, (1.0, 2.0), "initial value for 'slope' is above its limit"),
+        (1.0, (1.0, 1.0), "parameter 'slope' has empty limits"),
+    ],
+    ids=["below", "above", "equal-limits"],
+)
+def test_fit_shared_rejects_initial_value_limits(
+    initial: float, limits: tuple[float, float], expected_error: str
+) -> None:
+    x = np.linspace(0.0, 1.0, 10)
+    trace = FitTrace(x, linear(x, 1.0, 0.0), linear, ("slope", "intercept"))
+
+    with pytest.raises(ValueError, match=f"^{re.escape(expected_error)}$") as exc_info:
+        fit_shared(
+            (trace,),
+            (
+                ParameterSpec("slope", initial, limits=limits),
+                ParameterSpec("intercept", 0.0),
+            ),
+        )
+
+    assert str(exc_info.value) == expected_error
+
+
+def test_fit_shared_checks_global_names_before_numeric_values() -> None:
+    x = np.linspace(0.0, 1.0, 10)
+    trace = FitTrace(x, linear(x, 1.0, 0.0), linear, ("slope", "intercept"))
+
+    with pytest.raises(
+        ValueError, match="^each global parameter must be declared exactly once$"
+    ) as exc_info:
+        fit_shared(
+            (trace,),
+            (ParameterSpec("slope", np.nan), ParameterSpec("slope", 1.0)),
+        )
+
+    assert str(exc_info.value) == "each global parameter must be declared exactly once"
+
+
+def test_fit_shared_checks_numeric_values_before_trace_names() -> None:
+    x = np.linspace(0.0, 1.0, 10)
+    trace = FitTrace(x, linear(x, 1.0, 0.0), linear, ("slope", "missing"))
+
+    with pytest.raises(
+        ValueError, match="^initial value for 'slope' must be finite$"
+    ) as exc_info:
+        fit_shared(
+            (trace,),
+            (ParameterSpec("slope", np.nan), ParameterSpec("intercept", 0.0)),
+        )
+
+    assert str(exc_info.value) == "initial value for 'slope' must be finite"

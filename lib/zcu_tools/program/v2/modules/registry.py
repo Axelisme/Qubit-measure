@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 from qick.asm_v2 import QickParam
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .pulse import PulseCfg
 
 logger = logging.getLogger(__name__)

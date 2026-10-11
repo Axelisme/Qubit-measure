@@ -18,7 +18,7 @@ class IRCompileMixin(QickProgramV2):
 
     def _add_label(self, label: str) -> None:
         self.meta_infos.append(dict(kind="label", name=label, p_addr=self.p_addr))
-        super()._add_label(label)  # type: ignore
+        super()._add_label(label)
 
     def _add_meta(
         self, type: str, name: str, info: dict[str, Any] | None = None
@@ -95,7 +95,7 @@ class IRCompileMixin(QickProgramV2):
                 IRLinker._parse_label_addr(lbl.name, opt_labels[lbl.name])
                 for lbl in table_labels
             ]
-            offset = self.add_dmem(entry_addrs)  # type: ignore[attr-defined]
+            offset = self.add_dmem(entry_addrs)
             if offset != cursor:
                 raise RuntimeError(
                     f"dmem dispatch table allocation mismatch: pipeline reserved "

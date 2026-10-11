@@ -8,7 +8,7 @@ the physical converter port, the sample rate and the maximum pulse / buffer leng
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, Protocol, TypedDict
+from typing import Any, Protocol
 
 
 class SocCfgLike(Protocol):
@@ -50,7 +50,9 @@ def describe_soc(soccfg: SocCfgLike) -> str:
             gen["type"],
             _port_label(gen["dac"], _DAC_TILE_OFFSET),
             f"{soccfg['rf']['dacs'][gen['dac']]['fs']:.3f}",
-            _gen_pulse_len(gen),
+            _gen_pulse_len(gen["maxlen"], gen["samps_per_clk"], gen["f_fabric"])
+            if "maxlen" in gen
+            else "-",
         ]
         for ch, gen in enumerate(gens)
     ]
@@ -62,7 +64,7 @@ def describe_soc(soccfg: SocCfgLike) -> str:
             ro["ro_type"],
             _port_label(ro["adc"], _ADC_TILE_OFFSET),
             f"{soccfg['rf']['adcs'][ro['adc']]['fs']:.3f}",
-            _readout_buf_len(ro),
+            _readout_buf_len(ro["buf_maxlen"], ro["f_output"]),
         ]
         for ch, ro in enumerate(readouts)
     ]
@@ -88,33 +90,15 @@ def _port_label(name: str, offset: int) -> str:
     return f"{block}_{tile + offset}"
 
 
-class _GeneratorMemory(TypedDict):
-    maxlen: NotRequired[int]
-    samps_per_clk: int
-    f_fabric: float
-
-
-class _ReadoutMemory(TypedDict):
-    buf_maxlen: int
-    f_output: float
-
-
-def _gen_pulse_len(gen: _GeneratorMemory) -> str:
-    """Envelope-memory length of a generator, as "<samples> smp (<us> us)".
-
-    Returns "-" for generators without an envelope memory (e.g. muxed/const gens).
-    """
-    if "maxlen" not in gen:
-        return "-"
-    maxlen = gen["maxlen"]
-    us = maxlen / (gen["samps_per_clk"] * gen["f_fabric"])
+def _gen_pulse_len(maxlen: float, samps_per_clk: float, f_fabric: float) -> str:
+    """Envelope-memory length of a generator, as "<samples> smp (<us> us)"."""
+    us = maxlen / (samps_per_clk * f_fabric)
     return f"{maxlen} smp ({us:.3f} us)"
 
 
-def _readout_buf_len(ro: _ReadoutMemory) -> str:
+def _readout_buf_len(maxlen: float, f_output: float) -> str:
     """Decimated buffer length of a readout, as "<samples> smp (<us> us)"."""
-    maxlen = ro["buf_maxlen"]
-    us = maxlen / ro["f_output"]
+    us = maxlen / f_output
     return f"{maxlen} smp ({us:.3f} us)"
 
 

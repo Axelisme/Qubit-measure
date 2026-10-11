@@ -93,9 +93,7 @@ def purcell(
 
     purcell_down = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(a_1n0n) ** 2)
 
-    purcell_total = np.asarray(1 / (purcell_up + purcell_down), dtype=np.float64)
-
-    return purcell_total
+    return np.asarray(1 / (purcell_up + purcell_down), dtype=np.float64)
 
 
 def calculate_purcell_t1_vs_flux(

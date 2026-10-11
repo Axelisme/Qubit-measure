@@ -117,6 +117,60 @@ def _has_uncompensated_timed_base_access(inst: BaseInst) -> bool:
     return False
 
 
+def _accumulate_literal_delay(
+    delta: int, pending_lit: int, result: list[BaseInst]
+) -> int:
+    """Accumulate a literal delta, flushing before it exceeds the safe field limit."""
+    if pending_lit + delta > TIMED_LIT_MAX:
+        pending_lit = _flush(result, pending_lit)
+        if delta > TIMED_LIT_MAX:
+            result.append(TimeInst(c_op="inc_ref", lit=Immediate(delta)))
+        else:
+            pending_lit = delta
+    else:
+        pending_lit += delta
+    return pending_lit
+
+
+def _fold_anchored_time(
+    inst: BaseInst, pending_lit: int, result: list[BaseInst]
+) -> int:
+    """Compensate anchored time unless s14 access or literal overflow forces a flush."""
+    if _has_uncompensated_timed_base_access(inst):
+        pending_lit = _flush(result, pending_lit)
+        result.append(inst)
+        return pending_lit
+
+    time = getattr(inst, "time")
+    assert isinstance(time, TimeOffset)
+    if pending_lit > 0:
+        if time.value + pending_lit > TIMED_LIT_MAX:
+            pending_lit = _flush(result, pending_lit)
+            result.append(inst)
+        else:
+            result.append(
+                dataclasses.replace(inst, time=TimeOffset(time.value + pending_lit))
+            )
+            # pending_lit is NOT reset: subsequent timed insts in
+            # the same baseline segment receive the same delta, and
+            # the TIME must still be emitted at end of block so the
+            # hardware reference clock actually advances.
+    else:
+        result.append(inst)
+    return pending_lit
+
+
+def _is_reference_clock_barrier(inst: BaseInst) -> bool:
+    """Keep unknown/reference-replacing clock operations and s14 users in place."""
+    if isinstance(inst, TimeInst):
+        return (inst.c_op == "inc_ref" and inst.r1 is not None) or inst.c_op in (
+            "set_ref",
+            "updt",
+            "rst",
+        )
+    return TIMED_BASE_REG in inst.reg_read or TIMED_BASE_REG in inst.reg_write
+
+
 class TimedMergePass(BlockChunkPass):
     """Aggressive TIME inc_ref optimisation pass."""
 
@@ -134,15 +188,9 @@ class TimedMergePass(BlockChunkPass):
         for inst in block.insts:
             if _is_lit_time(inst):
                 assert isinstance(inst, TimeInst) and isinstance(inst.lit, Immediate)
-                delta = inst.lit.value
-                if pending_lit + delta > TIMED_LIT_MAX:
-                    pending_lit = _flush(result, pending_lit)
-                    if delta > TIMED_LIT_MAX:
-                        result.append(TimeInst(c_op="inc_ref", lit=Immediate(delta)))
-                    else:
-                        pending_lit = delta
-                else:
-                    pending_lit += delta
+                pending_lit = _accumulate_literal_delay(
+                    inst.lit.value, pending_lit, result
+                )
             elif not isinstance(inst, WaitInst) and isinstance(
                 getattr(inst, "time", None), TimeOffset
             ):
@@ -150,45 +198,8 @@ class TimedMergePass(BlockChunkPass):
                 # comparison value (TEST s11 - #(T-10)), not an offset from the
                 # s14 reference, so absorbing a TIME inc_ref delta would change
                 # the wait target. WaitInst falls through to the else-flush.
-                if _has_uncompensated_timed_base_access(inst):
-                    pending_lit = _flush(result, pending_lit)
-                    result.append(inst)
-                    continue
-
-                time = getattr(inst, "time")
-                assert isinstance(time, TimeOffset)
-                if pending_lit > 0:
-                    if time.value + pending_lit > TIMED_LIT_MAX:
-                        pending_lit = _flush(result, pending_lit)
-                        result.append(inst)
-                    else:
-                        result.append(
-                            dataclasses.replace(
-                                inst, time=TimeOffset(time.value + pending_lit)
-                            )
-                        )
-                        # pending_lit is NOT reset: subsequent timed insts in
-                        # the same baseline segment receive the same delta, and
-                        # the TIME must still be emitted at end of block so the
-                        # hardware reference clock actually advances.
-                else:
-                    result.append(inst)
-            elif (
-                isinstance(inst, TimeInst)
-                and inst.c_op == "inc_ref"
-                and inst.r1 is not None
-            ):
-                # Register-driven TIME inc_ref: unknown delta, must flush.
-                pending_lit = _flush(result, pending_lit)
-                result.append(inst)
-            elif isinstance(inst, TimeInst) and inst.c_op in ("set_ref", "updt", "rst"):
-                # TIME set_ref/updt/rst sets s14 to an absolute value —
-                # accumulated pending delta is invalidated.
-                pending_lit = _flush(result, pending_lit)
-                result.append(inst)
-            elif not isinstance(inst, TimeInst) and (
-                TIMED_BASE_REG in inst.reg_read or TIMED_BASE_REG in inst.reg_write
-            ):
+                pending_lit = _fold_anchored_time(inst, pending_lit, result)
+            elif _is_reference_clock_barrier(inst):
                 pending_lit = _flush(result, pending_lit)
                 result.append(inst)
             elif isinstance(
@@ -200,9 +211,7 @@ class TimedMergePass(BlockChunkPass):
                     DmemWriteInst,
                     WmemWriteInst,
                 ),
-            ):
-                result.append(inst)
-            elif isinstance(inst, RegWriteInst) and not inst.dst.is_volatile_reg():
+            ) or (isinstance(inst, RegWriteInst) and not inst.dst.is_volatile_reg()):
                 result.append(inst)
             else:
                 pending_lit = _flush(result, pending_lit)

@@ -9,9 +9,13 @@ coordinate columns fail before any physics or comparison runs.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from copy import deepcopy
+
 import numpy as np
 import pandas as pd
 import pytest
+from numpy.typing import NDArray
 from plotly.graph_objects import Figure, Scatter
 from zcu_tools.notebook.analysis.design import search as S
 from zcu_tools.resources.qubit_params import (
@@ -27,16 +31,41 @@ from zcu_tools.resources.sample_table import (
 
 _NOISE_CHANNELS: list[tuple[str, dict[str, object]]] = []
 
-# Physics-call counter shared with the fake implementations; reset per test.
+# Physics-call counter shared with the fakes; restored by the fixture.
 _PHYSICS_CALLS = {"physics": 0}
 
 
+@pytest.fixture(scope="module", autouse=True)
+def guard_shared_state() -> Iterator[None]:
+    """Name this module if its tests leak changes to shared recording state."""
+    noise_channels = deepcopy(_NOISE_CHANNELS)
+    physics_calls = _PHYSICS_CALLS.copy()
+    yield
+    assert noise_channels == _NOISE_CHANNELS, f"{__name__} leaked noise channels"
+    assert physics_calls == _PHYSICS_CALLS, f"{__name__} leaked physics calls"
+
+
+def _scatter_traces(fig: Figure) -> list[Scatter]:
+    traces = []
+    for trace in fig.data:
+        assert isinstance(trace, Scatter)
+        traces.append(trace)
+    return traces
+
+
 def _actual_t1_trace(fig: Figure) -> Scatter:
-    traces = list(fig.select_traces({"mode": "markers+text"}))
+    traces = [trace for trace in _scatter_traces(fig) if trace.mode == "markers+text"]
     assert len(traces) == 1
     trace = traces[0]
     assert isinstance(trace, Scatter)
     return trace
+
+
+def _y_values(trace: Scatter) -> NDArray[np.float64]:
+    values = trace.y
+    assert isinstance(values, (list, tuple, np.ndarray))
+    assert not np.iscomplexobj(values)
+    return np.asarray(values, dtype=np.float64)
 
 
 @pytest.fixture
@@ -59,7 +88,7 @@ def result_dir(tmp_path, monkeypatch) -> str:
     params_file.set_dispersive_fit(DispersiveFit(g=0.1, bare_rf=7.0))
 
     calls = _PHYSICS_CALLS
-    calls["physics"] = 0
+    monkeypatch.setitem(calls, "physics", 0)
 
     def _fake_calc_ge_snr(*_args, **_kwargs):
         calls["physics"] += 1
@@ -105,12 +134,11 @@ def test_selects_row_by_explicit_flux(result_dir: str) -> None:
     S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
 
     trace = _actual_t1_trace(fig)
-    assert np.asarray(trace.y, dtype=np.float64)[0] == 22.0
+    assert _y_values(trace)[0] == 22.0
     # predicted point comes from the fake model, not from the table
-    predicted = list(fig.select_traces({"mode": "markers"}))
+    predicted = [t for t in _scatter_traces(fig) if t.mode == "markers"]
     assert len(predicted) == 1
-    assert isinstance(predicted[0], Scatter)
-    assert np.asarray(predicted[0].y, dtype=np.float64)[0] == 0.5
+    assert _y_values(predicted[0])[0] == 0.5
 
 
 def test_selects_row_by_row_frame_derived_flux(result_dir: str) -> None:
@@ -143,7 +171,7 @@ def test_selects_row_by_row_frame_derived_flux(result_dir: str) -> None:
     fig = _new_fig()
     S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
 
-    assert np.asarray(_actual_t1_trace(fig).y, dtype=np.float64)[0] == 22.0
+    assert _y_values(_actual_t1_trace(fig))[0] == 22.0
 
 
 def test_selects_row_by_declared_fallback_frame(result_dir: str) -> None:
@@ -163,7 +191,7 @@ def test_selects_row_by_declared_fallback_frame(result_dir: str) -> None:
         fallback_frame=SampleFluxFrame("A", flux_int=0.0, flux_period=1.0),
     )
 
-    assert np.asarray(_actual_t1_trace(fig).y, dtype=np.float64)[0] == 22.0
+    assert _y_values(_actual_t1_trace(fig))[0] == 22.0
 
 
 def test_cross_unit_rows_compare_in_flux_domain_only(result_dir: str) -> None:
@@ -191,7 +219,7 @@ def test_cross_unit_rows_compare_in_flux_domain_only(result_dir: str) -> None:
     fig = _new_fig()
     S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
 
-    assert np.asarray(_actual_t1_trace(fig).y, dtype=np.float64)[0] == 22.0
+    assert _y_values(_actual_t1_trace(fig))[0] == 22.0
 
 
 def test_unresolved_rows_fail_with_indexes_before_physics(result_dir: str) -> None:

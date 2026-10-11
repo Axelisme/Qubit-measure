@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -75,6 +75,141 @@ class _FieldDeclaration:
 
 
 _Declaration = _SectionDeclaration | _FieldDeclaration
+
+
+@dataclass(frozen=True)
+class _ModuleDefaults:
+    """Prepare role-backed defaults without resolving context-dependent seeds.
+
+    ``role_id`` selects ROLE_FACTORIES; ``init`` controls reference initialization.
+    ``blank_overrides`` applies only to custom references, ``overrides`` always
+    applies, and ``locked`` fixes scalar spec paths. Mappings use relative paths.
+    Validation happens in ``prepare``, not construction, so the builder retains
+    its mutable/name checks before role and override checks.
+    """
+
+    role_id: str
+    init: ModuleInit
+    blank_overrides: Mapping[str, ModuleOverrideInput] | None
+    overrides: Mapping[str, ModuleOverrideInput] | None
+    locked: Mapping[str, object] | None
+
+    def prepare(
+        self, spec: ReferenceSpec, cfg_path: str
+    ) -> tuple[ReferenceSpec, Callable[[SessionEnv], ReferenceValue | None]]:
+        """Validate shape/paths and capture normalized seeds for later resolution."""
+        if not isinstance(self.init, ModuleInit):
+            raise TypeError(
+                f"module init must be a ModuleInit, got {type(self.init).__name__}"
+            )
+        role = ROLE_FACTORIES.get(self.role_id)
+        if role is None:
+            raise ValueError(
+                f"unknown role_id {self.role_id!r} "
+                f"(available: {', '.join(sorted(ROLE_FACTORIES))})"
+            )
+        if role.kind != spec.kind:
+            raise TypeError(
+                f"module role {self.role_id!r} has kind {role.kind!r}, "
+                f"but the spec expects {spec.kind!r}"
+            )
+        role_shape = role.shape()
+        if not any(
+            _shape_identity(allowed) == _shape_identity(role_shape)
+            for allowed in spec.allowed
+        ):
+            expected = ", ".join(_describe_shape(shape) for shape in spec.allowed)
+            actual = _describe_shape(role_shape)
+            raise TypeError(
+                f"cfg path '{cfg_path}' role_id {self.role_id!r} has incompatible "
+                f"shape: expected one of [{expected}], actual {actual}"
+            )
+        if self.init is ModuleInit.DISABLED and not spec.optional:
+            raise ValueError("ModuleInit.DISABLED requires an optional reference")
+
+        blank = _normalize_overrides(self.blank_overrides)
+        always = _normalize_overrides(self.overrides)
+        locks = tuple((self.locked or {}).items())
+        _validate_module_paths(
+            spec, "blank_overrides", tuple(path for path, _ in blank)
+        )
+        _validate_module_paths(spec, "overrides", tuple(path for path, _ in always))
+        _validate_module_paths(spec, "locked", tuple(path for path, _ in locks))
+        overlap = set(path for path, _ in locks) & {
+            path for path, _ in (*blank, *always)
+        }
+        if overlap:
+            raise ValueError(
+                "locked paths cannot also be overridden: " + ", ".join(sorted(overlap))
+            )
+        for relative_path, value in locks:
+            spec = spec.lock_literal(relative_path, value)
+
+        def resolve(ctx: SessionEnv) -> ReferenceValue | None:
+            return self._materialize(
+                ctx,
+                cfg_path=cfg_path,
+                optional=spec.optional,
+                blank_overrides=blank,
+                overrides=always,
+            )
+
+        return spec, resolve
+
+    def _materialize(
+        self,
+        ctx: SessionEnv,
+        *,
+        cfg_path: str,
+        optional: bool,
+        blank_overrides: tuple[tuple[str, Seed[ScalarLeafInput]], ...],
+        overrides: tuple[tuple[str, Seed[ScalarLeafInput]], ...],
+    ) -> ReferenceValue | None:
+        role = ROLE_FACTORIES[self.role_id]
+        if self.init is ModuleInit.DISABLED:
+            node = None
+        elif self.init is ModuleInit.INLINE:
+            node = role.blank(ctx)
+        elif role.ref is not None:
+            node = role.ref(ctx, optional=optional)
+        elif optional:
+            node = None
+        else:
+            node = role.blank(ctx)
+
+        if node is None:
+            return None
+        if not isinstance(node, ReferenceValue):
+            raise TypeError(
+                f"module role {self.role_id!r} produced {type(node).__name__}, "
+                "expected ReferenceValue"
+            )
+
+        applicable = list(overrides)
+        if is_custom_reference_key(node.chosen_key):
+            applicable = [*blank_overrides, *applicable]
+        resolved: list[tuple[str, ScalarLeafInput]] = []
+        for relative_path, seed in applicable:
+            try:
+                value = seed.resolve(ctx)
+                if not isinstance(
+                    value, (int, float, str, bool, DirectValue, EvalValue)
+                ):
+                    raise TypeError(
+                        f"module override {relative_path!r} resolved to "
+                        f"{type(value).__name__}, expected a scalar leaf"
+                    )
+                read_value_path(node.value, relative_path)
+            except Exception as exc:
+                exc.add_note(
+                    f"while materializing cfg path {cfg_path}.{relative_path!s} "
+                    f"from seed {seed.description!r}"
+                )
+                raise
+            resolved.append((relative_path, value))
+        for relative_path, value in resolved:
+            node.value.with_field(relative_path, value)
+        return node
 
 
 @dataclass(frozen=True)
@@ -154,11 +289,13 @@ class MeasureCfgBuilder:
         return self._module(
             name,
             spec=make_pulse_module_spec(label=label, optional=optional),
-            role_id=role_id or name,
-            init=init,
-            blank_overrides=blank_overrides,
-            overrides=overrides,
-            locked=locked,
+            defaults=_ModuleDefaults(
+                role_id=role_id or name,
+                init=init,
+                blank_overrides=blank_overrides,
+                overrides=overrides,
+                locked=locked,
+            ),
         )
 
     def readout(
@@ -182,11 +319,13 @@ class MeasureCfgBuilder:
         return self._module(
             name,
             spec=spec,
-            role_id=role_id or name,
-            init=init,
-            blank_overrides=blank_overrides,
-            overrides=overrides,
-            locked=locked,
+            defaults=_ModuleDefaults(
+                role_id=role_id or name,
+                init=init,
+                blank_overrides=blank_overrides,
+                overrides=overrides,
+                locked=locked,
+            ),
         )
 
     def reset(
@@ -212,11 +351,13 @@ class MeasureCfgBuilder:
         return self._module(
             name,
             spec=spec,
-            role_id=role_id or name,
-            init=init,
-            blank_overrides=blank_overrides,
-            overrides=overrides,
-            locked=locked,
+            defaults=_ModuleDefaults(
+                role_id=role_id or name,
+                init=init,
+                blank_overrides=blank_overrides,
+                overrides=overrides,
+                locked=locked,
+            ),
         )
 
     def relax_delay(
@@ -421,77 +562,17 @@ class MeasureCfgBuilder:
         name: str,
         *,
         spec: ReferenceSpec,
-        role_id: str,
-        init: ModuleInit,
-        blank_overrides: Mapping[str, ModuleOverrideInput] | None,
-        overrides: Mapping[str, ModuleOverrideInput] | None,
-        locked: Mapping[str, object] | None,
+        defaults: _ModuleDefaults,
     ) -> Self:
         self._check_mutable()
         _validate_local_name(name, verb="module")
-        if not isinstance(init, ModuleInit):
-            raise TypeError(
-                f"module init must be a ModuleInit, got {type(init).__name__}"
-            )
-        role = ROLE_FACTORIES.get(role_id)
-        if role is None:
-            raise ValueError(
-                f"unknown role_id {role_id!r} "
-                f"(available: {', '.join(sorted(ROLE_FACTORIES))})"
-            )
-        if role.kind != spec.kind:
-            raise TypeError(
-                f"module role {role_id!r} has kind {role.kind!r}, "
-                f"but the spec expects {spec.kind!r}"
-            )
-        role_shape = role.shape()
-        if not any(
-            _shape_identity(allowed) == _shape_identity(role_shape)
-            for allowed in spec.allowed
-        ):
-            expected = ", ".join(_describe_shape(shape) for shape in spec.allowed)
-            actual = _describe_shape(role_shape)
-            raise TypeError(
-                f"cfg path 'modules.{name}' role_id {role_id!r} has incompatible "
-                f"shape: expected one of [{expected}], actual {actual}"
-            )
-        if init is ModuleInit.DISABLED and not spec.optional:
-            raise ValueError("ModuleInit.DISABLED requires an optional reference")
-
-        blank = _normalize_overrides(blank_overrides)
-        always = _normalize_overrides(overrides)
-        locks = tuple((locked or {}).items())
-        _validate_module_paths(
-            spec, "blank_overrides", tuple(path for path, _ in blank)
-        )
-        _validate_module_paths(spec, "overrides", tuple(path for path, _ in always))
-        _validate_module_paths(spec, "locked", tuple(path for path, _ in locks))
-        overlap = set(path for path, _ in locks) & {
-            path for path, _ in (*blank, *always)
-        }
-        if overlap:
-            raise ValueError(
-                "locked paths cannot also be overridden: " + ", ".join(sorted(overlap))
-            )
-        for relative_path, value in locks:
-            spec = spec.lock_literal(relative_path, value)
-
-        def resolve(ctx: SessionEnv) -> ReferenceValue | None:
-            return _materialize_module(
-                ctx,
-                cfg_path=f"modules.{name}",
-                role_id=role_id,
-                init=init,
-                optional=spec.optional,
-                blank_overrides=blank,
-                overrides=always,
-            )
-
+        cfg_path = f"modules.{name}"
+        spec, resolve = defaults.prepare(spec, cfg_path)
         self._ensure_section("modules", "Modules")
         return self.field(
-            f"modules.{name}",
+            cfg_path,
             spec=spec,
-            default=custom(resolve, description=f"module role:{role_id}"),
+            default=custom(resolve, description=f"module role:{defaults.role_id}"),
         )
 
     def _ensure_section(self, path: str, label: str) -> None:
@@ -510,61 +591,6 @@ class MeasureCfgBuilder:
     def _check_mutable(self) -> None:
         if self._built:
             raise RuntimeError("MeasureCfgBuilder is already built; create a new one")
-
-
-def _materialize_module(
-    ctx: SessionEnv,
-    *,
-    cfg_path: str,
-    role_id: str,
-    init: ModuleInit,
-    optional: bool,
-    blank_overrides: tuple[tuple[str, Seed[ScalarLeafInput]], ...],
-    overrides: tuple[tuple[str, Seed[ScalarLeafInput]], ...],
-) -> ReferenceValue | None:
-    role = ROLE_FACTORIES[role_id]
-    if init is ModuleInit.DISABLED:
-        node = None
-    elif init is ModuleInit.INLINE:
-        node = role.blank(ctx)
-    elif role.ref is not None:
-        node = role.ref(ctx, optional=optional)
-    elif optional:
-        node = None
-    else:
-        node = role.blank(ctx)
-
-    if node is None:
-        return None
-    if not isinstance(node, ReferenceValue):
-        raise TypeError(
-            f"module role {role_id!r} produced {type(node).__name__}, "
-            "expected ReferenceValue"
-        )
-
-    applicable = list(overrides)
-    if is_custom_reference_key(node.chosen_key):
-        applicable = [*blank_overrides, *applicable]
-    resolved: list[tuple[str, ScalarLeafInput]] = []
-    for relative_path, seed in applicable:
-        try:
-            value = seed.resolve(ctx)
-            if not isinstance(value, (int, float, str, bool, DirectValue, EvalValue)):
-                raise TypeError(
-                    f"module override {relative_path!r} resolved to "
-                    f"{type(value).__name__}, expected a scalar leaf"
-                )
-            read_value_path(node.value, relative_path)
-        except Exception as exc:
-            exc.add_note(
-                f"while materializing cfg path {cfg_path}.{relative_path!s} "
-                f"from seed {seed.description!r}"
-            )
-            raise
-        resolved.append((relative_path, value))
-    for relative_path, value in resolved:
-        node.value.with_field(relative_path, value)
-    return node
 
 
 def _validate_module_paths(

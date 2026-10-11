@@ -121,7 +121,12 @@ class ResultTree(Generic[T_Env]):
     def _set_node_value(
         self, path: tuple[Hashable, ...], value: Any, *, flush: bool
     ) -> None:
-        """Preflight, write and notify a direct node update using the tree's env."""
+        """Write a direct node value and notify using this tree's run env.
+
+        Missing-env subscription preflight runs before mutation. A successful
+        write invalidates the result cache before emitting events. Write errors
+        propagate without emitting; callback errors propagate after mutation.
+        """
         self._ensure_direct_update_can_emit(path)
         self.set_path(path, value)
         self._emit_path_update(path, self._env, flush=flush)

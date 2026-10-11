@@ -4,11 +4,6 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-# Default poll pacing for the white-noise mock path (no SimParams).
-# When a SimParams is attached, its poll_latency field overrides this value.
-# Set to 0 to skip the sleep entirely (avoids the syscall overhead of sleep(0)).
-_DEFAULT_POLL_LATENCY: float = 1e-7
-
 import numpy as np
 from qick import QickConfig
 from qick.asm_v2 import QickProgramV2
@@ -17,6 +12,11 @@ from qick.qick_asm import get_version
 if TYPE_CHECKING:
     from .sim import SimParams
     from .sim.engine import SimEngine
+
+# Default poll pacing for the white-noise mock path (no SimParams).
+# When a SimParams is attached, its poll_latency field overrides this value.
+# Set to 0 to skip the sleep entirely (avoids the syscall overhead of sleep(0)).
+_DEFAULT_POLL_LATENCY: float = 1e-7
 
 
 def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict[str, object]:

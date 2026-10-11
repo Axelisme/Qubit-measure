@@ -4,14 +4,14 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-logger = logging.getLogger(__name__)
-
 if TYPE_CHECKING:
     from zcu_tools.resources.context import ContextManager
 
+logger = logging.getLogger(__name__)
+
 
 class IOManager:
-    """Wraps ContextManager; returns new SessionEnv objects to Controller."""
+    """Manage the project context root, entries, and active-context state."""
 
     def __init__(self) -> None:
         self._em: ContextManager | None = None

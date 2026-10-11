@@ -1,18 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypeAlias, cast
+from typing import Any
 
 import numpy as np
 import pytest
-from numpy.typing import NDArray
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.result_tree import ResultTree, ResultUpdateEvent
 from zcu_tools.experiment.v2.runtime.schedule import Schedule
 from zcu_tools.experiment.v2.utils.helper import Result
-
-LeafResult: TypeAlias = dict[str, NDArray[np.float64]]
-TreeRow: TypeAlias = dict[str, LeafResult]
 
 
 @dataclass(frozen=True)
@@ -21,7 +17,7 @@ class TreeEnv:
     flux_values: np.ndarray
 
 
-def _row() -> TreeRow:
+def _row() -> dict[str, Result]:
     return {
         "freq": {
             "raw": np.full((2,), np.nan, dtype=np.float64),
@@ -34,7 +30,7 @@ def _row() -> TreeRow:
 
 
 def _tree() -> ResultTree[TreeEnv]:
-    data = cast(list[dict[str, Result]], [_row(), _row()])
+    data = [_row(), _row()]
     return ResultTree[TreeEnv](data, outer_values=np.array([0.25, 0.5]))
 
 
@@ -43,15 +39,19 @@ def test_result_tree_node_set_updates_nested_data() -> None:
 
     tree.at(0).child("freq").child("fit").set(np.array(7.0), flush=True)
 
-    freq_row = cast(LeafResult, tree.data[0]["freq"])
+    freq_row = tree.data[0]["freq"]
+    assert isinstance(freq_row, dict)
+    assert isinstance(freq_row["fit"], np.ndarray)
     np.testing.assert_allclose(freq_row["fit"], np.array(7.0))
-    result = cast(LeafResult, tree.measurement_result("freq"))
+    result = tree.measurement_result("freq")
+    assert isinstance(result, dict)
+    assert isinstance(result["fit"], np.ndarray)
     np.testing.assert_allclose(result["fit"], np.array([7.0, np.nan]))
 
 
 def test_result_node_set_uses_tree_env_for_subscription_event() -> None:
     env = TreeEnv(label="direct", flux_values=np.array([0.25, 0.5]))
-    data = cast(list[dict[str, Result]], [_row(), _row()])
+    data = [_row(), _row()]
     tree = ResultTree[TreeEnv](data, outer_values=env.flux_values, env=env)
     events: list[ResultUpdateEvent[TreeEnv, Any]] = []
     tree.measurement_node("freq").subscribe(events.append)
@@ -74,13 +74,15 @@ def test_result_node_set_with_subscriber_requires_env() -> None:
     with pytest.raises(RuntimeError, match="without env"):
         tree.at(0).child("freq").child("fit").set(np.array(8.0), flush=True)
 
-    freq_row = cast(LeafResult, tree.data[0]["freq"])
+    freq_row = tree.data[0]["freq"]
+    assert isinstance(freq_row, dict)
+    assert isinstance(freq_row["fit"], np.ndarray)
     np.testing.assert_allclose(freq_row["fit"], np.array(np.nan))
 
 
 def test_result_tree_root_trigger_broadcasts_subscribed_measurements() -> None:
     env = TreeEnv(label="root", flux_values=np.array([0.25, 0.5]))
-    data = cast(list[dict[str, Result]], [_row(), _row()])
+    data = [_row(), _row()]
     tree = ResultTree[TreeEnv](data, outer_values=env.flux_values, env=env)
     events: list[ResultUpdateEvent[TreeEnv, Any]] = []
     tree.measurement_node("freq").subscribe(events.append)
@@ -137,7 +139,9 @@ def test_result_tree_child_buffer_writes_leaf_and_flushes_node() -> None:
         local_buffer.set(np.array([1.0, 2.0]))
         raw_step.trigger_update(flush=True)
 
-    freq_row = cast(LeafResult, tree.data[0]["freq"])
+    freq_row = tree.data[0]["freq"]
+    assert isinstance(freq_row, dict)
+    assert isinstance(freq_row["raw"], np.ndarray)
     np.testing.assert_allclose(freq_row["raw"], np.array([1.0, 2.0]))
     assert [event.flush for event in events] == [False, True]
     assert [event.outer_index for event in events] == [0, 0]
@@ -156,7 +160,9 @@ def test_result_tree_invalidates_only_updated_measurement_cache() -> None:
 
     assert tree.measurement_result("freq") is not freq_before
     assert tree.measurement_result("t1") is t1_before
-    freq_result = cast(LeafResult, tree.measurement_result("freq"))
+    freq_result = tree.measurement_result("freq")
+    assert isinstance(freq_result, dict)
+    assert isinstance(freq_result["fit"], np.ndarray)
     np.testing.assert_allclose(freq_result["fit"][0], 9.0)
 
 

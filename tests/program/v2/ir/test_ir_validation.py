@@ -46,7 +46,6 @@ from zcu_tools.program.v2.ir.passes import BranchEliminationPass
 from zcu_tools.program.v2.ir.passes.control_flow import SimplifyDispatchPass
 from zcu_tools.program.v2.ir.pipeline import (
     AbsChunkListPass,
-    AbsChunkPass,
     PipeLineConfig,
     PipeLineContext,
     make_default_pipeline,
@@ -75,7 +74,7 @@ def _walk_instructions(node: IRNode) -> Iterator[Instruction]:
 
 
 def _run_chunk_passes_on_root(
-    root: BlockNode, passes: list[AbsChunkPass | AbsChunkListPass]
+    root: BlockNode, passes: list[AbsChunkListPass]
 ) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
