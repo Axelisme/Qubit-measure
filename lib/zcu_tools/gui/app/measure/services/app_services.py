@@ -222,7 +222,6 @@ def build_app_services(
     writeback = WritebackService(
         cfg_editor,
         write_port=ContextControlFacet(context=context),
-        entry_ledger=context.entry_ledger,
     )
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).

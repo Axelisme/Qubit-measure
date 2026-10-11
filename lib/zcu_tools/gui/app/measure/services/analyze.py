@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +16,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.resources.entry.ledger_models import JsonObject
 
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
 from .staged_analyze import _StagedAnalyzeService
@@ -35,6 +38,8 @@ if TYPE_CHECKING:
 class _AnalyzeCapture:
     run_result: object | None
     run_id: str | None
+    experiment_name: str
+    device_snapshot: Mapping[str, JsonObject] | None
     context: SessionEnv
     adapter: ExpAdapterProtocol
     params: object | None
@@ -118,6 +123,12 @@ class AnalyzeService(_StagedAnalyzeService):
         captured_inputs = _AnalyzeCapture(
             run_result=req.run_result,
             run_id=tab.run.metadata.run_id if tab.run.metadata is not None else None,
+            experiment_name=tab.run.metadata.experiment
+            if tab.run.metadata is not None
+            else tab.adapter_name,
+            device_snapshot=deepcopy(tab.run.metadata.device_snapshot)
+            if tab.run.metadata is not None
+            else None,
             context=ctx,
             adapter=adapter,
             params=analyze_params_instance,
@@ -174,6 +185,12 @@ class AnalyzeService(_StagedAnalyzeService):
         captured = _AnalyzeCapture(
             run_result=tab.run.result,
             run_id=tab.run.metadata.run_id if tab.run.metadata is not None else None,
+            experiment_name=tab.run.metadata.experiment
+            if tab.run.metadata is not None
+            else tab.adapter_name,
+            device_snapshot=deepcopy(tab.run.metadata.device_snapshot)
+            if tab.run.metadata is not None
+            else None,
             context=ctx,
             adapter=tab.adapter,
             params=analyze_params_instance,
@@ -408,6 +425,8 @@ class AnalyzeService(_StagedAnalyzeService):
                 proposal_items,
                 parameters=ctx.parameters,
                 run_id=captured_inputs.run_id,
+                experiment_name=captured_inputs.experiment_name,
+                device_snapshot=captured_inputs.device_snapshot,
             )
             plots.finish()
             retired = self._state.update_tab_analyze(

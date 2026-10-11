@@ -1,54 +1,12 @@
-"""Live projection declarations and detached sparse-to-dense display data."""
+"""Detached sparse-to-dense workflow display data."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
-from matplotlib.image import AxesImage
-from matplotlib.lines import Line2D
 from numpy.typing import NDArray
-
-type Projection = Callable[[NDArray[np.complex128]], NDArray[np.float64]]
-
-
-@dataclass(frozen=True)
-class Live1D:
-    """Project a one-dimensional buffer onto a line.
-
-    ``line`` is an engine-owned artist. ``y`` maps complex samples to matching
-    real values; the Run buffer's sole axis supplies x coordinates.
-    """
-
-    line: Line2D
-    y: Projection
-
-
-@dataclass(frozen=True)
-class Live2D:
-    """Project a two-dimensional buffer onto an image.
-
-    ``image`` is engine-owned. ``y`` must preserve the buffer's two-dimensional
-    shape. Projection errors fail the run, not the acquisition outcome.
-    """
-
-    image: AxesImage
-    y: Projection
-
-
-@dataclass(frozen=True)
-class Live2DRow:
-    """Overlay one curve without changing an image's dimensions.
-
-    ``image`` is engine-owned. ``row`` is its zero-based destination row.
-    ``y`` converts the one-dimensional complex buffer into the image row values.
-    Invalid rows or shapes fail at execution; these declarations are not state.
-    """
-
-    image: AxesImage
-    row: int
-    y: Projection
 
 
 @dataclass(frozen=True)

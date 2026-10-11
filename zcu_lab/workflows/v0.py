@@ -2,8 +2,8 @@
 
 Calibration values and traces are fake deterministic values, not physical policy.
 The JSON savers only exercise the exact-path saver seam, even for .h5 paths.
-They are not the official/native data format. Phase 1 replaces T1_fluxdep;
-phase 3 replaces echo/overnight and removes fake calibration before retirement.
+They are not the official/native data format. Native T1_fluxdep lives in t1.py.
+Phase 3 replaces echo/overnight and removes fake calibration before retirement.
 Import declares functions only; it does not register workflows or start a run.
 """
 
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import numpy as np
-from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field
 from zcu_tools.experiment.workflows import (
@@ -26,7 +26,6 @@ from zcu_tools.experiment.workflows import (
     Effect,
     Failed,
     InitEnv,
-    Live1D,
     Next,
     Run,
     Step,
@@ -34,6 +33,8 @@ from zcu_tools.experiment.workflows import (
     WorkflowRegistry,
     workflow,
 )
+
+from .devices import set_flux
 
 
 @dataclass(frozen=True)
@@ -46,10 +47,17 @@ class DemoContext:
 
 
 class FluxPlan(BaseModel):
-    """Ordered device setpoints and fixed per-curve sample count."""
+    """Ordered absolute setpoints, explicit A/V/native unit and sample count.
+
+    flux_unit is required and forwarded unchanged; the host rejects a mismatch
+    with driver units. No conversion, hardware inference or default is applied.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     flux_dev: str = Field(min_length=1, description="Connected flux device name")
+    flux_unit: Literal["A", "V", "native"] = Field(
+        description="Explicit setpoint unit: A, V or native (Fake); no conversion"
+    )
     fluxes: tuple[float, ...] = Field(
         description="Ordered absolute setpoints in device units"
     )
@@ -91,23 +99,6 @@ class DecayKnobs(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reps: int = Field(default=100, ge=1, le=10000)
     rounds: int = Field(default=10, ge=1, le=1000)
-
-
-class T1Tunables(BaseModel):
-    """T1 generation and acceptance knobs.
-
-    cal controls calibration; t1 controls acquire averaging. guess_us seeds
-    the lifetime estimate. sweep_factor/relax_factor scale that estimate into
-    timing. max_rel_err is the strict upper bound on relative fit uncertainty.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    cal: CalTunables = Field(default_factory=CalTunables)
-    t1: DecayKnobs = Field(default_factory=DecayKnobs)
-    guess_us: float = Field(default=20.0, ge=1.0, le=1000.0)
-    sweep_factor: float = Field(default=5.0, ge=2.0, le=10.0)
-    relax_factor: float = Field(default=3.0, ge=1.0, le=10.0)
-    max_rel_err: float = Field(default=0.3, ge=0.01, le=1.0)
 
 
 class T2EchoTunables(BaseModel):
@@ -333,23 +324,21 @@ def smooth_last(values: list[float], default: float, *, alpha: float = 0.5) -> f
     return estimate
 
 
-def save_plot(ax: Axes, destination: Path) -> None:
-    """Save the axes' root figure to the exact destination, propagating I/O errors."""
-    figure = ax.get_figure(root=True)
-    if figure is None:
-        raise ValueError("Cannot save axes without a root figure")
-    figure.savefig(destination)
-
-
 def redraw(
     env: WorkflowEnv[DemoContext], name: str, points: list[tuple[float, float]]
 ) -> None:
     """Rebuild a scatter plot from committed workflow data."""
-    ax = env.axes(name)
-    ax.cla()
-    if points:
-        x, y = zip(*points, strict=True)
-        ax.scatter(x, y)
+    if name not in env.plots:
+        env.plots.subplots(name)
+
+    def draw(figure: Figure) -> None:
+        figure.clear()
+        ax = figure.subplots()
+        if points:
+            x, y = zip(*points, strict=True)
+            ax.scatter(x, y)
+
+    env.plots.draw(name, draw)
 
 
 def calibrate(
@@ -365,19 +354,33 @@ def calibrate(
     prior = carry.last if carry.last is not None else carry.seed
     hint = smooth_last([v for _, v in carry.f01_by_flux], prior.f01_mhz)
     stages = env.pbar("calibration", total=3)
-    ax = env.axes("calibration/qubit_freq")
     stages.set_progress(0)
     f01 = None
     for widen in tun.qf_widen:
-        ax.cla()
-        ax.axvline(hint, linestyle="--", label="expected")
-        ax.axvline(prior.f01_mhz, linestyle=":", label="previous")
-        (line,) = ax.plot([], [])
+        name = "calibration/qubit_freq"
+        if name not in env.plots:
+            env.plots.subplots(name)
+
+        def rebuild(figure: Figure) -> None:
+            figure.clear()
+            ax = figure.subplots()
+            ax.axvline(hint, linestyle="--", label="expected")
+            ax.axvline(prior.f01_mhz, linestyle=":", label="previous")
+
+        env.plots.draw(name, rebuild)
+        frequency_plot = env.plots.liveplot_1d(
+            name,
+            "Frequency (MHz)",
+            "Signal",
+            axes=env.plots[name].axes[0],
+        )
         outcome = yield from env.run(
             run_qubit_freq,
             CalCfg("qubit_freq", hint, tun.span_mhz * widen, 101, tun.qf_reps),
             save=save_cal,
-            live=Live1D(line, y=lambda signals: signals.real),
+            live=lambda axes, samples, plot=frequency_plot: plot.update(
+                axes[0], samples.real
+            ),
         )
         if isinstance(outcome, Failed):
             continue
@@ -422,109 +425,6 @@ def calibrate(
 
 
 @dataclass(frozen=True)
-class T1Point:
-    """One attempted T1 point.
-
-    index is zero-based; flux is the native setpoint. cal records calibration
-    success/failure. t1 is an accepted estimate or None; reason explains a
-    missing estimate and is None on success.
-    """
-
-    index: int
-    flux: float
-    cal: Calibration
-    t1: DecayValue | None
-    reason: str | None
-
-
-@dataclass
-class T1State:
-    """T1 loop state: remaining native setpoints and calibration carry in cal.
-
-    t1_by_flux contains ordered (setpoint, accepted lifetime in us) pairs.
-    """
-
-    remaining: list[float]
-    cal: CalCarry
-    t1_by_flux: list[tuple[float, float]]
-
-
-def init_t1(env: InitEnv[DemoContext], plan: FluxPlan) -> T1State:
-    """Create detached T1 state from the fixed plan and initial host context."""
-    return T1State(list(plan.fluxes), initial_carry(env), [])
-
-
-def t1_cfg(plan: FluxPlan, tun: T1Tunables, cal: Calibrated, guess: float) -> DecayCfg:
-    """Build complete T1 cfg using a positive lifetime guess in microseconds."""
-    return DecayCfg(
-        "t1",
-        cal,
-        plan.points,
-        tun.sweep_factor * guess,
-        tun.relax_factor * guess,
-        tun.t1.reps,
-        tun.t1.rounds,
-    )
-
-
-@workflow(
-    "T1_fluxdep",
-    plan=FluxPlan,
-    tunables=T1Tunables,
-    state=T1State,
-    record=T1Point,
-    init=init_t1,
-    requires=("devices", "context"),
-)
-def t1_fluxdep(
-    env: WorkflowEnv[DemoContext],
-    plan: FluxPlan,
-    tun: T1Tunables,
-    state: T1State,
-) -> Step[T1State, T1Point]:
-    """Attempt the next flux point; commit missing fits with an explicit reason.
-
-    The engine supplies detached state and captured tunables. Effects acquire
-    and save offline traces; calibration updates carry only after full success.
-    After all points, save a summary figure and return Done without a record.
-    Adapter, plotting, analysis, and saver errors propagate to the engine.
-    """
-    index = len(plan.fluxes) - len(state.remaining)
-    env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
-    redraw(env, "t1/vs_flux", state.t1_by_flux)
-    if not state.remaining:
-        save_plot(env.axes("t1/vs_flux"), env.iter_dir / "summary.png")
-        return Done()
-    flux = state.remaining.pop(0)
-    yield from env.set_device(plan.flux_dev, flux)
-    cal = yield from calibrate(env, tun.cal, flux, state.cal)
-    if isinstance(cal, CalibrationFailed):
-        return Next(T1Point(index, flux, cal, None, cal.reason), state)
-
-    guess = smooth_last([v for _, v in state.t1_by_flux], tun.guess_us)
-    ax = env.axes("t1/decay")
-    ax.cla()
-    (line,) = ax.plot([], [])
-    outcome = yield from env.run(
-        run_t1,
-        t1_cfg(plan, tun, cal, guess),
-        save=save_decay,
-        live=Live1D(line, y=lambda signals: signals.real),
-    )
-    if isinstance(outcome, Failed):
-        return Next(T1Point(index, flux, cal, None, outcome.reason), state)
-    fit = analyze_decay(outcome.cfg, outcome.result)
-    if fit is None or fit.rel_err >= tun.max_rel_err:
-        return Next(T1Point(index, flux, cal, None, "fit rejected"), state)
-
-    ax.plot(outcome.result.times_us, np.exp(-outcome.result.times_us / fit.value_us))
-    ax.set_title(f"T1 = {fit.value_us:.2f} us")
-    save_plot(ax, env.iter_dir / "decay.png")
-    state.t1_by_flux.append((flux, fit.value_us))
-    return Next(T1Point(index, flux, cal, fit, None), state)
-
-
-@dataclass(frozen=True)
 class T2EchoPoint:
     """One attempted echo point.
 
@@ -561,10 +461,7 @@ def init_echo(env: InitEnv[DemoContext], plan: FluxPlan) -> T2EchoState:
     "T2echo_fluxdep",
     plan=FluxPlan,
     tunables=T2EchoTunables,
-    state=T2EchoState,
-    record=T2EchoPoint,
     init=init_echo,
-    requires=("devices", "context"),
 )
 def t2echo_fluxdep(
     env: WorkflowEnv[DemoContext],
@@ -578,13 +475,16 @@ def t2echo_fluxdep(
     and save offline traces. Return Done after the fixed setpoints are exhausted.
     Adapter, plotting, analysis, and saver errors propagate to the engine.
     """
+    # Check required ports before plots or any hardware effect.
+    _ = env.devices
+    _ = env.context
     index = len(plan.fluxes) - len(state.remaining)
     env.pbar("echo points", total=len(plan.fluxes)).set_progress(index)
     redraw(env, "t2echo/vs_flux", state.t2echo_by_flux)
     if not state.remaining:
         return Done()
     flux = state.remaining.pop(0)
-    yield from env.set_device(plan.flux_dev, flux)
+    yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
     cal = yield from calibrate(env, tun.cal, flux, state.cal)
     if isinstance(cal, CalibrationFailed):
         return Next(T2EchoPoint(index, flux, cal, None, cal.reason), state)
@@ -599,14 +499,22 @@ def t2echo_fluxdep(
         tun.t2echo.reps,
         tun.t2echo.rounds,
     )
-    ax = env.axes("t2echo/decay")
-    ax.cla()
-    (line,) = ax.plot([], [])
+    name = "t2echo/decay"
+    axes = None
+    if name in env.plots:
+
+        def rebuild(figure: Figure) -> None:
+            figure.clear()
+            figure.subplots()
+
+        env.plots.draw(name, rebuild)
+        axes = env.plots[name].axes[0]
+    decay_plot = env.plots.liveplot_1d(name, "Time (us)", "Signal", axes=axes)
     outcome = yield from env.run(
         run_t2echo,
         cfg,
         save=save_decay,
-        live=Live1D(line, y=lambda signals: signals.real),
+        live=lambda axes, samples: decay_plot.update(axes[0], samples.real),
     )
     if isinstance(outcome, Failed):
         return Next(T2EchoPoint(index, flux, cal, None, outcome.reason), state)
@@ -620,13 +528,18 @@ def t2echo_fluxdep(
 class OvernightPlan(BaseModel):
     """Fixed overnight plan.
 
-    flux_dev names the device; flux is its native setpoint. period_s separates
+    flux_dev names the device; flux is an absolute setpoint in required flux_unit
+    (A, V or native for Fake). The host rejects mismatched driver units without
+    conversion or mode changes. period_s separates
     scheduled starts from the original UTC start. rounds counts outer steps;
     points is samples per decay curve.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     flux_dev: str = Field(min_length=1)
+    flux_unit: Literal["A", "V", "native"] = Field(
+        description="Explicit setpoint unit: A, V or native (Fake); no conversion"
+    )
     flux: float = Field(description="Absolute setpoint in the device's native units")
     period_s: float = Field(
         default=600.0, gt=0, description="Interval between scheduled starts"
@@ -691,10 +604,7 @@ def init_overnight(env: InitEnv[DemoContext], _plan: OvernightPlan) -> Overnight
     "T1_overnight",
     plan=OvernightPlan,
     tunables=OvernightTunables,
-    state=OvernightState,
-    record=T1Round,
     init=init_overnight,
-    requires=("devices", "context"),
 )
 def t1_overnight(
     env: WorkflowEnv[DemoContext],
@@ -709,6 +619,9 @@ def t1_overnight(
     reason. Return Done after plan.rounds. Adapter, analysis, and saver errors
     propagate to the engine.
     """
+    # Check required ports before plots, waits, or any hardware effect.
+    _ = env.devices
+    _ = env.context
     env.pbar("rounds", total=plan.rounds).set_progress(state.index)
     if state.index >= plan.rounds:
         return Done()
@@ -716,7 +629,7 @@ def t1_overnight(
     state.index += 1
     yield from env.wait_until(state.start + timedelta(seconds=index * plan.period_s))
     if index == 0:
-        yield from env.set_device(plan.flux_dev, plan.flux)
+        yield from set_flux(env, plan.flux_dev, plan.flux, unit=plan.flux_unit)
 
     cal = state.cal
     if cal is None:
@@ -743,11 +656,10 @@ def t1_overnight(
 
 
 def register_all(registry: WorkflowRegistry) -> None:
-    """Add the three offline workflows to a host-owned catalog.
+    """Add the echo/overnight offline demonstrations to a host-owned catalog.
 
     Import does not create a registry. Duplicate names raise ValueError from the
     supplied registry; the host creates a fresh registry for each reload.
     """
-    registry.add(t1_fluxdep)
     registry.add(t2echo_fluxdep)
     registry.add(t1_overnight)

@@ -67,7 +67,7 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
             (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
         )
         editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
+        service = WritebackService(editor, control)
         yield WritebackSession(control, context, service, entry)
         assert registry_state() == installed
     finally:

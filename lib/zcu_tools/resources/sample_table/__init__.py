@@ -1,5 +1,6 @@
 """Sample records and opt-in v2 coordinate contract."""
 
+from .jsonl import JsonlSampleTable
 from .schema import (
     DEV_UNIT_COLUMN,
     DEV_VALUE_COLUMN,
@@ -21,6 +22,7 @@ from .schema import (
 from .table import SampleTable
 
 __all__ = [
+    "JsonlSampleTable",
     "DEV_UNIT_COLUMN",
     "DEV_VALUE_COLUMN",
     "FLUX_COLUMN",

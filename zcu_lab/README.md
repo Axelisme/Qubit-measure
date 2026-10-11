@@ -1,10 +1,10 @@
 # zcu_lab
 
-**Last updated:** 2026-10-12，flux alias defaults、recipe helpers 與 component predictor 預填
+**Last updated:** 2026-10-12，Measure device alias defaults、共用 preset callers、recipe helpers 與 component predictor 預填
 
 `zcu_lab` 擁有具體實驗與其前端附件。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。組合根取得定義，再顯式注入框架。
 
-`zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow caller 在正式 pull 後重用同一來源。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
+`zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow app 直接重用同一來源，交給 shared `build_session_services(alias_rows=...)`。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
 
 `definitions.register_all` 接受 caller 的 measure Registry。Startup 可用 `templates` 傳入 TemplateCatalog，並用 `components` 傳入框架共用的 ComponentRegistry。Reload 省略這兩個參數，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
 

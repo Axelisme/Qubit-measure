@@ -79,6 +79,43 @@ def test_validate_accepts_full_v2_table_with_mixed_units() -> None:
     validate_sample_table_v2(samples)
 
 
+@pytest.mark.parametrize("mode", ["explicit", "row-frame", "fallback-frame"])
+def test_native_coordinates_resolve_with_declared_frame(mode: str) -> None:
+    samples = pd.DataFrame({DEV_VALUE_COLUMN: [2.0], DEV_UNIT_COLUMN: ["native"]})
+    fallback = None
+    if mode == "explicit":
+        samples[FLUX_COLUMN] = [0.25]
+    elif mode == "row-frame":
+        samples[FLUX_INT_COLUMN] = [1.0]
+        samples[FLUX_PERIOD_COLUMN] = [4.0]
+    else:
+        fallback = SampleFluxFrame("native", flux_int=1.0, flux_period=4.0)
+
+    validate_sample_table_v2(samples)
+    resolution = resolve_sample_flux(samples, fallback_frame=fallback)
+
+    np.testing.assert_allclose(resolution.values, [0.25])
+    assert resolution.sources == (mode,)
+
+
+@pytest.mark.parametrize("fallback_unit", [None, "A", "V"])
+def test_native_coordinates_require_matching_frame(
+    fallback_unit: DeviceValueUnit | None,
+) -> None:
+    samples = pd.DataFrame({DEV_VALUE_COLUMN: [2.0], DEV_UNIT_COLUMN: ["native"]})
+    fallback = (
+        None
+        if fallback_unit is None
+        else SampleFluxFrame(fallback_unit, flux_int=1.0, flux_period=4.0)
+    )
+
+    validate_sample_table_v2(samples)
+    with pytest.raises(SampleTableV2Error) as exc:
+        resolve_sample_flux(samples, fallback_frame=fallback)
+    assert exc.value.reason == "unresolved_flux"
+    assert exc.value.data["indexes"] == [0]
+
+
 def test_validate_requires_dev_value_and_dev_unit() -> None:
     with pytest.raises(SampleTableV2Error) as exc:
         validate_sample_table_v2(pd.DataFrame({FLUX_COLUMN: [0.5]}))

@@ -45,8 +45,7 @@ from zcu_tools.resources.context import (
     ModuleLibrary,
 )
 from zcu_tools.resources.sample_table import (
-    SampleTable,
-    validate_sample_table_v2,
+    JsonlSampleTable,
 )
 from zcu_tools.experiment.utils import make_sweep
 from zcu_tools.notebook.utils import dump_device_info, gc_collect, savefig
@@ -803,8 +802,7 @@ ml.register_waveform(
 ```
 
 ```python
-sample_table = SampleTable(os.path.join(result_dir, "samples.csv"))
-validate_sample_table_v2(sample_table.samples, allow_empty=True)
+sample_table = JsonlSampleTable(os.path.join(result_dir, "samples.jsonl"))
 ```
 
 ```python
@@ -3072,38 +3070,21 @@ cpmg_exp.save(
 
 # Save Sample
 
+直接追加時，先把 `run_id` 設為這次 acquisition 的 ID。呼叫端明填量測時的 device value 與 unit。這份 notebook 使用 current mode，單位為 A。`append` 自動記錄 UTC 時間與 manual source，不計算 flux 座標。分析時用 `read()` 取得每個 run_id 的最後一行，並提供對應的 `SampleFluxFrame` 給 flux resolver。JSONL 是樣本來源，CSV 只作匯出。
+
 ```python
-from datetime import datetime
-
-validate_sample_table_v2(sample_table.samples, allow_empty=True)
-
-flx_int = md.get("flx_int")
-flx_period = md.get("flx_period")
-frame_fields = {}
-if (
-    isinstance(flx_int, (int, float))
-    and isinstance(flx_period, (int, float))
-    and np.isfinite(flx_int)
-    and np.isfinite(flx_period)
-    and flx_period > 0
-):
-    frame_fields = {"flux_int": flx_int, "flux_period": flx_period}
-
-sample_table.add_sample(
-    **{
-        "dev_value": cur_value,
-        "dev_unit": "A",
-        **frame_fields,
-        "Freq (MHz)": md.q_f,
-        "T1 (us)": md.t1,
-        "T1err (us)": md.t1err,
-        "T2r (us)": md.t2r,
-        "T2r err (us)": md.t2r_err,
-        "T2e (us)": md.t2e,
-        "T2e err (us)": md.t2e_err,
-        "Tcomment": "Manual Added",
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
+sample_table.append(
+    run_id=run_id,
+    dev_value=cur_value,
+    dev_unit="A",
+    freq_mhz=md.q_f,
+    t1_us=md.t1,
+    t1_err_us=md.t1err,
+    t2r_us=md.t2r,
+    t2r_err_us=md.t2r_err,
+    t2e_us=md.t2e,
+    t2e_err_us=md.t2e_err,
+    comment="Manual Added",
 )
 ```
 

@@ -308,7 +308,7 @@ def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(
         metadata=replace(
             native_session.metadata, experiment=T1Exp().persistence_spec().tag
         ),
-        parameters=tab.run.parameters,
+        parameters=_flux_parameters(tab.run.parameters),
     )
     handles = OperationHandles()
     service, bg = _make_service(state, EventBus(), handles=handles)

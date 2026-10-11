@@ -23,7 +23,7 @@ from zcu_tools.resources.sample_table.schema import (
 from .processing import cast2real_and_norm
 
 # Coordinate and measurement columns never shown in sample-point hover labels.
-_PLOT_EXCLUDED_COLUMNS = frozenset((*SAMPLE_COORDINATE_COLUMNS, "Freq (MHz)"))
+_PLOT_EXCLUDED_COLUMNS = frozenset((*SAMPLE_COORDINATE_COLUMNS, "freq_mhz"))
 
 
 def derive_bound(
@@ -203,7 +203,7 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
         validate_sample_table_v2(sample_table)
         resolution = resolve_sample_flux(sample_table, fallback_frame=fallback_frame)
         xs = resolution.values
-        ys = np.asarray(sample_table["Freq (MHz)"]) * 1e-3  # GHz
+        ys = np.asarray(sample_table["freq_mhz"]) * 1e-3  # GHz
         labels = [
             ", ".join(
                 [

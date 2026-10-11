@@ -10,15 +10,17 @@ RunStatus: TypeAlias = Literal["completed", "stopped", "interrupted", "failed"]
 
 @dataclass(frozen=True)
 class ScheduleOutcome:
-    """Describe a completed or partial Schedule run.
+    """Immutable completion state and original cause for a Schedule run.
 
-    status is completed, stopped, interrupted, or failed. reason is a readable
-    explanation, or None when no reason was recorded. exception retains the
-    interruption/failure cause, or None when no exception was recorded. A stopped
-    outcome may retain the first acquire/build exception observed after stop;
-    status and StopSignal.error still represent cancellation, without retry.
-    Pure cancellation, including first-round stopped-partial acquisition, has
-    no exception.
+    status is completed, stopped, interrupted, or failed. reason is None for
+    completion, otherwise a human-readable explanation of that status.
+    exception is the original captured cause, or None when none was observed.
+    A stopped outcome may retain an acquire/build Exception caught after stop
+    was requested; its status/reason and StopSignal.error remain cancellation,
+    and no retry follows. The first such cause is retained even if the schedule
+    was already marked stopped. Pure cancellation, including the producer's
+    first-round stopped-partial signal, has no exception. interrupted retains
+    KeyboardInterrupt; failed retains the exhausted failure cause.
     """
 
     status: RunStatus = "completed"

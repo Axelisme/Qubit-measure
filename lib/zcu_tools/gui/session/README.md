@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，entry alias persistence、caller-owned preset 與獨立 predictor
+**Last updated:** 2026-10-12，entry alias persistence、caller-owned preset、固定 Run capture、SavedPoint writeback 與獨立 predictor
 
 # gui/session/ — 量測 session core
 
@@ -10,6 +10,8 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 `ContextService` 私下持有 `ResultEntry` 與 point/library handles。開啟 entry 發布空的記憶體 DRAFT，選取或建立 point 後發布 ACTIVE。它先完成資源與 asset capability 準備，再替換 session binding。準備失敗保留原 binding；point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。
 
 三個 target setter 經 resources owner 驗證值與來源。DRAFT 只替換記憶體，SavedPoint 使用單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發布 parameter／library 變更 fact，保留 alias 表。同 entry 的其他 point 可獨立寫入，不改目前投影；歷史 capture 保持隔離。
+
+`ContextService.apply_writeback` 是 accept 的單一入口，只對 SavedPoint 綁定資源並交共用 executor。非空 EntryDraft writeback 在 append 前以 failed precondition 拒絕，提示先選或建立工作點。它不寫記憶體、不自動建點。成功前綴依每項實際提交發布，後項失敗不撤回它。樣本 preview／receipt 經 sample owner 讀 entry JSONL，不維護 draft 樣本或延後 flush。
 
 ## Context、session environment 與 Run snapshot
 
@@ -92,10 +94,20 @@ Device panel 保留原 mode 顯示與 output／value／rampstep 控制，不提�
 
 Fluxdep search 重用 OperationRunner、OperationHandles 與 ProgressService。
 Runner 的 gate／progress injection 可為 None。begin 在建立 handle 前拒絕缺少的必要 facet。
-純分析不用注入硬體 gate。OperationSpec 的 optional on_opened hook 在 progress notification
-與 submit 前交出 token，讓 domain owner 保留 admission 與 startup-failure activity。
+純分析不用注入硬體 gate。OperationSpec 的 optional on_opened hook 在 lease registration、progress notification
+與 submit 前交出 token，讓 domain owner 先提交 admission。帶 exclusion 的 hook 只提交 owner
+state，不通知 listeners 或呼叫 reentrant UI；無 exclusion 的分析 owner 可發布 activity。
 Hook、registration、factory 或 submit 失敗時，runner 清理並重拋。
 Measure client 保留自己的硬體 policy。
+
+## Same-operation continuation
+
+Domain owner 在 producer delivery 後可保留未 settle 的 operation，再以 `continue_operation`
+提交下一個 producer。Runner 重用同一 token、原始 event origin 與 settle closure，不新增
+handle、lease、cancel hook 或 progress factory。Owner 負責 producer exclusivity 與 closure
+歸屬；Runner 不另建 producer registry。同步 continuation submit 失敗保留 ownership，讓 owner
+重試或終結。Worker failure 交給 terminal policy，escaping policy exception 則 settle failed。
+最終清理仍經原來的 call-once closure，只 discard progress、settle handle、release lease 一次。
 
 ## Operation markers
 
