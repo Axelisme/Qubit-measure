@@ -131,7 +131,6 @@ def serialize(node: object) -> Any:
     if isinstance(node, ReferenceValue):
         return {
             "ref": node.chosen_key,
-            "ov": node.is_overridden,
             "v": serialize(node.value),
         }
     if isinstance(node, CfgSectionValue):
